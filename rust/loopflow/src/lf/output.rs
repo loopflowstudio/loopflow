@@ -44,7 +44,7 @@ impl Default for Colors {
     }
 }
 
-use crate::engine::prompt::PromptComponents;
+use crate::prompt::PromptComponents;
 use crate::trace::PreparedTurnContext;
 
 /// Format the context header table for stderr output.
@@ -226,7 +226,7 @@ mod tests {
     fn format_context_header_with_content() {
         let context = crate::trace::PreparedTurnContext::from_prompts("system", "task");
         let components = PromptComponents {
-            skill: Some(crate::engine::Skill::named("implement")),
+            skill: Some(crate::flow::Skill::named("implement")),
             wave: Some("intelligence".to_string()),
             ..Default::default()
         };

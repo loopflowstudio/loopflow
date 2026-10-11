@@ -1,4 +1,4 @@
-//! Observed Task membership grants no driver, process or Flow authority.
+//! Observed Task membership grants no attachment, process or Flow authority.
 
 use serde::{Deserialize, Serialize};
 
@@ -22,6 +22,6 @@ pub struct TaskSession {
     pub title: String,
     pub interactive: bool,
     /// The Flow whose step opened its current input.
-    pub flow_process_lfid: Option<String>,
+    pub flow_lf_process_id: Option<String>,
     pub completed_at: Option<i64>,
 }

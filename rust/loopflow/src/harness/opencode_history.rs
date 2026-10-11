@@ -1,48 +1,70 @@
 //! OpenCode user messages correlate requests; assistant steps remain subordinate.
 
 use crate::id::AgentSessionId;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde_json::{json, Value};
 
 use crate::chat::types::{ConversationEvent, Lifecycle};
-use crate::process::SessionDriver;
-use crate::session::SessionEventKind;
+use crate::session::{SessionEventKind, SessionTurnOrigin};
 use crate::store::sqlite::SqliteStore;
 
 #[derive(Debug, Default)]
 pub(super) struct History {
-    pub(super) owner: Option<(SqliteStore, String, SessionDriver)>,
-    requests: HashSet<String>,
-    started: HashSet<String>,
-    completed: HashSet<String>,
+    pub(super) owner: Option<super::agent_process::AttachmentOwner>,
+    requests: BTreeMap<String, Request>,
     attention: super::attention::Attention,
 }
 
+#[derive(Debug, Default)]
+struct Request {
+    origin: Option<SessionTurnOrigin>,
+    started: bool,
+    completed: bool,
+}
+
 impl History {
-    pub(super) fn new(owner: Option<(SqliteStore, String, SessionDriver)>) -> Self {
+    pub(super) fn new(owner: Option<super::agent_process::AttachmentOwner>) -> Self {
         Self {
             owner,
             ..Self::default()
         }
     }
+    /// The attachment that fences native writes; absent until the server starts.
+    pub(super) fn owner(&self) -> Result<super::agent_process::AttachmentOwner> {
+        self.owner
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("OpenCode server not started"))
+    }
+
     /// One server event of conversation `thread`, read for attention only.
     pub(super) fn attend(&mut self, thread: &AgentSessionId, event: &Value) {
-        if let Some((store, session, driver)) = &self.owner {
+        if let Some((store, session, attachment)) = &self.owner {
             self.attention.record(
                 store,
                 session,
-                driver,
+                attachment,
                 super::attention::opencode(event, thread.as_str()),
             );
         }
     }
 
-    pub(super) fn request(&mut self) -> String {
+    pub(super) fn request(&mut self) -> Result<String> {
         let id = format!("msg_{}", uuid::Uuid::new_v4().simple());
-        self.requests.insert(id.clone());
-        id
+        let origin = self
+            .owner
+            .as_ref()
+            .map(|(store, session, attachment)| store.session_turn_origin(session, attachment))
+            .transpose()?;
+        self.requests.insert(
+            id.clone(),
+            Request {
+                origin,
+                ..Request::default()
+            },
+        );
+        Ok(id)
     }
 
     pub(super) fn observe(
@@ -53,21 +75,11 @@ impl History {
         let mut events = Vec::new();
         let receipts = native_receipts(thread, messages);
         for (request, receipt) in receipts {
-            if self.requests.contains(&request) && !self.started.contains(&request) {
-                if let Some((store, session, driver)) = &self.owner {
-                    let process = driver
-                        .process_lfid
-                        .as_ref()
-                        .context("OpenCode request has no driving Process")?;
-                    store.record_session_turn_origin(
-                        session,
-                        thread,
-                        &request,
-                        driver.provider_generation,
-                        process,
-                    )?;
+            let submitted = self.requests.get_mut(&request);
+            if let Some(submitted) = submitted.as_ref().filter(|submitted| !submitted.started) {
+                if let (Some((store, _, _)), Some(origin)) = (&self.owner, &submitted.origin) {
+                    store.record_session_turn_origin(thread, &request, origin)?;
                 }
-                self.started.insert(request.clone());
                 events.push(ConversationEvent::TurnStarted {
                     turn_id: request.clone(),
                 });
@@ -75,10 +87,10 @@ impl History {
             if let Some((store, session, _)) = &self.owner {
                 record_receipts(store, session, thread, &request, &receipt)?;
             }
-            if self.requests.contains(&request)
-                && !receipt.completion.is_null()
-                && self.completed.insert(request.clone())
-            {
+            let Some(submitted) = submitted else { continue };
+            submitted.started = true;
+            if !receipt.completion.is_null() && !submitted.completed {
+                submitted.completed = true;
                 let status = match receipt.completion["status"].as_str() {
                     Some("completed") => Lifecycle::Completed,
                     Some("interrupted") => Lifecycle::Interrupted,
@@ -106,7 +118,9 @@ impl History {
     }
 
     pub(super) fn admitted(&self, request: &str) -> bool {
-        self.requests.contains(request) && self.started.contains(request)
+        self.requests
+            .get(request)
+            .is_some_and(|request| request.started)
     }
 }
 
@@ -242,15 +256,15 @@ pub(super) async fn read_messages(
         .await?)
 }
 
-// Native submission is bounded and serialized with driver transfer. An
+// Native submission is bounded and serialized with attachment handoff. An
 // uncertain HTTP result is retained as uncertain; never submit it twice here.
 pub(super) async fn post(
-    owner: Option<(SqliteStore, String, SessionDriver)>,
+    (store, session, attachment): super::agent_process::AttachmentOwner,
     url: String,
     payload: Value,
 ) -> Result<()> {
     tokio::task::spawn_blocking(move || {
-        let write = || {
+        store.with_session_attachment(&session, &attachment, || {
             reqwest::blocking::Client::new()
                 .post(url)
                 .timeout(std::time::Duration::from_secs(10))
@@ -263,12 +277,7 @@ pub(super) async fn post(
                         "OpenCode native request: {error}"
                     ))
                 })
-        };
-        if let Some((store, session, driver)) = owner {
-            store.with_session_driver(&session, &driver, write)
-        } else {
-            write()
-        }
+        })
     })
     .await??;
     Ok(())
@@ -276,9 +285,9 @@ pub(super) async fn post(
 
 #[cfg(test)]
 mod tests {
-    use super::{native_receipts, record_receipts, History};
+    use super::History;
 
-    use crate::id::ProcessLfid;
+    use crate::id::LfProcessId;
     use crate::session::SessionEventKind;
     use crate::store::sqlite::SqliteStore;
     use serde_json::json;
@@ -289,19 +298,19 @@ mod tests {
         let path = home.path().join("store.db");
         let store = SqliteStore::open_ephemeral(&path).unwrap();
         let input = crate::session_record::new_artifact_key();
-        let process = ProcessLfid::new();
+        let process = LfProcessId::new();
         let sql = rusqlite::Connection::open(&path).unwrap();
         sql.execute(
-            "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
+            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
             [process.as_str()],
         )
         .unwrap();
         store.test_session("session", &input);
-        let driver = store
-            .claim_session_driver("session", None, &process, false)
+        let attachment = store
+            .claim_session_attachment("session", None, &process, false)
             .unwrap();
-        let mut history = History::new(Some((store.clone(), "session".into(), driver.clone())));
-        let request = history.request();
+        let mut history = History::new(Some((store.clone(), "session".into(), attachment.clone())));
+        let request = history.request().unwrap();
         let message = |id: &str, input: u64, finish: &str| {
             json!({
             "info":{"id":id,"sessionID":"thread","parentID":request,"role":"assistant",
@@ -309,42 +318,66 @@ mod tests {
                 "finish":finish,"tokens":{"input":input,"output":5,"reasoning":0,"cache":{"read":0,"write":0}}},
             "parts":[]})
         };
-        for input in [20, 40, 30] {
-            let events = history
-                .observe(
-                    &"thread".into(),
-                    &[message("assistant-a", input, "tool-calls")],
-                )
-                .unwrap();
-            assert!(!events.iter().any(|event| matches!(
-                event,
-                crate::chat::types::ConversationEvent::TurnCompleted { .. }
-            )));
-        }
         let session = store.session("session").unwrap().unwrap();
         let mut replacement = session.clone();
         replacement.artifact_key = crate::session_record::new_artifact_key();
         store
             .replace_session_input(session.captured, replacement.clone())
             .unwrap();
-        let second = ProcessLfid::new();
+        let second = LfProcessId::new();
         sql.execute(
-            "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
+            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
             [second.as_str()],
         )
         .unwrap();
         store
-            .claim_session_driver("session", Some(&driver), &second, true)
+            .claim_session_attachment("session", Some(&attachment), &second, true)
             .unwrap();
+        assert!(!history.admitted(&request));
+        for (index, input) in [20, 40, 30].into_iter().enumerate() {
+            let events = history
+                .observe(
+                    &"thread".into(),
+                    &[message("assistant-a", input, "tool-calls")],
+                )
+                .unwrap();
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|event| matches!(
+                        event,
+                        crate::chat::types::ConversationEvent::TurnStarted { .. }
+                    ))
+                    .count(),
+                usize::from(index == 0)
+            );
+            assert!(history.admitted(&request));
+            assert!(!events.iter().any(|event| matches!(
+                event,
+                crate::chat::types::ConversationEvent::TurnCompleted { .. }
+            )));
+        }
         let messages = [
             message("assistant-a", 30, "tool-calls"),
             message("assistant-b", 10, "stop"),
         ];
-        for _ in 0..2 {
-            for (request, receipt) in native_receipts(&"thread".into(), &messages) {
-                record_receipts(&store, "session", &"thread".into(), &request, &receipt).unwrap();
-            }
+        for index in 0..2 {
+            let events = history.observe(&"thread".into(), &messages).unwrap();
+            assert_eq!(events.len(), usize::from(index == 0));
+            assert!(events.iter().all(|event| matches!(
+                event,
+                crate::chat::types::ConversationEvent::TurnCompleted { .. }
+            )));
+            assert!(history.admitted(&request));
         }
+        // A reconnect can recover history without claiming these requests or
+        // emitting a new local turn boundary.
+        let mut reconnected = History::new(history.owner.clone());
+        assert!(reconnected
+            .observe(&"thread".into(), &messages)
+            .unwrap()
+            .is_empty());
+        assert!(!reconnected.admitted(&request));
         let recovered = store.input_history(input.as_str()).unwrap();
         assert_eq!(recovered.usage.input_tokens, Some(50));
         assert_eq!(recovered.usage.output_tokens, Some(10));
@@ -377,6 +410,6 @@ mod tests {
                 row.kind,
                 SessionEventKind::Captured | SessionEventKind::Observed
             ))
-            .all(|row| row.process_lfid.as_deref() == Some(process.as_str())));
+            .all(|row| row.lf_process_id.as_deref() == Some(process.as_str())));
     }
 }

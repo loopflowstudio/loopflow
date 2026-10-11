@@ -5,7 +5,7 @@ use anyhow::Result;
 use clap::Command;
 use serde::Serialize;
 
-use crate::engine::target::{resolve_definition, DefinitionKind};
+use crate::definition::{resolve_definition, DefinitionKind};
 use crate::lf::navigation::{
     command_tree, definition_invocation, definition_source, format_target, resolve_path,
 };
@@ -28,7 +28,7 @@ fn flow_entry(tree: &Command, repo: &Path, name: String) -> Result<Entry> {
     Ok(Entry {
         source: definition_source(
             repo,
-            crate::engine::flow::find_flow_source_path(&name, repo)?.as_deref(),
+            crate::flow::find_flow_source_path(&name, repo)?.as_deref(),
         ),
         invocation: definition_invocation(tree, &name, kind),
         name,
@@ -65,7 +65,7 @@ fn collect_entries(tree: &Command, path: &[String], repo: &Path) -> Result<Vec<E
         }
     }
     if path.is_empty() || path.first().is_some_and(|name| name == "skill") {
-        let catalog = crate::engine::skill_catalog::SkillCatalog::discover(Some(repo))?;
+        let catalog = crate::skills::catalog::SkillCatalog::discover(Some(repo))?;
         let prefix = path.get(1).map(|name| format!("{name}/"));
         for source in catalog.entries() {
             let name = source.name.clone();
@@ -76,9 +76,7 @@ fn collect_entries(tree: &Command, path: &[String], repo: &Path) -> Result<Vec<E
                 continue;
             }
             let description = match source.read() {
-                Ok(content) => {
-                    crate::engine::skills::skill_description(&content).unwrap_or_default()
-                }
+                Ok(content) => crate::skills::skill_description(&content).unwrap_or_default(),
                 Err(error) => format!("unavailable: {error}"),
             };
             entries.push(Entry {
@@ -94,7 +92,7 @@ fn collect_entries(tree: &Command, path: &[String], repo: &Path) -> Result<Vec<E
         }
     }
     if path.is_empty() || path == ["flow"] {
-        for name in crate::engine::available_flow_names(repo)? {
+        for name in crate::flow::available_flow_names(repo)? {
             entries.push(flow_entry(tree, repo, name)?);
         }
         if !path.is_empty() {

@@ -65,7 +65,7 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
             .output()
             .unwrap()
             .stdout;
-        let head = loopflow::engine::git::rev_parse(&checkout, "HEAD").unwrap();
+        let head = loopflow::git::rev_parse(&checkout, "HEAD").unwrap();
         if remote_only {
             for args in [
                 vec!["worktree", "remove", checkout.to_str().unwrap()],
@@ -222,12 +222,9 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
             assert_eq!(task.worktree.as_ref(), Some(&checkout));
         }
         checkout = task.worktree.as_ref().unwrap().clone();
-        assert!(loopflow::engine::git::is_ancestor(&checkout, &head, "HEAD").unwrap());
+        assert!(loopflow::git::is_ancestor(&checkout, &head, "HEAD").unwrap());
         if operation == "checkout" {
-            assert_eq!(
-                loopflow::engine::git::rev_parse(&checkout, "HEAD").unwrap(),
-                head
-            );
+            assert_eq!(loopflow::git::rev_parse(&checkout, "HEAD").unwrap(), head);
             let status = Command::new("git")
                 .args(["status", "--porcelain=v1"])
                 .current_dir(&checkout)
@@ -237,9 +234,7 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
             assert_eq!(status, before);
         }
         assert_eq!(
-            loopflow::engine::git::current_branch(&checkout)
-                .unwrap()
-                .as_deref(),
+            loopflow::git::current_branch(&checkout).unwrap().as_deref(),
             Some(branch)
         );
         let pr = runtime
@@ -294,7 +289,7 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
             assert_eq!(status, before);
         }
         assert_eq!(
-            loopflow::engine::worktrees::list_worktrees(repo.path())
+            loopflow::git::worktrees::list_worktrees(repo.path())
                 .unwrap()
                 .len(),
             2

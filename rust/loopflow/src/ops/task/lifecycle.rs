@@ -3,8 +3,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::durable::{WorkRef, WorkStatus};
-use crate::engine::git::current_branch;
-use crate::engine::worktrees::main_repo_root;
+use crate::git::current_branch;
+use crate::git::worktrees::main_repo_root;
 use crate::ops::wt::BranchDeletion;
 use crate::ops::{NullProgress, OpsResult, Progress};
 use crate::store::{open_registry_for_authority, RegistryUnavailable, SharedStore};

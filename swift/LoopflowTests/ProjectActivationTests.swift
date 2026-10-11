@@ -103,7 +103,7 @@ struct ProjectActivationTests {
 
     @Test("an unfinished persisted Process without a live command remains unknown")
     func unfinishedProcess() throws {
-        let readiness = try JSONDecoder().decode(ProjectReadiness.self, from: Data(#"{"state":"unconfigured","activation":{"process_lfid":"process","completed_at":null,"outcome":null,"error":null}}"#.utf8))
+        let readiness = try JSONDecoder().decode(ProjectReadiness.self, from: Data(#"{"state":"unconfigured","activation":{"lf_process_id":"process","completed_at":null,"outcome":null,"error":null}}"#.utf8))
         let view = ProjectReadinessView(readiness: readiness, isPending: false, transportError: nil, retry: {})
         #expect(try view.inspect().find(text: "Project activation has no recorded outcome yet.").string()
             == "Project activation has no recorded outcome yet.")

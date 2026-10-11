@@ -84,7 +84,7 @@ for the revised Task Session model. Carry remaining proof into LOO-353.
 
 Jack accepted Projects independent of chapters; chapters coordinate optional global
 resets. Task contributes purpose/history/continuity to ordinary Flows, not a second
-execution engine. Lower operations retain identity, authority, safe retries and
+executor. Lower operations retain identity, authority, safe retries and
 recovery. Broader candidate features remain proposals, not implementation approval.
 
 ## Retained design and research

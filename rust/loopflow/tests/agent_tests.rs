@@ -1,11 +1,11 @@
 mod support;
 
-use base64::Engine;
+use base64::prelude::*;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use loopflow::engine::agent::{run_agent, AgentCapabilities, AgentConfig, ProcessConfig};
-use loopflow::engine::error::CoreError;
+use loopflow::agent::{run_agent, AgentCapabilities, AgentConfig, ProcessConfig};
+use loopflow::error::CoreError;
 use loopflow::profile::{ProviderRoute, RouteScope};
 use loopflow::provider_auth::Provider;
 use loopflow::store::{
@@ -56,6 +56,90 @@ fn claude_batch_reads_large_context_without_argv_limits() {
         assert_eq!(result.exit_code, 0);
         assert_eq!(std::fs::read_to_string(&path).unwrap(), prompt);
     }
+}
+
+#[test]
+fn library_launch_records_each_provider_under_its_invocation() {
+    let _env = EnvGuard::new(&[("claude", "#!/bin/sh\nprintf '%s' \"$$\"\n")]);
+    let directory = TempDir::new().unwrap();
+    let launch = AgentConfig {
+        cwd: Some(directory.path().to_path_buf()),
+        ..base_launch()
+    };
+    for _ in 0..2 {
+        let result = run_agent(&launch, &base_process(), &AgentCapabilities::default()).unwrap();
+        assert_eq!(result.exit_code, 0);
+        let pid: u32 = result
+            .stdout
+            .trim()
+            .parse()
+            .unwrap_or_else(|error| panic!("{error}: fixture output {:?}", result.stdout));
+        let store = loopflow::store::sqlite::SqliteStore::new(
+            &loopflow::store::database_path_from_env().unwrap(),
+        )
+        .unwrap();
+        let rows = store.processes_since(0).unwrap();
+        let agent = rows.iter().find(|row| row.pid == Some(pid)).unwrap();
+        assert_eq!(agent.kind, loopflow::process::ProcessKind::Agent);
+        assert!(agent.os_started_at.is_some());
+        assert!(agent.completed_at.is_some());
+        let parent = store
+            .process(agent.parent_lf_process_id.as_ref().unwrap())
+            .unwrap()
+            .unwrap();
+        assert_eq!(parent.kind, loopflow::process::ProcessKind::Lf);
+        assert_eq!(parent.pid, Some(std::process::id()));
+        assert!(parent.completed_at.is_some());
+        assert!(agent.agent_session_id.is_some());
+    }
+    let store = loopflow::store::sqlite::SqliteStore::new(
+        &loopflow::store::database_path_from_env().unwrap(),
+    )
+    .unwrap();
+    let rows = store.processes_since(0).unwrap();
+    assert_eq!(rows.len(), 4);
+    assert_eq!(
+        rows.iter()
+            .filter(|row| row.kind == loopflow::process::ProcessKind::Agent)
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn library_launch_reuses_the_enclosing_invocation() {
+    let _env = EnvGuard::new(&[("claude", "#!/bin/sh\nexit 0\n")]);
+    let directory = TempDir::new().unwrap();
+    let launch = AgentConfig {
+        cwd: Some(directory.path().to_path_buf()),
+        ..base_launch()
+    };
+    loopflow::journal::with_runtime(directory.path(), &["fixture".into()], || {
+        for _ in 0..2 {
+            let result = run_agent(&launch, &base_process(), &AgentCapabilities::default())?;
+            assert_eq!(result.exit_code, 0);
+        }
+        let store =
+            loopflow::store::sqlite::SqliteStore::new(&loopflow::store::database_path_from_env()?)?;
+        let rows = store.processes_since(0)?;
+        let parents = rows
+            .iter()
+            .filter(|row| row.kind == loopflow::process::ProcessKind::Lf)
+            .collect::<Vec<_>>();
+        assert_eq!(parents.len(), 1);
+        assert!(parents[0].completed_at.is_none());
+        let agents = rows
+            .iter()
+            .filter(|row| row.kind == loopflow::process::ProcessKind::Agent)
+            .collect::<Vec<_>>();
+        assert_eq!(agents.len(), 2);
+        for agent in agents {
+            assert_eq!(agent.parent_lf_process_id.as_ref(), Some(&parents[0].id));
+            assert!(agent.completed_at.is_some());
+        }
+        Ok(())
+    })
+    .unwrap();
 }
 
 #[test]
@@ -125,21 +209,26 @@ fn release_acceptance_recovers_from_a_revoked_selected_account() {
     let home = TempDir::new().expect("lf home");
     let codex = support::codex_socket_script(
         r#"#!/bin/sh
+thread="thread-${CODEX_HOME##*/}"
 read -r initialize
 echo '{"jsonrpc":"2.0","id":1,"result":{}}'
 read -r initialized
 read -r thread_start
-echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thread-test"}}}'
+case "$thread_start" in
+  *'"method":"thread/start"'*) ;;
+  *) echo "failover attempted to resume the old account" >&2; exit 10;;
+esac
+echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"'"$thread"'"}}}'
 read -r turn_start
 echo '{"jsonrpc":"2.0","id":3,"result":{"turn":{"id":"turn-test"}}}'
-echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thread-test","turn":{"id":"turn-test","status":"inProgress"}}}'
+echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"'"$thread"'","turn":{"id":"turn-test","status":"inProgress"}}}'
 case "$CODEX_HOME" in
   */revoked)
-    echo '{"jsonrpc":"2.0","method":"error","params":{"threadId":"thread-test","turnId":"turn-test","error":{"message":"Your authentication token has been invalidated (token_invalidated). Please sign in again."},"willRetry":false}}'
-    echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-test","turn":{"id":"turn-test","status":"failed"}}}';;
+    echo '{"jsonrpc":"2.0","method":"error","params":{"threadId":"'"$thread"'","turnId":"turn-test","error":{"message":"Your authentication token has been invalidated (token_invalidated). Please sign in again."},"willRetry":false}}'
+    echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"'"$thread"'","turn":{"id":"turn-test","status":"failed"}}}';;
   */fallback)
-    echo '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"thread-test","turnId":"turn-test","itemId":"message-test","delta":"fallback account completed"}}'
-    echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-test","turn":{"id":"turn-test","status":"completed"}}}';;
+    echo '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"'"$thread"'","turnId":"turn-test","itemId":"message-test","delta":"fallback account completed"}}'
+    echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"'"$thread"'","turn":{"id":"turn-test","status":"completed"}}}';;
   *) echo "unexpected CODEX_HOME" >&2; exit 9;;
 esac
 if [ -n "$LF_TEST_CODEX_STDIO" ]; then exit 0; fi
@@ -169,7 +258,7 @@ while read -r line; do :; done
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
     let account = |account_id: ProviderAccountId, path: std::path::PathBuf| {
         let email = format!("{account_id}@example.com");
-        let claims = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        let claims = BASE64_URL_SAFE_NO_PAD
             .encode(serde_json::json!({"email":email, "sub":account_id.as_str()}).to_string());
         std::fs::write(path.join("auth.json"), serde_json::json!({"tokens":{"access_token":"fixture", "id_token":format!("h.{claims}.s")}}).to_string()).unwrap();
         ProviderAccount {
@@ -235,6 +324,64 @@ while read -r line; do :; done
         revoked.cooldown_reason.as_deref(),
         Some("token_invalidated")
     );
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let agents = db.prepare(
+        "SELECT id,agent_session_id,parent_lf_process_id,completed_at,spawn_state FROM processes WHERE kind='agent' ORDER BY rowid"
+    ).unwrap().query_map([], |row| Ok((
+        row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?,
+        row.get::<_, Option<i64>>(3)?, row.get::<_, String>(4)?,
+    ))).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+    assert_eq!(agents.len(), 2);
+    assert_ne!(agents[0].0, agents[1].0);
+    assert_eq!(agents[0].1, agents[1].1);
+    assert_eq!(agents[0].2, agents[1].2);
+    assert!(agents
+        .iter()
+        .all(|agent| agent.3.is_some() && agent.4 == "exited"));
+    let thread: String = db
+        .query_row(
+            "SELECT provider_thread FROM agent_sessions WHERE id=?1",
+            [&agents[0].1],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(thread, "thread-fallback");
+    let observations = db
+        .prepare("SELECT payload FROM session_events WHERE session_id=?1 ORDER BY seq")
+        .unwrap()
+        .query_map([&agents[0].1], |row| row.get::<_, String>(0))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap()
+        .join("\n");
+    for retained in [
+        "thread-revoked",
+        "thread-fallback",
+        "revoked",
+        "fallback",
+        &agents[0].0,
+        &agents[1].0,
+    ] {
+        assert!(
+            observations.contains(retained),
+            "missing retained history: {retained}"
+        );
+    }
+    for (thread, account) in [
+        ("thread-revoked", "revoked"),
+        ("thread-fallback", "fallback"),
+    ] {
+        let retained: bool = db
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM session_events WHERE session_id=?1
+             AND json_extract(payload,'$.evidence.provider_session_id')=?2
+             AND json_extract(payload,'$.evidence.account_id')=?3)",
+                rusqlite::params![agents[0].1, thread, account],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(retained, "native history lost account {account}");
+    }
 }
 
 #[test]

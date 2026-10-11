@@ -163,7 +163,7 @@
   "cwd": "/src/loopflow.task",
   "steps": [
     {
-      "process_lfid": "00000001-0000-4000-8000-000000000000",
+      "lf_process_id": "00000001-0000-4000-8000-000000000000",
       "label": "implement",
       "key": 0,
       "iterations": [
@@ -177,7 +177,7 @@
       "exit_code": 0
     },
     {
-      "process_lfid": "00000002-0000-4000-8000-000000000000",
+      "lf_process_id": "00000002-0000-4000-8000-000000000000",
       "label": "compress",
       "key": 1,
       "iterations": [
@@ -191,7 +191,7 @@
       "exit_code": 0
     },
     {
-      "process_lfid": "00000003-0000-4000-8000-000000000000",
+      "lf_process_id": "00000003-0000-4000-8000-000000000000",
       "label": "sync",
       "key": 2,
       "iterations": [
@@ -205,7 +205,7 @@
       "exit_code": 0
     },
     {
-      "process_lfid": "00000004-0000-4000-8000-000000000000",
+      "lf_process_id": "00000004-0000-4000-8000-000000000000",
       "label": "realign",
       "key": 3,
       "iterations": [
@@ -219,7 +219,7 @@
       "exit_code": 0
     },
     {
-      "process_lfid": "00000005-0000-4000-8000-000000000000",
+      "lf_process_id": "00000005-0000-4000-8000-000000000000",
       "label": "loop-or-next",
       "key": 4,
       "iterations": [
@@ -233,7 +233,7 @@
       "exit_code": 0
     },
     {
-      "process_lfid": "00000006-0000-4000-8000-000000000000",
+      "lf_process_id": "00000006-0000-4000-8000-000000000000",
       "label": "implement",
       "key": 0,
       "iterations": [

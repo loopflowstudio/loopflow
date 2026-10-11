@@ -251,7 +251,7 @@ private func session(id: String, state: String, replacing: Bool = false) -> Stri
       "ready_summary": \(state == "waiting" ? "\"Ready for review\"" : "null"),
       "work_path": "product / Desktop / LOO-291",
       "actions": \(sessionActionFixtureJSON(state: wire)),
-      "title_source": "generated", "task_primary": false, "flow_membership": {"kind": "independent"}, "task_ids": ["task-\(id)"], "provider_generation": 1, "terminal_ids": [],
+      "title_source": "generated", "task_primary": false, "flow_membership": {"kind": "independent"}, "task_ids": ["task-\(id)"], "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids": [],
       "open_argv": ["lf", "session", "connect", "\(id)"\(replacing ? ", \"--replace\"" : "")]
     }
     """

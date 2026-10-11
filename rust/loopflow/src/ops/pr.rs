@@ -3,11 +3,11 @@ use std::process::Command;
 
 use serde::Deserialize;
 
-use crate::engine::agent::{run_agent, AgentCapabilities, AgentConfig, ProcessConfig};
-use crate::engine::config::load_config_or_default;
-use crate::engine::git::{current_branch, get_default_branch, rev_parse};
-use crate::engine::load_skill;
-use crate::engine::worktrees::{list_worktrees, main_repo_root};
+use crate::agent::{run_agent, AgentCapabilities, AgentConfig, ProcessConfig};
+use crate::config::load_config_or_default;
+use crate::flow::load_skill;
+use crate::git::worktrees::{list_worktrees, main_repo_root};
+use crate::git::{current_branch, get_default_branch, rev_parse};
 
 use crate::ops::commit::{commit_workflow, CommitOptions};
 use crate::ops::error::{OpsError, OpsResult};
@@ -131,7 +131,7 @@ pub fn create_or_update_pr(
         agent: options.agent.clone(),
         ..CommitOptions::for_task("commit")
     };
-    if !crate::engine::worktrees::is_persistent_worktree(repo)? {
+    if !crate::git::worktrees::is_persistent_worktree(repo)? {
         commit_workflow(repo, &commit_options, progress, &|_| {})?;
     }
     crate::ops::task::require_task_pr_range_nonempty(repo)?;
@@ -390,7 +390,7 @@ fn resolve_pr_copy(
 
 fn consume_gate_artifacts(repo: &Path, progress: &impl Progress) -> OpsResult<Option<PrCopy>> {
     let cached = read_cached_pr_copy(repo, progress)?;
-    if crate::engine::worktrees::is_persistent_worktree(repo)? {
+    if crate::git::worktrees::is_persistent_worktree(repo)? {
         return Ok(cached);
     }
     let scratch = repo.join("scratch");
@@ -868,7 +868,7 @@ pub(crate) fn observe_pr_by_number(
             reason: "gh CLI not found".to_string(),
         };
     }
-    let Some((owner, name)) = crate::engine::worktrees::github_repo_nwo(repo) else {
+    let Some((owner, name)) = crate::git::worktrees::github_repo_nwo(repo) else {
         return PrObservation::Degraded {
             reason: "could not resolve GitHub owner/repo from the origin remote".to_string(),
         };

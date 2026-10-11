@@ -6,7 +6,7 @@ use std::process::Command;
 
 use fs2::FileExt;
 
-use crate::engine::git::{
+use crate::git::{
     absolute_git_dir, current_branch, fetch, find_worktree_for_branch, get_default_branch,
     intervention_state, is_ancestor, rev_parse,
 };
@@ -34,7 +34,7 @@ fn lock_shared(repo: &Path, name: &str) -> OpsResult<File> {
         .truncate(false)
         .read(true)
         .write(true)
-        .open(crate::engine::worktrees::git_common_dir(repo)?.join(name))?;
+        .open(crate::git::worktrees::git_common_dir(repo)?.join(name))?;
     FileExt::lock_exclusive(&lock)?;
     Ok(lock)
 }

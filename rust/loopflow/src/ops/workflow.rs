@@ -9,7 +9,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::engine::workflow::{WorkflowDefinition, END, START};
+use crate::workflow::{WorkflowDefinition, END, START};
 
 /// One Task's Workflow as `lf task status --json` carries it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -29,13 +29,13 @@ pub struct Workflow {
 pub enum WorkflowPosition {
     /// The Task waits on a person at this node, or stands at `start` or `end`.
     Node { node: String },
-    /// The Task is on this edge. `process_lfid` is the `lf task run` carrying it;
+    /// The Task is on this edge. `lf_process_id` is the `lf task run` carrying it;
     /// each Flow process it starts is that Process's child. `running` is read from
     /// that Process: an edge whose Task run has ended has stopped and holds the
     /// Task until it is chosen again or the Task is moved.
     Edge {
         edge: u32,
-        process_lfid: String,
+        lf_process_id: String,
         running: bool,
     },
 }
@@ -93,7 +93,7 @@ pub struct WorkflowMove {
     pub edge: Option<u32>,
     /// The `lf` process that made the move; for an edge, its Task run.
     /// `None` when no registered process made it.
-    pub process_lfid: Option<String>,
+    pub lf_process_id: Option<String>,
     pub actor: WorkflowActor,
     /// The conversation that asked, when `actor` is one.
     pub session_id: Option<String>,
@@ -219,7 +219,7 @@ fn leaving(definition: &WorkflowDefinition, node: &str) -> Vec<u32> {
 #[cfg(test)]
 mod tests {
     use super::{Workflow, WorkflowPosition};
-    use crate::engine::workflow::load_workflow;
+    use crate::workflow::load_workflow;
 
     #[test]
     fn a_stopped_edge_holds_the_task_and_guidance_names_every_edge() {
@@ -240,7 +240,7 @@ mod tests {
         let on_edge = |running| {
             at(WorkflowPosition::Edge {
                 edge: 2,
-                process_lfid: "process".into(),
+                lf_process_id: "process".into(),
                 running,
             })
         };

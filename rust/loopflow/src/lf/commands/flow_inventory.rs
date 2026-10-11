@@ -122,7 +122,7 @@ pub fn inspect(selector: &str, json: bool) -> Result<()> {
         let detail = store
             .flow_detail(selector)
             .await?
-            .context("no Flow has that driver Process")?;
+            .context("no Flow has that Flow process")?;
         if json {
             println!("{}", serde_json::to_string_pretty(&detail)?);
             return Ok(());
@@ -132,7 +132,7 @@ pub fn inspect(selector: &str, json: bool) -> Result<()> {
         for step in &detail.steps {
             println!(
                 "  {}  {}  {}",
-                step.process_lfid,
+                step.lf_process_id,
                 step.position(),
                 step.outcome.as_deref().unwrap_or("no recorded exit"),
             );

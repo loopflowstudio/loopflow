@@ -15,7 +15,7 @@ use std::time::Duration;
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 
-use crate::engine::worktrees::{Listing, RemoteOutcome};
+use crate::git::worktrees::{Listing, RemoteOutcome};
 use crate::journal::ReceiptCost;
 
 /// Samples kept after a trim. The file is trimmed when it holds twice as many.
@@ -94,7 +94,7 @@ pub fn begin(repo: &Path, json: bool, sync: bool) {
         startup,
         listing: None,
     });
-    crate::engine::agent::register_interrupt_cleanup(|| write_pending(Outcome::Interrupted, None));
+    crate::agent::register_interrupt_cleanup(|| write_pending(Outcome::Interrupted, None));
 }
 
 pub fn listed(listing: &Listing) {

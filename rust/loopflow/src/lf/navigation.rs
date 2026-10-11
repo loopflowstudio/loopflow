@@ -5,8 +5,9 @@ use std::path::Path;
 use anyhow::Result;
 use clap::{Command, CommandFactory, Parser};
 
-use crate::engine::target::{resolve_definition, DefinitionKind, Target};
-use crate::engine::{Step, XorPath};
+use crate::definition::{resolve_definition, DefinitionKind, Target};
+use crate::flow::Step;
+use crate::flow::XorPath;
 use crate::lf::{Cli, Commands, FlowCommand};
 
 pub fn command_tree() -> Command {
@@ -299,7 +300,7 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
                 cmd: FlowCommand::Show { name, json, .. },
             } => {
                 if *json {
-                    let entry = crate::engine::flow_graph::flow_catalog_entry(name, &repo)?;
+                    let entry = crate::flow::graph::flow_catalog_entry(name, &repo)?;
                     println!("{}", serde_json::to_string(&entry)?);
                 } else {
                     crate::lf::commands::flow::show(name, &repo)?;
@@ -307,7 +308,7 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
             }
             Commands::Flow {
                 cmd: FlowCommand::Customize { name },
-            } => println!("{}", crate::engine::flow::customize(name, &repo)?.display()),
+            } => println!("{}", crate::flow::customize(name, &repo)?.display()),
             _ => unreachable!("inspection command selected above"),
         }
         Ok(())
@@ -487,7 +488,7 @@ fn definition_help(
             skill.source.as_ref().map(|source| source.path.clone()),
         ),
         Target::Flow(flow) => {
-            let mut reviews = crate::engine::human_occurrence_ids(flow, repo)?;
+            let mut reviews = crate::flow::human_occurrence_ids(flow, repo)?;
             reviews.sort();
             let mut description = format_written_steps(&flow.items);
             if !reviews.is_empty() {
@@ -497,7 +498,7 @@ fn definition_help(
                 flow.name.as_str(),
                 DefinitionKind::Flow,
                 description,
-                crate::engine::flow::find_flow_source_path(&flow.name, repo)?,
+                crate::flow::find_flow_source_path(&flow.name, repo)?,
             )
         }
     };
@@ -528,7 +529,7 @@ fn definition_help(
                 definition_invocation(tree, &skill.name, DefinitionKind::Skill)
             )),
             Ok(_) => unreachable!("typed skill lookup returns a skill"),
-            Err(crate::engine::LoadError::SkillNotFound(_)) => {}
+            Err(crate::error::LoadError::SkillNotFound(_)) => {}
             Err(error) => output.push_str(&format!("\nSame-named skill unavailable: {error}\n")),
         }
     }

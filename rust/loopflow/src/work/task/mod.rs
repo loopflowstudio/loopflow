@@ -659,7 +659,7 @@ pub enum TaskEventKind {
     // Retained for reading recorded decisions; no current writer.
     HistoricalUncertaintyAccepted {
         #[serde(alias = "exec_ids")] // Append-only decisions keep their original bytes.
-        process_lfids: Vec<crate::id::ProcessLfid>,
+        lf_process_ids: Vec<crate::id::LfProcessId>,
         reason: String,
     },
     FlowFinished {

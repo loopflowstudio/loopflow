@@ -320,7 +320,7 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
         let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
         let completions: i64 = db.query_row("SELECT count(*) FROM task_events WHERE json_extract(kind_json,'$.kind')='completed'", [], |row| row.get(0)).unwrap();
         assert_eq!(completions, 1);
-        let flows: i64 = db.query_row("SELECT count(*) FROM flow_processes f JOIN processes p ON p.lfid=f.process_lfid WHERE p.outcome='succeeded'", [], |row| row.get(0)).unwrap();
+        let flows: i64 = db.query_row("SELECT count(*) FROM flow_processes f JOIN processes p ON p.id=f.lf_process_id WHERE p.outcome='succeeded'", [], |row| row.get(0)).unwrap();
         assert_eq!(flows, 1);
         let child_id = store.sqlite.task_follow_through(&source.id).unwrap().intents[0].issue_id.clone();
         let child = runtime.block_on(store.get_task_by_issue(&child_id)).unwrap().unwrap();

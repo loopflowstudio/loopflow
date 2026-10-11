@@ -266,13 +266,13 @@ pub fn run(command: &MonitorCommand) -> anyhow::Result<()> {
             };
             let filter = LfProcessFilter {
                 repo,
-                parent_process_lfid: match parent {
+                parent_lf_process_id: match parent {
                     Some(parent) => Some(
                         store
                             .resolve_process(parent)
                             .await?
                             .context("Parent Process was not found")?
-                            .lfid,
+                            .id,
                     ),
                     None => None,
                 },
@@ -313,7 +313,7 @@ fn print_process(process: &LfProcess) {
         .unwrap_or_else(|_| command.to_string());
     println!(
         "{}  {}  {}  {}",
-        process.lfid,
+        process.id,
         process.started_at,
         process.outcome.as_deref().unwrap_or("unknown"),
         display
@@ -404,7 +404,7 @@ pub fn overview(json: bool, all: bool) -> anyhow::Result<()> {
             CanonicalRepo::current()?.map(|repo| repo.to_string())
         };
         let home = crate::store::lf_home_dir();
-        let active = crate::session_record::active::snapshot(&home, &store, None).await;
+        let active = crate::session_record::active::snapshot(&home, &store.sqlite, None);
         let mut gaps = active.gaps.clone();
         let mut items = Vec::new();
         let filter = crate::session::SessionFilter {
@@ -491,22 +491,22 @@ pub fn overview(json: bool, all: bool) -> anyhow::Result<()> {
                     ("finished", "Flow completed".to_string())
                 }
                 crate::session::FlowProcessSummaryState::Stopped => {
-                    ("stopped", format!("Driver exited at {at}"))
+                    ("stopped", format!("Flow process exited at {at}"))
                 }
                 crate::session::FlowProcessSummaryState::Current => {
-                    match crate::id::ProcessLfid::parse(&summary.id)
-                        .map(|driver| crate::journal::process_evidence(&store.sqlite, &driver))
+                    match crate::id::LfProcessId::parse(&summary.id)
+                        .map(|id| crate::journal::process_evidence(&store.sqlite, &id))
                     {
                         Ok(crate::journal::ProcessIdentityEvidence::Live) => {
-                            ("running", format!("Driver is at {at}"))
+                            ("running", format!("Flow process is at {at}"))
                         }
                         Ok(crate::journal::ProcessIdentityEvidence::Dead) => (
                             "stopped",
-                            format!("Driver left no exit record; it stopped at {at}"),
+                            format!("Flow process left no exit record; it stopped at {at}"),
                         ),
                         _ => (
                             "unknown",
-                            format!("Driver process identity is unknown at {at}"),
+                            format!("Flow process identity is unknown at {at}"),
                         ),
                     }
                 }

@@ -32,7 +32,7 @@ public enum WorkActivityFact: Decodable, Sendable, Hashable {
     case workCreated
     case inputCaptured(sessionId: String, captured: Int)
     case inputCompletionRecorded(sessionId: String, captured: Int, status: String)
-    case providerHistoryRecorded(sessionId: String, captured: Int?, reference: ProviderHistoryReference, processLfid: String?, status: String?)
+    case providerHistoryRecorded(sessionId: String, captured: Int?, reference: ProviderHistoryReference, lfProcessId: String?, status: String?)
     case prStarted(id: String)
     case prPublishRequested(id: String, github: GithubPrSnapshot?)
     case prMergeRequested(
@@ -49,7 +49,7 @@ public enum WorkActivityFact: Decodable, Sendable, Hashable {
         case sessionId = "session_id"
         case captured
         case reference
-        case processLfid = "process_lfid"
+        case lfProcessId = "lf_process_id"
         case mergeCommit = "merge_commit"
     }
 
@@ -86,7 +86,7 @@ public enum WorkActivityFact: Decodable, Sendable, Hashable {
             self = .providerHistoryRecorded(sessionId: try container.decode(String.self, forKey: .sessionId),
                 captured: try container.decodeIfPresent(Int.self, forKey: .captured),
                 reference: try container.decode(ProviderHistoryReference.self, forKey: .reference),
-                processLfid: try container.decodeIfPresent(String.self, forKey: .processLfid),
+                lfProcessId: try container.decodeIfPresent(String.self, forKey: .lfProcessId),
                 status: try container.decodeIfPresent(String.self, forKey: .status))
         case .prStarted:
             self = .prStarted(id: try container.decode(String.self, forKey: .id))

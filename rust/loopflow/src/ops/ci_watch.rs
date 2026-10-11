@@ -433,11 +433,11 @@ pub struct CiWatchStatus {
 }
 
 fn lock_path(root: &Path) -> OpsResult<PathBuf> {
-    Ok(crate::engine::git::absolute_git_dir(root)?.join("lf-ci-watch.lock"))
+    Ok(crate::git::absolute_git_dir(root)?.join("lf-ci-watch.lock"))
 }
 
 fn state_path(root: &Path) -> OpsResult<PathBuf> {
-    Ok(crate::engine::git::absolute_git_dir(root)?
+    Ok(crate::git::absolute_git_dir(root)?
         .join("loopflow")
         .join("ci-watch.json"))
 }
@@ -473,7 +473,7 @@ fn write_state(root: &Path, state: &CiWatchState) -> OpsResult<()> {
 }
 
 pub fn status(repo: &Path) -> OpsResult<CiWatchStatus> {
-    let root = crate::engine::worktrees::main_repo_root(repo).map_err(error)?;
+    let root = crate::git::worktrees::main_repo_root(repo).map_err(error)?;
     let running = try_lock(&root)?.is_none();
     let installed = service_path(&super::cron::default_launch_agents_dir()?, &root).exists();
     Ok(CiWatchStatus {
@@ -795,7 +795,7 @@ async fn wait(delay: Duration, options: &WatchOptions) -> bool {
 }
 
 pub fn watch(repo: &Path, options: WatchOptions) -> OpsResult<()> {
-    let root = crate::engine::worktrees::main_repo_root(repo).map_err(error)?;
+    let root = crate::git::worktrees::main_repo_root(repo).map_err(error)?;
     if !super::pr::gh_available() {
         return Err(error("lf ci watch needs the gh CLI"));
     }
@@ -822,7 +822,7 @@ pub fn watch(repo: &Path, options: WatchOptions) -> OpsResult<()> {
                 return Ok(());
             }
         };
-        let (owner, name) = crate::engine::worktrees::github_repo_nwo(&root)
+        let (owner, name) = crate::git::worktrees::github_repo_nwo(&root)
             .ok_or_else(|| error("the origin remote is not a GitHub repository"))?;
         let repo_id = crate::repository::RepoId::discover(&root).map_err(error)?;
         let mut watcher = Watcher::new(format!("{owner}/{name}"), repo_id.as_str().to_string());

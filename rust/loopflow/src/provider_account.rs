@@ -1812,7 +1812,7 @@ mod account_first_tests {
     use std::ffi::OsString;
     use std::sync::Arc;
 
-    use base64::Engine;
+    use base64::prelude::*;
     use tempfile::tempdir;
 
     use super::*;
@@ -1847,7 +1847,7 @@ mod account_first_tests {
         if provider == Provider::Codex {
             let account_home = home.join(account_id);
             fs::create_dir_all(&account_home).unwrap();
-            let claims = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(
+            let claims = BASE64_URL_SAFE_NO_PAD.encode(
                 serde_json::json!({"email":format!("{account_id}@example.com"), "sub":account_id})
                     .to_string(),
             );
@@ -1892,7 +1892,7 @@ mod account_first_tests {
         let write = |account: &ProviderAccount, email: &str| {
             let home = account.home.as_ref().unwrap();
             fs::create_dir_all(home).unwrap();
-            let claims = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            let claims = BASE64_URL_SAFE_NO_PAD
                 .encode(serde_json::json!({"email":email, "sub":email}).to_string());
             fs::write(home.join("auth.json"), serde_json::json!({"tokens":{"access_token":"fixture", "id_token":format!("h.{claims}.s")}}).to_string()).unwrap();
         };
@@ -2146,19 +2146,19 @@ mod account_first_tests {
             .await
             .unwrap();
 
-        let mut dynamic = crate::engine::AgentConfig {
+        let mut dynamic = crate::agent::AgentConfig {
             agent: Some("codex".to_string()),
-            ..crate::engine::AgentConfig::default()
+            ..crate::agent::AgentConfig::default()
         };
-        crate::engine::agent::pin_provider_account_id_blocking(&mut dynamic).unwrap();
+        crate::agent::pin_provider_account_id_blocking(&mut dynamic).unwrap();
         assert_eq!(dynamic.provider_account_id, Some(first.account_id));
 
-        let mut exact = crate::engine::AgentConfig {
+        let mut exact = crate::agent::AgentConfig {
             agent: Some("codex".to_string()),
             provider_account_id: Some(requested.account_id.clone()),
-            ..crate::engine::AgentConfig::default()
+            ..crate::agent::AgentConfig::default()
         };
-        crate::engine::agent::pin_provider_account_id_blocking(&mut exact).unwrap();
+        crate::agent::pin_provider_account_id_blocking(&mut exact).unwrap();
         assert_eq!(exact.provider_account_id, Some(requested.account_id));
     }
 
@@ -3020,7 +3020,7 @@ mod inspection_tests {
     use std::fs;
     use std::sync::Arc;
 
-    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+    use base64::prelude::*;
 
     use crate::profile::{EmailAddress, ProviderRoute, RouteScope};
     use crate::provider_account::{inspect_provider_route, new_account};
@@ -3052,7 +3052,7 @@ mod inspection_tests {
         for id in ["strained", "healthy", "cooling"] {
             let home = temp.path().join(id);
             fs::create_dir_all(&home).unwrap();
-            let claims = URL_SAFE_NO_PAD.encode(
+            let claims = BASE64_URL_SAFE_NO_PAD.encode(
                 serde_json::json!({"email": format!("{id}@example.com"), "sub": id}).to_string(),
             );
             fs::write(

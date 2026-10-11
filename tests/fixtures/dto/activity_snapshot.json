@@ -3,10 +3,10 @@
   "observed_at": 1784606400,
   "nodes": [
     {
-      "id": "process:process-loopflow",
+      "id": "process:11111111-1111-4111-8111-111111111111",
       "parent_id": null,
       "kind": "process",
-      "label": "lf task pursue",
+      "label": "lf task run",
       "repo": "/src/loopflow",
       "wave": "product",
       "pid": 4100,
@@ -15,10 +15,10 @@
       "worktree": "/src/loopflow.task"
     },
     {
-      "id": "provider:4101",
-      "parent_id": "process:process-loopflow",
-      "kind": "provider_process",
-      "label": "codex 4101",
+      "id": "process:22222222-2222-4222-8222-222222222222",
+      "parent_id": "process:11111111-1111-4111-8111-111111111111",
+      "kind": "agent_process",
+      "label": "codex app-server",
       "repo": "/src/loopflow",
       "wave": "product",
       "pid": 4101,
@@ -27,28 +27,16 @@
       "worktree": "/src/loopflow.task"
     },
     {
-      "id": "provider:4201",
-      "parent_id": "process:process-loopflow",
-      "kind": "provider_process",
-      "label": "claude 4201",
+      "id": "process:33333333-3333-4333-8333-333333333333",
+      "parent_id": "process:11111111-1111-4111-8111-111111111111",
+      "kind": "agent_process",
+      "label": "claude",
       "repo": "/src/loopflow",
       "wave": "product",
-      "pid": 4201,
+      "pid": null,
       "started_at": 1784599200,
-      "state": "stalled",
+      "state": "unknown",
       "worktree": "/src/loopflow.task"
-    }
-  ],
-  "provider_processes": [
-    {
-      "pid": 4301,
-      "ppid": 1,
-      "process_group": 4301,
-      "started_at": 1784595600,
-      "kernel_state": "S",
-      "provider": "opencode",
-      "command": "opencode serve",
-      "claim": "orphaned"
     }
   ]
 }

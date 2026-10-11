@@ -3,7 +3,7 @@
 
 // Build registration only uses the portable projection.
 #[allow(dead_code)]
-#[path = "src/engine/definition_name.rs"]
+#[path = "src/definition/name.rs"]
 mod definition_name;
 use definition_name::portable_name;
 
@@ -47,7 +47,7 @@ fn main() {
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR not set"));
     emit_build_provenance(&manifest_dir, &out_dir);
     emit_schema_references(&manifest_dir, &out_dir);
-    let builtins_dir = manifest_dir.join("src/engine/builtins");
+    let builtins_dir = manifest_dir.join("src/builtins");
 
     for (kind, extension) in [("skill", "md"), ("flow", "yaml")] {
         generate_builtins(&builtins_dir, &out_dir, kind, extension);

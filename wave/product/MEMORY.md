@@ -389,6 +389,12 @@ October 11: Jack Heart included portfolio management in LOO-462. Portfolio confi
 lf-owned folder/manual membership through RegistryQuery: one `repo_root`, default
 `~/src`, or manual paths across directories. Opening never enrolls; explicit legacy
 import preserves CLI selection. Multiple roots are deferred. Publication/demo only.
+The implemented service shares one reading across windows; delayed reads serialize
+with mutations, failed discovery retains membership, and removing membership leaves
+Work/drafts intact. Authored-Wave discovery remains separate. Isolated CLI/Swift
+checks establish owner agreement, not native picker or menu acceptance. Configured
+review needs installed portfolio support as well as identity; the launcher tests
+identity only.
 
 ## Session working set and Waiting (2026-10-03, revised 2026-10-06)
 

@@ -38,7 +38,7 @@ Accepted direction and implementation evidence live in `get-me-using-lf.md`.
 ## Portfolio scope — October 11
 
 Jack Heart included lf-owned portfolio management and the existing Portfolio UI
-in LOO-462. The plan proposes `lf portfolio`, immediate-child folder scanning,
+in LOO-462. The implementation uses `lf portfolio`, immediate-child folder scanning,
 manual-only membership across arbitrary directories, and explicit one-time import
 of saved Desktop membership. These are reversible choices; no recursive discovery,
 folder exclusions, multiple named portfolios or repository-DAG revival is required.

@@ -27,7 +27,7 @@ are labeled implementation choices, not additional decisions attributed to Jack.
   portfolio. Its GitHub-remote identity, daemon and parent/child authority are
   retired models, not requirements to restore.
 
-## Present split
+## Pre-implementation split
 
 PortfolioDiscovery.repos unions hard-coded ~/src scanning, UserDefaults portfolio
 entries, and the launch repository. RepoScanner examines immediate child directories
@@ -37,9 +37,10 @@ but the Swift scanner does not consume it. Therefore changing CLI lookup root do
 not change Desktop discovery; removing a saved entry cannot exclude a repo that
 is rediscovered automatically. Manual-only selection is not represented.
 
-Reuse shared repository identity and opening; replace Swift-owned discovery and
-membership with one lf-owned selection/read/write contract if this direction moves
-into implementation. Do not introduce a second portfolio beside these owners.
+The October 11 implementation (`d43aa248d3`, compressed at `50e2cf44d1`) replaces
+this split with lf-owned selection and discovery. PortfolioService retains the
+shared reading; RepositoryPath retains explicit-opening validation. The historical
+owners above explain that replacement, not remaining implementation work.
 
 Evidence: lf wave list/status product, read-only saved Task briefs/comments including
 historical records, source and Git history. No exact current Task for configurable

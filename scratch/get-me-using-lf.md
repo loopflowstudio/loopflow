@@ -5,9 +5,10 @@ selecting conversation-first Tasks, repository-name conversation access and
 repo/session ownership. Pursue runs through publication for demo review, not landing.
 Remaining reversible UI details may be resolved during implementation; live data
 cleanup remains separate and requires a reviewed, restorable plan.
-Product owns this Task. LOO-427 is integrated at `c040d9fa03`; its landing remains
-a delivery dependency. Launcher repair: `1787d94bc9`; compression: `df40c477ef`.
-Reconciled October 11 against that implementation and the failed configured demo.
+Product owns this Task. Latest LOO-427 base `7bcff15648` is integrated at
+`7eedf5b060`; parent landing remains a delivery dependency. Portfolio implementation:
+`d43aa248d3`; shared-reader compression: `50e2cf44d1`. Reconciled October 11
+against those changes, parent integration and the failed configured demo.
 
 ## Problem and accepted direction
 
@@ -164,8 +165,9 @@ is added. The existing development app build/install remains.
 Real-data native acceptance still requires a compatible installed release.
 [The failed demo](work-first-demo.md) records the observed runtime mismatch; no
 new configured demo has succeeded. [Portfolio discovery](portfolio-discovery.md) records the prior-art investigation.
-Jack Heart added this outcome to LOO-462 on October 11; it is now the next
-implementation slice, not a separate Task or a second Portfolio surface.
+Jack Heart added portfolio management to LOO-462 on October 11. The shared
+CLI/Desktop implementation is present; affected gate coverage and native review
+remain. It belongs to this Task and the existing Portfolio surface.
 
 The consumer cut removes the generic composer, skill picker/storage/launch DTO,
 Debug Session inventory, orphan projection and Session-title search, including
@@ -244,12 +246,12 @@ one affects navigation only, not files, Work, live panes, Sessions or execution.
 Use existing repository identity and Git main-checkout normalization. Paths remain
 Machine-local locators, not portable identity or execution assignment.
 
-Rust owns selection persistence, normalization, enumeration and mutations. Use the
-existing Machine-local configuration writer for this preference; no new planning
-or execution table unless source investigation demonstrates a real need. Expose
-one typed reading through RegistryQuery, with selected mode/root, repository
-entries and truthful unavailable-path/read errors. Inspection creates no Work or
-conversations. Missing manual entries remain removable/unavailable, not silently
+Rust owns selection persistence, normalization, enumeration and mutations. Source
+inspection found no general Machine-local configuration writer; `config.rs` now
+provides the atomic writer, with portfolio mutations holding the config lock.
+No planning or execution table is needed. RegistryQuery exposes one typed reading
+with selected mode/root, repository entries and unavailable-path/read errors.
+Inspection creates no Work or conversations. Missing manual entries remain removable/unavailable, not silently
 deleted. A failed folder read is not an empty portfolio. Surface the same errors
 in CLI and Desktop; unknown state retains existing panes.
 
@@ -303,17 +305,21 @@ usable membership and expose the authoritative mode/root plus an error. Opening
 and removing membership do not touch retained Work. No acceptance is inferred from
 native path-picker code; both modes still require demo review.
 
-**Proof:** isolated roots with two repos, a linked worktree and a nested repo;
-default/root-change selection excludes the worktree, manual mode selects across
-roots/subfolders, aliases deduplicate, errors retain entries, and reads launch
-nothing. Rust/Swift DTO fixtures agree. CLI edits update the existing Portfolio
-and repo menus; Desktop edits read back identically from CLI. Switch modes and
-remove membership while retaining an open conversation/draft. Run focused Rust
-portfolio tests and existing PortfolioServiceTests/RepoScannerTests replacements,
-WorkNavigationTests and DTO fixtures; gate owns wider suites. Native review shows
-configuration of both modes entirely from Portfolio, CLI readback of the same
-selection, and retained Work. Multiple discovery roots are deferred. No live
-migration or cleanup is authorized.
+**Evidence and remaining acceptance:** Rust fixtures cover isolated roots with two
+repos, a linked worktree and a nested repo; folder changes, manual membership
+across directories, alias normalization, unavailable entries, explicit import and
+read-without-store-creation. Swift fixtures cover the shared DTO, error retention,
+serialized mutations and CLI readback through an isolated runtime. The retained-Work
+case removes nonempty membership without replacing panes or the unsaved document.
+These are automated owner/retention checks, not native path-picker acceptance.
+
+Gate still owns the affected Rust portfolio/CLI, lifecycle/DTO and Desktop suites
+at the integrated revision. `PortfolioServiceTests.desktopWritesReadBackThroughCLI`
+requires `LOOPFLOW_PORTFOLIO_TEST_BIN` pointing to the built branch CLI; otherwise
+it is skipped. Native review must demonstrate both modes entirely from Portfolio,
+CLI readback, menu refresh and retained conversation/draft. The installed release
+must support both repository identity and portfolio commands; the launcher probes
+identity only. Multiple discovery roots remain deferred; cleanup is unauthorized.
 
 ## Done when / unattended gate
 
@@ -359,8 +365,14 @@ WorkModel fences asynchronous authored-Wave discovery; PortfolioService serializ
 shared reads and mutations so a delayed read cannot overwrite a later removal.
 
 Earlier Rust portfolio, formatting/lint and fixture-generation checks remain at
-`d43aa248d3:scratch/get-me-using-lf.md`; this compression changes only Swift and notes.
+`d43aa248d3:scratch/get-me-using-lf.md`; compression evidence is retained at
+`50e2cf44d1:scratch/get-me-using-lf.md`. Parent integration at `7eedf5b060` also
+removes mandatory follow-through APIs and Task-header delivery controls; the
+conversation-first opening and portfolio owners remain. No gate on this combined
+revision is inferred from the earlier passes. Publication/demo remains the limit
+of LOO-462 authorization; the parent’s changed completion contract adds no landing
+authority here.
 Review preserved successful-read gating at startup and authored-Wave refresh on
 activation while removing duplicate membership reads.
 
-Check (October 11 compression): `LOOPFLOW_PORTFOLIO_TEST_BIN=/Users/jack/src/loopflow.make-loopflow-a-work-first/target/debug/lf scripts/test_desktop.sh --filter 'PortfolioServiceTests|WorkModelTests/authoredWavesRemainVisible|WorkCacheTests/savedLaunchRepository|WorkNavigationTests/composedWorkFirstEntry|WorkNavigationTests/unavailablePlanningPreservesRepositorySelection' -Xswiftc -gnone` — Desktop build and 9 tests pass; `git diff --check` and `lf context` pass; broader suites belong to gate, configured native review still needs a compatible installed release.
+Check (October 11 realign): `git diff --check` and `lf context` — pass, both context budgets fit; prose-only reconciliation reuses prior focused evidence, integrated suites belong to gate and native review awaits a compatible installed release.

@@ -235,20 +235,16 @@ Settlement rechecks merge/disposition.
 
 ## Terminal-host adoption (2026-10-07)
 
-Jack Heart: Flow → Task → Wave, Desktop optional. Automated trials are account-free;
-Jack starts real providers in dedicated windows. No host code is lifted.
-
-Taskless fixtures passed, not fresh-Task adoption. Native mode forwards through
-skills/Task launches (28 Flow tests). Jack confirmed cmux step two and herdr
-Flow/question/resize/input trials and authorized landing. Native resume, Task
-publication and Continue/Stop remain unresolved; no host integration or external
-progress. Release 0.13.9 revision, owners and earlier evidence:
-`31ec76b01:wave/product/MEMORY.md`, this heading.
-
-Native resume repeated the **Loopflow operating guide** once; first-content naming
-is only a hypothesis. Preserve native hooks/titles. Remaining trials keep LOO-421
-open; [findings](../../docs/reviews/terminal-host-trial.md) and
-`31ec76b01:wave/product/MEMORY.md`, this heading, retain failed attempts and limits.
+Jack Heart selected Flow → Task → Wave, Desktop optional, with account-free
+trials and real providers started by Jack in dedicated windows; no host code
+is lifted. Jack confirmed cmux step two and herdr Flow/question/resize/input
+trials and authorized landing. Taskless/28-Flow tests are not fresh-Task adoption,
+native resume, Task publication or Continue/Stop proof. LOO-421 remains open.
+Native resume repeated the operating guide once; first-content naming is only
+a hypothesis. Preserve native hooks/titles. No host integration or external
+progress is established. Failed attempts, release revision and limits:
+`ddc009d780:wave/product/MEMORY.md`, this heading, and
+[findings](../../docs/reviews/terminal-host-trial.md).
 
 ## Live Home reconciliation
 
@@ -380,20 +376,31 @@ launching again. The [review](../../docs/reviews/session-operate-prompts.md) has
 simulations and two read-only model runs, not installed proof. Open conversations
 keep old instructions until `lf session replace`.
 
-## Capture and configurable New Session (October 1–3)
+## Capture and work-first entry (October 1–10)
 
-Jack Heart accepted capture, then selected New Session and the Linear-style compose
-row. He approved the searchable picker prototype and pursuit through demo, preserving
-its opening prompt. New Session launches; skill choice changes/persists only the next
-launch per repository. Default: `capture-tasks`.
+Jack Heart accepted capture in the owning repo/Wave conversation: self-contained
+Tasks, no workers or new operation authority. Reconcile uncertain writes with
+identical input in the original destination; successful filings survive.
+October 1–3's New Session/picker decision and six-test evidence remain at
+`ddc009d780:wave/product/MEMORY.md`, **Capture and configurable New Session**;
+configured/native and cross-repository proof remains absent.
 
-Capture stays in its repository/Wave conversation and files cohesive self-contained Tasks
-without workers or new operation authority. Scope is a revisable clue. Preserve successful
-filings; uncertain writes reconcile and retry identical input in the original destination.
-Discovery uses lf-owned `skill NAME`, retaining Home/checkout, layouts and Task selection.
-Native/configured-CLI, provider/draft and cross-repository proof remain; no KR credit.
-Six-test evidence, failures and design links:
-`5825f95d9:wave/product/MEMORY.md`, this heading.
+October 10, LOO-462 supersedes generic Session navigation: Jack selected the
+homepage at `af48fd81db:website/home.html` as the Work-first design anchor,
+Repo/Wave/Task navigation, and direct configured repo conversation entry when
+there are no Waves or Tasks. Begin with what to work on, not organizational setup.
+Shell-launched unscoped Sessions stay possible but never enter the sidebar;
+power-user Session search is deferred. Reuse LOO-427 owners. Task composition,
+provider onboarding and cleanup policy remain open; kickoff grants no implementation
+or deletion approval. Old/interrupted/unknown records are not disposable evidence.
+Cleanup needs reviewed candidates and a restorable backup.
+
+Source reconciliation: LOO-427 already removed Session rows; the remaining Debug
+Session menu and generic composer still expose that model. `unmatchedSessions`
+includes missing-planning Work, and no Task association includes repo/Wave scopes:
+neither identifies unscoped debris. Primary repo ensure already owns continuity;
+its skill starts an operating pass, a mismatch with accepted no-work entry.
+Proposed prompt/entry changes remain with LOO-462; no native or adoption proof.
 
 ## Session working set and Waiting (2026-10-03, revised 2026-10-06)
 

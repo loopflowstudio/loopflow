@@ -58,7 +58,7 @@ cutover remain unimplemented.
 layout changes. Rendering, exits and split consume it; unknown refuses. Sessions still derive Machine from workspace identity,
 and remote shell commands still use workspace-level `executionLocation`. Files/log
 queries and those consumers must move with the Work-keyed cutover; shell content
-alone does not make a mixed-location workspace usable. Wire DTOs remain unchanged.
+alone does not make a mixed-location workspace usable. DTOs remain unchanged.
 
 **Passive entry deletion:** `a1dfa07833` removes implicit primary-Session acquisition
 from Task navigation/refresh and bare links; explicit Session/Changes requests

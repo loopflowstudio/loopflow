@@ -174,7 +174,7 @@ Jack Heart (October 10) accepted Work-named repository/Wave/Task tabs over retai
 panes; close hides. Work-keyed cutover remains unimplemented. Passive Task navigation
 and bare remote links no longer acquire Sessions; explicit Session/Changes survives.
 His `ff61b6bc` correction selects shell-default Split, with no empty option.
-`d6640b8c68` retains Machine/path in shell content, preserving it through layout/Undo without duplicate metadata. Unknown refuses.
+`d6640b8c68` retains Machine/path in shell content, preserving location through layout/Undo. Unknown refuses.
 Session/remote-shell consumers, registry and DTO cutover remain; 97 headless tests
 prove neither Work tabs nor native acceptance. Admission and other obligations remain.
 

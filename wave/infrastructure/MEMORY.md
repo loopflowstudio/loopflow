@@ -904,10 +904,14 @@ a phase alone proves no advancement.
 October 11: installation job 114410351377 failed pulling from ECR Public with
 `toomanyrequests: Rate exceeded`; exact quota unknown. `243ed91a36` adds local image
 reuse and bounded throttling retries, preserving Release's separate download/startup
-deadlines. Mutable local tags require explicit refresh. Six simulated tests pass;
-hosted recovery and full installation remain unproved. Persistent throttling fails
-as infrastructure, never skips verification. Jack Heart requested review
-publication only. [Release memory](release/MEMORY.md) retains cold-download
+deadlines. Mutable local tags require explicit refresh. Six simulated tests and
+both local disposable installation paths pass with cached Rust 1.99.0; hosted
+throttling recovery remains unproved. Gate's Python suite had 394 passes, 19 skips
+and one nested-sandbox refusal; that test passed through its own macOS sandbox.
+Persistent throttling fails as infrastructure, never skips verification.
+Jack Heart subsequently approved
+PR #1529 for landing (`ff9c03dd-7587-4c14-afd8-447d99252aaf`).
+[Release memory](release/MEMORY.md) retains cold-download
 and operation-entry evidence; successful reporting alone proves no operation success.
 
 ## Shipped history

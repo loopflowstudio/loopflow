@@ -5,8 +5,9 @@ selecting conversation-first Tasks, repository-name conversation access and
 repo/session ownership. Pursue runs through publication for demo review, not landing.
 Remaining reversible UI details may be resolved during implementation; live data
 cleanup remains separate and requires a reviewed, restorable plan.
-Product owns this Task. It stacks on LOO-427; parent integration remains a delivery dependency.
-Reconciled October 11 against `8f95d9e4e6`; no implementation changes in this pass.
+Product owns this Task. LOO-427 is integrated at `c040d9fa03`; its landing remains
+a delivery dependency. Launcher repair: `1787d94bc9`; compression: `df40c477ef`.
+Reconciled October 11 against that implementation and the failed configured demo.
 
 ## Problem and accepted direction
 
@@ -67,54 +68,24 @@ placement and unavailable-owner failures retain the existing failed-opening/retr
 surface. No local fallback is added. Native usability of these states remains
 for demo review; no separate preparation mechanism is planned.
 
-## Findings that change the plan
+## Surviving owners
 
-Historical discovery at `ddc009d780` (LOO-427 foundation), retained to explain
-the implemented cut. Present-tense descriptions below refer to that baseline:
+`WorkProjection.outline` owns Wave/Task rows; `WorkModel` retains full Session
+membership and missing-Work evidence. `SessionsWorkspaceRegistry` retains Work
+layouts, native surfaces and drafts. Navigation suppression changes none of those
+lifetimes or Session completion.
 
-1. **The sidebar rows are already Work-only.** `WorkProjection.outline` emits
-   Waves/Tasks, not Session rows. Remaining inventory exposure is concrete:
-   `WorkNavigator.repositoryActions` → Debug → Sessions / Orphan Sessions;
-   `orphanSessions` also includes legitimate Wave/repo conversations because it
-   means no Task association. Remove that menu, not the underlying Session records.
-   `unmatchedSessions` also contains missing-planning Work, so it is not evidence
-   that a conversation is unscoped. Retain membership and missing-Work evidence.
-2. **A second launch route creates clutter.** `WorkNavigator.sessionComposer`
-   offers New Session and a skill picker. `SessionSkillLaunch` launches in the repo
-   even with a Task selected; `ConversationLaunch` starts a fresh prompt, rather
-   than reusing a primary. Empty-repo entry must not use either as an ensure path.
-3. **The primary owner exists.** `ops/human_session/primary.rs::ensure` locks the
-   repo/Wave scope, uses `ensure_primary_session`, prepares the persistent scope
-   checkout, and starts/reuses the conversation. `ensure_task` separately chooses
-   a Task conversation. `RegistryQuery` wraps the Task path but has no repo ensure
-   wrapper here. Add the repo call to that existing API, not a Swift primary ID.
-   Ensure has effects: deliberate repository-name opening or first-use entry may
-   acquire; ordinary reads must not.
-4. **Configuration is not the skill picker.** `repository_session` chooses
-   `repo-session`; `conversation` resolves provider/model through
-   `resolve_task_agent` and ordinary config. An existing conversation retains its
-   provider history. The picker remembers a skill for fresh launches, not the
-   repo primary's default. Proposed interpretation: preserve those existing
-   primary/config semantics; no new default-session preference in this Task.
-5. **The prompt contradicts onboarding.**
-   `rust/loopflow/src/builtins/ops/skill/repo_session.md` requires an operating pass
-   immediately. Amend that skill's no-work entry to invite ideas first, retaining
-   ordinary operation for existing work. A separate repo/onboard skill would
-   duplicate scope/continuity without a distinct setup mechanism.
-6. **Retention already has an owner.** `SessionsWorkspaceRegistry` keys by Work;
-   tabs hide, native surfaces and drafts remain. `WorkModel.isSessionVisible`
-   filters closed/headless Sessions, not age. Changing it globally could strand
-   retained panes. Sidebar suppression must not change the complete inventory,
-   membership, native focus/attachment, or Session completion.
-7. **Cleanup is not a migration.** Historical
-   `0.11.036_delete_sessions.sql` concerns retired schema, not disposable current
-   conversations. `scripts/desktop_performance.py::_snapshot` uses SQLite online
-   backup from a read-only source and restricted output permissions; it is a
-   useful backup primitive, not a full restoration recipe for provider history,
-   artifacts and active clients. No cleanup policy or reviewed candidate IDs exist.
+Rust's `ops/human_session/primary.rs` owns repo/Wave ensure and Task primary
+selection. RegistryQuery calls that owner; configuration supplies provider/model
+and existing conversations retain native history. Only deliberate opening and
+one-shot first-use entry acquire conversations. Repo/session invites ideas before
+an operating pass when no Work exists.
 
-No external API or library change is proposed; local source supplies the relevant
-mechanisms. No live provider, database cleanup or native rendering was exercised.
+Historical discovery, rejected predecessors and earlier failed checks are preserved
+at `1787d94bc9:scratch/get-me-using-lf.md`; pre-compression uncommitted notes
+remain at `/tmp/loo462-compress-1787d94/`. The SQLite backup primitive in
+`scripts/desktop_performance.py::_snapshot` is not a restore recipe for provider
+history, artifacts or active clients; cleanup remains separate.
 
 ## Chosen approach and alternatives
 
@@ -174,11 +145,26 @@ toggle with its exclusive state/tests. CLI launching, explicit Session links,
 Run inspection, pane-owned new conversations, membership and missing-Work evidence
 remain. There is no replacement Session index or second primary/layout owner.
 
-Compression shares Task selection/presentation before preparation. Two cache
-fixtures still held the retired `roadmap` verb; they now hold exact `wave show`
-or `session list` prefixes. No deletion targets remain in this navigation cut.
+No deletion targets remain in this navigation cut. The launcher now reuses
+`cmd_install` for build/install in both launch modes, leaving their presentation
+separate. Task entry uses the pane's existing `sessionId` projection to detect a
+retained conversation instead of repeating its content switch.
 
 ## Implementation and remaining work
+
+October 11 continuation after parent integration `c040d9fa03` preserves the
+completed Work-first cut. The configured demo failed with an unrecognized
+`repo identity` command despite successful bundled help. The launcher repair
+removes its misleading runtime claim: `run`/`run-debug` now check
+the actual `repo identity --json` operation through the bundled helper before
+opening the app. This is ordinary repository registration, not an effect-free
+capability query. Normal installed dispatch and migration authority remain intact;
+no identity fallback, installed-CLI replacement or private-Machine substitution
+is added. The existing development app build/install remains.
+Real-data native acceptance still requires a compatible installed release.
+[The failed demo](work-first-demo.md) records the observed runtime mismatch; no
+new configured demo has succeeded. [Portfolio discovery](portfolio-discovery.md)
+is adjacent research only, with no Task filed or implementation authorization.
 
 The consumer cut removes the generic composer, skill picker/storage/launch DTO,
 Debug Session inventory, orphan projection and Session-title search, including
@@ -205,8 +191,9 @@ loading/error entry, hide-all, reopen, collapsed Overview and unsaved Files stat
 No mounted provider or native usability is inferred.
 
 Remaining acceptance work:
-- Publication checks below pass on `8efc1234a1`; the composed capture is not
-  a mounted provider or native usability result.
+- Earlier gate suites passed on `8efc1234a1`; parent conflict checks and the
+  launcher/Task-entry compression checks below cover subsequent changes. These
+  are distinct revisions, not a claim that a full gate ran at `df40c477ef`.
 - Native usability/demo review remains separate from the headless build.
 - Cleanup remains a proposal only. No exact iteration-owned candidates are known
   or approved. Remaining investigation needs a private candidate/artifact inventory,
@@ -261,6 +248,14 @@ child memory directories in this checkout; the complete selected memory was read
 Uncommitted pre-reconciliation notes are preserved at
 `/tmp/loo462-realign-8f95d9e4e6/`.
 
-Check: `git diff --check` and `lf context` pass; documentation-only reconciliation reuses prior focused checks; affected suites remain with gate and native usability with demo/review.
+Prior gate evidence (`8efc1234a1`): documented commands 3, DTOs 43, isolated
+Session lifecycle 21 (one Linux-only ignored), Desktop 92 passed. The first
+lifecycle attempt failed with ambient TMPDIR/readonly SQLite; canonical TMPDIR
+repaired the fixture context. Parent sync `c040d9fa03` passed both exact
+WorkCache Session-read conflict tests. These results remain applicable; native
+usability remains with demo/review. Pre-continuation notes are preserved at
+`/tmp/loo462-implement-c040d9fa03/`.
 
-Check (October 11, `8efc1234a1`): `cargo test -p loopflow --test documented_commands --test dto_fixtures` passed 3 + 43; isolated `session_lifecycle_tests` passed 21, one Linux-only ignored; planned Desktop filter passed 92; `git diff --check` passed. Initial lifecycle run with ambient TMPDIR failed readonly SQLite; documented canonical TMPDIR repaired the fixture context. Native usability remains with demo/review.
+Latest focused evidence (October 11 compression, `df40c477ef`): `uv run pytest python/tests/test_loopflow_dev.py python/tests/test_ghostty_artifact.py -q` passed 9; Ruff and `git diff --check` pass; `scripts/test_desktop.sh --filter 'WorkDestinationTests/taskEntryOpensConversationThenRetainsWorkspace|WorkDestinationTests/delayedPrimarySessionPreparationDoesNotOpenChangesInAnotherTask' -Xswiftc -gnone` built and passed 2 tests (3 cases) headlessly; `lf context` is within both budgets; configured native demo remains release-dependent.
+
+Check (October 11 realign): `git diff --check` and `lf context` pass; prose-only changes reuse focused evidence above; configured native acceptance remains with demo/review after compatible release.

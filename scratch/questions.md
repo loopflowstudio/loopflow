@@ -21,6 +21,10 @@ Accepted direction and implementation evidence live in `get-me-using-lf.md`.
 
 ## Reversible implementation choices
 
+- October 11 launcher repair: checking the same `repo identity --json` operation
+  before launch may register the selected repository, just as opening Work does.
+  It preserves normal installed dispatch and explicit private-Machine selection;
+  command help alone cannot demonstrate the configured runtime's support.
 - First-use acquisition is considered once per retained repository workspace after
   fresh current planning, then full historical Wave inventory. Refresh, filtering and
   hiding the last tab do not repeat it. A failed history read preserves an error;

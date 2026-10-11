@@ -670,7 +670,7 @@ pub enum SessionCommand {
         #[arg(long)]
         search: Option<String>,
     },
-    /// Connect to the live conversation, or resume its saved history
+    /// Stop headless Claude/OpenCode and resume history; connect to Codex live
     #[command(name = "connect")]
     Open {
         /// Session ID or provider conversation ID

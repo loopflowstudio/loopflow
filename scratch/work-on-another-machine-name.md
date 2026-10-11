@@ -160,7 +160,8 @@ retains pending work; reconnect acquires before publishing. No agent turn is rep
 ## Implementation boundary — 2026-10-10
 
 TaskPlan/ProjectPlan and live Project iteration are removed. TaskComment is domain
-owned; provider observations remain adapter-internal. Project now stores description,
+owned; comment observations are adapter-internal, but Project/Task observations
+still escape through ordinary readers. Project now stores description,
 workflow, KRs and metric targets directly. The shared local/import writer and local
 readers no longer parse/render stored Markdown; prompt assembly renders on demand.
 The one Task draft converts released content before seeding causal history, retaining
@@ -196,21 +197,15 @@ Readiness also returns local identity. The surviving reader orders by shared ran
 creation time and ID rather than edit time. Provider adapters compare explicit
 bindings. Rotation retains original receipt bytes and local execution is unchanged.
 
-Project and Task saves now derive receipts from one typed edit slice through
-`PlanningChanges::save`; Project's separate `write_edits` and Task's parallel JSON
-receipt construction are deleted. Task editing no longer reconstructs a
-`PmItem` merely to save local fields. Ordering and disposition keep their distinct
-receipt owners. The public offline fixture now binds its Project normally: raw
-SQL selection disagreed with the Git journal and foreground acquisition removed
-that unsaved selection. This removes a writer-side reader dependency, not the
-remaining Task/status/snapshot projection stack.
-
-Project save compression removes `write_content` and the parallel hand-built
-receipt values. Name/summary, workflow selection, content edits and rotation use
-one typed edit slice for receipts and the common writer, sharing acquisition's
-Linear field mapping. Rotation no longer reconstructs PM Project/Task records:
-its membership check supplies the exact previous Project. The later prose cut below extends receipts in this Task’s single draft;
-canonical observation ownership remains unfinished.
+`7e63c994d0` derives Task/Project save and rotation receipts from the same typed
+edit slice as the writer, through `PlanningChanges::save`. Task saves no longer
+read `plan_read::task_in`; the parallel JSON receipt construction, Project
+`write_edits`/`write_content` and rotation's PM reconstruction are deleted.
+Ordering and disposition keep distinct receipt owners. This removes writer-side
+reader dependencies, not the Task/status/snapshot stack or string-field journal.
+Offline fixtures bind through the writer: raw SQL selection contradicted the Git
+journal and foreground acquisition removed that unsaved selection. Earlier detail:
+`7e63c994d0:scratch/work-on-another-machine-name.md`.
 
 ### Canonical Task acquisition — October 10
 
@@ -222,15 +217,32 @@ Cold placement, comments, PR ownership and sweep consume that identity; sweep
 compares canonical Project IDs. Concrete Linear ownership validation remains at
 acquisition. No migration or execution write is added.
 
-The structural prerequisite remains incomplete. `plan_read::project_in` still
-substitutes external/local IDs and sets description to `None`; `task_in` still
-overwrites due dates from provider observations. Status and Wave snapshots still
-manufacture provider-shaped Work. Their callers must use canonical Task/Project
-with explicit ownership/removal/age evidence, including pending membership.
-The new focused proofs cover canonical fields after restart/import, Linear
-acquisition and pending local edits, not composed CLI/Desktop or populated
-execution preservation. Bindings, ordinary follow-ups, cron and the entire deeper
-audit remain required before review-only republication. No partial readiness.
+### Remaining reader cut — reconciled October 10 at `7e63c994d0`
+
+The preceding feedback's `ResolvedTask` finding is superseded by `8c2b64029f`;
+that type and `ops/task_pm.rs` are absent. Canonical fields and the acquisition
+return are implemented, but ordinary read composition remains provider-shaped:
+
+- `plan_read::task_in` selects saved due dates, then overwrites them from the
+  Linear observation (including `None` when its record is absent). `project_in`
+  fabricates `LinearProject` with `description: None` and dual-purpose IDs.
+- `ops/task.rs::task_planning_item` still feeds create, placement and snapshot
+  callers. `TaskStatus.planning` exposes `PmTaskRecord`; known Tasks use the local
+  reconstruction while cold status uses `inspect_task_planning`. Canonical
+  acquisition alone therefore does not make these paths agree.
+- `lf/commands/waves.rs::wave_tasks` reads Tasks and `planning_wave` separately;
+  `snapshot_tasks` joins them by either local or Linear ID. Its retained-Task path
+  reconstructs another item through `task_planning_item`. CLI/Work-frame/Swift
+  consumers must change with this join, not after the model is declared complete.
+
+The coherent cut replaces these reads with canonical Work and explicit binding,
+availability and acquisition evidence. Pending local membership must remain valid
+beside an older provider Project; invalidation, positive removal and foreign Team
+facts remain visible. A missing provider record must not erase a saved field;
+a local update timestamp must not invent provider observation age. Local/Git/Linear
+status and snapshots need matching IDs/content and unchanged populated execution
+proof. These are remaining implementation/tests, not results of this reconciliation.
+Bindings, ordinary follow-ups, cron and the full deletion audit still precede review.
 
 ### Project prose: composed behavior and remaining ownership cut
 
@@ -341,14 +353,14 @@ Earlier baseline detail: `c8fe4628a:scratch/work-on-another-machine-name.md`.
   cut. Regenerate them after the entire accepted reduction, before review-only
   republication. No readiness or landing follows from this persistence checkpoint.
 
-Checks: `cargo build -p loopflow --bin lf`, fmt, `cargo clippy --all-targets -- -D warnings`, diff check and five focused offline Task/Project edit, refile, older-acknowledgment and assignee-clear tests pass with LF authority cleared; gate owns affected/materialized/Desktop verification.
+Prior implementation checks: `cargo build -p loopflow --bin lf`, fmt, `cargo clippy --all-targets -- -D warnings`, diff check and five focused offline Task/Project edit, refile, older-acknowledgment and assignee-clear tests pass with LF authority cleared; gate owns affected/materialized/Desktop verification.
 
-Context: authored memory/scratch fit. The October 10 `lf context --skill compress`
-query reports a 19,453-token generated Task seed/steer/workspace source against
-16,000 (3,453 over):
-`.lf/tmp/context/b904b39986709f86f10a412a41d49626f98842a24eeacf8bd4ab25b407c1aa29.md`.
-The overflow is retained Task history/generated metadata, not authored scratch;
-no history or limit changed.
+Realign check: `git diff --check` passes; source tracing confirms the remaining reader cut; no product code changed or suites rerun (gate owns broader verification).
+
+Context: authored memory/scratch fit. `lf context --skill realign` reports the
+generated Task seed/steers/workspace at 19,434/16,000 tokens (3,434 over).
+Its complete launch source was inspected; retained history/generated metadata
+cannot be reduced by curating authored plans. No history or limit changed.
 
 ## Delete — do not maintain
 

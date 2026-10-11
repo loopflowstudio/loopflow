@@ -631,18 +631,19 @@ Outages buffer locally, without fallback/publisher election. One typed writer
 owns local/imported fields; execution/attempts stay local. Preserve causality,
 losers and uncertainty. Gate/installation remain unproved.
 
-Jack requires the full audit before review. Retain IDs, bindings and rank. Typed
-edits supply save receipts; fixtures must seed selection through the writer, not
-contradictory SQL. One parser replaces model patching. Acquisition returns canonical Task;
-snapshot/status still manufacture provider-shaped Work. Partial fields retain
-revision/age; omission proves no settlement. Follow-ups retain uncertain effects,
-never synthetic comment success. Git candidates prove no application/publication;
-read errors retain cache.
+Jack requires the full audit before review. Acquisition returns canonical Task;
+typed edits supply save receipts. Status/snapshots still replace due dates and
+omit prose. Absent observations cannot erase saved fields. Preserve IDs, bindings,
+rank and field revision/age; omission settles nothing.
+Fixtures seed selection through the writer. Follow-up conversion retains unknown
+creation/relation effects, never synthetic comment success. Git candidates prove
+no application/publication; read errors retain cache.
 
-Cron retains installed ownership and failure exits ([evidence](release/MEMORY.md)).
-[Remaining work](../../scratch/work-on-another-machine-name.md). Republish #1491
-after full reduction, for review only. No landing, installation,
-live schedule activation or real Work export. Prior proofs: `41378adacf:wave/infrastructure/MEMORY.md`.
+Cron retains installed ownership independently of file location and nonzero
+operation failures ([Release evidence](release/MEMORY.md), reread October 10).
+[Remaining audit](../../scratch/work-on-another-machine-name.md) precedes #1491's
+review-only republication. No landing, installation, schedule
+activation or real Work export. Prior proofs: `41378adacf:wave/infrastructure/MEMORY.md`.
 
 ## Planning and launch preservation (curated 2026-10-02)
 

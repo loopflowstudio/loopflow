@@ -158,7 +158,7 @@ struct WorktreeWorkspaceTests {
         let moved = try #require(first.multiplexer.pane(forSessionId: record.id))
         #expect(moved.id == pane.id)
         #expect(moved.incarnation != pane.incarnation)
-        #expect(moved.sessionLocation?.worktree == "/moved")
+        #expect(moved.content.location?.worktree == "/moved")
         registry.revealSession(record, in: other)
         #expect(first.multiplexer.pane(forSessionId: record.id) == nil)
         #expect(other.multiplexer.pane(forSessionId: record.id) != nil)

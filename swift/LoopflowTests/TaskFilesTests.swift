@@ -47,7 +47,7 @@ struct TaskFilesTests {
         #expect(document.dirty)
         // The shell beside Files follows its content, never the enclosing Work.
         let shell = try #require(try workspace.split(pane.id, axis: .vertical))
-        #expect(shell.shellLocation == location)
+        #expect(shell.content.location == location)
         workspace.multiplexer.close(pane.id)
         workspace.multiplexer.undoClose()
         let reopened = try #require(workspace.multiplexer.layout.pane(for: pane.id))
@@ -423,7 +423,7 @@ struct TaskFilesTests {
         let model = WorkModel(query: query, repoPath: "/src/loopflow")
         await model.refresh()
         let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
-        let view = SessionsView(model: model, repoPath: "/src/loopflow", workspaces: registry, query: query)
+        let view = SessionsView(model: model, repoPath: "/src/loopflow", workspaces: registry, repository: "fixture-repository", query: query)
         for (task, location) in [("issue-now", "loopflow.make-lf-work-the-machine"),
                                  ("issue-review", "loopflow.all-wave-roadmap"),
                                  ("issue-now", "loopflow.make-lf-work-the-machine")] {

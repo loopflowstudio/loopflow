@@ -137,7 +137,7 @@ public struct DesktopLayoutInspection: Codable, Sendable, Equatable {
     public init(_ layout: LayoutNode, surface: (PaneState) -> String?) {
         switch layout {
         case .leaf(let state):
-            location = state.shellLocation ?? state.sessionLocation ?? state.content.fileLocation
+            location = state.content.location
             pane = state.id; incarnation = state.incarnation; self.surface = surface(state); axis = nil; ratio = nil; children = []
             switch state.content {
             case .empty: content = "empty"; subject = nil

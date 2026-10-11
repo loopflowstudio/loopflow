@@ -62,7 +62,7 @@ public final class MultiplexerStore {
     public func updateSessionLocation(_ sessionId: String, location: WorkspaceIdentity?, execution: TaskLocationObservation? = nil) {
         func update(_ node: LayoutNode) -> LayoutNode {
             guard let pane = node.allPanes.first(where: { $0.sessionId == sessionId }) else { return node }
-            let retained = pane.sessionLocation == location ? pane.executionLocation : nil
+            let retained = pane.content.location == location ? pane.executionLocation : nil
             let content = PaneContent.session(id: sessionId, location: location, execution: execution ?? retained)
             guard pane.content != content else { return node }
             return node.replacingContent(of: pane.id, with: content)
@@ -208,7 +208,7 @@ public final class MultiplexerStore {
         if let pane = existing {
             // A fresh observation can replace the captured owner, but missing
             // evidence cannot discard the retained remote location or draft.
-            if content.executionLocation != nil || content.fileLocation != nil, pane.content != content {
+            if content.executionLocation != nil || content.location != nil, pane.content != content {
                 layout = layout.replacingContent(of: pane.id, with: content)
                 closedState = nil
             }

@@ -55,7 +55,7 @@ struct DesktopPaneControlTests {
         }
         let current = workspace.multiplexer.focusedPane
         let split = try #require(try workspace.split(current.id, axis: .vertical))
-        #expect(split.shellLocation == identity)
+        #expect(split.content.location == identity)
         workspace.multiplexer.updateSessionLocation("conversation", location: nil)
         #expect((try #require(workspace.multiplexer.pane(forSessionId: "conversation"))).terminal == nil)
     }
@@ -102,7 +102,7 @@ struct DesktopPaneControlTests {
         let location = fixtureWorkspace("/task")
         let source = try #require(workspace.multiplexer.newShell(location: location))
         let split = try #require(try workspace.split(source.id, axis: .vertical))
-        #expect(split.shellLocation == location)
+        #expect(split.content.location == location)
         #expect(workspace.multiplexer.shellCommands[split.id] == [])
         let remote = try #require(workspace.multiplexer.newShell(command: ["peer-shell"], location:
             WorkspaceIdentity(machineId: "peer", worktree: "/remote")))

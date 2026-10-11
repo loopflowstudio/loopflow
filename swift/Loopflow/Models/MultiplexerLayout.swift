@@ -20,19 +20,17 @@ public enum PaneContent: Codable, Sendable, Equatable {
     /// A Task's worktree files.
     case files(taskId: String, location: WorkspaceIdentity? = nil, execution: TaskLocationObservation? = nil)
 
-    public var fileLocation: WorkspaceIdentity? {
-        let location: WorkspaceIdentity?
-        let execution: TaskLocationObservation?
+    /// Terminals retain their captured location; Files and logs follow their
+    /// recorded owner. Unavailable owner evidence never falls back to a path.
+    public var location: WorkspaceIdentity? {
         switch self {
-        case .files(_, let value, let owner), .flowLog(_, let value, let owner):
-            location = value; execution = owner
-        default: return nil
-        }
-        if let execution {
+        case .empty: return nil
+        case .session(_, let location, _), .shell(let location, _): return location
+        case .files(_, let location, let execution), .flowLog(_, let location, let execution):
+            guard let execution else { return location }
             guard case .recorded(_, let checkout?) = execution.location else { return nil }
             return WorkspaceIdentity(machineId: execution.machineID, worktree: checkout)
         }
-        return location
     }
 
     /// The exact observed owner travels with the content, never the enclosing workspace.
@@ -50,20 +48,9 @@ public struct PaneState: Codable, Sendable, Identifiable, Equatable {
     public let content: PaneContent
     /// The content occurrence, distinct from the reusable pane slot.
     public let incarnation: String
-    /// Location travels with content, including replacement and Close/Undo.
-    public var shellLocation: WorkspaceIdentity? {
-        guard case .shell(let location, _) = content else { return nil }
-        return location
-    }
-
     public var sessionId: String? {
         guard case .session(let id, _, _) = content else { return nil }
         return id
-    }
-
-    public var sessionLocation: WorkspaceIdentity? {
-        guard case .session(_, let location, _) = content else { return nil }
-        return location
     }
 
     public var executionLocation: TaskLocationObservation? { content.executionLocation }

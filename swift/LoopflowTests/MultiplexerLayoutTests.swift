@@ -6,6 +6,36 @@ import Testing
 // resize, and round-trip must hold, because focus/color/persistence all read it.
 @Suite("Multiplexer layout")
 struct MultiplexerLayoutTests {
+    @Test("Pane locations preserve terminal capture and refuse unavailable file owners")
+    func contentLocations() {
+        let captured = WorkspaceIdentity(machineId: "local", worktree: "/captured")
+        let remote = WorkspaceIdentity(machineId: "peer", worktree: "/remote")
+        let readings: [(TaskLocation, WorkspaceIdentity?)] = [
+            (.recorded(taskID: "task", checkout: "/remote"), remote),
+            (.recorded(taskID: "task", checkout: nil), nil),
+            (.unrecorded, nil),
+            (.unavailable(reason: "offline"), nil),
+        ]
+        for (reading, expected) in readings {
+            let owner = TaskLocationObservation(request: "read", repositoryID: "repo",
+                taskID: "task", machineID: "peer", observedAt: 1, location: reading)
+            let contents: [(PaneContent, WorkspaceIdentity?)] = [
+                (.empty, nil),
+                (.session(id: "session", location: captured, execution: owner), captured),
+                (.shell(location: captured, execution: owner), captured),
+                (.files(taskId: "task", location: captured, execution: owner), expected),
+                (.flowLog(taskId: "task", location: captured, execution: owner), expected),
+                (.files(taskId: "task", location: captured), captured),
+                (.flowLog(taskId: "task", location: captured), captured),
+            ]
+            for (content, location) in contents {
+                #expect(content.location == location)
+                let inspected = DesktopLayoutInspection(.leaf(PaneState(content: content))) { _ in nil }
+                #expect(inspected.location == location)
+            }
+        }
+    }
+
     @Test("default layout is a single empty pane")
     func defaultIsOneLeaf() {
         let layout = LayoutNode.defaultLayout()

@@ -67,27 +67,16 @@ final class SessionsWorkspace {
         guard let pane = multiplexer.layout.pane(for: paneId) else {
             throw RegistryQueryError("The addressed pane disappeared; no shell was opened.")
         }
-        switch pane.content {
-        case .shell(let location, _), .session(_, let location, _):
+        if pane.content == .empty {
             guard let location else {
-                throw RegistryQueryError("Terminal location is unavailable; no shell was opened.")
-            }
-            return (location, pane.executionLocation)
-        case .files:
-            guard let location = pane.content.fileLocation else {
-                throw RegistryQueryError("Task file location is unavailable; no shell was opened.")
-            }
-            return (location, pane.executionLocation)
-        case .flowLog:
-            guard let location = pane.content.fileLocation else {
-                throw RegistryQueryError("Task log location is unavailable; no shell was opened.")
-            }
-            return (location, pane.executionLocation)
-        case .empty: guard let location else {
                 throw RegistryQueryError("Prepare this Work's location before opening a shell.")
             }
             return (location, nil)
         }
+        guard let location = pane.content.location else {
+            throw RegistryQueryError("Pane location is unavailable; no shell was opened.")
+        }
+        return (location, pane.executionLocation)
     }
 
     private func shellCommand(at identity: WorkspaceIdentity, execution: TaskLocationObservation?) throws -> [String] {
@@ -308,7 +297,7 @@ final class SessionsWorkspaceRegistry {
         case .files(let task), .flowLog(let task):
             guard let projection = model.task(id: task), workspace.key.kind == .task,
                   (workspace.key.id == projection.task.id || workspace.key.id == projection.task.runtime?.workId),
-                  let identity = pane.shellLocation ?? pane.sessionLocation ?? pane.content.fileLocation ?? workspace.location,
+                  let identity = pane.content.location ?? workspace.location,
                   (model.navigation.preparedTaskWorktrees[projection.task.id]
                     ?? projection.task.reference.workspace?.identity ?? identity) == identity else {
                 throw RegistryQueryError("The Task is not associated with this checkout. Inspect its recorded workspace; no pane was changed.")
@@ -1633,7 +1622,7 @@ private struct SessionPaneView: View {
                 emptyWorkspace
             }
         case .shell:
-            if let location = pane.shellLocation, let terminal = pane.terminal {
+            if let location = pane.content.location, let terminal = pane.terminal {
                 let isLocal = location.machineId == workspace.localMachineId
                 if !isLocal && store.shellCommands[pane.id] == nil {
                     Text("Reopen the Task and add a new remote shell. No local shell was opened.")
@@ -1778,7 +1767,7 @@ private struct SessionPaneView: View {
 
     @ViewBuilder
     private func _terminal(item: SessionItem, surface: SessionRecord) -> some View {
-        if let location = pane.sessionLocation, surface.workspace?.identity == location,
+        if let location = pane.content.location, surface.workspace?.identity == location,
            let terminal = pane.terminal {
             GhosttyTerminalView(
                 workingDirectory: sessions.presentationDirectory(for: surface, checkout: location.worktree),
@@ -1831,7 +1820,7 @@ private struct SessionPaneView: View {
         switch pane.content {
         case .session:
             item?.surface.flatMap { record in
-                guard record.workspace?.identity == pane.sessionLocation else { return nil }
+                guard record.workspace?.identity == pane.content.location else { return nil }
                 return pane.terminal
             }
         case .shell:

@@ -166,15 +166,16 @@ Jack authorized Product follow-ups LOO-452 (shortcut customization, beyond LOO-4
 and LOO-453 (readiness/events); research:
 [the comparison](../../docs/reviews/terminal-command-comparison.md#rex-composition-and-discoverability-2026-10-10).
 
-Jack Heart (October 10) accepted Work-named repository/Wave/Task tabs; close hides.
-Work-keyed cutover remains. Passive Task navigation/bare remote links
+Jack Heart (October 10) accepted repository/Wave/Task tabs named for Work; close hides.
+Passive Task navigation/bare remote links
 no longer acquire Sessions; explicit Session/Changes survives. `ff61b6bc` selects
 shell-default Split, no empty option. `d6640b8c68` retains shell Machine/path through
 layout/Undo; unknown refuses.
 `94d5195497`/`cf77ee325a`: content owns terminal/shell routing; Undo never
-replays launch. Files now consumes recorded owners without link priming and retains
-drafts on changed owners. Local Files uses Task placement; logs, registry,
-membership and targets remain checkout-led. Work tabs/DTO cutover and native proof remain.
+replays launch. `d10d5e9a69`/`d86e32d466`: Files reads pane owners without priming;
+same-owner reads reuse documents/transport; changed owners retain drafts. Nonces
+are not document identity. Local Files uses placement;
+Work tabs, logs, registry and targets remain unfinished. Native proof remains.
 
 **Confirmation cannot elect execution.** `4c43550c2`: divergent revisions and
 independent refs both confirm, not Task allocation. `42990dea3` shares membership

@@ -76,8 +76,12 @@ RegistryQuery and the retained Session/Files owners. The repository scene keeps
 local planning and drafts; only the addressed peer Session joins its inventory.
 Fresh nonce-bound owner observations precede opening and Session connection;
 stale, unavailable or changed-checkout readings fail without transfer. Session-only
-links prepare the same Files owner as Changes links, using local cache identity
-and the peer's command subject. Recorded query copies retain remote classification:
+links retain owner evidence without allocating Files. `d10d5e9a69` routes Files
+directly from pane content, using local cache identity and the peer's command
+subject; Changes opening and rendering share that reader. `d86e32d466` reuses
+the retained transport for repeated same-owner readings. Changed owners preserve
+drafts without redirecting them; local Files still uses Task placement. Recorded
+query copies retain remote classification:
 SSH closures alone cannot prevent accidental local watchers or recovery-folder opens.
 SSH carries its script as an argument, preserving stdin and remote native argv/Home.
 Headless fixtures and simulated SSH cover these boundaries, not mounted terminals

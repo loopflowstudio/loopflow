@@ -242,11 +242,13 @@ CI: `be4a2b2af:wave/infrastructure/MEMORY.md`, this heading.
 Jack Heart's October 10 decision `fd830a3f` supersedes live takeover for Claude
 and OpenCode: stop through the AgentProcess record, resume the same native
 conversation, and publish. Codex live handoff removal belongs to separate work;
-retain its generations, fences and saved connection here. No landing authorized.
+retain its generations, fences and saved connection here. Jack later approved
+#1524, gate/landing and completion after verified merge (`55bc3fcd`).
 Delete Claude replay and OpenCode relay/recovery preparation, including the shared
 named-lifeline rewrite. Preserve exact stop, foreground exclusion, native history
 and uncertain turns. `f2096ffce`'s public stop/resume and frozen-authority fixtures
-pass; publication and Linux CI remain. Configured/installed acceptance is unproved.
+pass. Gate repaired stale refusal and socket-server lifetime fixtures. Published
+checkpoint CI skipped tests; Linux/installed acceptance remains unproved.
 Prior live-takeover evidence: `5e95ce9a4:wave/infrastructure/MEMORY.md`, this heading.
 Plan: `scratch/stop-and-take-over-claude.md`.
 

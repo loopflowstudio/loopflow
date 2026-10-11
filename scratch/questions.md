@@ -47,6 +47,5 @@ Wrong scalar types now reject conversion; original rows/schema survive rollback.
 Independent SQL rechecks: `/tmp/loo412-membership-comparison-recheck.json` and
 `/tmp/loo412-observation-type-conversion-recheck.json`; neither is public CLI proof.
 Counterexamples remain in the corresponding `-proof.json` files.
-The populated migration fixture retains Task/Workflow/Process and uncertain
-receipts; it does not seed Session turns or live controls. Final gate retains those
-preservation obligations and the complete deletion audit.
+The design's released-frontier section owns populated-fixture coverage and the
+remaining Session-turn/live-control preservation obligations.

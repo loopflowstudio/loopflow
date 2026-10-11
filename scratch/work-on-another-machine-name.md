@@ -14,7 +14,8 @@ do not land, install, start a later remote-work slice or export real Work record
 to the public repository. The [model inventory and review](work-model.md) supplies
 source references; this section records the accepted scope and
 supersedes its earlier “proposed / not yet selected” labels for the scope below.
-The current HTML review is [work-model.html](work-model.html).
+The accepted model review is [work-sync-redesign.html](work-sync-redesign.html);
+`work-model.html` is the earlier inventory, not the final +/- review.
 
 ### Simplify the domain and its integration boundary
 
@@ -204,7 +205,7 @@ and later saves. Ordinary provider reconstruction, `planning_task`, `plan_read`,
 Delivery requires a revision accepted into Work and independent eligibility:
 same-revision archival or unresolved membership still refuses delivery without
 consuming the local save. Foreign observations grant no ownership or execution
-authority. Persistence, typed journal, bindings, ordinary follow-ups and cron
+authority. Adapter confinement, typed journal, ordinary follow-ups and cron
 remain one delivery scope before gate and review.
 
 ### Reconciled acquisition boundary
@@ -223,7 +224,7 @@ read typed fields; no ordinary reader reconstructs a provider model. Work-watch
 includes planning cadence. Exact cuts/proof limits: `fbc9c60e62` in this plan,
 this heading, including the retained `e0f716aa54` through `f0932031e5` references.
 
-The current persistence cut removes `pm_projects.body` and `pm_items.body` in
+`fbc9c60e62` removes `pm_projects.body` and `pm_items.body` in
 `planning_peers.sql`, replacing live whole-object decoding with field comparisons
 and direct column readers. Prose retains separate revision/age; omitted issue
 membership and dates retain presence separately from observed null. Foreign and
@@ -237,7 +238,7 @@ Conversion refuses unsupported scalar types before dropping source evidence;
 compound fields retain JSON encoding. Arrays-as-names and boolean ranks cannot
 silently become valid Work; failure rolls back schema and original rows.
 
-Concrete bindings now use repository `linear.team` and Wave `linear.initiative`.
+`56ea6db9c1` supplies repository `linear.team` and Wave `linear.initiative`.
 The redundant provider selector, legacy rejection/cleanup and mixed-authority
 validation are removed. Reteam confirms remote ownership without committing
 unrelated checkout edits. Connect selects repository Linear even with personal Git;
@@ -259,10 +260,13 @@ Merge `db36f20ba8` incorporates main `21dae527b4`: local planning, optional Task
 AgentProcess and process-ID drafts are materialized in `0.13.11.001_release.sql`.
 Only this Task's `planning_peers.sql` remains editable. Its `optional_task_pr`
 dependency names a retained released marker, not a missing draft to restore.
-Populated conversion must start at this actual frontier; pre-merge fixture passes
-do not establish that boundary. The focused receipt fixture now passes, preserving
-uncertain input and sequence high-water marks, not proving full Work conversion.
-Source materialization proves no installation.
+The populated `provider_columns_preserve_released_observations_and_local_execution`
+fixture starts here: foreign/partial observations, contradictory membership,
+independent removal/order/age, Task identity/path, captured Workflow, Process and
+uncertain state/comment receipts survive. Invalid scalar conversion rolls back
+schema and original rows. It seeds no Session turns or live controls; those and
+broader delayed/independent observations remain gate obligations. Earlier receipt
+proof retains uncertain inputs and sequence high-water marks. None proves installation.
 
 Main #1523 entered at `c77e72b6b7` after the recorded checks. Its separate
 `process_terminal.sql` draft adds local Process terminal placement; it is not a
@@ -373,6 +377,6 @@ Earlier focused proof: `9dbd6fc2d8`, `dfd3b80611`, `f025e9b7ab`,
 `dfa2cdafba`, `09709a05cc` in this plan. Adapter confinement, typed journal,
 follow-ups, cron, gate and review still precede republication.
 
-Checks: October 11 `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, source CLI build, PM operation tests (14), and planning/setup/ownership/remote CLI tests (13) pass after binding simplification. Earlier conversion/rollback/receipt and prose checks remain applicable (`fbc9c60e62` at this path); full gate remains after the audit.
+Checks: October 11 `git diff --check` and `lf context` pass for prose reconciliation; unchanged source retains `56ea6db9c1` formatting/Clippy/build and 27 focused passes, plus `fbc9c60e62` conversion/rollback/receipt/prose evidence; full gate remains after the audit.
 
 Transport evidence: `0181133849` at this path.

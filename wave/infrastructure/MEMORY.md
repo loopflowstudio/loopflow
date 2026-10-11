@@ -617,7 +617,7 @@ acceptance remain at
 Jack Heart selected Linear, shared or default user-keyed Git per repository.
 One typed writer owns local/imported Work; outages buffer without fallback/election.
 Execution/attempts stay local; retain causal losers and uncertainty. Before review:
-finish private observations, typed journal, bindings, ordinary follow-ups and cron.
+finish private observations, typed journal, ordinary follow-ups and cron.
 
 `e3a3479df7` removes public snapshot reads; portfolio ownership reads use
 SQLite claims. Task status, admission and acquisition read narrow
@@ -625,8 +625,9 @@ Linear evidence; ordinary provider readback is deleted. Delivery needs
 accepted revision plus archive/membership eligibility; foreign facts grant no ownership.
 Missing issue content cannot hide a canonical parent's archive or membership
 dispute. Projection, receipts and acquisition now read concrete observation columns;
-whole Project/issue bodies and ingestion reconstruction are removed by the Task
-draft. Partial fields retain presence and prose age; adapter envelopes remain.
+whole Project/issue bodies are removed by the Task draft. Partial fields retain
+presence and prose age; public ingestion envelopes remain. Concrete Linear bindings
+are implemented; repository transport selection remains separate from those bindings.
 Populated conversion and rollback proof belongs to the plan. Typed values alone
 are not a typed journal: field-addressed mutations still require reduction.
 Jack Heart excludes old-version support; an unshipped Git encoding needs no dual

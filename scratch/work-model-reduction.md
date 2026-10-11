@@ -79,7 +79,7 @@ never admission. Acquisition now reads narrow Linear identity, revision, ownersh
 validity and age too. `PmTaskObservation`, `pm_task_observation_in` and
 `read_task_planning_async` are deleted. Cached acquisition returns canonical Work;
 delayed absence retains its revision/age fence and Wave-lock lifetime. Raw provider
-input replay lives only in fixtures. Persistent reduction remains.
+input replay lives only in fixtures. Adapter confinement remains.
 
 **Keep:** explicit missing, invalid, removed and unavailable evidence. A failed
 provider read must not erase cached Work or convert unknown state into absence.
@@ -102,6 +102,10 @@ hierarchy. Concrete observations remain necessary for foreign/unmapped records,
 partial inventories, contradictory claims, independent membership/removal and
 original ages. Removing a whole table remains conditional on proving another
 existing owner retains every fact; canonical Work must not absorb foreign input.
+`Store::put_pm_snapshot`/`put_pm_task` still accept these public envelopes and a
+generic provider string; concrete Linear ingestion must replace that boundary and
+its callers together, not merely rename the envelopes. Atomic inventory acceptance
+and cancellation-safe Wave locks remain necessary.
 `pm_wave_sync`, `pm_wave_projects`, `pm_issue_changes`, relation observations and
 `pm_project_name_cutover` retain independent evidence, not ordinary Work content.
 
@@ -251,7 +255,7 @@ are deleted; actual acquisition failure retains its error.
 store checks narrow retained ownership claims directly; no inventory leaves it.
 `e3a3479df7` removed the public `pm_snapshot` reader and all callers. Fixtures
 read canonical Work or concrete retained evidence and replay fetched inputs;
-private acquisition inventory and provider hierarchy remain required cuts.
+acquisition input envelopes and provider hierarchy remain required cuts.
 
 `PmResolvedTask`, both `pm_resolve_task` wrappers and `ResolvedTask` are deleted;
 `ops/task_pm.rs` is removed. Acquisition validates concrete Linear ownership and
@@ -293,7 +297,7 @@ explicit optional Linear bindings and required sync evidence. `PmTaskSummary`,
 `planning_wave` and their dual-ID joins are removed. Creation now returns canonical Task and the CLI uses its title; `task_planning_item`
 is deleted. Placement/PR consumers read explicit branch/URL metadata. Task status now returns canonical Task/Project records; summaries expose acquisition
 state/age independently of delivery, including Swift decoding and display. Remaining:
-provider-shaped snapshot results. Project delivery now checks accepted Work revision
+provider-shaped ingestion inputs. Project delivery now checks accepted Work revision
 and retained archive/membership evidence, not a returned provider record.
 
 **Swift (under `swift/`):** `Models/WaveWorkMap.swift`'s Project/Task planning

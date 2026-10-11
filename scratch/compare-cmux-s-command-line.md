@@ -265,7 +265,9 @@ only initial skill/router input. Future/repeated input stays unavailable, and no
 predecessor executes. Main's October 10 refreshable context supersedes frozen
 input and budget gates: checkout Wave/ancestor Markdown and scratch refresh;
 Work direction remains a launch reference. Preview shows current system/first-turn
-input and reference contents, never promises future hook bytes. Docs selects
+input and reference contents, never promises future hook bytes. Task workspace
+input lists quoted paths and change states, not a duplicate per-file hash/size
+projection. Patch bounds and captured-reference receipts are unchanged. Docs selects
 references, not documentation generation; account/permission behavior is unchanged.
 
 `--explain` reads invocation selection/actions before admission or preparation,

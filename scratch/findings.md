@@ -103,4 +103,11 @@ then delete the outer checkout layout as the plan requires. `retainedPane` and
 `reconcileMembership` still encode checkout identity. Do not polish those
 predecessor rules. Admission remains independent and unresolved.
 
-Check: `git diff --check` — PASS (compression is prose-only; no new build needed).
+Task-input compression removes the duplicate `ContextFile` projection and its
+per-file disk reads/hashes. Quoted paths and all present change states remain;
+patch bounds and durable capture hashes are unchanged. The fixture covers mixed
+states, 301 binary paths and a quoted/newline name. Budget measurements and the
+production-database preview refusal remain in [questions](questions.md#context-budget).
+This does not implement Work tabs or alter their deletion targets.
+
+Check: `cargo test -p loopflow --lib task_workspace_context_covers_committed_staged_unstaged_and_untracked_bytes` (LF variables cleared, closed stdin), `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo build -p loopflow --bin lf`, `git diff --check` — PASS (1 test); installed input adoption and native UI remain unproved.

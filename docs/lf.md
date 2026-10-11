@@ -583,6 +583,9 @@ current reference contents. Launch saves generated references; Wave and scratch
 context can refresh during the conversation. Preview creates no reference files.
 It never prepares a checkout, refreshes planning, writes storage or runs a provider.
 A real launch refreshes Task direction; preview does not predict future hook input.
+Task input lists changed paths with their committed, staged, unstaged and untracked
+states. It includes a small text patch when available; omitted patches and exact
+file bytes remain in the checkout. The inventory is not a content-hash receipt.
 
 For a Flow, preview shows the compiled graph and input states keyed by node.
 Only the initial skill or router gets current-snapshot input. Later nodes and

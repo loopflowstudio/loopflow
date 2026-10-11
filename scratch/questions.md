@@ -46,11 +46,14 @@ dispatch; an unscoped ambiguous prefix still fails.
 
 ## Context budget
 
-The October 10 `lf context --skill compress` reading reports generated Work input
-at 34,981 tokens (18,981 over 16,000), from retained steers and workspace inventory.
-Authored scratch/memory fit. This generated source cannot be shortened by editing
-those files; its input owner must reduce the historical/inventory assembly without
-losing current direction. No limit was raised.
+Installed `lf context --skill compress` still assembles the old per-file JSON
+inventory: the October 10 reading is 34,986 goal tokens, 18,986 over 16,000.
+The local input owner now emits every quoted path and present change state without
+per-file hashes, sizes or false fields. Applying that rendering to the complete
+captured goal yields 11,637 tokens / 52,254 bytes, preserving all steers. This is
+an offline measurement, not installed adoption. The development preview refused
+the production database; that boundary was not bypassed. Authored scratch/memory
+fit; no limits changed. Installation remains outside this Task's authorization.
 
 ## Admission authority — October 9, unresolved
 

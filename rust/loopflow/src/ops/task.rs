@@ -3728,41 +3728,30 @@ fn diff_snapshot(workspace: TaskComparison<'_>, path: Option<&str>) -> OpsResult
 pub(crate) fn task_workspace_context(task: &Task) -> OpsResult<String> {
     const MAX_PATCH_TOKENS: usize = 15_000;
 
-    #[derive(serde::Serialize)]
-    struct ContextFile<'a> {
-        path: &'a str,
-        committed: bool,
-        staged: bool,
-        unstaged: bool,
-        untracked: bool,
-        size_bytes: Option<u64>,
-        content_sha256: Option<String>,
-    }
-
     let workspace = TaskComparison::new(task)?;
     let changes = changes_snapshot(workspace)?;
     let diff = diff_snapshot(workspace, None)?;
-    let worktree = task.worktree()?;
+    // This inventory locates changes; it is not a content receipt. Avoid reading
+    // and hashing every file again, especially when the patch is too large.
     let files = changes
         .files
         .iter()
         .map(|file| {
-            let bytes = std::fs::read(worktree.join(&file.path)).ok();
-            ContextFile {
-                path: &file.path,
-                committed: file.committed,
-                staged: file.staged,
-                unstaged: file.unstaged,
-                untracked: file.untracked,
-                size_bytes: bytes.as_ref().map(|bytes| bytes.len() as u64),
-                content_sha256: bytes
-                    .as_ref()
-                    .map(|bytes| hex::encode(Sha256::digest(bytes))),
-            }
+            let states = [
+                (file.committed, "committed"),
+                (file.staged, "staged"),
+                (file.unstaged, "unstaged"),
+                (file.untracked, "untracked"),
+            ]
+            .into_iter()
+            .filter_map(|(present, state)| present.then_some(state))
+            .collect::<Vec<_>>()
+            .join(", ");
+            let path = serde_json::to_string(&file.path).expect("a file path is a JSON string");
+            format!("{path}: {states}")
         })
-        .collect::<Vec<_>>();
-    let files = serde_json::to_string_pretty(&files)
-        .map_err(|error| task_error(format!("failed to encode Task changes: {error}")))?;
+        .collect::<Vec<_>>()
+        .join("\n");
     let include_patch = !diff.binary
         && !diff.truncated
         && crate::prompt::count_tokens(&diff.patch) < MAX_PATCH_TOKENS;
@@ -5474,17 +5463,34 @@ mod tests {
         let context = super::task_workspace_context(&task).unwrap();
 
         for expected in [
-            "\"committed\": true",
-            "\"staged\": true",
-            "\"unstaged\": true",
-            "\"untracked\": true",
-            "\"content_sha256\"",
+            "\"tracked.txt\": committed, unstaged",
+            "\"staged.txt\": staged",
+            "\"untracked.txt\": untracked",
             "unstaged bytes",
             "staged bytes",
             "untracked bytes",
         ] {
             assert!(context.contains(expected), "missing {expected:?}");
         }
+
+        // A large branch keeps every path and state without filling the goal
+        // budget with per-file hashes, nulls and repeated JSON field names.
+        for index in 0..300 {
+            std::fs::write(repository.path().join(format!("file-{index:03}.bin")), [0]).unwrap();
+        }
+        let unusual = "quoted\"\npath.bin";
+        std::fs::write(repository.path().join(unusual), [0]).unwrap();
+        let context = super::task_workspace_context(&task).unwrap();
+        for index in 0..300 {
+            assert!(context.contains(&format!("\"file-{index:03}.bin\": untracked")));
+        }
+        assert!(context.contains(&format!(
+            "{}: untracked",
+            serde_json::to_string(unusual).unwrap()
+        )));
+        assert!(context.contains("Patch omitted"));
+        assert!(!context.contains("content_sha256"));
+        assert!(crate::prompt::count_tokens(&context) < 5_000);
     }
 
     #[tokio::test]

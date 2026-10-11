@@ -629,10 +629,10 @@ finish Work, private observations, typed journal, bindings, ordinary follow-ups
 and one cron list. Installation unproved.
 
 `94cb65b569` deletes `pm_show`; `1d97aa98b2` removes refiling/rotation's
-local-placement restriction, preserving execution admission. Portfolio reads still
-reconstruct provider inventories. Accepted Work cannot represent contradictory
-retained claims; acquisition must retain their relation evidence before that
-reader disappears. Delivery needs accepted revision plus archive/membership
+local-placement restriction, preserving execution admission. Portfolio reads check
+retained ownership claims in SQLite, without provider inventories. Snapshot APIs
+and acquisition hierarchy still need deletion and preservation proof. Delivery
+needs accepted revision plus archive/membership
 eligibility; foreign facts grant no ownership. Installation remains unproved.
 
 Jack's `19116a1b`: prepare 427 on committed 412; land 427 after 412.

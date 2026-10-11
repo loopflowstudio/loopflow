@@ -490,8 +490,8 @@ fn project_operator_failures_remain_historical_without_reappearing_on_the_wave()
     let expected_projects = serde_json::json!({
         "state": "ok",
         "items": [{
-            "id": project.linear_id.as_ref().unwrap().as_str(),
-            "work_id": project.id.as_str(),
+            "id": project.id.as_str(),
+            "linear_id": project.linear_id.as_ref().unwrap().as_str(),
             "slug": project.slug,
             "name": project.name,
             "workflow": "feature",
@@ -708,7 +708,16 @@ Count dispatched Task loops that settle without rescue.
     assert_eq!(status["projects"]["state"], "ok");
     let projects = status["projects"]["items"].as_array().unwrap();
     assert_eq!(projects.len(), 1);
-    assert_eq!(projects[0]["id"], project_payload["projects"][0]["id"]);
+    let owned = SqliteStore::new(&home.path().join("loopflow.db"))
+        .unwrap()
+        .list_projects(Some(wave.id()))
+        .unwrap()
+        .remove(0);
+    assert_eq!(projects[0]["id"], owned.id.as_str());
+    assert_eq!(
+        projects[0]["linear_id"],
+        project_payload["projects"][0]["id"]
+    );
     assert_eq!(projects[0]["status"], "started");
     assert_eq!(projects[0]["krs"], project_payload["projects"][0]["krs"]);
     assert_eq!(
@@ -772,7 +781,7 @@ fn orphaned_task_work_preserves_status_and_roadmap_evidence() {
             assert_eq!(projects.len(), 2);
             let projects: Vec<_> = projects
                 .iter()
-                .filter(|project| project["id"] == "95159066-9098-4d0b-8903-01459dc7ec14")
+                .filter(|project| project["linear_id"] == "95159066-9098-4d0b-8903-01459dc7ec14")
                 .collect();
             assert_eq!(projects.len(), 1);
             assert_eq!(projects[0]["slug"], "auditability");
@@ -821,7 +830,26 @@ fn provider_inventory_loss_preserves_saved_planning_in_both_views() {
                     .iter()
                     .find(|old| old["task"]["id"] == task["task"]["id"])
                     .unwrap();
-                assert_eq!(task["task"], previous["task"]);
+                let mut content = task["task"].clone();
+                let mut previous_content = previous["task"].clone();
+                content.as_object_mut().unwrap().remove("acquisition");
+                previous_content
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("acquisition");
+                assert_eq!(content, previous_content);
+                if payload.is_some() && task["task"]["linear_id"] == "task-prd-52" {
+                    assert_eq!(
+                        task["task"]["acquisition"],
+                        serde_json::json!({
+                            "state": "invalid", "observed_at": null
+                        })
+                    );
+                } else {
+                    assert_eq!(task["task"]["acquisition"], previous["task"]["acquisition"]);
+                }
+                assert_eq!(task["runtime"], previous["runtime"]);
+                assert_eq!(task["reference"], previous["reference"]);
             }
         }
     }
@@ -1043,13 +1071,21 @@ fn exact_task_roadmap_scopes_duplicate_identifiers_to_registered_repositories() 
             .iter()
             .find(|row| row["wave"]["id"] == other.id().to_string())
             .unwrap();
-        assert_eq!(retained["tasks"]["items"][0]["task"]["id"], "other-task");
+        let task = store.task_by_issue("other-task").unwrap().unwrap();
+        assert_eq!(
+            retained["tasks"]["items"][0]["task"]["id"],
+            task.id.as_str()
+        );
+        assert_eq!(
+            retained["tasks"]["items"][0]["task"]["linear_id"],
+            "other-task"
+        );
         assert_eq!(retained["tasks"]["items"][0]["task"]["completed"], true);
     }
 }
 
 #[test]
-fn due_follow_up_is_visible_before_checkout_and_requires_a_confirmed_source() {
+fn ordinary_task_due_date_is_visible_before_checkout() {
     let home = tempfile::tempdir().unwrap();
     seed_stale_project_work(home.path(), false, false);
     let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
@@ -1067,46 +1103,12 @@ fn due_follow_up_is_visible_before_checkout_and_requires_a_confirmed_source() {
     planning.snapshot.items.push(child.clone());
     planning.synced_at += 1;
     store.put_pm_snapshot(&planning).unwrap();
-    let intent = loopflow::work::task::follow_through::FollowThroughIntent {
-        key: "installed-check".into(),
-        issue_id: child.id.clone(),
-        relation_id: uuid::Uuid::new_v4().to_string(),
-        project_id: child.project_id.clone().unwrap(),
-        team_id: child.team_id.clone().unwrap(),
-        state_id: None,
-        wave: "product".into(),
-        title: child.name.clone(),
-        notes: "Check the installed release after deployment".into(),
-        due: Some("2026-10-09".into()),
-        existing: false,
-    };
-    store.reserve_follow_through(&source_id, &intent).unwrap();
-    let pending = status_json(home.path(), &["product"], None);
-    let pending_child = pending["tasks"]["items"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|row| row["task"]["id"] == child.id)
-        .unwrap();
-    assert_eq!(
-        pending_child["task"]["follow_up_sources"],
-        serde_json::json!([])
-    );
-    let link = loopflow::work::task::follow_through::FollowThroughLink {
-        key: intent.key,
-        issue_id: child.id.clone(),
-        identifier: child.identifier,
-        url: child.url,
-        due: intent.due,
-    };
-    store.link_follow_through(&source_id, &link).unwrap();
-    store.link_follow_through(&source_id, &link).unwrap();
     let status = status_json(home.path(), &["product"], None);
     let row = status["tasks"]["items"]
         .as_array()
         .unwrap()
         .iter()
-        .find(|row| row["task"]["id"] == child.id)
+        .find(|row| row["task"]["linear_id"] == child.id)
         .unwrap();
     assert_eq!(row["runtime"]["started"], false);
     assert!(row["reference"]["workspace"].is_null());
@@ -1116,20 +1118,13 @@ fn due_follow_up_is_visible_before_checkout_and_requires_a_confirmed_source() {
         "current planning owns the date, not the original filing"
     );
     assert_eq!(row["task"]["completed"], false);
-    assert_eq!(
-        row["task"]["follow_up_sources"],
-        serde_json::json!([
-            {"issue_id": source.linear_id.as_ref().unwrap().as_str(), "identifier": source.identifier}
-        ])
-    );
-    assert_eq!(row["follow_through"]["reason"], serde_json::Value::Null);
     let roadmap = roadmap_json(home.path(), "product");
     let roadmap_child = roadmap["waves"]
         .as_array()
         .unwrap()
         .iter()
         .flat_map(|wave| wave["tasks"]["items"].as_array().into_iter().flatten())
-        .find(|row| row["task"]["id"] == child.id)
+        .find(|row| row["task"]["linear_id"] == child.id)
         .unwrap();
     assert_eq!(roadmap_child["task"], row["task"]);
 }

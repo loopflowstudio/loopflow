@@ -23,7 +23,6 @@ use crate::durable::{Machine, TaskState, WorkRef, WorkStatus};
 use crate::lf::commands::session_history::format_tokens;
 use crate::lf::output::Colors;
 use crate::ops::task_execution::{TaskExecutionSnapshot, TaskExecutionState};
-use crate::pm::PmPortfolioValidator;
 use crate::session_record::SessionHistory;
 use crate::store::{open_existing_store, SharedStore};
 use crate::work::project::Project;
@@ -568,7 +567,7 @@ pub(crate) async fn wave_detail(store: &SharedStore, wave: &Wave) -> Result<Wave
         .await
         .map_err(|err| anyhow!("failed to read repository Waves: {err}"))?;
     let mut repositories = HashMap::new();
-    validate_pm_portfolio(store, &repository_waves, &mut repositories).await?;
+    validate_linear_ownership(store, &repository_waves, &mut repositories).await?;
     let checkout = wave_repository(wave, &mut repositories)?;
     let snapshot = snapshot_wave(store, wave, &checkout).await?;
     let shared = SharedTaskReads::read(store).await?;
@@ -694,10 +693,16 @@ async fn roadmap_snapshot(
         waves.clone()
     };
     let mut repositories = HashMap::new();
-    validate_pm_portfolio(store, &ownership_waves, &mut repositories).await?;
+    validate_linear_ownership(store, &ownership_waves, &mut repositories).await?;
     let shared = SharedTaskReads::read(store).await?;
     let mut roadmaps = Vec::with_capacity(waves.len());
     for wave in &waves {
+        // Repository scoping can repair an alias in the registry. Use that
+        // refreshed address for Task selection rather than the pre-repair copy.
+        let wave = ownership_waves
+            .iter()
+            .find(|current| current.id() == wave.id())
+            .unwrap_or(wave);
         let checkout = wave_repository(wave, &mut repositories)?;
         let snapshot = snapshot_wave(store, wave, &checkout).await?;
         if !include_history && !current_wave(&snapshot) {
@@ -997,30 +1002,26 @@ fn snapshot_task_runtime(
     }
 }
 
-async fn validate_pm_portfolio(
+async fn validate_linear_ownership(
     store: &SharedStore,
     waves: &[Wave],
     repositories: &mut HashMap<String, PathBuf>,
 ) -> Result<()> {
-    let mut ownership = std::collections::HashMap::<_, PmPortfolioValidator>::new();
+    let mut ownership = HashMap::<PathBuf, Vec<_>>::new();
     for wave in waves {
         let repo = wave_repository(wave, repositories)?;
         let repo = std::fs::canonicalize(&repo).unwrap_or(repo);
-        let row = match store.pm_snapshot(wave.id()).await {
-            Ok(Some(row)) => row,
-            // Each Wave reports its own unavailable planning. A malformed
-            // entity must not hide that Wave's execution or readable siblings.
-            Ok(None) | Err(_) => continue,
-        };
-        let planning = row.snapshot;
-        let expected_team = crate::ops::pm::repository_team_for_snapshot_validation(&repo, store)?;
-        ownership.entry(repo).or_default().validate(
-            wave.slug(),
-            &row.initiative,
-            expected_team.as_deref(),
-            &planning.projects,
-            &planning.items,
-        )?;
+        ownership
+            .entry(repo)
+            .or_default()
+            .push((wave.id(), wave.slug()));
+    }
+    for (repo, waves) in ownership {
+        let expected_team = crate::ops::pm::repository_team_for_snapshot_validation(&repo, store)
+            .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()));
+        store
+            .sqlite
+            .validate_linear_ownership(&waves, expected_team)?;
     }
     Ok(())
 }
@@ -2400,6 +2401,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn local_ownership_read_does_not_require_repository_files() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
+                directory.path().join("registry.db"),
+            ))
+            .await
+            .unwrap(),
+        );
+        let wave = Wave::new(
+            crate::id::WaveId::new(),
+            "local".into(),
+            directory
+                .path()
+                .join("missing-checkout")
+                .display()
+                .to_string(),
+        );
+        store.create_wave(&wave).await.unwrap();
+        super::validate_linear_ownership(&store, &[wave], &mut Default::default())
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
     async fn portfolio_ownership_is_scoped_to_repository() {
         let _machine = crate::journal::TestLedgerGuard::new();
         let directory = tempfile::tempdir().unwrap();
@@ -2439,13 +2465,32 @@ mod tests {
                 .unwrap();
             waves.push(wave);
         }
-        super::validate_pm_portfolio(&store, &waves[..2], &mut Default::default())
+        super::validate_linear_ownership(&store, &waves[..2], &mut Default::default())
             .await
             .unwrap();
-        let error = super::validate_pm_portfolio(&store, &waves, &mut Default::default())
+        let error = super::validate_linear_ownership(&store, &waves, &mut Default::default())
             .await
             .unwrap_err();
         assert!(error.to_string().contains("bound by both"), "{error}");
+        // A malformed Wave must not hide a readable sibling or its local Work.
+        rusqlite::Connection::open(directory.path().join("registry.db"))
+            .unwrap()
+            .execute(
+                "UPDATE pm_projects SET body='not-json' WHERE id='first-ear'",
+                [],
+            )
+            .unwrap();
+        super::validate_linear_ownership(&store, &waves, &mut Default::default())
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .sqlite
+                .list_projects(Some(waves[0].id()))
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     #[tokio::test]

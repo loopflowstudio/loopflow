@@ -2,7 +2,6 @@ use crate::pm::linear::LinearProject;
 pub mod linear;
 pub(crate) mod project_document;
 
-use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -82,114 +81,6 @@ pub fn terminal_reason(state: Option<&str>, completed: bool) -> Option<&'static 
 pub struct PmSnapshot {
     pub projects: Vec<LinearProject>,
     pub items: Vec<PmItem>,
-}
-
-/// Validates provider ownership across cached Wave snapshots presented together.
-#[derive(Debug, Default)]
-pub(crate) struct PmPortfolioValidator {
-    initiative_owners: BTreeMap<String, String>,
-    project_owners: BTreeMap<String, String>,
-    task_owners: BTreeMap<String, String>,
-}
-
-impl PmPortfolioValidator {
-    pub(crate) fn validate(
-        &mut self,
-        wave: &str,
-        initiative_id: &str,
-        expected_team_id: Option<&str>,
-        projects: &[LinearProject],
-        items: &[PmItem],
-    ) -> PmResult<()> {
-        validate_snapshot_ownership(wave, initiative_id, expected_team_id, projects, items)?;
-
-        if let Some(owner) = self
-            .initiative_owners
-            .insert(initiative_id.to_string(), wave.to_string())
-        {
-            return Err(PmError::Message(format!(
-                "Linear Initiative {initiative_id} is bound by both wave/{owner} and wave/{wave} snapshots"
-            )));
-        }
-        for project in projects {
-            if let Some(owner) = self
-                .project_owners
-                .insert(project.id.clone(), wave.to_string())
-            {
-                return Err(PmError::Message(format!(
-                    "Linear Project {} belongs to both wave/{owner} and wave/{wave} snapshots",
-                    project.id
-                )));
-            }
-        }
-        for item in items {
-            if let Some(owner) = self.task_owners.insert(item.id.clone(), wave.to_string()) {
-                return Err(PmError::Message(format!(
-                    "Linear task {} belongs to both wave/{owner} and wave/{wave} snapshots",
-                    item.identifier
-                )));
-            }
-        }
-        Ok(())
-    }
-}
-
-fn validate_snapshot_ownership(
-    wave: &str,
-    initiative_id: &str,
-    expected_team_id: Option<&str>,
-    projects: &[LinearProject],
-    items: &[PmItem],
-) -> PmResult<()> {
-    let mut projects_by_id = BTreeMap::new();
-    for project in projects {
-        if projects_by_id
-            .insert(project.id.as_str(), project)
-            .is_some()
-        {
-            return Err(PmError::Message(format!(
-                "Linear Project {} appears more than once in wave/{wave}",
-                project.id
-            )));
-        }
-        validate_project_ownership(wave, initiative_id, expected_team_id, project)?;
-    }
-
-    let mut issue_ids = BTreeSet::new();
-    for item in items {
-        if !issue_ids.insert(item.id.as_str()) {
-            return Err(PmError::Message(format!(
-                "Linear task {} appears more than once in wave/{wave}",
-                item.identifier
-            )));
-        }
-        let project = item
-            .project_id
-            .as_deref()
-            .and_then(|id| projects_by_id.get(id))
-            .ok_or_else(|| {
-                PmError::Message(format!(
-                    "Linear task {} in wave/{wave} points to missing Project {:?}",
-                    item.identifier, item.project_id
-                ))
-            })?;
-        if item.project.as_deref() != Some(project.slug.as_str()) {
-            return Err(PmError::Message(format!(
-                "Linear task {} in wave/{wave} names Project slug `{:?}`, but Project {} has slug `{}`",
-                item.identifier, item.project, project.id, project.slug
-            )));
-        }
-        if project.team_ids.len() != 1 || item.team_id.as_ref() != project.team_ids.first() {
-            return Err(PmError::Message(format!(
-                "Linear task {} in wave/{wave} belongs to Team {}, but Project {} belongs to Teams [{}]",
-                item.identifier,
-                item.team_id.as_deref().unwrap_or("unmapped"),
-                project.id,
-                project.team_ids.join(", ")
-            )));
-        }
-    }
-    Ok(())
 }
 
 pub(crate) fn validate_project_ownership(

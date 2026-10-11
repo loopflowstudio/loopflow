@@ -81,7 +81,7 @@ fn task_delivery_works_on_an_ordinary_branch_without_registration() {
     repo.create_file("feature.txt", "local work");
     let before = repo.head_sha();
     let run = |args: &[&str]| {
-        let output = Command::new(crate::test_cli_binary())
+        let output = Command::new(loopflow_test_support::lf_binary())
             .env_clear()
             .env("HOME", home.path())
             .env("LF_HOME", home.path())
@@ -180,7 +180,7 @@ fn draft_open_stays_draft_until_publish() {
                 "Current work.",
             ];
             {
-                let output = Command::new(crate::test_cli_binary())
+                let output = Command::new(loopflow_test_support::lf_binary())
                     .args(["pr"])
                     .args(args)
                     .current_dir(repo.path())

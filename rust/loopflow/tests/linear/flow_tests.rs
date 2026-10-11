@@ -117,7 +117,7 @@ PYTHON
             &format!(
                 "#!/bin/sh\nset -eu\necho selected >> '{}'\n'{}' \"$@\"\n{migration}",
                 home.path().join("selected").display(),
-                crate::test_cli_binary()
+                loopflow_test_support::lf_binary()
             ),
         );
         let output = lf_command(
@@ -154,7 +154,7 @@ PYTHON
             .unwrap();
         assert_eq!(
             executables,
-            vec![crate::test_cli_binary(); steps.len()],
+            vec![loopflow_test_support::lf_binary(); steps.len()],
             "the wrapper delegated each step to these actual bytes"
         );
         assert_eq!(
@@ -364,7 +364,7 @@ fn run_lf(repo: &Path, home: &Path, args: &[&str], path: Option<&str>) -> std::p
 }
 
 fn lf_command(repo: &Path, home: &Path, args: &[&str], path: Option<&str>) -> Command {
-    let mut command = Command::new(crate::test_cli_binary());
+    let mut command = Command::new(loopflow_test_support::lf_binary());
     for (key, _) in std::env::vars_os() {
         if key.to_string_lossy().starts_with("LF_") {
             command.env_remove(key);
@@ -376,9 +376,11 @@ fn lf_command(repo: &Path, home: &Path, args: &[&str], path: Option<&str>) -> Co
         .env("HOME", home)
         .env("CODEX_HOME", home.join(".codex"))
         .env("LF_HOME", home)
-        .env("LF_BIN", crate::test_cli_binary())
+        .env("LF_BIN", loopflow_test_support::lf_binary())
         .env("NO_COLOR", "1");
-    let binary_dir = Path::new(crate::test_cli_binary()).parent().unwrap();
+    let binary_dir = Path::new(loopflow_test_support::lf_binary())
+        .parent()
+        .unwrap();
     command.env(
         "PATH",
         format!(

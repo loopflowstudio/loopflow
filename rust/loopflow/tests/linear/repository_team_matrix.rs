@@ -100,7 +100,7 @@ fn put_snapshot(
 }
 
 fn lf_command(home: &Path, repo: &Path, args: &[&str]) -> Command {
-    let mut command = Command::new(crate::test_cli_binary());
+    let mut command = Command::new(loopflow_test_support::lf_binary());
     command
         .args(args)
         .current_dir(repo)

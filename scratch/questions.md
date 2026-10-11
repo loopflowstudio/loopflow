@@ -27,20 +27,19 @@ creates no cleanup commit. Exact source proofs and prior counterevidence:
 
 ## Next implementation boundary — October 11
 
-`1d0bda8d7f` removed snapshot/detail envelopes; `9a0da6823d` removed acquisition
-provider selectors and projects Work from retained observation IDs. Next remains
-adapter confinement: public `Store::accept_linear_inventory`, `accept_linear_issue`
-and archival inputs still expose `PmItem`/`LinearProject`. The PM hierarchy,
-target-bearing writer/journal, follow-ups and cron remain in this delivery scope.
-The design retains applicable checks and outstanding gate/review evidence;
-moving or renaming public models alone does not complete the accepted cut.
+October 11 operator review:
+response structs/acceptance are now crate-private; wider Work edit/API ownership
+remains unfinished. Relocation does not finish Jack Heart's deletion audit.
 
-Conversion review repairs: confirming refresh compares the retained claim;
-membership/assignee receipt baselines preserve omitted versus explicit null.
-Released-frontier Rust regressions pass (Session history events 1823411/1823459).
-Wrong scalar types now reject conversion; original rows/schema survive rollback.
-Independent SQL rechecks: `/tmp/loo412-membership-comparison-recheck.json` and
-`/tmp/loo412-observation-type-conversion-recheck.json`; neither is public CLI proof.
-Counterexamples remain in the corresponding `-proof.json` files.
-The design's released-frontier section owns populated-fixture coverage and the
-remaining Session-turn/live-control preservation obligations.
+Review exposed stale-binary risk after moving CLI suites under `lib.rs`: deriving
+`target/<profile>/lf` neither built nor refreshed it. The repair uses Cargo JSON
+artifact output after an offline build in each fixture process; no guessed path.
+Installation selectors target the moved library modules. The Flow-launch proof
+passes using Cargo’s fresh artifact; no installation was performed.
+
+Source repair: `acceptance::observe_task_state` now saves only revision/state/
+completion evidence in new conflict receipts, matching acquisition. Historical
+receipt bytes remain unchanged; 15 `task_completion_` checks pass (event 1828637).
+Completed conversion findings: `b6df256d0f:scratch/questions.md`. Populated
+Session-turn/live-control proof, typed journal, follow-ups, cron and final review
+remain required by the design.

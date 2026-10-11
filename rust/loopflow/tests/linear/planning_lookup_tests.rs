@@ -104,7 +104,7 @@ fn task_status_reads_projectless_planning_without_allocating_execution() {
         ("uncached-removal", None, PlanningState::Removed, false),
         ("UNKNOWN", None, PlanningState::Unavailable, true),
     ] {
-        let mut command = Command::new(crate::test_cli_binary());
+        let mut command = Command::new(loopflow_test_support::lf_binary());
         for (name, _) in std::env::vars_os() {
             if name.to_string_lossy().starts_with("LF_") {
                 command.env_remove(name);

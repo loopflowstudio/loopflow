@@ -99,22 +99,3 @@ mod wave_resolution_tests;
 #[cfg(test)]
 #[path = "../tests/linear/work_watch.rs"]
 mod work_watch;
-
-#[cfg(test)]
-fn test_cli_binary() -> &'static str {
-    static BINARY: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    BINARY.get_or_init(|| {
-        let exe = std::env::current_exe().expect("test executable");
-        let binary = exe
-            .parent()
-            .expect("deps directory")
-            .parent()
-            .expect("target profile")
-            .join("lf");
-        assert!(
-            binary.is_file(),
-            "build the CLI with cargo build --bin lf before CLI fixtures"
-        );
-        binary.to_str().expect("UTF-8 CLI path").to_owned()
-    })
-}

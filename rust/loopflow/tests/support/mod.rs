@@ -215,6 +215,7 @@ impl EnvGuard {
         include_existing_path: bool,
     ) -> Self {
         let lock = env_lock().lock().unwrap_or_else(|err| err.into_inner());
+        let cli = loopflow_test_support::lf_binary();
         let bin = TempDir::new().expect("temp bin dir");
         for (name, content) in entries {
             write_executable(bin.path(), name, content);
@@ -232,7 +233,7 @@ impl EnvGuard {
         let previous_lf_home = env::var_os("LF_HOME");
         let ambient = ambient::EnvGuard::new();
         let previous_lf_bin = env::var_os("LF_BIN");
-        env::set_var("LF_BIN", cli_binary());
+        env::set_var("LF_BIN", cli);
         let lf_home = TempDir::new().expect("temp lf machine dir");
         env::remove_var("LF_HOME");
         if let Some(home) = home {
@@ -683,14 +684,4 @@ pub fn recorded_flows(home: &Path) -> Vec<(Option<String>, Vec<serde_json::Value
             (outcome, steps)
         })
         .collect()
-}
-
-fn cli_binary() -> std::path::PathBuf {
-    std::env::current_exe()
-        .expect("test executable")
-        .parent()
-        .expect("deps directory")
-        .parent()
-        .expect("target profile")
-        .join("lf")
 }

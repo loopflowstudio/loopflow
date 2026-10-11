@@ -182,7 +182,7 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
         fs::write(&gh, format!("#!/bin/sh\n[ \"$1\" = --version ] && exit 0\nif [ \"$1 $2\" = 'pr list' ]; then\n  printf '%s\\n' '[{{\"url\":\"https://example.test/pull/42\",\"number\":42,\"state\":\"OPEN\",\"isDraft\":true,\"mergeCommit\":null,\"headRefOid\":\"{head}\"}}]'\nelse\n  exit 1\nfi\n")).unwrap();
         fs::set_permissions(&gh, fs::Permissions::from_mode(0o755)).unwrap();
         let command = |cwd: &Path, args: &[&str]| {
-            let mut command = Command::new(crate::test_cli_binary());
+            let mut command = Command::new(loopflow_test_support::lf_binary());
             for (key, _) in std::env::vars_os() {
                 if key.to_string_lossy().starts_with("LF_") {
                     command.env_remove(key);
@@ -192,7 +192,7 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
                 .current_dir(cwd)
                 .args(args)
                 .env("LF_HOME", home.path())
-                .env("LF_BIN", crate::test_cli_binary())
+                .env("LF_BIN", loopflow_test_support::lf_binary())
                 .env(
                     "PATH",
                     format!("{}:{}", bin.display(), std::env::var("PATH").unwrap()),

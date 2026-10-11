@@ -27,10 +27,10 @@ the required merge queue. Successful PR CI explicitly enqueues the unchanged
 Dependabot head when it is not already queued; queue CI still gates merging.
 
 Linear acquisition fixtures live under `rust/loopflow/tests/linear/` and compile
-inside the library, where fetched response types stay private. Build the CLI first:
+inside the library, where fetched response types stay private. Each fixture process
+builds the current CLI and takes its path from Cargo’s artifact output:
 
 ```sh
-cargo build -p loopflow --bin lf
 cargo test -p loopflow --lib local_planning
 cargo test -p loopflow --lib pm::linear::acceptance
 ```

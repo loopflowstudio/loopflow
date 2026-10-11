@@ -4,8 +4,7 @@
 
 The current goal includes implementation of both this existing pass and the accepted
 [deletion audit](work-model-reduction.md), in that order, then verification and a
-fresh +/- PR review. The exact WorkEdit shape is delegated to implementation. No
-publication of a partial reduction establishes readiness.
+fresh +/- PR review. Implementation owns WorkEdit; both passes precede review.
 
 Jack Heart requested implementation of the model review and another published
 version for review in the ongoing conversation. Continue this Task and PR #1491;
@@ -75,8 +74,7 @@ isolated fixtures; this pursuit authorizes no live schedule activation/change.
 
 One typed transactional writer remains mandatory for local edits and imports.
 Only shared Work fields synchronize. Captured Workflow position/history, Sessions,
-Processes, checkouts, controls and local delivery attempts remain local. The Task
-struct is still not an export document. Provider binding/observation records must
+Processes, checkouts, controls and local delivery attempts remain local. Provider binding/observation records must
 not become a second writable Project/Task owner.
 
 Use the existing single Task migration draft; released SQL is immutable. Prove
@@ -251,17 +249,22 @@ reteam, archival, ordering and projection paths. Projection takes IDs and batche
 receipt attachment from accepted rows; fetched models supply no Work values.
 Released storage discriminators and observation evidence remain intact.
 
-Still required: adapter-owned acquisition replacing public Store inventory, issue
-and archival methods that expose `PmItem`/`LinearProject`, then PM hierarchy,
-target-bearing edits/journal, ordinary follow-ups/comments and one cron list.
-Acceptance commits observations and Work together; contradictory membership is
-deliberately marked before that transaction so rejection cannot erase the dispute.
-Full gate, Session-turn/live-control preservation and fresh +/- HTML review precede
-review-only republication. This cut does not establish that boundary.
+Private `pm/linear/acceptance.rs` now owns fetched-input acceptance. Public Store
+inventory/issue APIs and the unused archival API are removed. `PmItem` is deleted;
+Linear issue/Project response types are crate-private. Work projection still reads
+accepted rows in the same transaction; dispute marking and cancellation-safe locks
+retain their boundaries. Ordering receives accepted local IDs; new state conflict
+receipts keep only revision/state/completion evidence, preserving old receipt bytes.
+Private acquisition fixtures compile within the library and build their CLI through
+Cargo artifact output. Execution fixtures seed fixed admission facts; all share
+one environment lock. Installation selectors follow the moved library modules.
 
-Main #1522 entered at `7d9bf0a4d8`, adding Claude recorded-answer Flow settlement.
-That merge establishes no fresh planning gate acceptance and grants no replay of
-the stopped Flow.
+Still required: PM orchestration, target-bearing edits/journal, ordinary follow-ups
+and one cron list; populated Session-turn/live-control preservation, affected gate
+and fresh +/- HTML review before review-only republication. Visibility alone does not complete the audit.
+
+Main `7d9bf0a4d8` supplies Claude recorded-answer settlement, not planning gate
+acceptance or stopped-Flow replay authority.
 
 ### Released migration frontier — October 10
 
@@ -383,9 +386,9 @@ Writer transport/causal proofs: `eda4a98097` in this plan.
   follows the entire reduction and affected gate, before review-only republication.
 
 Earlier focused proof: `9dbd6fc2d8`, `dfd3b80611`, `f025e9b7ab`,
-`dfa2cdafba`, `09709a05cc` in this plan. Adapter confinement, typed journal,
+`dfa2cdafba`, `09709a05cc` in this plan. PM orchestration, typed journal,
 follow-ups, cron, gate and review still precede republication.
 
-Checks: October 11 `9a0da6823d`: fmt, all-target Clippy, CLI build, SQLite planning (8), Store (50), local_planning (22) pass with LF authority cleared/stdin closed; exact commands retained there, earlier acquisition/CLI checks at `0e0b347231`. Prose-only realign: `git diff --check` passes; `lf context` within limits. Full gate follows the audit.
+Prior focused checks: `9a0da6823d` and `0e0b347231` at this path. Current: fmt, CLI build and all-target Clippy pass; `cargo test -p loopflow --lib` filters `pm::linear::acceptance` (7), `local_planning` (29), `task_completion_` (15), `planning_order_` (10), cancellation-lock, PR-create and Flow-launch proofs pass. External PR-authority and fresh-Cargo Flow-launch pass; Python runner tests (6), Ruff pass. LF authority cleared/stdin closed. Full gate follows the audit.
 
-Transport evidence: `0181133849` at this path.
+Transport evidence: `0181133849` at this path; earlier simulated adoption: `5960415b3:scratch/remote-task-demo.md` (not real SSH or integrated acceptance).

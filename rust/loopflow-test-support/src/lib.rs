@@ -9,6 +9,47 @@ pub fn env_lock() -> &'static std::sync::Mutex<()> {
     LOCK.get_or_init(|| std::sync::Mutex::new(()))
 }
 
+/// Build the current CLI and use Cargo's artifact path, including custom target directories.
+pub fn lf_binary() -> &'static str {
+    static BINARY: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    BINARY.get_or_init(|| {
+        let mut command = Command::new(env!("CARGO"));
+        command
+            .args([
+                "build",
+                "--offline",
+                "-p",
+                "loopflow",
+                "--bin",
+                "lf",
+                "--message-format=json",
+            ])
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .stdin(std::process::Stdio::null());
+        for (name, _) in std::env::vars_os() {
+            if name.to_string_lossy().starts_with("LF_") {
+                command.env_remove(name);
+            }
+        }
+        let output = command.output().expect("build fixture CLI");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout)
+            .expect("Cargo JSON output")
+            .lines()
+            .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+            .find_map(|entry| {
+                (entry["target"]["name"] == "lf")
+                    .then(|| entry["executable"].as_str().map(str::to_owned))
+                    .flatten()
+            })
+            .expect("Cargo reports the CLI artifact")
+    })
+}
+
 #[derive(Debug)]
 pub struct TestRepo {
     bare: TempDir,

@@ -381,7 +381,7 @@ fn build_args(cmd: &Cmd, env: &Env) -> Vec<String> {
 fn run_lf(home: &Path, repo: &Path, cmd: &Cmd, env: &Env) -> std::process::Output {
     let args = build_args(cmd, env);
 
-    let mut command = Command::new(crate::test_cli_binary());
+    let mut command = Command::new(loopflow_test_support::lf_binary());
     command
         .args(&args)
         .current_dir(repo)
@@ -667,7 +667,7 @@ fn cron_add_rejects_a_development_binary_before_mutation() {
 
     let alpha_uuid = alpha.id().as_str();
 
-    let cron = Command::new(crate::test_cli_binary())
+    let cron = Command::new(loopflow_test_support::lf_binary())
         .args([
             "wave",
             "cron",

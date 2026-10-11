@@ -137,7 +137,7 @@ fn seed_credential_history(home: &Path) -> Project {
 
 /// `lf wave status --json` in a clean environment, optionally standing inside a wave.
 fn status_json(home: &Path, args: &[&str], ambient_wave_id: Option<&str>) -> serde_json::Value {
-    let mut command = Command::new(crate::test_cli_binary());
+    let mut command = Command::new(loopflow_test_support::lf_binary());
     command
         .args(["wave", "status"])
         .args(args)
@@ -161,7 +161,7 @@ fn status_json(home: &Path, args: &[&str], ambient_wave_id: Option<&str>) -> ser
 }
 
 fn status_human(home: &Path, wave: &str) -> String {
-    let output = Command::new(crate::test_cli_binary())
+    let output = Command::new(loopflow_test_support::lf_binary())
         .args(["wave", "status", wave])
         .env("LF_HOME", home)
         .current_dir(home.join("repo"))
@@ -176,7 +176,7 @@ fn status_human(home: &Path, wave: &str) -> String {
 }
 
 fn roadmap_json(home: &Path, wave: &str) -> serde_json::Value {
-    let mut command = Command::new(crate::test_cli_binary());
+    let mut command = Command::new(loopflow_test_support::lf_binary());
     command
         .args(["roadmap", "--wave", wave, "--json"])
         .env("LF_HOME", home)
@@ -548,7 +548,7 @@ fn all_roadmaps_ignore_inherited_wave_from_a_gui_launch() {
     let first = seed(home.path(), "one");
     let second = seed(home.path(), "two");
     for ambient in [first.id().as_str(), "stale-wave-id"] {
-        let output = Command::new(crate::test_cli_binary())
+        let output = Command::new(loopflow_test_support::lf_binary())
             .args(["roadmap", "--all", "--json"])
             .env("LF_HOME", home.path())
             .env_remove("LF_TRACE_ID")
@@ -581,7 +581,7 @@ fn current_wave_reads_exclude_abandoned_registrations_without_deleting_history()
     let work = loopflow::durable::WorkRef::Wave(abandoned.id().clone());
     store.abandon(&work, "accidental registration").unwrap();
     let run = |args: &[&str]| {
-        Command::new(crate::test_cli_binary())
+        Command::new(loopflow_test_support::lf_binary())
             .args(args)
             .env("LF_HOME", home.path())
             .env_remove("LF_WAVE_ID")
@@ -968,7 +968,7 @@ fn exact_task_roadmap_retains_history_without_starting_work() {
         )
         .unwrap();
     for identifier in ["W2-127", "PRD-52", "not-a-task"] {
-        let mut command = Command::new(crate::test_cli_binary());
+        let mut command = Command::new(loopflow_test_support::lf_binary());
         command
             .args(["roadmap", "--task", identifier, "--all", "--json"])
             .env("LF_HOME", home.path())
@@ -1050,7 +1050,7 @@ fn exact_task_roadmap_scopes_duplicate_identifiers_to_registered_repositories() 
         .contains("multiple stable Tasks"));
 
     for all in [true, false] {
-        let mut command = Command::new(crate::test_cli_binary());
+        let mut command = Command::new(loopflow_test_support::lf_binary());
         command.args(["roadmap", "--task", "PRD-52", "--json"]);
         if all {
             command.arg("--all");

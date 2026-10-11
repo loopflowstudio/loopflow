@@ -7,7 +7,7 @@ use loopflow_test_support::TestRepo;
 use serde_json::Value;
 
 fn command(repo: &Path, home: &Path, args: &[&str]) -> Command {
-    let mut command = Command::new(crate::test_cli_binary());
+    let mut command = Command::new(loopflow_test_support::lf_binary());
     for (name, _) in std::env::vars_os() {
         let name_text = name.to_string_lossy();
         if name_text.starts_with("LF_")
@@ -21,7 +21,7 @@ fn command(repo: &Path, home: &Path, args: &[&str]) -> Command {
         .current_dir(repo)
         .env("HOME", home)
         .env("LF_HOME", home)
-        .env("LF_BIN", crate::test_cli_binary())
+        .env("LF_BIN", loopflow_test_support::lf_binary())
         .env("LF_USER_NAME", "Fixture Person")
         .args(args);
     if home.join("bin").is_dir() {

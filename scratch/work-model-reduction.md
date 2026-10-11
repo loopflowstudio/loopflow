@@ -8,8 +8,8 @@ approval from Jack. This is accepted scope, with conditional deletions identifie
 ## Scope and outcome
 
 This audit and [design](work-on-another-machine-name.md) share one delivery scope.
-Canonical readers and concrete observation columns exist; adapter confinement remains,
-followed by typed edits/journal, ordinary follow-ups and one cron list. Concrete
+Canonical readers, concrete observation columns and private acquisition exist.
+Remaining: PM orchestration, typed edits/journal, ordinary follow-ups and one cron list. Concrete
 bindings are implemented (§14). All precede Jack Heart's next
 review of PR #1491. Publication is review-only; landing, installation and export
 of actual Work to the public repository remain unauthorized.
@@ -34,8 +34,8 @@ Whole-file and whole-table deletions remain conditional where stated.
 ## 1. Domain wrappers and the missing fields
 
 **Removed:** ordinary provider-shaped Work readers and `PmProject`.
-`PmItem` and `LinearProject` still escape the adapter; public snapshot/detail
-envelopes and their generic-provider ingestion APIs are removed.
+`PmItem` is deleted; `LinearIssue` and `LinearProject` are private acquisition
+shapes. Public snapshot/detail envelopes and Store ingestion APIs are removed.
 `09709a05cc` deletes `PmWave`; setup consumes the existing private Initiative response.
 Issue observations no longer duplicate the Project display slug; list acquisition
 requires only its ID. `ProjectRef` and fixture display reconstruction are deleted.
@@ -53,8 +53,8 @@ Linear mappings. Whole Task records still cannot travel because they carry local
 
 Project ingestion/association return no provider record; `plan_read` and the public
 `pm_snapshot` inventory reader are deleted. Production snapshot builders are removed.
-Confine `PmItem` and `LinearProject` and the concrete acceptance APIs before
-considering this cut complete. Composed Project prose saves,
+Private `pm/linear/acceptance.rs` owns fetched-input acceptance; ordinary Store
+readers/writers expose no fetched model. Composed Project prose saves,
 delivery and readback preserve field revision/age across partial observations;
 that proof does not satisfy the structural cut. Earlier tracing:
 `f9f9da7d3a:scratch/work-model-reduction.md` and `582c134439` at this path.
@@ -80,7 +80,7 @@ never admission. Acquisition now reads narrow Linear identity, revision, ownersh
 validity and age too. `PmTaskObservation`, `pm_task_observation_in` and
 `read_task_planning_async` are deleted. Cached acquisition returns canonical Work;
 delayed absence retains its revision/age fence and Wave-lock lifetime. Raw provider
-input replay lives only in fixtures. Adapter confinement remains.
+input replay lives only in private fixtures.
 
 **Keep:** explicit missing, invalid, removed and unavailable evidence. A failed
 provider read must not erase cached Work or convert unknown state into absence.
@@ -105,14 +105,17 @@ consumes IDs and batches retained-row receipt attachment, without fetched models
 Captured inputs stay in `tests/support/linear_input.rs`; transactions and the
 blocking writer's cancellation-safe Wave-lock lifetime remain unchanged.
 
-**Delete — do not maintain:** escaping `PmItem`/`LinearProject`, public Store
-inventory/issue acceptance and archival inputs, and the remaining PM hierarchy.
-Adapter confinement is unfinished. Rejected membership stays marked outside the
-acceptance transaction; cancellation retains its writer lock. Retain foreign/unmapped
-facts, contradictory ownership,
-partial inventories, independent membership/removal and original ages. Whole-table
-removal remains conditional on another existing owner retaining every fact;
-canonical Work must not absorb foreign input.
+**Removed:** public Store inventory/issue acceptance and archival inputs.
+Private Linear acquisition owns observation validation, persistence and acceptance
+transactions. Ordering receipts receive accepted local IDs; disposition receipts
+receive revision/state/completion fields, preserving existing receipt bytes.
+The unused archival API is deleted; archive evidence and refusal remain.
+Private acquisition tests compile inside the library from `tests/linear/`;
+execution fixtures seed fixed admission evidence without opening production APIs.
+Rejected membership remains marked outside acceptance; cancellation retains its
+writer lock. Foreign/unmapped facts, contradictory claims, independent removal,
+partial fields and original ages remain stored. Whole-table removal still requires
+another existing owner retaining every fact. The PM orchestration hierarchy remains.
 `pm_wave_sync`, `pm_wave_projects`, `pm_issue_changes`, relation observations and
 `pm_project_name_cutover` retain independent evidence, not ordinary Work content.
 
@@ -262,7 +265,7 @@ are deleted; actual acquisition failure retains its error.
 store checks narrow retained ownership claims directly; no inventory leaves it.
 `e3a3479df7` removed the public `pm_snapshot` reader and all callers. Fixtures
 read canonical Work or concrete retained evidence and replay fetched inputs;
-public concrete acquisition inputs and provider hierarchy remain required cuts.
+private acquisition is implemented; provider orchestration remains a required cut.
 
 `PmResolvedTask`, both `pm_resolve_task` wrappers and `ResolvedTask` are deleted;
 `ops/task_pm.rs` is removed. Acquisition validates concrete Linear ownership and
@@ -303,8 +306,7 @@ canonical Work. Wave/roadmap/Work-frame Task summaries now read canonical Tasks,
 explicit optional Linear bindings and required sync evidence. `PmTaskSummary`,
 `planning_wave` and their dual-ID joins are removed. Creation now returns canonical Task and the CLI uses its title; `task_planning_item`
 is deleted. Placement/PR consumers read explicit branch/URL metadata. Task status now returns canonical Task/Project records; summaries expose acquisition
-state/age independently of delivery, including Swift decoding and display. Remaining:
-escaping concrete Linear inputs. Project delivery now checks accepted Work revision
+state/age independently of delivery, including Swift decoding and display. Concrete Linear acquisition inputs are now private. Project delivery now checks accepted Work revision
 and retained archive/membership evidence, not a returned provider record.
 
 **Swift (under `swift/`):** `Models/WaveWorkMap.swift`'s Project/Task planning
@@ -393,7 +395,7 @@ alignment in the same diff as public removals.
 
 ## Proof and stop conditions
 
-Remaining order: adapter confinement; typed writer/journal; follow-ups and cron;
+Remaining order: PM orchestration; typed writer/journal; follow-ups and cron;
 gate and review. Each cut deletes its replaced paths in the same diff.
 
 Before dropping persistent state, inventory the released frontier and current

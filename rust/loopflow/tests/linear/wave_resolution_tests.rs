@@ -177,7 +177,7 @@ fn seed(home: &Path, repo: &Path, wave_name: &str) -> Wave {
 }
 
 fn lf(home: &Path, repo: &Path, args: &[&str], wave_id: Option<&str>) -> std::process::Output {
-    let mut command = Command::new(crate::test_cli_binary());
+    let mut command = Command::new(loopflow_test_support::lf_binary());
     command
         .args(args)
         .current_dir(repo)

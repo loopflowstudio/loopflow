@@ -10,7 +10,7 @@ use loopflow::work::task::{GithubPr, PrPublication};
 use loopflow_test_support::TestRepo;
 
 fn command(repo: &Path, home: &Path, args: &[&str]) -> Command {
-    let mut command = Command::new(crate::test_cli_binary());
+    let mut command = Command::new(loopflow_test_support::lf_binary());
     for (name, _) in
         std::env::vars_os().filter(|(name, _)| name.to_string_lossy().starts_with("LF_"))
     {
@@ -20,7 +20,7 @@ fn command(repo: &Path, home: &Path, args: &[&str]) -> Command {
         .args(args)
         .current_dir(repo)
         .env("LF_HOME", home)
-        .env("LF_BIN", crate::test_cli_binary())
+        .env("LF_BIN", loopflow_test_support::lf_binary())
         .env("HTTPS_PROXY", "http://127.0.0.1:1")
         .env("HTTP_PROXY", "http://127.0.0.1:1");
     command
@@ -993,7 +993,7 @@ fn one_task_run_starts_its_flow_again_until_an_attempt_succeeds_or_attempts_run_
             "#!/bin/sh\ncase \"$*\" in *'flow show late'*)\n  echo asked >> '{count}'\n  [ \"$(wc -l < '{count}')\" -ge 3 ] && printf -- '- cmd: task sync --plan\\n' > '{late}';;\nesac\nexec '{real}' \"$@\"\n",
             count = bin.path().join("asked").display(),
             late = task.repo.path().join(".lf/flows/late.yaml").display(),
-            real = crate::test_cli_binary(),
+            real = loopflow_test_support::lf_binary(),
         ),
     )
     .unwrap();
@@ -1038,7 +1038,7 @@ fn a_held_command_stops_the_task_run_without_repeating_the_flow() {
         &lf,
         format!(
             "#!/bin/sh\ncase \"$*\" in *'flow show late'*) exit 3;; esac\nexec '{}' \"$@\"\n",
-            crate::test_cli_binary()
+            loopflow_test_support::lf_binary()
         ),
     )
     .unwrap();

@@ -41,7 +41,7 @@ struct Machine {
 }
 
 fn lf(home: &Path, args: &[&str]) -> Command {
-    let mut command = Command::new(crate::test_cli_binary());
+    let mut command = Command::new(loopflow_test_support::lf_binary());
     for (key, _) in std::env::vars_os() {
         let key = key.to_string_lossy().into_owned();
         if key.starts_with("LF_") || key.starts_with("LOOPFLOW_") || key.starts_with("LINEAR_") {
@@ -52,7 +52,7 @@ fn lf(home: &Path, args: &[&str]) -> Command {
         .args(args)
         .current_dir(home)
         .env("LF_HOME", home)
-        .env("LF_BIN", crate::test_cli_binary())
+        .env("LF_BIN", loopflow_test_support::lf_binary())
         .env("HOME", home)
         .stderr(Stdio::inherit());
     command

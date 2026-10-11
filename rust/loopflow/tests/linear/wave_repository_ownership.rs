@@ -140,7 +140,7 @@ fn task(wave: &Wave, project: &Project, repo: &Path) -> (Task, TaskPr) {
 }
 
 fn lf_command(home: &Path, repo: &Path, args: &[&str]) -> std::process::Output {
-    Command::new(crate::test_cli_binary())
+    Command::new(loopflow_test_support::lf_binary())
         .args(args)
         .current_dir(repo)
         .env("LF_HOME", home)

@@ -108,42 +108,42 @@ final class SessionsWorkspace {
         guard case .files(let taskId, let execution) = content else {
             throw RegistryQueryError("The addressed pane is not Files.")
         }
-        let key = taskId
         let issue: String
-        let location: WorkspaceIdentity
-        let fileQuery: RegistryQuery
+        let checkout: String
         if let execution {
             guard [taskId, task?.runtime?.workId, task?.task.identifier].compactMap({ $0 }).contains(execution.taskID) else {
                 throw RegistryQueryError("The pane's recorded owner belongs to another Task; no files were read.")
             }
-            guard case .recorded(let ownerTask, let checkout?) = execution.location else {
+            guard case .recorded(let ownerTask, let path?) = execution.location else {
                 throw RegistryQueryError("Task location is unavailable. Retained drafts have not moved.")
             }
             issue = ownerTask
-            location = WorkspaceIdentity(machineId: execution.machineID, worktree: checkout)
-            fileQuery = query.onMachine(execution.machineID, repository: execution.repositoryID).pinFiles(to: execution)
+            checkout = path
         } else {
             guard let recorded = task?.reference.workspace?.identity,
                   recorded.machineId == localMachineId else {
                 throw RegistryQueryError("Task file location is unavailable. Reopen the Task; no local fallback was used.")
             }
             issue = task?.runtime?.workId ?? task?.task.identifier ?? taskId
-            location = recorded
-            fileQuery = query
+            checkout = recorded.worktree
         }
-        if let entry = taskFiles[key] {
+        if let entry = taskFiles[taskId] {
             let retained = entry.store
             guard entry.execution?.repositoryID == execution?.repositoryID,
                   entry.execution?.taskID == execution?.taskID,
                   entry.execution?.location == execution?.location,
-                  retained.cwd == location.worktree,
-                  retained.query.remoteMachine == fileQuery.remoteMachine,
+                  retained.cwd == checkout,
+                  retained.query.remoteMachine == (execution?.machineID ?? query.remoteMachine),
                   execution == nil || retained.issue == issue else {
                 throw RegistryQueryError("The Task file location changed. Its previous drafts are retained, not redirected.")
             }
             return retained
         }
-        return files(taskId: key, issue: issue, cwd: location.worktree, query: fileQuery, execution: execution)
+        // Retained documents keep their original transport; build it only once.
+        let fileQuery = execution.map {
+            query.onMachine($0.machineID, repository: $0.repositoryID).pinFiles(to: $0)
+        } ?? query
+        return files(taskId: taskId, issue: issue, cwd: checkout, query: fileQuery, execution: execution)
     }
     let surfaces: GhosttySurfacePool
     private var surfaceClosed: AnyCancellable?

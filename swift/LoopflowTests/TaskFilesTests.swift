@@ -50,6 +50,9 @@ struct TaskFilesTests {
         #expect(document.text == "one\ntwo\n")
         document.editor.insertText("draft", replacementRange: NSRange(location: 0, length: 3))
         #expect(try workspace.files(for: content, task: nil, query: query) === store)
+        let refreshed = TaskLocationObservation(request: "refreshed", repositoryID: location.repositoryID,
+            taskID: location.taskID, machineID: location.machineID, observedAt: 2, location: location.location)
+        #expect(try workspace.files(for: .files(taskId: "portable", execution: refreshed), task: nil, query: query) === store)
         #expect(document.text == "draft\ntwo\n")
         #expect(document.dirty)
 

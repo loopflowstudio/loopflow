@@ -579,65 +579,70 @@ fn publish_uses_managed_worktree_even_with_unknown_ambient_run() {
 /// branch refuses before any `gh` call.
 #[test]
 fn submit_refuses_an_empty_range_before_any_gh_call() {
-    let home = tempfile::TempDir::new().expect("temp home");
-    let repo = TestRepo::new();
-    let base = repo.head_sha();
+    for empty_commit in [false, true] {
+        let home = tempfile::TempDir::new().expect("temp home");
+        let repo = TestRepo::new();
+        let base = repo.head_sha();
 
-    let log_path = home.path().join("gh.log");
-    let script = gh_open_pr_script(log_path.to_string_lossy().as_ref());
-    let _env = EnvGuard::with_lf_home(
-        &[("gh", script.as_str()), ("open", noop_open_script())],
-        home.path(),
-    );
+        let log_path = home.path().join("gh.log");
+        let script = gh_open_pr_script(log_path.to_string_lossy().as_ref());
+        let _env = EnvGuard::with_lf_home(
+            &[("gh", script.as_str()), ("open", noop_open_script())],
+            home.path(),
+        );
 
-    let branch = "jack/empty-range";
-    repo.create_branch(branch);
-    let task = register_task_with_pr(home.path(), repo.path(), branch, &base);
+        let branch = "jack/empty-range";
+        repo.create_branch(branch);
+        if empty_commit {
+            git_out(&repo, &["commit", "--allow-empty", "-m", "No tree changes"]);
+        }
+        let task = register_task_with_pr(home.path(), repo.path(), branch, &base);
 
-    // Simulate a previously-published PR so the old guard's
-    // `pr.github().is_none()` condition is false — the exact case it skipped.
-    let runtime = tokio::runtime::Runtime::new().expect("update PR runtime");
-    runtime.block_on(async {
-        let mut pr = task
-            .store
-            .active_task_pr(&task.task.id)
-            .await
-            .expect("read active PR")
-            .expect("active PR exists");
-        pr.publication = Some(PrPublication {
-            requested_at: OffsetDateTime::now_utc(),
-            presentation: None,
-            github: Some(GithubPr {
-                number: 925,
-                url: "https://example.com/pr/925".to_string(),
-                head_sha: None,
-            }),
-            merge: None,
+        // Simulate a previously-published PR so the old guard's
+        // `pr.github().is_none()` condition is false — the exact case it skipped.
+        let runtime = tokio::runtime::Runtime::new().expect("update PR runtime");
+        runtime.block_on(async {
+            let mut pr = task
+                .store
+                .active_task_pr(&task.task.id)
+                .await
+                .expect("read active PR")
+                .expect("active PR exists");
+            pr.publication = Some(PrPublication {
+                requested_at: OffsetDateTime::now_utc(),
+                presentation: None,
+                github: Some(GithubPr {
+                    number: 925,
+                    url: "https://example.com/pr/925".to_string(),
+                    head_sha: None,
+                }),
+                merge: None,
+            });
+            pr.updated_at = OffsetDateTime::now_utc();
+            task.store
+                .update_task_pr(&pr)
+                .await
+                .expect("set github number");
         });
-        pr.updated_at = OffsetDateTime::now_utc();
-        task.store
-            .update_task_pr(&pr)
-            .await
-            .expect("set github number");
-    });
 
-    let err = submit(
-        repo.path(),
-        &land_options(true, "empty range"),
-        &NullProgress,
-    )
-    .expect_err("empty range must refuse");
-    assert!(
-        err.to_string().contains("empty"),
-        "expected empty-range refusal, got: {err}"
-    );
+        let err = submit(
+            repo.path(),
+            &land_options(true, "empty range"),
+            &NullProgress,
+        )
+        .expect_err("empty range must refuse");
+        assert!(
+            err.to_string().contains("empty"),
+            "expected empty-range refusal, got: {err}"
+        );
 
-    // No GitHub side effect happened before the refusal.
-    let log = fs::read_to_string(&log_path).unwrap_or_default();
-    assert!(
-        !log.contains("pr create") && !log.contains("pr edit") && !log.contains("pr ready"),
-        "no gh PR mutation may be issued for an empty range, got log:\n{log}"
-    );
+        // No GitHub side effect happened before the refusal.
+        let log = fs::read_to_string(&log_path).unwrap_or_default();
+        assert!(
+            !log.contains("pr create") && !log.contains("pr edit") && !log.contains("pr ready"),
+            "no gh PR mutation may be issued for an empty range, got log:\n{log}"
+        );
+    }
 }
 
 #[test]

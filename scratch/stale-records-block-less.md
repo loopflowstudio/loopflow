@@ -12,7 +12,7 @@ without integration. A saved base is a cached comparison, not evidence that any
 commit is foreign. Keep all branch commits, including inherited dependencies;
 review the actual GitHub range. No rebase or reset is a publication repair.
 
-Delete — do not maintain:
+Delete — do not maintain (removed):
 - `verify_task_pr_range_mode`'s saved-base ancestry classification and unbounded
   commit/file diagnostics; preserve current-branch and managed-Task ownership.
 - `was_published_tip` and its reflog exception; current ancestry suffices even
@@ -35,8 +35,8 @@ main's deletion survives alongside child edits.
 ## Five Whys and counterevidence
 
 1. **Why could the PR not open?** `create_or_update_pr` calls
-   `verify_task_pr_range` before push (now backed by `resolve_task_pr_base`). It compares saved B with merge-base M,
-   refusing when neither is an ancestor. The actual upstream/HEAD merge-base
+   `verify_task_pr_range` before push (now `refresh_task_pr_base`). The old gate compared saved B with merge-base M,
+   refusing when neither was an ancestor. The actual upstream/HEAD merge-base
    already exists; no history rewrite is necessary to identify the range.
 2. **Why was B stale?** Task preparation saves its initial fork in placement
    (`prepare_task_worktree`, `sync_task_placement`). Etude HEAD reflog starts at
@@ -79,8 +79,8 @@ changed during this investigation. Installed repair remains unproved.
 | Publication saved base | Reproduced by existing divergent fixture; replace with current merge-base. |
 | Explicit sync post-integration range | Same shared gate; inherited sibling fixture now must retain commits and heal. |
 | Squash-parent `validate_fork_base` | Saved fork no longer ancestor can refuse before comparison merge; preserving unpublished edits requires a valid comparison. Bound diagnostic; no guessed replay command. |
-| Task branch / active PR branch mismatch | `verify_task_pr_range_mode`, `task_pr_context`, `attach_task_github_pr`; source only. Identity reconciliation is separate from comparison-base repair. |
-| Live stack parent's missing branch/record | `resolve_verifier_upstream`; source only. Missing evidence cannot select main and silently change dependency. |
+| Task branch / active PR branch mismatch | `resolve_task_pr_base`, `task_pr_context`, `attach_task_github_pr`; source only. Identity reconciliation is separate from comparison-base repair. |
+| Live stack parent's missing branch/record | `resolve_task_pr_upstream`; source only. Missing evidence cannot select main and silently change dependency. |
 | Sync ownership receipt after raw Git | Sync continuation validates pinned branch/HEAD; source only. Stale unlocked receipts are adoptable; live locks remain authority. |
 | Saved GitHub head / merge request | `request_task_pr_merge`, `invalidate_stale_merge_request`; source only. Fresh provider head must fence settlement, never inherit an old approval. |
 | Absent checkout / placement collision | Task preparation retains identity and requires explicit placement recovery; source only, no relocation in this change. |
@@ -99,6 +99,11 @@ saved bases. The separate stacked regression preserves sync's comparison fork.
 
 Review finding fixed: publication's comparison must not replace a stack's
 integration fork. Removed the redundant reread of saved placement for emptiness.
+Compression shares upstream acquisition between root and parent branches, names
+placement writes explicitly with `BaseUpdate`, and uses one tree comparison for
+both zero commits and commits with no changes. Review found the old quiet-diff
+status treated Git errors as changes; comparing tree IDs propagates read failures. Stack forks and post-push timing
+remain unchanged; no deletion targets remain.
 
 
-Checks: network-isolated `cargo test -p loopflow --test task_pr_range_tests` (12 passed, stacked fixture repaired and its focused retry passed); `cargo test -p loopflow --test sync_tests stacked_sync_refuses_when_base_is_not_an_ancestor` passed; `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, demo-script Ruff passed; affected-suite gate/hosted CI deferred to their Flow steps.
+Checks: network-isolated `cargo test -p loopflow --test task_pr_range_tests` (13 passed); `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, demo-script Ruff passed; prior focused unsafe-stack sync pass remains applicable; affected-suite gate/hosted CI deferred to their Flow steps.

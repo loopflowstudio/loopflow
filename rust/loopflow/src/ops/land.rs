@@ -58,7 +58,7 @@ fn prepare_pr(
 ) -> OpsResult<Option<PrInfo>> {
     let (repo_root, main_repo) = resolve_repos(repo, options.worktree.as_deref())?;
     // Establish the Task's commit range before delivery availability checks.
-    crate::ops::task::verify_task_pr_range(&repo_root)?;
+    crate::ops::task::refresh_task_pr_base(&repo_root)?;
     if !options.local && !crate::git::has_origin(&repo_root)? {
         return Err(OpsError::Message(
             "hosted delivery requires an origin remote".to_string(),

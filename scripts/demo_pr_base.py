@@ -10,28 +10,27 @@ def main() -> None:
     environment = {key: value for key, value in os.environ.items() if not key.startswith("LF_")}
     if os.uname().sysname == "Darwin":
         environment["TMPDIR"] = "/private/tmp"
-    with open(os.devnull) as stdin:
-        subprocess.run(
-            [
-                "uv",
-                "run",
-                "python",
-                "scripts/test_network.py",
-                "cargo",
-                "test",
-                "-p",
-                "loopflow",
-                "--test",
-                "task_pr_range_tests",
-                "pr_open_resolves_stale_bases_without_rewriting_history",
-                "--",
-                "--nocapture",
-            ],
-            cwd=repo,
-            env=environment,
-            stdin=stdin,
-            check=True,
-        )
+    subprocess.run(
+        [
+            "uv",
+            "run",
+            "python",
+            "scripts/test_network.py",
+            "cargo",
+            "test",
+            "-p",
+            "loopflow",
+            "--test",
+            "task_pr_range_tests",
+            "pr_open_resolves_stale_bases_without_rewriting_history",
+            "--",
+            "--nocapture",
+        ],
+        cwd=repo,
+        env=environment,
+        stdin=subprocess.DEVNULL,
+        check=True,
+    )
 
 
 if __name__ == "__main__":

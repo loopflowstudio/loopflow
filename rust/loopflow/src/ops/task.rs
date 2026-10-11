@@ -2048,17 +2048,14 @@ fn has_remote(repo: &Path) -> OpsResult<bool> {
     Ok(!git_output(repo, &["remote"])?.trim().is_empty())
 }
 
-/// Resolve `(base_ref, base_commit)` for a new Task PR. With a remote, fetch and
-/// anchor on `origin/<default>`; without one, fall back explicitly to local
-/// `<default>`. The `base_ref` prefix (`origin/` vs `refs/heads/`) tells callers
-/// which case applied.
-fn resolve_upstream_base(repo: &Path, default_branch: &str) -> OpsResult<(String, String)> {
+/// Fetch the upstream branch when a remote exists; otherwise use its local ref.
+fn resolve_upstream_base(repo: &Path, branch: &str) -> OpsResult<(String, String)> {
     let base_ref = if has_remote(repo)? {
-        fetch(repo, "origin", default_branch)
+        fetch(repo, "origin", branch)
             .map_err(|error| task_error(format!("failed to fetch task base: {error}")))?;
-        format!("origin/{default_branch}")
+        format!("origin/{branch}")
     } else {
-        format!("refs/heads/{default_branch}")
+        format!("refs/heads/{branch}")
     };
     let base_commit = rev_parse(repo, &base_ref)
         .map_err(|error| task_error(format!("failed to resolve task base {base_ref}: {error}")))?;
@@ -2069,13 +2066,13 @@ fn resolve_upstream_base(repo: &Path, default_branch: &str) -> OpsResult<(String
 /// Saved placement never classifies branch commits as foreign: publication
 /// preserves HEAD and uses the same fork point as GitHub. Managed Task and
 /// branch ownership still apply; emptiness is checked after committing.
-pub(crate) fn verify_task_pr_range(repo: &Path) -> OpsResult<()> {
+pub(crate) fn refresh_task_pr_base(repo: &Path) -> OpsResult<()> {
     let repo = repo.to_path_buf();
     block_on_task(async move {
         let ManagedTask::Managed { store, task } = resolve_managed_task(&repo).await? else {
             return Ok(());
         };
-        resolve_task_pr_base(&store, &task, &repo, StaleBaseAction::Heal, None)
+        resolve_task_pr_base(&store, &task, &repo, BaseUpdate::Record, None)
             .await
             .map(|_| ())
     })
@@ -2088,7 +2085,7 @@ pub(crate) fn validate_task_pr_range_for_integration(
     target_ref: &str,
     target_sha: &str,
 ) -> OpsResult<()> {
-    verify_task_pr_range_for_integration(repo, target_ref, target_sha, StaleBaseAction::Accept)
+    verify_task_pr_range_for_integration(repo, target_ref, target_sha, BaseUpdate::Preserve)
 }
 
 /// Record the immutable base only after every requested Git postcondition,
@@ -2098,14 +2095,14 @@ pub(crate) fn record_task_pr_range_after_integration(
     target_ref: &str,
     target_sha: &str,
 ) -> OpsResult<()> {
-    verify_task_pr_range_for_integration(repo, target_ref, target_sha, StaleBaseAction::Heal)
+    verify_task_pr_range_for_integration(repo, target_ref, target_sha, BaseUpdate::Record)
 }
 
 fn verify_task_pr_range_for_integration(
     repo: &Path,
     target_ref: &str,
     target_sha: &str,
-    stale_base: StaleBaseAction,
+    base_update: BaseUpdate,
 ) -> OpsResult<()> {
     let repo = repo.to_path_buf();
     let target_ref = target_ref.to_string();
@@ -2118,7 +2115,7 @@ fn verify_task_pr_range_for_integration(
             &store,
             &task,
             &repo,
-            stale_base,
+            base_update,
             Some((target_ref, target_sha)),
         )
         .await
@@ -2126,14 +2123,8 @@ fn verify_task_pr_range_for_integration(
     })
 }
 
-/// Prove the active Task PR's range is **authoritative and non-empty** before
-/// any `gh pr create/edit/ready/merge` side effect. Runs the ancestry parity
-/// proof, then refuses when the tree at HEAD matches the
-/// current comparison base — an empty PR that must not reach GitHub. Unconditional: an
-/// already-open PR reset or synced empty is refused just like a first
-/// publication. A worktree that is provably not a Task worktree is an explicit
-/// no-op; a Task worktree whose registry is unusable is refused with an
-/// actionable authority error rather than degrading to generic PR behavior.
+/// Refuse empty Task PRs before GitHub mutations, including existing PR updates.
+/// Non-Task worktrees are unaffected; an unreadable managed registry is an error.
 pub(crate) fn require_task_pr_range_nonempty(repo: &Path) -> OpsResult<()> {
     let repo = repo.to_path_buf();
     block_on_task(async move {
@@ -2144,14 +2135,9 @@ pub(crate) fn require_task_pr_range_nonempty(repo: &Path) -> OpsResult<()> {
     })
 }
 
-/// Resolve the upstream a Task PR's ancestry should be measured against. A root
-/// PR measures against `origin/<default>` (or local `<default>` without a
-/// remote). A stacked child with a live parent measures against the parent's
-/// branch tip — so the parent's own commits are expected ancestry, not foreign
-/// contamination, and the child's range is `fork_point..HEAD` against the
-/// parent boundary. After the parent merges, publication measures against
-/// `origin/<default>` while retaining the stack fork for explicit integration.
-async fn resolve_verifier_upstream(
+/// Compare with the live stack parent, or the default branch after it settles.
+/// Publication retains the stack fork separately for explicit integration.
+async fn resolve_task_pr_upstream(
     store: &SharedStore,
     task: &Task,
     repo: &Path,
@@ -2165,36 +2151,23 @@ async fn resolve_verifier_upstream(
             .ok_or_else(|| task_error(format!("stack parent {parent_id} is missing")))?;
         let parent_live = parent.merge_commit.is_none() && parent.abandoned_at.is_none();
         if parent_live {
-            let base_ref = if has_remote(repo)? {
-                fetch(repo, "origin", &parent.branch).map_err(|error| {
-                    task_error(format!("failed to fetch parent branch: {error}"))
-                })?;
-                format!("origin/{}", parent.branch)
-            } else {
-                format!("refs/heads/{}", parent.branch)
-            };
-            let tip = rev_parse(repo, &base_ref).map_err(|error| {
-                task_error(format!(
-                    "failed to resolve parent branch {base_ref}: {error}"
-                ))
-            })?;
-            return Ok((base_ref, tip));
+            return resolve_upstream_base(repo, &parent.branch);
         }
     }
     resolve_upstream_base(repo, default_branch)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum StaleBaseAction {
-    Accept,
-    Heal,
+enum BaseUpdate {
+    Preserve,
+    Record,
 }
 
 async fn resolve_task_pr_base(
     store: &SharedStore,
     task: &Task,
     repo: &Path,
-    stale_base: StaleBaseAction,
+    base_update: BaseUpdate,
     upstream_override: Option<(String, String)>,
 ) -> OpsResult<String> {
     let branch =
@@ -2219,11 +2192,10 @@ async fn resolve_task_pr_base(
     });
     let (base_ref, upstream) = match pinned {
         Some(target) => target,
-        None => resolve_verifier_upstream(store, task, repo, &default_branch).await?,
+        None => resolve_task_pr_upstream(store, task, repo, &default_branch).await?,
     };
     let head = rev_parse(repo, "HEAD")
         .map_err(|error| task_error(format!("failed to resolve Task HEAD: {error}")))?;
-    let base = &task.base_commit;
     let identifier = &task.plan.identifier;
 
     let merge_base = crate::git::merge_base(repo, &upstream, &head).map_err(|error| {
@@ -2233,16 +2205,14 @@ async fn resolve_task_pr_base(
         ))
     })?;
 
-    if &merge_base == base {
-        // Parity holds: the GitHub range is exactly base_commit..HEAD.
-        return Ok(merge_base);
-    }
-
     // A stored fork may predate a reset, rebase, upstream rewrite or expired
     // reflog. A stack still needs its saved fork for the squash-parent comparison
     // merge; record_stack_sync owns that write after integration. Root Tasks
     // need only the current PR comparison.
-    if stale_base == StaleBaseAction::Heal && task.parent_pr_id.is_none() {
+    if base_update == BaseUpdate::Record
+        && task.parent_pr_id.is_none()
+        && merge_base != task.base_commit
+    {
         store
             .sync_task_placement(
                 &task.id,
@@ -2251,7 +2221,7 @@ async fn resolve_task_pr_base(
                 time::OffsetDateTime::now_utc(),
             )
             .await
-            .map_err(|error| task_error(format!("failed to heal Task PR base: {error}")))?;
+            .map_err(|error| task_error(format!("failed to record Task PR base: {error}")))?;
     }
     Ok(merge_base)
 }
@@ -2263,24 +2233,12 @@ async fn require_task_pr_range_nonempty_in(
     task: &Task,
     repo: &Path,
 ) -> OpsResult<()> {
-    let base = resolve_task_pr_base(store, task, repo, StaleBaseAction::Heal, None).await?;
+    let base = resolve_task_pr_base(store, task, repo, BaseUpdate::Record, None).await?;
     let identifier = &task.plan.identifier;
     let short = base.chars().take(12).collect::<String>();
-    let head = rev_parse(repo, "HEAD")
-        .map_err(|error| task_error(format!("failed to resolve Task HEAD: {error}")))?;
-    if head == base {
-        return Err(task_error(format!(
-            "Task {identifier} PR range is empty: HEAD is the comparison base {short}, so the PR has \
-             no commits to publish. Commit the Task's work, or complete the Task directly if the \
-             work is done. Refused before any GitHub side effect."
-        )));
-    }
-    let range = format!("{base}..HEAD");
-    let status = Command::new("git")
-        .args(["diff", "--quiet", &range])
-        .current_dir(repo)
-        .status()?;
-    if status.success() {
+    let base_tree = rev_parse(repo, &format!("{base}^{{tree}}"))?;
+    let head_tree = rev_parse(repo, "HEAD^{tree}")?;
+    if head_tree == base_tree {
         return Err(task_error(format!(
             "Task {identifier} PR range is empty: the tree at HEAD matches the comparison base \
              {short}, so the PR has no changes to publish. Commit the Task's work, or complete the \

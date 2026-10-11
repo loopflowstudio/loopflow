@@ -711,3 +711,5 @@ strip links to its own site in a new tab.
   → `x12-conduct.html` (built by `x12-build.py`, from `x11`): header "You conduct. Your agents play."; a Scale / Play / Craft section before the CLI section, each with one line, two or three sentences and a small detail. Claude's wording throughout except "Lines you don't revert next month." and "jam". The idea offered for his "hard to express how": a workflow is a score, not a script. `x11` is unchanged.
 
 - Jack Heart: "orchestra of coding agents" → the `x12` header is "Conduct an orchestra of coding agents."; the line under it is "Loopflow is how you design, implement, demo and ship software with agents, and still hear every part." Claude put his phrase in the header; he did not say where it goes.
+
+- Jack Heart, on "Agents make software cheap. Loopflow makes it yours.": "I like this. not sure i like it \"the literal headline on the site\" level but its a good direction" → in `x12` it is the closing statement, after Works with, above a second Download. Direction recorded: the page's larger claim is authorship (the person gets bigger, not smaller); this exact sentence is not the header.

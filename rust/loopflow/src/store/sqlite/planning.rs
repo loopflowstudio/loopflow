@@ -569,8 +569,6 @@ fn project_accepted_planning(
             }?,
             None => ProjectId::new(),
         };
-        let project =
-            super::planning_changes::PlanningChanges::Project(&id).reconcile(tx, &project)?;
         let rank: Option<u32> = tx
             .query_row(
                 "SELECT position FROM pm_wave_projects WHERE wave_id=?1 AND project_id=?2",
@@ -594,6 +592,11 @@ fn project_accepted_planning(
         if let Some(rank) = rank {
             edits.push(Edit::ProjectRank(rank));
         }
+        super::planning_changes::PlanningChanges::Project(&id).reconcile_edits(
+            tx,
+            project.revision.as_deref(),
+            &mut edits,
+        )?;
         planning_write::create(tx, repo, PlanningKind::Project, id.as_str(), &edits)?;
         tx.execute("UPDATE projects SET pm_snapshot_synced_at=?2,planning_provider_revision=?3 WHERE id=?1",params![id.as_str(),observed_at,project.revision])?;
     }
@@ -641,17 +644,13 @@ fn project_accepted_planning(
         let item: PmItem = serde_json::from_str(&body)?;
         let task_id = crate::durable::TaskId::from_raw(&id);
         super::task_state_delivery::reconcile_in(tx, &task_id, &item)?;
-        let item = super::planning_changes::PlanningChanges::Task(&task_id).reconcile(tx, &item)?;
-        let project: String = match item.project_id.as_deref() {
-            Some(selected) => tx.query_row(
-                "SELECT id FROM projects WHERE id=?1 OR external_project_id=?1",
-                [selected],
-                |row| row.get(0),
-            )?,
-            None => project,
-        };
         let pending:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM task_state_deliveries WHERE task_id=?1 AND settled=0 AND seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=?1))",[&id],|r|r.get(0))?;
         let mut edits = item_edits(&item, &project);
+        super::planning_changes::PlanningChanges::Task(&task_id).reconcile_edits(
+            tx,
+            item.revision.as_deref(),
+            &mut edits,
+        )?;
         edits.retain(|edit| {
             !matches!(edit, Edit::TaskRank(_))
                 && (!pending || !matches!(edit, Edit::Disposition(_)))

@@ -199,6 +199,14 @@ emits no `ProjectDescription`. The released-content conversion already obtains
 prose with `ProjectDocument::rewrite(None, "")`; the adapter can reuse that
 boundary rather than adding another parser or another public Project wrapper.
 
+Acquisition prerequisite: whole-model `PlanningChanges::reconcile<T>` is removed.
+Both acquisition consumers now reconcile common-writer typed edits, preserving
+receipts and explicit Linear field translation without reconstructing PM models.
+Focused tests cover unchanged baselines, uncertain effects, successor saves,
+Linear-wins conflicts and canonical Task membership. The conflict test now also
+asserts canonical saved names. Provider observations and string receipt addresses
+remain; this is not the typed journal or prose acquisition completion.
+
 The acquisition cut needs end-to-end evidence for full content, explicit empty/null
 content, and omitted content. Current `ProjectNode` requires the JSON keys but
 accepts null, then normalizes it to empty; omission is a decode failure, not an
@@ -270,19 +278,13 @@ Earlier baseline detail: `c8fe4628a:scratch/work-on-another-machine-name.md`.
   cut. Regenerate them after the entire accepted reduction, before review-only
   republication. No readiness or landing follows from this persistence checkpoint.
 
-Checks: `cargo build -p loopflow --bin lf`, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, focused `cargo test -p loopflow` selectors (`--test dto_fixtures peer_planning`, `--test planning_foreground_tests planning_status_reads_retained_journal`, `--lib rejected_selection_retains_history`), and `scripts/test_desktop.sh -Xswiftc -gnone --filter 'peerPlanning|roadmapPeerPlanning'` pass (4 headless Swift tests); prior Project proofs: `52e7da7f35:scratch/work-on-another-machine-name.md`; gate owns the affected/materialized matrix.
+Checks: `cargo build -p loopflow --bin lf`, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, and LF-scrubbed `cargo test -p loopflow --lib planning_fields_` pass (7 tests); earlier reader/journal checks remain at `73d6307f32:scratch/work-on-another-machine-name.md`; gate owns the affected/materialized matrix.
 
-Context: authored memory/scratch fit. `lf context --skill realign` reports the
-assembled Task seed/steers and workspace manifest at 19,400 tokens (3,400 over its
-16,000-token limit). The complete prior source
-`.lf/tmp/context/8e8a53810c8e6dbf6354277faade2b63eda47d0fc0b8989a616e5e95e35b3187.md`
-and current launch source
-`.lf/tmp/context/5975419587a83d95ef771a46ffafac88fb87fcb93782c2e0cbb29d8ca3535e49.md`
-were inspected. This generated source cannot be reduced by trimming authored notes;
-retained direction and limits are unchanged.
-
-Realign check: `git diff --check` passes; source inspection confirms the acquisition
-gap and completed reader/journal cuts; no product code changed or suites rerun.
+Context: authored memory/scratch fit. `lf context --skill implement` reports the
+generated Task seed/steers and workspace manifest at 19,404 tokens (3,404 over its
+16,000-token limit). Complete source:
+`.lf/tmp/context/acb2ff60ce34a571a6d4f2bd00a9c2937db3ab8f3d1cb0978e7952d5a9fc65d7.md`.
+Retained direction cannot be reduced by trimming authored notes; no limits changed.
 
 ## Delete — do not maintain
 

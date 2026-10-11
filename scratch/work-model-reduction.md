@@ -169,14 +169,17 @@ fourth Work scope. Existing `WorkRef` still names Wave/Project/Task.
 reconcile}`, `planning.rs::PlanningChange`, field-producing operations and the
 Linear delivery adapter.
 
-Linear content-field replacement is now typed and preserves recognized Markdown
-ranges; the generic PlanningChanges patcher below remains.
+Linear content-field replacement is typed and preserves recognized Markdown
+ranges. Whole-model `reconcile<T>` is deleted: Project and Task acquisition now
+reconcile the typed edits passed to the common writer. An explicit Linear field
+mapping limits receipt settlement to supplied fields; provider models are no longer
+serialized, patched and reconstructed. Task membership uses canonical Project IDs.
+This prerequisite does not complete prose acquisition or remove provider caches.
 
-`reconcile<T>` serializes a whole PM model, overlays fields by string, then
-reconstructs it. Replace that path with typed local edits and explicit adapter
-mapping. Remove parallel edit structures that only rename the same values
-(`name`, `issue_title`, `TaskTitle`, for example), and duplicated normalization of
-provider IDs into local owners.
+Remaining: remove parallel edit structures that only rename the same values
+(`name`, `issue_title`, `TaskTitle`, for example), receipt string-field addressing
+and duplicated normalization of provider IDs into local owners. The typed journal
+conversion still owns those cuts.
 
 Keep attempted values and their baselines: an acknowledgment of an older attempt
 cannot clear a newer local edit. Preserve conflict values, rebasing of edits not

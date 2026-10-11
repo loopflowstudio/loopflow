@@ -631,14 +631,12 @@ Outages buffer locally, without fallback/publisher election. One typed writer
 owns local/imported fields; execution/attempts stay local. Preserve causality,
 losers and uncertainty. Gate/installation remain unproved.
 
-Jack accepted the full One Work audit: direct fields, typed criteria/comments,
-Linear boundaries, ordinary follow-ups and one cron list. Partial work is not
-review-ready; retention needs evidence.
-Canonical Projects retain IDs, bindings and rank; Task/provider projections remain.
-Linear content acquisition loses prose; omission is not emptiness or settlement.
-Inbound prose/partial-observation proof remains.
-Git recovery reads the journal. Candidates prove no application/publication; read
-errors retain cached Desktop content.
+Jack accepted the full One Work audit; partial work is not review-ready.
+Canonical Projects retain IDs, bindings and rank. Acquisition reconciles typed
+edits, not whole-model JSON; receipt/journal vocabulary and provider projections
+remain. Linear prose/partial-observation proof remains: omission is not emptiness
+or settlement. Git recovery reads the journal; candidates prove no application
+or publication, and read errors retain cached Desktop content.
 
 Cron retains installed ownership and failure exits ([evidence](release/MEMORY.md)).
 [Remaining work](../../scratch/work-on-another-machine-name.md). Republish #1491

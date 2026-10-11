@@ -3,7 +3,6 @@
 use super::planning_write::{self, PlanningEdit as Edit};
 use crate::planning_exchange::PlanningKind;
 use rusqlite::{params, Connection, OptionalExtension};
-use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
 
 use super::SqliteStore;
@@ -344,35 +343,60 @@ impl<'a> PlanningChanges<'a> {
 
     /// Unchanged baselines preserve saves; observed conflicts retire their delivery.
     /// Both values remain in the receipt. Only attempted writes can be acknowledged.
-    pub(super) fn reconcile<T: Serialize + DeserializeOwned>(
+    pub(super) fn reconcile_edits(
         self,
         conn: &Connection,
-        observed: &T,
-    ) -> StoreResult<T> {
+        revision: Option<&str>,
+        edits: &mut [Edit],
+    ) -> StoreResult<()> {
         let (owner, _) = self.owner();
-        let mut saved = serde_json::to_value(observed)?;
-        self.observe_attempts(conn, &saved)?;
+        let mut observed = serde_json::json!({"revision": revision});
+        for edit in edits.iter() {
+            if let Some(field) = linear_field(edit) {
+                observed[field] = self.normalize(conn, field, edit.value()?)?;
+            }
+        }
+        self.observe_attempts(conn, &observed)?;
         for change in self.pending(conn)? {
-            // Ordinary inventory does not establish whether an issue is trashed.
-            let Some(value) = saved.get(&change.field) else {
+            let Some(edit) = edits
+                .iter_mut()
+                .find(|edit| linear_field(edit) == Some(&change.field))
+            else {
                 continue;
             };
-            let remote = self.normalize(conn, &change.field, value.clone())?;
-            if remote != change.value
+            let remote = &observed[&change.field];
+            if remote != &change.value
                 && change
                     .base
                     .as_ref()
-                    .is_none_or(|base| base["value"] != remote)
+                    .is_none_or(|base| &base["value"] != remote)
             {
                 conn.execute(
                     &format!("UPDATE {owner}_changes SET conflict_json=?2 WHERE id=?1 AND conflict_json IS NULL"),
-                    params![change.id, serde_json::json!({"revision": saved["revision"], "value": remote}).to_string()],
+                    params![change.id, serde_json::json!({"revision": revision, "value": remote}).to_string()],
                 )?;
             } else {
-                saved[&change.field] = change.value;
+                // Decode only the saved field, never reconstruct a provider model.
+                *edit = Edit::from_value(edit.kind(), edit.field(), change.value)?;
             }
         }
-        Ok(serde_json::from_value(saved)?)
+        Ok(())
+    }
+}
+
+// Linear receipt names belong at the adapter boundary, not in the Work model.
+fn linear_field(edit: &Edit) -> Option<&'static str> {
+    match edit {
+        Edit::ProjectName(_) | Edit::TaskTitle(_) => Some("name"),
+        Edit::ProjectSummary(_) => Some("summary"),
+        Edit::ProjectDescription(_) | Edit::TaskDescription(_) => Some("description"),
+        Edit::ProjectStatus(_) => Some("status"),
+        Edit::Workflow(_) => Some("workflow"),
+        Edit::Krs(_) => Some("krs"),
+        Edit::MetricTargets(_) => Some("metric_targets"),
+        Edit::TaskAssignee(_) => Some("assignee"),
+        Edit::TaskProject(_) => Some("project_id"),
+        _ => None,
     }
 }
 

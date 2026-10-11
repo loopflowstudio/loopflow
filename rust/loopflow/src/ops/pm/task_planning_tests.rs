@@ -3554,6 +3554,18 @@ fn planning_fields_observed_conflicts_adopt_linear_without_writing_or_moving_wor
                     .await
                     .unwrap();
                 assert!(field_receipts(fixture, task, project).is_empty());
+                let saved_name = if project {
+                    fixture
+                        .store
+                        .sqlite
+                        .project(&task.project_id)
+                        .unwrap()
+                        .unwrap()
+                        .name
+                } else {
+                    fixture.store.sqlite.task(&task.id).unwrap().unwrap().title
+                };
+                assert_eq!(saved_name, "Linear name");
                 assert_eq!(state.lock().await.field_writes, 0);
                 let conn = rusqlite::Connection::open(&fixture.database).unwrap();
                 let table = if project {

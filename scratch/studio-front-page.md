@@ -658,3 +658,5 @@ strip links to its own site in a new tab.
 - Jack Heart, on the CLI section: "It should be like \"of course Loopflow would build a cli like lf, that is the kind of cli you would need to do what Loopflow wants to do well\" and \"lf doesnt require you to buy into the task management system to just use it as a bestinclass launcher\"" → the section's first two paragraphs are rewritten to carry those two ideas (Claude's wording; "best in class" is left out as a claim about ourselves). The ssh and multi-subscription lines are joined as a third paragraph.
 
 - Jack Heart, on the heading's "all levels of abstraction": "ok, prefer just objectives and outcomes?" → the `x11` section heading is "Loopflow: a system for arranging coding sessions around long-lived objectives and concrete outcomes." The paragraph's opening sentence, which said the same thing, is removed.
+
+- Jack Heart set the section heading: "Loopflow: a system for arranging coding sessions around long-lived waves and short-lived tasks." Set in `x11` as written, with "waves" lower case.

@@ -474,7 +474,7 @@ mod tests {
         assert_eq!(summary.terminal_id.as_deref(), Some("first-pane"));
         assert_eq!(
             summary.agent_process_evidence,
-            Some(crate::journal::ProcessIdentityEvidence::Live)
+            crate::journal::ProcessIdentityEvidence::Live
         );
         let replacement = store
             .claim_session_attachment(&session.id, Some(&attachment), &next, false)
@@ -508,7 +508,7 @@ mod tests {
         let summary = store.session_summary(&session.id, 1).unwrap().unwrap();
         assert_eq!(
             summary.agent_process_evidence,
-            Some(crate::journal::ProcessIdentityEvidence::Dead)
+            crate::journal::ProcessIdentityEvidence::Dead
         );
         assert!(summary.terminal_id.is_none());
         assert!(!summary.waiting);

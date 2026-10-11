@@ -271,17 +271,13 @@ fn read_summary(
             None => None,
         };
         let agent_process_id: Option<crate::id::LfProcessId> = row.get(32)?;
-        let agent_process_evidence = if agent_process_id.is_some() {
-            Some(crate::journal::agent_process_evidence(
-                row.get(33)?,
-                row.get(34)?,
-                row.get(35)?,
-                crate::journal::process_identity_evidence,
-            ))
-        } else {
-            None
-        };
-        let live = agent_process_evidence == Some(crate::journal::ProcessIdentityEvidence::Live);
+        let agent_process_evidence = crate::journal::agent_process_evidence(
+            row.get(33)?,
+            row.get(34)?,
+            row.get(35)?,
+            crate::journal::process_identity_evidence,
+        );
+        let live = agent_process_evidence == crate::journal::ProcessIdentityEvidence::Live;
         Ok(crate::session::SessionSummary {
             terminal_id: row.get::<_, Option<String>>(36)?.filter(|_| live),
             task_ids: serde_json::from_str(&row.get::<_, String>(26)?)?,
@@ -606,11 +602,11 @@ impl SqliteStore {
                             AND done.provider_turn=origin.provider_turn AND done.kind='completed'
                             WHERE origin.session_id=s.id AND origin.captured_event=i.seq AND origin.kind='started')) END AS ended, NULL AS thread, NULL AS turn
                 FROM session_events i JOIN agent_sessions s ON s.id=i.session_id
-                LEFT JOIN processes attached ON attached.id=CASE WHEN EXISTS(
-                    SELECT 1 FROM session_events origin WHERE origin.captured_event=i.seq AND origin.kind='started')
-                    THEN (SELECT origin.lf_process_id FROM session_events origin
-                        WHERE origin.captured_event=i.seq AND origin.kind='started' ORDER BY origin.seq DESC LIMIT 1)
-                    ELSE i.lf_process_id END
+                LEFT JOIN session_events latest_turn ON latest_turn.seq=(
+                    SELECT origin.seq FROM session_events origin
+                    WHERE origin.captured_event=i.seq AND origin.kind='started' ORDER BY origin.seq DESC LIMIT 1)
+                LEFT JOIN processes attached ON attached.id=CASE WHEN latest_turn.seq IS NULL
+                    THEN i.lf_process_id ELSE latest_turn.lf_process_id END
                 LEFT JOIN session_events m ON m.session_id=s.id AND m.kind='observed'
                     AND m.receipt_key=i.receipt_key||':manifest.json'
                 LEFT JOIN session_events terminal ON terminal.session_id=s.id AND terminal.kind='observed'

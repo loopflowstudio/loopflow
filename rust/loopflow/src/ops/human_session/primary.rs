@@ -155,7 +155,7 @@ pub(super) async fn admit_workspace(
             .is_some_and(|summary| {
                 summary.agent_process_id.is_some()
                     && summary.agent_process_evidence
-                        != Some(crate::journal::ProcessIdentityEvidence::Dead)
+                        != crate::journal::ProcessIdentityEvidence::Dead
             })
     {
         return Ok(session);

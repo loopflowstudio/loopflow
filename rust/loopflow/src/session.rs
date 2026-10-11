@@ -209,7 +209,7 @@ impl Default for SessionFilter {
 pub(crate) struct SessionSummary {
     pub terminal_id: Option<String>,
     pub primary_scope: Option<String>,
-    pub agent_process_evidence: Option<crate::journal::ProcessIdentityEvidence>,
+    pub agent_process_evidence: crate::journal::ProcessIdentityEvidence,
     /// Waiting on a person, as of the read's clock.
     pub waiting: bool,
     pub program_status: Option<crate::program_status::Records>,

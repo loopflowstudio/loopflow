@@ -210,9 +210,9 @@ pub enum SessionAttention {
 
 fn session_state(session: &crate::session::SessionSummary) -> SessionState {
     match session.agent_process_evidence {
-        Some(crate::journal::ProcessIdentityEvidence::Live) => SessionState::Active,
-        Some(crate::journal::ProcessIdentityEvidence::Dead) => SessionState::Closed,
-        _ => SessionState::Unknown,
+        crate::journal::ProcessIdentityEvidence::Live => SessionState::Active,
+        crate::journal::ProcessIdentityEvidence::Dead => SessionState::Closed,
+        crate::journal::ProcessIdentityEvidence::Unknown => SessionState::Unknown,
     }
 }
 
@@ -388,27 +388,18 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
             reason: format!("Flow {id} metadata is unavailable"),
         },
     };
-    let mut unavailable = None;
-    // Sessions run where this registry recorded them; no read places one elsewhere.
-    let remote: Option<&crate::durable::MachineId> = None;
     let state = session_state(session);
     let mut actions = session_actions(state);
-    let open_argv = if unavailable.is_none() {
-        match human_open_argv(remote, &session.id) {
-            Ok(argv) => argv,
-            Err(error) => {
-                unavailable = Some(format!("Session connection unavailable: {error}"));
-                Vec::new()
+    let open_argv = match human_open_argv(None, &session.id) {
+        Ok(argv) => argv,
+        Err(error) => {
+            let reason = format!("Session connection unavailable: {error}");
+            for action in &mut actions {
+                action.unavailable_reason = Some(reason.clone());
             }
+            Vec::new()
         }
-    } else {
-        Vec::new()
     };
-    if let Some(reason) = unavailable {
-        for action in &mut actions {
-            action.unavailable_reason = Some(reason.clone());
-        }
-    }
     let provider = session.provider.clone().unwrap_or_default();
     SessionRecord {
         primary_scope: session.primary_scope.clone(),
@@ -418,12 +409,7 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
         task_primary: session.task_primary,
         task_ids: session.task_ids.clone(),
         id: session.id.clone(),
-        workspace: remote.map(|home| SessionWorkspace {
-            machine_id: home.clone(),
-            worktree: session.cwd.clone(),
-            task_id: session.task_id.clone(),
-            unavailable: Some("Checkout resolution is unavailable on this remote Machine".into()),
-        }),
+        workspace: None,
         interactive: session.interactive,
         work,
         wave_id: session.wave_id.clone(),
@@ -840,7 +826,6 @@ async fn surface(store: &SharedStore, session: &LfSession) -> Result<SessionReco
         (None, Some(wave)) => Some(WorkRef::Wave(wave.clone())),
         (None, None) => None,
     };
-    let remote: Option<crate::durable::MachineId> = None;
     let metadata = store
         .sqlite
         .session_summary(
@@ -875,12 +860,7 @@ async fn surface(store: &SharedStore, session: &LfSession) -> Result<SessionReco
         task_primary: metadata.task_primary,
         task_ids: store.sqlite.session_task_ids(&session.id)?,
         id: session.id.clone(),
-        workspace: remote.as_ref().map(|home| SessionWorkspace {
-            machine_id: home.clone(),
-            worktree: session.cwd.clone(),
-            task_id: session.task_id.clone(),
-            unavailable: Some("Checkout resolution is unavailable on this remote Machine".into()),
-        }),
+        workspace: None,
         interactive: session.interactive,
         wave_id: session.wave_id.clone(),
         work_path: session_work_path(store, session).await?,
@@ -898,7 +878,7 @@ async fn surface(store: &SharedStore, session: &LfSession) -> Result<SessionReco
         state,
         ready_summary: session.ready_summary.clone(),
         terminal_ids: metadata.terminal_id.clone().into_iter().collect(),
-        open_argv: human_open_argv(remote.as_ref(), &session.id)?,
+        open_argv: human_open_argv(None, &session.id)?,
     };
     workspace::associate(store, std::slice::from_mut(&mut reading)).await?;
     Ok(reading)
@@ -1630,7 +1610,7 @@ mod tests {
             program_status: None,
             agent_process_id: None,
             primary_scope: None,
-            agent_process_evidence: None,
+            agent_process_evidence: crate::journal::ProcessIdentityEvidence::Unknown,
             waiting: false,
             terminal_id: None,
             task_terminal: false,
@@ -1739,7 +1719,7 @@ mod tests {
                 super::SessionState::Unknown,
             ),
         ] {
-            summary.agent_process_evidence = Some(evidence);
+            summary.agent_process_evidence = evidence;
             assert_eq!(super::session_state(&summary), expected);
         }
     }

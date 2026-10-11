@@ -925,6 +925,16 @@ mod tests {
                     .unwrap()
             };
             assert!(completed_since().is_empty());
+            // A turn with unknown ownership must not fall back to its ended creator.
+            store.conn.lock().unwrap().execute(
+                "UPDATE session_events SET lf_process_id=NULL WHERE session_id='conversation' AND kind='started'",
+                [],
+            ).unwrap();
+            assert!(completed_since().is_empty());
+            store.conn.lock().unwrap().execute(
+                "UPDATE session_events SET lf_process_id=?1 WHERE session_id='conversation' AND kind='started'",
+                [&process],
+            ).unwrap();
             // An unrelated attachment's exit cannot finish this input.
             store
                 .conn

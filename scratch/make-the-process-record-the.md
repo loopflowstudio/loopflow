@@ -10,15 +10,16 @@ AgentProcess completion and exact OS identity alone decide live/dead/unknown.
 Waiting needs positive life before pagination; completed records never reconnect,
 even with an answering socket. Unknown cannot authorize replacement or cleanup;
 no timeout is selected. Rust/Swift and the shared fixture agree on unknown,
-active and closed. No reader needs exit events for process liveness.
+active and closed. Missing process rows use the same Unknown value, not a
+second optional state. No reader needs exit events for process liveness.
 
-Delete — do not maintain:
+Deleted — do not restore:
 - `ProviderClientRef`, `ProviderClientStop`, stop reasons and receipt guards;
   their JSON readers/writers, approximate command/age matching and file locks.
 - Client-file Session fallback, terminal lookup and stopping in util,
   human_session and primary succession; exclusive receipt fixtures.
 - Socket probes, attachment-outcome/Interrupted Session state and attachment-exit
-  input completion (removed in the earlier cut).
+  input completion.
 
 Preserve native history, exact stop fencing, intentional Move outcomes, terminal
 navigation and report provenance. Terminal placement now lives on the attached
@@ -34,7 +35,8 @@ remote clients bypass provider creation, under the surviving agent's attachment.
 New terminal registration uses that fence; takeover invalidates old placement.
 
 Input completion reads the latest turn's LfProcess, or capture owner before any
-turn. Preparation exiting cannot finish a later live turn. Provider outcomes stay
+turn. The latest-turn join selects its owner once; missing turn ownership never
+falls back to an ended creator. Preparation exiting cannot finish a later live turn. Provider outcomes stay
 history, not process life. Work-watch rereads Sessions, Task and Work activity on
 process revisions and its two-second OS clock, without requiring store writes.
 
@@ -54,4 +56,4 @@ Released-history migration and takeover tests retain identity, unknown refusal,
 terminal placement and completion boundaries. Configured remote-client exit remains
 unproved; fenced passive display is not provider death.
 
-Checks: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and network-isolated `cargo test` focused native Move/launch, legacy state, publication, migration and Program Status CLI: 9 tests pass; gate/CI own remaining suites and composed acceptance.
+Checks: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test -p loopflow --lib --no-run` and network-isolated lib tests (input completion, Program Status, Session projection, native Move): pass, 5 tests; gate/CI own affected suites, materialization and composed acceptance.

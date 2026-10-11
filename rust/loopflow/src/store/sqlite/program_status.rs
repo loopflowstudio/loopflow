@@ -158,7 +158,7 @@ mod tests {
                 assert!(summary.program_status.is_none());
                 assert_eq!(
                     summary.agent_process_evidence,
-                    Some(crate::journal::ProcessIdentityEvidence::Dead)
+                    crate::journal::ProcessIdentityEvidence::Dead
                 );
                 assert_eq!(
                     store.session_attachment("session").unwrap(),

@@ -41,13 +41,6 @@ with the following explicit follow-ups, not claims that their behavior is proved
 - LOO-453 (Product), already sufficient: exact-view readiness/waits/events, failures,
   stale target and reconnect behavior; receipts alone never promise usability.
 
-The previous gate repairs passed their focused checks and are retained at
-`bd295866bb`. They do not validate the combined tree. Integration must retain
-migration evidence, delegation inheritance and pinned execution while deleting
-manual enrollment and mixed-provider projections. Gate checks the final tree;
-LOO-391 retains native/configured proof. No live planning migration, installation,
-provider login or real-data publication is authorized.
-
 ## Accepted outcome
 
 Jack Heart selected an agent-facing software engineering CLI: Work leads,

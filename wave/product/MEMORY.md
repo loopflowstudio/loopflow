@@ -122,9 +122,6 @@ from import; #1517 preserves opaque AgentSessionId bytes. Evidence/limits:
 `e3ca861b1`: mounted-page/visibility observation replaces callbacks; request IDs
 fence registration only. Pre-registration failures survive.
 
-Preview counterexamples and credential-probe limits:
-`829c9b993:wave/product/MEMORY.md`, this heading; configured SSH/admission unproved.
-
 Identity is not action validation. Shared validators recheck writes; `--context`
 rejects non-agent commands before stdin. Refile resolves IDs before initialization;
 preview never locks. Save shares pinned-path/revision/draft checks, not recovery
@@ -174,9 +171,10 @@ Work-keyed cutover remains. Passive Task navigation/bare remote links
 no longer acquire Sessions; explicit Session/Changes survives. `ff61b6bc` selects
 shell-default Split, no empty option. `d6640b8c68` retains shell Machine/path through
 layout/Undo; unknown refuses.
-`94d5195497`/`cf77ee325a`: content owns terminals/shell routing; Undo never
-replays launch. Files/log readers still ignore content location. Registry, membership and targets remain checkout-keyed;
-Work tabs/DTO cutover remain. No native acceptance or admission decision.
+`94d5195497`/`cf77ee325a`: content owns terminal/shell routing; Undo never
+replays launch. Files now consumes recorded owners without link priming and retains
+drafts on changed owners. Local Files uses Task placement; logs, registry,
+membership and targets remain checkout-led. Work tabs/DTO cutover and native proof remain.
 
 **Confirmation cannot elect execution.** `4c43550c2`: divergent revisions and
 independent refs both confirm, not Task allocation. `42990dea3` shares membership

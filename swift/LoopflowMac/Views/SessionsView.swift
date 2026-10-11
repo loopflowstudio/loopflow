@@ -95,13 +95,55 @@ final class SessionsWorkspace {
     }
     let multiplexer = MultiplexerStore()
     let hover = PaneHover()
-    private var taskFiles: [String: TaskFilesStore] = [:]
+    private var taskFiles: [String: (store: TaskFilesStore, execution: TaskLocationObservation?)] = [:]
 
-    func files(taskId: String, issue: String, cwd: String, query: RegistryQuery = RegistryQueryLocal.shared) -> TaskFilesStore {
-        if let files = taskFiles[taskId] { return files }
+    func files(taskId: String, issue: String, cwd: String, query: RegistryQuery = RegistryQueryLocal.shared, execution: TaskLocationObservation? = nil) -> TaskFilesStore {
+        if let files = taskFiles[taskId] { return files.store }
         let files = TaskFilesStore(issue: issue, cwd: cwd, query: query)
-        taskFiles[taskId] = files
+        taskFiles[taskId] = (files, execution)
         return files
+    }
+    /// Resolve Files from its content, not the selected checkout or a previous link.
+    func files(for content: PaneContent, task: RoadmapTask?, query: RegistryQuery) throws -> TaskFilesStore {
+        guard case .files(let taskId, let execution) = content else {
+            throw RegistryQueryError("The addressed pane is not Files.")
+        }
+        let key = taskId
+        let issue: String
+        let location: WorkspaceIdentity
+        let fileQuery: RegistryQuery
+        if let execution {
+            guard [taskId, task?.runtime?.workId, task?.task.identifier].compactMap({ $0 }).contains(execution.taskID) else {
+                throw RegistryQueryError("The pane's recorded owner belongs to another Task; no files were read.")
+            }
+            guard case .recorded(let ownerTask, let checkout?) = execution.location else {
+                throw RegistryQueryError("Task location is unavailable. Retained drafts have not moved.")
+            }
+            issue = ownerTask
+            location = WorkspaceIdentity(machineId: execution.machineID, worktree: checkout)
+            fileQuery = query.onMachine(execution.machineID, repository: execution.repositoryID).pinFiles(to: execution)
+        } else {
+            guard let recorded = task?.reference.workspace?.identity,
+                  recorded.machineId == localMachineId else {
+                throw RegistryQueryError("Task file location is unavailable. Reopen the Task; no local fallback was used.")
+            }
+            issue = task?.runtime?.workId ?? task?.task.identifier ?? taskId
+            location = recorded
+            fileQuery = query
+        }
+        if let entry = taskFiles[key] {
+            let retained = entry.store
+            guard entry.execution?.repositoryID == execution?.repositoryID,
+                  entry.execution?.taskID == execution?.taskID,
+                  entry.execution?.location == execution?.location,
+                  retained.cwd == location.worktree,
+                  retained.query.remoteMachine == fileQuery.remoteMachine,
+                  execution == nil || retained.issue == issue else {
+                throw RegistryQueryError("The Task file location changed. Its previous drafts are retained, not redirected.")
+            }
+            return retained
+        }
+        return files(taskId: key, issue: issue, cwd: location.worktree, query: fileQuery, execution: execution)
     }
     let surfaces: GhosttySurfacePool
     private var surfaceClosed: AnyCancellable?
@@ -184,25 +226,17 @@ final class SessionsWorkspaceRegistry {
         }
     }
 
-    /// Prime the retained Files owner even for Session-only remote links, so a
-    /// later toolbar/CLI open never interprets the peer's path locally.
+    /// Record the Session owner; only explicit Changes opens a Files companion.
     @discardableResult
-    func prepareLinkedFiles(_ destination: LinkedSession, query: RegistryQuery) -> TaskFilesStore? {
-        guard destination.showsChanges || destination.location != nil,
-              let identity = destination.record.workspace?.identity else { return nil }
-        let task = destination.task
-        let key = task.runtime?.workId ?? task.task.identifier
-        let executionTask: String
-        if case .recorded(let taskID, _) = destination.location?.location { executionTask = taskID }
-        else { executionTask = key }
+    func openLinkedFiles(_ destination: LinkedSession, query: RegistryQuery) throws -> TaskFilesStore? {
+        guard let identity = destination.record.workspace?.identity else { return nil }
         let workspace = workspace(for: identity)
         workspace.multiplexer.updateSessionLocation(destination.record.id, location: identity, execution: destination.location)
-        let fileQuery = destination.location.map { query.pinFiles(to: $0) } ?? query
-        let files = workspace.files(taskId: key, issue: executionTask, cwd: identity.worktree, query: fileQuery)
-        if destination.showsChanges {
-            files.showsChanges = true
-            workspace.multiplexer.show(.files(taskId: task.id, execution: destination.location), focus: false)
-        }
+        guard destination.showsChanges else { return nil }
+        let content = PaneContent.files(taskId: destination.task.id, execution: destination.location)
+        let files = try workspace.files(for: content, task: destination.task, query: query)
+        files.showsChanges = true
+        workspace.multiplexer.show(content, focus: false)
         return files
     }
 
@@ -938,8 +972,12 @@ struct SessionsContentView: View {
         if let location = destination.location { store.retainLocation(location, for: record) }
         store.reconcile(model.sessions.value ?? [])
         openSession(record, preservingOpening: true)
-        let preparedFiles = workspaces.prepareLinkedFiles(destination, query: store.query(for: record))
-        let files = destination.showsChanges ? preparedFiles : nil
+        let files: TaskFilesStore?
+        do { files = try workspaces.openLinkedFiles(destination, query: store.query) }
+        catch {
+            model.failLinkedOpening(destination, reason: error.localizedDescription)
+            return
+        }
         let openingWorkspace = workspace
         if files != nil, let zoomed = openingWorkspace.multiplexer.zoomedPaneId {
             openingWorkspace.multiplexer.setZoom(zoomed, enabled: false)
@@ -1629,14 +1667,15 @@ private struct SessionPaneView: View {
                 .simultaneousGesture(TapGesture().onEnded { store.setFocusedPane(pane.id) })
         case .files(let taskId, _):
             let task = model.task(id: taskId)?.task
-            let key = task?.runtime?.workId ?? task?.task.identifier ?? taskId
-            TaskFilesView(
-                store: workspace.files(taskId: key, issue: key, cwd: workingDirectory, query: sessions.query),
-                prURL: task?.pr?.publication?.github?.url,
-                checkoutBase: task?.reference.workspace?.baseCommit
-            )
-            .environment(\.colorScheme, .light)
-            .simultaneousGesture(TapGesture().onEnded { store.setFocusedPane(pane.id) })
+            switch Result(catching: { try workspace.files(for: pane.content, task: task, query: sessions.query) }) {
+            case .success(let files):
+                TaskFilesView(store: files, prURL: task?.pr?.publication?.github?.url,
+                    checkoutBase: task?.reference.workspace?.baseCommit)
+                    .environment(\.colorScheme, .light)
+                    .simultaneousGesture(TapGesture().onEnded { store.setFocusedPane(pane.id) })
+            case .failure(let error):
+                Text(error.localizedDescription).textSelection(.enabled)
+            }
         }
     }
 

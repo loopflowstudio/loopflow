@@ -31,6 +31,45 @@ struct TaskFilesTests {
                          content: text, state: .text, revision: revision ?? text, readOnlyReason: nil, sizeBytes: UInt64(text.utf8.count))
     }
 
+    @Test func filePaneRoutesWithoutLinkedSessionPrimingAndRetainsDrafts() async throws {
+        let peer = RemoteFilesFixture()
+        let query = RegistryQuery { args, cwd in try await peer.read(args, cwd: cwd) }
+        let location = TaskLocationObservation(request: "opened", repositoryID: "plan", taskID: "portable",
+            machineID: "peer", observedAt: 1, location: .recorded(taskID: "remote-task", checkout: "/peer/checkout"))
+        // The enclosing checkout is deliberately unrelated to the pane's content.
+        let workspace = SessionsWorkspace(identity: .init(machineId: "local", worktree: "/local/other"))
+        let content = PaneContent.files(taskId: "portable", execution: location)
+        #expect(throws: RegistryQueryError.self) {
+            try workspace.files(for: .files(taskId: "another-task", execution: location), task: nil, query: query)
+        }
+        let store = try workspace.files(for: content, task: nil, query: query)
+        store.autosave = false
+        store.selection = "note.txt"
+        await store.loadFile()
+        let document = try #require(store.selectedDocument)
+        #expect(document.text == "one\ntwo\n")
+        document.editor.insertText("draft", replacementRange: NSRange(location: 0, length: 3))
+        #expect(try workspace.files(for: content, task: nil, query: query) === store)
+        #expect(document.text == "draft\ntwo\n")
+        #expect(document.dirty)
+
+        let changed = TaskLocationObservation(request: "changed", repositoryID: "other-plan", taskID: "portable",
+            machineID: "peer", observedAt: 2, location: location.location)
+        #expect(throws: RegistryQueryError.self) {
+            try workspace.files(for: .files(taskId: "portable", execution: changed), task: nil, query: query)
+        }
+        #expect(throws: RegistryQueryError.self) {
+            try workspace.files(for: .files(taskId: "portable"), task: nil, query: query)
+        }
+        #expect(store.document("note.txt") === document)
+        #expect(document.text == "draft\ntwo\n")
+        // A stale owner reply must not replace this draft with another checkout's bytes.
+        await peer.change("WRONG OWNER", changeOwnerDuringRead: true)
+        await store.loadFile()
+        #expect(store.error != nil)
+        #expect(document.text == "draft\ntwo\n")
+    }
+
     @Test(arguments: ["disconnect", "stale", "changed-owner"])
     func remoteEventsReconcileRetainedDraftsAndRejectLostOrStaleOwners(ending: String) async throws {
         let peer = RemoteFilesFixture()

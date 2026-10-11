@@ -320,6 +320,12 @@ final class WorkModel {
         linkedTaskPage = nil
     }
 
+    func failLinkedOpening(_ destination: LinkedSession, reason: String) {
+        guard destination.generation == destinationGeneration, let opening = taskOpening,
+              opening.status == .opening else { return }
+        taskOpening = DesktopOpening(url: opening.url, status: .failed, reason: reason)
+    }
+
     /// Observe the existing Session and Files owners, never a second readiness store.
     /// Each callback retains the request generation, including repeated identical URLs.
     func connectLinkedOpening(_ destination: LinkedSession, store: SessionsStore, workspace: SessionsWorkspace, files: TaskFilesStore?) async {
@@ -332,7 +338,10 @@ final class WorkModel {
         var panes = [PaneState]()
         if let sessionPane { panes.append(sessionPane) }
         if destination.showsChanges,
-           let pane = layout.allPanes.first(where: { $0.content == .files(taskId: destination.task.id) }) { panes.append(pane) }
+           let pane = layout.allPanes.first(where: {
+               if case .files(let task, _) = $0.content { return task == destination.task.id }
+               return false
+           }) { panes.append(pane) }
         guard panes.count == (destination.showsChanges ? 2 : 1) else {
             taskOpening = taskOpening.map { DesktopOpening(url: $0.url, status: .failed, reason: "Opening panes are no longer available.") }
             return

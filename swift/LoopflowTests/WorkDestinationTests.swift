@@ -160,13 +160,13 @@ struct WorkDestinationTests {
             #expect(model.taskOpening?.status == .opening)
             let remote = registry.workspace(for: remoteIdentity)
             remote.multiplexer.load(sessionId: record.id, location: record.workspace?.identity)
-            let peerQuery = query.onMachine("peer", repository: "repository").recording { _ in }
             let sessionOnly = LinkedSession(generation: request.generation, record: record,
                 task: task, showsChanges: false, location: request.location)
-            let companion = try #require(registry.prepareLinkedFiles(sessionOnly, query: peerQuery))
+            #expect(try registry.openLinkedFiles(sessionOnly, query: query) == nil)
+            let companion = try remote.files(for: .files(taskId: task.id, execution: request.location), task: task, query: query)
             companion.document("remote-draft.txt").editor.string = "retained peer draft"
             #expect(remote.multiplexer.layout.allPanes.count == 1)
-            #expect(registry.prepareLinkedFiles(request, query: peerQuery) === companion)
+            #expect(try registry.openLinkedFiles(request, query: query) === companion)
             #expect(companion.document("remote-draft.txt").editor.string == "retained peer draft")
             let sessions = local.sessionStore(repoPath: wave.wave.repo, query: query)
             sessions.retainLocation(try #require(request.location), for: record)
@@ -405,14 +405,14 @@ struct WorkDestinationTests {
         #expect(model.linkedSession?.record.id == record.id)
         #expect(model.linkedSession?.showsChanges == true)
         #expect(model.taskOpening?.status == .opening) // selection is not native readiness
-        let registry = SessionsWorkspaceRegistry()
+        let registry = SessionsWorkspaceRegistry(localMachineId: identity.machineId)
         let workspace = registry.workspace(for: identity)
         workspace.multiplexer.load(sessionId: record.id, location: record.workspace?.identity)
         let terminal = try #require(workspace.multiplexer.layout.allPanes.first)
-        registry.prepareLinkedFiles(try #require(model.linkedSession), query: query)
-        let files = workspace.files(taskId: try #require(task.runtime?.workId), issue: task.task.identifier, cwd: identity.worktree, query: query)
+        try registry.openLinkedFiles(try #require(model.linkedSession), query: query)
+        let files = workspace.files(taskId: task.id, issue: task.task.identifier, cwd: identity.worktree, query: query)
         files.selection = "retained-draft.rs"
-        registry.prepareLinkedFiles(try #require(model.linkedSession), query: query)
+        try registry.openLinkedFiles(try #require(model.linkedSession), query: query)
         #expect(workspace.multiplexer.layout.allPanes.count == 2)
         #expect(workspace.multiplexer.layout.pane(for: terminal.id) == terminal)
         #expect(workspace.multiplexer.focusedPaneId == terminal.id)

@@ -83,7 +83,8 @@ Closing the pane keeps its drafts in this window.
 shows the draft comparison read-only. Task headers show the recorded checkout;
 terminal and files follow that Task without a separate worktree selector.
 Changing Work assignment leaves the recorded checkout Machine and path intact.
-Remote Task links route Files through the recorded owner; unknown owners stay unavailable.
+Files panes route through their recorded owner, including a first open without a Session link.
+Unknown or changed owners stay unavailable without redirecting retained drafts.
 Remote paths are never opened or watched on the presentation Mac. Filesystem events
 on the execution Machine refresh retained documents, including hidden drafts. Disconnects
 retain drafts and show an error; Refresh reconnects. Stale owner readings are discarded.

@@ -137,7 +137,8 @@ fn lf(repo: &Path, home: &Path, args: &[&str]) -> Value {
     let output = command(repo, home, args).output().unwrap();
     assert!(
         output.status.success(),
-        "{}",
+        "{args:?} in {}: {}",
+        repo.display(),
         String::from_utf8_lossy(&output.stderr)
     );
     if output.stdout.is_empty() {
@@ -2898,6 +2899,100 @@ fn deletion_saves_offline_and_retains_execution_and_retry_identity() {
 }
 
 #[test]
+fn task_selectors_use_repository_scope_and_preserve_exact_identity_through_aliases() {
+    let first = TestRepo::new();
+    let second = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let tasks: Vec<_> = [&first, &second]
+        .into_iter()
+        .map(|repo| {
+            lf(
+                repo.path(),
+                home.path(),
+                &["task", "create", "--title", "Original", "--json"],
+            )
+        })
+        .collect();
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    db.execute("UPDATE tasks SET issue_identifier='DUP-1'", [])
+        .unwrap();
+    let alias = home.path().join("first-alias");
+    std::os::unix::fs::symlink(first.path(), &alias).unwrap();
+    db.execute(
+        "UPDATE waves SET repo=?1 WHERE id=?2",
+        rusqlite::params![
+            alias.to_string_lossy(),
+            tasks[0]["wave_id"].as_str().unwrap()
+        ],
+    )
+    .unwrap();
+    for (repo, task) in [
+        (first.path(), &tasks[0]),
+        (alias.as_path(), &tasks[0]),
+        (second.path(), &tasks[1]),
+    ] {
+        let status = lf(repo, home.path(), &["task", "status", "DUP-1", "--json"]);
+        assert_eq!(status["task"]["id"], task["id"]);
+    }
+    // Exact identity still permits inspection across repository scope.
+    let foreign = tasks[1]["id"].as_str().unwrap();
+    let status = lf(
+        first.path(),
+        home.path(),
+        &["task", "status", foreign, "--json"],
+    );
+    assert_eq!(status["task"]["id"], foreign);
+    let rejected = command(
+        first.path(),
+        home.path(),
+        &[
+            "task",
+            "edit",
+            foreign,
+            "--wave",
+            tasks[0]["wave_id"].as_str().unwrap(),
+            "--title",
+            "Wrong owner",
+        ],
+    )
+    .output()
+    .unwrap();
+    assert!(!rejected.status.success());
+    assert!(
+        String::from_utf8_lossy(&rejected.stderr)
+            .to_lowercase()
+            .contains("wave"),
+        "{}",
+        String::from_utf8_lossy(&rejected.stderr)
+    );
+    lf(
+        &alias,
+        home.path(),
+        &["task", "edit", "DUP-1", "--title", "First only"],
+    );
+    let status = lf(
+        second.path(),
+        home.path(),
+        &["task", "status", "DUP-1", "--json"],
+    );
+    assert_eq!(status["task"]["title"], "Original");
+    let status = lf(
+        first.path(),
+        home.path(),
+        &["task", "status", "DUP-1", "--json"],
+    );
+    assert_eq!(status["task"]["title"], "First only");
+    let missing = lf(
+        first.path(),
+        home.path(),
+        &["task", "status", "MISSING-1", "--json"],
+    );
+    assert!(missing["task"].is_null());
+    assert_eq!(missing["planning_state"], "unavailable");
+    assert!(missing["planning_error"].is_null());
+}
+
+#[test]
 fn ordinary_task_creation_returns_saved_identity_without_a_public_retry_token() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
@@ -3233,7 +3328,7 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
         ("available", "UPDATE pm_items SET needs_refresh=0"),
         (
             "invalid",
-            "UPDATE pm_items SET body=json_set(body,'$.project_id','another-project')",
+            "UPDATE pm_items SET project_id='another-project',body=json_set(body,'$.project_id','another-project')",
         ),
     ] {
         db.execute_batch(statement).unwrap();

@@ -132,7 +132,7 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
         if condition != "valid" {
             let expected = match condition {
                 "terminal" => "terminal",
-                "moved" | "team" => "no longer matches",
+                "moved" | "team" => "invalid ownership",
                 "removed" => "deleted",
                 _ => "planning",
             };

@@ -142,13 +142,17 @@ pub(crate) async fn record_abandoned_pr(repo: &Path, branch: &str) -> OpsResult<
     Ok(())
 }
 
-async fn resolve_task(store: &SharedStore, selector: &str) -> OpsResult<Option<Task>> {
-    if let Some(task) = store
-        .get_task_by_issue(selector)
-        .await
+async fn resolve_task(
+    store: &SharedStore,
+    repo: Option<&str>,
+    selector: &str,
+) -> OpsResult<Option<Task>> {
+    if let Some(id) = store
+        .sqlite
+        .resolve_task_id(selector, repo)
         .map_err(task_error)?
     {
-        return Ok(Some(task));
+        return store.get_task(&id).await.map_err(task_error);
     }
     historical_branch_task(store, selector).await
 }
@@ -192,7 +196,7 @@ pub fn task_abandon(repo: &Path, selector: Option<&str>, force: bool) -> OpsResu
 
 async fn abandon(repo: &Path, selector: &str, force: bool) -> OpsResult<String> {
     let store = task_store().await?;
-    let task = match resolve_task(&store, selector).await? {
+    let task = match resolve_task(&store, Some(&repo.to_string_lossy()), selector).await? {
         Some(task) => task,
         None => {
             crate::ops::pm::resolve_saved_task(repo, None, selector)
@@ -235,7 +239,7 @@ pub fn task_delete(repo: &Path, issue: &str) -> OpsResult<String> {
     let repo = task_repository(repo, Some(issue))?;
     block_on_task(async {
         let store = task_store().await?;
-        let task = match resolve_task(&store, issue).await? {
+        let task = match resolve_task(&store, Some(&repo.to_string_lossy()), issue).await? {
             Some(task) => task,
             None => {
                 crate::ops::pm::resolve_saved_task(&repo, None, issue)
@@ -390,7 +394,7 @@ pub fn task_sweep(repo: &Path, apply: bool) -> OpsResult<Vec<SweepEntry>> {
             })
             .collect();
         for (wave, project, item) in sweep.candidates {
-            let task = resolve_task(&store, &item.id).await?;
+            let task = resolve_task(&store, Some(&repo.to_string_lossy()), &item.id).await?;
             if let Some(task) = &task {
                 if super::task_work_status(&store, task).await? != WorkStatus::Ready {
                     continue;
@@ -443,10 +447,16 @@ pub fn task_sweep(repo: &Path, apply: bool) -> OpsResult<Vec<SweepEntry>> {
 /// Resolve placed Task operations through retained Wave ownership, even after
 /// their checkout is gone. Unplaced planning work uses the caller's repository.
 pub fn task_repository(directory: &Path, selector: Option<&str>) -> OpsResult<std::path::PathBuf> {
+    let current = crate::repo::discover_repo_root(directory).map_err(task_error)?;
+    let scope = current
+        .as_ref()
+        .map(|repo| crate::repository::CanonicalRepo::discover(repo).map(|repo| repo.to_string()))
+        .transpose()
+        .map_err(task_error)?;
     if let Some(selector) = selector {
         let retained = block_on_task(async {
             let store = task_store().await?;
-            let Some(task) = resolve_task(&store, selector).await? else {
+            let Some(task) = resolve_task(&store, scope.as_deref(), selector).await? else {
                 return Ok(None);
             };
             let wave = owning_wave(&store, &task).await?;
@@ -456,7 +466,5 @@ pub fn task_repository(directory: &Path, selector: Option<&str>) -> OpsResult<st
             return main_repo_root(&repo).map_err(Into::into);
         }
     }
-    crate::repo::discover_repo_root(directory)
-        .map_err(task_error)?
-        .ok_or_else(|| task_error("unplaced Task needs a repository; run from its repository"))
+    current.ok_or_else(|| task_error("unplaced Task needs a repository; run from its repository"))
 }

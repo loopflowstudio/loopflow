@@ -322,7 +322,7 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
             let pr_before = runtime.block_on(store.active_task_pr(&task.id)).unwrap();
             for (index, (condition, expected)) in [
                 ("canceled", "terminal"),
-                ("moved", "no longer matches"),
+                ("moved", "invalid ownership"),
                 ("team", "Team"),
                 ("removed", "deleted"),
             ]

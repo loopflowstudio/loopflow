@@ -235,7 +235,7 @@ impl Part {
 
     fn clock(self) -> Duration {
         match self {
-            Part::Planning | Part::Wave => PLANNING_CLOCK,
+            Part::Planning | Part::PeerPlanning | Part::Wave => PLANNING_CLOCK,
             Part::Activity | Part::Sessions | Part::Task | Part::WorkActivity => ACTIVITY_CLOCK,
         }
     }

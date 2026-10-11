@@ -634,8 +634,8 @@ Execution/attempts stay local; retain causal losers and uncertainty. Before revi
 finish private observations, typed journal, bindings, ordinary follow-ups and cron.
 
 `e3a3479df7` removes public snapshot reads; portfolio ownership reads use
-SQLite claims. Task acquisition/admission still reconstruct provider
-records. Canonical content proves no acquisition cut. Delivery needs
+SQLite claims. Task status/admission now read narrow evidence;
+acquisition still reconstructs provider records. Delivery needs
 accepted revision plus archive/membership eligibility; foreign facts grant no ownership.
 
 Jack's `19116a1b`: stack 427 on 412; land afterward. No 412 landing authority.

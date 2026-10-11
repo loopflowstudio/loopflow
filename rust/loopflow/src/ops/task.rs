@@ -2949,8 +2949,14 @@ pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
     block_on_task(async {
         let store = task_store().await?;
         let mut task = match issue {
-            Some(issue) => store.get_task_by_issue(issue).await.map_err(task_error)?,
-            None => task_for_checkout(&store, repo).await?,
+            Some(issue) => {
+                super::planning_sync::find_task(&store, &repo.to_string_lossy(), issue).await?
+            }
+            None => Some(
+                task_for_checkout(&store, repo)
+                    .await?
+                    .ok_or_else(|| task_error("this checkout has no Task"))?,
+            ),
         };
         if issue.is_none() {
             if let Some(task) = &task {
@@ -2959,15 +2965,15 @@ pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
                 }
             }
         }
-        let inspection = if task.is_none() {
+        let inspection = if task.is_none()
+            && super::linear_observe::connected(&repo.to_string_lossy())
+        {
             let selector = issue.ok_or_else(|| task_error("this checkout has no Task"))?;
             let read =
                 super::pm::inspect_task_planning_async(repo, selector, super::pm::PmRefresh::Auto)
                     .await?;
-            task = store
-                .get_task_by_issue(selector)
-                .await
-                .map_err(task_error)?;
+            task =
+                super::planning_sync::find_task(&store, &repo.to_string_lossy(), selector).await?;
             Some(read)
         } else {
             None

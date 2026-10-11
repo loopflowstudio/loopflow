@@ -56,8 +56,8 @@ local Files retains its opening placement through missing planning and Close/Und
 Remote Files owns observation and transport reuse. Bare Task navigation acquires
 no Session; explicit Session/Changes still does. Evidence and failed attempts:
 [findings](findings.md#content-location-cuts--october-10). These prerequisites are
-not Work-tab completion or native acceptance. Continue with the registry/DTO and
-navigation cut below, not another preparatory location refactor.
+not Work-tab completion or native acceptance. The remaining implementation is the registry/DTO and navigation cut below,
+not another preparatory location refactor.
 
 ### Experience and boundaries
 
@@ -88,6 +88,15 @@ unsent provider drafts across process exit. Saved layout integration belongs to
 LOO-416, not a second persistence system here.
 
 ### Current owners → minimal cutover
+
+Reconciled against `4cde15a0d3` (October 10): the registry still keys both
+workspaces and outer layouts by `WorkspaceIdentity`; `WorkModel` still emits
+`inspectLayouts()`, and the Flow-log view discards its content location.
+Input-inventory compression in that checkpoint changes none of these owners.
+The October 9 review is historical:
+`4cde15a0d3:scratch/pr-review.html`. Its stopped-pursuit account, mutation-wide
+inspection replies and pre-caller-inference examples are superseded; it is not
+the current demo or a reason to defer the independent tab implementation.
 
 Registry remains checkout-keyed.
 `retainedPane` still requires content location to equal the enclosing checkout;

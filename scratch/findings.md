@@ -97,11 +97,11 @@ The earlier empty-error checkpoint failures are retained in `92cd05cbf3`; the
 subsequent `lf commit` succeeded as that revision. Pre-checkpoint bytes also survive
 in `/tmp/loo427-compress-ka0wKM/working.patch` and its `scratch/` copy.
 
-**Next cut, not another location-preparation pass:** rekey the registry by Work,
-route Flow logs from content, integrate tabs/navigation and exact-target DTOs,
-then delete the outer checkout layout as the plan requires. `retainedPane` and
-`reconcileMembership` still encode checkout identity. Do not polish those
-predecessor rules. Admission remains independent and unresolved.
+**Remaining cut:** Work-keyed registry, content-routed Flow logs, tabs/navigation,
+exact-target DTOs and outer-layout deletion. `retainedPane` and
+`reconcileMembership` still encode checkout identity. Admission remains independent
+and unresolved. October 10 filesystem inspection found no Product child Wave
+directories; Infrastructure’s planning memory retains the same execution boundary.
 
 Task-input compression removes the duplicate `ContextFile` projection and its
 per-file disk reads/hashes. Quoted paths and all present change states remain;
@@ -111,3 +111,5 @@ production-database preview refusal remain in [questions](questions.md#context-b
 This does not implement Work tabs or alter their deletion targets.
 
 Check: `cargo test -p loopflow --lib task_workspace_context_covers_committed_staged_unstaged_and_untracked_bytes` (LF variables cleared, closed stdin), `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo build -p loopflow --bin lf`, `git diff --check` — PASS (1 test); installed input adoption and native UI remain unproved.
+
+Check: `git diff --check` — PASS (reconciliation only; prior code checks reused); native judgment remains at demo.

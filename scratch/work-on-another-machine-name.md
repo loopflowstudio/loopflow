@@ -227,11 +227,20 @@ dates and prose no longer depend on provider inventory in these surfaces. Execut
 checkout and Workflow reads remain independent. Source checks are recorded below.
 
 Still required: `plan_read::task_in` and `project_in`, `task_planning_item`,
-`TaskStatus.planning`/`PmTaskRecord` and cold status still expose provider-shaped
-records. The Task reader still overwrites due dates from the observation and the
-Project projection omits prose. Replace these remaining consumers, retaining
-invalidation, positive removal, pending membership and original observation age.
-The canonical snapshot cut does not complete acquisition or the deletion audit.
+`TaskStatus.planning`/`PmTaskRecord` and cold status expose provider-shaped records.
+At `db36f20ba8`, the Task reader overwrites saved due dates from observations;
+the Project projection omits prose and substitutes provider IDs for local IDs.
+The coherent replacement includes CLI status/create and Swift consumers, not an
+additional wrapper. Invalidation, positive removal, pending membership and original
+observation age must survive independently of content and delivery status.
+
+The canonical Wave/roadmap/Work-frame summary cut exists, but its acquisition
+behavior is not proved: `waves.rs::task_snapshot` derives `launch_refusal` only from
+checkout/configuration/process evidence. `task_planning_sync` reports delivery,
+not acquisition validity. Removing provider-shaped content must not silently drop
+that distinction. Composed snapshot/status fixtures still need invalidation,
+positive removal and pending-membership cases with unchanged local execution.
+The absorbed review is preserved at `c3c510f862:scratch/task-view-evidence-review.md`.
 Bindings, ordinary follow-ups, cron and typed journal/provider hierarchy remain.
 
 Rotation now consumes and returns canonical Tasks, including saved dates/prose and
@@ -242,6 +251,17 @@ baselines; retained attempted inputs are unchanged. This removes those consumers
 not `plan_read`, Task status or the provider hierarchy. Offline public rotation
 covers both transport configurations/mapping states and transaction/retry preservation;
 export fixtures cover retained input and later saves.
+
+### Released migration frontier — October 10
+
+Merge `db36f20ba8` incorporates main `21dae527b4`: local planning, optional Task PR,
+AgentProcess and process-ID drafts are materialized in `0.13.11.001_release.sql`.
+Only this Task's `planning_peers.sql` remains editable. Its `optional_task_pr`
+dependency names a retained released marker, not a missing draft to restore.
+Populated conversion must start at this actual frontier; pre-merge fixture passes
+do not establish that boundary. The focused receipt fixture now passes, preserving
+uncertain input and sequence high-water marks, not proving full Work conversion.
+Source materialization proves no installation.
 
 ### LOO-427 integration coordination — October 10
 
@@ -312,17 +332,8 @@ Project reader cut (`52e7da7f35`) is complete. Remaining Task/snapshot consumers
 `LinearProject` belong to this acquisition prerequisite, before bindings, ordinary
 follow-ups, cron and the rest of the audit. No partial publication or readiness.
 
-Acquisition now selects new and existing Tasks in one query and applies one typed
-edit slice through the common writer. Existing identities, local order,
-pending disposition and cross-Wave membership fences remain distinct from first
-admission. The duplicate import branch and `item_edits` forwarding function are
-deleted. `PmResolvedTask`, both `pm_resolve_task` wrappers and now `ResolvedTask` are deleted.
-Acquisition returns canonical Task; ordinary snapshot/status projections still need
-replacement. These reductions do not complete canonical acquisition or the audit.
-Focused checks exposed fixtures predating foreground exchange: offline completion
-now simulates an outage; repeat refiling preserves Task/receipts rather than freezing
-sync status. Mappings enter through the writer, not SQL inconsistent with its journal;
-changed provider content carries a revision.
+Earlier acquisition/fixture corrections: `c3c510f862` here. Canonical Task
+acquisition is recorded above; it does not finish the private-observation boundary.
 
 Compression removes the fabricated Git recovery record/value hierarchy: status and
 CLI/Desktop now inspect retained journal mutations directly, with candidate IDs
@@ -370,11 +381,11 @@ Earlier baseline detail: `c8fe4628a:scratch/work-on-another-machine-name.md`.
   cut. Regenerate them after the entire accepted reduction, before review-only
   republication. No readiness or landing follows from this persistence checkpoint.
 
-Checks: `cargo build -p loopflow --bin lf`, network-isolated `cargo test -p loopflow --test local_planning rotation_` (2), `--lib planning_export_` (5), `--lib ops::chapter::tests::un` (2) pass; fmt/diff and all-target Clippy pass. Gate owns affected/materialized verification; prior Wave/DTO/Swift evidence: `fc7f5cac81` here.
+Checks: network-isolated `cargo test -p loopflow --lib project_prose_receipt_migration_preserves_uncertain_effects` passes (1) at the merged frontier; `git diff --check` passes. Prior build/Clippy/rotation/export results: `c3c510f862` here; full populated conversion and affected suites remain gate-owned.
 
-Context: memory and scratch fit; generated Task seed/steers/workspace measured
-21,256/16,000 tokens, 5,256 over. Authored curation cannot remove this generated
-history/metadata; no history or limit changed.
+
+Context: authored memory/scratch fit. Generated Task seed/steers/workspace remains
+about 21,159/16,000 tokens; no authored reduction can remove it. Limits/history unchanged.
 
 ## Delete — do not maintain
 

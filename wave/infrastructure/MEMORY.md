@@ -624,23 +624,25 @@ acceptance remain at
 
 ## Tasks across machines (LOO-412, 2026-10-10)
 
-Jack Heart selected Linear, shared or default user-keyed Git per repository.
-One typed writer owns local/imported fields; outages buffer without fallback or
-election. Execution/attempts stay local; preserve causal losers and uncertainty.
-Gate/installation unproved.
+Jack Heart selected one repository transport: Linear, shared or default user-keyed
+Git. One typed writer owns local/imported Work; outages buffer without fallback or election.
+Execution/attempts stay local; preserve causal losers and uncertainty.
+Jack requires the entire accepted model/deletion audit before another PR review:
+canonical Work, private observations, typed journal, bindings, ordinary follow-ups
+and one cron list. Renamed models/summaries are insufficient; gate/install unproved.
 
-Full audit precedes review. Acquisition, summaries and rotation read canonical
-Tasks. Export captures shared creation baselines, never local execution. Status
-remains provider-shaped; retain age, invalidation and pending membership.
-Follow-up conversion retains uncertain effects; Git candidates prove no publication.
+Summaries, rotation and export are canonical; status is not. Delivery status proves
+no acquisition validity. Preserve invalidation, removal, pending membership, age
+and uncertain effects without replay. Git candidates prove no publication.
 
-Jack assigned LOO-427's combined reduction here; its `bd295866bb` baseline is
-checkpointed. Stack order is unresolved; preserve tabs, Machine ownership and admission,
-adapting triggers to the released frontier.
-[Design and remaining audit](../../scratch/work-on-another-machine-name.md) own
-integration and #1491's review boundary. Cron preserves installed ownership and
-nonzero failures ([evidence](release/MEMORY.md)). No landing, installation, schedule
-activation or real export. Prior proofs: `41378adacf:wave/infrastructure/MEMORY.md`.
+Jack assigned LOO-427's combined reduction here (`bd295866bb`); stack order is
+unresolved. Preserve tabs, Machine ownership/admission; adapt delegation to the
+surviving writer/released frontier.
+[Design and audit](../../scratch/work-on-another-machine-name.md) own remaining
+implementation and #1491's review boundary. Cron retains installed ownership and
+nonzero operation failures ([Release evidence](release/MEMORY.md)). No landing,
+installation, schedule activation or real export. Prior proofs:
+`41378adacf:wave/infrastructure/MEMORY.md`.
 
 ## Planning and launch preservation (curated 2026-10-02)
 

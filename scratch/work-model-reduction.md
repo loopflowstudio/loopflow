@@ -381,8 +381,9 @@ and remaining deletion. This ordering follows the existing passes rather than
 starting a competing pursuit. Each cut deletes its replaced paths in the same diff.
 
 Before dropping persistent state, inventory the released frontier and current
-Task-owned draft. `local_planning.sql` came from LOO-406; it is not a spare draft
-for this Task. Preserve released SQL and edit the current Task's one draft, with
+Task-owned draft. Main merged at `db36f20ba8` materialized LOO-406 and optional
+Task PR into `0.13.11.001_release.sql`; `planning_peers.sql` is the sole remaining
+draft. Preserve released SQL and edit that draft, with
 populated conversion fixtures for Work IDs, legacy external mappings, prose,
 criteria, selection, order, uncertain delivery and historical events.
 

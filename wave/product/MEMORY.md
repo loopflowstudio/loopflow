@@ -3,7 +3,7 @@
 ## Direction after October 7
 
 LOO-387–430 briefs and LOO-427 steers supersede older designs.
-LOO-389 comments failed on an unbound Initiative.
+LOO-389 comments failed: unbound Initiative.
 
 - **Machine replaces Home** (LOO-394); one OS user and data directory.
   `LF_HOME`, provider homes and stored opaque IDs keep their meanings. LOO-411
@@ -541,8 +541,7 @@ Processes still block. Unanswered turns alone are history, not execution.
 
 Finite landing (#1382) provided continuation after caller exit; #1384 moved
 repair to the watcher. #1287 fixed repair permissions and locks retained across
-canceled waits. No inspected record establishes a particular land crash as the
-cause of the switch. Task run retries whole failed Flows three times while its
+canceled waits. No record establishes a land crash caused the switch. Task run retries whole failed Flows three times while its
 carrier survives; held exit 3 now stays held. Jack requested failed-step retry
 as Infrastructure LOO-435. Local CLI/provider fixtures pass; live repair and
 crashed-runner recovery remain unproven. Evidence: `53be55c70:scratch/`.

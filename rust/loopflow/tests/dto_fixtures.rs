@@ -686,6 +686,8 @@ fn planning_sync_preserves_delivery_and_losing_values() {
         sync.changes[1].state,
         loopflow::store::planning_sync::PlanningSyncState::Uncertain
     );
+    assert_eq!(sync.changes[2].field, "task_title");
+    assert_eq!(sync.changes[3].field, "task_assignee");
     assert_eq!(sync.changes[2].local_value, "Local title");
     assert_eq!(
         sync.changes[2].linear_value,

@@ -680,9 +680,9 @@ fn task_deletion_active_sync_reconnect_retains_execution_and_history() {
         let receipt = fixture
             .store
             .sqlite
-            .pending_task_changes(&task.id)
+            .pending_task_deletion(&task.id)
             .unwrap()
-            .remove(0);
+            .unwrap();
         let sync = crate::ops::planning_sync::PlanningSync::start(
             fixture.store.clone(),
             repo.to_string_lossy().into_owned(),
@@ -707,9 +707,9 @@ fn task_deletion_active_sync_reconnect_retains_execution_and_history() {
                 while !fixture
                     .store
                     .sqlite
-                    .pending_task_changes(&task.id)
+                    .pending_task_deletion(&task.id)
                     .unwrap()
-                    .is_empty()
+                    .is_none()
                 {
                     tokio::time::sleep(std::time::Duration::from_millis(25)).await;
                 }
@@ -737,7 +737,7 @@ fn task_deletion_active_sync_reconnect_retains_execution_and_history() {
             reopened.task(&task.id).unwrap().unwrap().linear_id,
             task.linear_id
         );
-        assert!(reopened.pending_task_changes(&task.id).unwrap().is_empty());
+        assert!(reopened.pending_task_deletion(&task.id).unwrap().is_none());
         assert_eq!(
             conn.query_row(
                 "SELECT id FROM task_changes WHERE task_id=?1 AND field='deleted'",
@@ -759,9 +759,9 @@ fn task_deletion_lost_reply_requires_positive_trash_evidence_without_replay() {
         let receipt = fixture
             .store
             .sqlite
-            .pending_task_changes(&task.id)
+            .pending_task_deletion(&task.id)
             .unwrap()
-            .remove(0);
+            .unwrap();
         let work = crate::durable::WorkRef::Task(task.id.clone());
         runtime.block_on(async {
             state.lock().await.lose_deletion_reply = true;
@@ -778,7 +778,13 @@ fn task_deletion_lost_reply_requires_positive_trash_evidence_without_replay() {
                     .is_err()
             );
             assert_eq!(
-                fixture.store.sqlite.pending_task_changes(&task.id).unwrap()[0].id,
+                fixture
+                    .store
+                    .sqlite
+                    .pending_task_deletion(&task.id)
+                    .unwrap()
+                    .unwrap()
+                    .id,
                 receipt.id
             );
             state.lock().await.trash_unavailable = false;
@@ -796,9 +802,9 @@ fn task_deletion_lost_reply_requires_positive_trash_evidence_without_replay() {
         assert!(fixture
             .store
             .sqlite
-            .pending_task_changes(&task.id)
+            .pending_task_deletion(&task.id)
             .unwrap()
-            .is_empty());
+            .is_none());
     });
 }
 
@@ -821,9 +827,9 @@ fn task_deletion_concurrent_delivery_has_one_effect() {
         assert!(fixture
             .store
             .sqlite
-            .pending_task_changes(&task.id)
+            .pending_task_deletion(&task.id)
             .unwrap()
-            .is_empty());
+            .is_none());
     });
 }
 
@@ -836,9 +842,9 @@ fn task_deletion_old_trash_observation_cannot_settle_newer_removal() {
         let receipt = fixture
             .store
             .sqlite
-            .pending_task_changes(&task.id)
+            .pending_task_deletion(&task.id)
             .unwrap()
-            .remove(0);
+            .unwrap();
         runtime.block_on(async {
             let mut provider = state.lock().await;
             provider.issues[0]["trashed"] = json!(true);
@@ -854,7 +860,13 @@ fn task_deletion_old_trash_observation_cannot_settle_newer_removal() {
             assert_eq!(state.lock().await.deletion_writes, 0);
         });
         assert_eq!(
-            fixture.store.sqlite.pending_task_changes(&task.id).unwrap()[0].id,
+            fixture
+                .store
+                .sqlite
+                .pending_task_deletion(&task.id)
+                .unwrap()
+                .unwrap()
+                .id,
             receipt.id
         );
     });
@@ -879,15 +891,12 @@ fn task_deletion_unconfirmed_write_stays_uncertain_without_replay() {
             assert_eq!(state.lock().await.deletion_writes, 1);
             assert_ne!(state.lock().await.issues[0]["trashed"], true);
         });
-        assert_eq!(
-            fixture
-                .store
-                .sqlite
-                .pending_task_changes(&task.id)
-                .unwrap()
-                .len(),
-            1
-        );
+        assert!(fixture
+            .store
+            .sqlite
+            .pending_task_deletion(&task.id)
+            .unwrap()
+            .is_some());
         assert!(fixture.store.sqlite.list_tasks(None).unwrap().is_empty());
     });
 }
@@ -901,9 +910,9 @@ fn task_deletion_adopts_newer_linear_edit_and_retains_losing_removal() {
         let receipt = fixture
             .store
             .sqlite
-            .pending_task_changes(&task.id)
+            .pending_task_deletion(&task.id)
             .unwrap()
-            .remove(0);
+            .unwrap();
         runtime.block_on(async {
             let mut provider = state.lock().await;
             provider.issues[0]["title"] = json!("Keep this work");
@@ -925,9 +934,9 @@ fn task_deletion_adopts_newer_linear_edit_and_retains_losing_removal() {
         assert!(fixture
             .store
             .sqlite
-            .pending_task_changes(&task.id)
+            .pending_task_deletion(&task.id)
             .unwrap()
-            .is_empty());
+            .is_none());
         let conn = rusqlite::Connection::open(&fixture.database).unwrap();
         let (value, conflict): (String, String) = conn
             .query_row(
@@ -3429,6 +3438,49 @@ fn planning_fields_lost_reply_retains_identity_and_readback_settles_without_rewr
 }
 
 #[test]
+fn planning_fields_selected_before_deletion_cannot_be_attempted_afterward() {
+    with_planning_task(|_runtime, fixture, _repo, task, _state| {
+        fixture
+            .store
+            .sqlite
+            .edit_task(
+                &task.id,
+                task.revision,
+                &crate::work::task::TaskUpdate {
+                    title: Some("Pending edit".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let change = fixture
+            .store
+            .sqlite
+            .pending_task_changes(&task.id)
+            .unwrap()
+            .remove(0);
+        fixture.store.sqlite.delete_task(&task.id).unwrap();
+        assert!(!fixture
+            .store
+            .sqlite
+            .attempt_planning_field(
+                crate::store::sqlite::planning_changes::PlanningChanges::Task(&task.id),
+                &change,
+                change
+                    .base
+                    .as_ref()
+                    .and_then(|base| base.revision.as_deref()),
+            )
+            .unwrap());
+        assert!(fixture
+            .store
+            .sqlite
+            .pending_task_deletion(&task.id)
+            .unwrap()
+            .is_some());
+    });
+}
+
+#[test]
 fn planning_fields_older_acknowledgement_preserves_and_delivers_newer_save() {
     for project in [false, true] {
         with_planning_task(|runtime, fixture, repo, task, state| {
@@ -3457,8 +3509,26 @@ fn planning_fields_older_acknowledgement_preserves_and_delivers_newer_save() {
                 let pending = field_receipts(fixture, task, project);
                 assert_eq!(pending.len(), 1);
                 assert_eq!(pending[0].id, newer.id);
-                assert_eq!(pending[0].value, "Newer save");
-                assert_eq!(pending[0].base.as_ref().unwrap()["value"], "First save");
+                assert_eq!(
+                    pending[0].value,
+                    if project {
+                        WorkValue::ProjectName(Some("Newer save".into()))
+                    } else {
+                        WorkValue::TaskTitle(Some("Newer save".into()))
+                    }
+                );
+                assert_eq!(
+                    pending[0]
+                        .base
+                        .as_ref()
+                        .unwrap()
+                        .value
+                        .as_ref()
+                        .unwrap()
+                        .value()
+                        .unwrap(),
+                    "First save"
+                );
                 if project {
                     assert_eq!(
                         fixture
@@ -3596,11 +3666,11 @@ fn planning_fields_observed_conflicts_adopt_linear_without_writing_or_moving_wor
                     )
                     .unwrap();
                 assert_eq!(
-                    serde_json::from_str::<serde_json::Value>(&value).unwrap(),
+                    serde_json::from_str::<serde_json::Value>(&value).unwrap()["value"],
                     "Losing local name"
                 );
                 assert_eq!(
-                    serde_json::from_str::<serde_json::Value>(&conflict).unwrap()["value"],
+                    serde_json::from_str::<serde_json::Value>(&conflict).unwrap()["value"]["value"],
                     "Linear name"
                 );
                 assert_eq!(
@@ -4017,6 +4087,53 @@ fn planning_export_captures_shared_task_fields_without_local_execution() {
             fixture.store.sqlite.task(&child.id).unwrap().unwrap().title,
             "Later save"
         );
+    });
+}
+
+#[test]
+fn planning_export_acquisition_acknowledges_canonical_membership() {
+    with_export_plan(|runtime, fixture, repo, task, state| {
+        let conn = rusqlite::Connection::open(&fixture.database).unwrap();
+        conn.execute("INSERT INTO task_changes(id,task_id,value_json) VALUES('before-creation-membership',?1,?2)",
+            rusqlite::params![task.id.as_str(),serde_json::to_string(&WorkValue::TaskProject(task.project_id.to_string())).unwrap()]).unwrap();
+        for owner in [
+            crate::durable::WorkRef::Project(task.project_id.clone()),
+            crate::durable::WorkRef::Task(task.id.clone()),
+        ] {
+            runtime
+                .block_on(crate::ops::planning_export::sync_export(
+                    &fixture.store,
+                    repo,
+                    &owner,
+                ))
+                .unwrap();
+        }
+        let project = fixture
+            .store
+            .sqlite
+            .project(&task.project_id)
+            .unwrap()
+            .unwrap();
+        assert_ne!(
+            project.id.as_str(),
+            project.linear_id.as_ref().unwrap().as_str()
+        );
+        assert!(conn
+            .query_row(
+                "SELECT acknowledged FROM task_changes WHERE id='before-creation-membership'",
+                [],
+                |row| row.get::<_, bool>(0)
+            )
+            .unwrap());
+        let retained = fixture.store.sqlite.task(&task.id).unwrap().unwrap();
+        assert_eq!(retained.project_id, project.id);
+        assert!(fixture
+            .store
+            .sqlite
+            .pending_task_changes(&task.id)
+            .unwrap()
+            .is_empty());
+        assert_eq!(state.blocking_lock().field_writes, 0);
     });
 }
 
@@ -4493,7 +4610,7 @@ fn project_prose_save_delivers_and_settles_without_changing_managed_fields() {
                 assert!(fixture.store.sqlite.pending_project_changes(&saved.id).unwrap().is_empty());
                 let conn = rusqlite::Connection::open(&fixture.database).unwrap();
                 let (acknowledged, conflict): (bool, Option<String>) = conn.query_row(
-                    "SELECT acknowledged,conflict_json FROM project_changes WHERE project_id=?1 AND field='description' ORDER BY seq DESC LIMIT 1",
+                    "SELECT acknowledged,conflict_json FROM project_changes WHERE project_id=?1 AND field='project_description' ORDER BY seq DESC LIMIT 1",
                     [saved.id.as_str()], |r| Ok((r.get(0)?,r.get(1)?))).unwrap();
                 assert!(acknowledged);
                 assert_eq!(conflict, None);
@@ -4581,11 +4698,11 @@ fn project_prose_omission_is_not_empty_or_receipt_settlement() {
                 )
                 .unwrap();
             assert_eq!(
-                serde_json::from_str::<serde_json::Value>(&value).unwrap(),
+                serde_json::from_str::<serde_json::Value>(&value).unwrap()["value"],
                 "Saved prose"
             );
             assert_eq!(
-                serde_json::from_str::<serde_json::Value>(&conflict).unwrap()["value"],
+                serde_json::from_str::<serde_json::Value>(&conflict).unwrap()["value"]["value"],
                 ""
             );
             assert!(!acknowledged);
@@ -4644,7 +4761,18 @@ fn project_prose_older_acknowledgement_preserves_successor() {
                 .unwrap();
             assert_eq!(pending.len(), 1);
             assert_ne!(pending[0].id, first.id);
-            assert_eq!(pending[0].base.as_ref().unwrap()["value"], "First");
+            assert_eq!(
+                pending[0]
+                    .base
+                    .as_ref()
+                    .unwrap()
+                    .value
+                    .as_ref()
+                    .unwrap()
+                    .value()
+                    .unwrap(),
+                "First"
+            );
             crate::ops::planning_delivery::sync_fields(&fixture.store, repo, &work)
                 .await
                 .unwrap();

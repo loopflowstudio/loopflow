@@ -58,13 +58,7 @@ macro_rules! work_values {
             pub fn value(&self) -> StoreResult<Value> {
                 Ok(match self { $(Self::$variant(v) => serde_json::to_value(v)?,)* })
             }
-            pub(crate) fn with_value(&self, value: Value) -> StoreResult<Self> {
-                let value: Self = serde_json::from_value(serde_json::json!({
-                    "field": self.field(), "value": value,
-                }))?;
-                value.validate()?;
-                Ok(value)
-            }
+
         }
     }
 }

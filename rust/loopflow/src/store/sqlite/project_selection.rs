@@ -211,9 +211,8 @@ impl SqliteStore {
         }
         super::planning_changes::PlanningChanges::Project(&id).record(
             &tx,
-            "status",
-            serde_json::to_value(project.status)?,
-            serde_json::json!("started"),
+            &Edit::ProjectStatus(project.status),
+            &Edit::ProjectStatus(crate::work::project::ProjectStatus::Started),
         )?;
         planning_write::local(
             &tx,

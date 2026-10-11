@@ -782,17 +782,20 @@ fn project_accepted_planning(
         tx.execute("UPDATE projects SET pm_snapshot_synced_at=?2,planning_provider_revision=?3 WHERE id=?1",params![id.as_str(),observed_at,revision])?;
     }
     let mut query = tx.prepare(
-        "SELECT id,revision,name,description,assignee,project_id
-         FROM pm_items WHERE repo=?1 AND provider='linear' AND needs_refresh=0
-         AND id IN (SELECT value FROM json_each(?2))",
+        "SELECT i.id,i.revision,i.name,i.description,i.assignee,p.id,i.assignee_observed
+         FROM pm_items i LEFT JOIN projects p ON p.external_project_id=i.project_id
+         WHERE i.repo=?1 AND i.provider='linear' AND i.needs_refresh=0
+         AND i.id IN (SELECT value FROM json_each(?2))",
     )?;
     let observed = query
         .query_map(params![repo, item_ids], |row| {
             let mut edits = vec![
                 Edit::TaskTitle(Some(row.get(2)?)),
                 Edit::TaskDescription(Some(row.get(3)?)),
-                Edit::TaskAssignee(row.get(4)?),
             ];
+            if row.get::<_, bool>(6)? {
+                edits.push(Edit::TaskAssignee(row.get(4)?));
+            }
             if let Some(project) = row.get::<_, Option<String>>(5)? {
                 edits.push(Edit::TaskProject(project));
             }
@@ -826,9 +829,9 @@ fn project_accepted_planning(
          WHERE i.repo=?1 AND i.provider=?2 AND i.needs_refresh=0
          AND i.id IN (SELECT value FROM json_each(?3))
          AND (target.id IS NULL OR current.wave_id=p.wave_id OR EXISTS(
-             SELECT 1 FROM task_changes c WHERE c.task_id=target.id AND c.field='project_id'
-             AND c.acknowledged=0 AND c.conflict_json IS NULL AND json_extract(c.value_json,'$')=current.id
-             AND c.seq=(SELECT max(seq) FROM task_changes WHERE task_id=target.id AND field='project_id')))
+             SELECT 1 FROM task_changes c WHERE c.task_id=target.id AND c.field='task_project'
+             AND c.acknowledged=0 AND c.conflict_json IS NULL AND json_extract(c.value_json,'$.value')=current.id
+             AND c.seq=(SELECT max(seq) FROM task_changes WHERE task_id=target.id AND field='task_project')))
          AND NOT EXISTS(SELECT 1 FROM task_deletions d
              WHERE d.wave_id=COALESCE(current.wave_id,p.wave_id) AND d.issue_id=i.id)
          AND NOT EXISTS(SELECT 1 FROM pm_issue_changes c WHERE c.issue_id=i.id

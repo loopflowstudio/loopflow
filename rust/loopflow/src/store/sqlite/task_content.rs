@@ -37,12 +37,11 @@ impl SqliteStore {
             )?
         };
         if changed {
-            PlanningChanges::Task(id).record(
-                &tx,
-                "deleted",
-                serde_json::json!(false),
-                serde_json::json!(true),
-            )?;
+            tx.execute("INSERT INTO task_changes(id,task_id,value_json,base_json)
+                SELECT ?1,t.id,'true',CASE WHEN o.id IS NOT NULL THEN json_object('revision',o.revision,'value',json('false')) END
+                FROM tasks t JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id
+                LEFT JOIN pm_items o ON o.id=t.external_issue_id AND o.repo=w.repo AND o.provider='linear'
+                WHERE t.id=?2", rusqlite::params![uuid::Uuid::new_v4().to_string(),id.as_str()])?;
         }
         tx.commit()?;
         Ok(())

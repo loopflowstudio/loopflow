@@ -94,8 +94,9 @@ pub(crate) async fn sync_export(store: &Store, repo: &Path, work: &WorkRef) -> O
         if project {
             input["statusId"] = client
                 .project_field_input(
-                    "status",
-                    &json!(export.project_status().map_err(message)?),
+                    &crate::work::edit::WorkValue::ProjectStatus(
+                        export.project_status().map_err(message)?,
+                    ),
                     "",
                 )
                 .await

@@ -141,7 +141,7 @@
               },
               {
                 "id": "title-task",
-                "field": "name",
+                "field": "task_title",
                 "state": "adopted_linear",
                 "local_value": "Local title",
                 "linear_value": "Linear title",
@@ -149,7 +149,7 @@
               },
               {
                 "id": "assignee-task",
-                "field": "assignee",
+                "field": "task_assignee",
                 "state": "adopted_linear",
                 "local_value": "person-id",
                 "linear_value": null,
@@ -613,7 +613,7 @@
               },
               {
                 "id": "title-task",
-                "field": "name",
+                "field": "task_title",
                 "state": "adopted_linear",
                 "local_value": "Local title",
                 "linear_value": "Linear title",
@@ -621,7 +621,7 @@
               },
               {
                 "id": "assignee-task",
-                "field": "assignee",
+                "field": "task_assignee",
                 "state": "adopted_linear",
                 "local_value": "person-id",
                 "linear_value": null,

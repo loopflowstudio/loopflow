@@ -770,6 +770,25 @@ pub(crate) fn seed_peer_planning(conn: &rusqlite::Connection, sql: &str) -> Stor
                 value.validate()?;
             }
         }
+        let mut query = conn.prepare("SELECT value_json,base_json,conflict_json FROM task_changes WHERE field!='deleted'
+            UNION ALL SELECT value_json,base_json,conflict_json FROM project_changes WHERE field!='task_order'")?;
+        for row in query.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, Option<String>>(2)?,
+            ))
+        })? {
+            let (value, base, conflict) = row?;
+            serde_json::from_str::<crate::work::edit::WorkValue>(&value)?.validate()?;
+            for retained in [base, conflict].into_iter().flatten() {
+                let baseline: super::planning_sync::PlanningBaseline =
+                    serde_json::from_str(&retained)?;
+                if let Some(value) = baseline.value {
+                    value.validate()?;
+                }
+            }
+        }
         super::sqlite::planning_write::seed(conn)?;
     }
     Ok(())
@@ -1479,11 +1498,22 @@ mod tests {
         let rows = |conn: &rusqlite::Connection| {
             conn.query_row("SELECT json_array(seq,id,project_id,field,value_json,base_json,conflict_json,attempted,error,acknowledged_revision,acknowledged,order_effects_json) FROM project_changes WHERE id='receipt-proof'", [], |r| r.get::<_, String>(0)).unwrap()
         };
-        let before = rows(&conn);
+        let mut expected: serde_json::Value = serde_json::from_str(&rows(&conn)).unwrap();
+        expected[3] = serde_json::json!("project_summary");
+        expected[4] = serde_json::json!(
+            serde_json::json!({"field":"project_summary","value":"Saved"}).to_string()
+        );
+        expected[5]=serde_json::json!(serde_json::json!({"revision":"r1","value":{"field":"project_summary","value":"Before"}}).to_string());
         conn.execute_batch(&current_draft_sql("planning_peers"))
             .unwrap();
-        assert_eq!(rows(&conn), before);
-        conn.execute("INSERT INTO project_changes(id,project_id,field,value_json) VALUES('prose-proof','project-proof','description','\"Purpose\"')", []).unwrap();
+        let mut actual: serde_json::Value = serde_json::from_str(&rows(&conn)).unwrap();
+        // Compare retained JSON values, independently of object-key ordering.
+        for index in [4, 5] {
+            actual[index] = serde_json::from_str(actual[index].as_str().unwrap()).unwrap();
+            expected[index] = serde_json::from_str(expected[index].as_str().unwrap()).unwrap();
+        }
+        assert_eq!(actual, expected);
+        conn.execute("INSERT INTO project_changes(id,project_id,value_json) VALUES('prose-proof','project-proof',?1)", [serde_json::to_string(&crate::work::edit::WorkValue::ProjectDescription(Some("Purpose".into()))).unwrap()]).unwrap();
         assert_eq!(
             conn.query_row(
                 "SELECT seq FROM project_changes WHERE id='prose-proof'",

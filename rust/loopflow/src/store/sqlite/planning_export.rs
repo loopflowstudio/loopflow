@@ -6,6 +6,7 @@ use serde_json::{json, Value};
 use super::planning_changes::PlanningChanges;
 use super::SqliteStore;
 use crate::durable::{ProjectId, TaskId, WorkRef};
+use crate::store::planning_sync::PlanningBaseline;
 use crate::store::{StoreError, StoreResult};
 use crate::work::edit::WorkValue;
 
@@ -232,15 +233,25 @@ pub(crate) fn attach_in(
     // The retained creation values, never current Work or changed readback, seed
     // later saves. The captured sequence boundary limits acknowledgments.
     for value in &export.baseline {
-        let Some(field) = super::planning_changes::linear_field(value) else {
-            continue;
+        let field = value.field();
+        let baseline = PlanningBaseline {
+            revision: revision.map(str::to_owned),
+            value: Some(value.clone()),
         };
-        let encoded = value.value()?;
         conn.execute(&format!("UPDATE {kind}_changes SET base_json=?3 WHERE {kind}_id=?1 AND field=?2 AND base_json IS NULL AND acknowledged=0 AND conflict_json IS NULL"),
-            params![id,field,json!({"revision":revision,"value":encoded}).to_string()])?;
+            params![id,field,serde_json::to_string(&baseline)?])?;
         if observed.contains(value) {
-            conn.execute(&format!("UPDATE {kind}_changes SET acknowledged=1,acknowledged_revision=?4,error=NULL WHERE {kind}_id=?1 AND field=?2 AND seq<=?3 AND value_json=?5 AND conflict_json IS NULL"),
-                params![id,field,export.through,revision,encoded.to_string()])?;
+            let mut query = conn.prepare(&format!("SELECT id,value_json FROM {kind}_changes WHERE {kind}_id=?1 AND field=?2 AND seq<=?3 AND conflict_json IS NULL"))?;
+            let changes = query
+                .query_map(params![id, field, export.through], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            for (receipt, saved) in changes {
+                if serde_json::from_str::<WorkValue>(&saved)? == *value {
+                    conn.execute(&format!("UPDATE {kind}_changes SET acknowledged=1,acknowledged_revision=?2,error=NULL WHERE id=?1"),params![receipt,revision])?;
+                }
+            }
         }
     }
     if !project {
@@ -527,7 +538,7 @@ mod tests {
                     )
                     .map(|v| serde_json::from_str(&v).unwrap())
                     .unwrap();
-                assert_eq!(base, json!({"revision":revision,"value":original}));
+                assert_eq!(base, json!({"revision":revision,"value":title(original)}));
                 let ack = |name: &str| {
                     conn.query_row(
                         &format!("SELECT acknowledged FROM {kind}_changes WHERE id=?1"),
@@ -584,7 +595,13 @@ mod tests {
                         |row| row.get::<_, bool>(0)
                     )
                     .unwrap());
-                conn.execute(&format!("INSERT INTO {kind}_changes(id,{kind}_id,field,value_json) VALUES('next',?1,'name','\"Next\"')"), params![id]).unwrap();
+                conn.execute(
+                    &format!(
+                        "INSERT INTO {kind}_changes(id,{kind}_id,value_json) VALUES('next',?1,?2)"
+                    ),
+                    params![id, serde_json::to_string(&title("Next")).unwrap()],
+                )
+                .unwrap();
                 assert_eq!(
                     conn.query_row(
                         &format!("SELECT seq FROM {kind}_changes WHERE id='next'"),

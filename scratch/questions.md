@@ -25,33 +25,28 @@ that transport without allocating Work. Reteam preserves unrelated edits and
 creates no cleanup commit. Exact source proofs and prior counterevidence:
 `4e78739a9f:scratch/questions.md`; live Linear/SSH and installation remain unproved.
 
-## Next implementation boundary — October 11
+## Remaining implementation — October 11
 
-The generic PM facade and nested Wave context are removed; ordinary Task
-lookup/comments and foreground exchange now have domain/planning owners. Git
-misses stay on Git. Linear refresh retains unmapped local Projects without lookup.
-Populated migration/import fixtures now cover Session turns, capture reservations,
-attachment claims/activity and an uncertain local cancellation receipt. This proves
-stored preservation, not configured provider control.
-The typed local writer/journal now shares WorkEdit. Typed Linear field receipts,
-historical follow-through effects and cron conversion remain before gate/republication. Earlier acquisition/fixture review findings:
-`1930805f40:scratch/questions.md`; no installation or stopped-Flow replay occurred.
+The PM facade, provider reconstruction, duplicate writer/journal vocabularies and
+string/JSON content receipts are removed. Linear owns acquisition/projection;
+WorkValue owns saved content and journal/receipt values. Creation retains captured
+inputs and typed baselines, never reconstructing an attempt from current Work.
+Historical intent state UUIDs cannot establish semantic state. Ordering/deletion
+keep separate effect semantics. Full follow-up lifecycle removal, cron conversion
+and conditional routing-inventory reduction remain before gate/republication.
+Earlier store-owner and acquisition findings: `216668cd9b:scratch/questions.md`.
 
-## Resolved store-owner review and remaining cut — October 11
+Populated migration/import proof retains Session turns, reservations, claims,
+activity and uncertain controls. Stored preservation is not configured provider
+control or installation acceptance. LOO-414's first-start authority remains open;
+no missing-placement inference or LOO-427 landing authority is introduced.
 
-The moved `ops/task.rs::resolve_saved_task` now uses the shared fallible
-`planning_sync::planning_store`. This restores the previous store-opening semantics;
-source readback confirms the repair. CLI admission can initialize a fresh registry,
-so the earlier finding never established a public cold-start failure.
+## Receipt review — October 11
 
-Both `planning.rs` modules are deleted. Linear acceptance owns projection,
-Linear observations own invalidation/evidence, and field delivery owns accepted
-revision eligibility. The journal stores typed mutations directly; receipt
-translation still needs deletion. Module removal
-alone does not complete Jack Heart's audit.
-
-Creation baselines now retain typed attempted fields, with released conversion from
-captured receipts. Historical state UUIDs do not establish semantic state; retained
-input remains recoverable. The field-receipt cut must separately preserve explicit
-null membership versus an absent baseline; `WorkValue::TaskProject` itself requires
-a Project. Ordering and deletion effects have distinct receipt semantics.
+The field-attempt deletion check is restored inside its transaction, with a
+select/edit/delete/attempt regression. Creation acquisition now resolves Linear
+Project IDs to canonical Work IDs before matching typed baselines; its regression
+retains a pre-creation membership receipt with distinct identities. Partial
+assignee omission supplies no invented null observation. Released conversion retains
+explicit-null membership separately from an absent baseline; older acknowledgment
+rebases a later save without clearing it. The pursuit design owns check results.

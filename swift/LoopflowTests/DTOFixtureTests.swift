@@ -87,6 +87,8 @@ struct DTOFixtureTests {
         #expect(sync.changes[0].state == .pending)
         #expect(sync.changes[1].state == .uncertain)
         #expect(sync.changes[1].error == "Reply lost; awaiting readback")
+        #expect(sync.changes[2].field == "task_title")
+        #expect(sync.changes[3].field == "task_assignee")
         #expect(sync.changes[2].localValue == .string("Local title"))
         #expect(sync.changes[2].linearValue == .string("Linear title"))
         #expect(sync.changes[3].text.contains("Linear: null"))

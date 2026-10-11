@@ -10,7 +10,6 @@ use serde_json::{json, Value};
 use crate::durable::{ProjectId, TaskId};
 use crate::store::StoreResult;
 
-use super::planning_changes::PlanningChanges;
 use super::SqliteStore;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -31,6 +30,14 @@ pub(crate) struct OrderDelivery {
 }
 
 impl SqliteStore {
+    pub(crate) fn project_order_error(&self, project: &ProjectId, error: &str) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute("UPDATE project_changes SET error=?2 WHERE project_id=?1 AND field='task_order'
+            AND acknowledged=0 AND conflict_json IS NULL AND error IS NOT ?2
+            AND seq=(SELECT max(seq) FROM project_changes WHERE project_id=?1 AND field='task_order')",params![project.as_str(),error])?;
+        Ok(())
+    }
+
     pub(crate) fn project_order_delivery(
         &self,
         project: &ProjectId,
@@ -89,12 +96,17 @@ pub(super) fn reorder_in(
     let mut desired = previous.clone();
     desired.retain(|id| id != task.as_str());
     desired.insert((rank as usize).min(desired.len()), task.to_string());
-    if PlanningChanges::Project(project).record(
-        conn,
-        "task_order",
-        json!(previous),
-        json!(desired),
-    )? {
+    if previous != desired {
+        let base = observed_order(conn, project)?.map(|value| json!({"value":value}));
+        conn.execute(
+            "INSERT INTO project_changes(id,project_id,value_json,base_json) VALUES(?1,?2,?3,?4)",
+            params![
+                uuid::Uuid::new_v4().to_string(),
+                project.as_str(),
+                serde_json::to_string(&desired)?,
+                base.map(|value| value.to_string())
+            ],
+        )?;
         apply_order(conn, project, &desired)?;
     }
     Ok(())
@@ -240,16 +252,21 @@ pub(crate) fn observe_in(
     }
     // Only the latest pending intention projects locally; older attempts retain
     // delivery evidence without reviving a superseded local order.
-    let pending = PlanningChanges::Project(project)
-        .pending(conn)?
-        .into_iter()
-        .find(|c| c.field == "task_order");
+    let pending: Option<String> = conn
+        .query_row(
+            "SELECT value_json FROM project_changes WHERE project_id=?1
+        AND field='task_order' AND acknowledged=0 AND conflict_json IS NULL
+        AND seq=(SELECT max(seq) FROM project_changes WHERE project_id=?1 AND field='task_order')",
+            [project.as_str()],
+            |row| row.get(0),
+        )
+        .optional()?;
     let order = if let Some(change) = pending {
         include_members(
             &current_members(
                 conn,
                 project,
-                &serde_json::from_value::<Vec<String>>(change.value)?,
+                &serde_json::from_str::<Vec<String>>(&change)?,
             )?,
             &observed,
         )

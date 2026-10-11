@@ -1,4 +1,6 @@
 use crate::test_linear_input::{InventoryFixture, IssueFixture, SeedLinearSqlite};
+use crate::work::edit::WorkValue;
+use crate::work::project::ProjectStatus;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::Command;
@@ -1140,9 +1142,12 @@ fn project_creation_binding_and_activation_save_offline() {
             let changes = store.pending_project_changes(&id).unwrap();
             let state = changes
                 .iter()
-                .find(|change| change.field == "status")
+                .find(|change| change.value.field() == "project_status")
                 .unwrap();
-            assert_eq!(state.value, "started");
+            assert_eq!(
+                state.value,
+                WorkValue::ProjectStatus(ProjectStatus::Started)
+            );
             lf(repo.path(), home.path(), &args);
             lf(
                 repo.path(),
@@ -1170,7 +1175,7 @@ fn project_creation_binding_and_activation_save_offline() {
                     .pending_project_changes(&id)
                     .unwrap()
                     .iter()
-                    .all(|change| change.field != "status"));
+                    .all(|change| change.value.field() != "project_status"));
                 let losing: (String, String) = db
                     .query_row(
                         "SELECT value_json,conflict_json FROM project_changes WHERE id=?1",
@@ -1178,9 +1183,12 @@ fn project_creation_binding_and_activation_save_offline() {
                         |row| Ok((row.get(0)?, row.get(1)?)),
                     )
                     .unwrap();
-                assert_eq!(serde_json::from_str::<Value>(&losing.0).unwrap(), "started");
                 assert_eq!(
-                    serde_json::from_str::<Value>(&losing.1).unwrap()["value"],
+                    serde_json::from_str::<Value>(&losing.0).unwrap()["value"],
+                    "started"
+                );
+                assert_eq!(
+                    serde_json::from_str::<Value>(&losing.1).unwrap()["value"]["value"],
                     "completed"
                 );
                 assert_eq!(
@@ -1634,9 +1642,10 @@ fn project_edits_save_offline_in_both_connection_modes() {
             let pending = store.pending_project_changes(&id).unwrap();
             assert!(pending
                 .iter()
-                .all(|change| change.field != "name" && change.field != "workflow"));
+                .all(|change| change.value.field() != "project_name"
+                    && change.value.field() != "workflow"));
             let conflicts = read["sync"]["changes"].as_array().unwrap();
-            for field in ["name", "workflow"] {
+            for field in ["project_name", "workflow"] {
                 assert!(conflicts
                     .iter()
                     .any(|change| change["field"] == field && change["state"] == "adopted_linear"));
@@ -1737,7 +1746,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
                 .pending_project_changes(&id)
                 .unwrap()
                 .iter()
-                .all(|change| change.field != "krs"));
+                .all(|change| change.value.field() != "krs"));
             assert!(read["sync"]["changes"]
                 .as_array()
                 .unwrap()
@@ -1917,16 +1926,10 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
         let pending = store.pending_task_changes(&second).unwrap();
         assert_eq!(pending.len(), 3);
         assert!(store.pending_task_changes(&first).unwrap().is_empty());
-        let ordering = store
-            .pending_project_changes(&store.task(&second).unwrap().unwrap().project_id)
-            .unwrap();
-        assert_eq!(
-            ordering
-                .iter()
-                .filter(|change| change.field == "task_order")
-                .count(),
-            1
-        );
+        assert!(store
+            .project_order_delivery(&store.task(&second).unwrap().unwrap().project_id)
+            .unwrap()
+            .is_some());
         let edited = store.task(&second).unwrap().unwrap();
         let revision = || {
             conn.query_row(
@@ -1997,7 +2000,7 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
         if connected {
             assert!(sync.changes.iter().any(|c| c.field == "task_order"));
             assert_eq!(sync.changes.iter().any(|c| c.field == "creation"), !mapped);
-            assert!(sync.changes.iter().any(|c| c.field == "name"));
+            assert!(sync.changes.iter().any(|c| c.field == "task_title"));
         }
         let desktop = lf(
             repo.path(),
@@ -2033,7 +2036,11 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
                 )
                 .unwrap();
             let sync = store.task_planning_sync(&second).unwrap();
-            let conflict = sync.changes.iter().find(|c| c.field == "name").unwrap();
+            let conflict = sync
+                .changes
+                .iter()
+                .find(|c| c.field == "task_title")
+                .unwrap();
             assert_eq!(
                 conflict.state,
                 loopflow::store::planning_sync::PlanningSyncState::AdoptedLinear
@@ -2052,7 +2059,7 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             let changes = store.pending_task_changes(&second).unwrap();
             assert!(changes
                 .iter()
-                .all(|change| !matches!(change.field.as_str(), "name" | "assignee")));
+                .all(|change| !matches!(change.value.field(), "task_title" | "task_assignee")));
             let losing: (String, String) = conn
                 .query_row(
                     "SELECT value_json,conflict_json FROM task_changes WHERE id=?1",
@@ -2061,11 +2068,11 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
                 )
                 .unwrap();
             assert_eq!(
-                serde_json::from_str::<Value>(&losing.0).unwrap(),
+                serde_json::from_str::<Value>(&losing.0).unwrap()["value"],
                 "Saved offline"
             );
             assert_eq!(
-                serde_json::from_str::<Value>(&losing.1).unwrap()["value"],
+                serde_json::from_str::<Value>(&losing.1).unwrap()["value"]["value"],
                 "Concurrent title"
             );
             incoming.name = "Saved offline".into();
@@ -2324,10 +2331,16 @@ fn rotation_saves_membership_and_pending_effects_offline() {
         );
         let changes = store.pending_task_changes(&active.id).unwrap();
         assert_eq!(changes.len(), 1);
-        assert_eq!(changes[0].field, "project_id");
-        assert_eq!(changes[0].value, successor.as_str());
+        assert_eq!(changes[0].value.field(), "task_project");
+        assert_eq!(
+            changes[0].value,
+            WorkValue::TaskProject(successor.to_string())
+        );
         let status = store.pending_project_changes(&project.id).unwrap();
-        assert_eq!(status[0].value, "completed");
+        assert_eq!(
+            status[0].value,
+            WorkValue::ProjectStatus(ProjectStatus::Completed)
+        );
         // Released receipts nest content and preserve their original JSON bytes/order.
         let retained = format!(
             r#"{{"wave_id":"{}","successor_id":"{}","create":true,"project_name":"Next","content":{{"metric_targets":[],"workflow":"","krs":[{{"text":"Preserve work","holds":false}}]}}}}"#,
@@ -2446,8 +2459,8 @@ fn rotation_saves_membership_and_pending_effects_offline() {
         let pending = store.pending_project_changes(&existing.id).unwrap();
         assert!(pending
             .iter()
-            .any(|c| c.field == "status" && c.value == "started"));
-        assert!(pending.iter().any(|c| c.field == "krs"));
+            .any(|c| c.value == WorkValue::ProjectStatus(ProjectStatus::Started)));
+        assert!(pending.iter().any(|c| c.value.field() == "krs"));
         lf(repo.path(), home.path(), &args);
         assert_eq!(
             store.pending_project_changes(&existing.id).unwrap(),
@@ -2635,8 +2648,11 @@ fn refiling_saves_membership_offline_and_retains_inbound_changes() {
         assert!(moved.worktree.is_none());
         let changes = store.pending_task_changes(&task.id).unwrap();
         assert_eq!(changes.len(), 1);
-        assert_eq!(changes[0].field, "project_id");
-        assert_eq!(changes[0].value, projects[1].id.as_str());
+        assert_eq!(changes[0].value.field(), "task_project");
+        assert_eq!(
+            changes[0].value,
+            WorkValue::TaskProject(projects[1].id.to_string())
+        );
         // A repeated command may refresh exchange status, but cannot edit the Task
         // or enqueue another membership effect.
         let before = store.task(&task.id).unwrap().unwrap();
@@ -2918,12 +2934,10 @@ fn deletion_saves_offline_and_retains_execution_and_retry_identity() {
         if connected {
             assert!(output.as_str().unwrap().contains("Pending Linear sync"));
         }
-        let changes = store.pending_task_changes(&task_id).unwrap();
-        assert_eq!(changes.len(), 1);
-        assert_eq!(changes[0].field, "deleted");
-        assert_eq!(changes[0].value, true);
+        let changes = store.pending_task_deletion(&task_id).unwrap();
+        assert!(changes.is_some());
         lf(repo.path(), home.path(), &["task", "delete", id]);
-        assert_eq!(store.pending_task_changes(&task_id).unwrap(), changes);
+        assert_eq!(store.pending_task_deletion(&task_id).unwrap(), changes);
         let removed = store.task(&task_id).unwrap().unwrap();
         assert_eq!(store.work_status(&work).unwrap(), execution);
         assert_eq!(removed.worktree, before.worktree);
@@ -2935,7 +2949,7 @@ fn deletion_saves_offline_and_retains_execution_and_retry_identity() {
         drop(store);
         let reopened =
             loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
-        assert_eq!(reopened.pending_task_changes(&task_id).unwrap(), changes);
+        assert_eq!(reopened.pending_task_deletion(&task_id).unwrap(), changes);
     }
 }
 
@@ -3117,7 +3131,7 @@ fn planning_sync_tracks_creation_errors_uncertainty_conflicts_and_settlement() {
     let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     let status = || lf(repo.path(), home.path(), &["task", "status", id, "--json"])["sync"].clone();
     let initial = status();
-    for field in ["creation", "name", "comment"] {
+    for field in ["creation", "task_title", "comment"] {
         assert!(initial["changes"]
             .as_array()
             .unwrap()
@@ -3186,7 +3200,7 @@ fn planning_sync_tracks_creation_errors_uncertainty_conflicts_and_settlement() {
         [project],
     )
     .unwrap();
-    conn.execute(r#"UPDATE task_changes SET conflict_json='{"value":"Linear title"}',error=NULL WHERE task_id=?1"#, [id]).unwrap();
+    conn.execute(r#"UPDATE task_changes SET conflict_json='{"revision":null,"value":{"field":"task_title","value":"Linear title"}}',error=NULL WHERE task_id=?1"#, [id]).unwrap();
     conn.execute(
         "UPDATE task_comment_deliveries SET acknowledged=1,error=NULL",
         [],
@@ -3407,7 +3421,7 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
         }
     }
     // A pending membership save explains the difference without replacing content.
-    db.execute("INSERT INTO task_changes(id,task_id,field,value_json,base_json,attempted) VALUES('pending-membership',?1,'project_id',?2,'\"provider-project\"',0)", rusqlite::params![id.as_str(),serde_json::to_string(saved.project_id.as_str()).unwrap()]).unwrap();
+    db.execute("INSERT INTO task_changes(id,task_id,value_json,base_json,attempted) VALUES('pending-membership',?1,?2,NULL,0)", rusqlite::params![id.as_str(),serde_json::to_string(&WorkValue::TaskProject(saved.project_id.to_string())).unwrap()]).unwrap();
     assert_eq!(read()["planning_state"], "available");
     store
         .observe_pm_issue_change("provider-task", None, true)

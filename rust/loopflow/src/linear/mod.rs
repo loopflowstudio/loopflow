@@ -1444,23 +1444,25 @@ impl LinearClient {
 
     pub(crate) async fn project_field_input(
         &self,
-        field: &str,
-        value: &Value,
+        value: &crate::work::edit::WorkValue,
         content: &str,
     ) -> LinearResult<Value> {
-        match field {
-            "name" => Ok(json!({"name": value})),
-            "summary" => Ok(json!({"description": value})),
-            "status" => {
-                let status = serde_json::from_value(value.clone())
-                    .map_err(|e| LinearError::Message(format!("invalid Project status: {e}")))?;
-                Ok(json!({"statusId": self.project_status_id(status).await?}))
+        use crate::work::edit::WorkValue;
+        match value {
+            WorkValue::ProjectName(value) => Ok(json!({"name": value})),
+            WorkValue::ProjectSummary(value) => Ok(json!({"description": value})),
+            WorkValue::ProjectStatus(value) => {
+                Ok(json!({"statusId": self.project_status_id(*value).await?}))
             }
-            "description" | "workflow" | "krs" | "metric_targets" => {
-                Ok(json!({"content": patch_project_field(content, field, value)?}))
+            WorkValue::ProjectDescription(_)
+            | WorkValue::Workflow(_)
+            | WorkValue::Krs(_)
+            | WorkValue::MetricTargets(_) => {
+                Ok(json!({"content": patch_project_field(content, value)?}))
             }
             _ => Err(LinearError::Message(format!(
-                "unsupported Project field {field}"
+                "unsupported Project field {}",
+                value.field()
             ))),
         }
     }
@@ -2304,37 +2306,27 @@ struct ProjectNode {
 }
 
 // Replace only the selected planning field, retaining unrelated provider prose.
-fn patch_project_field(content: &str, field: &str, value: &Value) -> LinearResult<String> {
+fn patch_project_field(
+    content: &str,
+    value: &crate::work::edit::WorkValue,
+) -> LinearResult<String> {
+    use crate::work::edit::WorkValue;
     use project_document::ProjectField::{Krs, Targets, Workflow};
     let document = parse_project_document(content)?;
-    if field == "description" {
-        let description: String = serde_json::from_value(value.clone())
-            .map_err(|e| LinearError::Message(e.to_string()))?;
-        return document.replace_description(&description);
-    }
-    let (owner, replacement) = match field {
-        "workflow" => {
-            let workflow: String = serde_json::from_value(value.clone())
-                .map_err(|e| LinearError::Message(e.to_string()))?;
-            (Workflow, format!("workflow: {workflow}"))
+    let (owner, replacement) = match value {
+        WorkValue::ProjectDescription(Some(description)) => {
+            return document.replace_description(description)
         }
-        "krs" => {
-            let krs: Vec<crate::work::project::ProjectKR> =
-                serde_json::from_value(value.clone())
-                    .map_err(|e| LinearError::Message(e.to_string()))?;
-            (Krs, project_document::render_krs(&krs))
-        }
-        "metric_targets" => {
-            let targets: Vec<crate::work::wave::metrics::MetricTarget> =
-                serde_json::from_value(value.clone())
-                    .map_err(|e| LinearError::Message(e.to_string()))?;
-            crate::work::project::validate_metric_targets(&targets)
-                .map_err(LinearError::Message)?;
-            (Targets, project_document::render_metric_targets(&targets))
+        WorkValue::Workflow(workflow) => (Workflow, format!("workflow: {workflow}")),
+        WorkValue::Krs(krs) => (Krs, project_document::render_krs(krs)),
+        WorkValue::MetricTargets(targets) => {
+            crate::work::project::validate_metric_targets(targets).map_err(LinearError::Message)?;
+            (Targets, project_document::render_metric_targets(targets))
         }
         _ => {
             return Err(LinearError::Message(format!(
-                "unsupported content field {field}"
+                "unsupported content field {}",
+                value.field()
             )))
         }
     };
@@ -2582,6 +2574,7 @@ fn first_meaningful_paragraph(description: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use crate::work::edit::WorkValue;
     #[tokio::test]
     async fn project_markdown_prose_replacement_preserves_managed_fields() {
         let client =
@@ -2589,7 +2582,7 @@ mod tests {
         let source = "Old introduction.\nworkflow: code\n## Metric targets\nTarget rationale.\n```json\n[{\"metric_id\":\"proof\",\"target\":{\"kind\":\"at_least\",\"value\":1.0}}]\n```\n## KRs\nPreamble.\n- [ ] Keep this criterion\n  across lines.\n\nOld closing.\n";
         let before = super::parse_project_document(source).unwrap();
         for description in ["", "New authored prose.", "## Examples\n````markdown\n```yaml\nworkflow: example\n```\n## KRs\n- [x] Example only\n````\nClosing prose.\n"] {
-            let input = client.project_field_input("description", &serde_json::json!(description), source).await.unwrap();
+            let input = client.project_field_input(&WorkValue::ProjectDescription(Some(description.into())), source).await.unwrap();
             let after = input["content"].as_str().unwrap();
             let parsed = super::parse_project_document(after).unwrap();
             assert_eq!(parsed.description().trim(), description.trim());
@@ -2607,14 +2600,17 @@ mod tests {
         ] {
             assert!(
                 client
-                    .project_field_input("description", &serde_json::json!(description), source)
+                    .project_field_input(
+                        &WorkValue::ProjectDescription(Some(description.into())),
+                        source
+                    )
                     .await
                     .is_err(),
                 "{description}"
             );
         }
         assert!(client
-            .project_field_input("description", &serde_json::Value::Null, source)
+            .project_field_input(&WorkValue::ProjectDescription(None), source)
             .await
             .is_err());
     }
@@ -2636,7 +2632,7 @@ mod tests {
                 ("krs", serde_json::json!([{"text":"New criterion","holds":true}])),
                 ("metric_targets", serde_json::json!([{"metric_id":"proof","target":{"kind":"at_least","value":1.0}}])),
             ] {
-                let after = super::patch_project_field(&source, field, &value).unwrap();
+                let after = super::patch_project_field(&source, &serde_json::from_value(serde_json::json!({"field":field,"value":value})).unwrap()).unwrap();
                 assert_eq!(after.matches(example).count(), 2, "{field}: {after}");
                 for prose in ["Target rationale.\n", "Target note.\n", "KR preamble.\n", "Paragraph after the criterion.\n", "## Notes\nKeep these bytes.\n"] {
                     assert!(after.contains(prose), "{field}: {after}");
@@ -2650,25 +2646,16 @@ mod tests {
     }
 
     #[test]
-    fn project_markdown_edits_reject_invalid_replacements() {
-        let source = "workflow: code\n## KRs\n- [ ] Keep this proof\n";
-        for (field, value) in [
-            ("workflow", serde_json::json!(null)),
-            ("krs", serde_json::json!([{"text": "Missing judgment"}])),
-            (
-                "metric_targets",
-                serde_json::json!([
-                    {"metric_id": "rate", "target": {"kind": "at_least", "value": 1.0}},
-                    {"metric_id": "rate", "target": {"kind": "at_most", "value": 2.0}},
-                ]),
-            ),
-            ("unsupported", serde_json::json!("value")),
-        ] {
-            assert!(
-                super::patch_project_field(source, field, &value).is_err(),
-                "{field}"
-            );
-        }
+    fn project_markdown_edits_reject_duplicate_targets() {
+        let targets = serde_json::from_value(serde_json::json!([
+            {"metric_id":"rate","target":{"kind":"at_least","value":1.0}},
+            {"metric_id":"rate","target":{"kind":"at_most","value":2.0}}
+        ]))
+        .unwrap();
+        assert!(
+            super::patch_project_field("workflow: code", &WorkValue::MetricTargets(targets))
+                .is_err()
+        );
     }
 
     #[test]
@@ -2676,8 +2663,10 @@ mod tests {
         let source = "## Metric targets\n[]\n## KRs\nPreamble.\n- [ ] Existing proof\n";
         let after = super::patch_project_field(
             source,
-            "krs",
-            &serde_json::json!([{"text":"New proof","holds":true}]),
+            &WorkValue::Krs(vec![crate::work::project::ProjectKR {
+                text: "New proof".into(),
+                holds: true,
+            }]),
         )
         .unwrap();
         assert!(after.contains("Preamble.\n"));

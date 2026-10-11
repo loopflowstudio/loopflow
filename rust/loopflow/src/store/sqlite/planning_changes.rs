@@ -3,11 +3,10 @@
 use super::planning_write;
 use crate::work::edit::WorkValue as Edit;
 use rusqlite::{params, Connection, OptionalExtension};
-use serde_json::Value;
 
 use super::SqliteStore;
 use crate::durable::{ProjectId, TaskId};
-use crate::store::planning_sync::PlanningChange;
+use crate::store::planning_sync::{PlanningBaseline, PlanningChange, TaskDeletion};
 use crate::store::{StoreError, StoreResult};
 
 impl SqliteStore {
@@ -96,7 +95,7 @@ impl SqliteStore {
                 [id.as_str()],
                 |row| row.get(0),
             )?;
-            if deleted != (change.field == "deleted") {
+            if deleted {
                 return Ok(false);
             }
         }
@@ -109,7 +108,7 @@ impl SqliteStore {
              AND NOT EXISTS(SELECT 1 FROM {owner}_changes WHERE {owner}_id=?2 AND field=?3
                  AND attempted=1 AND acknowledged=0 AND conflict_json IS NULL)"
             ),
-            params![change.id, id, change.field],
+            params![change.id, id, change.value.field()],
         )? == 1;
         tx.commit()?;
         Ok(changed)
@@ -122,15 +121,8 @@ impl SqliteStore {
         if owner.observed_revision(&tx)?.as_deref() != Some(revision) {
             return Ok(());
         }
-        if let Some(change) = owner
-            .pending(&tx)?
-            .into_iter()
-            .find(|c| c.field == "deleted")
-        {
-            let baseline = change
-                .base
-                .as_ref()
-                .and_then(|base| base["revision"].as_str());
+        if let Some(change) = pending_deletion(&tx, id)? {
+            let baseline = change.base_revision.as_deref();
             // Deletion competes with the whole issue. Only an explicitly active
             // issue at a newer revision can restore planning visibility.
             if baseline.is_some()
@@ -158,7 +150,7 @@ impl SqliteStore {
     pub(crate) fn acknowledge_task_deletion(
         &self,
         id: &TaskId,
-        change: &PlanningChange,
+        change: &TaskDeletion,
         revision: Option<&str>,
     ) -> StoreResult<bool> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
@@ -184,7 +176,7 @@ impl SqliteStore {
     pub(crate) fn planning_field_error(
         &self,
         owner: PlanningChanges<'_>,
-        change: &PlanningChange,
+        receipt: &str,
         error: &str,
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -194,7 +186,7 @@ impl SqliteStore {
                 "UPDATE {owner}_changes SET error=?3 WHERE id=?1 AND {owner}_id=?2
             AND acknowledged=0 AND conflict_json IS NULL AND error IS NOT ?3"
             ),
-            params![change.id, id, error],
+            params![receipt, id, error],
         )?;
         Ok(())
     }
@@ -219,13 +211,11 @@ impl<'a> PlanningChanges<'a> {
         };
         let current = planning_write::read(conn, table, self.owner().1)?;
         for edit in edits {
-            let field = linear_field(edit)
-                .ok_or_else(|| StoreError::InvalidData("Edit has no Linear field".into()))?;
             let previous = current
                 .iter()
                 .find(|previous| previous.field() == edit.field())
                 .ok_or_else(|| StoreError::InvalidData("Edit belongs to another owner".into()))?;
-            self.record(conn, field, previous.value()?, edit.value()?)?;
+            self.record(conn, previous, edit)?;
         }
         planning_write::local(
             conn,
@@ -234,66 +224,65 @@ impl<'a> PlanningChanges<'a> {
         Ok(())
     }
 
-    // A matching attempted write can arrive through either acquisition or readback.
-    // Rebase later saves before conflict reconciliation; never acknowledge them.
-    fn observe_attempts(self, conn: &Connection, observed: &Value) -> StoreResult<()> {
+    // A matching attempted write can arrive through acquisition or readback.
+    // Rebase later unsent saves before reconciliation, without acknowledging them.
+    fn observe_attempts(
+        self,
+        conn: &Connection,
+        revision: Option<&str>,
+        observed: &[Edit],
+    ) -> StoreResult<()> {
         let (owner, id) = self.owner();
         let mut query = conn.prepare(&format!(
-            "SELECT id,field,value_json,base_json FROM {owner}_changes
-             WHERE {owner}_id=?1 AND attempted=1 AND acknowledged=0 AND conflict_json IS NULL ORDER BY seq"
+            "SELECT id,value_json,base_json FROM {owner}_changes
+             WHERE {owner}_id=?1 AND field NOT IN ('deleted','task_order')
+             AND attempted=1 AND acknowledged=0 AND conflict_json IS NULL ORDER BY seq"
         ))?;
         let changes = query
             .query_and_then([id], read_change)?
             .collect::<StoreResult<Vec<_>>>()?;
-        for PlanningChange {
-            id: receipt,
-            field,
-            value,
-            base,
-        } in changes
-        {
-            let Some(remote) = observed.get(&field) else {
+        for change in changes {
+            let Some(remote) = observed
+                .iter()
+                .find(|value| value.field() == change.value.field())
+            else {
                 continue;
             };
-            let remote = self.normalize(conn, &field, remote.clone())?;
-            if crate::linear::observations::revision_nanos(observed["revision"].as_str())?
+            if crate::linear::observations::revision_nanos(revision)?
                 < crate::linear::observations::revision_nanos(
-                    base.as_ref().and_then(|b| b["revision"].as_str()),
+                    change.base.as_ref().and_then(|b| b.revision.as_deref()),
                 )?
             {
                 continue;
             }
-            if remote == value {
-                let baseline =
-                    serde_json::json!({"revision": observed["revision"], "value": remote});
-                conn.execute(
-                    &format!(
-                        "UPDATE {owner}_changes SET base_json=?2 WHERE {owner}_id=?3 AND field=?4
-                     AND seq>(SELECT seq FROM {owner}_changes WHERE id=?1)
-                     AND attempted=0 AND acknowledged=0 AND conflict_json IS NULL
-                     AND (base_json IS ?5 OR (base_json IS NOT NULL AND ?5 IS NOT NULL
-                         AND json_extract(base_json,'$.value') IS json_extract(?5,'$.value')))"
-                    ),
-                    params![
-                        receipt,
-                        baseline.to_string(),
-                        id,
-                        field,
-                        base.as_ref().map(Value::to_string)
-                    ],
-                )?;
-                conn.execute(
-                    &format!("UPDATE {owner}_changes SET acknowledged=1,acknowledged_revision=?2,error=NULL WHERE id=?1"),
-                    params![receipt, observed["revision"].as_str()],
-                )?;
-            } else if base.as_ref().is_none_or(|base| base["value"] != remote) {
+            let baseline = PlanningBaseline {
+                revision: revision.map(str::to_owned),
+                value: Some(remote.clone()),
+            };
+            if remote == &change.value {
+                let mut later = conn.prepare(&format!(
+                    "SELECT id,value_json,base_json FROM {owner}_changes
+                     WHERE {owner}_id=?1 AND field=?2 AND seq>(SELECT seq FROM {owner}_changes WHERE id=?3)
+                     AND attempted=0 AND acknowledged=0 AND conflict_json IS NULL"
+                ))?;
+                let later = later
+                    .query_and_then(params![id, change.value.field(), change.id], read_change)?
+                    .collect::<StoreResult<Vec<_>>>()?;
+                for saved in later {
+                    if saved.base.as_ref().map(|b| &b.value)
+                        == change.base.as_ref().map(|b| &b.value)
+                    {
+                        conn.execute(
+                            &format!("UPDATE {owner}_changes SET base_json=?2 WHERE id=?1"),
+                            params![saved.id, serde_json::to_string(&baseline)?],
+                        )?;
+                    }
+                }
+                conn.execute(&format!("UPDATE {owner}_changes SET acknowledged=1,acknowledged_revision=?2,error=NULL WHERE id=?1"), params![change.id,revision])?;
+            } else if change.base.as_ref().and_then(|b| b.value.as_ref()) != Some(remote) {
                 conn.execute(
                     &format!("UPDATE {owner}_changes SET conflict_json=?2,error=NULL WHERE id=?1"),
-                    params![
-                        receipt,
-                        serde_json::json!({"revision":observed["revision"],"value":remote})
-                            .to_string()
-                    ],
+                    params![change.id, serde_json::to_string(&baseline)?],
                 )?;
             }
         }
@@ -330,112 +319,84 @@ impl<'a> PlanningChanges<'a> {
             .flatten())
     }
 
-    // A receipt needs only its field's baseline. Partial prose keeps its own
-    // revision; unrelated fields cannot become another writable provider model.
-    fn baseline(self, conn: &Connection, field: &str) -> StoreResult<Option<Value>> {
-        let fields = match self {
-            Self::Task(_) => "o.revision, CASE ?2
-                WHEN 'deleted' THEN 'false'
-                WHEN 'name' THEN CASE WHEN o.name IS NOT NULL THEN json_quote(o.name) END
-                WHEN 'description' THEN CASE WHEN o.description IS NOT NULL THEN json_quote(o.description) END
-                WHEN 'project_id' THEN CASE WHEN o.project_id_observed THEN json_quote(o.claimed_project_id) END
-                WHEN 'assignee' THEN CASE WHEN o.assignee_observed THEN json_quote(o.assignee) END
-                WHEN 'due_date' THEN CASE WHEN o.due_date_observed THEN json_quote(o.due_date) END END",
-            Self::Project(_) => "CASE WHEN ?2='description' THEN o.description_revision ELSE o.revision END,
-                CASE ?2 WHEN 'description' THEN CASE WHEN o.description_observed_at IS NOT NULL THEN json_quote(o.description) END
-                WHEN 'name' THEN CASE WHEN o.name IS NOT NULL THEN json_quote(o.name) END
-                WHEN 'summary' THEN CASE WHEN o.summary IS NOT NULL THEN json_quote(o.summary) END
-                WHEN 'workflow' THEN CASE WHEN o.workflow IS NOT NULL THEN json_quote(o.workflow) END
-                WHEN 'status' THEN CASE WHEN o.status IS NOT NULL THEN json_quote(o.status) END
-                WHEN 'krs' THEN o.krs
-                WHEN 'metric_targets' THEN o.metric_targets
-                WHEN 'task_order' THEN COALESCE(o.task_order_json,'null') END",
+    // Read only the edited field's observation. Prose keeps its own revision;
+    // an explicitly null membership is distinct from an omitted observation.
+    fn baseline(self, conn: &Connection, edit: &Edit) -> StoreResult<Option<PlanningBaseline>> {
+        let (column, presence) = match edit {
+            Edit::TaskTitle(_) | Edit::ProjectName(_) => ("o.name", "o.name IS NOT NULL"),
+            Edit::TaskDescription(_) => ("o.description", "o.description IS NOT NULL"),
+            Edit::ProjectDescription(_) => ("o.description", "o.description_observed_at IS NOT NULL"),
+            Edit::ProjectSummary(_) => ("o.summary", "o.summary IS NOT NULL"),
+            Edit::ProjectStatus(_) => ("o.status", "o.status IS NOT NULL"),
+            Edit::Workflow(_) => ("o.workflow", "o.workflow IS NOT NULL"),
+            Edit::Krs(_) => ("o.krs", "o.krs IS NOT NULL"),
+            Edit::MetricTargets(_) => ("o.metric_targets", "o.metric_targets IS NOT NULL"),
+            Edit::TaskAssignee(_) => ("o.assignee", "o.assignee_observed"),
+            Edit::TaskProject(_) => ("COALESCE((SELECT id FROM projects WHERE id=o.claimed_project_id OR external_project_id=o.claimed_project_id),o.claimed_project_id)", "o.project_id_observed"),
+            _ => return Err(StoreError::InvalidData("Edit has no Linear field receipt".into())),
         };
-        let baseline = conn
-            .query_row(
-                &format!("SELECT {fields} FROM {}", self.observation_source()),
-                params![self.owner().1, field],
-                |row| {
-                    Ok((
-                        row.get::<_, Option<String>>(0)?,
-                        row.get::<_, Option<String>>(1)?,
-                    ))
-                },
-            )
-            .optional()?;
-        let Some((revision, Some(value))) = baseline else {
-            return Ok(None);
-        };
-        let value = if matches!(self, Self::Project(_)) && field == "task_order" {
-            serde_json::to_value(serde_json::from_str::<Option<Vec<String>>>(&value)?)?
+        let revision = if matches!(edit, Edit::ProjectDescription(_)) {
+            "o.description_revision"
         } else {
-            serde_json::from_str(&value)?
+            "o.revision"
         };
-        Ok(Some(serde_json::json!({
-            "revision": revision,
-            "value": self.normalize(conn, field, value)?,
-        })))
+        let mut query = conn.prepare(&format!(
+            "SELECT {revision},{column} FROM {} AND {presence}",
+            self.observation_source()
+        ))?;
+        let baseline = query
+            .query_and_then([self.owner().1], |row| -> StoreResult<PlanningBaseline> {
+                let value = match edit {
+                    Edit::TaskTitle(_) => Some(Edit::TaskTitle(row.get(1)?)),
+                    Edit::ProjectName(_) => Some(Edit::ProjectName(row.get(1)?)),
+                    Edit::TaskDescription(_) => Some(Edit::TaskDescription(row.get(1)?)),
+                    Edit::ProjectDescription(_) => Some(Edit::ProjectDescription(row.get(1)?)),
+                    Edit::ProjectSummary(_) => Some(Edit::ProjectSummary(row.get(1)?)),
+                    Edit::ProjectStatus(_) => Some(Edit::ProjectStatus(serde_json::from_value(
+                        serde_json::Value::String(row.get(1)?),
+                    )?)),
+                    Edit::Workflow(_) => Some(Edit::Workflow(row.get(1)?)),
+                    Edit::Krs(_) => {
+                        Some(Edit::Krs(serde_json::from_str(&row.get::<_, String>(1)?)?))
+                    }
+                    Edit::MetricTargets(_) => Some(Edit::MetricTargets(serde_json::from_str(
+                        &row.get::<_, String>(1)?,
+                    )?)),
+                    Edit::TaskAssignee(_) => Some(Edit::TaskAssignee(row.get(1)?)),
+                    Edit::TaskProject(_) => row.get::<_, Option<String>>(1)?.map(Edit::TaskProject),
+                    _ => unreachable!("receipt field was selected above"),
+                };
+                Ok(PlanningBaseline {
+                    revision: row.get(0)?,
+                    value,
+                })
+            })?
+            .next()
+            .transpose();
+        baseline
     }
 
     pub(super) fn record(
         self,
         conn: &Connection,
-        field: &str,
-        previous: Value,
-        value: Value,
+        previous: &Edit,
+        value: &Edit,
     ) -> StoreResult<bool> {
-        let previous = self.normalize(conn, field, previous)?;
-        let value = self.normalize(conn, field, value)?;
         if previous == value {
             return Ok(false);
         }
         let (owner, id) = self.owner();
-        let base = self.baseline(conn, field)?;
-        conn.execute(
-            &format!(
-                "INSERT INTO {owner}_changes(id,{owner}_id,field,value_json,base_json)
-                VALUES(?1,?2,?3,?4,?5)"
-            ),
-            params![
-                uuid::Uuid::new_v4().to_string(),
-                id,
-                field,
-                value.to_string(),
-                base.map(|v| v.to_string())
-            ],
-        )?;
+        let base = self.baseline(conn, value)?;
+        conn.execute(&format!("INSERT INTO {owner}_changes(id,{owner}_id,value_json,base_json) VALUES(?1,?2,?3,?4)"),
+            params![uuid::Uuid::new_v4().to_string(),id,serde_json::to_string(value)?,base.map(|b|serde_json::to_string(&b)).transpose()?])?;
         Ok(true)
-    }
-
-    // Membership receipts retain durable identity even when a provider mapping arrives later.
-    pub(super) fn normalize(
-        self,
-        conn: &Connection,
-        field: &str,
-        value: Value,
-    ) -> StoreResult<Value> {
-        if matches!(self, Self::Task(_)) && field == "project_id" {
-            if let Some(selector) = value.as_str() {
-                let id: Option<String> = conn
-                    .query_row(
-                        "SELECT id FROM projects WHERE id=?1 OR external_project_id=?1",
-                        [selector],
-                        |row| row.get(0),
-                    )
-                    .optional()?;
-                if let Some(id) = id {
-                    return Ok(Value::String(id));
-                }
-            }
-        }
-        Ok(value)
     }
 
     pub(super) fn pending(self, conn: &Connection) -> StoreResult<Vec<PlanningChange>> {
         let (owner, id) = self.owner();
         let mut query = conn.prepare(&format!(
-            "SELECT id,field,value_json,base_json FROM {owner}_changes c
-             WHERE {owner}_id=?1 AND acknowledged=0 AND conflict_json IS NULL AND seq=(SELECT max(seq) FROM {owner}_changes
+            "SELECT id,value_json,base_json FROM {owner}_changes c
+             WHERE {owner}_id=?1 AND field NOT IN ('deleted','task_order') AND acknowledged=0 AND conflict_json IS NULL AND seq=(SELECT max(seq) FROM {owner}_changes
                  WHERE {owner}_id=c.{owner}_id AND field=c.field) ORDER BY seq"
         ))?;
         let changes = query.query_and_then([id], read_change)?;
@@ -451,65 +412,89 @@ impl<'a> PlanningChanges<'a> {
         edits: &mut [Edit],
     ) -> StoreResult<()> {
         let (owner, _) = self.owner();
-        let mut observed = serde_json::json!({"revision": revision});
-        for edit in edits.iter() {
-            if let Some(field) = linear_field(edit) {
-                observed[field] = self.normalize(conn, field, edit.value()?)?;
-            }
-        }
-        self.observe_attempts(conn, &observed)?;
+        self.observe_attempts(conn, revision, edits)?;
         for change in self.pending(conn)? {
             let Some(edit) = edits
                 .iter_mut()
-                .find(|edit| linear_field(edit) == Some(&change.field))
+                .find(|edit| edit.field() == change.value.field())
             else {
                 continue;
             };
-            let remote = &observed[&change.field];
-            if remote != &change.value
-                && change
-                    .base
-                    .as_ref()
-                    .is_none_or(|base| &base["value"] != remote)
+            if edit != &change.value
+                && change.base.as_ref().and_then(|b| b.value.as_ref()) != Some(edit)
             {
-                conn.execute(
-                    &format!("UPDATE {owner}_changes SET conflict_json=?2 WHERE id=?1 AND conflict_json IS NULL"),
-                    params![change.id, serde_json::json!({"revision": revision, "value": remote}).to_string()],
-                )?;
+                let conflict = PlanningBaseline {
+                    revision: revision.map(str::to_owned),
+                    value: Some(edit.clone()),
+                };
+                conn.execute(&format!("UPDATE {owner}_changes SET conflict_json=?2 WHERE id=?1 AND conflict_json IS NULL"), params![change.id,serde_json::to_string(&conflict)?])?;
             } else {
-                // Decode only the saved field, never reconstruct a provider model.
-                *edit = edit.with_value(change.value)?;
+                *edit = change.value;
             }
         }
         Ok(())
     }
 }
 
-// Linear receipt names belong at the adapter boundary, not in the Work model.
-pub(super) fn linear_field(edit: &Edit) -> Option<&'static str> {
-    match edit {
-        Edit::ProjectName(_) | Edit::TaskTitle(_) => Some("name"),
-        Edit::ProjectSummary(_) => Some("summary"),
-        Edit::ProjectDescription(_) | Edit::TaskDescription(_) => Some("description"),
-        Edit::ProjectStatus(_) => Some("status"),
-        Edit::Workflow(_) => Some("workflow"),
-        Edit::Krs(_) => Some("krs"),
-        Edit::MetricTargets(_) => Some("metric_targets"),
-        Edit::TaskAssignee(_) => Some("assignee"),
-        Edit::TaskProject(_) => Some("project_id"),
-        _ => None,
-    }
-}
-
 fn read_change(row: &rusqlite::Row<'_>) -> StoreResult<PlanningChange> {
-    let value: String = row.get(2)?;
-    let base: Option<String> = row.get(3)?;
+    let value: String = row.get(1)?;
+    let base: Option<String> = row.get(2)?;
     Ok(PlanningChange {
         id: row.get(0)?,
-        field: row.get(1)?,
         value: serde_json::from_str(&value)?,
         base: base.map(|value| serde_json::from_str(&value)).transpose()?,
     })
+}
+
+pub(super) fn pending_deletion(
+    conn: &Connection,
+    task: &TaskId,
+) -> StoreResult<Option<TaskDeletion>> {
+    Ok(conn
+        .query_row(
+            "SELECT id,json_extract(base_json,'$.revision') FROM task_changes
+        WHERE task_id=?1 AND field='deleted' AND acknowledged=0 AND conflict_json IS NULL
+        AND seq=(SELECT max(seq) FROM task_changes WHERE task_id=?1 AND field='deleted')",
+            [task.as_str()],
+            |row| {
+                Ok(TaskDeletion {
+                    id: row.get(0)?,
+                    base_revision: row.get(1)?,
+                })
+            },
+        )
+        .optional()?)
+}
+
+impl SqliteStore {
+    pub fn pending_task_deletion(&self, task: &TaskId) -> StoreResult<Option<TaskDeletion>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        pending_deletion(&conn, task)
+    }
+
+    pub(crate) fn attempt_task_deletion(
+        &self,
+        task: &TaskId,
+        receipt: &TaskDeletion,
+        revision: &str,
+    ) -> StoreResult<bool> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        if PlanningChanges::Task(task)
+            .observed_revision(&tx)?
+            .as_deref()
+            != Some(revision)
+        {
+            return Ok(false);
+        }
+        let changed=tx.execute("UPDATE task_changes SET attempted=1,error=NULL WHERE id=?1 AND task_id=?2
+            AND field='deleted' AND attempted=0 AND acknowledged=0 AND conflict_json IS NULL
+            AND EXISTS(SELECT 1 FROM tasks WHERE id=?2 AND planning_deleted_at IS NOT NULL)
+            AND seq=(SELECT max(seq) FROM task_changes WHERE task_id=?2 AND field='deleted')
+            AND NOT EXISTS(SELECT 1 FROM task_changes WHERE task_id=?2 AND field='deleted' AND attempted=1 AND acknowledged=0 AND conflict_json IS NULL)",params![receipt.id,task.as_str()])?==1;
+        tx.commit()?;
+        Ok(changed)
+    }
 }
 
 #[cfg(test)]
@@ -520,6 +505,59 @@ mod tests {
     use super::PlanningChanges;
     use crate::durable::TaskId;
     use crate::store::migrations::{apply_before_current_draft, current_draft_sql};
+    use crate::work::edit::WorkValue;
+
+    #[test]
+    fn released_attempt_acknowledgment_rebases_without_clearing_later_save() {
+        let conn = Connection::open_in_memory().unwrap();
+        apply_before_current_draft(&conn, "planning_peers");
+        conn.execute_batch(include_str!(
+            "../../../tests/fixtures/migrations/creation_baselines.sql"
+        ))
+        .unwrap();
+        let sql = current_draft_sql("planning_peers");
+        conn.execute_batch(&sql).unwrap();
+        crate::store::migrations::seed_peer_planning(&conn, &sql).unwrap();
+        let task = TaskId::from_raw("task-receipt");
+        let owner = PlanningChanges::Task(&task);
+        let before = owner.pending(&conn).unwrap();
+        let membership = before.iter().find(|c| c.id == "null-membership").unwrap();
+        assert!(membership.base.is_some());
+        assert_eq!(membership.base.as_ref().unwrap().value, None);
+        let mut observed = vec![WorkValue::TaskTitle(Some("Attempted title".into()))];
+        owner
+            .reconcile_edits(&conn, Some("2026-10-10T00:00:00Z"), &mut observed)
+            .unwrap();
+        assert_eq!(
+            observed,
+            vec![WorkValue::TaskTitle(Some("Later save".into()))]
+        );
+        assert!(conn
+            .query_row(
+                "SELECT acknowledged FROM task_changes WHERE id='attempted-title'",
+                [],
+                |row| row.get::<_, bool>(0)
+            )
+            .unwrap());
+        assert!(!conn
+            .query_row(
+                "SELECT acknowledged FROM task_changes WHERE id='later-title'",
+                [],
+                |row| row.get::<_, bool>(0)
+            )
+            .unwrap());
+        let pending = owner.pending(&conn).unwrap();
+        let later = pending.iter().find(|c| c.id == "later-title").unwrap();
+        assert_eq!(
+            later.base.as_ref().unwrap().value,
+            Some(WorkValue::TaskTitle(Some("Attempted title".into())))
+        );
+        assert_eq!(later.value, WorkValue::TaskTitle(Some("Later save".into())));
+        assert_eq!(
+            pending.iter().find(|c| c.id == "null-membership").unwrap(),
+            membership
+        );
+    }
 
     #[test]
     fn membership_receipts_preserve_absent_null_and_contradictory_released_claims() {
@@ -562,9 +600,16 @@ mod tests {
                 assert!(PlanningChanges::Task(&task)
                     .record(
                         &conn,
-                        field_name,
-                        json!("project-proof"),
-                        json!("desired-project")
+                        &if field_name == "project_id" {
+                            WorkValue::TaskProject("project-proof".into())
+                        } else {
+                            WorkValue::TaskAssignee(Some("before".into()))
+                        },
+                        &if field_name == "project_id" {
+                            WorkValue::TaskProject("desired-project".into())
+                        } else {
+                            WorkValue::TaskAssignee(Some("after".into()))
+                        }
                     )
                     .unwrap());
                 let base: Option<String> = conn
@@ -576,7 +621,12 @@ mod tests {
                     .unwrap();
                 assert_eq!(
                     base.map(|value| serde_json::from_str::<serde_json::Value>(&value).unwrap()),
-                    expected
+                    expected.map(|mut expected| {
+                        if field_name=="assignee" || !expected["value"].is_null() {
+                            expected["value"]=json!({"field":if field_name=="project_id" {"task_project"} else {"task_assignee"},"value":expected["value"]});
+                        }
+                        expected
+                    })
                 );
             }
         }

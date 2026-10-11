@@ -94,7 +94,7 @@ UPDATE pm_items SET revision=json_extract(body,'$.revision'),
     project_id_observed=json_type(body,'$.project_id') IS NOT NULL;
 ALTER TABLE pm_items DROP COLUMN body;
 
--- Add prose receipts without changing captured values, attempts or sequence identity.
+-- Typed content receipts retain sequence, attempts, baselines and conflicts.
 DROP TRIGGER store_revision_project_changes_insert;
 DROP TRIGGER store_revision_project_changes_update;
 DROP TRIGGER store_revision_project_changes_delete;
@@ -105,7 +105,7 @@ CREATE TABLE project_changes (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
     id TEXT NOT NULL UNIQUE,
     project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
-    field TEXT NOT NULL CHECK(field IN ('name','summary','description','workflow','krs','metric_targets','status','task_order')),
+    field TEXT GENERATED ALWAYS AS (COALESCE(json_extract(value_json,'$.field'),'task_order')) VIRTUAL NOT NULL CHECK(field IN ('project_name','project_summary','project_description','workflow','krs','metric_targets','project_status','task_order')),
     value_json TEXT NOT NULL CHECK(json_valid(value_json)),
     base_json TEXT CHECK(base_json IS NULL OR json_valid(base_json)),
     conflict_json TEXT CHECK(conflict_json IS NULL OR json_valid(conflict_json)),
@@ -114,7 +114,12 @@ CREATE TABLE project_changes (
     acknowledged_revision TEXT,
     acknowledged INTEGER NOT NULL DEFAULT 0 CHECK(acknowledged IN (0,1))
 );
-INSERT INTO project_changes SELECT * FROM retained_project_changes;
+INSERT INTO project_changes(order_effects_json,seq,id,project_id,value_json,base_json,conflict_json,attempted,error,acknowledged_revision,acknowledged)
+SELECT order_effects_json,seq,id,project_id,
+    CASE WHEN field='task_order' THEN value_json ELSE json_object('field',CASE field WHEN 'name' THEN 'project_name' WHEN 'summary' THEN 'project_summary' WHEN 'description' THEN 'project_description' WHEN 'workflow' THEN 'workflow' WHEN 'krs' THEN 'krs' WHEN 'metric_targets' THEN 'metric_targets' WHEN 'status' THEN 'project_status' END,'value',json(value_json)) END,
+    CASE WHEN base_json IS NULL OR field='task_order' THEN base_json  ELSE json_set(base_json,'$.value',json_object('field',CASE field WHEN 'name' THEN 'project_name' WHEN 'summary' THEN 'project_summary' WHEN 'description' THEN 'project_description' WHEN 'workflow' THEN 'workflow' WHEN 'krs' THEN 'krs' WHEN 'metric_targets' THEN 'metric_targets' WHEN 'status' THEN 'project_status' END,'value',json(base_json -> '$.value'))) END,
+    CASE WHEN conflict_json IS NULL OR field='task_order' THEN conflict_json  ELSE json_set(conflict_json,'$.value',json_object('field',CASE field WHEN 'name' THEN 'project_name' WHEN 'summary' THEN 'project_summary' WHEN 'description' THEN 'project_description' WHEN 'workflow' THEN 'workflow' WHEN 'krs' THEN 'krs' WHEN 'metric_targets' THEN 'metric_targets' WHEN 'status' THEN 'project_status' END,'value',json(conflict_json -> '$.value'))) END,
+    attempted,error,acknowledged_revision,acknowledged FROM retained_project_changes;
 UPDATE sqlite_sequence SET seq=MAX(seq,COALESCE((SELECT seq FROM sqlite_sequence WHERE name='retained_project_changes'),0))
 WHERE name='project_changes';
 DROP TABLE retained_project_changes;
@@ -126,6 +131,40 @@ BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; EN
 CREATE TRIGGER store_revision_project_changes_delete AFTER DELETE ON project_changes
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
 
+DROP TRIGGER store_revision_task_changes_insert;
+DROP TRIGGER store_revision_task_changes_update;
+DROP TRIGGER store_revision_task_changes_delete;
+DROP INDEX idx_task_changes_pending;
+ALTER TABLE task_changes RENAME TO retained_task_changes;
+CREATE TABLE task_changes (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    id TEXT NOT NULL UNIQUE,
+    task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE RESTRICT,
+    field TEXT GENERATED ALWAYS AS (COALESCE(json_extract(value_json,'$.field'),'deleted')) VIRTUAL NOT NULL CHECK(field IN ('task_title','task_description','task_assignee','task_project','deleted')),
+    value_json TEXT NOT NULL CHECK(json_valid(value_json)),
+    base_json TEXT CHECK(base_json IS NULL OR json_valid(base_json)),
+    conflict_json TEXT CHECK(conflict_json IS NULL OR json_valid(conflict_json)),
+    attempted INTEGER NOT NULL DEFAULT 0 CHECK(attempted IN (0,1)),
+    error TEXT,
+    acknowledged_revision TEXT,
+    acknowledged INTEGER NOT NULL DEFAULT 0 CHECK(acknowledged IN (0,1))
+);
+INSERT INTO task_changes(seq,id,task_id,value_json,base_json,conflict_json,attempted,error,acknowledged_revision,acknowledged)
+SELECT seq,id,task_id,
+    CASE WHEN field='deleted' THEN value_json ELSE json_object('field',CASE field WHEN 'name' THEN 'task_title' WHEN 'description' THEN 'task_description' WHEN 'assignee' THEN 'task_assignee' WHEN 'project_id' THEN 'task_project' END,'value',json(value_json)) END,
+    CASE WHEN base_json IS NULL OR field='deleted' THEN base_json WHEN field='project_id' AND json_type(base_json,'$.value')='null' THEN base_json ELSE json_set(base_json,'$.value',json_object('field',CASE field WHEN 'name' THEN 'task_title' WHEN 'description' THEN 'task_description' WHEN 'assignee' THEN 'task_assignee' WHEN 'project_id' THEN 'task_project' END,'value',json(base_json -> '$.value'))) END,
+    CASE WHEN conflict_json IS NULL OR field='deleted' THEN conflict_json WHEN field='project_id' AND json_type(conflict_json,'$.value')='null' THEN conflict_json ELSE json_set(conflict_json,'$.value',json_object('field',CASE field WHEN 'name' THEN 'task_title' WHEN 'description' THEN 'task_description' WHEN 'assignee' THEN 'task_assignee' WHEN 'project_id' THEN 'task_project' END,'value',json(conflict_json -> '$.value'))) END,
+    attempted,error,acknowledged_revision,acknowledged FROM retained_task_changes;
+UPDATE sqlite_sequence SET seq=MAX(seq,COALESCE((SELECT seq FROM sqlite_sequence WHERE name='retained_task_changes'),0))
+WHERE name='task_changes';
+DROP TABLE retained_task_changes;
+CREATE INDEX idx_task_changes_pending ON task_changes(task_id,field,seq);
+CREATE TRIGGER store_revision_task_changes_insert AFTER INSERT ON task_changes
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+CREATE TRIGGER store_revision_task_changes_update AFTER UPDATE ON task_changes
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+CREATE TRIGGER store_revision_task_changes_delete AFTER DELETE ON task_changes
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
 
 -- Creation recovery keeps the original captured values, not today's Work.
 -- Provider inputs, IDs, attempt flags and the sequence boundary remain intact.

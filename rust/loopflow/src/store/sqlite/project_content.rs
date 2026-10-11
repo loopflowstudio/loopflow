@@ -161,10 +161,8 @@ mod tests {
             .unwrap()
             .remove(0);
         assert_eq!(
-            change.base,
-            Some(serde_json::json!({
-                "revision":"2026-10-10T12:00:00Z", "value":"Product"
-            }))
+            serde_json::to_value(&change.base).unwrap(),
+            serde_json::json!({"revision":"2026-10-10T12:00:00Z", "value":{"field":"project_name","value":"Product"}})
         );
         assert!(store
             .attempt_planning_field(
@@ -233,11 +231,13 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            serde_json::from_str::<String>(&value).unwrap(),
-            "Saved without a baseline"
+            serde_json::from_str::<crate::work::edit::WorkValue>(&value).unwrap(),
+            crate::work::edit::WorkValue::ProjectDescription(Some(
+                "Saved without a baseline".into()
+            ))
         );
         assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&conflict).unwrap()["value"],
+            serde_json::from_str::<serde_json::Value>(&conflict).unwrap()["value"]["value"],
             ""
         );
     }
@@ -283,8 +283,8 @@ mod tests {
             .unwrap()
             .remove(0);
         assert_eq!(
-            change.base,
-            Some(serde_json::json!({"value":"Baseline", "revision":"2026-10-10T12:00:00Z"}))
+            serde_json::to_value(&change.base).unwrap(),
+            serde_json::json!({"value":{"field":"project_description","value":"Baseline"}, "revision":"2026-10-10T12:00:00Z"})
         );
         let prose: String = store
             .conn

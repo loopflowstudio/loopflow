@@ -9,7 +9,7 @@ approval from Jack. This is accepted scope, with conditional deletions identifie
 
 This audit and [design](work-on-another-machine-name.md) share one delivery scope.
 Canonical readers, concrete observation columns and private acquisition exist.
-Remaining: typed Linear field receipts, ordinary follow-ups and one cron list. Concrete
+Remaining: ordinary follow-ups, one cron list and conditional routing reduction. Concrete
 bindings are implemented (§14). All precede Jack Heart's next
 review of PR #1491. Publication is review-only; landing, installation and export
 of actual Work to the public repository remain unauthorized.
@@ -115,7 +115,7 @@ execution fixtures seed fixed admission evidence without opening production APIs
 Rejected membership remains marked outside acceptance; cancellation retains its
 writer lock. Foreign/unmapped facts, contradictory claims, independent removal,
 partial fields and original ages remain stored. Whole-table removal still requires
-another existing owner retaining every fact. The typed writer/delivery hierarchy remains.
+another existing owner retaining every fact. Typed writer/receipt values now share one vocabulary.
 `pm_wave_sync`, `pm_wave_projects`, `pm_issue_changes`, relation observations and
 `pm_project_name_cutover` retain independent evidence, not ordinary Work content.
 
@@ -174,12 +174,14 @@ round trips; parent-first creation and per-record import savepoints remain.
 Causal parents, competing values, uncertain effects and routing evidence survive.
 Only the Task draft changed; released SQL remains immutable.
 
-**Still delete:** receipt string-field translation/normalization.
-`WorkValue::with_value` remains solely for pending Linear receipt decoding;
-remove it with that cut. Creation now retains typed `WorkValue`s and captured
-Task state, excluding whole Project/Task models. Team/Initiative lists and comment
-authors remain typed. Populated conversion and repeated import fixtures retain
-Session turns, claims, activity, capture reservations and cancellation uncertainty.
+**Removed:** receipt string-field translation/normalization and
+`WorkValue::with_value`. Content receipts retain the same typed values as the
+writer; generated field indexes derive from those values. Baselines retain revision
+and explicit-null membership independently of absent observations. Ordering and
+deletion keep their distinct effect semantics. Creation retains typed attempted
+fields and captured Task state, excluding whole Project/Task models. Team/Initiative
+lists and comment authors remain typed. Populated conversion and repeated import
+fixtures retain Session turns, claims, activity, capture reservations and uncertainty.
 
 Keep atomic disposition updates, comment identity, ownership validation, and the
 transaction boundary covering local changes/imports. Serialization at the actual
@@ -198,12 +200,13 @@ reconcile the typed edits passed to the common writer. An explicit Linear field
 mapping limits receipt settlement to supplied fields; provider models are no longer
 serialized, patched and reconstructed. Task membership uses canonical Project IDs.
 Composed prose proof is recorded above. `dac4cb1ba6` confines fetched-model
-acceptance to Linear; `06e95d98fe` removes the generic PM facade. Duplicate receipt translation remains; adapter confinement is complete.
+acceptance to Linear; `06e95d98fe` removes the generic PM facade. Receipt reconciliation now compares typed values and retains later saves across older acknowledgments; adapter confinement is complete.
 Observation, projection and accepted-revision checks now have concrete owners (§11).
 
-Remaining: remove parallel edit structures that only rename the same values
-(`name`, `issue_title`, `TaskTitle`, for example), receipt string-field addressing
-and duplicated normalization of provider IDs into local owners. The remaining Linear receipt conversion owns those cuts.
+The ordinary receipt writer no longer decodes provider field names or patches
+whole JSON models. Acquisition resolves membership to canonical Project identity
+before creation readback and ordinary reconciliation. The provider adapter accepts
+WorkValue directly; Markdown field decoding is removed.
 
 Keep attempted values and their baselines: an acknowledgment of an older attempt
 cannot clear a newer local edit. Preserve conflict values, rebasing of edits not
@@ -286,8 +289,8 @@ external effect really needs them. PlanningSync, store opening and Wave locks no
 `store/sqlite/planning.rs` is deleted. Private accepted-Work projection belongs
 to `linear/acceptance.rs`; invalidation, evidence and revision parsing to
 `linear/observations.rs`; accepted-revision delivery eligibility to
-`sqlite/planning_changes.rs`. Receipt translation and creation baseline reduction
-remain; deleting the module does not finish the audit.
+`sqlite/planning_changes.rs`. Typed field receipts and creation baselines now replace the remaining string/JSON
+translations. Follow-up and cron deletion still precede audit completion.
 
 October 11 creation cut removes `PlanningExport.model` and generic-map
 attachment. Typed creation values and captured Task state retain the original
@@ -297,11 +300,13 @@ compares typed values and rebases from the attempt, not changed readback.
 Historical intent conversion uses the intent's values; a state UUID supplies no
 invented semantic state. Full follow-through deletion remains §13.
 
-`PlanningChanges::{record,baseline,normalize,reconcile_edits}` and `linear_field`
-still address ordinary field receipts by strings/JSON. Remove those translations
-and `WorkValue::with_value` together. Preserve older acknowledgments, conflicts,
-partial/null membership and sequence high-water marks. Creation conversion proof
-does not establish field-receipt conversion or full gate acceptance.
+`PlanningChanges` now writes and reconciles typed values; `normalize`,
+`linear_field` and `WorkValue::with_value` are deleted. The Task draft converts
+released field receipts, including explicit-null membership, without changing
+sequence, attempts, acknowledgment history or uncertainty. Typed comparison also
+avoids JSON object-key ordering affecting creation acknowledgment. Ordinary fields
+retain transactional deletion eligibility. Effect-only ordering/deletion readers
+replace the former mixed pending list; their errors and retry boundaries remain.
 
 Do not unify creation, comments, ordering, deletion and disposition into a new
 universal effect lifecycle merely for symmetry. Their existing receipts,
@@ -374,8 +379,8 @@ current docs, authored goals and surviving fixtures use those fields. Historical
 SQL/captures and the one-time `pm.linear_project` selection import retain bytes.
 Reteam still confirms remote ownership and preserves delayed observations, but no
 longer commits unrelated checkout edits to remove obsolete configuration sentinels.
-Provider-shaped acquisition APIs are removed (§3). The remaining receipt/writer
-hierarchy still requires reduction; concrete bindings alone did not establish it.
+Provider-shaped acquisition APIs and receipt translations are removed (§3, §11).
+Concrete bindings alone did not establish those completed ownership cuts.
 
 The existing pass owns cron unification: one list of ordinary scheduled commands,
 existing parser for scope filtering, no parallel Wave-specific cron interpretation.
@@ -406,7 +411,7 @@ alignment in the same diff as public removals.
 
 ## Proof and stop conditions
 
-Remaining order: typed Linear field receipts; follow-ups and cron;
+Remaining order: follow-ups and cron;
 gate and review. Each cut deletes its replaced paths in the same diff.
 
 Before dropping persistent state, inventory the released frontier and current

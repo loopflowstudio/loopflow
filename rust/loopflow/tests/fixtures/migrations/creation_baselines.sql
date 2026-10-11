@@ -22,3 +22,14 @@ INSERT INTO task_changes(seq,id,task_id,field,value_json,base_json,conflict_json
 VALUES(9,'conflicted-task','task-proof','assignee','"local-author"','{"revision":"2026-10-09T00:00:00Z","value":null}',
        '{"revision":"2026-10-10T00:00:00Z","value":"provider-author"}',1,'Retained conflict');
 UPDATE sqlite_sequence SET seq=42 WHERE name IN ('task_changes','project_changes');
+
+-- An earlier attempted field write and a save made while its reply was missing.
+INSERT INTO tasks(id,project_id,issue_identifier,issue_title,created_at,updated_at)
+VALUES('task-receipt','project-proof','PROOF-2','Later save',1,1);
+INSERT INTO task_changes(seq,id,task_id,field,value_json,base_json,attempted,error)
+VALUES(10,'attempted-title','task-receipt','name','"Attempted title"',
+       '{"revision":"2026-10-09T00:00:00Z","value":"Provider before"}',1,'Lost reply'),
+      (11,'later-title','task-receipt','name','"Later save"',
+       '{"revision":"2026-10-09T00:00:00Z","value":"Provider before"}',0,NULL),
+      (12,'null-membership','task-receipt','project_id','"project-proof"',
+       '{"revision":"2026-10-09T00:00:00Z","value":null}',0,NULL);

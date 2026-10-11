@@ -888,30 +888,36 @@ LOO-287's open proof and Intelligence ownership of assembly remain at
 `7b28ab1ca:wave/infrastructure/MEMORY.md`, this heading. Identity, eligibility
 and consumed launch evidence stay separate.
 
-## Installation and command scope (curated 2026-10-02)
+## Installation and command scope (curated 2026-10-11)
 
-LOO-292's installation acceptance closed below; LOO-287 retains command-scope
-reduction. Earlier installation evidence:
-`24db5d4d68b1e4a5efe11781712a321b564e01ca:wave/infrastructure/MEMORY.md`, this heading.
-
-Pinned artifacts activate only through promotion. Candidate-owned recovery and
-exact-store preflight precede startup authorization. Verify matching macOS app bytes;
-preserve launchd labels/logs/custom directories without source WorkingDirectory,
-source maintenance or recursive Python refresh.
-OS-account Home bypasses HOME/LF_HOME: use disposable accounts/containers and verify
-first-activation failure/recovery. Simulated launchctl proves no timing; asynchronous
-copy caused mismatched bytes/segfault. Ubuntu 24.04 passed where Debian lacked GLIBC.
-
-Distinguish non-Git folders from Git errors; never invent repositories or change
-routes. LOO-287's ordinary-folder/provider-completion and target-first resolution
-remain unproved across consumers. Repository setup and receipt redesign remain
-unselected; a phase alone is not durable advancement evidence.
-
-## Installation and checkout closure (LOO-292, 2026-10-04)
-
-Jack Heart closed LOO-292 on machine evidence; remaining cadence/app checks and
-recovery lessons: `7b28ab1ca:wave/infrastructure/MEMORY.md`, this heading.
+Jack Heart closed LOO-292 on machine evidence October 4. History and remaining
+cadence/app checks:
+`243ed91a36:wave/infrastructure/MEMORY.md`, Installation and command scope/closure.
 Install owns artifacts; sync owns checkouts. Reinstall cannot heal a truncated gate.
+Pinned artifacts activate through promotion; candidate recovery and exact-store
+preflight precede authorization. Verify matching macOS bytes and preserve launchd
+labels/logs/custom directories without source maintenance. OS-account Home bypasses
+HOME/LF_HOME: verify activation failure/recovery in disposable accounts. Simulated
+launchctl proves no timing; asynchronous copy caused mismatched bytes/segfault.
+Ubuntu 24.04 passed where Debian lacked GLIBC.
+
+LOO-287 retains command-scope reduction and unproved ordinary-folder/provider
+completion and target-first resolution. Distinguish non-Git folders from Git errors;
+never invent repositories/routes. Setup and receipt redesign remain unselected;
+a phase alone proves no advancement.
+
+October 11: installation job 114410351377 failed pulling from ECR Public with
+`toomanyrequests: Rate exceeded`; exact quota unknown. `243ed91a36` adds local image
+reuse and bounded throttling retries, preserving Release's separate download/startup
+deadlines. Mutable local tags require explicit refresh. Six simulated tests and
+both local disposable installation paths pass with cached Rust 1.99.0; hosted
+throttling recovery remains unproved. Gate's Python suite had 394 passes, 19 skips
+and one nested-sandbox refusal; that test passed through its own macOS sandbox.
+Persistent throttling fails as infrastructure, never skips verification.
+Jack Heart subsequently approved
+PR #1529 for landing (`ff9c03dd-7587-4c14-afd8-447d99252aaf`).
+[Release memory](release/MEMORY.md) retains cold-download
+and operation-entry evidence; successful reporting alone proves no operation success.
 
 ## Shipped history
 

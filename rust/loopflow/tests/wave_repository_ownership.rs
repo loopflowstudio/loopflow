@@ -204,7 +204,7 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         let sibling = Wave::new(WaveId::new(), "sibling".into(), alias.display().to_string());
         store.create_wave(&sibling).await.unwrap();
         let snapshot: loopflow::pm::PmSnapshot =
-            serde_json::from_str(include_str!("../../../tests/fixtures/dto/pm_show.json")).unwrap();
+            serde_json::from_str(include_str!("fixtures/linear_snapshot.json")).unwrap();
         store
             .put_pm_snapshot(
                 PmSnapshotRow {
@@ -271,15 +271,6 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
                 resolved.repo()
             );
         }
-        assert_eq!(
-            store
-                .pm_snapshot(legacy.id())
-                .await
-                .unwrap()
-                .unwrap()
-                .snapshot,
-            snapshot
-        );
         let observation = store
             .pm_task_observation(resolved.repo(), "linear", "LOO-2")
             .await
@@ -604,13 +595,14 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     assert_eq!(moved_grandchild.slug(), "platform/child/leaf");
     assert_eq!(moved_grandchild.parent_wave_id(), Some(child.id()));
     assert!(!repo_d.join("wave/platform").exists());
+    let conn = rusqlite::Connection::open(&database).unwrap();
     assert_eq!(
-        store
-            .pm_snapshot(alpha.id())
-            .await
-            .unwrap()
-            .unwrap()
-            .initiative,
+        conn.query_row(
+            "SELECT initiative FROM pm_wave_sync WHERE wave_id=?1",
+            [alpha.id().as_str()],
+            |r| r.get::<_, String>(0)
+        )
+        .unwrap(),
         "initiative-alpha"
     );
     assert_eq!(

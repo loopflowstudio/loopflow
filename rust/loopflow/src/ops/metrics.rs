@@ -595,12 +595,13 @@ mod tests {
         };
         snapshot.snapshot.projects[0].revision = Some("2026-09-30T00:00:02Z".into());
         store.put_pm_snapshot(snapshot.clone(), None).await.unwrap();
+        let before = store.list_projects(Some(wave.id())).await.unwrap();
         let selected = wave_metric_portfolio(&store, &wave, source_time + Duration::hours(1))
             .await
             .unwrap();
         assert_eq!(selected.metrics, untargeted.metrics);
         assert!(selected.contract_issues.is_empty());
-        assert_eq!(store.pm_snapshot(wave.id()).await.unwrap(), Some(snapshot));
+        assert_eq!(store.list_projects(Some(wave.id())).await.unwrap(), before);
 
         let owned = wave_metric_portfolio(&store, &wave, source_time + Duration::hours(1))
             .await

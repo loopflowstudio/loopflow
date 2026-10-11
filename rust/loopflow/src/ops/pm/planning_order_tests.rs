@@ -6,9 +6,8 @@ use serde_json::json;
 
 use super::{mark_issue_updated, seed_provider_task, with_planning_task, PlanningState};
 use crate::durable::WorkRef;
+use crate::ops::pm::refresh_wave;
 use crate::ops::pm::test_fixture::Fixture;
-use crate::ops::pm::{load_show_snapshot, PmRefresh};
-use crate::ops::NullProgress;
 use crate::pm::PmItemUpdate;
 use crate::store::Store;
 use crate::work::task::Task;
@@ -41,9 +40,7 @@ fn with_order(
                 mark_issue_updated(issue);
             }
             drop(provider);
-            load_show_snapshot(repo, "product", PmRefresh::Force, &NullProgress)
-                .await
-                .unwrap();
+            refresh_wave(repo, "product").await.unwrap();
         });
         test(runtime, fixture, repo, tasks, state);
     });
@@ -268,9 +265,7 @@ fn planning_order_acquisition_during_write_preserves_newer_save_and_scalar_edits
                     provider.issues[0]["title"] = json!("Inbound title during reorder");
                     mark_issue_updated(&mut provider.issues[0]);
                 }
-                load_show_snapshot(repo, "product", PmRefresh::Force, &NullProgress)
-                    .await
-                    .unwrap();
+                refresh_wave(repo, "product").await.unwrap();
                 assert_eq!(
                     local_order(&fixture.store, &tasks),
                     ["issue-3", "issue-4", "issue-1", "issue-2"]
@@ -395,9 +390,7 @@ fn planning_order_equal_keys_preserve_groups_through_intermediate_moves() {
                     mark_issue_updated(issue);
                 }
             }
-            load_show_snapshot(repo, "product", PmRefresh::Force, &NullProgress)
-                .await
-                .unwrap();
+            refresh_wave(repo, "product").await.unwrap();
             reorder(&fixture.store, &tasks[3], 1);
             deliver(&fixture.store, repo, &tasks[0]).await.unwrap();
             assert_eq!(
@@ -419,12 +412,23 @@ fn planning_order_equal_keys_preserve_groups_through_intermediate_moves() {
 fn planning_order_stale_list_cannot_undo_confirmed_reorder() {
     with_order(|runtime, fixture, repo, tasks, state| {
         runtime.block_on(async {
-            let stale = fixture
-                .store
-                .sqlite
-                .pm_snapshot(&tasks[0].wave_id)
-                .unwrap()
+            let ctx = crate::ops::pm::resolve_context(repo, "product")
+                .await
                 .unwrap();
+            let stale = crate::store::PmSnapshotRow {
+                wave_id: tasks[0].wave_id.clone(),
+                provider: "linear".into(),
+                initiative: ctx.initiative.clone(),
+                synced_at: time::OffsetDateTime::now_utc().unix_timestamp(),
+                snapshot: crate::ops::pm::fetch_pm_snapshot_with_store(
+                    repo,
+                    "product",
+                    &ctx,
+                    &fixture.store,
+                )
+                .await
+                .unwrap(),
+            };
             reorder(&fixture.store, &tasks[3], 0);
             deliver(&fixture.store, repo, &tasks[0]).await.unwrap();
             let expected = remote_order(&state).await;

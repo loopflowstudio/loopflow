@@ -88,14 +88,12 @@ LOO-406's common writer boundary is `84664e661`; `e68f2a423` exports saved UUIDs
 Separate creation/link attempts retain uncertainty without replay; identity attachment
 precedes inventory, preserving later saves. Export acceptance remains unproved. Prior proofs: `906576f39:wave/infrastructure/MEMORY.md`, this heading.
 
-Jack selected Git-like Task prefixes: four or more hex digits, bare or prefixed;
-reject ambiguity, retain full IDs and lengthen display abbreviations as needed.
-Identity, receipts, mappings and placement stay distinct. No landing/installation.
-Design: `scratch/explore-loopflow-s-own-store.md`.
+Jack selected unambiguous Git-like Task prefixes (4+ hex digits, bare/prefixed);
+retain full IDs and lengthen display prefixes. Identity, receipts, mappings and
+placement stay distinct. No landing/install. Design:
+`scratch/explore-loopflow-s-own-store.md`. Disposable workers prove no backup/export.
 
 Superseded split proofs and recovery evidence: `dfe18ab6060901992b55e64842e23c4295673b08:wave/infrastructure/MEMORY.md`.
-
-Disposable workers prove no backup or private export.
 
 ## Session titles (LOO-439, 2026-10-08)
 
@@ -251,6 +249,16 @@ pass. Gate repaired stale refusal and socket-server lifetime fixtures. Published
 checkpoint CI skipped tests; Linux/installed acceptance remains unproved.
 Prior live-takeover evidence: `5e95ce9a4:wave/infrastructure/MEMORY.md`, this heading.
 Plan: `scratch/stop-and-take-over-claude.md`.
+
+## Process-owned liveness (LOO-451, 2026-10-10)
+
+Jack Heart removed client-file compatibility (`5228ab69`); launches record an
+AgentProcess before exec. Unknown grants no Waiting or cleanup. Terminals follow
+attachment; completion outranks sockets. Inputs follow the latest turn's LfProcess,
+not an ended creator; native outcomes remain history. Jack approved #1523 and
+shipping (`5df94b2c`). Materialized Rust/Swift proofs include
+Work-watch detecting OS death without writes, not configured kill/reconnect or
+installed acceptance.
 
 ## Execution vocabulary (LOO-441/442/446, 2026-10-10)
 
@@ -410,14 +418,10 @@ linked receipts. They preserve due ownership, candidate, uncertain publication,
 caller edits and child-held leases; simulated passes establish neither public
 container/macOS acceptance nor configured automatic settlement.
 
-October 6 scheduled receipt cron_a4b8b11b2a534bf99d183e677f2a6871 failed after
-recovery cron_5d930c31c7ae4a118f6b93774496991c passed continuity but the scorecard
-emitted retired product/task-loop-trust. Accepted chapter commit 42451654e removed
-that contract; remove its hardcoded producer output, preserving strict metric
-validation and lifecycle rows. Installed CLI with the repaired checkout reports
-35 rows; twelve focused tests pass. Original failed receipts and repair ownership
-remain unchanged. Jack Heart authorized publication; the operator owns subsequent
-release recovery after LOO-382. This manual proof supplies no automatic settlement.
+October 6 telemetry's retired metric producer failed; the repaired checkout passed
+35 rows and twelve tests, not automatic settlement. Jack Heart authorized
+publication; the operator owns recovery after LOO-382. Original receipts, repair
+ownership and exact evidence: `85490d96ec:wave/infrastructure/MEMORY.md`, this heading.
 
 Release's September 28 incident proves entry points need operation-level recovery:
 an agent reported failure successfully, producing a misleading green cron receipt.
@@ -624,25 +628,25 @@ acceptance remain at
 
 ## Tasks across machines (LOO-412, 2026-10-10)
 
-Jack Heart selected one repository transport: Linear, shared or default user-keyed
-Git. One typed writer owns local/imported Work; outages buffer without fallback or election.
-Execution/attempts stay local; preserve causal losers and uncertainty.
-Jack requires the full accepted deletion audit before review: Work, private
-observations, typed journal, bindings, ordinary follow-ups and one cron list.
-Renames are insufficient; gate/install unproved.
+Jack Heart selected Linear, shared or default user-keyed Git per repository.
+One typed writer owns local/imported Work; outages buffer without fallback/election.
+Execution/attempts stay local; retain causal losers and uncertainty. Before review:
+finish Work, private observations, typed journal, bindings, ordinary follow-ups
+and one cron list. Installation unproved.
 
-`96607a9a46`: canonical status/create and CLI/Swift acquisition proof.
-Delivery requires accepted Work revision; archive/disputed membership still refuse
-it. `plan_read` and Project ingestion return projections are deleted; snapshot
-confinement remains. Foreign observations grant no ownership.
+`94cb65b569` deletes `pm_show`; `1d97aa98b2` removes refiling/rotation's
+local-placement restriction, preserving execution admission. Portfolio reads check
+retained ownership claims in SQLite, without provider inventories. Snapshot APIs
+and acquisition hierarchy still need deletion and preservation proof. Delivery
+needs accepted revision plus archive/membership
+eligibility; foreign facts grant no ownership. Installation remains unproved.
 
-Jack assigned LOO-427 here (`bd295866bb`); stack order is unresolved. Preserve
-tabs, Machine ownership/admission; adapt delegation to the writer/released frontier.
-[Design and audit](../../scratch/work-on-another-machine-name.md) own remaining
-implementation and #1491's review boundary. Cron retains installed ownership, not
-file location; operation failures stay nonzero ([Release evidence](release/MEMORY.md)). No landing,
-installation, schedule activation or real export. Prior proofs:
-`41378adacf:wave/infrastructure/MEMORY.md`.
+Jack's `19116a1b`: prepare 427 on committed 412; land 427 after 412.
+No 412 landing. Preserve admission/tabs and released frontier.
+[Plan](../../scratch/work-on-another-machine-name.md) owns remaining work.
+Release's inspected memory requires cron conversion to preserve installed owner,
+lock/child-descriptor identity, dues and nonzero operation failures—not infer
+authority from files. No activation/export. Prior: `41378adacf:wave/infrastructure/MEMORY.md`.
 
 ## Planning and launch preservation (curated 2026-10-02)
 
@@ -693,18 +697,15 @@ Main #1511 (`e69d5103f`): Codex terminals use `--no-daemon` (0.161.0-verified).
 Explicit account selection, not launch-time switching, reconciles the shared daemon
 with five-minute turn grace. Configured acceptance remains open.
 
-## Account auth consolidation (LOO-320, curated 2026-10-08)
+## Account auth consolidation (LOO-320, curated 2026-10-10)
 
 Jack Heart approved delivery, excluding cross-account continuation, native refresh
-coordination and headroom ranking. Native OAuth/callback ownership, side-effect-free
-cached inspection and usage-window provenance: [subscriptions](../../docs/subscriptions.md).
-Selected account precedes native Session discovery. Missing windows or reset success
-prove no capacity; printed URLs and cached login prove no current OAuth success.
-Browser login without pasted code, first connection, remembered Linear profile and
-live Claude/Codex windows remain unproved; Claude returned `invalid_grant`.
-No branch binary may migrate the installed Home; fixtures prove no installed outcome.
-Exact constraints and archived evidence: `b2228bce8:wave/infrastructure/MEMORY.md`
-under this heading, retaining the October 4 source and original caveat references.
+coordination and headroom ranking. Selected account precedes native history;
+usage proves no login or capacity. Browser login, first connection, remembered
+Linear profile and live usage windows remain unproved; Claude returned
+`invalid_grant`. Branch binaries never migrate the installed Home.
+[Mechanics](../../docs/subscriptions.md); constraints and proof limits: `be4a2b2af:wave/infrastructure/MEMORY.md`, this heading and its
+`b2228bce8` archive.
 
 ## Task deletion and command ownership (LOO-305, curated 2026-10-10)
 

@@ -8,13 +8,9 @@ use serde_json::json;
 use tokio::sync::Barrier;
 
 use super::test_fixture::{now, token, Fixture, PlanningEnvironment};
-use super::{
-    linear_refresh_lock, pm_show_async, resolve_pm_token, PmRefresh, PmShowOptions, PmTestContext,
-    PM_TEST_CONTEXT,
-};
+use super::{linear_refresh_lock, refresh_wave, resolve_pm_token, PmTestContext, PM_TEST_CONTEXT};
 use crate::durable::Author;
 use crate::ops::error::OpsResult;
-use crate::ops::NullProgress;
 use crate::planning::LinearProjectId;
 use crate::pm::test_server::{self, json_response, QueuedResponse};
 use crate::pm::PmSnapshot;
@@ -87,16 +83,8 @@ fn gated(mut response: QueuedResponse) -> (QueuedResponse, Arc<Barrier>, Arc<Bar
     (response, entered, release)
 }
 
-async fn forced_read(repo: &Path) -> OpsResult<super::PmShowResult> {
-    pm_show_async(
-        repo,
-        &PmShowOptions {
-            wave: Some("product".into()),
-            refresh: PmRefresh::Force,
-        },
-        &NullProgress,
-    )
-    .await
+async fn forced_read(repo: &Path) -> OpsResult<()> {
+    refresh_wave(repo, "product").await
 }
 
 #[tokio::test]
@@ -168,14 +156,9 @@ async fn pm_read_linear_oauth_recovers() {
             "nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}
         }}}})),
     ], Some("Bearer A2".into())).await;
-    let result = scoped(fixture.context(&graphql), &oauth, forced_read(&repo))
+    scoped(fixture.context(&graphql), &oauth, forced_read(&repo))
         .await
         .unwrap();
-    assert!(result.projects[0].metric_targets.is_empty());
-    assert_eq!(result.projects[0].krs[0].text, "Fresh proof");
-    let row = fixture.store.pm_snapshot(wave.id()).await.unwrap().unwrap();
-    let snapshot = row.snapshot;
-    assert_eq!(snapshot.projects, result.projects);
     assert_eq!(
         serde_json::to_value(fixture.store.get_wave(wave.id()).await.unwrap()).unwrap(),
         stored_wave
@@ -186,6 +169,8 @@ async fn pm_read_linear_oauth_recovers() {
         .await
         .unwrap()
         .unwrap();
+    assert!(refreshed.metric_targets.is_empty());
+    assert_eq!(refreshed.krs[0].text, "Fresh proof");
     assert_eq!(refreshed.id, project.id);
     assert_eq!(refreshed.wave_id, project.wave_id);
     assert_eq!(refreshed.abandon_intent, project.abandon_intent);
@@ -241,11 +226,10 @@ async fn pm_read_linear_oauth_invalid_grant() {
         let fixture = Fixture::new().await;
         std::env::set_var("LF_HOME", fixture.directory.path());
         let (repo, wave) = fixture.planning_repo().await;
-        let previous = if cached {
-            Some(fixture.seed_snapshot(&wave).await)
-        } else {
-            None
-        };
+        if cached {
+            fixture.seed_snapshot(&wave).await;
+        }
+        let previous = fixture.wave_refresh_at(&wave);
         let original = fixture.seed(now() - 1).await;
         let (oauth, exchanges) = test_server::spawn(vec![rejected("invalid_grant")]).await;
         let (graphql, requests) = test_server::spawn(vec![]).await;
@@ -259,10 +243,7 @@ async fn pm_read_linear_oauth_invalid_grant() {
         assert_eq!(exchanges.lock().await.len(), 1);
         assert!(requests.lock().await.is_empty());
         fixture.assert_token(&original).await;
-        assert_eq!(
-            fixture.store.pm_snapshot(wave.id()).await.unwrap(),
-            previous
-        );
+        assert_eq!(fixture.wave_refresh_at(&wave), previous);
     }
 }
 
@@ -565,7 +546,8 @@ async fn pm_read_linear_oauth_sqlite_contention_has_bounded_failure_and_recovers
     let fixture = Fixture::new().await;
     std::env::set_var("LF_HOME", fixture.directory.path());
     let (repo, wave) = fixture.planning_repo().await;
-    let previous = fixture.seed_snapshot(&wave).await;
+    fixture.seed_snapshot(&wave).await;
+    let previous = fixture.wave_refresh_at(&wave);
     let original = fixture.seed(now() - 1).await;
     let conn = rusqlite::Connection::open(&fixture.database).unwrap();
     conn.execute_batch("BEGIN IMMEDIATE").unwrap();
@@ -582,10 +564,7 @@ async fn pm_read_linear_oauth_sqlite_contention_has_bounded_failure_and_recovers
         .unwrap();
     conn.execute_batch("ROLLBACK").unwrap();
     fixture.assert_token(&original).await;
-    assert_eq!(
-        fixture.store.pm_snapshot(wave.id()).await.unwrap(),
-        Some(previous)
-    );
+    assert_eq!(fixture.wave_refresh_at(&wave), previous);
     drop(guard);
     assert!(fixture.resolve(&url).await.unwrap() == "A2");
 }

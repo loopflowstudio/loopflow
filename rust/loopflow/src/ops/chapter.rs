@@ -183,7 +183,6 @@ pub(crate) async fn rotate(
         if located.as_ref().map(Wave::id) != Some(wave.id()) {
             return Err(error("planned Wave belongs to another repository"));
         }
-        super::pm::require_planning_home(&store, &wave).await?;
         super::metrics::validate_chapter_targets(&wave, &input.metric_targets).map_err(error)?;
         let acquisition = lock_wave_planning(&wave).await?;
         contexts.push((input, wave, acquisition));

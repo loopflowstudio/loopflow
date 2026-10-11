@@ -4,7 +4,7 @@ use super::planning_write::{self, Disposition, PlanningEdit as Edit};
 use crate::id::WaveId;
 use crate::planning_exchange::PlanningKind;
 use crate::pm::linear::LinearProject;
-use crate::pm::{PmItem, PmSnapshot};
+use crate::pm::PmItem;
 use crate::store::sqlite::SqliteStore;
 use crate::store::{
     PlanningState, PmSnapshotRow, PmTaskObservation, PmTaskRecord, StoreError, StoreResult,
@@ -399,69 +399,141 @@ impl SqliteStore {
         Ok(accepted)
     }
 
-    pub fn pm_snapshot(&self, wave_id: &WaveId) -> StoreResult<Option<PmSnapshotRow>> {
+    /// Validate retained Linear claims without exposing a second Work inventory.
+    pub(crate) fn validate_linear_ownership(
+        &self,
+        waves: &[(&WaveId, &str)],
+        expected_team: StoreResult<Option<String>>,
+    ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction()?;
-        let metadata = tx
-            .query_row(
-                "SELECT w.repo,s.provider,s.initiative,s.synced_at FROM pm_wave_sync s
-             JOIN waves w ON w.id=s.wave_id WHERE s.wave_id=?1",
-                [wave_id.as_str()],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, i64>(3)?,
-                    ))
-                },
-            )
-            .optional()?;
-        let Some((repo, provider, initiative, synced_at)) = metadata else {
-            return Ok(None);
-        };
-        let mut query = tx.prepare(
-            "SELECT p.body FROM pm_wave_projects m JOIN pm_projects p ON p.id=m.project_id
-             WHERE m.wave_id=?1 AND p.repo=?2 AND p.provider=?3 AND p.archived=0 AND p.membership_unresolved=0
-             ORDER BY m.position,p.id",
-        )?;
-        // Decode before membership filtering: malformed retained bodies are unavailable
-        // evidence, not an empty plan.
-        let mut projects = query
-            .query_map(params![wave_id, repo, provider], |row| {
-                row.get::<_, String>(0)
-            })?
-            .map(|row| Ok(serde_json::from_str::<LinearProject>(&row?)?))
-            .collect::<StoreResult<Vec<_>>>()?;
-        projects.retain(|project| project.initiative_ids.contains(&initiative));
-        let mut query = tx.prepare(
-            "SELECT i.body,json_extract(p.body,'$.slug') FROM pm_items i JOIN pm_wave_projects m ON m.project_id=i.project_id
-             JOIN pm_projects p ON p.id=i.project_id AND p.repo=i.repo AND p.provider=i.provider
-             WHERE m.wave_id=?1 AND i.repo=?2 AND i.provider=?3 AND i.needs_refresh=0
-             AND p.archived=0 AND p.membership_unresolved=0
-             AND EXISTS(SELECT 1 FROM json_each(p.body,'$.initiative_ids') WHERE value=?4)
-             AND NOT EXISTS(SELECT 1 FROM task_deletions d JOIN waves w ON w.id=d.wave_id
-                            WHERE w.repo=i.repo AND d.issue_id=i.id)
-             ORDER BY m.position,json_extract(i.body,'$.rank'),i.id",
-        )?;
-        let items = query
-            .query_map(params![wave_id, repo, provider, initiative], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })?
-            .map(|row| {
-                let (body, slug) = row?;
-                let mut item: PmItem = serde_json::from_str(&body)?;
-                item.project = Some(slug);
-                Ok(item)
-            })
-            .collect::<StoreResult<Vec<_>>>()?;
-        Ok(Some(PmSnapshotRow {
-            wave_id: wave_id.clone(),
-            provider,
-            initiative,
-            synced_at,
-            snapshot: PmSnapshot { projects, items },
-        }))
+        let conn = conn.transaction()?;
+        let mut initiatives = std::collections::BTreeMap::new();
+        let mut projects = std::collections::BTreeMap::new();
+        let mut issues = std::collections::BTreeMap::new();
+        for (wave_id, wave) in waves {
+            let metadata = conn
+                .query_row(
+                    "SELECT w.repo,s.provider,s.initiative FROM pm_wave_sync s
+                 JOIN waves w ON w.id=s.wave_id WHERE s.wave_id=?1",
+                    [wave_id.as_str()],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                        ))
+                    },
+                )
+                .optional()?;
+            let Some((repo, provider, initiative)) = metadata else {
+                continue;
+            };
+            // A malformed observation belongs to this Wave's acquisition status.
+            // Read the whole Wave before adding claims so readable siblings survive.
+            let observations = (|| -> StoreResult<_> {
+                let mut query = conn.prepare(
+                    "SELECT p.id,json_extract(p.body,'$.initiative_ids'),json_extract(p.body,'$.team_ids')
+                     FROM pm_wave_projects m JOIN pm_projects p ON p.id=m.project_id
+                     WHERE m.wave_id=?1 AND p.repo=?2 AND p.provider=?3
+                     AND p.archived=0 AND p.membership_unresolved=0 ORDER BY m.position,p.id",
+                )?;
+                let mut project_claims = query
+                    .query_map(params![wave_id, repo, provider], |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                        ))
+                    })?
+                    .map(|row| {
+                        let (id, initiatives, teams) = row?;
+                        Ok((
+                            id,
+                            serde_json::from_str::<Vec<String>>(&initiatives)?,
+                            serde_json::from_str::<Vec<String>>(&teams)?,
+                        ))
+                    })
+                    .collect::<StoreResult<Vec<_>>>()?;
+                project_claims.retain(|(_, initiatives, _)| initiatives.contains(&initiative));
+                let mut query = conn.prepare(
+                    "SELECT i.id,i.identifier,i.project_id,json_extract(i.body,'$.team_id')
+                     FROM pm_items i JOIN pm_wave_projects m ON m.project_id=i.project_id
+                     JOIN pm_projects p ON p.id=i.project_id AND p.repo=i.repo AND p.provider=i.provider
+                     WHERE m.wave_id=?1 AND i.repo=?2 AND i.provider=?3 AND i.needs_refresh=0
+                     AND p.archived=0 AND p.membership_unresolved=0
+                     AND EXISTS(SELECT 1 FROM json_each(p.body,'$.initiative_ids') WHERE value=?4)
+                     AND NOT EXISTS(SELECT 1 FROM task_deletions d JOIN waves w ON w.id=d.wave_id
+                                    WHERE w.repo=i.repo AND d.issue_id=i.id)
+                     ORDER BY m.position,i.id",
+                )?;
+                let issue_claims = query
+                    .query_map(params![wave_id, repo, provider, initiative], |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, Option<String>>(3)?,
+                        ))
+                    })?
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok((project_claims, issue_claims))
+            })();
+            let (project_claims, issue_claims) = match observations {
+                Ok(observations) => observations,
+                Err(_) => continue,
+            };
+            // Missing or malformed Linear evidence must not make local Work
+            // depend on readable repository files or Linear configuration.
+            let expected_team = expected_team
+                .as_ref()
+                .map_err(|error| StoreError::InvalidData(error.to_string()))?
+                .as_deref();
+            for (id, initiatives, teams) in &project_claims {
+                if initiatives.as_slice() != [initiative.as_str()] {
+                    return Err(StoreError::InvalidData(format!(
+                        "Linear Project {id} in wave/{wave} belongs to Initiatives [{}]; expected exactly {initiative}", initiatives.join(", ")
+                    )));
+                }
+                if teams.len() != 1 || expected_team.is_some_and(|expected| teams[0] != expected) {
+                    return Err(StoreError::InvalidData(format!(
+                        "Linear Project {id} in wave/{wave} belongs to Teams [{}]; expected repository Team {}",
+                        teams.join(", "), expected_team.unwrap_or("(one Team)")
+                    )));
+                }
+            }
+            for (_, identifier, project_id, team) in &issue_claims {
+                let (_, _, teams) = project_claims.iter().find(|(id, _, _)| id == project_id)
+                    .ok_or_else(|| StoreError::InvalidData(format!(
+                        "Linear task {identifier} in wave/{wave} points to missing Project {project_id}"
+                    )))?;
+                if team.as_ref() != teams.first() {
+                    return Err(StoreError::InvalidData(format!(
+                        "Linear task {identifier} in wave/{wave} belongs to Team {}, but Project {project_id} belongs to Teams [{}]",
+                        team.as_deref().unwrap_or("unmapped"), teams.join(", ")
+                    )));
+                }
+            }
+            if let Some(owner) = initiatives.insert(initiative.clone(), *wave) {
+                return Err(StoreError::InvalidData(format!(
+                    "Linear Initiative {initiative} is bound by both wave/{owner} and wave/{wave} observations"
+                )));
+            }
+            for (project, _, _) in project_claims {
+                if let Some(owner) = projects.insert(project.clone(), *wave) {
+                    return Err(StoreError::InvalidData(format!(
+                        "Linear Project {project} belongs to both wave/{owner} and wave/{wave} observations"
+                    )));
+                }
+            }
+            for (id, identifier, _, _) in issue_claims {
+                if let Some(owner) = issues.insert(id, *wave) {
+                    return Err(StoreError::InvalidData(format!(
+                        "Linear task {identifier} belongs to both wave/{owner} and wave/{wave} observations"
+                    )));
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -1053,6 +1125,98 @@ mod tests {
     use crate::store::{FrontierAdvance, PlanningState, Store};
 
     #[test]
+    fn ownership_reads_retained_claims_without_changing_work_or_observation_age() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let wave = crate::work::wave::Wave::new(WaveId::new(), "product".into(), "/repo".into());
+        store.create_wave(&wave).unwrap();
+        let mut snapshot: crate::pm::PmSnapshot = serde_json::from_str(include_str!(
+            "../../../../../tests/fixtures/dto/task_history_planning.json"
+        ))
+        .unwrap();
+        snapshot.projects.truncate(1);
+        snapshot
+            .items
+            .retain(|item| item.project_id.as_deref() == Some(&snapshot.projects[0].id));
+        snapshot.items.truncate(1);
+        let project = snapshot.projects[0].clone();
+        let item = snapshot.items[0].clone();
+        store
+            .put_pm_snapshot(&crate::store::PmSnapshotRow {
+                wave_id: wave.id().clone(),
+                provider: "linear".into(),
+                initiative: project.initiative_ids[0].clone(),
+                synced_at: 42,
+                snapshot,
+            })
+            .unwrap();
+        let task = store.task_by_issue(&item.id).unwrap().unwrap();
+        let validate = || {
+            store.validate_linear_ownership(
+                &[(wave.id(), wave.slug())],
+                Ok(Some(project.team_ids[0].clone())),
+            )
+        };
+        validate().unwrap();
+        {
+            let conn = store.conn.lock().unwrap();
+            // Rejected foreign evidence still matters even though Work keeps its owner.
+            conn.execute(
+                "UPDATE pm_items SET body=json_set(body,'$.team_id','foreign')",
+                [],
+            )
+            .unwrap();
+        }
+        assert!(validate().unwrap_err().to_string().contains("Team foreign"));
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute("UPDATE pm_items SET needs_refresh=1", [])
+                .unwrap();
+        }
+        validate().unwrap();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute("UPDATE pm_items SET needs_refresh=0", [])
+                .unwrap();
+            conn.execute("UPDATE pm_projects SET membership_unresolved=1", [])
+                .unwrap();
+        }
+        validate().unwrap();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE pm_projects SET membership_unresolved=0,archived=1",
+                [],
+            )
+            .unwrap();
+        }
+        validate().unwrap();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute("UPDATE pm_projects SET archived=0,body=json_set(body,'$.initiative_ids',json('[\"removed\"]'))", []).unwrap();
+        }
+        validate().unwrap();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE pm_projects SET body=json_set(body,'$.initiative_ids',json(?1))",
+                [serde_json::to_string(&project.initiative_ids).unwrap()],
+            )
+            .unwrap();
+            conn.execute("INSERT INTO task_deletions(wave_id,issue_id,identifier,confirmed_at) VALUES(?1,?2,?3,50)",
+                params![wave.id(),item.id,item.identifier]).unwrap();
+        }
+        validate().unwrap();
+        assert_eq!(store.task(&task.id).unwrap().unwrap(), task);
+        let conn = store.conn.lock().unwrap();
+        let ages: (i64, i64) = conn.query_row(
+            "SELECT p.observed_at,i.observed_at FROM pm_projects p JOIN pm_items i ON i.project_id=p.id",
+            [], |row| Ok((row.get(0)?,row.get(1)?)),
+        ).unwrap();
+        assert_eq!(ages, (42, 42));
+    }
+
+    #[test]
     fn owned_issue_import_retains_identity_across_alias_changes_without_placement() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
@@ -1153,7 +1317,7 @@ mod tests {
         // An already exact prefixed name also consumes the exception once.
         for historical_name in ["Customer requests", "Product — Customer requests"] {
             let mut conn = Connection::open_in_memory().unwrap();
-            crate::store::migrations::apply_before_current_draft(&conn, "project_readiness");
+            crate::store::migrations::apply_before_current_draft(&conn, "planning_peers");
             let snapshot: crate::pm::PmSnapshot = serde_json::from_str(include_str!(
                 "../../../../../tests/fixtures/dto/task_history_planning.json"
             ))
@@ -1169,8 +1333,13 @@ mod tests {
                 params![project.id, original],
             )
             .unwrap();
+            conn.execute(
+                "INSERT INTO pm_project_name_cutover(repo,provider,id,body,observed_at,archived,membership_unresolved)
+                 VALUES('/repo','linear',?1,?2,10,0,0)",
+                params![project.id, original],
+            ).unwrap();
             conn.execute_batch(&crate::store::migrations::current_draft_sql(
-                "project_readiness",
+                "planning_peers",
             ))
             .unwrap();
             project.name = "Product — Customer requests".into();
@@ -1208,13 +1377,16 @@ mod tests {
                 )
                 .unwrap();
             assert_eq!(evidence, (original, 10, Some(12)));
-            let accepted = serde_json::to_string(&project).unwrap();
+            let accepted = serde_json::to_value(&project).unwrap();
             project.name = "Another name".into();
             assert!(super::put_project(&conn, "/repo", "linear", 13, &project).is_err());
             let retained: String = conn
                 .query_row("SELECT body FROM pm_projects", [], |r| r.get(0))
                 .unwrap();
-            assert_eq!(retained, accepted);
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(&retained).unwrap(),
+                accepted
+            );
             project.id = "post-cutover".into();
             super::put_project(&conn, "/repo", "linear", 13, &project).unwrap();
             project.name = "Conflict on a new record".into();
@@ -1332,17 +1504,7 @@ mod tests {
             FrontierAdvance::Authorized,
         )
         .unwrap();
-        for name in [
-            "normalize_pm_planning",
-            "pm_issue_revisions",
-            "pm_project_evidence",
-            "project_readiness",
-            "task_flow_observations",
-            "local_planning",
-            "optional_task_pr",
-        ] {
-            sqlite.apply_migration_for_test(name).unwrap();
-        }
+        sqlite.apply_migration_for_test("planning_peers").unwrap();
         sqlite
             .place_work(
                 &crate::durable::WorkRef::Wave(wave.clone()),
@@ -1356,7 +1518,13 @@ mod tests {
             .unwrap();
         assert_eq!(observation.state, PlanningState::Available);
         let detail = observation.record.unwrap();
-        let list = store.pm_snapshot(&wave).await.unwrap().unwrap();
+        let list = crate::store::PmSnapshotRow {
+            wave_id: wave.clone(),
+            provider: "linear".into(),
+            initiative: "initiative".into(),
+            synced_at: 42,
+            snapshot: serde_json::from_value(snapshot).unwrap(),
+        };
         assert_eq!(detail.observed_at, 42);
         assert_eq!(detail.item, list.snapshot.items[0]);
         assert_eq!(detail.item.name, "Retained title");
@@ -1378,13 +1546,6 @@ mod tests {
             .unwrap();
         assert_eq!(removed.state, PlanningState::Removed);
         assert_eq!(removed.record, Some(detail));
-        assert!(store
-            .pm_snapshot(&wave)
-            .await
-            .unwrap()
-            .unwrap()
-            .snapshot
-            .items
-            .is_empty());
+        assert!(store.list_tasks(None).await.unwrap().is_empty());
     }
 }

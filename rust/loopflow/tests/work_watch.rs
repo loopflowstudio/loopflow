@@ -440,7 +440,7 @@ fn a_task_committed_elsewhere_appears_once_and_bursts_converge() {
 }
 
 #[test]
-fn transcript_lines_read_nothing_and_do_not_delay_a_task() {
+fn transcript_lines_do_not_publish_changes_or_delay_a_task() {
     let home = Machine::new();
     let mut watch = home.watch();
     watch.planning(Duration::from_secs(30), |_| true);
@@ -462,11 +462,17 @@ fn transcript_lines_read_nothing_and_do_not_delay_a_task() {
             std::thread::sleep(Duration::from_millis(50));
         }
     }
-    watch.parts(Duration::from_millis(500));
+    assert!(watch
+        .parts(Duration::from_millis(500))
+        .iter()
+        .all(|frame| !matches!(
+            frame.content,
+            WorkContent::Sessions(_) | WorkContent::Task(_) | WorkContent::WorkActivity(_)
+        )));
     let after = watch.heartbeat();
-    // `activity` is absent: it observes this machine's processes on a 2 s
-    // clock and reads nothing a transcript line can change.
-    for part in ["planning", "sessions", "task", "wave", "work_activity"] {
+    // Process-backed parts reread on their OS clock even without store writes.
+    // Transcript lines must neither wake planning nor publish unchanged Sessions.
+    for part in ["planning", "wave"] {
         assert_eq!(before.get(part), after.get(part), "{part} was read again");
     }
 
@@ -493,8 +499,7 @@ fn transcript_lines_read_nothing_and_do_not_delay_a_task() {
     writer.join().unwrap();
 }
 
-/// The only guard on the transcript exemption being too wide: a displayed
-/// fact that bumps nothing is never read again, by any clock.
+/// Displayed commits and OS death reach the same Session reader.
 #[test]
 fn every_displayed_session_fact_committed_elsewhere_is_shown() {
     let home = Machine::new();
@@ -505,6 +510,20 @@ fn every_displayed_session_fact_committed_elsewhere_is_shown() {
         "headless": false, "task": null, "wave": null, "activity": null}),
     );
     home.conversation();
+    struct Provider(Child);
+    impl Drop for Provider {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let mut provider = Provider(Command::new("/bin/sleep").arg("60").spawn().unwrap());
+    home.raw()
+        .execute(
+            "UPDATE processes SET pid=?1,os_started_at=?2 WHERE agent_session_id='conversation' AND kind='agent'",
+            rusqlite::params![provider.0.id(), time::OffsetDateTime::now_utc().unix_timestamp()],
+        )
+        .unwrap();
     let first = watch.session(|record| !record.is_null());
     assert_eq!(first["title"], "Conversation");
     assert_eq!(first["flow_membership"]["kind"], "unknown");
@@ -557,15 +576,19 @@ fn every_displayed_session_fact_committed_elsewhere_is_shown() {
         serde_json::json!({"outcome": "interrupted"}),
     );
     write("UPDATE processes SET attachment_exit_seq=(SELECT seq FROM session_events WHERE session_id='conversation' AND receipt_key='attachment:0:exit') WHERE agent_session_id='conversation'");
-    watch.session(|record| record["state"] == "interrupted");
-
-    // Transcript lines between those facts were never a reason to read.
-    let before = watch.heartbeat()["sessions"];
+    // Attachment outcomes and transcript writes cannot change provider life.
     for line in 0..50 {
         transcript(&conn, line);
     }
-    watch.parts(Duration::from_millis(1500));
-    assert_eq!(watch.heartbeat()["sessions"], before);
+    assert!(watch
+        .parts(Duration::from_millis(1500))
+        .iter()
+        .all(|frame| !matches!(frame.content, WorkContent::Sessions(_))));
+
+    // No database write announces this death: the OS clock must find it.
+    provider.0.kill().unwrap();
+    provider.0.wait().unwrap();
+    watch.session(|record| record["state"] == "closed" && record["attention"].is_null());
 
     write("UPDATE agent_sessions SET completed_at=4 WHERE id='conversation'");
     watch.session(|record| record.is_null() || record["state"] == "closed");
@@ -754,10 +777,9 @@ fn a_checkout_changed_on_disk_is_shown() {
     watch.checkout((false, true));
 }
 
-/// Agents record usage every few seconds. Only the part showing token totals
-/// follows it, and however often it moves that part is read once per rest.
+/// Usage updates token totals, not Session content; process clocks still run.
 #[test]
-fn usage_rereads_only_wave_detail_and_not_for_every_row() {
+fn usage_updates_wave_without_publishing_unchanged_sessions() {
     let home = Machine::new();
     let mut watch = home.watch();
     watch.planning(Duration::from_secs(30), |_| true);
@@ -783,11 +805,15 @@ fn usage_rereads_only_wave_detail_and_not_for_every_row() {
         std::thread::sleep(Duration::from_millis(100));
     }
     // Heartbeats sent while writing are still waiting to be received.
-    watch.parts(Duration::from_millis(200));
+    assert!(watch
+        .parts(Duration::from_millis(200))
+        .iter()
+        .all(|frame| !matches!(
+            frame.content,
+            WorkContent::Sessions(_) | WorkContent::Task(_) | WorkContent::WorkActivity(_)
+        )));
     let after = watch.heartbeat();
-    for part in ["planning", "sessions", "task", "work_activity"] {
-        assert_eq!(before.get(part), after.get(part), "{part} was read again");
-    }
+    assert_eq!(before.get("planning"), after.get("planning"));
     let readings = after["wave"] - before["wave"];
     assert!((1..=2).contains(&readings), "wave read {readings} times");
 }

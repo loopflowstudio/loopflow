@@ -574,7 +574,7 @@ fn seed_provider_task(
             "team":{"id":"team-1"},"project":{"id":project,"name":"Chapter"}
         }));
         drop(state);
-        super::load_show_snapshot(repo, "product", PmRefresh::Force, &NullProgress).await?;
+        super::refresh_wave(repo, "product").await?;
         Ok(super::read_task_planning_async(repo, &id, PmRefresh::Force)
             .await?
             .item)
@@ -751,7 +751,9 @@ fn task_deletion_active_sync_reconnect_retains_execution_and_history() {
 #[test]
 fn task_deletion_lost_reply_requires_positive_trash_evidence_without_replay() {
     with_planning_task(|runtime, fixture, repo, task, state| {
+        runtime.block_on(async { state.lock().await.field_outage = true });
         crate::ops::task::task_delete(repo, task.id.as_str()).unwrap();
+        runtime.block_on(async { state.lock().await.field_outage = false });
         let receipt = fixture
             .store
             .sqlite
@@ -801,7 +803,9 @@ fn task_deletion_lost_reply_requires_positive_trash_evidence_without_replay() {
 #[test]
 fn task_deletion_concurrent_delivery_has_one_effect() {
     with_planning_task(|runtime, fixture, repo, task, state| {
+        runtime.block_on(async { state.lock().await.field_outage = true });
         crate::ops::task::task_delete(repo, task.id.as_str()).unwrap();
+        runtime.block_on(async { state.lock().await.field_outage = false });
         let work = crate::durable::WorkRef::Task(task.id.clone());
         runtime.block_on(async {
             let (first, second) = tokio::join!(
@@ -824,7 +828,9 @@ fn task_deletion_concurrent_delivery_has_one_effect() {
 #[test]
 fn task_deletion_old_trash_observation_cannot_settle_newer_removal() {
     with_planning_task(|runtime, fixture, repo, task, state| {
+        runtime.block_on(async { state.lock().await.field_outage = true });
         crate::ops::task::task_delete(repo, task.id.as_str()).unwrap();
+        runtime.block_on(async { state.lock().await.field_outage = false });
         let receipt = fixture
             .store
             .sqlite
@@ -855,7 +861,9 @@ fn task_deletion_old_trash_observation_cannot_settle_newer_removal() {
 #[test]
 fn task_deletion_unconfirmed_write_stays_uncertain_without_replay() {
     with_planning_task(|runtime, fixture, repo, task, state| {
+        runtime.block_on(async { state.lock().await.field_outage = true });
         crate::ops::task::task_delete(repo, task.id.as_str()).unwrap();
+        runtime.block_on(async { state.lock().await.field_outage = false });
         let work = crate::durable::WorkRef::Task(task.id.clone());
         runtime.block_on(async {
             state.lock().await.deletion_unconfirmed = true;
@@ -885,7 +893,9 @@ fn task_deletion_unconfirmed_write_stays_uncertain_without_replay() {
 #[test]
 fn task_deletion_adopts_newer_linear_edit_and_retains_losing_removal() {
     with_planning_task(|runtime, fixture, repo, task, state| {
+        runtime.block_on(async { state.lock().await.field_outage = true });
         crate::ops::task::task_delete(repo, task.id.as_str()).unwrap();
+        runtime.block_on(async { state.lock().await.field_outage = false });
         let receipt = fixture
             .store
             .sqlite
@@ -1075,7 +1085,9 @@ fn task_abandonment_active_sync_delivers_after_reconnect() {
 #[test]
 fn task_abandonment_lost_reply_reconciles_without_repeating_cancellation() {
     with_planning_task(|runtime, fixture, repo, task, state| {
+        runtime.block_on(async { state.lock().await.field_outage = true });
         crate::ops::task::task_abandon(repo, Some(task.id.as_str()), false).unwrap();
+        runtime.block_on(async { state.lock().await.field_outage = false });
         let receipt = fixture
             .store
             .sqlite
@@ -1113,7 +1125,9 @@ fn task_abandonment_lost_reply_reconciles_without_repeating_cancellation() {
 #[test]
 fn task_abandonment_adopts_linear_conflict_and_retains_local_decision() {
     with_planning_task(|runtime, fixture, repo, task, state| {
+        runtime.block_on(async { state.lock().await.field_outage = true });
         crate::ops::task::task_abandon(repo, Some(task.id.as_str()), false).unwrap();
+        runtime.block_on(async { state.lock().await.field_outage = false });
         let receipt = fixture
             .store
             .sqlite
@@ -1171,7 +1185,9 @@ fn task_abandonment_adopts_linear_conflict_and_retains_local_decision() {
 #[test]
 fn task_abandonment_missing_linear_state_leaves_the_save_retryable() {
     with_planning_task(|runtime, fixture, repo, task, state| {
+        runtime.block_on(async { state.lock().await.field_outage = true });
         crate::ops::task::task_abandon(repo, Some(task.id.as_str()), false).unwrap();
+        runtime.block_on(async { state.lock().await.field_outage = false });
         let receipt = fixture
             .store
             .sqlite
@@ -1312,7 +1328,11 @@ fn task_completion_retains_request_but_rolls_back_status_if_delivery_cannot_comm
             .sqlite
             .pending_task_state(&task.id)
             .unwrap()
-            .is_some());
+            .is_none());
+        assert_eq!(
+            runtime.block_on(async { state.lock().await.completion_writes }),
+            1
+        );
     });
 }
 
@@ -2039,12 +2059,12 @@ fn assert_completion_adopts_reopening(during_delivery: bool) {
                 provider.issues[0]["state"] = json!({"type":"started"});
                 mark_issue_updated(&mut provider.issues[0]);
                 drop(provider);
-                super::load_show_snapshot(repo, "product", PmRefresh::Force, &NullProgress)
-                    .await
-                    .unwrap();
+                super::refresh_wave(repo, "product").await.unwrap();
             });
         }
+        runtime.block_on(async { state.lock().await.field_outage = true });
         crate::ops::task::task_complete(repo, task.id.as_str(), Some("Delivered locally")).unwrap();
+        runtime.block_on(async { state.lock().await.field_outage = false });
         let original = fixture
             .store
             .sqlite
@@ -2154,7 +2174,9 @@ fn task_completion_unseen_reopening_can_be_overwritten_by_unconditional_delivery
     // Jack Heart selected observed Linear-wins, not unseen-write atomicity.
     // Keep the original counterexample: no ownership read sees this reopening.
     with_planning_task(|runtime, fixture, repo, task, state| {
+        runtime.block_on(async { state.lock().await.field_outage = true });
         crate::ops::task::task_complete(repo, task.id.as_str(), Some("Delivered locally")).unwrap();
+        runtime.block_on(async { state.lock().await.field_outage = false });
         let original = fixture
             .store
             .sqlite
@@ -2386,7 +2408,7 @@ fn assert_unplaced_completion_retry(lose_response: bool, uncached: bool) {
         };
         runtime.block_on(async {
             let mut provider = state.lock().await;
-            provider.fail_issue_read_after = (!lose_response && !uncached).then_some(1);
+            provider.field_outage = !uncached;
             provider.lose_completion = lose_response;
         });
         let complete = || {
@@ -2410,10 +2432,12 @@ fn assert_unplaced_completion_retry(lose_response: bool, uncached: bool) {
             runtime.block_on(fixture.store.work_status(&crate::durable::WorkRef::Task(pending.id.clone()))).unwrap(),
             WorkStatus::Done
         );
-        assert_eq!(runtime.block_on(async { state.lock().await.completion_writes }), 0);
+        assert_eq!(runtime.block_on(async { state.lock().await.completion_writes }), usize::from(uncached));
         let delivery = fixture.store.sqlite.pending_task_state(&pending.id).unwrap().unwrap();
+        runtime.block_on(async { state.lock().await.field_outage = false });
         complete().unwrap();
-        assert_eq!(fixture.store.sqlite.pending_task_state(&pending.id).unwrap().unwrap().id, delivery.id);
+        let conn = rusqlite::Connection::open(&fixture.database).unwrap();
+        assert_eq!(conn.query_row("SELECT id FROM task_state_deliveries WHERE task_id=?1", [pending.id.as_str()], |r| r.get::<_, String>(0)).unwrap(), delivery.id);
         runtime.block_on(crate::ops::linear_observe::sync_task_state(&fixture.store, &pending)).unwrap();
         runtime.block_on(crate::ops::linear_observe::sync_task_state(&fixture.store, &pending)).unwrap();
         let retained = runtime
@@ -2421,6 +2445,7 @@ fn assert_unplaced_completion_retry(lose_response: bool, uncached: bool) {
             .unwrap()
             .unwrap();
         assert_eq!(retained.pm_writeback, LinearWritebackState::Current);
+        assert_eq!(runtime.block_on(async { state.lock().await.completion_writes }), 1);
         assert!(retained.worktree.is_none());
         let events = runtime
             .block_on(fixture.store.task_events_after(&pending.id, 0))
@@ -2630,6 +2655,7 @@ fi
                 .and_then(|()| crate::ops::task::task_complete(&repo, selector, Some(summary))),
         };
 
+        runtime.block_on(async { state.lock().await.field_outage = true });
         let first = complete("Delivered the requested outcome").unwrap();
         assert!(matches!(
             first.pm_writeback,
@@ -2651,6 +2677,7 @@ fi
         );
         runtime.block_on(async {
             let mut provider = state.lock().await;
+            provider.field_outage = false;
             provider.fail_issue_read_after = (!lose_response).then_some(1);
             provider.lose_completion = lose_response;
         });
@@ -2916,7 +2943,7 @@ esac
                 assert_eq!(
                     runtime
                         .block_on(async { state.lock().await.issues[0]["state"]["type"].clone() }),
-                    json!("unstarted")
+                    json!("canceled")
                 );
                 assert!(matches!(
                     fixture
@@ -2926,10 +2953,7 @@ esac
                         .unwrap()
                         .unwrap()
                         .pm_writeback,
-                    LinearWritebackState::Pending {
-                        operation: crate::work::task::LinearWritebackOperation::CancelTask,
-                        ..
-                    }
+                    LinearWritebackState::Current
                 ));
                 assert!(checkout.exists());
                 std::fs::remove_file(repo.join(".git/fail-close")).unwrap();
@@ -3046,11 +3070,13 @@ fn foreign_projects_do_not_block_sweep_refresh_or_sync() {
         runtime.block_on(async {
             let provider = state.lock().await;
             assert_eq!(provider.extra_projects, vec![foreign.clone()]);
-            let row = fixture.store.pm_snapshot(wave.id()).await.unwrap().unwrap();
-            let snapshot = row.snapshot;
-            assert_eq!(snapshot.projects.len(), 1);
-            assert_eq!(snapshot.projects[0].id, "project-1");
-            assert_eq!(snapshot.projects[0].name, "Chapter");
+            let projects = fixture.store.list_projects(Some(wave.id())).await.unwrap();
+            assert_eq!(projects.len(), 1);
+            assert_eq!(
+                projects[0].linear_id.as_ref().unwrap().as_str(),
+                "project-1"
+            );
+            assert_eq!(projects[0].name, "Chapter");
         });
         runtime.block_on(async {
             let mut provider = state.lock().await;
@@ -3080,7 +3106,7 @@ fn foreign_projects_do_not_block_sweep_refresh_or_sync() {
         assert_eq!(applied[1].outcome, "canceled");
         assert_eq!(
             runtime.block_on(async { state.lock().await.issues[0]["state"]["type"].clone() }),
-            json!("unstarted")
+            json!("canceled")
         );
         let saved = fixture
             .store
@@ -3096,16 +3122,12 @@ fn foreign_projects_do_not_block_sweep_refresh_or_sync() {
                 .unwrap(),
             WorkStatus::Abandoned
         );
-        assert_eq!(
-            fixture
-                .store
-                .sqlite
-                .pending_task_state(&saved.id)
-                .unwrap()
-                .unwrap()
-                .target,
-            "canceled"
-        );
+        assert!(fixture
+            .store
+            .sqlite
+            .pending_task_state(&saved.id)
+            .unwrap()
+            .is_none());
         let repeated = crate::ops::task::task_sweep(&repo, true).unwrap();
         assert_eq!(repeated.len(), 1);
         assert_eq!(repeated[0].issue, None);
@@ -4157,14 +4179,7 @@ fn planning_export_late_readback_preserves_newer_edits_and_inventory_identity() 
                                 )
                                 .unwrap();
                             // Inventory observes the committed creation before its response returns.
-                            super::load_show_snapshot(
-                                repo,
-                                "product",
-                                PmRefresh::Force,
-                                &NullProgress,
-                            )
-                            .await
-                            .unwrap();
+                            super::refresh_wave(repo, "product").await.unwrap();
                         }
                         _ => unreachable!(),
                     }

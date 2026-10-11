@@ -207,8 +207,9 @@ impl Default for SessionFilter {
 /// validation belong to exact detail/actions, never to this row projection.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SessionSummary {
+    pub terminal_id: Option<String>,
     pub primary_scope: Option<String>,
-    pub attachment_outcome: Option<String>,
+    pub agent_process_evidence: crate::journal::ProcessIdentityEvidence,
     /// Waiting on a person, as of the read's clock.
     pub waiting: bool,
     pub program_status: Option<crate::program_status::Records>,

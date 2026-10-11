@@ -689,7 +689,8 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
         "--json",
     ]);
     assert_eq!(history.as_array().unwrap().len(), 3);
-    assert_eq!(history[0]["state"], "closed");
+    // A historical Session completion without an AgentProcess proves no death.
+    assert_eq!(history[0]["state"], "unknown");
     assert_eq!(fixture.count("agent_sessions"), 113);
 }
 

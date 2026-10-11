@@ -63,7 +63,9 @@ pub(super) fn queue_in(conn: &Connection, task: &TaskId, target: &str) -> StoreR
 pub(super) fn reconcile_in(
     conn: &Connection,
     task: &TaskId,
-    observed: &crate::pm::PmItem,
+    observed_revision: Option<&str>,
+    observed: &super::planning_write::Disposition,
+    evidence: &str,
 ) -> StoreResult<bool> {
     let pending: Option<(TaskStateDelivery, Option<String>)> = conn.query_row(
         "SELECT d.id,d.task_id,d.target,d.attempted,d.base_revision,d.base_state,t.planning_provider_revision
@@ -84,12 +86,12 @@ pub(super) fn reconcile_in(
         attempted,
         ..
     } = delivery;
-    if super::planning::revision_nanos(observed.revision.as_deref())?
+    if super::planning::revision_nanos(observed_revision)?
         < super::planning::revision_nanos(revision.as_deref())?
     {
         return Ok(false);
     }
-    let Some(state) = observed.state.as_deref() else {
+    let Some(state) = observed.planning_state.as_deref() else {
         return Ok(true);
     };
     if state == target {
@@ -101,26 +103,24 @@ pub(super) fn reconcile_in(
     }
     // An unrelated provider revision does not conflict with an unattempted save.
     // After an uncertain write, a changed revision may represent completion/reopening.
-    if observed.state == base_state && !(attempted && observed.revision != base_revision) {
+    if observed.planning_state == base_state
+        && !(attempted && observed_revision != base_revision.as_deref())
+    {
         return Ok(true);
     }
     conn.execute(
         "UPDATE task_state_deliveries SET settled=1,conflict_json=?2,error=NULL WHERE id=?1",
-        params![id, serde_json::to_string(observed)?],
+        params![id, evidence],
     )?;
     planning_write::local(
         conn,
         PlanningKind::Task,
         task.as_str(),
-        &[Edit::Disposition(super::planning_write::Disposition {
-            planning_state: observed.state.clone(),
-            planning_completed: i64::from(observed.completed),
-            planning_completed_at: observed.completed_at.clone(),
-        })],
+        &[Edit::Disposition(observed.clone())],
     )?;
     conn.execute(
         "UPDATE tasks SET planning_provider_revision=?2 WHERE id=?1",
-        params![task.as_str(), observed.revision],
+        params![task.as_str(), observed_revision],
     )?;
     super::children::insert_task_event_in(conn, task, &crate::work::task::TaskEventKind::Progress {
         summary: format!("Adopted Linear state {state}; local intention {target} remains in delivery {id}. Local Workflow unchanged."),
@@ -181,7 +181,17 @@ impl SqliteStore {
         )? {
             return Ok(false);
         }
-        let pending = reconcile_in(&tx, &delivery.task_id, observed)?;
+        let pending = reconcile_in(
+            &tx,
+            &delivery.task_id,
+            observed.revision.as_deref(),
+            &super::planning_write::Disposition {
+                planning_state: observed.state.clone(),
+                planning_completed: i64::from(observed.completed),
+                planning_completed_at: observed.completed_at.clone(),
+            },
+            &serde_json::to_string(observed)?,
+        )?;
         tx.commit()?;
         Ok(pending)
     }

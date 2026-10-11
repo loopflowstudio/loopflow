@@ -178,18 +178,18 @@ pub(super) fn observe_in(
     let mut observed = Vec::new();
     for item in items {
         // An older list must not order a mixture of old and retained newer facts.
-        let retained: Option<(String, String)> = conn.query_row(
-            "SELECT t.id,i.body FROM pm_items i JOIN tasks t ON t.external_issue_id=i.id
+        let retained = conn.query_row(
+            "SELECT t.id,json_extract(i.body,'$.revision'),json_extract(i.body,'$.rank'),i.project_id
+             FROM pm_items i JOIN tasks t ON t.external_issue_id=i.id
              WHERE i.repo=?1 AND i.provider=?2 AND i.id=?3 AND i.needs_refresh=0 AND t.project_id=?4 AND t.planning_deleted_at IS NULL",
-            params![repo,provider,item.id,project.as_str()], |row| Ok((row.get(0)?,row.get(1)?))).optional()?;
-        let Some((id, body)) = retained else {
+            params![repo,provider,item.id,project.as_str()], |row| Ok((
+                row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?,
+                row.get::<_, u32>(2)?, row.get::<_, Option<String>>(3)?,
+            ))).optional()?;
+        let Some((id, revision, rank, membership)) = retained else {
             return Ok(false);
         };
-        let retained: PmItem = serde_json::from_str(&body)?;
-        if retained.revision != item.revision
-            || retained.rank != item.rank
-            || retained.project_id != item.project_id
-        {
+        if revision != item.revision || rank != item.rank || membership != item.project_id {
             return Ok(false);
         }
         observed.push(id);

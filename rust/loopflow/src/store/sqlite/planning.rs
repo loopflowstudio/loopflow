@@ -648,52 +648,70 @@ fn project_accepted_planning(
     let item_ids = serde_json::to_string(&items.iter().map(|i| &i.id).collect::<Vec<_>>())?;
     let mut query = tx.prepare(&format!(
         "WITH accepted AS ({ACCEPTED_WAVE_PROJECTS})
-         SELECT body,observed_at,wave_id,prose_json FROM accepted
-         WHERE id IN (SELECT value FROM json_each(?3))"
+         SELECT id,observed_at,wave_id,json_extract(body,'$.revision'),
+             json_extract(body,'$.slug'),json_extract(body,'$.name'),
+             json_extract(body,'$.summary'),json_quote(json_extract(body,'$.status')),
+             json_extract(body,'$.workflow'),json_extract(body,'$.krs'),
+             json_extract(body,'$.metric_targets'),json_extract(body,'$.initiative_ids'),
+             json_extract(body,'$.team_ids'),
+             CASE WHEN prose_json IS NOT NULL
+                       AND json_extract(prose_json,'$.revision') IS json_extract(body,'$.revision')
+                  THEN json_extract(prose_json,'$.value')
+                  ELSE json_extract(body,'$.description') END
+         FROM accepted WHERE id IN (SELECT value FROM json_each(?3))"
     ))?;
-    let projects = query.query_map(
-        params![
-            repo,
-            provider,
-            project_ids,
-            confirmed_wave,
-            confirmed_initiative
-        ],
-        |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, i64>(1)?,
-                row.get::<_, WaveId>(2)?,
-                row.get::<_, Option<String>>(3)?,
-            ))
-        },
-    )?;
-    for project in projects {
-        let (body, observed_at, wave_id, prose) = project?;
-        let mut project: LinearProject = serde_json::from_str(&body)?;
-        let prose: Option<serde_json::Value> = prose
-            .map(|value| serde_json::from_str(&value))
-            .transpose()?;
-        if let Some(prose) = &prose {
-            // The body only owns fields observed at its entity revision.
-            // Retained older prose supplies save baselines, not fresh acquisition.
-            if prose["revision"].as_str() == project.revision.as_deref() {
-                project.description = Some(serde_json::from_value(prose["value"].clone())?);
-            }
-        }
-        super::planning_export::attach_in(tx, repo, true, &serde_json::to_value(&project)?)?;
+    let observations = query
+        .query_and_then(
+            params![
+                repo,
+                provider,
+                project_ids,
+                confirmed_wave,
+                confirmed_initiative
+            ],
+            |row| -> StoreResult<_> {
+                let external: String = row.get(0)?;
+                let wave: WaveId = row.get(2)?;
+                let mut edits = vec![
+                    Edit::ProjectWave(wave.to_string()),
+                    Edit::ProjectLinearId(Some(external.clone())),
+                    Edit::ProjectSlug(Some(row.get(4)?)),
+                    Edit::ProjectName(Some(row.get(5)?)),
+                    Edit::ProjectSummary(row.get(6)?),
+                    Edit::ProjectStatus(serde_json::from_str(&row.get::<_, String>(7)?)?),
+                    Edit::Workflow(row.get(8)?),
+                    Edit::Krs(serde_json::from_str(&row.get::<_, String>(9)?)?),
+                    Edit::MetricTargets(serde_json::from_str(&row.get::<_, String>(10)?)?),
+                    Edit::ProjectInitiatives(serde_json::from_str(&row.get::<_, String>(11)?)?),
+                    Edit::ProjectTeams(serde_json::from_str(&row.get::<_, String>(12)?)?),
+                ];
+                if let Some(description) = row.get::<_, Option<String>>(13)? {
+                    edits.push(Edit::ProjectDescription(Some(description)));
+                }
+                Ok((
+                    external,
+                    row.get::<_, i64>(1)?,
+                    wave,
+                    row.get::<_, Option<String>>(3)?,
+                    edits,
+                ))
+            },
+        )?
+        .collect::<StoreResult<Vec<_>>>()?;
+    drop(query);
+    for (external, observed_at, wave_id, revision, mut edits) in observations {
+        super::planning_export::attach_in(tx, repo, true, &external, revision.as_deref(), &edits)?;
         let existing: Option<(String, WaveId)> = tx
             .query_row(
                 "SELECT id,wave_id FROM projects WHERE external_project_id=?1",
-                [&project.id],
+                [&external],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .optional()?;
         let id = match existing {
             Some((_, owner)) if owner != wave_id => {
                 return Err(StoreError::InvalidData(format!(
-                    "Project {} changed Wave ownership",
-                    project.id
+                    "Project {external} changed Wave ownership"
                 )));
             }
             Some((id, _)) => {
@@ -704,48 +722,64 @@ fn project_accepted_planning(
         let rank: Option<u32> = tx
             .query_row(
                 "SELECT position FROM pm_wave_projects WHERE wave_id=?1 AND project_id=?2",
-                params![wave_id, project.id],
+                params![wave_id, external],
                 |r| r.get(0),
             )
             .optional()?;
-        let mut edits = vec![
-            Edit::ProjectWave(wave_id.to_string()),
-            Edit::ProjectLinearId(Some(project.id.clone())),
-            Edit::ProjectSlug(Some(project.slug.clone())),
-            Edit::ProjectName(Some(project.name.clone())),
-            Edit::ProjectSummary(project.summary.clone()),
-            Edit::ProjectStatus(project.status),
-            Edit::Workflow(project.workflow.clone()),
-            Edit::Krs(project.krs.clone()),
-            Edit::MetricTargets(project.metric_targets.clone()),
-            Edit::ProjectInitiatives(project.initiative_ids.clone()),
-            Edit::ProjectTeams(project.team_ids.clone()),
-        ];
-        if let Some(description) = &project.description {
-            edits.push(Edit::ProjectDescription(Some(description.clone())));
-        }
         if let Some(rank) = rank {
             edits.push(Edit::ProjectRank(rank));
         }
         super::planning_changes::PlanningChanges::Project(&id).reconcile_edits(
             tx,
-            project.revision.as_deref(),
+            revision.as_deref(),
             &mut edits,
         )?;
         planning_write::create(tx, repo, PlanningKind::Project, id.as_str(), &edits)?;
-        tx.execute("UPDATE projects SET pm_snapshot_synced_at=?2,planning_provider_revision=?3 WHERE id=?1",params![id.as_str(),observed_at,project.revision])?;
+        tx.execute("UPDATE projects SET pm_snapshot_synced_at=?2,planning_provider_revision=?3 WHERE id=?1",params![id.as_str(),observed_at,revision])?;
     }
     for item in items {
-        if let Some(body) = tx.query_row("SELECT body FROM pm_items WHERE repo=?1 AND provider=?2 AND id=?3 AND needs_refresh=0",
-            params![repo,provider,item.id], |row| row.get::<_,String>(0)).optional()? {
-            super::planning_export::attach_in(tx, repo, false, &serde_json::from_str(&body)?)?;
+        let observed = tx
+            .query_row(
+                "SELECT json_extract(body,'$.revision'),json_extract(body,'$.name'),
+                json_extract(body,'$.description'),json_extract(body,'$.assignee'),project_id
+             FROM pm_items WHERE repo=?1 AND provider=?2 AND id=?3 AND needs_refresh=0",
+                params![repo, provider, item.id],
+                |row| {
+                    let mut edits = vec![
+                        Edit::TaskTitle(Some(row.get(1)?)),
+                        Edit::TaskDescription(Some(row.get(2)?)),
+                        Edit::TaskAssignee(row.get(3)?),
+                    ];
+                    if let Some(project) = row.get::<_, Option<String>>(4)? {
+                        edits.push(Edit::TaskProject(project));
+                    }
+                    Ok((row.get::<_, Option<String>>(0)?, edits))
+                },
+            )
+            .optional()?;
+        if let Some((revision, edits)) = observed {
+            super::planning_export::attach_in(
+                tx,
+                repo,
+                false,
+                &item.id,
+                revision.as_deref(),
+                &edits,
+            )?;
         }
     }
     // Admission and refresh share one accepted observation. Existing Tasks retain
     // their IDs, local order and pending disposition; new Tasks receive only Work.
     let mut query = tx.prepare(&format!(
         "WITH accepted AS ({ACCEPTED_WAVE_PROJECTS})
-         SELECT target.id,i.body,i.observed_at,p.id FROM pm_items i
+         SELECT target.id,i.body,i.observed_at,p.id,i.id,
+             json_extract(i.body,'$.revision'),i.identifier,
+             json_extract(i.body,'$.name'),json_extract(i.body,'$.description'),
+             json_extract(i.body,'$.rank'),json_extract(i.body,'$.url'),
+             json_extract(i.body,'$.branch_name'),json_extract(i.body,'$.team_id'),
+             json_extract(i.body,'$.assignee'),json_extract(i.body,'$.due_date'),
+             json_extract(i.body,'$.state'),json_extract(i.body,'$.completed'),
+             json_extract(i.body,'$.completed_at') FROM pm_items i
          JOIN projects p ON p.external_project_id=i.project_id
          JOIN accepted observed ON observed.id=i.project_id AND observed.wave_id=p.wave_id
          LEFT JOIN tasks target ON target.external_issue_id=i.id
@@ -775,38 +809,45 @@ fn project_accepted_planning(
                     row.get::<_, Option<String>>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, i64>(2)?,
-                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    vec![
+                        Edit::TaskProject(row.get(3)?),
+                        Edit::TaskLinearId(Some(row.get(4)?)),
+                        Edit::TaskIdentifier(row.get(6)?),
+                        Edit::TaskTitle(Some(row.get(7)?)),
+                        Edit::TaskDescription(Some(row.get(8)?)),
+                        Edit::TaskRank(row.get(9)?),
+                        Edit::TaskUrl(row.get(10)?),
+                        Edit::TaskBranch(row.get(11)?),
+                        Edit::TaskTeam(row.get(12)?),
+                        Edit::TaskAssignee(row.get(13)?),
+                        Edit::TaskDueDate(row.get(14)?),
+                    ],
+                    Disposition {
+                        planning_state: row.get(15)?,
+                        planning_completed: i64::from(row.get::<_, bool>(16)?),
+                        planning_completed_at: row.get(17)?,
+                    },
                 ))
             },
         )?
         .collect::<Result<Vec<_>, _>>()?;
     drop(query);
-    for (existing, body, observed_at, project) in observations {
-        let item: PmItem = serde_json::from_str(&body)?;
+    for (existing, body, observed_at, external, revision, mut edits, disposition) in observations {
         let id = existing.as_ref().map_or_else(
-            || crate::durable::TaskId::from_issue(&item.id),
+            || crate::durable::TaskId::from_issue(&external),
             crate::durable::TaskId::from_raw,
         );
-        let mut edits = vec![
-            Edit::TaskProject(project),
-            Edit::TaskLinearId(Some(item.id.clone())),
-            Edit::TaskIdentifier(item.identifier.clone()),
-            Edit::TaskTitle(Some(item.name.clone())),
-            Edit::TaskDescription(Some(item.description.clone())),
-            Edit::TaskRank(item.rank),
-            Edit::TaskUrl(item.url.clone()),
-            Edit::TaskBranch(item.branch_name.clone()),
-            Edit::TaskTeam(item.team_id.clone()),
-            Edit::TaskAssignee(item.assignee.clone()),
-            Edit::TaskDueDate(item.due_date.clone()),
-            Edit::Disposition(Disposition {
-                planning_state: item.state.clone(),
-                planning_completed: i64::from(item.completed),
-                planning_completed_at: item.completed_at.clone(),
-            }),
-        ];
+        edits.push(Edit::Disposition(disposition.clone()));
         if existing.is_some() {
-            super::task_state_delivery::reconcile_in(tx, &id, &item)?;
+            super::task_state_delivery::reconcile_in(
+                tx,
+                &id,
+                revision.as_deref(),
+                &disposition,
+                &body,
+            )?;
             let pending: bool = tx.query_row(
                 "SELECT EXISTS(SELECT 1 FROM task_state_deliveries WHERE task_id=?1 AND settled=0
                  AND seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=?1))",
@@ -815,7 +856,7 @@ fn project_accepted_planning(
             )?;
             super::planning_changes::PlanningChanges::Task(&id).reconcile_edits(
                 tx,
-                item.revision.as_deref(),
+                revision.as_deref(),
                 &mut edits,
             )?;
             edits.retain(|edit| {
@@ -826,7 +867,7 @@ fn project_accepted_planning(
         planning_write::create(tx, repo, PlanningKind::Task, id.as_str(), &edits)?;
         tx.execute(
             "UPDATE tasks SET planning_provider_revision=?2,pm_snapshot_synced_at=?3 WHERE id=?1",
-            params![id.as_str(), item.revision, observed_at],
+            params![id.as_str(), revision, observed_at],
         )?;
     }
     Ok(())
@@ -869,13 +910,12 @@ fn require_accepted_initiative(
     project_id: &str,
     initiative: &str,
 ) -> StoreResult<()> {
-    let body: String = conn.query_row(
-        "SELECT body FROM pm_projects WHERE repo=?1 AND provider=?2 AND id=?3",
+    let initiatives: String = conn.query_row(
+        "SELECT json_extract(body,'$.initiative_ids') FROM pm_projects WHERE repo=?1 AND provider=?2 AND id=?3",
         params![repo, provider, project_id],
         |row| row.get(0),
     )?;
-    let accepted: LinearProject = serde_json::from_str(&body)?;
-    if accepted.initiative_ids.as_slice() != [initiative] {
+    if serde_json::from_str::<Vec<String>>(&initiatives)?.as_slice() != [initiative] {
         return Err(StoreError::InvalidData(format!(
             "accepted Project {project_id} does not belong to Initiative {initiative}"
         )));
@@ -891,26 +931,37 @@ fn validate_project_membership(
 ) -> StoreResult<()> {
     // Run before the ingestion transaction: disputed ownership must remain
     // recorded even when rejecting the incoming facts rolls that transaction back.
-    let previous: Option<String> = conn
+    let previous = conn
         .query_row(
-            "SELECT body FROM pm_projects WHERE repo=?1 AND provider=?2 AND id=?3",
+            "SELECT json_extract(body,'$.revision'),json_extract(body,'$.initiative_ids'),
+                    json_extract(body,'$.team_ids')
+             FROM pm_projects WHERE repo=?1 AND provider=?2 AND id=?3",
             params![repo, provider, project.id],
-            |row| row.get(0),
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
         )
         .optional()?;
-    let Some(previous) = previous else {
+    let Some((previous_revision, initiatives, teams)) = previous else {
         return Ok(());
     };
-    let previous: LinearProject = serde_json::from_str(&previous)?;
     let revision = revision_nanos(project.revision.as_deref())?;
-    if revision.is_some() && revision < revision_nanos(previous.revision.as_deref())? {
+    if revision.is_some() && revision < revision_nanos(previous_revision.as_deref())? {
         return Ok(());
     }
     // A Project revision does not order its separate Initiative/Team relationships.
     // Preserve the facts, but do not let managed readers use disputed ownership.
-    if !same_ids(&project.initiative_ids, &previous.initiative_ids)
-        || !same_ids(&project.team_ids, &previous.team_ids)
-    {
+    if !same_ids(
+        &project.initiative_ids,
+        &serde_json::from_str::<Vec<String>>(&initiatives)?,
+    ) || !same_ids(
+        &project.team_ids,
+        &serde_json::from_str::<Vec<String>>(&teams)?,
+    ) {
         conn.execute("UPDATE pm_projects SET membership_unresolved=1 WHERE repo=?1 AND provider=?2 AND id=?3",
             params![repo, provider, project.id])?;
         return Err(StoreError::InvalidData(format!(

@@ -178,7 +178,9 @@ pub(super) fn attach_in(
     conn: &Connection,
     repo: &str,
     project: bool,
-    observed: &Value,
+    external: &str,
+    revision: Option<&str>,
+    observed: &[super::planning_write::PlanningEdit],
 ) -> StoreResult<()> {
     let (kind, table, key, mapping, join) = if project {
         (
@@ -204,7 +206,7 @@ pub(super) fn attach_in(
         {join} JOIN {table} c ON c.{key}=o.id WHERE w.repo=?1 AND o.{mapping} IS NULL
         AND c.export_attempted=1 AND json_extract(c.export_json,'$.id')=?2"
             ),
-            params![repo, observed["id"].as_str()],
+            params![repo, external],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()?;
@@ -231,19 +233,22 @@ pub(super) fn attach_in(
         }
         let value = owner.normalize(conn, field, value.clone())?;
         conn.execute(&format!("UPDATE {kind}_changes SET base_json=?3 WHERE {kind}_id=?1 AND field=?2 AND base_json IS NULL AND acknowledged=0 AND conflict_json IS NULL"),
-            params![id,field,json!({"revision":observed["revision"],"value":value}).to_string()])?;
-        if observed.get(field).is_some_and(|remote| {
-            owner.normalize(conn, field, remote.clone()).ok().as_ref() == Some(&value)
-        }) {
+            params![id,field,json!({"revision":revision,"value":value}).to_string()])?;
+        let remote = observed
+            .iter()
+            .find(|edit| super::planning_changes::linear_field(edit) == Some(field.as_str()))
+            .map(|edit| owner.normalize(conn, field, edit.value()?))
+            .transpose()?;
+        if remote.as_ref() == Some(&value) {
             conn.execute(&format!("UPDATE {kind}_changes SET acknowledged=1,acknowledged_revision=?4,error=NULL WHERE {kind}_id=?1 AND field=?2 AND seq<=?3 AND value_json=?5 AND conflict_json IS NULL"),
-                params![id,field,export.through,observed["revision"].as_str(),value.to_string()])?;
+                params![id,field,export.through,revision,value.to_string()])?;
         }
     }
     if !project {
         conn.execute("UPDATE task_state_deliveries SET base_state=?2,base_revision=?3 WHERE task_id=?1 AND base_state IS NULL AND attempted=0 AND settled=0",
-            params![id,export.model["state"].as_str(),observed["revision"].as_str()])?;
+            params![id,export.model["state"].as_str(),revision])?;
         conn.execute("UPDATE task_changes SET base_json=?2 WHERE task_id=?1 AND field='deleted' AND base_json IS NULL",
-            params![id,json!({"revision":observed["revision"],"value":false}).to_string()])?;
+            params![id,json!({"revision":revision,"value":false}).to_string()])?;
     }
     let (kind, edit) = if project {
         (

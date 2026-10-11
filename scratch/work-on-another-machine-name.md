@@ -255,10 +255,12 @@ fixtures replay retained inputs directly. Rollback proof now includes canonical
 Project, provider input and Wave acquisition age. The persistent hierarchy, typed
 journal, bindings, follow-ups and cron still precede gate and review.
 `09709a05cc` removes provider Wave and Project display reconstruction.
-The remaining persistence cut is explicit: `linear_issue_evidence` still extracts
-fields from `pm_items`/`pm_projects` JSON, and `project_accepted_planning` still
-decodes retained content into typed edits. Narrow reads do not remove that hierarchy.
-The upstream Work-watch clock now includes the planning cadence.
+Accepted Project/Task projection now builds typed edits directly from retained
+fields; creation attachment and disposition reconciliation no longer require a
+provider object. Ownership and order checks use narrow evidence. The remaining
+persistence cut includes `pm_items`/`pm_projects` JSON, whole-observation comparison,
+secondary receipt readers and populated conversion. Work-watch includes the
+planning cadence. These consumer removals do not satisfy the persistent cut.
 
 Main #1522 entered at `7d9bf0a4d8`, adding Claude recorded-answer Flow settlement.
 That merge establishes no fresh planning gate acceptance and grants no replay of
@@ -380,11 +382,10 @@ Writer transport/causal proofs: `eda4a98097` in this plan.
   earlier review material, not final acceptance. A fresh one-page +/- HTML review
   follows the entire reduction and affected gate, before review-only republication.
 
-Prior checks: writer/seeding/DTO/rotation/Swift at `9dbd6fc2d8` and `dfd3b80611`;
-admission/lookup/launch at `f025e9b7ab`; acquisition at `dfa2cdafba`, all in this plan.
-Persistent hierarchy, typed journal, bindings, follow-ups, cron, gate and review
-remain required before republication.
+Earlier focused proof: `9dbd6fc2d8`, `dfd3b80611`, `f025e9b7ab`,
+`dfa2cdafba`, `09709a05cc` in this plan. Persistence conversion, typed journal,
+bindings, follow-ups, cron, gate and review still precede republication.
 
-Checks: `git diff --check` and `lf context` pass for prose reconciliation; build/focused passes retained at `09709a05cc` in this plan; full affected gate remains required.
+Checks: `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo build -p loopflow --bin lf` and 30 focused library tests (prose/export/order/ingestion/ownership/completion) pass with inherited LF authority cleared; full gate remains.
 
-Earlier transport evidence: `0181133849` in this plan.
+Transport evidence: `0181133849` at this path.

@@ -89,14 +89,14 @@ create another generic reader framework simply to replace these functions.
 ## 3. Collapse accepted-provider-to-Work projection
 
 **Remove or shrink:** `store/sqlite/planning.rs::project_accepted_planning`.
-Ordinary provider hierarchy readback through `pm_task_observation_in` is deleted.
-The duplicate Task create/update projection branches and `item_edits` are removed:
-one accepted-observation query and typed edit slice now feed the common writer,
-retaining existing identity, rank, pending disposition and membership fences.
-Today `put_pm_project`,
-`put_pm_task`, `put_pm_snapshot`, `associate_project`, `put_project` and `put_item`
-retain provider records, then copy accepted content into Work. Acquisition should
-apply eligible typed facts through the same writer used for local edits.
+Ordinary acquisition now reads eligible Project/Task fields into typed edits,
+without reconstructing `LinearProject` or `PmItem`. Creation attachment consumes
+those edits; disposition reconciliation takes the observed disposition/revision
+and retains the exact conflicting input. Ownership and order checks read only
+their required facts. Identity, partial prose, pending disposition and membership
+fences remain. This removes object reconstruction, not the retained JSON hierarchy:
+`put_project`/`put_item` still compare whole observations, and secondary readers
+still extract their fields. The persistent conversion below remains required.
 
 **Persistent candidates:** duplicated accepted content in `pm_projects`, `pm_items`,
 `pm_wave_projects` and snapshot serialization through `PmSnapshot` /

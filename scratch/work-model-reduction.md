@@ -15,10 +15,11 @@ its Flow merely because this document exists. This is the next scope in the desi
 not a claim that a runtime job was scheduled. Publish for Jack's next review; do not
 land, install or export actual Work into the public repository.
 
-The existing pursuit encountered `Index was not unstashed` during sync. At audit
-completion the primary design still had an unresolved stash conflict. Its owning
-sync operation must preserve and settle that work before further implementation.
-This separate note deliberately leaves that conflict untouched.
+Recovery: the pursuit stopped during sync with `Index was not unstashed`. Both
+sides of the scratch conflict and the accepted queue were preserved in `dc7db5be49`;
+the working tree then read clean. The retained stash and stopped Flow remain
+history. Jack Heart confirmed that implementing this audit is part of the current
+goal, not optional follow-up after review.
 
 The result should be one ordinary local reader and typed writer for Wave, Project,
 Task and subordinate Task comments. Linear and Git translate changes into those

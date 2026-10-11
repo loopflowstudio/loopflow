@@ -708,9 +708,8 @@ under this heading, retaining the October 4 source and original caveat reference
 ## Task deletion and command ownership (LOO-305, curated 2026-10-10)
 
 Jack Heart selected provider/local deletion and command consolidation; execution
-settlement stayed deferred. Full decisions, proofs and incident:
-`58de9907b6:wave/infrastructure/MEMORY.md`, this heading. Current mechanics:
-[CLI](../../docs/lf.md), [planning](../../docs/architecture/planning.md).
+settlement stayed deferred. History:
+`58de9907b6:wave/infrastructure/MEMORY.md`, this heading. [Mechanics](../../docs/lf.md).
 Fresh ownership authorizes deletion; acknowledgment or trash confirms it, never
 missing membership. Preserve Done outcomes, terminal times, PR/Git evidence and
 positive confirmation across retries/stale reads. Allocation failure retains created

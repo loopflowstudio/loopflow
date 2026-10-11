@@ -424,7 +424,7 @@ struct DesktopPerformanceTests {
         let multiplexer = workspace.multiplexer
         multiplexer.load(sessionId: "perf-session-0")
         let sessionPane = multiplexer.focusedPaneId
-        multiplexer.newShell()
+        multiplexer.newShell(location: workspace.identity)
         let companionPane = multiplexer.focusedPaneId
         multiplexer.load(sessionId: "perf-session-2")
         let otherPane = multiplexer.focusedPaneId
@@ -739,7 +739,7 @@ struct DesktopPerformanceTests {
         let multiplexer = workspace.multiplexer
         multiplexer.load(sessionId: fixture.sessionId)
         let sessionPane = multiplexer.focusedPaneId
-        multiplexer.newShell()
+        multiplexer.newShell(location: workspace.identity)
         let companion = multiplexer.focusedPaneId
         let companionIdentity = TerminalIdentity.shell(companion, machineId: workspace.identity.machineId)
         let companionView = registry.surfaces.view(for: companionIdentity)

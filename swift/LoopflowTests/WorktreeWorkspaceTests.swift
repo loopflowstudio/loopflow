@@ -72,7 +72,7 @@ struct WorktreeWorkspaceTests {
         let remote = WorkspaceIdentity(machineId: "remote", worktree: "/repo")
         let first = registry.workspace(for: local)
         let other = registry.workspace(for: remote)
-        first.multiplexer.newShell(command: ["server"])
+        first.multiplexer.newShell(command: ["server"], location: first.identity)
         let files = first.files(taskId: "task", issue: "TASK", cwd: "/repo")
         let document = files.document("note.txt")
         document.editor.string = "draft"
@@ -112,7 +112,7 @@ struct WorktreeWorkspaceTests {
         record.workspace = SessionWorkspace(machineId: fixtureMachineId, worktree: "/second", taskId: "task", unavailable: nil)
         source.multiplexer.reveal(sessionId: record.id)
         peer.multiplexer.reveal(sessionId: record.id)
-        source.multiplexer.newShell(command: ["server"])
+        source.multiplexer.newShell(command: ["server"], location: source.identity)
         let shell = source.multiplexer.focusedPaneId
         #if GHOSTTY_ENABLED
         let view = registry.surfaces.view(for: .session(record.id, machineId: fixtureMachineId))
@@ -169,8 +169,8 @@ struct WorktreeWorkspaceTests {
         outer.select(fixtureWorkspace("/repo.design"))
         let design = registry.workspace(for: fixtureWorkspace("/repo.design"))
         design.multiplexer.load(sessionId: "design")
-        design.multiplexer.newShell()
-        design.multiplexer.newShell()
+        design.multiplexer.newShell(location: design.identity)
+        design.multiplexer.newShell(location: design.identity)
         let original = design.multiplexer.layout
         let focus = design.multiplexer.focusedPaneId
 
@@ -190,14 +190,14 @@ struct WorktreeWorkspaceTests {
         let outer = registry.layout(for: fixtureWorkspace("/repo"))
         let firstSlot = outer.focusedSlotId
         let first = registry.workspace(for: fixtureWorkspace("/repo"))
-        first.multiplexer.newShell()
+        first.multiplexer.newShell(location: first.identity)
         outer.split(firstSlot, axis: .vertical)
         outer.select(fixtureWorkspace("/repo.other"))
         let secondSlot = outer.focusedSlotId
         let second = registry.workspace(for: fixtureWorkspace("/repo.other"))
-        second.multiplexer.newShell()
+        second.multiplexer.newShell(location: second.identity)
         let secondLayout = second.multiplexer.layout
-        first.multiplexer.newShell()
+        first.multiplexer.newShell(location: first.identity)
 
         #expect(outer.layout.slots.count == 2)
         #expect(second.multiplexer.layout == secondLayout)

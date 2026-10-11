@@ -6,6 +6,40 @@ import Testing
 @Suite("Multiplexer store")
 @MainActor
 struct MultiplexerStoreTests {
+    @Test("Shell location survives arrangement and Undo without replaying its launch")
+    func shellLocationSurvivesLayoutChanges() throws {
+        let store = MultiplexerStore()
+        let local = WorkspaceIdentity(machineId: "local", worktree: "/same/path")
+        let peer = WorkspaceIdentity(machineId: "peer", worktree: "/same/path")
+        let first = try #require(store.newShell(command: ["local-command"], location: local))
+        let second = try #require(store.split(first.id, axis: .vertical,
+            command: ["remote-command"], location: peer))
+        store.move(first.id, beside: second.id, axis: .horizontal)
+        store.setCollapsed(paneId: second.id, collapsed: true)
+        store.setZoom(first.id, enabled: true)
+        #expect(store.layout.pane(for: first.id) == first)
+        #expect(store.layout.pane(for: second.id) == second)
+        let decoded = try JSONDecoder().decode(LayoutNode.self, from: JSONEncoder().encode(store.layout))
+        #expect(decoded == store.layout)
+        store.close(second.id)
+        store.undoClose()
+        let restored = try #require(store.layout.pane(for: second.id))
+        #expect(restored.shellLocation == peer)
+        #expect(restored.incarnation != second.incarnation)
+        #expect(store.shellCommands[second.id] == nil)
+        #expect(store.layout.pane(for: first.id)?.shellLocation == local)
+    }
+
+    @Test("Replacing shell content cannot pass its execution location to another pane type")
+    func replacementClearsShellLocation() throws {
+        let store = MultiplexerStore()
+        let shell = try #require(store.newShell(location:
+            WorkspaceIdentity(machineId: "peer", worktree: "/remote")))
+        let replaced = store.layout.replacingContent(of: shell.id, with: .session(id: "conversation"))
+        #expect(replaced.firstPane.shellLocation == nil)
+        #expect(replaced.firstPane.incarnation != shell.incarnation)
+    }
+
     @Test("Visibility follows retained occurrences, collapse and zoom, not focus")
     func exactPaneVisibility() throws {
         let store = MultiplexerStore()

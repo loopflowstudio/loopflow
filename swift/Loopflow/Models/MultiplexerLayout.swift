@@ -25,13 +25,17 @@ public struct PaneState: Codable, Sendable, Identifiable, Equatable {
     public let content: PaneContent
     /// The content occurrence, distinct from the reusable pane slot.
     public let incarnation: String
+    /// A shell keeps its creation location across layout changes and Close/Undo.
+    public let shellLocation: WorkspaceIdentity?
 
     public init(
         id: String = UUID().uuidString,
-        content: PaneContent
+        content: PaneContent,
+        shellLocation: WorkspaceIdentity? = nil
     ) {
         self.id = id
         self.content = content
+        self.shellLocation = content == .shell ? shellLocation : nil
         self.incarnation = UUID().uuidString
     }
 }
@@ -108,9 +112,9 @@ public indirect enum LayoutNode: Codable, Sendable, Equatable {
         }
     }
 
-    public func replacingContent(of paneId: String, with content: PaneContent) -> LayoutNode {
+    public func replacingContent(of paneId: String, with content: PaneContent, shellLocation: WorkspaceIdentity? = nil) -> LayoutNode {
         _replacingLeaf(paneId) { pane in
-            .leaf(PaneState(id: pane.id, content: content))
+            .leaf(PaneState(id: pane.id, content: content, shellLocation: shellLocation))
         }
     }
 

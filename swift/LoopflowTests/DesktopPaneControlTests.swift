@@ -46,7 +46,7 @@ struct DesktopPaneControlTests {
         let store = registry.workspace(for: identity).multiplexer
         store.show(.files(taskId: "fixture"))
         let companion = target(store.focusedPane, window: window)
-        store.newShell(command: ["retained-command"])
+        store.newShell(command: ["retained-command"], location: identity)
         let shell = target(store.focusedPane, window: window)
         store.load(sessionId: "focused-elsewhere")
         store.setCollapsed(paneId: shell.pane, collapsed: true)
@@ -67,12 +67,43 @@ struct DesktopPaneControlTests {
         #expect(registry.surfaces.programStatus(for: .shell(shell.pane, machineId: identity.machineId)) == nil)
     }
 
+    @Test("Split follows the addressed shell's location and refuses an unobserved remote location")
+    func splitUsesShellLocation() throws {
+        let workspace = SessionsWorkspace(identity: fixtureWorkspace("/repository"))
+        let location = fixtureWorkspace("/task")
+        let source = try #require(workspace.multiplexer.newShell(location: location))
+        let split = try #require(try workspace.split(source.id, axis: .vertical))
+        #expect(split.shellLocation == location)
+        #expect(workspace.multiplexer.shellCommands[split.id] == [])
+        let remote = try #require(workspace.multiplexer.newShell(command: ["peer-shell"], location:
+            WorkspaceIdentity(machineId: "peer", worktree: "/remote")))
+        let before = workspace.multiplexer.layout
+        #expect(throws: RegistryQueryError.self) { try workspace.split(remote.id, axis: .horizontal) }
+        #expect(workspace.multiplexer.layout == before)
+    }
+
+    @Test("Shell observation and exit use the pane's location, not the workspace path")
+    func shellOwnsExecutionLocation() throws {
+        let workspace = SessionsWorkspace(identity: fixtureWorkspace("/repository"))
+        let location = WorkspaceIdentity(machineId: "peer", worktree: "/remote/task")
+        let shell = try #require(workspace.multiplexer.newShell(command: ["peer-shell"], location: location))
+        let terminal = TerminalIdentity.shell(shell.id, machineId: "peer")
+        #expect(workspace.terminal(for: shell) == terminal)
+        NotificationCenter.default.post(name: .ghosttySurfaceClosed,
+            object: TerminalIdentity.shell(shell.id, machineId: fixtureMachineId))
+        #expect(workspace.multiplexer.layout.pane(for: shell.id) == shell)
+        NotificationCenter.default.post(name: .ghosttySurfaceClosed, object: terminal)
+        #expect(workspace.multiplexer.focusedPane.content == .empty)
+        let unknown = try #require(workspace.multiplexer.newShell())
+        #expect(workspace.terminal(for: unknown) == nil)
+    }
+
     @Test(arguments: [DesktopTextRegion.screen, .scrollback, .selection])
     func passiveReadKeepsMissingSurfaceDistinctAndDoesNotFollowFocus(region: DesktopTextRegion) throws {
         let registry = SessionsWorkspaceRegistry(localMachineId: identity.machineId)
         let router = WorkLinkRouter(), window = UUID()
         let workspace = registry.workspace(for: identity), store = workspace.multiplexer
-        store.newShell(command: ["retained-command"])
+        store.newShell(command: ["retained-command"], location: identity)
         let shell = store.focusedPane
         let request = DesktopTextRequest(target: target(shell, window: window), surface: "old-surface",
                                          region: region, maxBytes: 16)
@@ -132,9 +163,9 @@ struct DesktopPaneControlTests {
         let registry = SessionsWorkspaceRegistry(localMachineId: identity.machineId)
         let router = WorkLinkRouter(), windowID = UUID()
         let workspace = registry.workspace(for: identity), store = workspace.multiplexer
-        store.newShell()
+        store.newShell(location: identity)
         let pane = store.focusedPane
-        store.newShell()
+        store.newShell(location: identity)
         let otherPane = store.focusedPane
         let terminal = TerminalIdentity.shell(pane.id, machineId: identity.machineId)
         let other = TerminalIdentity.shell(otherPane.id, machineId: identity.machineId)
@@ -217,7 +248,7 @@ struct DesktopPaneControlTests {
         let registry = SessionsWorkspaceRegistry(localMachineId: identity.machineId)
         let router = WorkLinkRouter(), window = UUID()
         let store = registry.workspace(for: identity).multiplexer
-        store.newShell()
+        store.newShell(location: identity)
         let pane = store.focusedPane
         let terminal = TerminalIdentity.shell(pane.id, machineId: identity.machineId)
         let view = registry.surfaces.view(for: terminal)
@@ -230,7 +261,7 @@ struct DesktopPaneControlTests {
         let surface = try #require(view.surface)
         let token = try #require(registry.surfaces.surfaceIncarnation(for: terminal))
         register(router, window: window, registry: registry)
-        store.newShell()
+        store.newShell(location: identity)
         store.setCollapsed(paneId: pane.id, collapsed: true)
         let before = store.layout, focus = store.focusedPaneId
         // Observe the exited-but-retained surface before queued lifecycle cleanup.
@@ -331,7 +362,7 @@ struct DesktopPaneControlTests {
         store.load(sessionId: "retained-session")
         let session = store.focusedPane
         let source = target(session, window: window)
-        store.newShell(command: ["retained-shell-command"])
+        store.newShell(command: ["retained-shell-command"], location: identity)
         let selected = store.focusedPane
         store.setZoom(selected.id, enabled: true)
         register(router, window: window, registry: registry, model: model)
@@ -386,7 +417,7 @@ struct DesktopPaneControlTests {
     @Test func hideRestoreRetainsContentAndIgnoresLaterFocus() throws {
         let router = WorkLinkRouter(), registry = SessionsWorkspaceRegistry(), window = UUID()
         let workspace = registry.workspace(for: identity), store = workspace.multiplexer
-        store.newShell(command: ["fixture-shell"])
+        store.newShell(command: ["fixture-shell"], location: identity)
         let shell = store.focusedPane
         store.load(sessionId: "retained-draft")
         let session = store.focusedPane
@@ -414,7 +445,7 @@ struct DesktopPaneControlTests {
     @Test func arrangementRetainsDocumentsSurfacesSelectionAndContentOccurrences() throws {
         let router = WorkLinkRouter(), registry = SessionsWorkspaceRegistry(localMachineId: identity.machineId), window = UUID()
         let workspace = registry.workspace(for: identity), store = workspace.multiplexer
-        store.newShell(command: ["fixture-shell"])
+        store.newShell(command: ["fixture-shell"], location: identity)
         let shell = store.focusedPane
         store.load(sessionId: "retained-session")
         let session = store.focusedPane
@@ -479,7 +510,7 @@ struct DesktopPaneControlTests {
         store.load(sessionId: "old")
         let old = target(store.focusedPane, window: window)
         store.load(sessionId: "replacement")
-        store.newShell()
+        store.newShell(location: identity)
         let peer = target(store.focusedPane, window: window)
         register(router, window: window, registry: registry)
         let before = store.layout, focus = store.focusedPaneId
@@ -498,7 +529,7 @@ struct DesktopPaneControlTests {
     @Test func invalidSecondTargetsAndRatiosLeaveBothPanesUntouched() throws {
         let router = WorkLinkRouter(), registry = SessionsWorkspaceRegistry(), window = UUID()
         let store = registry.workspace(for: identity).multiplexer
-        store.newShell()
+        store.newShell(location: identity)
         let shell = target(store.focusedPane, window: window)
         store.load(sessionId: "old")
         let stale = target(store.focusedPane, window: window)
@@ -529,7 +560,7 @@ struct DesktopPaneControlTests {
     @Test func focusingTheOnlyHiddenPaneRevealsItWithoutChangingItsContent() throws {
         let router = WorkLinkRouter(), registry = SessionsWorkspaceRegistry(), window = UUID()
         let store = registry.workspace(for: identity).multiplexer
-        store.newShell()
+        store.newShell(location: identity)
         let pane = store.focusedPane, request = target(pane, window: window)
         register(router, window: window, registry: registry)
         _ = try router.controlPane(.init(target: request, action: .hide))
@@ -558,7 +589,7 @@ struct DesktopPaneControlTests {
     @Test func undoCloseKeepsContentsButInvalidatesTheRemovedOccurrence() throws {
         let router = WorkLinkRouter(), registry = SessionsWorkspaceRegistry(), window = UUID()
         let store = registry.workspace(for: identity).multiplexer
-        store.newShell()
+        store.newShell(location: identity)
         let shell = store.focusedPane
         register(router, window: window, registry: registry)
         store.close(shell.id)
@@ -573,7 +604,7 @@ struct DesktopPaneControlTests {
     @Test func wrongMachineAndReplacedWindowNeverChangeOrAllocateWorkspaces() throws {
         let router = WorkLinkRouter(), registry = SessionsWorkspaceRegistry(), old = UUID(), replacement = UUID()
         let store = registry.workspace(for: identity).multiplexer
-        store.newShell()
+        store.newShell(location: identity)
         let pane = store.focusedPane
         register(router, window: old, registry: registry)
         #expect(throws: RegistryQueryError.self) {

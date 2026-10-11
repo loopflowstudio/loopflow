@@ -516,7 +516,7 @@ struct TaskFilesTests {
         GhosttyManager.shared.initialize()
         let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
         let workspace = registry.workspace(for: fixtureWorkspace(NSTemporaryDirectory()))
-        workspace.multiplexer.newShell()
+        workspace.multiplexer.newShell(location: workspace.identity)
         let identity = TerminalIdentity.shell(workspace.multiplexer.focusedPaneId, machineId: fixtureMachineId)
         let terminal = registry.surfaces.view(for: identity)
         terminal.frame = CGRect(x: 0, y: 0, width: 400, height: 350)

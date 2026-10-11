@@ -417,7 +417,7 @@ struct TaskFlowProofTests {
         let workspace = registry.workspace(for: fixtureWorkspace(repo))
         var terminals: [GhosttyMetalView] = []
         for _ in 0..<2 {
-            workspace.multiplexer.newShell()
+            workspace.multiplexer.newShell(location: workspace.identity)
             let pane = workspace.multiplexer.focusedPaneId
             let terminal = registry.surfaces.view(for: .shell(pane, machineId: fixtureMachineId))
             terminal.frame = CGRect(x: 0, y: 0, width: 400, height: 350)

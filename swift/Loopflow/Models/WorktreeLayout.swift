@@ -1,7 +1,7 @@
 import Foundation
 import Observation
 
-public struct WorkspaceIdentity: Decodable, Hashable, Sendable {
+public struct WorkspaceIdentity: Codable, Hashable, Sendable {
     enum CodingKeys: String, CodingKey {
         case machineId = "machine_id"
         case worktree

@@ -606,7 +606,7 @@ the verified caller terminal wins within selected Work, otherwise one eligible
 pane is required; ambiguity lists choices and does nothing. Surface/window/content tokens are internal.
 Move retains the pane itself,
 including its content occurrence and surface key; it never closes/reopens a client.
-Split adds a shell on the addressed pane’s execution Machine and checkout. Arrangement preserves selection except explicit focus;
+Split adds a shell on the addressed pane’s execution Machine and checkout. Shell panes retain their creation location through arrangement and Close/Undo; unknown locations never open a local replacement. Arrangement preserves selection except explicit focus;
 zoom does not redirect input to an unselected pane. Window/content replacement
 rejects stale targets, including the second target of a move or resize. Mutation replies
 identify the affected pane directly; they are not native-rendering proof. Shell, Files and Flow-log add

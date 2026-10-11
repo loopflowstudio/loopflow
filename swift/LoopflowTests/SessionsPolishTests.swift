@@ -33,7 +33,7 @@ struct SessionsPolishTests {
     func shellExitKeepsMachineIdentity() throws {
         let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
         let local = registry.workspace(for: fixtureWorkspace("/same/path"))
-        local.multiplexer.newShell()
+        local.multiplexer.newShell(location: local.identity)
         let shell = local.multiplexer.focusedPane
         #expect(registry.path(containingShell: shell.id, machineId: "peer") == nil)
         NotificationCenter.default.post(name: .ghosttySurfaceClosed,
@@ -45,10 +45,10 @@ struct SessionsPolishTests {
     func shellExitSurvivesNavigation() {
         let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
         let workspace = registry.workspace(for: fixtureWorkspace("/tmp/repo"))
-        workspace.multiplexer.newShell()
+        workspace.multiplexer.newShell(location: workspace.identity)
         let paneId = workspace.multiplexer.focusedPaneId
         let other = registry.workspace(for: fixtureWorkspace("/tmp/other"))
-        other.multiplexer.newShell()
+        other.multiplexer.newShell(location: other.identity)
 
         NotificationCenter.default.post(
             name: .ghosttySurfaceClosed, object: TerminalIdentity.session(paneId, machineId: fixtureMachineId)

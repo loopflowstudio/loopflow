@@ -4,24 +4,15 @@ The [plan](compare-cmux-s-command-line.md) owns implementation; [findings](findi
 retain evidence. Jack Heart selected shared Work, subtree delegation, one repository
 window, macOS-only control and one PR. Native/configured-peer proof remains.
 
-## Selected decisions — October 8–9
+## Selected decisions and pane choices — October 8–9
 
-Jack Heart selected Q1: execution-Machine-local operations and Git-ref planning
-exchange (406 writer/Linear, 412 exchange); imported completion never moves
-Workflow or cleans execution. Q2: nearest explicit assignment for unstarted Tasks;
-narrower overrides win, started Tasks stay put, unknown historical provenance stays
-unknown. Q3: insert at the cursor into the existing draft, with Enter separate.
-The plan owns implementation; delegation exchange has isolated-peer proof, not
-exclusive admission, remote execution or native fidelity.
-Original Q1–Q3 record: `7d5bcf939:scratch/questions.md`, those headings.
-
-## Retained pane choices — October 8
-
-Visibility, arrangement, companions and bounded-read choices remain in the plan's
-§4. Original details: `e4a324636:scratch/questions.md`, **Reversible visibility
-choice**, **Reversible arrangement choices**, **Reversible companion choices** and
-**Reversible bounded-read choice**. No focus/acquisition authority follows from
-hiding, arranging or reading. Native extraction remains unproved.
+The plan owns Jack Heart’s Q1–Q3 decisions: execution-local operations/portable
+planning exchange, nearest-ancestor delegation with started Tasks pinned, and
+cursor insertion with Enter separate. Source: `7d5bcf939:scratch/questions.md`,
+Q1–Q3. Earlier visibility/arrangement/companion/read choices:
+`e4a324636:scratch/questions.md`, **Retained pane choices** references in
+`a81245920:scratch/questions.md`. Hiding/reading grants no acquisition authority;
+exclusive admission and native fidelity remain unproved.
 
 ## Command-map review — October 8
 
@@ -38,17 +29,13 @@ Open choices:
 Draft uses `desktop open/list` and the existing user config for `repo_root`; these
 are accepted for implementation after Jack's October 8 review; the listed choices remain open.
 
-## CLI deletion assumptions — October 8
+## CLI/history assumptions — October 8
 
-Retiring `run` preserves flow-first untyped lookup and explicit skill/Flow kinds;
-Task edges resolve in their prepared checkout. Broader collisions remain open.
-Historical turn-limit records do not restore public switches. Full rationale:
-`e4a324636:scratch/questions.md`, this heading.
-
-## History command shape — October 8
-
-`history` is activity; list/show/replay/usage reuse recorded owners. `list` is
-reversible spelling, not another history store.
+Flow-first shorthand and explicit skill/Flow kinds survive root `run` removal;
+Task edges resolve in their checkout. Collisions remain open; old turn-limit
+records restore no switches. `history` reuses recorded activity/execution, with
+`list` a reversible spelling. Rationale: `a81245920:scratch/questions.md`,
+**CLI deletion assumptions** and **History command shape**.
 
 ## Repository selection assumptions — October 9
 
@@ -61,8 +48,8 @@ dispatch; an unscoped ambiguous prefix still fails.
 
 ## Context budget
 
-`lf context --skill realign` reports generated Work input at 34,897/16,000
-tokens (109,634 bytes). Stored steers/inventory exceed the token target; authored
+`lf context --skill implement` reports generated Work input at about 34,985/16,000
+tokens (109,885 bytes). Stored steers/inventory exceed the token target; authored
 scratch and memory fit. No historical inputs or limits were changed. Source:
 `.lf/tmp/context/51cdd42b2d506f7788c9aae49fa9c75815dc637d470bed7bc6c904013108f4f9.md`.
 

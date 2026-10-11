@@ -63,11 +63,20 @@ local/remote bare links await page readiness without Session acquisition; they d
 not prove rendered navigation or tabs. The Work-keyed registry, per-pane locations,
 outer-tree deletion and DTO cutover remain unfinished.
 
-Opening now chooses retained inventory or a complete enumeration in one branch,
-instead of initializing and repeatedly clearing the same records. Ensured Sessions
-still force enumeration; explicit retained targets avoid it. Prior focused result:
-`a1dfa07833` plus `/tmp/loo427-compress-preserved/findings.md`;
-`1e5b958d86` is the inventory simplification. Registry and Desktop targets still use Machine/checkout;
-Work tabs require the planned coherent cutover.
+Inventory simplification and its 49-test passing result remain at
+`a81245920:scratch/findings.md`, this heading.
 
-Check: `scripts/test_desktop.sh --filter WorkDestinationTests -Xswiftc -gnone --no-parallel` PASS (build, 49 tests); native: demo, cutover suites: gate after implementation.
+## Shell-location cut — October 10
+
+Shell panes now retain their creation Machine/path through move, hide and Close/Undo.
+Rendering, terminal identity, exit callbacks and release read that pane location;
+split follows the addressed shell, refusing unobserved remote locations before mutation.
+Undo renews content identity without replaying the launch command. Exact targets reject
+mismatched shell locations. Review caught split still consulting workspace location;
+that path is removed. Earlier focused checks failed because three read fixtures omitted
+location; fixtures now supply their creation location. A missing inner `try` in
+the new split fixture also failed compilation and was repaired. Native fixtures are adapted,
+not executed. This is a partial internal cut, not Work tabs: registry rekeying,
+Session/Files/log locations, outer-layout deletion, navigation and DTOs remain.
+
+Check: `scripts/test_desktop.sh --filter 'MultiplexerStoreTests|DesktopPaneControlTests' -Xswiftc -gnone --no-parallel` PASS (build, 47 tests); native: demo; full cutover suites: gate after implementation.

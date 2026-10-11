@@ -409,7 +409,7 @@ struct WorkNavigationTests {
         workspace.multiplexer.load(sessionId: "human")
         let sessionPane = workspace.multiplexer.focusedPaneId
         _ = workspace.multiplexer.split(sessionPane, axis: .vertical)
-        workspace.multiplexer.newShell()
+        workspace.multiplexer.newShell(location: workspace.identity)
         let layout = workspace.multiplexer.layout
         let focused = workspace.multiplexer.focusedPaneId
         model.select(.task(id: "issue-review"))

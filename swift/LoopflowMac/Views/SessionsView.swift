@@ -35,31 +35,46 @@ final class SessionsWorkspace {
     /// One mapping for retained pane observation; never follows focus or allocates a surface.
     func terminal(for pane: PaneState) -> TerminalIdentity? {
         switch pane.content {
-        case .shell: .shell(pane.id, machineId: identity.machineId)
+        case .shell: pane.shellLocation.map { .shell(pane.id, machineId: $0.machineId) }
         case .session(let id): .session(id, machineId: identity.machineId)
         case .empty, .files, .flowLog: nil
         }
     }
 
     let identity: WorkspaceIdentity
-    let isLocal: Bool
+    let localMachineId: String?
     var executionLocation: TaskLocationObservation?
 
     @discardableResult
     func newShell(beside pane: String? = nil, focus: Bool = true) throws -> PaneState? {
-        let command = try shellCommand()
-        return multiplexer.newShell(command: command, beside: pane, focus: focus)
+        let location = try shellLocation(beside: pane ?? multiplexer.focusedPaneId)
+        let command = try shellCommand(at: location)
+        return multiplexer.newShell(command: command, location: location, beside: pane, focus: focus)
     }
 
     @discardableResult
     func split(_ pane: String, axis: SplitAxis, focus: Bool = true) throws -> PaneState? {
-        let command = try shellCommand()
-        return multiplexer.split(pane, axis: axis, command: command, focusNewPane: focus)
+        let location = try shellLocation(beside: pane)
+        let command = try shellCommand(at: location)
+        return multiplexer.split(pane, axis: axis, command: command, location: location, focusNewPane: focus)
     }
 
-    private func shellCommand() throws -> [String] {
+    private func shellLocation(beside paneId: String) throws -> WorkspaceIdentity {
+        guard let pane = multiplexer.layout.pane(for: paneId) else {
+            throw RegistryQueryError("The addressed pane disappeared; no shell was opened.")
+        }
+        if pane.content == .shell {
+            guard let location = pane.shellLocation else {
+                throw RegistryQueryError("Shell location is unavailable; no shell was opened.")
+            }
+            return location
+        }
+        return identity
+    }
+
+    private func shellCommand(at identity: WorkspaceIdentity) throws -> [String] {
         let command: [String]
-        if isLocal { command = [] }
+        if identity.machineId == localMachineId { command = [] }
         else {
             guard let location = executionLocation, location.machineID == identity.machineId,
                   case .recorded(let task, let checkout) = location.location,
@@ -96,7 +111,7 @@ final class SessionsWorkspace {
 
     init(identity: WorkspaceIdentity, isLocal: Bool = true, surfaces: GhosttySurfacePool = GhosttySurfacePool()) {
         self.identity = identity
-        self.isLocal = isLocal
+        self.localMachineId = isLocal ? identity.machineId : nil
         self.surfaces = surfaces
         // The workspace outlives SessionsView, including while a shell exits
         // on the Work screen or while another repository is selected.
@@ -105,8 +120,9 @@ final class SessionsWorkspace {
                 guard let terminal = notification.object as? TerminalIdentity,
                       case .shell(let paneId, let machineId) = terminal else { return }
                 MainActor.assumeIsolated {
-                    guard let self, self.identity.machineId == machineId,
-                          self.multiplexer.layout.pane(for: paneId)?.content == .shell
+                    guard let self,
+                          let pane = self.multiplexer.layout.pane(for: paneId),
+                          pane.content == .shell, pane.shellLocation?.machineId == machineId
                     else { return }
                     self.multiplexer.close(paneId)
                 }
@@ -263,14 +279,18 @@ final class SessionsWorkspaceRegistry {
         let identity = WorkspaceIdentity(machineId: target.machineId, worktree: target.worktree)
         guard let workspace = workspaces[identity],
               let pane = workspace.multiplexer.layout.pane(for: target.pane),
-              pane.incarnation == target.incarnation else {
+              pane.incarnation == target.incarnation,
+              pane.content != .shell || pane.shellLocation == identity else {
             throw RegistryQueryError("The pane content was removed or replaced. Inspect Desktop again; no pane was changed.")
         }
         return (workspace, pane)
     }
 
     func path(containingShell id: String, machineId: String) -> WorkspaceIdentity? {
-        workspaces.first { $0.key.machineId == machineId && $0.value.multiplexer.layout.pane(for: id)?.content == .shell }?.key
+        workspaces.first {
+            guard let pane = $0.value.multiplexer.layout.pane(for: id) else { return false }
+            return pane.content == .shell && pane.shellLocation?.machineId == machineId
+        }?.key
     }
 
     /// A repository reading establishes moves, not absence from the whole window.
@@ -958,7 +978,7 @@ struct SessionsContentView: View {
             worktreeLayout.select(identity)
             navigation.showsRetainedTerminals = true
             navigation.content = .terminals
-            workspaces.workspace(for: identity).multiplexer.newShell(command: launch.arguments(lf: lf))
+            workspaces.workspace(for: identity).multiplexer.newShell(command: launch.arguments(lf: lf), location: identity)
         } catch { launchError = error.localizedDescription }
     }
 
@@ -981,7 +1001,7 @@ struct SessionsContentView: View {
         worktreeLayout.select(identity)
         navigation.content = .terminals
         workspaces.workspace(for: identity).multiplexer.newShell(
-            command: ConversationLaunch(scope: scope).arguments(lf: lf))
+            command: ConversationLaunch(scope: scope).arguments(lf: lf), location: identity)
     }
 
     /// An independent conversation with Task context in the Task's checkout.
@@ -1072,7 +1092,8 @@ struct SessionsContentView: View {
         let pane = multiplexer.focusedPane
         switch pane.content {
         case .shell:
-            return store.sessions.filter { store.localTerminal(for: $0.record) == .shell(pane.id, machineId: workspace.identity.machineId) }
+            guard let terminal = workspace.terminal(for: pane) else { return [] }
+            return store.sessions.filter { store.localTerminal(for: $0.record) == terminal }
         case .session(let id):
             return store.sessions.filter { $0.id == id }
         case .empty, .flowLog, .files:
@@ -1085,7 +1106,7 @@ struct SessionsContentView: View {
         case .empty, .flowLog, .files:
             return
         case .shell:
-            store.surfaces.release(.shell(pane.id, machineId: workspace.identity.machineId))
+            if let terminal = workspace.terminal(for: pane) { store.surfaces.release(terminal) }
         case .session:
             return
         }
@@ -1501,7 +1522,7 @@ private struct SessionPaneView: View {
 
     private func closePane() {
         if case .shell = pane.content {
-            sessions.surfaces.release(.shell(pane.id, machineId: workspace.identity.machineId))
+            if let terminal = workspace.terminal(for: pane) { sessions.surfaces.release(terminal) }
         }
         store.close(pane.id)
     }
@@ -1537,8 +1558,9 @@ private struct SessionPaneView: View {
 
     private var paneSessions: [SessionItem] {
         if case .shell = pane.content {
+            guard let terminal = workspace.terminal(for: pane) else { return [] }
             return sessions.sessions.filter {
-                sessions.localTerminal(for: $0.record) == .shell(pane.id, machineId: workspace.identity.machineId)
+                sessions.localTerminal(for: $0.record) == terminal
             }
         }
         return item.map { [$0] } ?? []
@@ -1571,18 +1593,23 @@ private struct SessionPaneView: View {
                 emptyWorkspace
             }
         case .shell:
-            if !workspace.isLocal && store.shellCommands[pane.id] == nil {
-                Text("Reopen the Task and add a new remote shell. No local shell was opened.")
+            if let location = pane.shellLocation {
+                let isLocal = location.machineId == workspace.localMachineId
+                if !isLocal && store.shellCommands[pane.id] == nil {
+                    Text("Reopen the Task and add a new remote shell. No local shell was opened.")
+                } else {
+                    GhosttyTerminalView(
+                        workingDirectory: isLocal ? location.worktree : NSHomeDirectory(),
+                        argv: store.shellCommands[pane.id] ?? [],
+                        terminal: .shell(pane.id, machineId: location.machineId),
+                        surfacePool: sessions.surfaces,
+                        isFocused: isFocused,
+                        onFocus: focusPane
+                    )
+                    .id(pane.id)
+                }
             } else {
-            GhosttyTerminalView(
-                workingDirectory: workspace.isLocal ? workingDirectory : NSHomeDirectory(),
-                argv: store.shellCommands[pane.id] ?? [],
-                terminal: .shell(pane.id, machineId: workspace.identity.machineId),
-                surfacePool: sessions.surfaces,
-                isFocused: isFocused,
-                onFocus: focusPane
-            )
-            .id(pane.id)
+                Text("Shell location is unavailable. Add a new shell in this Work.")
             }
         case .flowLog(let taskId):
             FlowProcessLog(model: model, taskId: taskId)
@@ -1763,7 +1790,7 @@ private struct SessionPaneView: View {
                 record.workspace.map { .session(record.id, machineId: $0.machineId) }
             }
         case .shell:
-            .shell(pane.id, machineId: workspace.identity.machineId)
+            workspace.terminal(for: pane)
         case .empty, .flowLog, .files:
             nil
         }

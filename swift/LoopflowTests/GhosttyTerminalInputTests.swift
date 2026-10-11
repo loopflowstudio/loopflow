@@ -346,7 +346,7 @@ struct GhosttyTerminalInputTests {
         defer { for view in views { view.handleSurfaceClose() } }
         var records: [SessionRecord] = []
         for id in ["one", "two"] {
-            workspace.multiplexer.newShell()
+            workspace.multiplexer.newShell(location: workspace.identity)
             let pane = workspace.multiplexer.focusedPaneId
             let view = registry.surfaces.view(for: .shell(pane, machineId: fixtureMachineId))
             view.frame = CGRect(x: 0, y: 0, width: 600, height: 300)

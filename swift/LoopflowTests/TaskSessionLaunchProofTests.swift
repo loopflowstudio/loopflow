@@ -136,7 +136,7 @@ struct TaskSessionLaunchProofTests {
         let origin = model.navigation
         let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
         let workspace = registry.workspace(for: fixtureWorkspace(repo))
-        workspace.multiplexer.newShell()
+        workspace.multiplexer.newShell(location: workspace.identity)
         let pane = workspace.multiplexer.focusedPaneId
         let terminal = registry.surfaces.view(for: .shell(pane, machineId: fixtureMachineId))
         terminal.frame = CGRect(x: 0, y: 0, width: 600, height: 350)

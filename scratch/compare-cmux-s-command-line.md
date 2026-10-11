@@ -54,11 +54,14 @@ existing shell-location owner for CLI, shortcuts and pane menus; missing remote
 location refuses before layout mutation. Work-keyed tabs, per-pane locations,
 outer-layout deletion and inspection/DTO cutover remain unimplemented. This is not Work tabs.
 
-**Passive entry deletion (`a1dfa07833`):** ordinary Task navigation no longer ensures/connects a
-primary Session on selection or inventory refresh. Bare local/remote Task links
-wait for the Task page, not Session preparation. Explicit Session/Changes requests
-retain their connection path. `1e5b958d86` simplifies complete Session inventory
-selection, not workspace identity. Registry, tabs, locations and DTO cutover remain.
+**Shell locations:** retained shell panes now own their Machine/path; rendering,
+identity, exits, release and split use it. Missing location refuses rather than
+falling back locally. Session/Files/log location cutover, Work keys, tabs, outer
+layout deletion and DTOs remain; this internal cut is not the complete UI slice.
+
+**Passive entry deletion:** `a1dfa07833` removes implicit primary-Session acquisition
+from Task navigation/refresh and bare links; explicit Session/Changes requests
+survive. `1e5b958d86` simplifies inventory selection. Neither implements Work tabs.
 
 ### Experience and boundaries
 

@@ -138,7 +138,7 @@ struct WorkDestinationTests {
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
         let registry = SessionsWorkspaceRegistry(localMachineId: localIdentity.machineId)
         let local = registry.workspace(for: localIdentity)
-        local.multiplexer.newShell(command: ["retained-local-shell"])
+        local.multiplexer.newShell(command: ["retained-local-shell"], location: local.identity)
         let layout = local.multiplexer.layout
         let files = local.files(taskId: task.id, issue: taskID, cwd: localIdentity.worktree, query: query)
         let document = files.document("draft.txt")
@@ -655,7 +655,7 @@ struct WorkDestinationTests {
         #expect(destination.breadcrumb?.task?.task.id == task.id)
         let registry = SessionsWorkspaceRegistry()
         let workspace = registry.workspace(for: try #require(task.reference.workspace?.identity))
-        workspace.multiplexer.newShell(command: ["local-server"])
+        workspace.multiplexer.newShell(command: ["local-server"], location: workspace.identity)
         let layout = workspace.multiplexer.layout
         let document = workspace.files(taskId: task.id, issue: task.task.identifier, cwd: wave.wave.repo,
                                        query: exactQuery).document("note.txt")

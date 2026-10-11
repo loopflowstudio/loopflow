@@ -211,7 +211,7 @@ struct DesktopNativeSessionTests {
         let workspace = registry.workspace(for: try #require(owned.workspace).identity)
         let store = workspace.sessionStore(repoPath: fixture.repo, query: query)
         workspace.multiplexer.load(sessionId: fixture.sessionId)
-        workspace.multiplexer.newShell()
+        workspace.multiplexer.newShell(location: workspace.identity)
         let layout = workspace.multiplexer.layout
         let files = workspace.files(taskId: fixture.taskId, issue: fixture.issue, cwd: fixture.checkout, query: query)
         files.autosave = false

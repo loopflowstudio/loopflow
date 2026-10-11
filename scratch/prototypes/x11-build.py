@@ -112,9 +112,10 @@ main = f'''
   <h2>Loopflow: Arrange coding sessions around long-lived waves and short-lived tasks</h2>
   <div class="halves">
     <article>
-      <p>Coding agents can do amazing things for you, but they ask a lot of focus from you. How can you, a human with a single locus of attention, stay in sync with an entire parallel agent swarm? Shipping tens of thousands of lines is the easy part. Making them lines worth keeping — lines you don’t revert next month — is the hard part.</p>
-      <p>You don’t have to keep every session window open for fear of it disappearing, or remember why you wanted this massive change in the first place. Each task follows a workflow you choose, and each session you come to is one where your input really matters. Every task ends shipped.</p>
-      <p>Your work has defined processes: how an idea gets researched, designed, implemented, validated, shipped. Loopflow is a template system for them. A flow is a (looping) sequence of skills: a habit turned into a process you can run again. A workflow joins flows with the points where you come in. Loopflow ships reasonable ones for software engineering, and they are templates. Change them, or write down the way you work and share it.</p>
+      <p>Coding agents can do amazing things for you, but they ask amazing focus of you. How can you, a human with a single locus of attention, stay in sync with an entire parallel agent swarm? Shipping tens of thousands of lines is the easy part. Making them lines worth keeping — lines you don’t revert next month — is the hard part.</p>
+      <p>Loopflow helps you do that by arranging your agent sessions around clear work boundaries: long-lived areas of responsibility and objectives and concrete outcomes. You don’t have to keep every session window open for fear of it disappearing, or remember why you wanted to do this massive change in the first place.</p>
+      <p>Your work has defined workflows — how an idea gets researched, designed, implemented, validated, shipped, etc. — and the points at which you want to get involved: be that early on in design, later on in trying it out, both, or neither. Each wave and task has an associated workflow that is used to drive work forward and ensures that each session you come to in Loopflow is one where your input really matters.</p>
+      <p>Loopflow ships reasonable workflows for software engineering, and they are templates. Change them, or write down the way you work and share it.</p>
       <p class="more"><a href="/docs/waves">Tasks and Waves ↗</a><a href="/docs/authoring#workflows">Write a workflow ↗</a></p>
     </article>
     <article>

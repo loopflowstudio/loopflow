@@ -107,23 +107,24 @@ impl SqliteStore {
         let tx = conn.transaction()?;
         let previous: Option<String> = tx
             .query_row(
-                "SELECT body FROM pm_projects WHERE repo=?1 AND provider=?2 AND id=?3",
+                "SELECT json_extract(body,'$.initiative_ids') FROM pm_projects WHERE repo=?1 AND provider=?2 AND id=?3",
                 params![repo, provider, project.id],
                 |row| row.get(0),
             )
             .optional()?;
-        if let Some(previous) = previous {
-            let mut previous: LinearProject = serde_json::from_str(&previous)?;
-            if previous.initiative_ids.as_slice() != [initiative] {
+        if let Some(initiatives) = previous {
+            if serde_json::from_str::<Vec<String>>(&initiatives)?.as_slice() != [initiative] {
                 return Err(StoreError::InvalidData(format!(
                     "Project {} changed Initiative during reteam",
                     project.id
                 )));
             }
             // Reteam orders Team relationships only. Retain independently newer entity facts.
-            previous.team_ids.clone_from(&project.team_ids);
-            tx.execute("UPDATE pm_projects SET body=?4,membership_unresolved=0 WHERE repo=?1 AND provider=?2 AND id=?3",
-                params![repo, provider, project.id, serde_json::to_string(&previous)?])?;
+            tx.execute(
+                "UPDATE pm_projects SET body=json_set(body,'$.team_ids',json(?4)),membership_unresolved=0
+                 WHERE repo=?1 AND provider=?2 AND id=?3",
+                params![repo, provider, project.id, serde_json::to_string(&project.team_ids)?],
+            )?;
         }
         put_project(&tx, &repo, provider, observed_at, project)?;
         associate_project(&tx, &repo, provider, &project.id, wave, initiative)?;
@@ -236,15 +237,14 @@ impl SqliteStore {
             }
         }
         let mut query =
-            tx.prepare("SELECT repo,body FROM pm_items WHERE provider='linear' AND id=?1")?;
+            tx.prepare("SELECT repo,json_extract(body,'$.revision') FROM pm_items WHERE provider='linear' AND id=?1")?;
         let rows = query
             .query_map([issue_id], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
             })?
             .collect::<Result<Vec<_>, _>>()?;
-        for (repo, body) in rows {
-            let item: PmItem = serde_json::from_str(&body)?;
-            let cached = revision_nanos(item.revision.as_deref())?;
+        for (repo, cached_revision) in rows {
+            let cached = revision_nanos(cached_revision.as_deref())?;
             if removed || revision.is_none() || cached < revision {
                 tx.execute("UPDATE pm_items SET needs_refresh=1 WHERE repo=?1 AND provider='linear' AND id=?2", params![repo,issue_id])?;
             }

@@ -126,6 +126,63 @@ mod tests {
     use crate::work::wave::Wave;
 
     #[test]
+    fn project_name_receipt_does_not_reconstruct_unrelated_order_evidence() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let wave = Wave::new(WaveId::new(), "product".into(), "/repo".into());
+        store.create_wave(&wave).unwrap();
+        let observed = serde_json::from_value(serde_json::json!({
+            "id":"linear-project", "revision":"2026-10-10T12:00:00Z", "slug":"product", "name":"Product", "summary":"",
+            "workflow":"", "krs":[], "metric_targets":[], "status":"started", "initiative_ids":["initiative"], "team_ids":["team"]
+        })).unwrap();
+        store
+            .put_pm_project(wave.id(), "linear", "initiative", &observed, 17)
+            .unwrap();
+        let project = store.list_projects(Some(wave.id())).unwrap().remove(0);
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE pm_projects SET task_order_json='{}' WHERE id='linear-project'",
+                [],
+            )
+            .unwrap();
+        store
+            .edit_project(&project.id, Some("Renamed"), None, None)
+            .unwrap();
+        let change = store
+            .pending_project_changes(&project.id)
+            .unwrap()
+            .remove(0);
+        assert_eq!(
+            change.base,
+            Some(serde_json::json!({
+                "revision":"2026-10-10T12:00:00Z", "value":"Product"
+            }))
+        );
+        assert!(store
+            .attempt_planning_field(
+                super::super::planning_changes::PlanningChanges::Project(&project.id),
+                &change,
+                Some("2026-10-10T12:00:00Z"),
+            )
+            .unwrap());
+        assert_eq!(store.project(&project.id).unwrap().unwrap().name, "Renamed");
+        let retained: (String, i64) = store
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT task_order_json,observed_at FROM pm_projects WHERE id='linear-project'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(retained, ("{}".into(), 17));
+    }
+
+    #[test]
     fn project_prose_unobserved_baseline_stays_unknown_at_the_same_revision() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();

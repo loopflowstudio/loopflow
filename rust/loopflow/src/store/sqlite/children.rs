@@ -2268,7 +2268,7 @@ mod local_planning_tests {
         let edited = store
             .edit_task(
                 &local.id,
-                0,
+                mapped.revision,
                 &PmItemUpdate {
                     name: Some("A mapping does not transfer authority".into()),
                     description: None,

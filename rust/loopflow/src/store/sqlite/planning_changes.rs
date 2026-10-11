@@ -50,12 +50,7 @@ impl SqliteStore {
     ) -> StoreResult<bool> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let observation = owner.observation(&tx)?;
-        if observation
-            .as_ref()
-            .and_then(|body| body["revision"].as_str())
-            != revision
-        {
+        if owner.observed_revision(&tx)?.as_deref() != revision {
             return Ok(false);
         }
         if let PlanningChanges::Task(id) = owner {
@@ -87,8 +82,7 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let owner = PlanningChanges::Task(id);
-        let retained = owner.observation(&tx)?;
-        if retained.as_ref().and_then(|body| body["revision"].as_str()) != Some(revision) {
+        if owner.observed_revision(&tx)?.as_deref() != Some(revision) {
             return Ok(());
         }
         if let Some(change) = owner
@@ -132,10 +126,9 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         if let Some(revision) = revision {
-            let observed = PlanningChanges::Task(id).observation(&tx)?;
-            let retained = observed.as_ref().and_then(|body| body["revision"].as_str());
+            let retained = PlanningChanges::Task(id).observed_revision(&tx)?;
             if super::planning::revision_nanos(Some(revision))?
-                < super::planning::revision_nanos(retained)?
+                < super::planning::revision_nanos(retained.as_deref())?
             {
                 return Ok(false);
             }
@@ -277,40 +270,68 @@ impl<'a> PlanningChanges<'a> {
         }
     }
 
-    fn observation(self, conn: &Connection) -> StoreResult<Option<Value>> {
-        let (_, id) = self.owner();
-        let observation = match self {
-            Self::Task(_) => "SELECT i.body FROM tasks t JOIN projects p ON p.id=t.project_id
+    fn observation_source(self) -> &'static str {
+        match self {
+            Self::Task(_) => "tasks t JOIN projects p ON p.id=t.project_id
                 JOIN waves w ON w.id=p.wave_id
-                JOIN pm_items i ON i.id=t.external_issue_id AND i.repo=w.repo AND i.provider='linear'
+                JOIN pm_items o ON o.id=t.external_issue_id AND o.repo=w.repo AND o.provider='linear'
                 WHERE t.id=?1",
-            Self::Project(_) => "SELECT o.body FROM projects p JOIN waves w ON w.id=p.wave_id
+            Self::Project(_) => "projects p JOIN waves w ON w.id=p.wave_id
                 JOIN pm_projects o ON o.id=p.external_project_id AND o.repo=w.repo AND o.provider='linear'
                 WHERE p.id=?1",
+        }
+    }
+
+    fn observed_revision(self, conn: &Connection) -> StoreResult<Option<String>> {
+        Ok(conn
+            .query_row(
+                &format!(
+                    "SELECT json_extract(o.body,'$.revision') FROM {}",
+                    self.observation_source()
+                ),
+                [self.owner().1],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten())
+    }
+
+    // A receipt needs only its field's baseline. Partial prose keeps its own
+    // revision; unrelated fields cannot become another writable provider model.
+    fn baseline(self, conn: &Connection, field: &str) -> StoreResult<Option<Value>> {
+        let fields = match self {
+            Self::Task(_) => "o.body ->> '$.revision',
+                CASE ?2 WHEN 'deleted' THEN 'false' ELSE o.body -> ('$.' || ?2) END",
+            Self::Project(_) => "CASE WHEN ?2='description' THEN o.prose_json ->> '$.revision'
+                    ELSE o.body ->> '$.revision' END,
+                CASE ?2 WHEN 'description' THEN COALESCE(o.prose_json -> '$.value',o.body -> '$.description')
+                    WHEN 'task_order' THEN COALESCE(o.task_order_json,'null')
+                    ELSE o.body -> ('$.' || ?2) END",
         };
-        let body: Option<String> = conn
-            .query_row(observation, [id], |row| row.get(0))
+        let baseline = conn
+            .query_row(
+                &format!("SELECT {fields} FROM {}", self.observation_source()),
+                params![self.owner().1, field],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<String>>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                    ))
+                },
+            )
             .optional()?;
-        let mut body: Option<Value> = body.map(|body| serde_json::from_str(&body)).transpose()?;
-        // An acquired issue is an active observation. Deletion competes with
-        // that whole issue revision, although the issue body has no `deleted` field.
-        if let (Self::Task(_), Some(Value::Object(body))) = (self, body.as_mut()) {
-            body.insert("deleted".into(), Value::Bool(false));
-        }
-        if let (Self::Project(id), Some(body)) = (self, body.as_mut()) {
-            let prose: Option<String> = conn.query_row(
-                "SELECT o.prose_json FROM projects p JOIN waves w ON w.id=p.wave_id
-                 JOIN pm_projects o ON o.id=p.external_project_id AND o.repo=w.repo AND o.provider='linear'
-                 WHERE p.id=?1", [id.as_str()], |row| row.get(0))?;
-            if let Some(prose) = prose {
-                let prose: Value = serde_json::from_str(&prose)?;
-                body["description"] = prose["value"].clone();
-                body["description_revision"] = prose["revision"].clone();
-            }
-            body["task_order"] =
-                serde_json::to_value(super::planning_order::observed_order(conn, id)?)?;
-        }
-        Ok(body)
+        let Some((revision, Some(value))) = baseline else {
+            return Ok(None);
+        };
+        let value = if matches!(self, Self::Project(_)) && field == "task_order" {
+            serde_json::to_value(serde_json::from_str::<Option<Vec<String>>>(&value)?)?
+        } else {
+            serde_json::from_str(&value)?
+        };
+        Ok(Some(serde_json::json!({
+            "revision": revision,
+            "value": self.normalize(conn, field, value)?,
+        })))
     }
 
     pub(super) fn record(
@@ -326,19 +347,7 @@ impl<'a> PlanningChanges<'a> {
             return Ok(false);
         }
         let (owner, id) = self.owner();
-        let body = self.observation(conn)?;
-        let base = body
-            .as_ref()
-            .and_then(|body| body.get(field).map(|value| (body, value)))
-            .map(|(body, value)| -> StoreResult<Value> {
-                let revision = if matches!(self, Self::Project(_)) && field == "description" {
-                    &body["description_revision"]
-                } else {
-                    &body["revision"]
-                };
-                Ok(serde_json::json!({"revision": revision, "value": self.normalize(conn, field, value.clone())?}))
-            })
-            .transpose()?;
+        let base = self.baseline(conn, field)?;
         conn.execute(
             &format!(
                 "INSERT INTO {owner}_changes(id,{owner}_id,field,value_json,base_json)

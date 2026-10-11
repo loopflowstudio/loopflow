@@ -606,3 +606,5 @@ strip links to its own site in a new tab.
 - Jack Heart wrote the closing text: "Free and open source. `lf` has no servers and everything is done through ephemeral processes (like sessions) and `ssh` . There is telemetry built for you to explore on your own machine  but the maintainers of `lf` do not receive any of this data in any way. `lf` can proxy jobs onto remote machines but everything is done through `ssh`, not `http`. Currently requires `claude`, `codex` or `opencode` and `github`. `linear` is an optional integration. Plays nicely with `herdr` and `cmux`." → set in `x11` under "Free and open source (MIT).", replacing the three-item list; the heading carries his first sentence. Placement is Claude's guess. The no-servers and telemetry claims are not checked against the code.
 
 - Jack Heart corrected the closing text: "(like agent sessions)", not "(like sessions)". Set in `x11`.
+
+- Jack Heart: "lf has no servers." → its own sentence in the `x11` closing text. Claude takes it as his confirmation of the claim; it is still not checked against the code.

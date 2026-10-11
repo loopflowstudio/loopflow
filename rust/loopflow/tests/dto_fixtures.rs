@@ -665,53 +665,6 @@ fn desktop_inspection_preserves_exact_windows_hidden_panes_and_stale_reading() {
 }
 
 #[test]
-fn task_delivery_preserves_pending_filings_links_and_due_unstarted_follow_ups() {
-    use loopflow::lf::commands::waves::RoadmapTask;
-    let json = include_str!("../../../tests/fixtures/dto/task_delivery_rows.json");
-    let rows: std::collections::BTreeMap<String, RoadmapTask> = serde_json::from_str(json).unwrap();
-    assert_eq!(
-        rows["conversion"].follow_through.scope_notes,
-        ["Verify the installed release. Evidence: the command succeeds on the released version."]
-    );
-    assert!(!rows["pending"].follow_through.resolved());
-    assert!(rows["pending"]
-        .runtime
-        .as_ref()
-        .unwrap()
-        .completion_pending
-        .as_ref()
-        .unwrap()
-        .contains("lf task complete"));
-    assert_eq!(
-        rows["completed_running"].runtime.as_ref().unwrap().status,
-        loopflow::durable::TaskState::Done
-    );
-    assert_eq!(
-        rows["completed_running"].execution,
-        rows["pending"].execution
-    );
-    assert_eq!(rows["pending"].follow_through.intents.len(), 1);
-    assert!(rows["done"].follow_through.resolved());
-    assert_eq!(rows["done"].follow_through.links[0].identifier, "W2-FOLLOW");
-    assert!(rows["none"].follow_through.resolved());
-    assert!(rows["none"].follow_through.links.is_empty());
-    assert!(rows["due"].runtime.is_none());
-    assert_eq!(rows["due"].task.due_date.as_deref(), Some("2026-10-08"));
-    assert_eq!(
-        rows["due"].task.follow_up_sources[0].identifier,
-        "W2-SOURCE"
-    );
-    assert!(rows["unrelated"].task.follow_up_sources.is_empty());
-    assert_eq!(
-        serde_json::to_value(&rows).unwrap(),
-        serde_json::from_str::<serde_json::Value>(json).unwrap()
-    );
-    let mut missing = serde_json::to_value(&rows["pending"]).unwrap();
-    missing.as_object_mut().unwrap().remove("follow_through");
-    assert!(serde_json::from_value::<RoadmapTask>(missing).is_err());
-}
-
-#[test]
 fn composed_lifecycle_preserves_completion_before_workflow_arrival() {
     use loopflow::lf::commands::waves::RoadmapTask;
     use loopflow::lf::commands::work_watch::{WorkContent, WorkFrame};
@@ -737,7 +690,6 @@ fn composed_lifecycle_preserves_completion_before_workflow_arrival() {
         let execution = status.execution.unwrap();
         assert_eq!(task.work.workflow, execution.work.workflow);
         assert_eq!(row.runtime.as_ref().unwrap().status, execution.status);
-        assert_eq!(row.follow_through, execution.follow_through);
         let loopflow::lf::commands::waves::Evidence::Ok { items, .. } =
             &plan.roadmap.waves[0].tasks
         else {
@@ -748,18 +700,8 @@ fn composed_lifecycle_preserves_completion_before_workflow_arrival() {
             .find(|row| row.task.identifier == "FIX-1")
             .unwrap();
         assert_eq!(projected.runtime.as_ref().unwrap().status, execution.status);
-        assert_eq!(projected.follow_through, execution.follow_through);
         if phase != "merged" {
             assert_eq!(execution.status, loopflow::durable::TaskState::Done);
-            assert!(execution.follow_through.resolved());
-            assert_eq!(execution.follow_through.links.len(), 1);
-            assert!(execution.follow_through.links[0]
-                .identifier
-                .starts_with("lf-"));
-            assert_eq!(
-                execution.follow_through.links[0].due.as_deref(),
-                Some("2026-10-09")
-            );
         }
     }
     assert_eq!(

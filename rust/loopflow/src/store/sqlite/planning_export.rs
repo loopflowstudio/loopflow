@@ -264,32 +264,6 @@ pub(super) fn attach_in(
     Ok(())
 }
 
-// Historical filing persisted intent before its network call, but recorded no
-// attempt boundary. Conversion must preserve uncertainty, never guess no send.
-pub(super) fn retain_follow_through_export_in(
-    conn: &Connection,
-    task: &TaskId,
-    intent: &crate::work::task::follow_through::FollowThroughIntent,
-) -> StoreResult<()> {
-    let task = super::children::task_on(conn, task)?.ok_or(StoreError::NotFound)?;
-    let export = PlanningExport {
-        id: intent.issue_id.clone(),
-        model: task_creation_baseline(&task),
-        through: 0,
-        input: json!({"id":intent.issue_id,"teamId":intent.team_id,"projectId":intent.project_id,
-            "stateId":intent.state_id,"title":intent.title,"description":intent.notes,"dueDate":intent.due}),
-        initiative: String::new(),
-        link_id: intent.relation_id.clone(),
-    };
-    conn.execute(
-        "UPDATE task_creation_intents SET export_json=?2,export_attempted=1,
-        export_error='Historical creation outcome is unknown; awaiting exact provider readback'
-        WHERE task_id=?1 AND export_json IS NULL",
-        params![task.id.as_str(), serde_json::to_string(&export)?],
-    )?;
-    Ok(())
-}
-
 // Only creation fields can seed delivery baselines. Never persist the whole Task:
 // checkout, Workflow and execution fields are not part of the external effect.
 fn task_creation_baseline(task: &crate::work::task::Task) -> Value {

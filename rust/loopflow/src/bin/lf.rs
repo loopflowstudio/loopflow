@@ -717,38 +717,6 @@ fn print_task_snapshot(
         if let Some(pr) = &snapshot.pr {
             println!("{}", format_task_pr_line(pr));
         }
-        let follow_through = &snapshot.follow_through;
-        if snapshot
-            .pr
-            .as_ref()
-            .is_some_and(|pr| pr.phase() == loopflow::work::task::PrPhase::Merged)
-            && !snapshot.status.is_terminal()
-        {
-            let state = if follow_through.needs_conversion {
-                "scope needs conversion"
-            } else if follow_through.resolved() {
-                "recorded; ready to complete"
-            } else {
-                "pending"
-            };
-            println!("  Merged · Follow-through {state}");
-        }
-        for link in &follow_through.links {
-            println!(
-                "  Follow-up: {}{}",
-                link.identifier,
-                link.url
-                    .as_ref()
-                    .map(|url| format!(" · {url}"))
-                    .unwrap_or_default()
-            );
-        }
-        for note in &follow_through.scope_notes {
-            println!("  Scope needs conversion: {note}");
-        }
-        if let Some(reason) = &follow_through.reason {
-            println!("  Follow-through: {reason}");
-        }
         match &snapshot.observation {
             loopflow::work::task::Observation::Cached { observed_at } => {
                 println!("  PR observation: cached from {observed_at}");
@@ -1020,36 +988,6 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             if !result.errors.is_empty() {
                 anyhow::bail!("{}", result.errors.join("\n"));
             }
-            Ok(())
-        }
-        TaskCommand::FollowUp {
-            issue,
-            title,
-            notes,
-            due,
-            wave,
-            existing,
-            none,
-            finish,
-            key,
-        } => {
-            println!(
-                "{}",
-                loopflow::ops::task::task_follow_up(
-                    repo,
-                    issue,
-                    &loopflow::ops::task::FollowUpOptions {
-                        title: title.clone(),
-                        notes: notes.clone(),
-                        due: due.clone(),
-                        wave: wave.clone(),
-                        existing: existing.clone(),
-                        none: none.clone(),
-                        finish: finish.clone(),
-                        key: key.clone(),
-                    }
-                )?
-            );
             Ok(())
         }
         TaskCommand::Automate { issue, state } => Ok(loopflow::ops::task_automation::select(

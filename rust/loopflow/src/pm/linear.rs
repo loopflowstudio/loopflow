@@ -900,70 +900,6 @@ impl LinearClient {
         }
     }
 
-    pub(crate) async fn ensure_follow_up_relation(
-        &self,
-        source: &str,
-        target: &str,
-        id: &str,
-    ) -> PmResult<()> {
-        if self.follow_up_relation_exists(source, target).await? {
-            return Ok(());
-        }
-        let result: PmResult<serde_json::Value> = self.graphql(
-            "mutation FollowUpRelation($input: IssueRelationCreateInput!) { issueRelationCreate(input: $input) { success issueRelation { id } } }",
-            json!({"input": {"id": id, "issueId": source, "relatedIssueId": target, "type": "related"}}),
-        ).await;
-        if self.follow_up_relation_exists(source, target).await? {
-            return Ok(());
-        }
-        Err(result.err().unwrap_or_else(|| {
-            PmError::Message("Linear did not confirm the follow-up relation".into())
-        }))
-    }
-
-    async fn follow_up_relation_exists(&self, source: &str, target: &str) -> PmResult<bool> {
-        for (issue, related) in [(source, target), (target, source)] {
-            let mut after: Option<String> = None;
-            loop {
-                let data: serde_json::Value = self.graphql(
-                    "query FollowUpRelationExists($id: String!, $after: String) { issue(id: $id) { relations(first: 100, after: $after) { nodes { type relatedIssue { id } } pageInfo { hasNextPage endCursor } } } }",
-                    json!({"id": issue, "after": after}),
-                ).await?;
-                let page = data.pointer("/issue/relations").ok_or_else(|| {
-                    PmError::Message("Linear omitted relation lookup results".into())
-                })?;
-                let nodes = page["nodes"]
-                    .as_array()
-                    .ok_or_else(|| PmError::Message("Linear omitted relation nodes".into()))?;
-                if nodes
-                    .iter()
-                    .any(|node| node["type"] == "related" && node["relatedIssue"]["id"] == related)
-                {
-                    return Ok(true);
-                }
-                match page["pageInfo"]["hasNextPage"].as_bool() {
-                    Some(false) => break,
-                    Some(true) => {
-                        after = Some(
-                            page["pageInfo"]["endCursor"]
-                                .as_str()
-                                .ok_or_else(|| {
-                                    PmError::Message("Linear omitted relation cursor".into())
-                                })?
-                                .into(),
-                        )
-                    }
-                    None => {
-                        return Err(PmError::Message(
-                            "Linear omitted relation pagination".into(),
-                        ))
-                    }
-                }
-            }
-        }
-        Ok(false)
-    }
-
     pub async fn move_item_to_team(&self, item_id: &str, team_id: &str) -> PmResult<String> {
         let response: IssueUpdateIdentifierData = self
             .graphql(
@@ -3195,10 +3131,6 @@ mod tests {
         assert_eq!(linear_description(""), "");
     }
 }
-
-#[cfg(test)]
-#[path = "linear_follow_through_tests.rs"]
-mod follow_through_tests;
 
 /// Retained Linear facts, including foreign and not-yet-associated Projects.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

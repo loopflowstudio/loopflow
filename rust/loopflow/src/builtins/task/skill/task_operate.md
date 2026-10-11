@@ -63,8 +63,8 @@ or liveness evidence; never a reason to start a second Flow process). â€œReadyâ€
    Explain any departure from the default. Scratch history alone cannot approve
    a design or waive a review. A finished Flow proves neither completion nor
    unfinished work: inspect its outcome. Completion alone is not a stopping
-   point while required delivery follow-through remains unresolved. A merged
-   PR alone leaves follow-through pending. Ask about consequential scope
+   point if the requested outcome still needs work. A merged PR alone does not
+   complete the Task. Ask about consequential scope
    or direction conflicts; when judgment is unavailable, name the exact decision.
 
 3. **Advance the work.** `lf task run <issue> [flow]` runs a
@@ -85,26 +85,18 @@ or liveness evidence; never a reason to start a second Flow process). â€œReadyâ€
    live Flow process. Continue through the authored steps, resolve recoverable failures,
    and use inline answers to unblock interactive work. Read a failure's log
    before retrying, and retry with `--reason "<what changed>"` only on new
-   evidence or a repaired cause. Stop when status confirms Task completion and
-   resolved delivery obligations, or a concrete blocker remains. Report publication,
-   review, merge, follow-through and completion as separate facts. Arming a merge the Flow did not remains the
+   evidence or a repaired cause. Stop when status confirms Task completion, or a concrete blocker remains. Report publication,
+   review, merge and completion as separate facts. Arming a merge the Flow did not remains the
    person's choice. Each Task has zero or one PR; further implementation needing
    another PR belongs in another Task, stacked if dependent. Repeated calls must
    preserve existing work without duplicating Flows or conversations.
 
-5. **Finish merged delivery.** A verified merge, including a manual GitHub merge,
-   leaves follow-through pending until follow-ups are filed or none needed is
-   recorded. Linear may already show Done; keep that status without mistaking
-   it for a filing disposition. Do not reopen a completed Task to bypass a
-   finishing refusal; report the unresolved obligation and blocker.
-   First inspect every associated live Flow and unfinished Process; a live ship
-   Flow owns its finish. With no live Flow process, if the disposition is already durable,
-   run `lf task complete <issue>` and reread status. Otherwise run
-   `lf --task <issue> flow finish-delivery`, which performs only follow-through.
-   Do not replay gate, re-arm the PR, resume an old Flow or require its template.
-   Inspect receipts after failure before retrying; unavailable scope judgment
-   stays a concrete blocker in this conversation. The source does not wait for
-   its follow-up Tasks to finish. A PR-less Task can reach end with retained files
+5. **Finish merged delivery.** A verified merge leaves an open Task available for
+   optional new Task creation. No filing or disposition is required. First inspect
+   associated Flows and unfinished Processes; leave a live ship Flow to finish.
+   When the accepted outcome is satisfied and no live Flow owns its finish,
+   run `lf task complete <issue>` and reread status. Do not replay gate, re-arm the
+   PR or reopen a completed Task merely to create more work. A PR-less Task can reach end with retained files
    and commits; no placeholder PR or landing ceremony is required. Completion
    changes status without moving the Workflow and is safe to repeat after arrival.
    When status shows completion pending at end, retry `lf task complete <issue>`

@@ -12,7 +12,6 @@ lf --task INF-123 implement
 lf commit -m "parser: accept nested groups"
 lf pr publish --title "Parser: accept nested groups"
 lf land --wait-and-fix
-lf task follow-up INF-123 --none 'No accepted obligations remain'
 lf task complete INF-123
 ```
 
@@ -29,7 +28,7 @@ Task Work ----> managed worktree ----> commits
                                           |
                                  checks / repair / merge
                                           |
-                             file follow-ups or record none
+                             optional ordinary Task creation
                                           |
                                     complete Task
 ```
@@ -123,7 +122,7 @@ existing request, including standalone PRs. It preserves the commit, merge
 queue position, and CI. Explicit standalone title/body edits update only those
 fields; omitted copy is preserved. Dirty source or a new local commit still
 prepares and publishes a replacement head. Task completion remains separate:
-verified merge and a recorded follow-through disposition are required.
+a verified merge is required when the Task has a PR.
 
 `lf pr open` is the presenting verb; it opens the review surface after
 publishing. Headless Task flows use publish or land.
@@ -298,8 +297,8 @@ A PR closed without merging ends its landing unsettled. Merge evidence is
 recorded before Task settlement; a failed local or Linear settlement keeps the
 landing pending and the next check retries it.
 
-After verified merge the Task shows **Merged · Follow-through pending**.
-`ship` runs gate, `land --wait-and-fix`, then follow-through. Waited landing uses the
+After verified merge the open Task can be completed.
+`ship` runs gate and `land --wait-and-fix`. Waited landing uses the
 existing observation and CI repair path every 15 seconds for at most 30 minutes,
 releasing its lock between reads. Repair admission exempts the calling command
 and its recorded ancestors, which wait for it; unrelated live or unresolved
@@ -311,39 +310,24 @@ interruption retains intent and returns stopped (exit 130).
 Neither ordinary reconciliation nor a manual GitHub merge manufactures a verdict.
 Keep the checkout available for the finishing step.
 
-Follow-through reads the accepted brief, merged PR copy and delivery evidence.
-It uses `lf task follow-up` to file or link actual Tasks for accepted later
-obligations, or records none needed with a reason. Filing intent retains a stable
-child identity, destination Project and exact payload before local creation;
-uncertain responses and chapter rotation cannot select a replacement destination.
-The common planning writer creates the Task; its confirmed local link permits
-the filed disposition. Foreground planning sync delivers optional Linear creation
-and related-issue links independently, including after source completion.
-Existing unresolved keep-open records require scope conversion, never silent
-completion or remote issue creation during migration.
+After merge, optional follow-up work uses ordinary Task creation. No dedicated
+API, relation exporter, disposition or completion gate is needed. Historical event
+payloads remain readable without authorizing writes or preventing completion.
+Already-saved ordinary creation/export receipts retain their normal recovery.
 
 `lf task complete` settles status without moving the Workflow. Movement to
 `end` persists a completion request in the same transaction as arrival, then
 tries completion. Failure retains both arrival and the reason; operators retry
 completion alone. Accepted provider status changes clear superseded requests
-without touching Workflow or Process history. Reads never execute the trigger. A Task with a PR needs merge
-and a durable none/filed disposition; its follow-up Tasks need not be complete.
+without touching Workflow or Process history. Reads never execute the trigger. A Task with a PR needs a verified merge.
 A PR-less Task may finish with retained files and commits, without a landing
 ceremony. Completion is idempotent, including when the enclosing Flow later
 arrives at end; planning writeback remains retryable.
 
-A stopped finishing Flow is recovered by the next Task/Wave operation. Inspect
-all associated live work, then run `finish-delivery` or repeat completion if the
-disposition is already durable. Do not replay gate or re-arm a merged PR.
-Provider completion does not block first filing or this recovery: an unresolved,
-merged delivery retains its checkout and admits a Flow containing only
-`follow-through`, regardless of the Flow's name. Normal Flow/Workflow launches
-stay closed on completed Tasks. A resolved disposition admits retries of saved
-filings but no new obligation or finishing Flow; recovery never reopens planning.
-Dated follow-ups return on the owning Wave's next pass, including unstarted ones;
-unattended execution needs a concrete check already authorized in the brief.
-Filing installs no schedule. Without an installed Wave schedule there is no
-automatic wake, and time passing proves no accepted outcome.
+After a stopped Flow, inspect associated live work and the requested outcome,
+then retry completion alone when appropriate. Do not replay gate or re-arm a
+merged PR. Completed Tasks have no special Flow-launch exception for filing.
+New work can be created independently without reopening its source Task.
 
 Task decisions never settle Session turns or process exits. Checkout cleanup and
 process control keep their own evidence and authority. Historical uncertainty

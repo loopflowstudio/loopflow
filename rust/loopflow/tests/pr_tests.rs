@@ -1291,7 +1291,7 @@ fn publishing_after_the_pr_merged_names_the_next_step() {
 }
 
 #[test]
-fn observed_auto_merge_waits_for_follow_through_to_complete_the_task() {
+fn observed_auto_merge_waits_for_explicit_task_completion() {
     let home = tempfile::TempDir::new().expect("temp home");
     let _env = EnvGuard::with_lf_home(&[("gh", gh_merged_pr_script())], home.path());
     let repo = TestRepo::new();

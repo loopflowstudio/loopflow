@@ -11,7 +11,6 @@
       "completed_at": null,
       "assignee": null,
       "due_date": null,
-      "follow_up_sources": [],
       "sync": {
         "connected": false,
         "changes": []
@@ -57,14 +56,7 @@
     "run_control": {
       "unavailable": "Linear Task is canceled"
     },
-    "pr": null,
-    "follow_through": {
-      "intents": [],
-      "links": [],
-      "reason": null,
-      "needs_conversion": false,
-      "scope_notes": []
-    }
+    "pr": null
   },
   {
     "task": {
@@ -78,7 +70,6 @@
       "completed_at": null,
       "assignee": null,
       "due_date": null,
-      "follow_up_sources": [],
       "sync": {
         "connected": false,
         "changes": []
@@ -124,14 +115,7 @@
     "run_control": {
       "unavailable": "Linear Task is canceled"
     },
-    "pr": null,
-    "follow_through": {
-      "intents": [],
-      "links": [],
-      "reason": null,
-      "needs_conversion": false,
-      "scope_notes": []
-    }
+    "pr": null
   },
   {
     "task": {
@@ -145,7 +129,6 @@
       "completed_at": null,
       "assignee": null,
       "due_date": null,
-      "follow_up_sources": [],
       "sync": {
         "connected": false,
         "changes": []
@@ -191,14 +174,7 @@
     "run_control": {
       "unavailable": "Linear Task is canceled"
     },
-    "pr": null,
-    "follow_through": {
-      "intents": [],
-      "links": [],
-      "reason": null,
-      "needs_conversion": false,
-      "scope_notes": []
-    }
+    "pr": null
   },
   {
     "task": {
@@ -212,7 +188,6 @@
       "completed_at": null,
       "assignee": null,
       "due_date": null,
-      "follow_up_sources": [],
       "sync": {
         "connected": false,
         "changes": []
@@ -258,14 +233,7 @@
     "run_control": {
       "unavailable": "Linear Task is canceled"
     },
-    "pr": null,
-    "follow_through": {
-      "intents": [],
-      "links": [],
-      "reason": null,
-      "needs_conversion": false,
-      "scope_notes": []
-    }
+    "pr": null
   },
   {
     "task": {
@@ -279,7 +247,6 @@
       "completed_at": null,
       "assignee": null,
       "due_date": null,
-      "follow_up_sources": [],
       "sync": {
         "connected": false,
         "changes": []
@@ -325,14 +292,7 @@
     "run_control": {
       "unavailable": "Linear Task is canceled"
     },
-    "pr": null,
-    "follow_through": {
-      "intents": [],
-      "links": [],
-      "reason": null,
-      "needs_conversion": false,
-      "scope_notes": []
-    }
+    "pr": null
   },
   {
     "task": {
@@ -346,7 +306,6 @@
       "completed_at": null,
       "assignee": null,
       "due_date": null,
-      "follow_up_sources": [],
       "sync": {
         "connected": false,
         "changes": []
@@ -392,14 +351,7 @@
     "run_control": {
       "unavailable": "Linear Task is canceled"
     },
-    "pr": null,
-    "follow_through": {
-      "intents": [],
-      "links": [],
-      "reason": null,
-      "needs_conversion": false,
-      "scope_notes": []
-    }
+    "pr": null
   },
   {
     "task": {
@@ -413,7 +365,6 @@
       "completed_at": null,
       "assignee": null,
       "due_date": null,
-      "follow_up_sources": [],
       "sync": {
         "connected": false,
         "changes": []
@@ -459,14 +410,7 @@
     "run_control": {
       "unavailable": "Linear Task is canceled"
     },
-    "pr": null,
-    "follow_through": {
-      "intents": [],
-      "links": [],
-      "reason": null,
-      "needs_conversion": false,
-      "scope_notes": []
-    }
+    "pr": null
   },
   {
     "task": {
@@ -480,7 +424,6 @@
       "completed_at": null,
       "assignee": null,
       "due_date": null,
-      "follow_up_sources": [],
       "sync": {
         "connected": false,
         "changes": []
@@ -526,14 +469,7 @@
     "run_control": {
       "unavailable": null
     },
-    "pr": null,
-    "follow_through": {
-      "intents": [],
-      "links": [],
-      "reason": null,
-      "needs_conversion": false,
-      "scope_notes": []
-    }
+    "pr": null
   },
   {
     "task": {
@@ -547,7 +483,6 @@
       "completed_at": null,
       "assignee": null,
       "due_date": null,
-      "follow_up_sources": [],
       "sync": {
         "connected": false,
         "changes": []
@@ -593,14 +528,7 @@
     "run_control": {
       "unavailable": null
     },
-    "pr": null,
-    "follow_through": {
-      "intents": [],
-      "links": [],
-      "reason": null,
-      "needs_conversion": false,
-      "scope_notes": []
-    }
+    "pr": null
   },
   {
     "task": {
@@ -614,7 +542,6 @@
       "completed_at": null,
       "assignee": null,
       "due_date": null,
-      "follow_up_sources": [],
       "sync": {
         "connected": false,
         "changes": []
@@ -660,14 +587,7 @@
     "run_control": {
       "unavailable": null
     },
-    "pr": null,
-    "follow_through": {
-      "intents": [],
-      "links": [],
-      "reason": null,
-      "needs_conversion": false,
-      "scope_notes": []
-    }
+    "pr": null
   },
   {
     "task": {
@@ -681,7 +601,6 @@
       "completed_at": null,
       "assignee": null,
       "due_date": null,
-      "follow_up_sources": [],
       "sync": {
         "connected": false,
         "changes": []
@@ -727,14 +646,7 @@
     "run_control": {
       "unavailable": null
     },
-    "pr": null,
-    "follow_through": {
-      "intents": [],
-      "links": [],
-      "reason": null,
-      "needs_conversion": false,
-      "scope_notes": []
-    }
+    "pr": null
   },
   {
     "task": {
@@ -748,7 +660,6 @@
       "completed_at": "2026-10-01T12:00:00Z",
       "assignee": null,
       "due_date": null,
-      "follow_up_sources": [],
       "sync": {
         "connected": false,
         "changes": []
@@ -794,14 +705,7 @@
     "run_control": {
       "unavailable": "Linear Task is complete"
     },
-    "pr": null,
-    "follow_through": {
-      "intents": [],
-      "links": [],
-      "reason": null,
-      "needs_conversion": false,
-      "scope_notes": []
-    }
+    "pr": null
   },
   {
     "task": {
@@ -815,7 +719,6 @@
       "completed_at": "2026-09-12T12:00:00Z",
       "assignee": null,
       "due_date": null,
-      "follow_up_sources": [],
       "sync": {
         "connected": false,
         "changes": []
@@ -861,14 +764,7 @@
     "run_control": {
       "unavailable": "Linear Task is complete"
     },
-    "pr": null,
-    "follow_through": {
-      "intents": [],
-      "links": [],
-      "reason": null,
-      "needs_conversion": false,
-      "scope_notes": []
-    }
+    "pr": null
   },
   {
     "task": {
@@ -882,7 +778,6 @@
       "completed_at": null,
       "assignee": null,
       "due_date": null,
-      "follow_up_sources": [],
       "sync": {
         "connected": false,
         "changes": []
@@ -928,14 +823,7 @@
     "run_control": {
       "unavailable": "Linear Task is complete"
     },
-    "pr": null,
-    "follow_through": {
-      "intents": [],
-      "links": [],
-      "reason": null,
-      "needs_conversion": false,
-      "scope_notes": []
-    }
+    "pr": null
   },
   {
     "task": {
@@ -949,7 +837,6 @@
       "completed_at": "2026-09-01T12:00:00Z",
       "assignee": null,
       "due_date": null,
-      "follow_up_sources": [],
       "sync": {
         "connected": false,
         "changes": []
@@ -995,14 +882,7 @@
     "run_control": {
       "unavailable": null
     },
-    "pr": null,
-    "follow_through": {
-      "intents": [],
-      "links": [],
-      "reason": null,
-      "needs_conversion": false,
-      "scope_notes": []
-    }
+    "pr": null
   },
   {
     "task": {
@@ -1016,7 +896,6 @@
       "completed_at": null,
       "assignee": null,
       "due_date": null,
-      "follow_up_sources": [],
       "sync": {
         "connected": false,
         "changes": []
@@ -1062,13 +941,6 @@
     "run_control": {
       "unavailable": "Linear Task is canceled"
     },
-    "pr": null,
-    "follow_through": {
-      "intents": [],
-      "links": [],
-      "reason": null,
-      "needs_conversion": false,
-      "scope_notes": []
-    }
+    "pr": null
   }
 ]

@@ -263,12 +263,6 @@ mod tests {
         assert!(get_builtin_flow("ship")
             .expect("Task final flow")
             .contains("- cmd: land --wait-and-fix"));
-        assert!(get_builtin_flow("ship")
-            .unwrap()
-            .contains("- follow-through"));
-        assert!(get_builtin_flow("finish-delivery")
-            .unwrap()
-            .contains("- follow-through"));
 
         for wrapper in ["design", "launch-plan", "ship-5whys", "wave"] {
             assert!(get_builtin_flow(wrapper).is_none());

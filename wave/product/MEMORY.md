@@ -26,7 +26,7 @@ LOO-389 comments failed: unbound Initiative.
   palette, LOO-387 native draft preparation. Programmatic Desktop control must
   reuse these owners. LOO-415 owns the transparent relay and all lf status
   emission; LOO-398 is reading only. LOO-422 owns host status/title fidelity.
-- LOO-418: a Task has zero or one PR; follow-through is another Task. Serial PR
+- LOO-418: a Task has zero or one PR; optional later work uses ordinary Tasks. Serial PR
   chains below describe the retired implementation. LOO-401 selects
   `self`, `config user`, app opening and HTML screenshot removal without a
   replacement. Desktop's native snapshot is separate. LOO-406 owns the accepted local
@@ -192,44 +192,26 @@ baseline-first interpretation is superseded.
 Queue repairs pass focused checks; full matrix stays with CI. No installation,
 live migration/publication or provider-account use is authorized.
 
-## Task delivery boundary (LOO-418, reconciled 2026-10-09)
+## Task delivery boundary (LOO-418, revised 2026-10-11)
 
-Jack Heart decided: zero or one PR per Task; dependencies use stacked Tasks.
-After merge, file follow-ups or record “none needed”, then complete. October 8:
-end triggers completion; Task status, Workflow position and Process liveness
-are independent. Failed end requests retry without replaying the Flow;
-reopening supersedes old intent. Linear completion preserves execution.
+Jack Heart clarified in LOO-427: follow-up is only an optional window after PR
+landing, with no required disposition or dedicated APIs. Ordinary Task creation
+handles new work. Bare landing keeps the Task open; explicit completion or an
+authored Workflow end completes it. Historical follow-through events remain history,
+not completion gates. Earlier implementation and decisions:
+`f1e8cd19ff:wave/product/MEMORY.md`, this heading.
 
-Jack authorized stacking on LOO-406 `558a39232`: local planning, optional
-placement, independent completion. Jack retained best-effort unseen concurrency:
-observed Linear conflicts win; the enabled counterexample documents an overwritten
-unseen reopening despite matching readback, not an atomic-write guarantee.
-LOO-385 overlaps without closure authority. October 9: Jack approved the HTML
-walkthrough and requested shipping #1499; native-demo acceptance remains unproven.
+Zero or one PR per Task; dependencies use stacked Tasks. Task status, Workflow
+position and Process liveness are independent. Failed end requests retry without
+replaying the Flow; reopening supersedes old intent. Linear completion preserves
+execution. Completion rechecks a verified merge for a Task with a PR. Failed cleanup
+never reverses completion. Common planning owns creation and optional export;
+already-saved uncertain export receipts retain their identity. Old event-only filing
+intents remain readable and do not automatically create new Tasks.
 
-Placement, PR history and unresolved scope survive.
-Jack accepted normal delivery or the next Task/Wave pass finishing follow-through,
-without a watcher or wake. Common planning owns creation/status;
-foreground export owns optional issues and relations, even after completion.
-Lost replies retain identity. Links read current saved names/dates, including
-removal, without changing immutable filing input.
-
-Reservation and child commit together; older reservations recover in their
-pinned Project after rotation. Historical intents retain unknown creation in
-common export; absence cannot authorize another create. Jack accepted usable local
-Tasks while that export stays pending. Reopening preserves
-execution/PR (`7671f8e9f`).
-
-Merged delivery can finish after Done without reopening (`1c4f10f96`). Resolved
-disposition blocks new scope; unresolved delivery retains its checkout (`0865e43a9`).
-Fixtures prove no scheduled or native acceptance.
-
-Failed promotion retains confirmed copy; handoffs preserve child edits.
-Flow/Started commit atomically after placement. Rust and populated-upgrade checks
-cover filing, completion, arrival, reopening, end retry and stacked handoff.
-Post-sync gate adds Swift build/headless lifecycle views; configured native and
-Jack's demo remain. Fixtures must use canonical paths and their own nested CLI.
-Settlement rechecks merge/disposition.
+Jack authorized shipping #1499 October 9; native acceptance was not established.
+Observed provider conflicts win; matching readback does not guarantee atomic writes
+against an unseen reopening. LOO-385 overlap does not establish closure.
 
 ## Terminal-host adoption (2026-10-07)
 

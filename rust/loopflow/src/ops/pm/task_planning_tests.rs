@@ -2598,22 +2598,13 @@ fi
             });
             if merge.is_some() {
                 runtime.block_on(fixture.store.insert_task_pr(&pr)).unwrap();
-                // Observe the merge before recording the accepted disposition.
+                // Observe the merge without requesting completion.
                 // Provider completion itself is the operation exercised below.
                 runtime
                     .block_on(crate::ops::task::reconcile_delivered_task(
                         &fixture.store,
                         &mut task,
                     ))
-                    .unwrap();
-                fixture
-                    .store
-                    .sqlite
-                    .finish_follow_through(
-                        &task.id,
-                        "Accepted checks complete; no later obligation",
-                        true,
-                    )
                     .unwrap();
             }
             task

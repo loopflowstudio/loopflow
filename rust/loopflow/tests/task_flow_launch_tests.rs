@@ -1353,284 +1353,24 @@ fn completion_preserves_retained_session_input_and_unknown_process_history() {
 }
 
 #[test]
-fn merged_delivery_requires_a_disposition_and_follow_through_completion_is_idempotent() {
+fn merged_delivery_completes_without_disposition_and_is_idempotent() {
     let task = WorkflowTask::new();
     task.publish(true);
     task.ok(&["-b", "task", "run", "INF-123", "findings"]);
-    for args in [
-        &["task", "run", "INF-123"][..],
-        &["task", "complete", "INF-123"],
-        &[
-            "task",
-            "move",
-            "INF-123",
-            "end",
-            "--reason",
-            "Try bypassing",
-        ],
-    ] {
-        let error = refusal(task.run(args));
-        assert!(error.to_lowercase().contains("follow-through"), "{error}");
-        assert_eq!(task.workflow()["position"], at("end"));
-        assert_eq!(task.state(), "active");
-    }
+    assert_ne!(task.state(), "done");
     assert!(task.repo.path().exists());
-    task.ok(&[
-        "task",
-        "follow-up",
-        "INF-123",
-        "--none",
-        "Accepted checks are complete",
-    ]);
-    task.ok(&[
-        "task",
-        "follow-up",
-        "INF-123",
-        "--none",
-        "Retry does not replace the reason",
-    ]);
     task.finish_after_provider_observation(&["task", "complete", "INF-123"]);
     let workflow = task.workflow();
     task.ok(&["task", "complete", "INF-123"]);
-    task.ok(&["task", "move", "INF-123", "end"]);
     assert_eq!(task.workflow(), workflow);
     let status = task.status();
     assert_eq!(status["status"], "done");
     assert_eq!(status["pr"]["publication"]["github"]["number"], 42);
-    assert_eq!(
-        status["follow_through"]["reason"],
-        "Accepted checks are complete"
-    );
-}
-
-#[test]
-fn provider_completed_delivery_can_file_and_finish_without_reopening() {
-    use std::os::unix::fs::PermissionsExt;
-
-    let task = WorkflowTask::new();
-    task.publish(true);
-    task.ok(&["-b", "task", "run", "INF-123", "findings"]);
-    task.complete_in_linear();
-    let before = task.status();
-    let workflow = task.workflow();
-    let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
-    let processes: Vec<(String, Option<i64>, Option<String>)> = db
-        .prepare("SELECT id,completed_at,outcome FROM processes")
-        .unwrap()
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
-        .unwrap()
-        .collect::<Result<_, _>>()
-        .unwrap();
-
-    // Reconciliation/completion cannot remove the workspace still needed to file.
-    task.ok(&["task", "complete", "INF-123"]);
-    let runtime = tokio::runtime::Runtime::new().unwrap();
-    let saved = runtime
-        .block_on(task.registered.store.get_task(&task.registered.task.id))
-        .unwrap()
-        .unwrap();
-    assert!(saved.worktree.as_ref().unwrap().exists());
-    assert_eq!(task.state(), "done");
-
-    // A normal edge or a misleadingly named local Flow cannot start new work.
-    let error = refusal(task.run(&["-b", "--task", "INF-123", "flow", "proof"]));
-    assert!(error.contains("terminal"), "{error}");
-    let override_path = task.repo.path().join(".lf/flows/finish-delivery.yaml");
-    fs::write(&override_path, "- cmd: task sync --plan\n").unwrap();
-    assert!(
-        refusal(task.run(&["-b", "--task", "INF-123", "flow", "finish-delivery"]))
-            .contains("terminal")
-    );
-    fs::remove_file(override_path).unwrap();
-
-    // Simulate the agent's judgment, not the filing operations: its commands
-    // cross the same public CLI/store path used by the operator's recovery Flow.
-    support::register_codex_account(task.home.path());
-    let bin = tempfile::tempdir().unwrap();
-    let provider = bin.path().join("codex");
-    fs::write(
-        &provider,
-        support::codex_app_server_script(
-            "Accepted follow-through filed",
-            r#"set -eu
-if [ "$1" = --version ]; then echo "codex fixture"; exit 0; fi
-for attempt in 1 2; do
-  "$LF_BIN" task follow-up INF-123 --title "Verify installed command" --notes "Run the released command; retain its result" --due 2026-10-09 >&2
-done
-for attempt in 1 2; do
-  "$LF_BIN" task follow-up INF-123 --finish "Installed proof belongs to the child" >&2
-done
-"$LF_BIN" task complete INF-123 >&2
-"#,
-        ),
-    )
-    .unwrap();
-    fs::set_permissions(&provider, fs::Permissions::from_mode(0o755)).unwrap();
-    let output = command(
-        task.repo.path(),
-        task.home.path(),
-        &[
-            "-b",
-            "--agent",
-            "codex",
-            "--task",
-            "INF-123",
-            "flow",
-            "finish-delivery",
-        ],
-    )
-    .env("HOME", task.home.path())
-    .env("CODEX_HOME", task.home.path().join(".codex"))
-    .env(
-        "PATH",
-        format!(
-            "{}:{}",
-            bin.path().display(),
-            std::env::var("PATH").unwrap()
-        ),
-    )
-    .output()
-    .unwrap();
-    assert!(
-        output.status.success(),
-        "{}\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let after = task.status();
-    assert_eq!(after["status"], "done");
-    assert_eq!(task.workflow(), workflow);
-    assert_eq!(after["pr"], before["pr"]);
-    assert_eq!(
-        after["follow_through"]["intents"].as_array().unwrap().len(),
-        1
-    );
-    assert_eq!(
-        after["follow_through"]["links"].as_array().unwrap().len(),
-        1
-    );
-    assert_eq!(
-        after["follow_through"]["reason"],
-        "Installed proof belongs to the child"
-    );
-    let child_id = after["follow_through"]["intents"][0]["issue_id"]
-        .as_str()
-        .unwrap();
-    let child = runtime
-        .block_on(task.registered.store.get_task_by_issue(child_id))
-        .unwrap()
-        .unwrap();
-    assert!(
-        !loopflow::store::sqlite::SqliteStore::new(&task.home.path().join("loopflow.db"))
-            .unwrap()
-            .task_state(&child.id)
-            .unwrap()
-            .is_terminal()
-    );
-    assert_eq!(
-        runtime
-            .block_on(task.registered.store.list_tasks(None))
-            .unwrap()
-            .len(),
-        2
-    );
-    assert_eq!(db.query_row(
-        "SELECT count(*) FROM task_events WHERE task_id=?1 AND json_extract(kind_json,'$.kind')='follow_through_disposition'",
-        [task.registered.task.id.as_str()], |row| row.get::<_, i64>(0)).unwrap(), 1);
-    for (id, completed, outcome) in processes {
-        assert_eq!(
-            db.query_row(
-                "SELECT completed_at,outcome FROM processes WHERE id=?1",
-                [id],
-                |row| Ok((
-                    row.get::<_, Option<i64>>(0)?,
-                    row.get::<_, Option<String>>(1)?
-                ))
-            )
-            .unwrap(),
-            (completed, outcome)
-        );
-    }
-    let disposition = after["follow_through"].clone();
-    task.ok(&[
-        "task",
-        "follow-up",
-        "INF-123",
-        "--title",
-        "Ignored retry",
-        "--notes",
-        "The saved obligation wins",
-    ]);
-    task.ok(&[
-        "task",
-        "follow-up",
-        "INF-123",
-        "--finish",
-        "Ignored retry reason",
-    ]);
-    assert_eq!(task.status()["follow_through"], disposition);
-    assert_eq!(
-        runtime
-            .block_on(task.registered.store.get_task(&saved.id))
-            .unwrap()
-            .unwrap()
-            .worktree,
-        saved.worktree
-    );
-    // Resolved delivery admits neither another obligation nor another recovery Flow.
+    assert!(status.get("follow_through").is_none());
     assert!(!task
-        .run(&[
-            "task",
-            "follow-up",
-            "INF-123",
-            "--key",
-            "new-scope",
-            "--title",
-            "Unaccepted work",
-            "--notes",
-            "Not part of delivery"
-        ])
+        .run(&["task", "follow-up", "INF-123", "--none", "obsolete"])
         .status
         .success());
-    assert!(!task
-        .run(&["-b", "--task", "INF-123", "flow", "finish-delivery"])
-        .status
-        .success());
-    assert_eq!(task.workflow(), workflow);
-}
-
-#[test]
-fn provider_completion_without_merged_delivery_does_not_admit_first_filing() {
-    for published in [false, true] {
-        let task = WorkflowTask::new();
-        if published {
-            task.publish(false);
-        }
-        task.complete_in_linear();
-        task.ok(&["task", "complete", "INF-123"]);
-        assert!(task.registered.task.worktree.as_ref().unwrap().exists());
-        assert!(!task
-            .run(&[
-                "task",
-                "follow-up",
-                "INF-123",
-                "--title",
-                "New scope",
-                "--notes",
-                "No accepted merged delivery"
-            ])
-            .status
-            .success());
-        assert!(!task
-            .run(&["-b", "--task", "INF-123", "flow", "finish-delivery"])
-            .status
-            .success());
-        assert_eq!(task.state(), "done");
-        assert!(task.status()["follow_through"]["intents"]
-            .as_array()
-            .unwrap()
-            .is_empty());
-    }
 }
 
 #[test]
@@ -1646,17 +1386,11 @@ fn failed_completion_in_finishing_flow_is_retryable_without_replaying_it() {
         "edges:\n  - {from: start, to: end, flow: finish-proof}\n",
     )
     .unwrap();
-    task.publish(true);
+    task.publish(false);
     task.select_workflow("delivery");
     let error = refusal(task.run(&["-b", "task", "run", "INF-123", "delivery"]));
     assert!(task.status()["completion_pending"].is_string(), "{error}");
-    task.ok(&[
-        "task",
-        "follow-up",
-        "INF-123",
-        "--none",
-        "Accepted checks complete",
-    ]);
+    task.publish(true);
     task.ok(&["task", "complete", "INF-123"]);
     task.ok(&["task", "move", "INF-123", "end"]);
     assert_eq!(task.state(), "done");
@@ -1800,13 +1534,6 @@ fn successful_final_flow_keeps_arrival_when_completion_fails_and_never_replays()
     assert_eq!(flows.len(), 1);
     assert_eq!(flows[0].0.as_deref(), Some("succeeded"));
     task.publish(true);
-    task.ok(&[
-        "task",
-        "follow-up",
-        "INF-123",
-        "--none",
-        "Accepted checks complete",
-    ]);
     task.ok(&["task", "complete", "INF-123"]);
     assert_eq!(task.workflow(), arrived);
     assert_eq!(support::recorded_flows(task.home.path()), flows);

@@ -650,3 +650,5 @@ strip links to its own site in a new tab.
 - Jack Heart: "maybe lf pr open" / "should be in there"; "maybe need the command to open the task session for the task after you create it"; then "i think actually i changed my mind. dont show using the taks commands in the cli section. for that section, just do it all old school, w/o having to buy into task management per see. lf wt create etc" → the `x11` card has no Task commands: `lf wt create csv-export`, the launch command with `--wt csv-export`, `lf pr open`, `lf land --watch`.
 - Jack Heart: "maybe now switch the lf and stay engaged secitons" → in `x11` the CLI section comes before "Stay engaged *and* scale the swarm."
 - Still open: the card's `graph pursue` is not a command `lf` accepts.
+
+- Jack Heart: "remove (Waves) and (Tasks). Lowercase task everywhere just use it as a common place word, not Our Word" → in `x11`, the two parentheticals are gone from the thesis and "task" is lower case across the page copy, the mock and the flows card. The docs link label "Tasks and Waves" keeps its capital as the start of a label.

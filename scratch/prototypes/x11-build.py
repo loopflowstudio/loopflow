@@ -47,8 +47,8 @@ def wf(name, note, *parts):
     return f'<li><code>{name}</code><p class="line">{out}</p><small>{note}</small></li>'
 WFS = "\n".join([
 wf("feature", "The default. You jam on the design, and you try every change before it ships.", "start", "task-design", "@design", "pursue", "@demo", "ship", "end"),
-wf("code", "One stop. Your agent builds straight from the Task, and you try the change.", "start", "pursue", "@demo", "ship", "end"),
-wf("research", "No pull request. Your agent investigates, and the Task ends when you accept the findings.", "start", "research", "@findings", "end"),
+wf("code", "One stop. Your agent builds straight from the task, and you try the change.", "start", "pursue", "@demo", "ship", "end"),
+wf("research", "No pull request. Your agent investigates, and the task ends when you accept the findings.", "start", "research", "@findings", "end"),
 ])
 YAML = """# .lf/workflows/feature.yaml
 nodes:
@@ -97,7 +97,7 @@ main = f'''
 - cmd: pr land -c</pre></li>
         <li class="cap">end</li>
       </ol>
-      <p class="lab">Tasks · 5</p>
+      <p class="lab">tasks · 5</p>
       <ol class="tasks t6">
         <li><div><b>Add CSV export</b></div><span class="pos w">demo · waiting on you</span><span class="id">EXP-12</span></li>
         <li><div><b>Schedule a weekly export</b></div><span class="pos w">design · waiting on you</span><span class="id">EXP-15</span></li>
@@ -110,7 +110,7 @@ main = f'''
 </section>
 <section class="thesis">
   <p>Coding agents can do amazing things for you, but they ask a lot of focus from you. How can you, a human with a single locus of attention, stay in sync with an entire parallel agent swarm? Shipping tens of thousands of lines is the easy part. Making them lines worth keeping — lines you don’t revert next month — is the hard part.</p>
-  <p>Loopflow arranges your agent sessions around the work: long-lived objectives (<b>Waves</b>) and concrete outcomes (<b>Tasks</b>). You don’t have to keep every session window open for fear of it disappearing, or remember why you wanted this massive change in the first place. Each Task follows a workflow you choose, and each session you come to is one where your input really matters. Every Task ends shipped.</p>
+  <p>Loopflow arranges your agent sessions around the work: long-lived objectives and concrete outcomes. You don’t have to keep every session window open for fear of it disappearing, or remember why you wanted this massive change in the first place. Each task follows a workflow you choose, and each session you come to is one where your input really matters. Every task ends shipped.</p>
 </section>
 <section class="pair clihero">
   <h2><code>lf</code>: the CLI for agent workflows.</h2>
@@ -141,8 +141,8 @@ main = f'''
   <h2>Stay engaged <em>and</em> scale the swarm.</h2>
   <div class="halves">
     <article>
-      <p>A workflow says how a Task gets from an idea to shipped, and where you come in: early on in the design, later on to try the change, both, or neither. Stay close while the work is new, and drop a stop once you trust how it goes. You can zoom in and you can zoom out.</p>
-      <p>Workflows are files in your repository. Use these three, change them, or write your own, and each project picks the one its Tasks follow, so hands-on work and hands-off work run side by side.</p>
+      <p>A workflow says how a task gets from an idea to shipped, and where you come in: early on in the design, later on to try the change, both, or neither. Stay close while the work is new, and drop a stop once you trust how it goes. You can zoom in and you can zoom out.</p>
+      <p>Workflows are files in your repository. Use these three, change them, or write your own, and each project picks the one its tasks follow, so hands-on work and hands-off work run side by side.</p>
       <p class="more"><a href="/docs/waves">Tasks and Waves ↗</a><a href="/docs/authoring#workflows">Write a workflow ↗</a></p>
     </article>
     <article>
@@ -157,7 +157,7 @@ main = f'''
   <ul>
     <li><b><a href="https://claude.com/claude-code" target="_blank" rel="noopener">Claude Code</a> · <a href="https://openai.com/codex" target="_blank" rel="noopener">Codex</a> · <a href="https://opencode.ai" target="_blank" rel="noopener">OpenCode</a></b><span>the coding agent, on your own account</span></li>
     <li><b><a href="https://github.com" target="_blank" rel="noopener">GitHub</a></b><span>your code and your pull requests</span></li>
-    <li><b><a href="https://linear.app" target="_blank" rel="noopener">Linear</a></b><span>your Tasks are Linear issues</span></li>
+    <li><b><a href="https://linear.app" target="_blank" rel="noopener">Linear</a></b><span>your tasks are Linear issues</span></li>
     <li><b><a href="https://wisprflow.ai" target="_blank" rel="noopener">Wispr Flow</a></b><span>talk instead of typing</span></li>
     <li><b><a href="https://cmux.com" target="_blank" rel="noopener">cmux</a> · <a href="https://herdr.dev" target="_blank" rel="noopener">herdr</a></b><span><code>lf</code> runs inside them</span></li>
   </ul>

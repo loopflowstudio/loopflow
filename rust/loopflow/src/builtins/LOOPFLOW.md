@@ -108,8 +108,8 @@ Agent comments published through `lf comment` carry a progress marker and
 are excluded from steers. Use `--steer` only for deliberate new direction.
 Keep `<!-- loopflow-progress:... -->` provenance when writing progress elsewhere.
 
-Launch context has explicit budgets. An excerpt names its complete local source;
-read relevant omitted sections before acting, not whole archives.
+`lf context` measures memory and scratch against their size targets. Curate
+stale material without discarding live decisions or unresolved evidence.
 
 Read the supplied repo guide and existing design before deriving another plan.
 Recursive Markdown under `scratch/` enters this worktree's runs. A path in another
@@ -121,7 +121,8 @@ their durable owner before shipping.
 
 Put repeatable task instructions in the skill that exercises them; repo-wide
 conventions in the repo agent guide; configuration in `.lf/config.yaml`.
-Curate Wave decisions in `wave/<address>/MEMORY.md` through `realign`. Child
+Edit Wave `wave/<address>/GOAL.md` and `MEMORY.md` like any other files in the
+checkout; launches read them directly. Curate decisions through `realign`. Child
 memories live in nested directories; find relevant ones with filesystem tools.
 Do not create miscellaneous `.lf/` handoff notes or copy maintainer
 instructions into customer skills.

@@ -225,28 +225,26 @@ fn personal_task_launch_resume_and_skill_workflow_keep_native_identity() {
     let codex = fixture.home.path().join("bin/codex");
     let script = support::codex_app_server_script("Parser inspected.", "");
     let terminal = r#"#!/bin/sh
-case "$*" in
-  --version) exit 0 ;;
-  '--dangerously-bypass-hook-trust --model')
-    echo "a value is required for '--model <MODEL>'" >&2; exit 2 ;;
-  *app-server*) ;;
-  *resume*)
-    case "$*" in *terminal-fixture*) exit 0 ;; *) exit 91 ;; esac ;;
-  *--profile*)
+if [ "$1" = --version ]; then exit 0; fi
+mode=terminal
+for arg in "$@"; do
+    case "$arg" in app-server) mode=server;; resume) mode=resume;; esac
+done
+if [ "$mode" = resume ]; then
+    case "$*" in *terminal-fixture*) exit 0 ;; *) exit 91 ;; esac
+fi
+if [ "$mode" = terminal ]; then
     printf '%s\n' "$LF_CAPTURE_KEY" >> "$LF_HOME/launched"
     python3 - "$@" <<'PYTHON'
-import os, pathlib, subprocess, sys, tomllib
-args = sys.argv[1:]
-home = pathlib.Path(os.environ.get("CODEX_HOME", pathlib.Path.home() / ".codex"))
-profile = home / (args[args.index("--profile") + 1] + ".config.toml")
-config = tomllib.loads(profile.read_text())
+import subprocess, sys, tomllib
+config = tomllib.loads(next(arg for arg in sys.argv[1:] if arg.startswith("hooks=")))
 for group in config["hooks"]["SessionStart"]:
-    for hook in group["hooks"]:
-        subprocess.run(hook["command"], shell=True, input='{"session_id":"terminal-fixture"}', text=True, check=True)
+    if "startup" in group["matcher"]:
+        for hook in group["hooks"]:
+            subprocess.run(hook["command"], shell=True, input='{"session_id":"terminal-fixture"}', text=True, check=True)
 PYTHON
-    exit $? ;;
-  *) echo 'unexpected native provider command' >&2; exit 92 ;;
-esac
+    exit $?
+fi
 "#;
     std::fs::write(
         &codex,

@@ -1948,7 +1948,13 @@ mod local_planning_tests {
     use crate::store::sqlite::SqliteStore;
 
     fn local_project(store: &SqliteStore) -> ProjectId {
-        store.ensure_wave_project("/local", "inbox").unwrap().id
+        let repo = store.home_dir().unwrap();
+        // Fence Git discovery when the fixture runs inside a source checkout.
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        store
+            .ensure_wave_project(repo.to_str().unwrap(), "inbox")
+            .unwrap()
+            .id
     }
 
     #[test]

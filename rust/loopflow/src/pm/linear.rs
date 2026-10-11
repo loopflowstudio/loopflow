@@ -51,8 +51,9 @@ const CREATE_INITIATIVE_MUTATION: &str = r#"mutation CreateInitiative($name: Str
   }
 }"#;
 
-const UPDATE_INITIATIVE_MUTATION: &str = r#"mutation UpdateInitiative($id: String!, $name: String!) {
-  initiativeUpdate(id: $id, input: { name: $name }) {
+const UPDATE_INITIATIVE_MUTATION: &str = r#"mutation UpdateInitiative($id: String!, $input: InitiativeUpdateInput!) {
+  initiativeUpdate(id: $id, input: $input) {
+    success
     initiative {
       id
     }
@@ -625,15 +626,33 @@ impl LinearClient {
     }
 
     pub async fn rename_wave(&self, initiative_id: &str, name: &str) -> PmResult<()> {
-        let _: Value = self
+        self.update_wave(initiative_id, Some(name), None).await
+    }
+
+    pub async fn update_wave(
+        &self,
+        initiative_id: &str,
+        name: Option<&str>,
+        summary: Option<&str>,
+    ) -> PmResult<()> {
+        let mut input = serde_json::Map::new();
+        if let Some(name) = name {
+            input.insert("name".into(), json!(name));
+        }
+        if let Some(summary) = summary {
+            input.insert("description".into(), json!(linear_description(summary)));
+        }
+        let response: Value = self
             .graphql(
                 UPDATE_INITIATIVE_MUTATION,
-                json!({
-                    "id": initiative_id,
-                    "name": name,
-                }),
+                json!({"id": initiative_id, "input": input}),
             )
             .await?;
+        if response["initiativeUpdate"]["success"] != true {
+            return Err(PmError::Message(format!(
+                "Linear did not confirm update of Initiative {initiative_id}"
+            )));
+        }
         Ok(())
     }
 
@@ -2151,7 +2170,7 @@ fn description_with_repository_claim(description: &str, repository: &str) -> Str
     }
 }
 
-fn linear_description(description: &str) -> String {
+pub(crate) fn linear_description(description: &str) -> String {
     let summary = first_meaningful_paragraph(description);
     if summary.is_empty() {
         return String::new();

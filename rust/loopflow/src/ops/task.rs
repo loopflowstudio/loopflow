@@ -1243,7 +1243,7 @@ pub fn task_create(
                 .map_err(task_error)?
                 .is_none()
             {
-                super::project::ensure(&main, name).await?;
+                super::project::ensure(repo, name).await?;
             }
         }
         let ambient = std::env::var(crate::work::wave::context::WAVE_ID_ENV).ok();
@@ -1262,12 +1262,10 @@ pub fn task_create(
         let wave = match selected {
             Some(wave) => wave,
             None => {
-                let canonical =
-                    crate::repository::CanonicalRepo::discover(&main).map_err(task_error)?;
                 let name = wave.unwrap_or("inbox");
                 let project = store
                     .sqlite
-                    .ensure_wave_project(&canonical.to_string(), name)
+                    .ensure_wave_project(&repo.to_string_lossy(), name)
                     .map_err(task_error)?;
                 store
                     .get_wave(&project.wave_id)

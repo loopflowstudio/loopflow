@@ -858,19 +858,6 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
         WaveCommand::Place { .. } | WaveCommand::Rename { .. } => {
             loopflow::lf::commands::placement::wave(repo, command)
         }
-        WaveCommand::Edit { wave, goal, memory } => {
-            for (document, path) in [("GOAL.md", goal), ("MEMORY.md", memory)] {
-                if let Some(path) = path {
-                    loopflow::work::wave::config::write_wave_document(
-                        repo,
-                        wave,
-                        document,
-                        &std::fs::read_to_string(path)?,
-                    )?;
-                }
-            }
-            Ok(())
-        }
         WaveCommand::UpdatePlan { wave, plan } => {
             let saved = tokio::runtime::Runtime::new()?.block_on(update_plan(
                 repo,
@@ -1744,6 +1731,9 @@ fn execute_command(
         Some(Commands::ProviderSession) => {
             loopflow::lf::commands::session_history::observe_provider_session()
         }
+        Some(Commands::ContextBlock { delivery, moment }) => {
+            loopflow::lf::commands::context::emit_block(delivery, *moment)
+        }
         Some(Commands::SessionTitle { provider }) => {
             loopflow::lf::commands::session_history::name_native_session(provider)
         }
@@ -1974,12 +1964,9 @@ fn execute_command(
             let repo = loopflow::ops::task::task_repository(&directory, cmd.selector())?;
             with_runtime(&repo, args, || run_task_command(&repo, cmd))
         }
-        Some(Commands::Context {
-            json,
-            wave,
-            task,
-            skill,
-        }) => loopflow::lf::commands::context::run(*json, wave.as_deref(), task.as_deref(), skill),
+        Some(Commands::Context { json, wave, task }) => {
+            loopflow::lf::commands::context::run(*json, wave.as_deref(), task.as_deref())
+        }
         Some(Commands::TelemetryScorecard { json }) => in_repo_runtime(args, |repo| {
             loopflow::ops::run_telemetry_scorecard(repo, *json).map_err(Into::into)
         }),

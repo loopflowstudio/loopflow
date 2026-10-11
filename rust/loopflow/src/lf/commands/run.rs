@@ -85,7 +85,14 @@ pub fn resume(id: &str, message: &str, cli: &Cli) -> Result<()> {
         .map(|wave| wave.slug().to_string());
     // Continuation belongs to the saved conversation, even when invoked from
     // another Task's checkout. Do not rediscover Work from the caller's cwd.
-    let built = build_prompt_at(None, Some(message), message, &turn, session.cwd, None)?;
+    let mut built = build_prompt_at(None, Some(message), message, &turn, session.cwd, None)?;
+    let (_, saved) = crate::session_record::resolve_manifest(
+        &crate::store::lf_home_dir(),
+        &session.artifact_key,
+    )?;
+    if let Some(request) = saved.process {
+        built.agent_config.conversation_context = request.conversation_context;
+    }
     print_context_header(&built, &turn);
     run_prompt(&built, &turn).map(|_| ())
 }
@@ -212,7 +219,6 @@ struct PromptBuild {
     capabilities: AgentCapabilities,
     components: PromptComponents,
     context: crate::trace::PreparedTurnContext,
-    prompt: String,
     harness: String,
     model: Option<String>,
     skill_name: Option<String>,
@@ -274,9 +280,9 @@ fn build_bound_prompt_at(
     cli: &Cli,
     repo_root: &Path,
 ) -> Result<PromptBuild> {
-    build_prompt_at(
+    let mut built = build_prompt_at(
         skill,
-        Some(message),
+        Some(arguments),
         arguments,
         cli,
         repo_root.to_path_buf(),
@@ -284,7 +290,14 @@ fn build_bound_prompt_at(
             crate::trace::ContextAssetKind::Goal,
             crate::trace::ContextScope::Task,
         )),
-    )
+    )?;
+    if message != arguments {
+        let path = crate::prompt::write_prompt_log(repo_root, message, "work-direction", None)?;
+        if let Some(context) = &mut built.agent_config.conversation_context {
+            context.references.push(path);
+        }
+    }
+    Ok(built)
 }
 
 // Keep the existing unattended Task confinement while applying it equally to
@@ -342,10 +355,7 @@ fn build_prompt_at(
         None => false,
     };
     let confine = confine_checkout_agent(task_checkout, is_interactive);
-    let task_message = task_input
-        .as_ref()
-        .map(|(_, seed)| format!("{}\n\n{}", seed.message, message.unwrap_or_default()));
-    let message = task_message.as_deref().or(message);
+    let task_message = task_input.as_ref().map(|(_, seed)| seed.message.clone());
     let steers = task_input
         .as_ref()
         .map(|(_, seed)| seed.steers.clone())
@@ -385,17 +395,6 @@ fn build_prompt_at(
             .then(crate::work::wave::context::resolve_ambient_wave_name)
             .flatten()
     });
-    // Ordinary third-party skills need their own instructions, not the Work
-    // operating manual. Captured Flows and attributed Work retain that guidance.
-    let standalone_native = task_input.is_none()
-        && wave.is_none()
-        && cli.skill_input.is_none()
-        && message_context.is_none()
-        && discovered_skill.as_ref().is_some_and(|skill| {
-            skill.source.as_ref().is_some_and(|source| {
-                source.dialect != crate::skills::catalog::SkillDialect::Loopflow
-            })
-        });
     let prepared = prepare_process_prompt(
         &config,
         ProcessPromptInput {
@@ -407,7 +406,7 @@ fn build_prompt_at(
             wave,
             message: message.map(|value| value.to_string()),
             skill_arguments: arguments.to_string(),
-            no_loopflow: cli.no_loopflow || standalone_native,
+            no_loopflow: cli.no_loopflow,
             agent: task_input
                 .as_ref()
                 .and_then(|(_, seed)| seed.task.agent.clone())
@@ -421,6 +420,10 @@ fn build_prompt_at(
                 clipboard: if cli.clipboard { Some(true) } else { None },
             },
             summary: None,
+            references: task_message
+                .as_ref()
+                .map(|text| vec![("Task brief and steers".into(), text.clone())])
+                .unwrap_or_default(),
             client_context: Default::default(),
             related_repos: Vec::new(),
         },
@@ -464,7 +467,6 @@ fn build_prompt_at(
         )?);
         agent_config.skip_permissions = true;
     }
-    let prompt = prepared.prompt;
 
     let mut components = prepared.components;
     components.message_context = message_context.or_else(|| {
@@ -492,7 +494,6 @@ fn build_prompt_at(
         capabilities,
         components,
         context,
-        prompt,
         harness,
         model,
         skill_name,
@@ -575,21 +576,11 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
         let result = (|| {
             let mut config = built.agent_config.clone();
             config.env = environment.clone();
-            let (flags, prompt, context_file) = if let Some(skill) = &config.skill_invocation {
-                let (flags, prompt) = skill.terminal_input(&built.harness, &config)?;
-                (flags, prompt, None)
+            let context_file = crate::agent::write_system_prompt_file(&config, &built.log_name)?;
+            let (flags, prompt) = if let Some(skill) = &config.skill_invocation {
+                skill.terminal_input(&built.harness, &config)?
             } else {
-                let context_file = if matches!(built.harness.as_str(), "claude" | "codex") {
-                    crate::agent::write_system_prompt_file(&config, &built.log_name)?
-                } else {
-                    None
-                };
-                let prompt = if context_file.is_some() {
-                    config.task_prompt.clone()
-                } else {
-                    built.prompt.clone()
-                };
-                (Vec::new(), prompt, context_file)
+                (Vec::new(), config.task_prompt.clone())
             };
             launch_session(
                 &built.harness,
@@ -600,6 +591,7 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
                 agent_session.as_ref(),
                 &flags,
                 context_file.as_deref(),
+                config.conversation_context.as_ref(),
                 capture.session_attachment(),
             )
         })();
@@ -749,11 +741,21 @@ fn begin_capture(
             AgentProcessRequest::from_prepared(prepared_config, &built.capabilities),
         )
     } else if let Some(id) = crate::ops::human_session::prepared_artifact_key()? {
-        CaptureHandle::start_prepared(&crate::store::lf_home_dir(), &id, spec, &built.context)
+        CaptureHandle::start_prepared(
+            &crate::store::lf_home_dir(),
+            &id,
+            spec,
+            &built.context,
+            Some(AgentProcessRequest::from_prepared(
+                prepared_config,
+                &built.capabilities,
+            )),
+        )
     } else {
-        let interactive = surface != "headless";
-        let launch = (!interactive)
-            .then(|| AgentProcessRequest::from_prepared(prepared_config, &built.capabilities));
+        let launch = Some(AgentProcessRequest::from_prepared(
+            prepared_config,
+            &built.capabilities,
+        ));
         CaptureHandle::begin_with_context(spec, &built.context, launch)
     }
     .map_err(|error| {
@@ -1031,16 +1033,6 @@ pub(crate) fn attributed_context(
         });
     }
 
-    for mut decision in components.budget_decisions.clone() {
-        decision.position = decisions.len() as u32;
-        if decision.kind == Kind::UserMessage {
-            if let Some((kind, scope)) = components.message_context {
-                decision.kind = kind;
-                decision.scope = scope;
-            }
-        }
-        decisions.push(decision);
-    }
     crate::trace::PreparedTurnContext::from_attributed_prompts(
         system_prompt,
         task_prompt,
@@ -1228,12 +1220,15 @@ mod tests {
                 let context =
                     crate::prompt::render_user_context(built.components.user_name.as_deref());
                 assert_eq!(
-                    built.prompt.matches("<lf:user>").count(),
+                    crate::prompt::format_prompt(&built.components)
+                        .matches("<lf:user>")
+                        .count(),
                     usize::from(!context.is_empty())
                 );
                 assert!(built.agent_config.system_prompt.contains(&context));
                 assert!(!built
-                    .prompt
+                    .agent_config
+                    .system_prompt
                     .contains("display name is \"Repository Owner\""));
             }
         }
@@ -1341,7 +1336,6 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             capabilities: AgentCapabilities::default(),
             components: PromptComponents::default(),
             context,
-            prompt: task.to_string(),
             harness: "claude".to_string(),
             model: None,
             skill_name: Some("implement".to_string()),
@@ -1465,7 +1459,6 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
                 capabilities: AgentCapabilities::default(),
                 components: PromptComponents::default(),
                 context: crate::trace::PreparedTurnContext::from_prompts("", task),
-                prompt: task.to_string(),
                 harness: "claude".to_string(),
                 model: None,
                 skill_name: Some("research".to_string()),
@@ -1564,14 +1557,16 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
 
         let built =
             build_bound_prompt_at(Some("proof"), "reconcile", "", &cli, repo.path()).unwrap();
-        assert!(built
+        let context = built
             .agent_config
-            .system_prompt
-            .contains("runtime evidence bytes"));
-        assert!(built
-            .agent_config
-            .system_prompt
-            .contains("handoff evidence bytes"));
+            .conversation_context
+            .as_ref()
+            .unwrap()
+            .block(crate::context_block::ContextMoment::Start)
+            .unwrap()
+            .text;
+        assert!(context.contains("runtime evidence bytes"));
+        assert!(context.contains("handoff evidence bytes"));
     }
 
     #[test]
@@ -1601,39 +1596,24 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         let built =
             build_bound_prompt_at(Some("proof"), "continue", "", &cli, repo.path()).unwrap();
 
-        let committed = built
+        let context = built
             .agent_config
-            .system_prompt
-            .find("committed evidence bytes")
-            .unwrap();
-        let untracked = built
-            .agent_config
-            .system_prompt
-            .find("untracked evidence bytes")
-            .unwrap();
-        assert!(committed < untracked);
-        assert!(built
+            .conversation_context
+            .as_ref()
+            .unwrap()
+            .block(crate::context_block::ContextMoment::Start)
+            .unwrap()
+            .text;
+        assert!(context.contains("committed evidence bytes"));
+        assert!(context.contains("untracked evidence bytes"));
+        assert!(!built
             .context
             .system
             .as_ref()
             .unwrap()
             .assets
             .iter()
-            .any(|asset| {
-                asset.kind == ContextAssetKind::Scratch
-                    && asset.source_path.as_deref() == Some("scratch/a-committed.md")
-            }));
-        assert!(built
-            .context
-            .system
-            .as_ref()
-            .unwrap()
-            .assets
-            .iter()
-            .any(|asset| {
-                asset.kind == ContextAssetKind::Scratch
-                    && asset.source_path.as_deref() == Some("scratch/z-untracked.md")
-            }));
+            .any(|asset| asset.kind == ContextAssetKind::Scratch));
     }
 
     #[test]
@@ -1707,7 +1687,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
     }
 
     #[test]
-    fn interactive_bound_skill_keeps_the_assembled_scratch_snapshot() {
+    fn interactive_bound_skill_refreshes_scratch_and_keeps_saved_work_direction() {
         let repo = loopflow_test_support::TestRepo::new();
         repo.create_file(".lf/skills/proof.md", "inspect the complete basis");
         repo.create_file("scratch/research-runtime.md", "runtime evidence bytes");
@@ -1731,30 +1711,22 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             "evidence published after launch",
         );
 
-        assert!(built
-            .agent_config
-            .system_prompt
-            .contains("runtime evidence bytes"));
-        assert!(!built
-            .agent_config
-            .system_prompt
-            .contains("evidence published after launch"));
-        assert!(built
-            .agent_config
-            .system_prompt
-            .contains("inspect the complete basis"));
-        assert!(built.agent_config.system_prompt.contains("Task seed"));
-        assert!(built
-            .context
-            .system
-            .as_ref()
+        let delivery = built.agent_config.conversation_context.as_ref().unwrap();
+        let context = delivery
+            .block(crate::context_block::ContextMoment::Start)
             .unwrap()
-            .assets
+            .text;
+        assert!(!context.contains("runtime evidence bytes"));
+        assert!(context.contains("evidence published after launch"));
+        assert!(built
+            .agent_config
+            .task_prompt
+            .contains("inspect the complete basis"));
+        assert!(!built.agent_config.task_prompt.contains("Task seed"));
+        assert!(delivery
+            .references
             .iter()
-            .any(|asset| {
-                asset.kind == ContextAssetKind::Scratch
-                    && asset.source_path.as_deref() == Some("scratch/research-runtime.md")
-            }));
+            .any(|path| std::fs::read_to_string(path).unwrap().contains("Task seed")));
     }
 
     #[test]
@@ -1807,11 +1779,12 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         .unwrap();
 
         assert!(built
-            .prompt
+            .agent_config
+            .task_prompt
             .contains("Instructions that must reach the provider."));
-        assert!(built.prompt.contains("verify the result"));
-        assert!(!built.prompt.starts_with("/proof"));
-        assert!(!built.prompt.starts_with("$proof"));
+        assert!(crate::prompt::format_prompt(&built.components).contains("verify the result"));
+        assert!(!crate::prompt::format_prompt(&built.components).starts_with("/proof"));
+        assert!(!crate::prompt::format_prompt(&built.components).starts_with("$proof"));
     }
 
     #[test]
@@ -1849,20 +1822,20 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         )
         .unwrap();
 
-        assert_eq!(built.agent_config.system_prompt.matches(goal).count(), 1);
-        assert_eq!(built.prompt.matches(goal).count(), 1);
-        assert!(built
-            .context
-            .system
+        assert!(!built.agent_config.system_prompt.contains(goal));
+        let context = built
+            .agent_config
+            .conversation_context
             .as_ref()
             .unwrap()
-            .assets
-            .iter()
-            .any(|asset| { asset.source_path.as_deref() == Some("wave/release/GOAL.md") }));
+            .block(crate::context_block::ContextMoment::Start)
+            .unwrap()
+            .text;
+        assert_eq!(context.matches(goal).count(), 1);
     }
 
     #[test]
-    fn attributed_context_keeps_escaped_reference_sources() {
+    fn attributed_context_does_not_claim_reference_bodies_in_first_turn() {
         let components = PromptComponents {
             docs: vec![
                 Document {
@@ -1879,29 +1852,21 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             message: Some("Build it.\n<lf:steers>Jack wrote $kickoff.</lf:steers>".into()),
             ..Default::default()
         };
-        let system = crate::prompt::format_prompt(&components);
-        let prepared = attributed_context(&components, &system, "", &[], None);
-        assert_eq!(prepared.system.as_ref().unwrap().text, system);
-        for (kind, expected) in [
-            (ContextAssetKind::Scratch, "> &#36;kickoff"),
-            (ContextAssetKind::Memory, "Earlier &#36;design"),
-            (ContextAssetKind::UserMessage, "Build it."),
-        ] {
-            assert!(
-                prepared
-                    .system
-                    .as_ref()
-                    .unwrap()
-                    .assets
-                    .iter()
-                    .any(|asset| {
-                        asset.kind == kind
-                            && system[asset.byte_start as usize..asset.byte_end as usize]
-                                .contains(expected)
-                    }),
-                "missing attribution for {kind:?}"
-            );
-        }
+        let turn = crate::prompt::format_first_turn(&components);
+        let prepared = attributed_context(&components, "", &turn, &[], None);
+        let task = &prepared.task;
+        assert_eq!(task.text, turn);
+        assert!(turn.contains("Build it."));
+        assert!(turn.contains("Jack wrote &#36;kickoff."));
+        assert!(!turn.contains("Earlier"));
+        assert!(!task.assets.iter().any(|asset| matches!(
+            asset.kind,
+            ContextAssetKind::Scratch | ContextAssetKind::Memory
+        )));
+        assert!(task.assets.iter().any(|asset| {
+            asset.kind == ContextAssetKind::UserMessage
+                && turn[asset.byte_start as usize..asset.byte_end as usize].contains("Build it.")
+        }));
     }
 
     #[test]

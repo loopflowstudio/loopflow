@@ -20,10 +20,12 @@ Review removed duplicate Git command/error paths. Selected commits now share
 ordinary commits' identity handling and diagnostics while retaining their separate
 index. Persistent scratch policy and unrelated staged bytes remain covered.
 Failed staged reads now propagate shared Git errors. The deleted local runners,
-staged-read helpers and duplicate message test need no replacement.
+staged-read helpers and duplicate message test need no replacement. Gate added a
+direct empty Git commit regression: Git redirects hook stdout to stderr, so the
+hook fixtures alone did not prove retention of stdout-only diagnostics.
 
-Remaining: publication for review. Shared Git unit, Git integration and worktree
-suites now pass alongside the commit regressions. Full CI and installed acceptance
-remain unproved. No landing is authorized.
+PR #1532 is published; Jack Heart's approval is recorded in steer `02719e02`.
+This gate covers local readiness only. Full CI and installed acceptance remain
+unproved; checkpoint PRs defer the hosted matrix while scratch remains.
 
-Checks: network-isolated `cargo test -p loopflow --lib git::` passed (43) and `cargo test -p loopflow --test git_tests --test worktree_tests --test commit_tests -- --skip commit_generates_message_when_none` passed (46); prior `cargo clippy --all-targets -- -D warnings`, `cargo fmt --check` and disposable branch CLI passed unchanged. Agent invocation remains excluded; full matrix belongs to CI.
+Checks (gate): network-isolated `cargo test -p loopflow --lib git::` passed (43) and `cargo test -p loopflow --test git_tests --test worktree_tests --test commit_tests -- --skip commit_generates_message_when_none` passed (47); `cargo clippy --all-targets -- -D warnings` and `cargo fmt --all -- --check` passed; prior disposable branch CLI acceptance still applies to unchanged production code. Agent invocation remains excluded; full matrix belongs to CI.

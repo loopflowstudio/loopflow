@@ -221,33 +221,17 @@ pub(crate) fn resume_session_with_env(
     remote: Option<NativeConnection>,
     attachment: Option<(String, crate::process::SessionAttachment)>,
 ) -> Result<()> {
-<<<<<<< HEAD
-    let selected_model = crate::engine::config::resume_model(harness, model)?;
-    let user_name = crate::engine::config::participant_name()?;
+    let selected_model = crate::config::resume_model(harness, model)?;
+    let user_name = crate::config::participant_name()?;
     let mut command = build_resume_session_command(
         harness,
         selected_model.as_deref(),
         worktree,
-        &provider_session.provider_session_id,
+        &provider_session.agent_session,
     )?;
-    if let Some(remote) = remote {
-||||||| 497885050f
-    let user_name = crate::engine::config::participant_name()?;
-    let mut command = build_resume_session_command(
-        harness,
-        model,
-        worktree,
-        &provider_session.provider_session_id,
-    )?;
-    if let Some(remote) = remote {
-=======
-    let user_name = crate::config::participant_name()?;
-    let mut command =
-        build_resume_session_command(harness, model, worktree, &provider_session.agent_session)?;
     command.attachment = attachment;
     command.remote = remote;
     if let Some(remote) = &command.remote {
->>>>>>> 21dae527b4da14b57d96286f80e3fb3cec09eaa3
         if harness != "codex" {
             bail!("This provider has no native remote connection");
         }

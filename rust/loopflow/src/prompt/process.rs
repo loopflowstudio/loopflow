@@ -190,31 +190,7 @@ pub fn prepare_process_prompt(
         )]
         .into(),
     };
-<<<<<<< HEAD:rust/loopflow/src/engine/process_prompt.rs
     launch.apply_agent_override();
-    let effective_system = crate::engine::agent::system_prompt_with_structured_replies(&launch);
-    budget_report.measure_input(
-        &original_system,
-        INITIAL_TURN_PROMPT,
-        &effective_system,
-        &launch.task_input_for_budget(),
-    );
-    // The source snapshot is stable; the total includes this notice and provider guidance.
-    // The notice labels its pre-feedback total; the report measures submitted bytes.
-
-||||||| 497885050f:rust/loopflow/src/engine/process_prompt.rs
-    let effective_system = crate::engine::agent::system_prompt_with_structured_replies(&launch);
-    budget_report.measure_input(
-        &original_system,
-        INITIAL_TURN_PROMPT,
-        &effective_system,
-        &launch.task_input_for_budget(),
-    );
-    // The source snapshot is stable; the total includes this notice and provider guidance.
-    // The notice labels its pre-feedback total; the report measures submitted bytes.
-
-=======
->>>>>>> 21dae527b4da14b57d96286f80e3fb3cec09eaa3:rust/loopflow/src/prompt/process.rs
     Ok(PreparedProcessPrompt {
         config: launch,
         components,
@@ -269,7 +245,7 @@ pub(crate) fn resolve_agent(
     skill: Option<&Skill>,
     config: &Config,
 ) -> String {
-    crate::engine::config::agent_override()
+    crate::config::agent_override()
         .or_else(|| override_agent.map(str::to_owned))
         .or_else(|| skill.and_then(|skill| skill.agent.clone()))
         .or_else(|| config.agent.clone())

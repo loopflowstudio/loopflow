@@ -656,7 +656,7 @@ pub(crate) async fn open(
         .is_some()
     {
         if let Some(provider) = session.provider.as_deref() {
-            crate::engine::config::resume_model(provider, session.model.as_deref())?;
+            crate::config::resume_model(provider, session.model.as_deref())?;
         }
     }
     let admitted;

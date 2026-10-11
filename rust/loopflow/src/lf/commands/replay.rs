@@ -60,9 +60,8 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
         skip_permissions: request.skip_permissions,
         ..AgentConfig::default()
     };
-<<<<<<< HEAD
     config.apply_agent_override();
-    let (selected_harness, model) = crate::engine::parse_agent(config.agent());
+    let (selected_harness, model) = crate::config::parse_agent(config.agent());
     if selected_harness != harness {
         config.provider_account_id = None;
         config.provider_account_authority_home = None;
@@ -72,15 +71,8 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
             "'{selected_harness}' CLI is unavailable on this Machine"
         ));
     }
-    crate::engine::agent::pin_provider_account_id_blocking(&mut config)
-        .map_err(anyhow::Error::from)?;
-    request.agent = config.agent().to_owned();
-||||||| 497885050f
-    crate::engine::agent::pin_provider_account_id_blocking(&mut config)
-        .map_err(anyhow::Error::from)?;
-=======
     crate::agent::pin_provider_account_id_blocking(&mut config).map_err(anyhow::Error::from)?;
->>>>>>> 21dae527b4da14b57d96286f80e3fb3cec09eaa3
+    request.agent = config.agent().to_owned();
     request.account_id = config.provider_account_id.clone();
     let capabilities = AgentCapabilities {
         chrome: request.chrome,
@@ -175,7 +167,7 @@ mod tests {
             "LF_BIN",
             "LF_HOME",
             "LF_TEST_REPLAY_EVIDENCE",
-            crate::engine::config::AGENT_OVERRIDE_ENV,
+            crate::config::AGENT_OVERRIDE_ENV,
         ];
         let _environment = crate::test_ambient::EnvGuard::clear(&keys);
         std::env::set_var("PATH", path);
@@ -248,10 +240,7 @@ mod tests {
             .unwrap();
         assert_eq!(tasks, 0, "replay requires no registered planning Work");
 
-        std::env::set_var(
-            crate::engine::config::AGENT_OVERRIDE_ENV,
-            "opencode:opencode/other",
-        );
+        std::env::set_var(crate::config::AGENT_OVERRIDE_ENV, "opencode:opencode/other");
         let overridden_id = replay_at(home.path(), &session.id).unwrap();
         let (_, overridden) =
             crate::session_record::resolve_manifest(home.path(), &overridden_id).unwrap();

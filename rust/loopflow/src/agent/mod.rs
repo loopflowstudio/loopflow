@@ -213,44 +213,14 @@ pub struct AgentConfig {
 }
 
 impl AgentConfig {
-<<<<<<< HEAD:rust/loopflow/src/engine/agent.rs
-    /// Declared input bytes; native expansion is measured in provider receipts.
-    pub(crate) fn task_input_for_budget(&self) -> String {
-        match &self.skill_invocation {
-            Some(invocation) => format!(
-                "{}\n\n{}\n\n{}",
-                self.task_prompt,
-                invocation.instruction_text(&parse_agent(self.agent()).0),
-                invocation.arguments
-            ),
-            None => self.task_prompt.clone(),
-        }
-    }
-
     pub(crate) fn apply_agent_override(&mut self) {
-        if let Some(agent) = crate::engine::config::agent_override() {
+        if let Some(agent) = crate::config::agent_override() {
             self.agent = Some(agent.clone());
             self.env
-                .insert(crate::engine::config::AGENT_OVERRIDE_ENV.into(), agent);
+                .insert(crate::config::AGENT_OVERRIDE_ENV.into(), agent);
         }
     }
 
-||||||| 497885050f:rust/loopflow/src/engine/agent.rs
-    /// Declared input bytes; native expansion is measured in provider receipts.
-    pub(crate) fn task_input_for_budget(&self) -> String {
-        match &self.skill_invocation {
-            Some(invocation) => format!(
-                "{}\n\n{}\n\n{}",
-                self.task_prompt,
-                invocation.instruction_text(&parse_agent(self.agent()).0),
-                invocation.arguments
-            ),
-            None => self.task_prompt.clone(),
-        }
-    }
-
-=======
->>>>>>> 21dae527b4da14b57d96286f80e3fb3cec09eaa3:rust/loopflow/src/agent/mod.rs
     /// Return the selected agent or Loopflow's compiled default.
     pub fn agent(&self) -> &str {
         match self.agent.as_deref() {

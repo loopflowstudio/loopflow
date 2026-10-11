@@ -75,3 +75,13 @@ capable CI. Logs: `.lf/tmp/gate/run-25073/`. Remote and installed acceptance rem
 unproved. Nothing was landed or completed by this gate.
 
 Checks: `uv run python scripts/test.py --reuse-passing` (LF authority cleared): architecture, fmt, Clippy and website passed; Rust 2,280 passed/2 failed/17 skipped; Python 388 passed/1 nested-sandbox failure/19 skipped; standalone checkout-observation test 1 passed; `git diff --check` passed. Hosted CI owns the full matrix and deferred checks.
+
+## Main reconciliation (2026-10-11)
+
+Merged pinned main `21dae527b4`. Global selection now uses the reorganized
+agent/config/prompt modules and preserves native attachment and conversation
+context. The acceptance fixture selects its authored Project workflow explicitly.
+The first resolution script failed before continue; a local repair checkpoint
+removes remaining markers and restores the complete command reference.
+
+Check: network-isolated `cargo test -p loopflow --test task_flow_launch_tests explicit_agent_wins_through_task_nested_flows_and_provider_children -- --exact --nocapture` passed (1); fmt and diff check passed; broader checks remain with gate/CI.

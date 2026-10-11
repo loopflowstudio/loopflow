@@ -5,12 +5,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
-<<<<<<< HEAD
 use loopflow::store::{CredentialState, ProviderAccount, ProviderAccountId, RoutingState};
-||||||| 497885050f
-=======
 use loopflow::work::task::{GithubPr, PrPublication};
->>>>>>> 21dae527b4da14b57d96286f80e3fb3cec09eaa3
 use loopflow_test_support::TestRepo;
 use sha2::{Digest, Sha256};
 
@@ -68,7 +64,7 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"done","ses
         ],
         Some(home.path()),
     );
-    let registered = support::register_task(
+    let registered = support::register_task_without_pr(
         home.path(),
         &repo.path().canonicalize().unwrap(),
         "agent-proof",
@@ -145,6 +141,12 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"done","ses
     }
     repo.stage_all();
     repo.commit("Define agent selection fixtures");
+    let store =
+        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let workflow = fs::read_to_string(repo.path().join(".lf/workflows/feature.yaml")).unwrap();
+    store
+        .select_project_workflow(&registered.task.project_id, "feature", &workflow)
+        .unwrap();
     // Direct Task binding used to prefer the saved Task agent over -a.
     for args in [
         vec![

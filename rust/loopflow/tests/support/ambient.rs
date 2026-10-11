@@ -2,16 +2,12 @@ use std::ffi::OsString;
 
 /// Execution authority and capture context inherited by tests launched inside lf.
 pub const AMBIENT_TASK_ENV: &[&str] = &[
-<<<<<<< HEAD
     "LF_AGENT_OVERRIDE",
-||||||| 497885050f
-=======
     // Detached children must use the fixture binary, not the launching agent's installation.
     "LF_BIN",
     "LF_TRACE_ID",
     "LF_PROCESS_ID",
     "LF_GIT_OPERATION_ID",
->>>>>>> 21dae527b4da14b57d96286f80e3fb3cec09eaa3
     "LF_CAPTURE_KEY",
     "LF_AGENT_CALLER",
     "LF_AS",

@@ -1,6 +1,5 @@
 # infrastructure wave memory
 
-<<<<<<< HEAD
 ## Global agent override (LOO-440, 2026-10-08)
 
 Jack Heart selected one global `-a` / `--agent`, overriding Task, nested Flow,
@@ -16,8 +15,7 @@ retain declared models. Replay preserves its source; native history keeps its
 provider and conflicting resume explains how to start anew. Synthetic accounts
 need isolation: shared macOS activation attempted a Keychain write and failed.
 Remote and installed/live-provider acceptance remain unproved.
-||||||| 497885050f
-=======
+
 ## Plan ownership (LOO-406, revised 2026-10-08)
 
 Jack Heart selected identical local plan records/APIs with or without repository-wide
@@ -126,7 +124,6 @@ the endpoint. Live cmux workspace/tab rename passed with a stand-in
 (`/tmp/lf-cmux-demo-owapn43t/`). Docker promotion/retry preserves hooks, settings
 and symlinks; rendered host/shim/herdr and Jack's installation remain unproved.
 Plan: `scratch/every-lf-session-in-cmux.md`.
->>>>>>> 21dae527b4da14b57d96286f80e3fb3cec09eaa3
 
 ## Program Status direction (LOO-398, 2026-10-07)
 
@@ -902,41 +899,12 @@ LOO-287's open proof and Intelligence ownership of assembly remain at
 `7b28ab1ca:wave/infrastructure/MEMORY.md`, this heading. Identity, eligibility
 and consumed launch evidence stay separate.
 
-## Installation and command scope (curated 2026-10-08)
+## Installation and command scope (curated 2026-10-02)
 
-<<<<<<< HEAD
-LOO-292 closed below; LOO-287 retains command reduction. Historical fixtures and
-failed v0.12.20 promotion: `86d0e5e6a:wave/infrastructure/MEMORY.md`, this heading.
-Mechanics/proofs: docs/lf.md and TESTING.md.
-||||||| 497885050f
-LOO-292's installation acceptance closed below; LOO-287 retains command-scope
-reduction. [Prior memory](https://github.com/loopflowstudio/loopflow/blob/d281370191844294ce0ad877752f2aa6a6402282/wave/infrastructure/MEMORY.md#installation-and-command-scope-branch-evidence-2026-09-24)
-retains September 24 fixtures, failed public v0.12.20 clean-home promotion and
-exact branch evidence.
-=======
 LOO-292's installation acceptance closed below; LOO-287 retains command-scope
 reduction. Earlier installation evidence:
 `24db5d4d68b1e4a5efe11781712a321b564e01ca:wave/infrastructure/MEMORY.md`, this heading.
->>>>>>> 21dae527b4da14b57d96286f80e3fb3cec09eaa3
 
-<<<<<<< HEAD
-Pinned published promotion alone activates artifacts/store; source and checkout
-maintenance stay separate. First-install preflight precedes startup; the pinned
-candidate owns recovery. Verify exact store, matching app and complete copies/hashes;
-bound broken-binary reads. Preserve launchd labels/logs and custom destinations
-without source WorkingDirectory. OS-account promotion requires disposable accounts
-or containers; HOME/LF_HOME/PATH mocks do not isolate it. Simulated launchctl proves
-no timing. Keep the recursive Python/PATH refresh alias deleted.
-||||||| 497885050f
-Installation verifies a pinned published installer; the promotion transaction
-alone activates artifacts/store. Checkout integration is separate. No Git,
-Homebrew, uv, Python or source maintenance belongs in installation. First install
-has no previous selection: preflight must precede ordinary startup authorization,
-and the pinned candidate owns recovery after handoff. Matching version strings
-are insufficient without exact-store preflight and a complete matching macOS app.
-Bound inspection of broken binaries. Do not restore the old Python refresh alias:
-delegation through PATH recursed into the old source updater.
-=======
 Pinned artifacts activate only through promotion. Candidate-owned recovery and
 exact-store preflight precede startup authorization. Verify matching macOS app bytes;
 preserve launchd labels/logs/custom directories without source WorkingDirectory,
@@ -944,35 +912,11 @@ source maintenance or recursive Python refresh.
 OS-account Home bypasses HOME/LF_HOME: use disposable accounts/containers and verify
 first-activation failure/recovery. Simulated launchctl proves no timing; asynchronous
 copy caused mismatched bytes/segfault. Ubuntu 24.04 passed where Debian lacked GLIBC.
->>>>>>> 21dae527b4da14b57d96286f80e3fb3cec09eaa3
 
-<<<<<<< HEAD
-Ordinary folders differ from Git failures; never invent a repo or mutate a route.
-Machine commands need no repo capture. LOO-287's ordinary-folder/provider-completion
-and target-first proofs remain open. New-repo/configuration/PM setup and receipt
-redesign remain unselected; switch phase is not durable advancement evidence.
-||||||| 497885050f
-Preserve launchd label/logs and custom install directory, without source
-WorkingDirectory. Simulated launchctl proves no real timing. Promotion resolves the OS
-account home: HOME/LF_HOME and PATH mocks cannot isolate it. Use disposable OS
-accounts/containers without the real installation; verify failed first activation
-and retained-candidate recovery. Artifact-copy completion and member hashes matter;
-one asynchronous fixture copy produced mismatched bytes and a segfault. Ubuntu
-24.04 reached promotion where Debian bookworm lacked the release's GLIBC versions.
-
-Ordinary-folder absence differs from a genuine Git error; never invent an empty
-repository or silently mutate a default route. Machine commands need no repo
-capture. LOO-287's ordinary-folder/provider-completion and target-first resolution
-remain unproved across every consumer. New-repository creation/configuration/PM
-setup remains unselected. No receipt redesign was selected: switch phase alone
-cannot substitute for durable advancement evidence. Current mechanics and proof
-commands belong in docs/lf.md and TESTING.md.
-=======
 Distinguish non-Git folders from Git errors; never invent repositories or change
 routes. LOO-287's ordinary-folder/provider-completion and target-first resolution
 remain unproved across consumers. Repository setup and receipt redesign remain
 unselected; a phase alone is not durable advancement evidence.
->>>>>>> 21dae527b4da14b57d96286f80e3fb3cec09eaa3
 
 ## Installation and checkout closure (LOO-292, 2026-10-04)
 

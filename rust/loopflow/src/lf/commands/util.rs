@@ -1316,6 +1316,7 @@ mod tests {
             }
         });
         let command = SessionCommand {
+            context: None,
             program: "/bin/sleep".into(),
             args: vec!["10".into()],
             cwd: home.into(),

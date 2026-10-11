@@ -57,3 +57,5 @@ terminal placement and completion boundaries. Configured remote-client exit rema
 unproved; fenced passive display is not provider death.
 
 Checks: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test -p loopflow --lib --no-run` and network-isolated lib tests (input completion, Program Status, Session projection, native Move): pass, 5 tests; gate/CI own affected suites, materialization and composed acceptance.
+
+Sync check: merged main's native context delivery without restoring client receipts; `test_network.py … --exact lf::commands::util::tests::recorded_native_move_returns_cleanly_without_stop_receipts` passed (1 test); broader verification stays with gate/CI.

@@ -677,13 +677,16 @@ Fixtures targeting a named boundary should resolve its node ID in the expanded
 graph. A hard-coded step index can silently select a different skill when
 a nested Flow gains a step.
 
-For worktree creation or checkout-refresh changes, build the current CLI before
-running its Python behavior tests:
+For worktree creation, pruning or checkout-refresh changes, build the current
+CLI before running its Python behavior tests (also run by the Rust CI job):
 
 ```bash
 cargo build -p loopflow --bin lf
 LOOPFLOW_TEST_LF="$PWD/target/debug/lf" uv run pytest python/tests/test_checkout_refresh.py
 ```
+
+Pruning stays local: it must not fetch, merge main or depend on an available
+remote. Keep those assertions separate from create/list refresh expectations.
 
 Checkout pruning also reads OS-account installation authority. `LF_HOME` alone
 does not isolate that read: an unreleased CLI can reject the installed Home's

@@ -145,10 +145,7 @@ def test_main_preserves_unpublished_commits_and_index(checkout: Checkout) -> Non
     assert _run(author, "git", "ls-remote", "origin", "refs/heads/main").split()[0] == upstream
 
 
-@pytest.mark.parametrize("command", [("list", "--sync", "--json"), ("prune",)])
-def test_worktree_refresh_preserves_local_main(
-    checkout: Checkout, command: tuple[str, ...]
-) -> None:
+def test_worktree_list_refresh_preserves_local_main(checkout: Checkout) -> None:
     main, author, env = checkout
     local = _commit(main, "local.txt", "unpublished\n")
     (main / "local.txt").write_text("staged\n")
@@ -156,9 +153,8 @@ def test_worktree_refresh_preserves_local_main(
     (main / "local.txt").write_text("working\n")
     (main / "notes.txt").write_text("untracked\n")
     upstream = _advance(author, "upstream.txt")
-    output = _run(main, str(LF), "wt", *command, env=env)
-    if command[0] == "list":
-        assert isinstance(json.loads(output), list)
+    output = _run(main, str(LF), "wt", "list", "--sync", "--json", env=env)
+    assert isinstance(json.loads(output), list)
     for sha in [local, upstream]:
         _run(main, "git", "merge-base", "--is-ancestor", sha, "HEAD")
     assert _run(main, "git", "show", ":local.txt") == "staged"
@@ -166,7 +162,7 @@ def test_worktree_refresh_preserves_local_main(
     assert (main / "notes.txt").read_text() == "untracked\n"
 
 
-@pytest.mark.parametrize("command", [("create", "next"), ("list", "--sync"), ("prune",)])
+@pytest.mark.parametrize("command", [("create", "next"), ("list", "--sync")])
 def test_worktree_refresh_reports_fetch_failure_then_recovers(
     checkout: Checkout, command: tuple[str, ...]
 ) -> None:
@@ -189,6 +185,40 @@ def test_worktree_refresh_reports_fetch_failure_then_recovers(
     for sha in [before, upstream]:
         _run(main, "git", "merge-base", "--is-ancestor", sha, "HEAD")
     assert (main / "base.txt").read_text() == "caller edit\n"
+
+
+@pytest.mark.parametrize("remote_state", ["advanced", "conflicting", "unavailable"])
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_worktree_prune_leaves_main_and_remote_refs_unchanged(
+    checkout: Checkout, remote_state: str, dry_run: bool
+) -> None:
+    main, author, env = checkout
+    _commit(main, "base.txt", "unpublished\n")
+    if remote_state == "conflicting":
+        _commit(author, "base.txt", "conflicting upstream\n")
+        _run(author, "git", "push", "origin", "main")
+    else:
+        _advance(author, "not-fetched.txt")
+    if remote_state == "unavailable":
+        _run(main, "git", "remote", "set-url", "origin", str(main / "unavailable"))
+    (main / "base.txt").write_text("staged\n")
+    _run(main, "git", "add", "base.txt")
+    (main / "base.txt").write_text("working\n")
+    (main / "notes.txt").write_text("untracked\n")
+    refs = _run(main, "git", "show-ref")
+
+    flags = ("--dry-run",) if dry_run else ()
+    report = json.loads(_run(main, str(LF), "wt", "prune", "--json", *flags, env=env))
+
+    assert report["removed"] == []
+    assert report["failed"] == []
+    assert _run(main, "git", "show-ref") == refs
+    assert _run(main, "git", "branch", "--show-current") == "main"
+    assert _run(main, "git", "show", ":base.txt") == "staged"
+    assert (main / "base.txt").read_text() == "working\n"
+    assert (main / "notes.txt").read_text() == "untracked\n"
+    assert not (main / ".git/MERGE_HEAD").exists()
+    assert _run(main, "git", "stash", "list") == ""
 
 
 @pytest.mark.parametrize("ahead", [False, True])
@@ -214,7 +244,7 @@ def test_worktree_plans_leave_checkout_and_remote_refs_unchanged(
         assert not main.with_name("repo.next").exists()
 
 
-@pytest.mark.parametrize("command", [("create", "next"), ("list", "--sync"), ("prune",)])
+@pytest.mark.parametrize("command", [("create", "next"), ("list", "--sync")])
 def test_worktree_refresh_conflict_preserves_main_and_stops(
     checkout: Checkout, command: tuple[str, ...]
 ) -> None:
@@ -344,9 +374,7 @@ def test_fetch_failure_preserves_state_and_later_invocation_catches_up(checkout:
     (main / "base.txt").write_text("caller edit\n")
     remote = _run(main, "git", "remote", "get-url", "origin")
     _run(main, "git", "remote", "set-url", "origin", str(main / "unavailable"))
-    result = subprocess.run(
-        [str(LF), "sync"], cwd=main, env=env, capture_output=True, text=True
-    )
+    result = subprocess.run([str(LF), "sync"], cwd=main, env=env, capture_output=True, text=True)
     assert result.returncode != 0
     assert "fetch" in result.stderr
     assert _run(main, "git", "rev-parse", "HEAD") == before
@@ -364,9 +392,7 @@ def test_main_merge_conflict_restores_original_history_and_edits(checkout: Check
     _commit(author, "base.txt", "upstream conflict\n")
     _run(author, "git", "push", "origin", "main")
     (main / "notes.txt").write_text("caller notes\n")
-    result = subprocess.run(
-        [str(LF), "sync"], cwd=main, env=env, capture_output=True, text=True
-    )
+    result = subprocess.run([str(LF), "sync"], cwd=main, env=env, capture_output=True, text=True)
     assert result.returncode != 0
     assert _run(main, "git", "rev-parse", "HEAD") == before
     assert (main / "base.txt").read_text() == "local commit\n"

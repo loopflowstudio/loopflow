@@ -318,7 +318,7 @@ fi
         native
     );
     let status = fixture.json(&["task", "status", task_id, "--json"]);
-    let project = status["planning"]["project"]["id"].as_str().unwrap();
+    let project = status["project"]["id"].as_str().unwrap();
     let selected = fixture.run(&["project", "workflow", "set", project, "proof"]);
     assert!(selected.status.success(), "{selected:?}");
     // Managed skill execution needs an agent account, independently of planning.

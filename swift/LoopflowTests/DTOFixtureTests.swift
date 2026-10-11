@@ -671,6 +671,26 @@ struct DTOFixtureTests {
         #expect(decoded == statuses)
     }
 
+    @Test("Task acquisition evidence is required independently of delivery")
+    func taskAcquisitionEvidence() throws {
+        let root = try loadFixture("local_task.json")
+        let detail = try #require(root["task"] as? [String: Any])
+        var task = try #require(detail["task"] as? [String: Any])
+        for state in ["available", "invalid", "removed", "unavailable"] {
+            task["acquisition"] = ["state": state, "observed_at": 17]
+            let decoded = try JSONDecoder().decode(TaskPlanningSnapshot.self,
+                from: JSONSerialization.data(withJSONObject: task))
+            #expect(decoded.acquisition.state.rawValue == state)
+            #expect(decoded.acquisition.observedAt == 17)
+            #expect(decoded.id == task["id"] as? String)
+        }
+        task.removeValue(forKey: "acquisition")
+        #expect(throws: (any Error).self) {
+            try JSONDecoder().decode(TaskPlanningSnapshot.self,
+                from: JSONSerialization.data(withJSONObject: task))
+        }
+    }
+
     private func loadFixture(_ name: String, sourceFile: String = #filePath) throws -> [String: Any] {
         let data = try loadFixtureData(name, sourceFile: sourceFile)
         let json = try JSONSerialization.jsonObject(with: data)

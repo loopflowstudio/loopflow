@@ -324,7 +324,7 @@ enum MockWaveFixture {
                   "name": "Surface nightly failures",
                   "description": "Surface one focused failure.",
                   "rank": 1,
-                  "completed": false, "state": "unstarted", "completed_at": null, "due_date": null, "follow_up_sources": [], "linear_id": null, "sync": {"connected": false, "changes": []},
+                  "completed": false, "state": "unstarted", "completed_at": null, "due_date": null, "follow_up_sources": [], "acquisition": {"state": "available", "observed_at": null}, "linear_id": null, "sync": {"connected": false, "changes": []},
                   "assignee": "user-1"
                 },
                 "reference": {
@@ -413,7 +413,7 @@ enum MockWaveFixture {
                   "name": "Classify publish failures",
                   "description": "",
                   "rank": 2,
-                  "completed": false, "state": "unstarted", "completed_at": null, "due_date": null, "follow_up_sources": [], "linear_id": null, "sync": {"connected": false, "changes": []},
+                  "completed": false, "state": "unstarted", "completed_at": null, "due_date": null, "follow_up_sources": [], "acquisition": {"state": "available", "observed_at": null}, "linear_id": null, "sync": {"connected": false, "changes": []},
                   "assignee": null
                 },
                 "reference": {

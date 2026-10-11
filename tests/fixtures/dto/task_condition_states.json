@@ -16,7 +16,11 @@
         "connected": false,
         "changes": []
       },
-      "linear_id": null
+      "linear_id": null,
+      "acquisition": {
+        "state": "available",
+        "observed_at": null
+      }
     },
     "reference": {
       "issue_url": null,
@@ -84,7 +88,11 @@
         "connected": false,
         "changes": []
       },
-      "linear_id": null
+      "linear_id": null,
+      "acquisition": {
+        "state": "available",
+        "observed_at": null
+      }
     },
     "reference": {
       "issue_url": null,
@@ -416,7 +424,11 @@
         "connected": false,
         "changes": []
       },
-      "linear_id": null
+      "linear_id": null,
+      "acquisition": {
+        "state": "available",
+        "observed_at": null
+      }
     },
     "reference": {
       "issue_url": null,
@@ -796,7 +808,11 @@
         "connected": false,
         "changes": []
       },
-      "linear_id": null
+      "linear_id": null,
+      "acquisition": {
+        "state": "available",
+        "observed_at": null
+      }
     },
     "reference": {
       "issue_url": null,
@@ -879,7 +895,11 @@
         "connected": false,
         "changes": []
       },
-      "linear_id": null
+      "linear_id": null,
+      "acquisition": {
+        "state": "available",
+        "observed_at": null
+      }
     },
     "reference": {
       "issue_url": null,
@@ -1260,7 +1280,11 @@
         "connected": false,
         "changes": []
       },
-      "linear_id": null
+      "linear_id": null,
+      "acquisition": {
+        "state": "available",
+        "observed_at": null
+      }
     },
     "reference": {
       "issue_url": null,
@@ -1343,7 +1367,11 @@
         "connected": false,
         "changes": []
       },
-      "linear_id": null
+      "linear_id": null,
+      "acquisition": {
+        "state": "available",
+        "observed_at": null
+      }
     },
     "reference": {
       "issue_url": null,

@@ -172,7 +172,11 @@
               }
             ]
           },
-          "linear_id": "issue-1"
+          "linear_id": "issue-1",
+          "acquisition": {
+            "state": "available",
+            "observed_at": null
+          }
         },
         "reference": {
           "issue_url": "https://linear.app/loopflow/issue/INF-123/surface-nightly-failures",
@@ -640,7 +644,11 @@
               }
             ]
           },
-          "linear_id": null
+          "linear_id": null,
+          "acquisition": {
+            "state": "available",
+            "observed_at": null
+          }
         },
         "reference": {
           "issue_url": null,

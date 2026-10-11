@@ -1071,24 +1071,25 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                         .as_str()
                         .expect("planning state is a string")
                 );
-                if let Some(planning) = &status.planning {
-                    println!("{} · {}", planning.item.identifier, planning.item.name);
+                if let Some(task) = &status.task {
+                    println!("{} · {}", task.identifier, task.title);
                     println!(
-                        "Planning: {} · {} · observed at {}",
-                        planning.item.state.as_deref().unwrap_or("unknown"),
+                        "Planning: {} · {}",
+                        task.state.as_deref().unwrap_or("unknown"),
                         if status.planning_stale {
                             "stale"
                         } else {
                             "current"
-                        },
-                        planning.observed_at
+                        }
                     );
-                    if let Some(due) = &planning.item.due_date {
+                    if let Some(due) = &task.due_date {
                         println!("Due: {due}");
                     }
-                    if planning.project.is_none() {
-                        println!("No Project assigned; managed work requires ownership.");
-                    }
+                } else {
+                    println!("No owned Task; retained observations do not establish ownership.");
+                }
+                if let Some(at) = status.observed_at {
+                    println!("Observed at: {at}");
                 }
                 if let Some(sync) = &status.sync {
                     for line in sync.lines() {

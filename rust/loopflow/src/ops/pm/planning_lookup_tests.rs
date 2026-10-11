@@ -568,7 +568,10 @@ async fn automatic_refresh_reports_failure_with_retained_observation_age() {
             let read = inspect_task_planning_async(&repo, "FIX-1", PmRefresh::Auto)
                 .await
                 .unwrap();
-            assert!(read.is_stale());
+            assert_eq!(
+                read.observation.state,
+                crate::store::PlanningState::Unavailable
+            );
             assert!(read.refresh_error.unwrap().contains("provider unavailable"));
             assert_eq!(read.observation.record.as_ref(), Some(&record));
             assert!(read_task_planning_async(&repo, "FIX-1", PmRefresh::Auto)

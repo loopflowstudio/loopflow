@@ -314,11 +314,14 @@ failure there does not undo the selected Projects or their KRs.
 lf task status INF-124 --json
 ```
 
-Status returns `planning`, `planning_state`, `planning_error`, `planning_stale`,
-and optional `execution`. An issue
-without a Project stays inspectable; operations requiring ownership report the
-missing relationship. Status may refresh planning and observe a PR, but never
-completes a Task. Reading an issue allocates no Task execution or worktree.
+Status returns canonical `task` and `project` records, `planning_state`,
+`observed_at`, `planning_error`, `planning_stale`, delivery `sync` and optional
+`execution`. Local IDs and explicit Linear bindings stay distinct. A foreign or
+Project-less observation returns acquisition evidence without fabricating owned
+Work; its concrete record remains retained internally. Status may acquire planning
+but never completes a Task, allocates a checkout or moves a captured Workflow.
+Wave, roadmap and Work frames expose the same acquisition state and age separately
+from saved content and outbound delivery.
 
 Exact lookups and Wave views share normalized SQLite entities scoped to a
 repository and provider. An empty cache fetches the requested issue before
@@ -334,13 +337,13 @@ Status preserves dated facts even after hard-stale or forced acquisition fails.
 evidence, confirmed `removed` planning, and an `absent` detail response. A null
 provider response observes absence for that acquisition; the stored record stays
 invalid until complete detail repairs it. This creates no deletion receipt.
-`planning.observed_at` remains the last successful acquisition. An unresolved
+`observed_at` remains the last successful acquisition. An unresolved
 selector returns an unavailable envelope even without execution.
 
-Invalid and removed facts remain inspectable through status. Task execution
-requires available planning: a fresh cached observation suffices, but a failed
-due refresh stops the launch. Wave `synced_at` dates its last successful list
-acquisition; joined entities may have newer detail observations.
+Invalid and removed facts remain inspectable and withdraw new-launch availability,
+without settling or stopping existing execution. Saved Work supports offline
+admission; observation age and missing inventory alone do not erase it. Wave
+`synced_at` dates its last successful list; entities may have newer detail evidence.
 
 Task facts carry Linear's `updatedAt` as `revision`. Detail, list and confirmed
 mutation refreshes share one writer: older provider revisions cannot overwrite

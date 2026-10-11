@@ -125,7 +125,7 @@ fn stored_task_publishes_and_completes_after_verified_merge() {
     let completed = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
     assert_eq!(completed["execution"]["status"], "done");
     assert_eq!(completed["execution"]["task_id"], id);
-    assert!(completed["planning"]["item"]["completed_at"].is_string());
+    assert!(completed["task"]["completed_at"].is_string());
     assert!(
         !home.path().join("gh-unexpected").exists(),
         "{}",
@@ -337,7 +337,7 @@ fn stored_rotation_commits_all_waves_and_serializes_new_work() {
         let id = created["id"].as_str().unwrap();
         assert!(identities.insert(id.to_string()));
         let status = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
-        let project = &status["planning"]["project"]["id"];
+        let project = &status["project"]["id"];
         assert!(project == destination || project == &predecessors[0]["id"]);
         assert!(status["execution"]["worktree"].is_null());
     }
@@ -451,9 +451,12 @@ fn stored_fields_preserve_order_assignment_and_project_summary() {
     );
     let status = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
     for field in ["name", "description", "rank", "assignee"] {
-        assert_eq!(status["planning"]["item"][field], fields[field]);
+        assert_eq!(
+            status["task"][if field == "name" { "title" } else { field }],
+            fields[field]
+        );
     }
-    let project = status["planning"]["project"]["id"].as_str().unwrap();
+    let project = status["project"]["id"].as_str().unwrap();
     lf(
         repo.path(),
         home.path(),
@@ -468,17 +471,17 @@ fn stored_fields_preserve_order_assignment_and_project_summary() {
         ],
     );
     let status = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
-    assert_eq!(status["planning"]["project"]["summary"], fields["summary"]);
-    assert_eq!(status["planning"]["project"]["name"], "Current");
+    assert_eq!(status["project"]["summary"], fields["summary"]);
+    assert_eq!(status["project"]["name"], "Current");
     lf(
         repo.path(),
         home.path(),
         &["task", "edit", id, "--unassign", "--notes", ""],
     );
     let status = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
-    assert!(status["planning"]["item"]["assignee"].is_null());
-    assert_eq!(status["planning"]["item"]["description"], "");
-    assert_eq!(status["planning"]["item"]["rank"], 0);
+    assert!(status["task"]["assignee"].is_null());
+    assert_eq!(status["task"]["description"], "");
+    assert_eq!(status["task"]["rank"], 0);
     let wave = lf(
         repo.path(),
         home.path(),
@@ -529,10 +532,7 @@ fn nested_waves_create_files_and_store_project_identity() {
         home.path(),
         &["task", "status", again["id"].as_str().unwrap(), "--json"],
     );
-    assert_eq!(
-        status["planning"]["project"]["id"],
-        other["planning"]["project"]["id"]
-    );
+    assert_eq!(status["project"]["id"], other["project"]["id"]);
     lf(
         repo.path(),
         home.path(),
@@ -560,10 +560,7 @@ fn nested_waves_create_files_and_store_project_identity() {
         home.path(),
         &["task", "status", created["id"].as_str().unwrap(), "--json"],
     );
-    assert_ne!(
-        moved["planning"]["project"]["id"],
-        status["planning"]["project"]["id"]
-    );
+    assert_ne!(moved["project"]["id"], status["project"]["id"]);
     let wave = lf(
         repo.path(),
         home.path(),
@@ -634,7 +631,7 @@ fn public_task_prefixes_resolve_and_report_ambiguity() {
             &["task", "status", selector, "--json"],
         );
         assert_eq!(status["execution"]["task_id"], first);
-        assert_eq!(status["planning"]["item"]["identifier"], "lf-abcd1234");
+        assert_eq!(status["task"]["identifier"], "lf-abcd1234");
     }
     let failed = command(
         repo.path(),
@@ -657,13 +654,13 @@ fn public_task_prefixes_resolve_and_report_ambiguity() {
         home.path(),
         &["task", "status", first, "--json"],
     );
-    assert_eq!(status["planning"]["item"]["name"], "Chosen target");
+    assert_eq!(status["task"]["title"], "Chosen target");
     let other = lf(
         repo.path(),
         home.path(),
         &["task", "status", second, "--json"],
     );
-    assert_eq!(other["planning"]["item"]["name"], "Second");
+    assert_eq!(other["task"]["title"], "Second");
 }
 
 #[test]
@@ -727,7 +724,7 @@ fn public_local_planning_survives_restart_with_generated_identity() {
         home.path(),
         &["task", "status", identity.as_str(), "--json"],
     );
-    assert_eq!(status["planning"]["item"]["name"], "Retain quoted input");
+    assert_eq!(status["task"]["title"], "Retain quoted input");
     assert_eq!(status["execution"]["task_id"], identity.as_str());
     assert!(status["execution"]["issue_id"].is_null());
     assert!(status["execution"]["worktree"].is_null());
@@ -778,7 +775,7 @@ fn public_local_planning_survives_restart_with_generated_identity() {
             plan_file.to_str().unwrap(),
         ],
     );
-    let project_id = status["planning"]["project"]["id"].as_str().unwrap();
+    let project_id = status["project"]["id"].as_str().unwrap();
     let project = lf(
         repo.path(),
         home.path(),
@@ -813,7 +810,7 @@ fn public_local_planning_survives_restart_with_generated_identity() {
         &["task", "status", identity.as_str(), "--json"],
     );
     assert_eq!(completed["execution"]["status"], "done");
-    assert!(completed["planning"]["item"]["completed_at"].is_string());
+    assert!(completed["task"]["completed_at"].is_string());
     assert!(completed["execution"]["worktree"].is_null());
     let other_id = other["id"].as_str().unwrap();
     lf(
@@ -898,7 +895,7 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
     );
     let id = created["id"].as_str().unwrap();
     let status = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
-    let project_id = status["planning"]["project"]["id"].as_str().unwrap();
+    let project_id = status["project"]["id"].as_str().unwrap();
     lf(
         repo.path(),
         home.path(),
@@ -1004,7 +1001,7 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
     std::fs::write(&plan_file, original_plan).unwrap();
     let moved = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
     assert_eq!(
-        moved["planning"]["project"]["id"],
+        moved["project"]["id"],
         format!("proj_{}", successor.simple())
     );
     assert_eq!(
@@ -1020,7 +1017,7 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
         home.path(),
         &["task", "status", backlog["id"].as_str().unwrap(), "--json"],
     );
-    assert_eq!(retained["planning"]["project"]["id"], project_id);
+    assert_eq!(retained["project"]["id"], project_id);
     let retry = lf(
         repo.path(),
         home.path(),
@@ -1940,10 +1937,10 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             home.path(),
             &["task", "status", selector, "--json"],
         );
-        assert_eq!(status["planning"]["item"]["name"], "Saved offline");
-        assert_eq!(status["planning"]["item"]["description"], "");
-        assert_eq!(status["planning"]["item"]["rank"], 0);
-        assert_eq!(status["planning"]["item"]["assignee"], "person-id");
+        assert_eq!(status["task"]["title"], "Saved offline");
+        assert_eq!(status["task"]["description"], "");
+        assert_eq!(status["task"]["rank"], 0);
+        assert_eq!(status["task"]["assignee"], "person-id");
         let sync = store.task_planning_sync(&second).unwrap();
         assert_eq!(sync.connected, connected);
         assert_eq!(status["sync"], serde_json::to_value(&sync).unwrap());
@@ -3044,4 +3041,156 @@ fn wave_files_are_checkout_local_and_edits_reach_status_without_ensure() {
     .unwrap();
     assert!(!removed.status.success());
     assert!(String::from_utf8_lossy(&removed.stderr).contains("unrecognized subcommand 'edit'"));
+}
+
+#[test]
+fn canonical_status_retains_content_and_execution_across_acquisition_states() {
+    use loopflow::durable::TaskId;
+    use loopflow::store::PmTaskRecord;
+    use serde_json::json;
+
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let created = lf(
+        repo.path(),
+        home.path(),
+        &["task", "create", "--title", "Original", "--json"],
+    );
+    let id = created["id"].as_str().unwrap();
+    let id = TaskId::parse(id).unwrap();
+    let path = home.path().join("loopflow.db");
+    let store = loopflow::store::sqlite::SqliteStore::new(&path).unwrap();
+    let task = store.task(&id).unwrap().unwrap();
+    let mut project = store.project(&task.project_id).unwrap().unwrap();
+    project.linear_id = Some(loopflow::planning::LinearProjectId::new("provider-project").unwrap());
+    store.insert_project(&project).unwrap();
+    let observed: loopflow::pm::linear::LinearProject = serde_json::from_value(json!({
+        "id":"provider-project", "slug":project.slug, "name":project.name,
+        "summary":"", "description":"Saved Project prose", "workflow":"", "status":"started",
+        "krs":[], "metric_targets":[], "initiative_ids":["initiative"], "team_ids":["team"], "revision":null
+    })).unwrap();
+    store
+        .put_pm_project(&task.wave_id, "linear", "initiative", &observed, 17)
+        .unwrap();
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute(
+        "UPDATE tasks SET external_issue_id='provider-task',issue_identifier='FIX-1' WHERE id=?1",
+        [id.as_str()],
+    )
+    .unwrap();
+    let record: PmTaskRecord = serde_json::from_value(json!({
+        "item":{"id":"provider-task","identifier":"FIX-1","name":"Original", "description":"Provider prose",
+            "rank":0,"completed":false,"state":"unstarted","project_id":"provider-project", "project":project.slug,
+            "team_id":"team","due_date":"2026-10-11", "assignee":null, "url":null},
+        "project":observed,"observed_at":17
+    })).unwrap();
+    let scope = loopflow::repository::CanonicalRepo::discover(repo.path())
+        .unwrap()
+        .to_string();
+    store
+        .put_pm_task(
+            &scope,
+            "linear",
+            &record,
+            Some((&task.wave_id, "initiative")),
+        )
+        .unwrap();
+    let task = store.task(&id).unwrap().unwrap();
+    store
+        .edit_task(
+            &id,
+            task.revision,
+            &loopflow::pm::PmItemUpdate {
+                name: Some("Saved locally".into()),
+                description: Some("Saved Task prose".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    // Seed a locally retained date differing from the provider observation, and
+    // a captured Workflow. Reading must not copy either value from another owner.
+    db.execute(
+        "UPDATE tasks SET planning_due_date='2026-10-20' WHERE id=?1",
+        [id.as_str()],
+    )
+    .unwrap();
+    db.execute("INSERT INTO processes(id,trace_id,command,cwd,started_at) VALUES('11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222','lf run code','/retained/task',2)", []).unwrap();
+    db.execute("INSERT INTO task_workflows(task_id,graph,node,edge,lf_process_id,updated_at) VALUES(?1,?2,'review',0,'11111111-1111-4111-8111-111111111111',7)", rusqlite::params![id.as_str(),json!({"name":"review","nodes":[],"edges":[{"from":"review","to":"end","flow":"implement"}]}).to_string()]).unwrap();
+    let saved = store.task(&id).unwrap().unwrap();
+    let read = || {
+        lf(
+            repo.path(),
+            home.path(),
+            &["task", "status", id.as_str(), "--json"],
+        )
+    };
+    let initial = read();
+    for (state, statement) in [
+        ("available", "SELECT 1"),
+        ("invalid", "UPDATE pm_items SET needs_refresh=1"),
+        ("available", "UPDATE pm_items SET needs_refresh=0"),
+        (
+            "invalid",
+            "UPDATE pm_items SET body=json_set(body,'$.project_id','another-project')",
+        ),
+    ] {
+        db.execute_batch(statement).unwrap();
+        let status = read();
+        assert_eq!(status["planning_state"], state);
+        assert_eq!(status["observed_at"], 17);
+        assert_eq!(status["task"]["id"], id.as_str());
+        assert_eq!(status["task"]["title"], "Saved locally");
+        assert_eq!(status["task"]["description"], "Saved Task prose");
+        assert_eq!(status["task"]["due_date"], "2026-10-20");
+        assert_eq!(status["project"]["id"], saved.project_id.as_str());
+        assert_eq!(status["project"]["description"], "Saved Project prose");
+        assert_eq!(status["execution"], initial["execution"]);
+        let wave = lf(
+            repo.path(),
+            home.path(),
+            &["wave", "status", "inbox", "--json"],
+        );
+        let summary = &wave["tasks"]["items"][0]["task"];
+        assert_eq!(
+            summary["acquisition"],
+            json!({"state":state,"observed_at":17})
+        );
+        assert_eq!(summary["due_date"], "2026-10-20");
+        if state == "invalid" {
+            assert!(wave["tasks"]["items"][0]["run_control"]["unavailable"]
+                .as_str()
+                .unwrap()
+                .contains("planning"));
+        }
+    }
+    // A pending membership save explains the difference without replacing content.
+    db.execute("INSERT INTO task_changes(id,task_id,field,value_json,base_json,attempted) VALUES('pending-membership',?1,'project_id',?2,'\"provider-project\"',0)", rusqlite::params![id.as_str(),serde_json::to_string(saved.project_id.as_str()).unwrap()]).unwrap();
+    assert_eq!(read()["planning_state"], "available");
+    store
+        .observe_pm_issue_change("provider-task", None, true)
+        .unwrap();
+    let removed = read();
+    assert_eq!(removed["planning_state"], "removed");
+    assert_eq!(removed["observed_at"], 17);
+    assert_eq!(removed["execution"]["work"], initial["execution"]["work"]);
+    assert_eq!(
+        removed["execution"]["execution"],
+        initial["execution"]["execution"]
+    );
+    assert_eq!(removed["task"]["due_date"], "2026-10-20");
+    assert_eq!(removed["task"]["title"], "Saved locally");
+    let after_removal = store.task(&id).unwrap().unwrap();
+    assert_eq!(after_removal.worktree, saved.worktree);
+    assert_eq!(after_removal.branch, saved.branch);
+    assert_eq!(after_removal.project_id, saved.project_id);
+    let node: String = db
+        .query_row(
+            "SELECT node FROM task_workflows WHERE task_id=?1",
+            [id.as_str()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(node, "review");
+    let process: (Option<i64>, Option<String>) = db.query_row("SELECT completed_at,outcome FROM processes WHERE id='11111111-1111-4111-8111-111111111111'", [], |row| Ok((row.get(0)?,row.get(1)?))).unwrap();
+    assert_eq!(process, (None, None));
 }

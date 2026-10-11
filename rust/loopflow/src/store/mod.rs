@@ -59,6 +59,13 @@ pub enum PlanningState {
     Unavailable,
 }
 
+/// Acquisition evidence is independent of saved Work and outbound delivery.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct TaskAcquisition {
+    pub state: PlanningState,
+    pub observed_at: Option<i64>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct PmTaskObservation {
     pub record: Option<PmTaskRecord>,

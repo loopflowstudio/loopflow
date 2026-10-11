@@ -631,9 +631,10 @@ Jack requires the entire accepted model/deletion audit before another PR review:
 canonical Work, private observations, typed journal, bindings, ordinary follow-ups
 and one cron list. Renamed models/summaries are insufficient; gate/install unproved.
 
-Summaries, creation, rotation and export read canonical Work; status does not.
-Delivery proves no acquisition validity. Preserve invalidation, removal, pending
-membership, age and uncertain effects. Git candidates prove no publication.
+Summaries, creation, rotation, export and status read canonical Work.
+Acquisition state/age differs from delivery. Foreign observations grant no
+ownership; invalidation, removal and pending membership retain their meaning.
+Git candidates prove no publication.
 
 Jack assigned LOO-427's combined reduction here (`bd295866bb`); stack order is
 unresolved. Preserve tabs, Machine ownership/admission; adapt delegation to the

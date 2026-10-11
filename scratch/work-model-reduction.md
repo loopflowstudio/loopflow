@@ -78,7 +78,8 @@ longer substitutes IDs or re-resolves a fabricated PM item.
 
 **Remaining:** `store/sqlite/plan_read.rs` reconstructs `LinearProject` (formerly `PmProject`)/`PmItem` for
 Task observations. `planning_wave` and its consumers are removed. Delete the remaining projections. `PmTaskRecord` / `PmTaskObservation` must cease being alternate Task
-read results, including the embedded Project clone inside a Task observation.
+read results, including the embedded Project clone inside a Task observation. Task status and
+summary consumers now return canonical content plus separate acquisition evidence.
 
 **Evidence:** `project_in` still rebuilds a PM-shaped Project from typed columns;
 `task_in` reconstructs
@@ -259,7 +260,7 @@ than new wrappers around renamed snapshots.
 `PmResolvedTask`, both `pm_resolve_task` wrappers and `ResolvedTask` are deleted;
 `ops/task_pm.rs` is removed. Acquisition validates concrete Linear ownership and
 returns the saved Task. The acquisition/lookup split and ordinary provider-shaped
-snapshot/status results remain.
+snapshot results remain.
 
 Linear setup, OAuth, Team/Initiative mapping and reteam are real integration
 operations. Keep them concrete. A local lookup cannot infer that another Machine
@@ -291,8 +292,9 @@ an explicit optional `linear_id` binding. Project operations and rotation return
 canonical Work. Wave/roadmap/Work-frame Task summaries now read canonical Tasks, with local IDs,
 explicit optional Linear bindings and required sync evidence. `PmTaskSummary`,
 `planning_wave` and their dual-ID joins are removed. Creation now returns canonical Task and the CLI uses its title; `task_planning_item`
-is deleted. Placement/PR consumers read explicit branch/URL metadata. Remaining:
-Task status/detail and provider-shaped reconstruction; preserve observation validity.
+is deleted. Placement/PR consumers read explicit branch/URL metadata. Task status now returns canonical Task/Project records; summaries expose acquisition
+state/age independently of delivery, including Swift decoding and display. Remaining:
+provider-shaped reconstruction in delivery and snapshots.
 
 **Swift (under `swift/`):** `Models/WaveWorkMap.swift`'s Project/Task planning
 snapshots and `PlanningKeyResult`; `Models/WavePlan.swift`, `PlanningSync.swift`,

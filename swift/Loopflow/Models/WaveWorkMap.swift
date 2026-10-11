@@ -77,7 +77,22 @@ public struct PlanningKeyResult: Decodable, Sendable, Identifiable, Hashable {
     public let holds: Bool
 }
 
+public struct TaskAcquisition: Decodable, Sendable, Hashable {
+    public let state: State
+    public let observedAt: Int64?
+
+    public enum State: String, Decodable, Sendable {
+        case available, invalid, removed, absent, unavailable
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case state
+        case observedAt = "observed_at"
+    }
+}
+
 public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable {
+    public let acquisition: TaskAcquisition
     public let sync: PlanningSyncStatus
     public let id: String
     public let linearId: String?
@@ -93,7 +108,7 @@ public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable 
     public let assignee: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, identifier, name, description, rank, completed, state, assignee, sync
+        case id, identifier, name, description, rank, completed, state, assignee, sync, acquisition
         case linearId = "linear_id"
         case completedAt = "completed_at"
         case dueDate = "due_date"

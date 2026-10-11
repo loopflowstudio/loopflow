@@ -78,7 +78,11 @@
                 "connected": false,
                 "changes": []
               },
-              "linear_id": null
+              "linear_id": null,
+              "acquisition": {
+                "state": "available",
+                "observed_at": null
+              }
             },
             "reference": {
               "issue_url": "https://linear.app/loopflow/issue/W2-144/make-lf-roadmap-the-machine-wide-view",
@@ -457,7 +461,11 @@
                 "connected": false,
                 "changes": []
               },
-              "linear_id": null
+              "linear_id": null,
+              "acquisition": {
+                "state": "available",
+                "observed_at": null
+              }
             },
             "reference": {
               "issue_url": "https://linear.app/loopflow/issue/W2-131/show-the-all-wave-roadmap",
@@ -865,7 +873,11 @@
                 "connected": false,
                 "changes": []
               },
-              "linear_id": null
+              "linear_id": null,
+              "acquisition": {
+                "state": "available",
+                "observed_at": null
+              }
             },
             "reference": {
               "issue_url": null,
@@ -933,7 +945,11 @@
                 "connected": false,
                 "changes": []
               },
-              "linear_id": null
+              "linear_id": null,
+              "acquisition": {
+                "state": "available",
+                "observed_at": null
+              }
             },
             "reference": {
               "issue_url": "https://linear.app/loopflow/issue/W2-141/now-available-work-views-research",

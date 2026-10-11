@@ -613,7 +613,7 @@ mod task_comments_tests;
 // ── snapshot freshness policy ────────────────────────────────────────
 
 /// Past this age an Auto read opportunistically refreshes before serving.
-const PM_SOFT_STALE_SECS: i64 = 60 * 60; // 1 hour
+pub(crate) const PM_SOFT_STALE_SECS: i64 = 60 * 60; // 1 hour
 /// Past this age a failed refresh is an error, not a silent cache fallback.
 const PM_HARD_STALE_SECS: i64 = 7 * 24 * 60 * 60; // 1 week
 /// Ceiling on an opportunistic refresh; exceeding it counts as a failure.
@@ -1301,29 +1301,7 @@ pub(crate) struct TaskPlanningInspection {
     pub refresh_error: Option<String>,
 }
 
-impl TaskPlanningInspection {
-    fn age(&self) -> Option<i64> {
-        self.observation
-            .record
-            .as_ref()
-            .map(|record| time::OffsetDateTime::now_utc().unix_timestamp() - record.observed_at)
-    }
-
-    pub(crate) fn is_stale(&self) -> bool {
-        self.observation.state != PlanningState::Available
-            || self.age().is_some_and(|age| age >= PM_SOFT_STALE_SECS)
-    }
-}
-
-pub(crate) fn inspect_task_planning(
-    repo: &Path,
-    issue: &str,
-    refresh: PmRefresh,
-) -> OpsResult<TaskPlanningInspection> {
-    block_on_pm(inspect_task_planning_async(repo, issue, refresh))
-}
-
-async fn inspect_task_planning_async(
+pub(crate) async fn inspect_task_planning_async(
     repo: &Path,
     issue: &str,
     refresh: PmRefresh,

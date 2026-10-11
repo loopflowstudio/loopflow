@@ -19,7 +19,7 @@ use crate::durable::{Author, TaskState};
 use crate::id::WaveId;
 use crate::planning::{LinearIssueId, LinearProjectId, NewTask};
 use crate::store::rows::now_unix;
-use crate::store::{StoreError, StoreResult};
+use crate::store::{PlanningState, PmTaskObservation, StoreError, StoreResult};
 use crate::work::project::{Project, ProjectEvent, ProjectEventKind, ProjectId};
 use crate::work::task::{
     CiObservation, GithubObservation, GithubPr, LinearObservationOutcome, LinearWritebackState,
@@ -361,6 +361,60 @@ impl SqliteStore {
         let task = task_on(&tx, id)?.ok_or(StoreError::NotFound)?;
         tx.commit()?;
         Ok(task)
+    }
+
+    pub fn task_acquisition(&self, id: &TaskId) -> StoreResult<crate::store::TaskAcquisition> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.unchecked_transaction()?;
+        let task = task_on(&tx, id)?.ok_or(StoreError::NotFound)?;
+        let (repo, project, teams, deleted): (String, Option<String>, String, bool) = tx
+            .query_row(
+            "SELECT w.repo,p.external_project_id,p.planning_teams,t.planning_deleted_at IS NOT NULL
+             FROM tasks t JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id
+             WHERE t.id=?1",
+            [id.as_str()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )?;
+        let mut result = crate::store::TaskAcquisition {
+            state: PlanningState::Available,
+            observed_at: None,
+        };
+        if let Some(issue) = &task.linear_id {
+            let observation =
+                match super::planning::pm_task_observation_in(&tx, &repo, "linear", issue.as_str())
+                {
+                    Ok(observation) => observation,
+                    Err(StoreError::Serde(_)) => PmTaskObservation {
+                        record: None,
+                        state: PlanningState::Invalid,
+                    },
+                    Err(error) => return Err(error),
+                };
+            result.state = observation.state;
+            if let Some(record) = observation.record {
+                result.observed_at = Some(record.observed_at);
+                let teams: Vec<String> = serde_json::from_str(&teams)?;
+                let pending_membership = super::planning_changes::PlanningChanges::Task(id)
+                    .pending(&tx)?
+                    .iter()
+                    .any(|change| change.field == "project_id");
+                if result.state != PlanningState::Removed
+                    && ((record.item.project_id != project && !pending_membership)
+                        || record
+                            .item
+                            .team_id
+                            .as_ref()
+                            .is_some_and(|team| !teams.contains(team)))
+                {
+                    result.state = PlanningState::Invalid;
+                }
+            }
+        }
+        if deleted {
+            result.state = PlanningState::Removed;
+        }
+        tx.commit()?;
+        Ok(result)
     }
 
     pub fn task(&self, task_id: &TaskId) -> StoreResult<Option<Task>> {

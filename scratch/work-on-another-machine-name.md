@@ -226,29 +226,28 @@ binding and sync evidence is required; Swift consumes that contract. Saved due
 dates and prose no longer depend on provider inventory in these surfaces. Execution,
 checkout and Workflow reads remain independent. Source checks are recorded below.
 
-Still required: `plan_read::task_in` and `project_in`,
-`TaskStatus.planning`/`PmTaskRecord` and cold status expose provider-shaped records.
-At `db36f20ba8`, the Task reader overwrites saved due dates from observations;
-the Project projection omits prose and substitutes provider IDs for local IDs.
-The coherent replacement includes CLI status and Swift consumers, not an
-additional wrapper. Invalidation, positive removal, pending membership and original
-observation age must survive independently of content and delivery status.
+Task status now returns canonical Task and Project records, not `PmTaskRecord`.
+CLI status retains local identity, due date and prose; Wave/roadmap/Work-frame
+summaries and Swift carry separate acquisition state and original observation time.
+Invalidation, positive removal and pending membership do not replace saved content
+or move captured Workflow/Process history. A foreign observation without owned Work
+returns evidence and no Task; its original record stays in the acquisition store.
+Status/wait share async store reads; duplicate lookup/inspection wrappers are deleted.
 
-The canonical Wave/roadmap/Work-frame summary cut exists, but its acquisition
-behavior is not proved: `waves.rs::task_snapshot` derives `launch_refusal` only from
-checkout/configuration/process evidence. `task_planning_sync` reports delivery,
-not acquisition validity. Removing provider-shaped content must not silently drop
-that distinction. Composed snapshot/status fixtures still need invalidation,
-positive removal and pending-membership cases with unchanged local execution.
-The absorbed review is preserved at `c3c510f862:scratch/task-view-evidence-review.md`.
-Bindings, ordinary follow-ups, cron and typed journal/provider hierarchy remain.
+Still required: delete `plan_read::task_in` / `project_in`, whose remaining production
+consumer is field-delivery revision checking, and convert their fixtures to canonical
+reads or actual provider observations. These projections still overwrite dates and
+fabricate Projects, though status no longer uses them. `PmSnapshot`/provider hierarchy,
+bindings, ordinary follow-ups, cron and typed journal remain required before review.
+Acquisition evidence is not execution eligibility or delivery success. The earlier
+counterexamples remain at `18520565d6:scratch/work-on-another-machine-name.md`.
 
 Rotation now consumes and returns canonical Tasks, including saved dates/prose and
 explicit bindings. It no longer reconstructs PM records, substitutes IDs or repeats
 the Task lookup. Membership receipts and writes share the typed `save` path.
 Task export likewise reads canonical Work and captures only shared creation-field
 baselines; retained attempted inputs are unchanged. This removes those consumers,
-not `plan_read`, Task status or the provider hierarchy. Offline public rotation
+not `plan_read` or the provider hierarchy. Offline public rotation
 covers both transport configurations/mapping states and transaction/retry preservation;
 export fixtures cover retained input and later saves.
 
@@ -328,7 +327,7 @@ The original acquisition tracing is preserved at
 `a849341234:scratch/work-on-another-machine-name.md`; the absorbed review is at
 `f2ca2063b5:scratch/project-acquisition-dependency.md`. Its missing prose proof is
 superseded above, not its private-observation requirement. The public canonical
-Project reader cut (`52e7da7f35`) is complete. Remaining Task/snapshot consumers of
+Project reader cut (`52e7da7f35`) is complete. Remaining delivery/snapshot consumers of
 `LinearProject` belong to this acquisition prerequisite, before bindings, ordinary
 follow-ups, cron and the rest of the audit. No partial publication or readiness.
 
@@ -381,11 +380,11 @@ Earlier baseline detail: `c8fe4628a:scratch/work-on-another-machine-name.md`.
   cut. Regenerate them after the entire accepted reduction, before review-only
   republication. No readiness or landing follows from this persistence checkpoint.
 
-Checks: CLI build, fmt, all-target Clippy and isolated `local_planning::task_creation_and_edits_save_offline_in_both_connection_modes` / `pr_tests::task_pr_missing_cached_linear_url_refuses_before_remote_mutation` pass; broader verification stays gate-owned. Prior merged-frontier receipt proof: `329abe7daa` here.
+Checks: CLI build, fmt/all-target Clippy, focused status/DTO/offline-save/projectless-status tests and `scripts/test_desktop.sh --filter taskAcquisitionEvidence` pass; broader verification stays gate-owned.
 
 
 Context: authored memory/scratch fit; generated Task seed/steers/workspace exceeds
-16,000 tokens by about 5,168. Authored edits cannot remove that stored input.
+16,000 tokens by about 5,343. Authored edits cannot remove that stored input.
 
 ## Delete — do not maintain
 

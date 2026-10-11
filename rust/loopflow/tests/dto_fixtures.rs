@@ -408,55 +408,29 @@ fn session_input_history_retains_distinct_native_results_and_unknown_process() {
 }
 
 #[test]
-fn task_status_preserves_planning_freshness_without_execution() {
+fn task_status_preserves_canonical_work_and_acquisition_evidence() {
     use loopflow::ops::task::TaskStatus;
     let json = include_str!("../../../tests/fixtures/dto/task_status.json");
-    let states: Vec<TaskStatus> = serde_json::from_str(json).unwrap();
+    let status: TaskStatus = serde_json::from_str(json).unwrap();
+    let task = status.task.as_ref().unwrap();
+    let project = status.project.as_ref().unwrap();
+    assert_eq!(task.title, "Route incoming mail");
+    assert_eq!(task.project_id, project.id);
+    assert_ne!(task.id.as_str(), task.linear_id.as_ref().unwrap().as_str());
+    assert_eq!(project.description, "Retained authored prose.");
+    assert_eq!(status.observed_at, Some(1790683200));
     assert_eq!(
-        states[0]
-            .planning
-            .as_ref()
-            .unwrap()
-            .item
-            .branch_name
-            .as_deref(),
-        Some("dev/fix-1-existing")
+        status.planning_state,
+        loopflow::store::PlanningState::Available
     );
-    assert_eq!(
-        states
-            .iter()
-            .map(|state| state.planning_state)
-            .collect::<Vec<_>>(),
-        vec![
-            loopflow::store::PlanningState::Available,
-            loopflow::store::PlanningState::Unavailable,
-            loopflow::store::PlanningState::Unavailable,
-            loopflow::store::PlanningState::Invalid,
-            loopflow::store::PlanningState::Removed,
-            loopflow::store::PlanningState::Absent,
-        ]
-    );
-    for state in &states[3..] {
-        assert_eq!(state.planning, states[0].planning);
-    }
-    assert!(!states[0].planning_stale);
-    assert!(states[0].planning_error.is_none());
-    assert!(states[0].execution.is_none());
-    assert!(states[1].planning_stale);
-    assert_eq!(
-        states[1].planning_error.as_deref(),
-        Some("Linear unavailable")
-    );
-    assert_eq!(states[0].planning, states[1].planning);
-    assert!(states[2].planning.is_none());
-    assert!(states[2].planning_error.is_some());
-    assert_eq!(
-        serde_json::to_value(states).unwrap(),
-        serde_json::from_str::<serde_json::Value>(json).unwrap()
-    );
-    let mut missing: serde_json::Value = serde_json::from_str(json).unwrap();
-    missing[0].as_object_mut().unwrap().remove("planning_stale");
-    assert!(serde_json::from_value::<Vec<TaskStatus>>(missing).is_err());
+    assert!(!status.planning_stale);
+    assert!(status.planning_error.is_none());
+    assert!(status.execution.is_none());
+    let value: serde_json::Value = serde_json::from_str(json).unwrap();
+    assert_eq!(serde_json::to_value(status).unwrap(), value);
+    let mut missing = value;
+    missing.as_object_mut().unwrap().remove("planning_stale");
+    assert!(serde_json::from_value::<TaskStatus>(missing).is_err());
 }
 
 #[test]

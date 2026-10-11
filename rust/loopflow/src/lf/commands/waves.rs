@@ -112,6 +112,7 @@ impl<T> Evidence<T> {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskSummary {
+    pub acquisition: crate::store::TaskAcquisition,
     pub sync: crate::planning::PlanningSyncStatus,
     pub id: String,
     pub linear_id: Option<String>,
@@ -1172,9 +1173,21 @@ async fn snapshot_task_detail(
         machine_id,
         &shared.local_machine,
     );
+    let acquisition = store.sqlite.task_acquisition(&task.id)?;
     let worktree_blocker = crate::ops::task::task_worktree_blocker(store, task).await?;
     let launch_refusal = if worktree_blocker.is_none() {
-        crate::ops::task::task_process_refusal(store, task).await?
+        crate::ops::task::task_process_refusal(store, task)
+            .await?
+            .or_else(|| {
+                matches!(
+                    acquisition.state,
+                    crate::store::PlanningState::Invalid | crate::store::PlanningState::Removed
+                )
+                .then(|| {
+                    "Task planning has invalidation or removal evidence; refresh its planning"
+                        .to_string()
+                })
+            })
     } else {
         None
     };
@@ -1281,6 +1294,7 @@ async fn snapshot_task_detail(
             task,
             &shared.follow_up_sources,
             store.sqlite.task_planning_sync(&task.id)?,
+            acquisition,
         ),
         reference,
         runtime: Some(runtime),
@@ -1567,8 +1581,10 @@ fn task_summary(
     task: &Task,
     sources: &HashMap<String, Vec<crate::work::task::follow_through::FollowThroughSource>>,
     sync: crate::planning::PlanningSyncStatus,
+    acquisition: crate::store::TaskAcquisition,
 ) -> TaskSummary {
     TaskSummary {
+        acquisition,
         follow_up_sources: sources
             .get(task.id.as_str())
             .or_else(|| {

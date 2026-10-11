@@ -63,8 +63,8 @@ prove a provider exited or authorize cleanup. Local absence cannot prove peer ab
 
 The [pursuit design](work-on-another-machine-name.md) owns implementation status
 and focused evidence; the [audit](work-model-reduction.md) owns remaining deletion.
-Canonical Project/Task persistence and summary readers are implemented, not the
-full acquisition, status, journal or provider-cache cut. The detailed October 10
+Canonical persistence, summaries and Task status are implemented, not the full
+acquisition, journal or provider-cache cut. The detailed October 10
 checkpoint survives at `fc7f5cac81:scratch/work-model.md`. Conditional deletions
 still require retained-evidence ownership and populated conversion proof.
 

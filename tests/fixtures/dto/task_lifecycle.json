@@ -118,7 +118,11 @@
                         "connected": false,
                         "changes": []
                       },
-                      "linear_id": null
+                      "linear_id": null,
+                      "acquisition": {
+                        "state": "available",
+                        "observed_at": null
+                      }
                     },
                     "workflow_name": "feature"
                   },
@@ -348,7 +352,11 @@
                         "connected": false,
                         "changes": []
                       },
-                      "linear_id": null
+                      "linear_id": null,
+                      "acquisition": {
+                        "state": "available",
+                        "observed_at": null
+                      }
                     },
                     "workflow_name": "delivery"
                   }
@@ -643,7 +651,11 @@
           "connected": false,
           "changes": []
         },
-        "linear_id": null
+        "linear_id": null,
+        "acquisition": {
+          "state": "available",
+          "observed_at": null
+        }
       },
       "workflow_name": "delivery"
     },
@@ -1770,7 +1782,11 @@
                         "connected": false,
                         "changes": []
                       },
-                      "linear_id": null
+                      "linear_id": null,
+                      "acquisition": {
+                        "state": "available",
+                        "observed_at": null
+                      }
                     },
                     "workflow_name": "feature"
                   },
@@ -1985,7 +2001,11 @@
                         "connected": false,
                         "changes": []
                       },
-                      "linear_id": null
+                      "linear_id": null,
+                      "acquisition": {
+                        "state": "available",
+                        "observed_at": null
+                      }
                     },
                     "workflow_name": "delivery"
                   }
@@ -2265,7 +2285,11 @@
           "connected": false,
           "changes": []
         },
-        "linear_id": null
+        "linear_id": null,
+        "acquisition": {
+          "state": "available",
+          "observed_at": null
+        }
       },
       "workflow_name": "delivery"
     },
@@ -3301,7 +3325,11 @@
                         "connected": false,
                         "changes": []
                       },
-                      "linear_id": null
+                      "linear_id": null,
+                      "acquisition": {
+                        "state": "available",
+                        "observed_at": null
+                      }
                     },
                     "workflow_name": "delivery"
                   }
@@ -3559,7 +3587,11 @@
           "connected": false,
           "changes": []
         },
-        "linear_id": null
+        "linear_id": null,
+        "acquisition": {
+          "state": "available",
+          "observed_at": null
+        }
       },
       "workflow_name": "delivery"
     },

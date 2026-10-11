@@ -731,3 +731,5 @@ strip links to its own site in a new tab.
 - Jack Heart: "make the cycling words musical but also work?" → the `x12` header cycles compose, arrange, rehearse, release: each is something you do to a piece of music and to software, in the order of the old design, implement, demo, ship.
 
 - Jack Heart: "Nah i think the words have to be the software words" → the `x12` header cycles design, implement, demo, ship again. The cycling words stay the software ones.
+
+- Jack Heart: "release was a good one though, and study would have worked" → the `x12` header cycles five software words: study, design, implement, demo, release. "Release" replaces "ship"; "study" is added first.

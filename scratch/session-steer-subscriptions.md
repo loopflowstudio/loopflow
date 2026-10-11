@@ -3,20 +3,36 @@
 Task `lf-9c03797`, 2026-10-11. Jack Heart accepted the Session-only primitive and
 wrappers for pursuit (“ok, pursue”). After the stopped Flow reported the Codex
 handoff and OpenCode boundary gaps, Jack Heart renewed pursuit (“pursuse!”).
-Production steer cutover is not active. The withdrawn October 11 draft exposed
-a startup lock cycle. The working branch now proves shared startup exclusion and
-provider-bound context authority; the remaining publication/receipt cutover below
-is still required in this PR.
+The working branch replaces event-backed launch/live injection with immutable
+publications, bounded Session delivery and receipt-backed provider callbacks.
+The indivisible cutover is implemented locally; verification and review below
+remain required before publication.
 
 ## Current implementation — reconciled 2026-10-11
 
-At `ff1dc403c4`, Task launch still reads event-backed steers into `TaskSeed`;
-`TaskInput::poll` injects them on a five-second timer, and `RunningFlow` keeps
-per-node cursors through `--steers-after`. `ContextDelivery::prepare` saves generated
-Task summaries as references that later context hooks reread. No publication,
-Session subscription or delivery receipt exists. The working `session_steers`
-integration target currently covers startup transport and provider authority only.
-The data structures, commands and transaction below remain design, not shipped APIs.
+Publication writers preserve local comment and Linear acquisition transactions,
+stable source/revision keys, known names and historical unresolved attribution.
+One migration converts Task/Project direction and nested TaskObserved copies,
+including orphaned historical copies, while retaining planning receipts.
+Scope derives from existing Task checkout/explicit associations and Wave ancestry.
+Repository/Wave commands report Machine-local publication and unavailable exchange.
+
+Startup, tool and continuation callbacks reserve at most eight revisions within
+the existing 10,000-byte context owner. Full immutable source files cover selected
+excerpts; paginated Session status exposes pending counts, capability observations,
+receipt evidence and explicit retry. Source revisions and association changes
+cancel prepared batches before output. An exclusive nonblocking Session fence
+proves that no emitter holds a prepared reservation; it does not infer death from
+age. Uncertain/emitted attempts never automatically replay.
+
+Deleted: Flow node cursors and `--steers-after`, TaskInput steer polling and seed
+receipts, live steer injection, inline event bodies, the old event-backed readers,
+and prompt-component steer attribution. The saved Task brief contains no consumed
+direction. Interrupt polling and attached-client input remain.
+
+Remaining work is the authored review and gate/CI's affected suites and
+configured-provider acceptance. Local focused verification passes. No full model-acceptance claim is made:
+current callbacks report local emission as unconfirmed.
 
 Main's #1518/#1521 already supply checkout-based context refresh and a rendered
 10,000-byte hook ceiling; extend that owner rather than adding another budget or
@@ -66,21 +82,19 @@ activation also needs its own proof: Claude can replace the AgentProcess inside
 `ensure_process`, after harness configuration was built; an adapter installed only
 before `Harness::start` becomes stale on that path.
 
-Dependent cutover stopped. Production Rust and tests were restored to `a839b8fad2`;
-all old delivery paths remain together. The withdrawn experimental diff is preserved
+At the withdrawn attempt, dependent cutover stopped. Production Rust and tests
+were restored to `a839b8fad2`, retaining all old delivery paths together. The withdrawn experimental diff is preserved
 at `0ffdb9c04acdca129767b0e45719e6f00390bed2:scratch/session-steer-subscriptions.patch.gz`,
-based on `a839b8fad2`. Keep it in Git history rather than maintaining a second code
-copy in scratch. It is unfinished evidence, not a shippable slice: Work publication wrappers,
-source revision keys, native bootstrap, OpenCode adapter integration, prepared-crash
-recovery, complete migration preservation and public adapter proofs are missing.
+based on `a839b8fad2`. It remains historical evidence in Git. That withdrawn diff
+lacked Work wrappers, source revision keys, native bootstrap, OpenCode integration,
+prepared recovery, complete migration preservation and public adapter proofs.
 Four draft receipt tests passed (idle pending/one emission, uncertain write/explicit
 retry, render failure, and provider handoff/replacement); they do not establish the
 provider cutover. No migration touched the installed store.
 
-The first slice now includes the startup exclusion/identity proof before old-path
-removal. Its public fixture must force startup to overlap a first input larger than
-the pipe buffer, preserve the complete seed, and test takeover during each side of
-that exchange. The complete one-PR replacement remains required.
+The replacement below resolves that counterexample before old-path removal.
+Its public fixture forces startup/input overlap and preserves the complete seed;
+the dispatch race holds takeover through both sides of the exchange.
 
 ## Shared startup exclusion — implementation evidence, 2026-10-11
 
@@ -88,8 +102,8 @@ The working change separates shared transport exclusion from exclusive provider
 lifetime changes. Claude owns its stdin through `&mut self`; Codex's writer queue
 and connection proxy each own their socket. Their bounded writes now use
 `with_session_dispatch`; spawn, stop, replacement and attachment changes keep
-`with_session_attachment` and its exclusive fence. OpenCode's HTTP writer still
-needs its adapter integration audit before changing its fence.
+`with_session_attachment` and its exclusive fence. OpenCode's serialized HTTP submission uses the same
+bounded shared dispatch fence.
 
 The public `session_steers` launch fixture invokes an external Claude skill with
 150,000 UTF-8 bytes of clipboard context. Its stand-in waits for input to become
@@ -99,7 +113,8 @@ query, native identity and retained answer. This is a protocol transport proof:
 the fixture forces overlap and invokes production provider-bound hook exclusion.
 It also resumes the Task-associated Session with a fresh AgentProcess and verifies
 that the new capability names it, while preserving native identity and distinct
-answer correlation. It proves no steer receipt.
+answer correlation. It now includes oversized Unicode direction, checks the combined
+rendered ceiling, and verifies that resume does not replay the emitted revision.
 The dispatch race fixture proves takeover waits for both shared writers and the
 former claim cannot dispatch afterward.
 
@@ -126,8 +141,9 @@ then verifies output, child/foreign-thread rejection and replacement rejection.
 It uses a stand-in provider and the actual hook CLI/store claim APIs, not a
 configured Codex reconnect. OpenCode now generates adapter invocation UUIDs and
 refreshes each transform instead of caching consumable direction in its text;
-receipt-backed retry/error behavior remains unfinished. The sole draft migration
-currently contains capability storage; publication conversion is still pending.
+the protocol fixture invokes the actual receipt command from the shipped JavaScript,
+checks internal retry input reuse and a later transform without reinjection. The
+single draft also owns publications and receipts.
 
 ## What to build
 
@@ -177,8 +193,7 @@ revokes it. Reject child-conversation callbacks.
 
 Under the Session fence, validate that binding, observe the current attachment
 claim and hold exclusion through the bounded output write. Receipts record the
-provider identity and observed claim. The startup exclusion mode remains unresolved
-above. This grants no attached-client input or general process-control authority.
+provider identity and observed claim. The shared startup exclusion described above preserves that lifetime fence. This grants no attached-client input or general process-control authority.
 Prove A → B → A handoff, replacement and stale/child rejection through the public
 hook boundary. Explicit adapter rebinding is not a second delivery path.
 
@@ -304,12 +319,14 @@ IDs before rendering; concurrent callbacks cannot select them again. Duplicate
 boundary callbacks return no second payload. Rendering/filesystem failure before
 emission releases the reservation. Do not hold a transaction across provider I/O.
 
-Launch prepares the same batch after allocating the durable Session and before
-assembling top-level Task context. The launch batch and subsequent hooks therefore
-agree on exactly what was supplied. Publications arriving after that transaction
-remain pending. Split the saved Task brief from consumed steer bodies so reference
-reload at compaction/resume cannot bypass receipts. Preserve the brief, workspace,
-Project context, source attribution and the existing compact-only skill behavior.
+Implementation decision, 2026-10-11: the synchronous startup callback prepares
+the launch batch after durable Session/AgentProcess allocation. The Task brief is
+assembled independently beforehand and contains no steer bodies. This avoids a
+second launch reservation before native identity exists, preserves the oversized
+combined skill/query seed, and uses exactly the subsequent hook receipt path.
+Publications arriving after selection remain pending. Reference reload at
+compaction/resume cannot bypass receipts; brief, workspace, Project context and
+compact-only skill behavior remain available.
 
 ## Acknowledgement and crashes
 
@@ -334,8 +351,8 @@ means the model understood or followed direction.
 
 Process replacement retains Session receipts. A stale attached client cannot emit
 or advance them; the surviving provider's scoped adapter uses the authority above.
-Reconcile prepared attempts using exact attempt/process evidence;
-age alone does not authorize another emitter. No background polling, Stop-hook
+Reconcile prepared attempts only after acquiring the exclusive Session fence,
+which no active shared emitter can coexist with; age alone grants no authority. No background polling, Stop-hook
 continuation, auto-turn, replacement worker or terminal keystroke injection.
 
 ## Context bounds
@@ -383,9 +400,8 @@ cannot exchange a scope, report unavailable exchange. No new cross-machine bus.
 ## Delete — do not maintain
 
 The withdrawn patch lives only at the Git reference above; retain the startup
-reproducer until the replacement passes its public fixture. Production targets
-below remain pending that replacement, not separate cleanup. Paths are under
-`rust/loopflow/src/` unless stated otherwise; delete them in the same cut.
+reproducer until the replacement passes its public fixture. The production targets below are removed in the working replacement. Paths are
+under `rust/loopflow/src/` unless stated otherwise.
 
 - `RunningFlow.steers` and its node cursor logic in `lf/commands/flow.rs`;
   `Cli.steers_after`, forwarding/clone code in `lf/mod.rs`, and the seed filter in
@@ -432,6 +448,12 @@ claiming remote exchange or already-open coverage from local fixture success.
    `docs/architecture-reference.md` and steering/context command documentation.
    No separate PR or compatibility period between slices.
 
+Review repairs: cancel superseded/removed-scope batches before output, keep retries
+from selecting inapplicable history, preserve nested migration copies and CI-help
+reads, record excerpt evidence, and retain the established `lf comment` Task
+shorthand after adding scoped comments. No replacement path remains alongside
+the deleted injection owners.
+
 ## Done when
 
 Add a headless `session_steers` integration target. With inherited `LF_*` removed,
@@ -456,4 +478,4 @@ if the status shape crosses that boundary. Configured provider probes use isolat
 homes and headless fake endpoints; unavailable probes are explicitly deferred to
 capable CI, never recorded as passes.
 
-Check: isolated public startup/resume and capability fixtures, shared-dispatch race, configured Claude shared-fence probe, `cargo fmt`, Clippy and JS syntax pass; publication/receipt/deletion cutover and provider-specific retry proofs remain unfinished.
+Check: `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, isolated `session_steers` (3), receipt/migration tests (8), takeover race, Task comments, CI-help, Linear observation and DTO fixtures pass; standalone Swift author-model compile/round trip passes (SwiftPM nested sandbox unavailable); full affected suites, configured Codex/OpenCode/native-model probes and authored review remain gate/CI/demo coverage.

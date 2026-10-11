@@ -759,3 +759,29 @@ fn planning_sync_preserves_delivery_and_losing_values() {
     assert_eq!(serde_json::to_value(&sync).unwrap(), value);
     assert!(sync.lines()[3].contains("Linear: null"));
 }
+
+#[test]
+fn work_authors_preserve_names_and_historical_attribution() {
+    let fixture = include_str!("../../../tests/fixtures/dto/work_authors.json");
+    let authors: Vec<loopflow::durable::Author> = serde_json::from_str(fixture).unwrap();
+    assert_eq!(
+        authors[1],
+        loopflow::durable::Author::Named("Fixture author".into())
+    );
+    assert_eq!(
+        serde_json::to_value(authors).unwrap(),
+        serde_json::from_str::<serde_json::Value>(fixture).unwrap()
+    );
+}
+
+#[test]
+fn session_steer_status_preserves_excerpt_evidence() {
+    let fixture = include_str!("../../../tests/fixtures/dto/session_steers.json");
+    let page: loopflow::steer::SessionSteerPage = serde_json::from_str(fixture).unwrap();
+    assert_eq!(page.items[0].excerpted, Some(true));
+    assert_eq!(page.items[0].evidence, "emitted");
+    assert_eq!(
+        serde_json::to_value(page).unwrap(),
+        serde_json::from_str::<serde_json::Value>(fixture).unwrap()
+    );
+}

@@ -82,7 +82,7 @@ pub fn emit_block(
     delivery: &std::path::Path,
     moment: crate::context_block::ContextMoment,
 ) -> Result<()> {
-    use crate::context_block::{ContextDelivery, ContextMoment};
+    use crate::context_block::ContextDelivery;
     let delivery: ContextDelivery = serde_json::from_slice(&std::fs::read(delivery)?)?;
     let mut input = String::new();
     std::io::stdin()
@@ -101,15 +101,12 @@ pub fn emit_block(
         return Ok(());
     }
     let event = input["hook_event_name"].as_str().unwrap_or("SessionStart");
-    let write = || -> crate::store::StoreResult<()> {
-        let text = if matches!(moment, ContextMoment::Tool) {
-            String::new()
-        } else {
-            delivery
-                .block(moment)
-                .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))?
-                .text
-        };
+    let render = |prefix: &str| -> crate::store::StoreResult<String> {
+        delivery
+            .block_with_prefix(moment, prefix)
+            .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))
+    };
+    let write = |text: &str| -> crate::store::StoreResult<()> {
         let output = serde_json::json!({"hookSpecificOutput": {
             "hookEventName": event, "additionalContext": text,
         }});
@@ -125,16 +122,116 @@ pub fn emit_block(
             anyhow::anyhow!("Provider context callback has no native conversation")
         })?;
         let store = crate::store::sqlite::SqliteStore::new(&delivery.home.join("loopflow.db"))?;
+        store.recover_prepared_steers(&adapter.session)?;
         store.with_provider_context(
             adapter,
             thread,
             event == "SessionStart" || event == "OpenCodeMessagesTransform",
-            |_| write(),
+            |_| {
+                let invocation = input["tool_use_id"]
+                    .as_str()
+                    .or_else(|| input["adapter_invocation_id"].as_str())
+                    .or_else(|| input["turn_id"].as_str())
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+                let boundary = format!(
+                    "{event}:{}:{invocation}",
+                    input["turn_id"].as_str().unwrap_or("")
+                );
+                let emitted = std::cell::Cell::new(false);
+                store.emit_session_steers(
+                    adapter,
+                    thread,
+                    &boundary,
+                    |batch, publications, remaining| {
+                        let (prefix, excerpts) = render_steers(
+                            &delivery,
+                            &adapter.session,
+                            batch,
+                            publications,
+                            remaining,
+                        )
+                        .map_err(|error| {
+                            crate::store::StoreError::InvalidData(error.to_string())
+                        })?;
+                        Ok(crate::steer::SteerContext {
+                            text: render(&prefix)?,
+                            excerpts,
+                        })
+                    },
+                    |text| {
+                        write(text)?;
+                        emitted.set(true);
+                        Ok(())
+                    },
+                )?;
+                if !emitted.get() {
+                    write(&render("")?)?;
+                }
+                Ok(())
+            },
         )?;
     } else {
-        write()?;
+        write(&render("")?)?;
     }
     Ok(())
+}
+
+fn excerpt(text: &str, bytes: usize) -> &str {
+    let mut end = text.len().min(bytes);
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    &text[..end]
+}
+
+fn render_steers(
+    delivery: &crate::context_block::ContextDelivery,
+    session: &str,
+    batch: &str,
+    publications: &[crate::steer::SteerPublication],
+    remaining: usize,
+) -> Result<(String, Vec<crate::id::SteerPublicationId>)> {
+    let mut excerpts = Vec::new();
+    let mut text = format!("<lf:steers batch=\"{batch}\">\n");
+    for publication in publications {
+        let path = crate::prompt::write_prompt_log(
+            &delivery.repo,
+            &serde_json::to_string_pretty(publication)?,
+            "steer",
+            None,
+        )?;
+        let path = path.strip_prefix(&delivery.repo).unwrap_or(&path);
+        let mut item = format!(
+            "Publication {}. Source {} revision {}; author {}. Complete source: {}\n",
+            publication.id,
+            serde_json::to_string(excerpt(&publication.source, 96))?,
+            serde_json::to_string(excerpt(&publication.revision, 64))?,
+            serde_json::to_string(excerpt(&publication.author.to_string(), 96))?,
+            serde_json::to_string(path)?
+        );
+        let mut body = excerpt(&publication.text, 400);
+        while !body.is_empty()
+            && item.len() + crate::prompt::render_reference(body).len() + 32 > 1024
+        {
+            body = excerpt(body, body.len() - 1);
+        }
+        item.push_str(&crate::prompt::render_reference(body));
+        if body.len() != publication.text.len() {
+            excerpts.push(publication.id.clone());
+            item.push_str(" [excerpt; full source above]");
+        }
+        item.push('\n');
+        anyhow::ensure!(
+            item.len() <= 1024,
+            "Steer attribution and source pointer exceed the item budget"
+        );
+        text.push_str(&item);
+    }
+    text.push_str(&format!(
+        "{remaining} pending. Inspect: lf session steers {session} --json\n</lf:steers>\n"
+    ));
+    Ok((text, excerpts))
 }
 
 /// A stalled provider cannot retain the takeover fence through an unread pipe.

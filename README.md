@@ -120,7 +120,7 @@ Delegate durable work — the same verbs whether the caller is you or the wave:
 lf checkout INF-123                               # durable Task Work + worktree, no controller
 lf -b task run INF-123                            # place the Task, then run its Flow here until it ends
 lf task run INF-123 pursue                        # on a workflow: take the edge that runs pursue
-lf comment INF-123 "take the smaller approach"   # post a Linear comment for the Task's running Flow
+lf comment INF-123 "take the smaller approach"   # save direction for the Task's Sessions
 lf interrupt INF-123                             # end this turn so fresh direction is read now
 lf --task INF-123 research "write scratch/runtime.md"    # one independent Task conversation
 lf task run INF-123 --reason "reconcile all scratch first" # publish direction, then run fresh work

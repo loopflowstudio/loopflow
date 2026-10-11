@@ -53,6 +53,7 @@ Open Loopflow or run its CLI
 | `--clipboard / -c` | Include clipboard content in prompt Default: false. |
 | `--agent / -a` | Agent to use (harness or harness:model) |
 | `--skill-input` | Captured skill and arguments supplied by the invoking Flow process Internal. |
+| `--output-schema` | Native final-answer schema supplied by a deciding step Internal. |
 | `--account` | Prefer this managed provider login before the normal route. Repeat to select provider-qualified preferences such as `claude=jack@`. Logins spend; a profile is only the Chrome venue accounts log in through, so it is never a run-time selector |
 | `--only-account` | Restrict this invocation and its children to exactly these managed provider logins. Providers without a selection are unavailable |
 | `--isolate` | Run in the selected account's own provider home, unmoved by account switches. Applies to this invocation and its children Default: false. |
@@ -70,7 +71,6 @@ Open Loopflow or run its CLI
 | `--forward-agent` | Forward the SSH agent to the selected machine Default: false. |
 | `--wave` | Add Wave context and identity without changing the working directory |
 | `--task` | Execute in this Task's checkout |
-| `--steers-after` | Give the agent only Task direction newer than this steer |
 | `--wt` | Execute in an existing worktree by name or branch |
 | `--__cwd` | Keep a Work-bound internal launch in this exact checkout Internal. |
 | `--no-loopflow` | Exclude loopflow operating guidance Default: false. |
@@ -166,7 +166,7 @@ Request auto-merge, retain settlement intent, and return
 
 | Argument | What it does |
 |---|---|
-| `--wait` | Wait up to 30 minutes for verified merge; timeout retains the request Default: false. |
+| `--wait-and-fix` | Wait up to 30 minutes for merge and repair failing CI; timeout retains the request Default: false. |
 | `--strict` | strict Default: false. |
 | `--local` | local Default: false. |
 | `--worktree / -w` | worktree |
@@ -441,6 +441,19 @@ Internal command; invoked by the owning operation.
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
+## lf __context-block
+
+Internal conversation context for native startup/compaction hooks
+
+Internal command; invoked by the owning operation.
+
+| Argument | What it does |
+|---|---|
+| `--delivery` | delivery |
+| `--moment` | moment |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
 ## lf __session-title
 
 Native provider naming callback
@@ -459,6 +472,32 @@ Inspect and continue Sessions
 
 | Argument | What it does |
 |---|---|
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf session steer
+
+Save direction for this Session without starting a turn
+
+| Argument | What it does |
+|---|---|
+| `<id>` | id |
+| `<message>` | message |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf session steers
+
+Inspect delivery evidence or explicitly retry a publication
+
+| Argument | What it does |
+|---|---|
+| `<id>` | id |
+| `--json` | json Default: false. |
+| `--retry` | retry |
+| `--after` | after Default: 0. |
+| `--limit` | limit Default: 32. |
+| `--source` | Read one complete immutable source |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
@@ -521,7 +560,7 @@ List Sessions
 
 ## lf session connect
 
-Connect to the live conversation, or resume its saved history
+Stop headless Claude/OpenCode and resume history; connect to Codex live
 
 | Argument | What it does |
 |---|---|
@@ -707,6 +746,17 @@ Repository releases, source measurement, CI evidence, and provider administratio
 
 | Argument | What it does |
 |---|---|
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf repo comment
+
+Save direction for subscribed Sessions without starting a turn
+
+| Argument | What it does |
+|---|---|
+| `<message>` | message |
+| `--steer` | steer Default: false. |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
@@ -1188,6 +1238,18 @@ Manage Wave identity, placement and planning
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
+## lf wave comment
+
+Save direction for subscribed Sessions without starting a turn
+
+| Argument | What it does |
+|---|---|
+| `<wave>` | wave |
+| `<message>` | message |
+| `--steer` | steer Default: false. |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
 ## lf wave new-chapter
 
 Rotate this Wave using its exact destination in a retained chapter plan
@@ -1563,6 +1625,7 @@ File or link follow-up Tasks after merge, then record the disposition
 | `--none` | none |
 | `--finish` | finish |
 | `--key` | Stable obligation key; use a distinct key for each additional follow-up |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task automate
@@ -1616,6 +1679,7 @@ Place a Task's worktree, then run a Flow there like `lf --task ISSUE run FLOW`
 | `--stack-on` | Fork this Task's worktree from another Task's active PR |
 | `--directive` | directive |
 | `--reason` | Direction for this run, published to the Task |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task complete
@@ -1626,6 +1690,7 @@ Complete a Task without moving its Workflow
 |---|---|
 | `<issue>` | issue |
 | `--reason` | Why, kept in the Task's completion request |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task reopen
@@ -1636,6 +1701,7 @@ Reopen local planning without moving Workflow or replacing the PR
 |---|---|
 | `<issue>` | issue |
 | `--reason` | reason |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task move
@@ -1647,6 +1713,7 @@ Move Workflow position without running anything; `end` requests completion
 | `<issue>` | issue |
 | `<node>` | `start`, `end` or one of the workflow's nodes |
 | `--reason` | Why, kept in the Task's workflow history |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task create
@@ -1828,14 +1895,13 @@ Wait without polling an LM
 
 ## lf context
 
-Show effective context budgets, their sources, and current source usage
+Show memory and scratch size targets, their sources, and current usage
 
 | Argument | What it does |
 |---|---|
 | `--json` | json Default: false. |
 | `--wave` | Inspect a Wave's local authored context |
-| `--task` | Inspect a Task's checkout and goal files |
-| `--skill` | Skill to include in the launch preview Default: realign. |
+| `--task` | Inspect a Task's checkout and Wave context |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 

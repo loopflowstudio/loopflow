@@ -301,7 +301,7 @@ async fn task_comments_read_and_publish_without_starting_work() {
             assert!(!store.task_started(&task.id).await.unwrap());
             crate::ops::linear_observe::sync_task_comments(&store, &task).await.unwrap();
             assert_eq!(store.sqlite.pending_task_comments(&task.id).unwrap().len(), 1);
-            let saved_steers = store.task_steers(&task.id).await.unwrap();
+            let saved_steers = store.task_direction(&task.id).await.unwrap();
 
             provider.lock().await.thread = Thread::Empty;
             // The provider commits but loses its first reply. Concurrent catch-up
@@ -316,7 +316,7 @@ async fn task_comments_read_and_publish_without_starting_work() {
             assert!(store.sqlite.pending_task_comments(&task.id).unwrap().is_empty());
             crate::ops::linear_observe::refresh_task_comments(&store, &task).await.unwrap();
             crate::ops::linear_observe::refresh_task_comments(&store, &task).await.unwrap();
-            assert_eq!(store.task_steers(&task.id).await.unwrap(), saved_steers);
+            assert_eq!(store.task_direction(&task.id).await.unwrap(), saved_steers);
             assert_eq!(store.sqlite.task_comments(&task.id).unwrap().comments.len(), 5);
 
             provider.lock().await.posted.push(comment("incoming-after-reconnect",
@@ -348,8 +348,8 @@ async fn task_comments_read_and_publish_without_starting_work() {
                 let started = home.join(format!("{marker}.started"));
                 let stop = home.join(format!("{marker}.stop"));
                 let seed = crate::ops::task_input::TaskSeed {
-                    task: task.clone(), message: String::new(), steers: Vec::new(),
-                    steer: 0, interrupt: 0,
+                    task: task.clone(), message: String::new(),
+                    interrupt: 0,
                 };
                 let process = crate::agent::ProcessConfig {
                     auto,
@@ -422,18 +422,18 @@ async fn task_comments_read_and_publish_without_starting_work() {
             }
             crate::ops::linear_observe::refresh_task_comments(&store, &task).await.unwrap();
             assert_eq!(store.sqlite.task_comments(&task.id).unwrap().comments.iter().find(|c| c.id == collision).unwrap().body, "Provider correction survives");
-            assert!(store.task_steers(&task.id).await.unwrap().iter().any(|steer| steer.text.contains("Provider correction survives")));
+            assert!(store.task_direction(&task.id).await.unwrap().iter().any(|steer| steer.text.contains("Provider correction survives")));
 
-            let before_retry = store.task_steers(&task.id).await.unwrap();
+            let before_retry = store.task_direction(&task.id).await.unwrap();
             let posted_before = provider.lock().await.posted.len();
             crate::ops::linear_observe::sync_task_comments(&store, &task).await.unwrap();
             crate::ops::linear_observe::refresh_task_comments(&store, &task).await.unwrap();
             assert!(store.sqlite.pending_task_comments(&task.id).unwrap().is_empty());
             assert_eq!(provider.lock().await.posted.len(), posted_before);
-            assert_eq!(store.task_steers(&task.id).await.unwrap(), before_retry);
+            assert_eq!(store.task_direction(&task.id).await.unwrap(), before_retry);
             assert!(crate::lf::Cli::try_parse_from(["lf", "task", "sync", "FIX-7", "--resolve", "local"]).is_err());
 
-            let delivered = store.task_steers(&task.id).await.unwrap();
+            let delivered = store.task_direction(&task.id).await.unwrap();
             assert_eq!(delivered.iter().filter(|steer| steer.text.contains("incoming-after-reconnect")).count(), 1);
             assert!(matches!(store.get_task(&task.id).await.unwrap().unwrap().pm_writeback,
                 crate::work::task::PmWritebackState::Pending {

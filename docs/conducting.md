@@ -125,7 +125,7 @@ Reading is half; the system stays steerable while it runs.
 lf --wave <wave> wave-operate "ship the parser fix first"
 lf session ensure -w <wave>                # the Wave's ongoing conversation and operator
 lf --wave <wave> : "Review this plan"          # start a conversation
-lf comment INF-123 "smaller PR"            # post a Linear comment; deliver to its running Flow
+lf comment INF-123 "smaller PR"            # save direction for each associated Session
 lf interrupt INF-123                     # end this turn and re-read direction
 lf session list --waiting --json              # conversations waiting on you
 lf session connect <session-id> --json           # recover one exact conversation

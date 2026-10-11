@@ -212,7 +212,17 @@ impl SqliteStore {
                         comment.id, comment.body
                     ),
                 };
-                Self::append_task_steer_in(&tx, &task.id, &crate::durable::Author::User, &text)?;
+                Self::publish_task_direction_in(
+                    &tx,
+                    &task.id,
+                    &name
+                        .as_ref()
+                        .map(|name| crate::durable::Author::Named(name.clone()))
+                        .unwrap_or(crate::durable::Author::User),
+                    &text,
+                    &format!("comment:{}", comment.id),
+                    "local",
+                )?;
             }
         }
         tx.commit()?;
@@ -278,7 +288,7 @@ mod tests {
         };
         let initial_state = store.task_state(&task).unwrap();
         store.append_task_comment(&task, &original).unwrap();
-        let steers = store.task_steers(&task).unwrap();
+        let steers = store.task_direction(&task).unwrap();
         let observed = crate::pm::IssueComment {
             id: original.id.clone(),
             body: "Provider body".into(),
@@ -353,7 +363,7 @@ mod tests {
             store.task_comments(&task).unwrap().comments[0].body,
             amended.body
         );
-        assert_eq!(store.task_steers(&task).unwrap(), steers);
+        assert_eq!(store.task_direction(&task).unwrap(), steers);
         assert_eq!(store.task_state(&task).unwrap(), initial_state);
     }
 }

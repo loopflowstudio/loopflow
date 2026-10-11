@@ -61,7 +61,7 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
     assert!(outcome.content_steer_applied);
 
     let steers = rt
-        .block_on(task.store.task_steers(&task.task.id))
+        .block_on(task.store.task_direction(&task.task.id))
         .expect("Work steers");
     assert_eq!(steers.len(), 1);
     assert!(steers[0].text.contains("New title"));
@@ -104,7 +104,7 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
     assert_eq!(body, "please prioritize");
 
     let steers = rt
-        .block_on(task.store.task_steers(&task.task.id))
+        .block_on(task.store.task_direction(&task.task.id))
         .expect("Work steers");
     assert_eq!(steers.len(), 2, "one edit + one comment, no dup");
     assert!(steers[1].text.contains("please prioritize"));
@@ -138,7 +138,9 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
         )
         .expect("explicit return to the original definition");
     assert!(outcome.content_steer_applied);
-    let steers = rt.block_on(task.store.task_steers(&task.task.id)).unwrap();
+    let steers = rt
+        .block_on(task.store.task_direction(&task.task.id))
+        .unwrap();
     assert_eq!(steers.len(), 3);
     assert!(steers[2].text.contains(&task.task.plan.title));
 }

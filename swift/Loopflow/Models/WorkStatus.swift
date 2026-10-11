@@ -87,6 +87,7 @@ public struct WorkReference: Codable, Sendable, Hashable {
 /// The durable author shared by Answers and Steers.
 public enum WorkAuthor: Codable, Sendable, Hashable {
     case user
+    case named(id: String)
     case captured(id: Int64)
     case imported(id: String)
 
@@ -95,7 +96,7 @@ public enum WorkAuthor: Codable, Sendable, Hashable {
     }
 
     private enum Kind: String, Codable {
-        case user, captured, imported
+        case user, named, captured, imported
     }
 
     public init(from decoder: Decoder) throws {
@@ -103,6 +104,8 @@ public enum WorkAuthor: Codable, Sendable, Hashable {
         switch try container.decode(Kind.self, forKey: .kind) {
         case .user:
             self = .user
+        case .named:
+            self = .named(id: try container.decode(String.self, forKey: .id))
         case .captured:
             self = .captured(id: try container.decode(Int64.self, forKey: .id))
         case .imported:
@@ -115,6 +118,9 @@ public enum WorkAuthor: Codable, Sendable, Hashable {
         switch self {
         case .user:
             try container.encode(Kind.user, forKey: .kind)
+        case .named(let id):
+            try container.encode(Kind.named, forKey: .kind)
+            try container.encode(id, forKey: .id)
         case .captured(let id):
             try container.encode(Kind.captured, forKey: .kind)
             try container.encode(id, forKey: .id)

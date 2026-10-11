@@ -805,6 +805,9 @@ fn print_task_control(
 
 fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
     match command {
+        WaveCommand::Comment { wave, message, .. } => {
+            loopflow::lf::commands::waves::comment(Some(wave), message)
+        }
         WaveCommand::NewChapter {
             wave,
             name,

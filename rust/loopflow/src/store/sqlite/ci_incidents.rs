@@ -268,9 +268,10 @@ impl super::SqliteStore {
                 ts.created_at,
                 EXISTS (
                     SELECT 1 FROM task_events event
+                    JOIN steer_publications direction ON direction.id=json_extract(event.kind_json, '$.publication_id')
                     WHERE event.task_id=ci.task_id
                       AND json_extract(event.kind_json, '$.kind')='steer'
-                      AND json_extract(event.kind_json, '$.author.kind')='user'
+                      AND json_extract(direction.author, '$.kind') IN ('user','named')
                       AND event.created_at * 1000000000 >= CASE
                           WHEN ci.poll_observed_at IS NULL THEN COALESCE(ci.webhook_received_at, ci.created_at)
                           WHEN ci.webhook_received_at IS NULL THEN ci.poll_observed_at

@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use crate::durable::{render_steers, Steer, TaskId, WorkRef};
+use crate::durable::{TaskId, WorkRef};
 use crate::id::WaveId;
 use crate::planning::ProjectPlan;
 use crate::store::SharedStore;
@@ -27,7 +27,6 @@ pub(crate) fn render_task_context(
     project: &ProjectPlan,
     pr: Option<&TaskPr>,
     wave_name: &str,
-    steers: &[Steer],
 ) -> String {
     let placement = task
         .parent_pr_id
@@ -39,14 +38,13 @@ pub(crate) fn render_task_context(
         .map(|pr| format!("\nPull request: {}", pr.url))
         .unwrap_or_default();
     format!(
-        "Task {identifier}: {title}\n\n{description}\n\nChapter plan: {project} (source {project_id})\n{project_context}\n\n{direction}\n\nTask directive snapshot synced at: {task_snapshot_synced_at}\nChapter plan snapshot synced at: {project_snapshot_synced_at}\nWave: {wave}\nTask Work: {task_id}\nWorktree: {worktree}\nBranch: {branch}{pull_request}\nBase commit: {base_commit}\n{placement}",
+        "Task {identifier}: {title}\n\n{description}\n\nChapter plan: {project} (source {project_id})\n{project_context}\n\nTask directive snapshot synced at: {task_snapshot_synced_at}\nChapter plan snapshot synced at: {project_snapshot_synced_at}\nWave: {wave}\nTask Work: {task_id}\nWorktree: {worktree}\nBranch: {branch}{pull_request}\nBase commit: {base_commit}\n{placement}",
         identifier = task.plan.identifier,
         title = task.plan.title,
         description = task.plan.description,
         project = project.name,
         project_id = project.linear_id.as_ref().map(|id| id.as_str()).unwrap_or("local"),
         project_context = project.prompt_context,
-        direction = render_steers(steers),
         task_snapshot_synced_at = task.plan.pm_snapshot_synced_at.map(|at| at.to_string()).unwrap_or_else(|| "not observed".into()),
         project_snapshot_synced_at = project.pm_snapshot_synced_at.map(|at| at.to_string()).unwrap_or_else(|| "not observed".into()),
         wave = wave_name,
@@ -149,10 +147,8 @@ pub async fn resolve_work_selection(
             )?;
         }
         let work = WorkRef::Task(task.id.clone());
-        let steers = Vec::new();
         let pr = store.active_task_pr(&task.id).await.map_err(run_error)?;
-        let mut context =
-            render_task_context(&task, &project.plan, pr.as_ref(), wave.slug(), &steers);
+        let mut context = render_task_context(&task, &project.plan, pr.as_ref(), wave.slug());
         if let Ok(Some(workflow)) = store.sqlite.workflow(&task.id) {
             context.push_str(&format!("\n\n{}", workflow.guidance(&task.plan.identifier)));
         }
@@ -633,7 +629,7 @@ mod tests {
         let task = task(&store, &wave, &project, worktree.clone()).await;
 
         store
-            .append_steer(
+            .publish_direction(
                 &WorkRef::Task(task.id.clone()),
                 crate::durable::Author::User,
                 "ADVANCER ONLY",
@@ -655,7 +651,7 @@ mod tests {
         assert_eq!(prompts.work, WorkRef::Task(task.id.clone()));
         assert!(!runtime.context.contains("ADVANCER ONLY"));
         assert!(!prompts.context.contains("ADVANCER ONLY"));
-        assert_eq!(store.task_steers(&task.id).await.unwrap().len(), 1);
+        assert_eq!(store.task_direction(&task.id).await.unwrap().len(), 1);
     }
 
     #[tokio::test]

@@ -49,8 +49,15 @@ pub fn resolve_child(
         return Ok(Some(vec![child.get_name().to_string()]));
     }
     let mut matches = Vec::new();
-    if prefix.is_empty() && name == "resume" && command.find_subcommand("session").is_some() {
-        return Ok(Some(vec!["session".into(), "resume".into()]));
+    if prefix.is_empty() {
+        let owner = match name {
+            "resume" => Some("session"),
+            "comment" => Some("task"),
+            _ => None,
+        };
+        if let Some(owner) = owner.filter(|owner| command.find_subcommand(owner).is_some()) {
+            return Ok(Some(vec![owner.into(), name.into()]));
+        }
     }
     descendants(command, name, &[], &mut matches, false);
     // Exact descendant names win over abbreviations, just as exact owners do.

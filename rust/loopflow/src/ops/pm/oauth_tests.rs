@@ -12,7 +12,6 @@ use super::{
     linear_refresh_lock, pm_show_async, resolve_pm_token, PmRefresh, PmShowOptions, PmTestContext,
     PM_TEST_CONTEXT,
 };
-use crate::durable::Author;
 use crate::ops::error::OpsResult;
 use crate::ops::NullProgress;
 use crate::planning::{LinearProjectId, ProjectPlan};
@@ -134,8 +133,7 @@ async fn pm_read_linear_oauth_recovers() {
         .append_project_event(
             &project.id,
             &crate::work::project::ProjectEventKind::Steer {
-                author: Author::User,
-                text: "Preserve historical direction.".into(),
+                publication_id: crate::id::SteerPublicationId::new(),
             },
         )
         .await

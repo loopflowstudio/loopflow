@@ -1570,9 +1570,6 @@ fn _run_harness_once(
                 .send_input(&prompt)
                 .await
                 .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
-            if let (Some(input), Some(capture)) = (&process.task_input, capture) {
-                input.record_seed(capture).await;
-            }
             let mut stdout = String::new();
             let mut stderr = String::new();
             let mut exit_code = None;
@@ -1584,7 +1581,7 @@ fn _run_harness_once(
                 tokio::select! {
                     _ = input_tick.tick(), if process.task_input.is_some() => {
                         process.task_input.as_ref().expect("Task input is enabled")
-                            .poll(harness.as_mut(), capture).await
+                            .poll(harness.as_mut()).await
                             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
                     }
                     _ = activity_tick.tick(), if capture.is_some() => {

@@ -626,7 +626,7 @@ impl SqliteStore {
         self.lock_session_fence(session, true)
     }
 
-    fn lock_session_fence(&self, session: &str, shared: bool) -> StoreResult<File> {
+    fn session_fence_file(&self, session: &str) -> StoreResult<File> {
         let database = self
             .conn
             .lock()
@@ -649,6 +649,20 @@ impl SqliteStore {
             .write(true)
             .open(root.join(hex::encode(Sha256::digest(session.as_bytes()))))
             .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+        Ok(file)
+    }
+
+    pub(crate) fn try_lock_session_attachment(&self, session: &str) -> StoreResult<Option<File>> {
+        let file = self.session_fence_file(session)?;
+        match file.try_lock_exclusive() {
+            Ok(()) => Ok(Some(file)),
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => Ok(None),
+            Err(error) => Err(StoreError::InvalidData(error.to_string())),
+        }
+    }
+
+    fn lock_session_fence(&self, session: &str, shared: bool) -> StoreResult<File> {
+        let file = self.session_fence_file(session)?;
         // A synchronous caller must never wait indefinitely on a dispatch whose
         // reactor it might be driving. This bound uses the OS clock, not Tokio.
         let deadline = Instant::now() + Duration::from_secs(15);

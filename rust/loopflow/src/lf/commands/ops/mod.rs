@@ -930,6 +930,7 @@ pub fn refresh_status(wave: Option<&str>) -> Result<String> {
 
 pub fn run_repo(cmd: &RepoCommand) -> Result<()> {
     match cmd {
+        RepoCommand::Comment { message, .. } => crate::lf::commands::waves::comment(None, message),
         RepoCommand::Connect {
             wave,
             all,

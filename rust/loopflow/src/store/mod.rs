@@ -2767,15 +2767,15 @@ mod tests {
         let target = ChildRef::Task(task.id.clone());
         let work = store.work_for_child(&target).await.unwrap();
         let first = store
-            .append_steer(&work, Author::User, "inspect the failing test")
+            .publish_direction(&work, Author::User, "inspect the failing test")
             .await
             .unwrap();
         let second = store
-            .append_steer(&work, Author::User, "preserve the public behavior")
+            .publish_direction(&work, Author::User, "preserve the public behavior")
             .await
             .unwrap();
 
-        let steers = store.task_steers(&task.id).await.unwrap();
+        let steers = store.task_direction(&task.id).await.unwrap();
         assert_eq!(
             steers.iter().map(|steer| steer.id).collect::<Vec<_>>(),
             [first.id, second.id]
@@ -2789,7 +2789,7 @@ mod tests {
         );
 
         // The cross-Work `lf activity` timeline reads the same comments through
-        // `steers_since`, attributed to their Work and ordered by time. Stamp the
+        // `direction_since`, attributed to their Work and ordered by time. Stamp the
         // two events so the `since` filter has something to bite on.
         let conn = rusqlite::Connection::open(&database_path).unwrap();
         conn.execute(
@@ -2802,7 +2802,7 @@ mod tests {
             [second.id],
         )
         .unwrap();
-        let timeline = store.steers_since(0).await.unwrap();
+        let timeline = store.direction_since(0).await.unwrap();
         assert_eq!(
             timeline
                 .iter()
@@ -2813,7 +2813,7 @@ mod tests {
         assert!(timeline.iter().all(|comment| comment.work == work));
         assert_eq!(
             store
-                .steers_since(1_700_000_010)
+                .direction_since(1_700_000_010)
                 .await
                 .unwrap()
                 .into_iter()
@@ -2866,7 +2866,7 @@ mod tests {
             .await
             .unwrap();
         store
-            .append_steer(
+            .publish_direction(
                 &WorkRef::Task(task.id.clone()),
                 Author::User,
                 "try the flaky test again",
@@ -2922,89 +2922,6 @@ mod tests {
         fn agent_session(&self) -> Option<crate::id::AgentSessionId> {
             None
         }
-    }
-
-    #[test]
-    fn live_steers_inject_new_comments_and_defer_when_not_steerable() {
-        let _lock = crate::journal::test_env_lock();
-        let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
-        tokio::runtime::Runtime::new().unwrap().block_on(async {
-            let directory = tempfile::tempdir().unwrap();
-            std::env::set_var("LF_HOME", directory.path());
-            let store = std::sync::Arc::new(
-                crate::store::open_ephemeral_store(&StorageConfig::sqlite(
-                    directory.path().join("loopflow.db"),
-                ))
-                .await
-                .unwrap(),
-            );
-            let wave = make_wave(directory.path().to_str().unwrap());
-            store.create_wave(&wave).await.unwrap();
-            let project = make_project(&wave);
-            store.create_project(&project).await.unwrap();
-            select_project(&store, &project);
-            let mut task = make_task(&wave, &project);
-            let checkout = directory.path().join("checkout");
-            std::fs::create_dir(&checkout).unwrap();
-            task.worktree = Some(checkout);
-            store.seed_task(&task, &make_task_pr(&task)).await.unwrap();
-            let work = WorkRef::Task(task.id.clone());
-
-            let sent = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-            let mut harness = RecordingHarness {
-                sent: sent.clone(),
-                steerable: true,
-                ..Default::default()
-            };
-
-            let first = store
-                .append_steer(&work, Author::User, "focus on the parser")
-                .await
-                .unwrap();
-            let second = store
-                .append_steer(&work, Author::User, "keep the API stable")
-                .await
-                .unwrap();
-            let mut cursor = 0;
-            crate::ops::child::inject_live_steers(&store, &task.id, &mut harness, &mut cursor)
-                .await;
-            assert_eq!(
-                *sent.lock().unwrap(),
-                ["focus on the parser", "keep the API stable"]
-            );
-            assert_eq!(
-                cursor, second.id,
-                "the cursor advances past what was injected"
-            );
-            assert!(first.id < second.id);
-
-            // A comment that arrives later injects only itself — the cursor gates it.
-            let third = store
-                .append_steer(&work, Author::User, "add a regression test")
-                .await
-                .unwrap();
-            crate::ops::child::inject_live_steers(&store, &task.id, &mut harness, &mut cursor)
-                .await;
-            assert_eq!(sent.lock().unwrap().len(), 3);
-            assert_eq!(cursor, third.id);
-
-            // A provider that can't take live input leaves the cursor where it is, so
-            // the comment rides the next skill boundary's seed instead.
-            store
-                .append_steer(&work, Author::User, "later direction")
-                .await
-                .unwrap();
-            let mut deaf = RecordingHarness {
-                steerable: false,
-                ..Default::default()
-            };
-            let before = cursor;
-            crate::ops::child::inject_live_steers(&store, &task.id, &mut deaf, &mut cursor).await;
-            assert_eq!(
-                cursor, before,
-                "NotSteerable defers the comment to the next boundary seed"
-            );
-        });
     }
 
     #[tokio::test]
@@ -3158,7 +3075,7 @@ mod tests {
         };
         assert_eq!(durable_child_rows(&database_path), (1, 0, 0));
 
-        let child_steers = store.task_steers(&task.id).await.unwrap();
+        let child_steers = store.task_direction(&task.id).await.unwrap();
         assert!(child_steers.is_empty());
         assert_eq!(
             store
@@ -3222,7 +3139,7 @@ mod tests {
             target_status
         );
         assert_eq!(store.task_prs(&target.id).await.unwrap(), target_prs);
-        assert!(store.task_steers(&target.id).await.unwrap().is_empty());
+        assert!(store.task_direction(&target.id).await.unwrap().is_empty());
     }
 
     #[tokio::test]

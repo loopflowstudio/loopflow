@@ -205,7 +205,7 @@ pub(crate) fn build_snapshot(
     }
 
     let steers = store
-        .steers_since(since)
+        .direction_since(since)
         .map_err(|error| anyhow!("failed to read Steers: {error}"))?;
     for comment in steers {
         if let Some(work) = catalog.owners.get(&comment.work) {

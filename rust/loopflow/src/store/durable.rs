@@ -98,13 +98,13 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.work_for_child(&target)).await
     }
 
-    pub async fn task_steers(&self, task_id: &TaskId) -> StoreResult<Vec<Steer>> {
+    pub async fn task_direction(&self, task_id: &TaskId) -> StoreResult<Vec<Steer>> {
         let task_id = task_id.clone();
-        run_sqlite(&self.sqlite, move |store| store.task_steers(&task_id)).await
+        run_sqlite(&self.sqlite, move |store| store.task_direction(&task_id)).await
     }
 
-    pub async fn steers_since(&self, since: i64) -> StoreResult<Vec<SteerComment>> {
-        run_sqlite(&self.sqlite, move |store| store.steers_since(since)).await
+    pub async fn direction_since(&self, since: i64) -> StoreResult<Vec<SteerComment>> {
+        run_sqlite(&self.sqlite, move |store| store.direction_since(since)).await
     }
 
     pub async fn append_interrupt(&self, work: &WorkRef) -> StoreResult<i64> {
@@ -118,7 +118,7 @@ impl Store {
     }
 
     #[cfg(test)]
-    pub(crate) async fn append_steer(
+    pub(crate) async fn publish_direction(
         &self,
         work: &WorkRef,
         author: crate::durable::Author,
@@ -127,7 +127,7 @@ impl Store {
         let work = work.clone();
         let text = text.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.append_steer(&work, &author, &text)
+            store.publish_direction(&work, &author, &text)
         })
         .await
     }

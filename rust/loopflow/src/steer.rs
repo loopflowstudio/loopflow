@@ -19,3 +19,40 @@ impl std::fmt::Debug for SteerAdapter {
             .finish_non_exhaustive()
     }
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SteerPublication {
+    pub id: crate::id::SteerPublicationId,
+    pub sequence: i64,
+    pub source: String,
+    pub revision: String,
+    pub author: crate::durable::Author,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionSteerStatus {
+    pub publication: SteerPublication,
+    pub attempt: i64,
+    pub evidence: String,
+    pub batch_id: Option<crate::id::SteerBatchId>,
+    pub payload_hash: Option<String>,
+    pub excerpted: Option<bool>,
+}
+
+/// A bounded page of receipts; capability is observed adapter evidence, never
+/// inferred from an installed provider version or a successful stdout write.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionSteerPage {
+    pub items: Vec<SessionSteerStatus>,
+    pub next_after: Option<i64>,
+    pub pending: i64,
+    pub capability: String,
+}
+
+/// The exact context offered by a callback, including which sources were excerpted.
+#[derive(Debug)]
+pub(crate) struct SteerContext {
+    pub text: String,
+    pub excerpts: Vec<crate::id::SteerPublicationId>,
+}

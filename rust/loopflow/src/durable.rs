@@ -127,6 +127,7 @@ pub struct Placement {
 #[serde(tag = "kind", content = "id", rename_all = "snake_case")]
 pub enum Author {
     User,
+    Named(String),
     Captured(i64),
     /// Historical selector preserved from pre-event attribution.
     #[serde(alias = "run")]
@@ -136,7 +137,8 @@ pub enum Author {
 impl std::fmt::Display for Author {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::User => f.write_str("user"),
+            Self::User => f.write_str("attribution unresolved"),
+            Self::Named(name) => f.write_str(name),
             Self::Captured(id) => write!(f, "session input {id}"),
             Self::Imported(selector) => write!(f, "imported {selector}"),
         }

@@ -35,6 +35,7 @@ export default async () => {
       // acquire fresh context instead of caching a consumed steer batch.
       const text = refresh(summary ? "compact" : "start");
       // Transform the conversation copy, not the stored user request or title.
+      user.parts = user.parts.filter((part) => part.id !== `lf-context-${user.info.id}`);
       user.parts.push({ type: "text", text, synthetic: true,
         id: `lf-context-${user.info.id}`, sessionID: session, messageID: user.info.id });
     },

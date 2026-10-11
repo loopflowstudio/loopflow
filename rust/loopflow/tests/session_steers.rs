@@ -18,6 +18,13 @@ fn claude_startup_preserves_large_combined_seed_and_correlated_answer() {
     fs::write(account_home.join(".credentials.json"), &credential).unwrap();
     let store =
         loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let publication = store
+        .publish_repository_steer(
+            &loopflow::repository::CanonicalRepo::discover(repo.path()).unwrap(),
+            "Fixture author",
+            &format!("STARTUP_DIRECTION {}", "界<&>".repeat(20_000)),
+        )
+        .unwrap();
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
     store
         .upsert_provider_account(&loopflow::store::ProviderAccount {
@@ -87,7 +94,13 @@ with open(lock, 'r+') as fence:
         assert previous.read_text() != adapter['agent_process_id'], 'replacement reused old capability'
     previous.write_text(adapter['agent_process_id'])
     output = subprocess.check_output(hook, shell=True, input=json.dumps({'session_id': 'startup-native', 'hook_event_name': 'SessionStart', 'source': 'startup'}).encode())
-    assert json.loads(output)['hookSpecificOutput']['additionalContext']
+    context_text = json.loads(output)['hookSpecificOutput']['additionalContext']
+    assert len(context_text.encode()) <= 10000
+    if '--resume' in sys.argv:
+        assert 'STARTUP_DIRECTION' not in context_text, 'resume replayed consumed direction'
+    else:
+        assert 'STARTUP_DIRECTION' in context_text
+        assert '[excerpt; full source above]' in context_text
     (home / 'startup-complete').touch()
 if '--resume' in sys.argv:
     query = json.loads(sys.stdin.readline())
@@ -157,6 +170,17 @@ sys.stdin.read()
             |r| r.get(0),
         )
         .unwrap();
+    let receipts = store.session_steers(&session, 0, 32).unwrap();
+    assert_eq!(receipts.items[0].publication.id, publication.id);
+    assert_eq!(receipts.items[0].evidence, "emitted");
+    assert_eq!(receipts.items[0].excerpted, Some(true));
+    assert_eq!(
+        store
+            .session_steer_source(&session, &publication.id)
+            .unwrap()
+            .text,
+        publication.text
+    );
     let resumed = Command::new(env!("CARGO_BIN_EXE_lf"))
         .env_clear()
         .env("HOME", home.path())
@@ -313,14 +337,24 @@ while not (home / 'finish').exists() and time.monotonic() < deadline:
             .unwrap();
         hook.wait_with_output().unwrap()
     };
-    let payload = serde_json::json!({"session_id":"handoff-native", "hook_event_name":"SessionStart", "source":"resume"});
+    let direction = store
+        .publish_session_steer(session, "Fixture author", "HANDOFF_DIRECTION")
+        .unwrap();
+    let payload = serde_json::json!({"session_id":"handoff-native", "hook_event_name":"PostToolUse", "tool_use_id":"handoff-tool", "turn_id":"native-turn"});
     let received = hook(payload.clone());
     assert!(
         received.status.success(),
         "{}",
         String::from_utf8_lossy(&received.stderr)
     );
-    assert!(!received.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&received.stdout).contains("HANDOFF_DIRECTION"));
+    assert_eq!(
+        store.session_steers(session, 0, 32).unwrap().items[0].evidence,
+        "emitted"
+    );
+    let pending = store
+        .publish_session_steer(session, "Fixture author", "NEXT_DIRECTION")
+        .unwrap();
     let mut nested = payload.clone();
     nested["agent_id"] = serde_json::json!("child");
     let rejected = hook(nested);
@@ -330,6 +364,88 @@ while not (home / 'finish').exists() and time.monotonic() < deadline:
     let rejected = hook(foreign);
     assert!(!rejected.status.success());
     assert!(rejected.stdout.is_empty());
+    assert_eq!(store.session_steers(session, 0, 32).unwrap().pending, 1);
+    // Exercise the shipped OpenCode transform against the real receipt command.
+    // Internal stream retries reuse one transformed value; a later callback has
+    // another adapter invocation and must replace that ephemeral context copy.
+    let plugin = home.path().join("transform.mjs");
+    let delivery_path = declaration["delivery"].as_str().unwrap();
+    let delivery: serde_json::Value =
+        serde_json::from_slice(&fs::read(delivery_path).unwrap()).unwrap();
+    fs::write(&plugin, format!("const spec = {};\nconst delivery = {};\n{}",
+        serde_json::json!({"executable":env!("CARGO_BIN_EXE_lf"),"delivery":delivery,"instructions":""}),
+        serde_json::to_string(delivery_path).unwrap(),
+        include_str!("../src/harness/context_opencode.js"))).unwrap();
+    let probe = home.path().join("transform-proof.mjs");
+    fs::write(
+        &probe,
+        r#"
+import assert from 'node:assert/strict';
+import plugin from './transform.mjs';
+const hooks = await plugin();
+await hooks['chat.message']({sessionID:'handoff-native'});
+const output = {messages:[{info:{role:'user',id:'user-one',sessionID:'handoff-native'},parts:[]}]};
+const transform = hooks['experimental.chat.messages.transform'];
+await transform({},output);
+const first = JSON.stringify(output);
+assert(first.includes('NEXT_DIRECTION'));
+assert.equal(JSON.stringify(structuredClone(output)), first); // processor stream retry input
+const afterLostTransform = {messages:[{info:{role:'user',id:'user-one',sessionID:'handoff-native'},parts:[]}]};
+await transform({},afterLostTransform);
+assert(!JSON.stringify(afterLostTransform).includes('NEXT_DIRECTION')); // loss is emitted/unconfirmed
+await transform({},output);
+assert(!JSON.stringify(output).includes('NEXT_DIRECTION'));
+assert.equal(output.messages[0].parts.filter(p=>p.id==='lf-context-user-one').length,1);
+const child = {messages:[{info:{role:'user',id:'child',sessionID:'another-native'},parts:[]}]};
+await transform({},child);
+assert.equal(child.messages[0].parts.length,0);
+"#,
+    )
+    .unwrap();
+    let protocol = Command::new("node")
+        .arg(&probe)
+        .env("LF_HOME", home.path())
+        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+        .env(
+            "LF_PROVIDER_CONTEXT",
+            declaration["capability"].as_str().unwrap(),
+        )
+        .output()
+        .unwrap();
+    assert!(
+        protocol.status.success(),
+        "{}",
+        String::from_utf8_lossy(&protocol.stderr)
+    );
+    let page = store.session_steers(session, 0, 32).unwrap();
+    assert_eq!(page.pending, 0);
+    assert_eq!(
+        page.items
+            .iter()
+            .find(|row| row.publication.id == pending.id)
+            .unwrap()
+            .evidence,
+        "emitted"
+    );
+    assert_eq!(
+        page.items
+            .iter()
+            .find(|row| row.publication.id == direction.id)
+            .unwrap()
+            .attempt,
+        0
+    );
+    store
+        .publish_session_steer(session, "Fixture author", "FAILED_TOOL_DIRECTION")
+        .unwrap();
+    let failed = hook(serde_json::json!({"session_id":"handoff-native",
+        "hook_event_name":"PostToolUseFailure","tool_use_id":"failed-tool"}));
+    assert!(
+        failed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&failed.stderr)
+    );
+    assert!(String::from_utf8_lossy(&failed.stdout).contains("FAILED_TOOL_DIRECTION"));
     store
         .claim_session_attachment(session, Some(&third), &other, true)
         .unwrap();
@@ -339,4 +455,102 @@ while not (home / 'finish').exists() and time.monotonic() < deadline:
     fs::write(home.path().join("finish"), "").unwrap();
     let mut child = child;
     child.wait().unwrap();
+}
+
+#[test]
+fn public_publication_commands_save_direction_without_launching_providers() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let task =
+        support::register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    let run = |args: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+            .env_clear()
+            .env("HOME", home.path())
+            .env("LF_HOME", home.path())
+            .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+            .env("PATH", "/usr/bin:/bin")
+            .env("GIT_ALLOW_PROTOCOL", "file")
+            .current_dir(repo.path())
+            .args(args)
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).unwrap()
+    };
+    run(&["repo", "comment", "REPOSITORY_DIRECTION", "--steer"]);
+    run(&[
+        "wave",
+        "comment",
+        task.task.wave_id.as_str(),
+        "WAVE_DIRECTION",
+        "--steer",
+    ]);
+    run(&[
+        "comment",
+        task.task.id.as_str(),
+        "TASK_DIRECTION",
+        "--steer",
+    ]);
+    let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    conn.execute(
+        "INSERT INTO agent_sessions(id,title,title_source,created_at,cwd,input_published,repo)
+        VALUES('idle','Idle fixture','human',1,?1,1,?2)",
+        rusqlite::params![
+            repo.path().to_str().unwrap(),
+            loopflow::repository::CanonicalRepo::discover(repo.path())
+                .unwrap()
+                .to_string()
+        ],
+    )
+    .unwrap();
+    let artifact = format!("run_{}", uuid::Uuid::new_v4().simple());
+    conn.execute(
+        "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
+        VALUES('idle','captured',?1,1,json_object('artifact_key',?1))",
+        [artifact.as_str()],
+    )
+    .unwrap();
+    conn.execute(
+        "UPDATE agent_sessions SET current_capture=?1 WHERE id='idle'",
+        [conn.last_insert_rowid()],
+    )
+    .unwrap();
+    run(&["session", "steer", "idle", "DIRECT_DIRECTION"]);
+    let page: serde_json::Value = serde_json::from_str(&run(&[
+        "session", "steers", "idle", "--json", "--limit", "2",
+    ]))
+    .unwrap();
+    assert_eq!(page["pending"], 4, "{page}");
+    assert_eq!(page["items"].as_array().unwrap().len(), 2);
+    assert!(page["capability"].as_str().unwrap().contains("idle"));
+    let cursor = page["next_after"].as_i64().unwrap().to_string();
+    let rest: serde_json::Value = serde_json::from_str(&run(&[
+        "session", "steers", "idle", "--json", "--after", &cursor,
+    ]))
+    .unwrap();
+    assert_eq!(rest["items"].as_array().unwrap().len(), 2);
+    let publication = rest["items"][1]["publication"]["id"].as_str().unwrap();
+    let source: serde_json::Value = serde_json::from_str(&run(&[
+        "session",
+        "steers",
+        "idle",
+        "--source",
+        publication,
+    ]))
+    .unwrap();
+    assert_eq!(source["text"], "DIRECT_DIRECTION");
+    let provider_count: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM processes WHERE kind='agent'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(provider_count, 0);
 }

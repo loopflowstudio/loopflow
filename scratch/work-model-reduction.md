@@ -76,7 +76,7 @@ The canonical list preserves shared rank rather than edit-time order. Project ex
 now reads that canonical owner too.
 
 **Remaining:** `store/sqlite/plan_read.rs` reconstructs `LinearProject` (formerly `PmProject`)/`PmItem` for
-Task observations and `planning_wave`. Delete these with their surviving consumers. `PmTaskRecord` / `PmTaskObservation` must cease being alternate Task
+Task observations. `planning_wave` and its consumers are removed. Delete the remaining projections. `PmTaskRecord` / `PmTaskObservation` must cease being alternate Task
 read results, including the embedded Project clone inside a Task observation.
 
 **Evidence:** `project_in` still rebuilds a PM-shaped Project from typed columns;
@@ -287,8 +287,10 @@ local; there is one configured transport and no fallback transport or resident.
 **Rust:** ProjectSummary now reads canonical Projects once, has no optional
 `work_id`, and requires sync evidence. CLI and Swift select local identity with
 an explicit optional `linear_id` binding. Project operations and rotation return
-canonical Work. Remaining: `PmTaskSummary`, Task status/detail readers and Work
-frame Task projections; remove their alternate identity/read paths end to end.
+canonical Work. Wave/roadmap/Work-frame Task summaries now read canonical Tasks, with local IDs,
+explicit optional Linear bindings and required sync evidence. `PmTaskSummary`,
+`planning_wave` and their dual-ID joins are removed. Remaining: Task status/detail
+and its provider-shaped local reconstruction; preserve the observation boundary.
 
 **Swift (under `swift/`):** `Models/WaveWorkMap.swift`'s Project/Task planning
 snapshots and `PlanningKeyResult`; `Models/WavePlan.swift`, `PlanningSync.swift`,

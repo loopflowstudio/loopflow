@@ -1768,9 +1768,6 @@ mod tests {
             assert_eq!(record.item.rank, 0);
             assert_eq!(record.observed_at, 17);
             assert_eq!(store.sqlite.workflow(&task.id).unwrap(), reopened);
-            let wave_plan = store.sqlite.planning_wave(wave.id()).unwrap();
-            assert_eq!(wave_plan.items, vec![record.item]);
-            assert_eq!(wave_plan.projects, snapshot.snapshot.projects);
         }
     }
 

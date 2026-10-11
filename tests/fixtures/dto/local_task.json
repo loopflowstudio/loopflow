@@ -87,7 +87,8 @@
       "sync": {
         "connected": false,
         "changes": []
-      }
+      },
+      "linear_id": null
     },
     "workflow_name": null
   }

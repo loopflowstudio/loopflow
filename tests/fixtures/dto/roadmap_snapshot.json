@@ -74,7 +74,11 @@
               "completed_at": null,
               "due_date": null,
               "follow_up_sources": [],
-              "sync": null
+              "sync": {
+                "connected": false,
+                "changes": []
+              },
+              "linear_id": null
             },
             "reference": {
               "issue_url": "https://linear.app/loopflow/issue/W2-144/make-lf-roadmap-the-machine-wide-view",
@@ -449,7 +453,11 @@
               "completed_at": null,
               "due_date": null,
               "follow_up_sources": [],
-              "sync": null
+              "sync": {
+                "connected": false,
+                "changes": []
+              },
+              "linear_id": null
             },
             "reference": {
               "issue_url": "https://linear.app/loopflow/issue/W2-131/show-the-all-wave-roadmap",
@@ -853,7 +861,11 @@
               "completed_at": null,
               "due_date": null,
               "follow_up_sources": [],
-              "sync": null
+              "sync": {
+                "connected": false,
+                "changes": []
+              },
+              "linear_id": null
             },
             "reference": {
               "issue_url": null,
@@ -908,7 +920,7 @@
             "task": {
               "id": "issue-later",
               "identifier": "W2-141",
-              "name": "Now + Available work views \u2014 research",
+              "name": "Now + Available work views — research",
               "description": "Research delivered in merged PR.",
               "rank": 0,
               "completed": true,
@@ -917,7 +929,11 @@
               "completed_at": null,
               "due_date": null,
               "follow_up_sources": [],
-              "sync": null
+              "sync": {
+                "connected": false,
+                "changes": []
+              },
+              "linear_id": null
             },
             "reference": {
               "issue_url": "https://linear.app/loopflow/issue/W2-141/now-available-work-views-research",

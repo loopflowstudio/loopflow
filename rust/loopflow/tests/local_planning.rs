@@ -1234,110 +1234,176 @@ fn project_creation_binding_and_activation_save_offline() {
 
 #[test]
 fn project_reads_keep_canonical_identity_and_authored_order_after_edits() {
-    let repo = TestRepo::new();
-    let home = tempfile::tempdir().unwrap();
-    let store =
-        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
-    let canonical = loopflow::repository::CanonicalRepo::discover(repo.path()).unwrap();
-    let wave = loopflow::work::wave::Wave::new(
-        loopflow::id::WaveId::new(),
-        "product".into(),
-        canonical.to_string(),
-    );
-    store.create_wave(&wave).unwrap();
-    let projects = ["first", "second"]
-        .into_iter()
-        .map(|name| {
-            serde_json::from_value(serde_json::json!({
-                "id": format!("linear-{name}"), "slug": name, "name": name,
-                "summary": "", "revision": null, "status": "started", "workflow": "",
-                "krs": [], "metric_targets": [], "initiative_ids": ["initiative"],
-                "team_ids": ["team"]
-            }))
-            .unwrap()
-        })
-        .collect();
-    store
-        .put_pm_snapshot(&loopflow::store::PmSnapshotRow {
-            wave_id: wave.id().clone(),
-            provider: "linear".into(),
-            initiative: "initiative".into(),
-            synced_at: 17,
-            snapshot: loopflow::pm::PmSnapshot {
-                projects,
-                items: Vec::new(),
-            },
-        })
+    for connected in [false, true] {
+        let repo = TestRepo::new();
+        if connected {
+            std::fs::create_dir_all(repo.path().join(".lf")).unwrap();
+            std::fs::write(
+                repo.path().join(".lf/config.yaml"),
+                "planning:\n  provider: linear\npm:\n  linear_team: team\n",
+            )
+            .unwrap();
+        }
+        let home = tempfile::tempdir().unwrap();
+        let store =
+            loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+        let canonical = loopflow::repository::CanonicalRepo::discover(repo.path()).unwrap();
+        let wave = loopflow::work::wave::Wave::new(
+            loopflow::id::WaveId::new(),
+            "product".into(),
+            canonical.to_string(),
+        );
+        store.create_wave(&wave).unwrap();
+        let projects = ["first", "second"]
+            .into_iter()
+            .map(|name| {
+                serde_json::from_value(serde_json::json!({
+                    "id": format!("linear-{name}"), "slug": name, "name": name,
+                    "summary": "", "revision": null, "status": "started", "workflow": "",
+                    "krs": [], "metric_targets": [], "initiative_ids": ["initiative"],
+                    "team_ids": ["team"]
+                }))
+                .unwrap()
+            })
+            .collect();
+        store
+            .put_pm_snapshot(&loopflow::store::PmSnapshotRow {
+                wave_id: wave.id().clone(),
+                provider: "linear".into(),
+                initiative: "initiative".into(),
+                synced_at: 17,
+                snapshot: loopflow::pm::PmSnapshot {
+                    projects,
+                    items: vec![serde_json::from_value(serde_json::json!({
+                    "id": "linear-task", "identifier": "FIX-1", "name": "Shared title",
+                    "description": "Saved prose", "rank": 4, "project_id": "linear-first",
+                    "project": "first", "team_id": "team", "completed": false,
+                    "completed_at": null, "state": "unstarted", "due_date": "2026-11-01",
+                    "assignee": "Fixture author", "branch_name": null, "url": null, "revision": null
+                }))
+                .unwrap()],
+                },
+            })
+            .unwrap();
+        let projects = store.list_projects(Some(wave.id())).unwrap();
+        assert_eq!(
+            projects.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
+            ["first", "second"]
+        );
+        lf(
+            repo.path(),
+            home.path(),
+            &[
+                "wave",
+                "bind-project",
+                "product",
+                projects[0].id.as_str(),
+                "--json",
+            ],
+        );
+        // Make recency disagree with the shared order before and after an ordinary edit.
+        let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+        conn.execute(
+            "UPDATE projects SET updated_at=1 WHERE id=?1",
+            [projects[0].id.as_str()],
+        )
         .unwrap();
-    let projects = store.list_projects(Some(wave.id())).unwrap();
-    assert_eq!(
-        projects.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
-        ["first", "second"]
-    );
-    lf(
-        repo.path(),
-        home.path(),
-        &[
-            "wave",
-            "bind-project",
-            "product",
-            projects[0].id.as_str(),
-            "--json",
-        ],
-    );
-    // Make recency disagree with the shared order before and after an ordinary edit.
-    let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-    conn.execute(
-        "UPDATE projects SET updated_at=1 WHERE id=?1",
-        [projects[0].id.as_str()],
-    )
-    .unwrap();
-    for edited in [false, true] {
-        if edited {
-            lf(
+        let saved = store.task_by_issue("FIX-1").unwrap().unwrap();
+        for edited in [false, true] {
+            if edited {
+                lf(
+                    repo.path(),
+                    home.path(),
+                    &[
+                        "project",
+                        "edit",
+                        projects[1].id.as_str(),
+                        "--name",
+                        "Edited",
+                    ],
+                );
+            }
+            if edited {
+                lf(
+                    repo.path(),
+                    home.path(),
+                    &[
+                        "task",
+                        "edit",
+                        "FIX-1",
+                        "--title",
+                        "Local title",
+                        "--notes",
+                        "Local prose",
+                    ],
+                );
+                // Missing provider inventory is not a missing saved due date or Task.
+                conn.execute("DELETE FROM pm_items", []).unwrap();
+            }
+            let status = lf(
                 repo.path(),
                 home.path(),
-                &[
-                    "project",
-                    "edit",
-                    projects[1].id.as_str(),
-                    "--name",
-                    "Edited",
-                ],
+                &["wave", "status", "product", "--json"],
+            );
+            let roadmap = lf(
+                repo.path(),
+                home.path(),
+                &["roadmap", "--wave", "product", "--json"],
+            );
+            for rows in [
+                &status["tasks"]["items"],
+                &roadmap["waves"][0]["tasks"]["items"],
+            ] {
+                let rows = rows.as_array().unwrap();
+                assert_eq!(rows.len(), 1);
+                let task = &rows[0]["task"];
+                assert_eq!(task["id"], saved.id.as_str());
+                assert_eq!(task["linear_id"], "linear-task");
+                assert_eq!(
+                    task["name"],
+                    if edited {
+                        "Local title"
+                    } else {
+                        "Shared title"
+                    }
+                );
+                assert_eq!(
+                    task["description"],
+                    if edited { "Local prose" } else { "Saved prose" }
+                );
+                assert_eq!(task["due_date"], "2026-11-01");
+                assert_eq!(task["assignee"], "Fixture author");
+                assert!(task["sync"].is_object());
+                assert_eq!(rows[0]["runtime"]["work_id"], saved.id.as_str());
+            }
+            let retained = store.task_by_issue("FIX-1").unwrap().unwrap();
+            assert_eq!(retained.worktree, saved.worktree);
+            assert_eq!(retained.branch, saved.branch);
+            assert_eq!(retained.base_commit, saved.base_commit);
+            assert_eq!(retained.pm_snapshot_synced_at, saved.pm_snapshot_synced_at);
+            for rows in [
+                &status["projects"]["items"],
+                &roadmap["waves"][0]["projects"]["items"],
+            ] {
+                let rows = rows.as_array().unwrap();
+                assert_eq!(rows.len(), 2);
+                for (row, project) in rows.iter().zip(&projects) {
+                    assert_eq!(row["id"], project.id.as_str());
+                    assert_eq!(
+                        row["linear_id"],
+                        project.linear_id.as_ref().unwrap().as_str()
+                    );
+                    assert!(row.get("work_id").is_none());
+                    assert!(row["sync"].is_object());
+                }
+                assert_eq!(rows[0]["current"], true);
+                assert_eq!(rows[1]["name"], if edited { "Edited" } else { "second" });
+            }
+            assert_eq!(
+                status["project_readiness"]["project_id"],
+                projects[0].id.as_str()
             );
         }
-        let status = lf(
-            repo.path(),
-            home.path(),
-            &["wave", "status", "product", "--json"],
-        );
-        let roadmap = lf(
-            repo.path(),
-            home.path(),
-            &["roadmap", "--wave", "product", "--json"],
-        );
-        for rows in [
-            &status["projects"]["items"],
-            &roadmap["waves"][0]["projects"]["items"],
-        ] {
-            let rows = rows.as_array().unwrap();
-            assert_eq!(rows.len(), 2);
-            for (row, project) in rows.iter().zip(&projects) {
-                assert_eq!(row["id"], project.id.as_str());
-                assert_eq!(
-                    row["linear_id"],
-                    project.linear_id.as_ref().unwrap().as_str()
-                );
-                assert!(row.get("work_id").is_none());
-                assert!(row["sync"].is_object());
-            }
-            assert_eq!(rows[0]["current"], true);
-            assert_eq!(rows[1]["name"], if edited { "Edited" } else { "second" });
-        }
-        assert_eq!(
-            status["project_readiness"]["project_id"],
-            projects[0].id.as_str()
-        );
     }
 }
 

@@ -211,6 +211,11 @@ work require that exact Project to be In Progress; another In Progress Project
 does not compete with the binding. Already-started Tasks retain continuation in
 predecessor Projects.
 
+Wave and roadmap Task summaries read saved Work directly: `id` is the local Task
+identity, `linear_id` is its optional provider binding, and `sync` is required
+read-only evidence. Missing provider inventory does not erase saved prose, due
+dates or assignments. Workflow, execution and checkout evidence remain separate.
+
 `ensure` activates the configured Backlog or Planned Project in SQLite and records
 its status change for delivery. Without a binding, creation, original name,
 selection and the local transition receipt commit together. Retry reuses that

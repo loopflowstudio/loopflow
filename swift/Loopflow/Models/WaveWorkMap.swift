@@ -78,8 +78,9 @@ public struct PlanningKeyResult: Decodable, Sendable, Identifiable, Hashable {
 }
 
 public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable {
-    public let sync: PlanningSyncStatus?
+    public let sync: PlanningSyncStatus
     public let id: String
+    public let linearId: String?
     public let identifier: String
     public let name: String
     public let description: String
@@ -93,6 +94,7 @@ public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable 
 
     enum CodingKeys: String, CodingKey {
         case id, identifier, name, description, rank, completed, state, assignee, sync
+        case linearId = "linear_id"
         case completedAt = "completed_at"
         case dueDate = "due_date"
         case followUpSources = "follow_up_sources"

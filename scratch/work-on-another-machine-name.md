@@ -217,32 +217,46 @@ Cold placement, comments, PR ownership and sweep consume that identity; sweep
 compares canonical Project IDs. Concrete Linear ownership validation remains at
 acquisition. No migration or execution write is added.
 
-### Remaining reader cut — reconciled October 10 at `7e63c994d0`
+### Remaining reader cut — October 10
 
-The preceding feedback's `ResolvedTask` finding is superseded by `8c2b64029f`;
-that type and `ops/task_pm.rs` are absent. Canonical fields and the acquisition
-return are implemented, but ordinary read composition remains provider-shaped:
+Wave, roadmap and Work-frame Task summaries now read canonical Tasks and Projects,
+without `planning_wave`, its fabricated Project inventory, `PmTaskSummary` or the
+local/provider-ID join. Summary IDs are local, `linear_id` is an explicit optional
+binding and sync evidence is required; Swift consumes that contract. Saved due
+dates and prose no longer depend on provider inventory in these surfaces. Execution,
+checkout and Workflow reads remain independent. Source checks are recorded below.
 
-- `plan_read::task_in` selects saved due dates, then overwrites them from the
-  Linear observation (including `None` when its record is absent). `project_in`
-  fabricates `LinearProject` with `description: None` and dual-purpose IDs.
-- `ops/task.rs::task_planning_item` still feeds create, placement and snapshot
-  callers. `TaskStatus.planning` exposes `PmTaskRecord`; known Tasks use the local
-  reconstruction while cold status uses `inspect_task_planning`. Canonical
-  acquisition alone therefore does not make these paths agree.
-- `lf/commands/waves.rs::wave_tasks` reads Tasks and `planning_wave` separately;
-  `snapshot_tasks` joins them by either local or Linear ID. Its retained-Task path
-  reconstructs another item through `task_planning_item`. CLI/Work-frame/Swift
-  consumers must change with this join, not after the model is declared complete.
+Still required: `plan_read::task_in` and `project_in`, `task_planning_item`,
+`TaskStatus.planning`/`PmTaskRecord` and cold status still expose provider-shaped
+records. The Task reader still overwrites due dates from the observation and the
+Project projection omits prose. Replace these remaining consumers, retaining
+invalidation, positive removal, pending membership and original observation age.
+The canonical snapshot cut does not complete acquisition or the deletion audit.
+Bindings, ordinary follow-ups, cron and typed journal/provider hierarchy remain.
 
-The coherent cut replaces these reads with canonical Work and explicit binding,
-availability and acquisition evidence. Pending local membership must remain valid
-beside an older provider Project; invalidation, positive removal and foreign Team
-facts remain visible. A missing provider record must not erase a saved field;
-a local update timestamp must not invent provider observation age. Local/Git/Linear
-status and snapshots need matching IDs/content and unchanged populated execution
-proof. These are remaining implementation/tests, not results of this reconciliation.
-Bindings, ordinary follow-ups, cron and the full deletion audit still precede review.
+### LOO-427 integration coordination — October 10
+
+Jack Heart requested the combined reduction in LOO-412. LOO-427's clean gate-repaired
+boundary is `bd295866bb`; its ship Flow stopped before landing. The provisional
+427-first order was superseded by unresolved stack direction after Jack's
+“probably worth stacking on 412 then” (`a4d374b5-9853-4aa8-aebc-ada0598351fe`).
+No stack mutation or landing is selected here. Provide a pinned coherent commit
+and remaining scope, not dirty code or a readiness claim.
+
+Preserve Work-keyed Desktop tabs, content-owned Machine locations, nearest-ancestor
+delegation for unstarted Tasks, recorded-owner admission before checkout preparation,
+started Tasks pinned to their Machine, exact pane targeting and bounded terminal I/O.
+Shared first-start admission remains LOO-414. TaskSource carries code, not relocation.
+427's `task_checkout_machine.sql` triggers reference the old planning journal;
+integration must adapt to the surviving writer, retain null inheritance, uncertain
+legacy assignments, checkout_machine_id and repository locators, and migrate from
+the actual released frontier. Never edit SQL already released by either delivery.
+
+After the existing writer cut, absorb 427's `ops/task/{explain,planning_explain,
+checkout_explain}.rs` duplication: share concrete read-only decisions with execution
+where that deletes request/field/effect lists, retaining revalidation and effect-free
+`--explain`. No generic command-plan framework; aligned Desktop multiplexer and
+surface lifetimes are not deletion targets. No second writer or Flow restart.
 
 ### Project prose: composed behavior and remaining ownership cut
 
@@ -314,15 +328,9 @@ remaining provider hierarchy, duplicate edit/journal vocabularies and Task
 projections. Whole-model patch reconciliation is already removed. Conditional retention requires a concrete fact,
 owner and populated conversion proof. No partial publication or readiness follows.
 
-Review found edit-time ordering would reshuffle the replacement Project list;
-the canonical reader now owns shared order and the passing public Wave/roadmap
-regression covers two Projects whose shared rank disagrees with update time,
-then edits one without reordering either. It also checks local IDs, explicit
-Linear bindings and required sync evidence. The independent static finding is
-resolved here; its original text is retained at `/tmp/loo412-project-reader-review.md`. The old invalidation fixture also treated missing inventory
-membership as deletion, contrary to the surviving reader and omission contract.
-Its coverage now distinguishes missing inventory (retain saved Work) from positive
-archive, invalidation, contradictory relation and observation-age evidence.
+Project ordering and invalidation review evidence remains at
+`7853a22f5c:scratch/work-on-another-machine-name.md`: shared rank wins over edit time;
+missing inventory is not deletion. Positive removal and observation age survive.
 
 Cron conversion must retain the installed owner independently of file location.
 Release's October 5 memory records both jobs installed under Infrastructure,
@@ -353,14 +361,11 @@ Earlier baseline detail: `c8fe4628a:scratch/work-on-another-machine-name.md`.
   cut. Regenerate them after the entire accepted reduction, before review-only
   republication. No readiness or landing follows from this persistence checkpoint.
 
-Prior implementation checks: `cargo build -p loopflow --bin lf`, fmt, `cargo clippy --all-targets -- -D warnings`, diff check and five focused offline Task/Project edit, refile, older-acknowledgment and assignee-clear tests pass with LF authority cleared; gate owns affected/materialized/Desktop verification.
+Checks: `cargo build -p loopflow --bin lf`, focused Wave/public canonical-read/DTO tests and `swift test --package-path swift --filter DTOFixtureTests` pass; `cargo fmt`, `cargo clippy --all-targets -- -D warnings` and diff checks pass. Gate owns affected/materialized verification.
 
-Realign check: `git diff --check` passes; source tracing confirms the remaining reader cut; no product code changed or suites rerun (gate owns broader verification).
-
-Context: authored memory/scratch fit. `lf context --skill realign` reports the
-generated Task seed/steers/workspace at 19,434/16,000 tokens (3,434 over).
-Its complete launch source was inspected; retained history/generated metadata
-cannot be reduced by curating authored plans. No history or limit changed.
+Context: memory and scratch fit; generated Task seed/steers/workspace measured
+21,269/16,000 tokens, 5,269 over. Authored curation cannot remove this generated
+history/metadata; no history or limit changed.
 
 ## Delete — do not maintain
 
@@ -375,10 +380,6 @@ cannot be reduced by curating authored plans. No history or limit changed.
 Earlier transport evidence: `ae96102580e:scratch/work-on-another-machine-name.md`.
 The mixed model is superseded; its synthetic proofs establish no installed acceptance.
 
-The complete mixed design and prior acceptance are retained at
-`ae96102580e442fe582dd17ce5e6fef9b8cee69d:scratch/work-on-another-machine-name.md`;
-that model is superseded, not proof of this cut. Original adoption demo: `0cd8e7f14`.
-Mixed receipt recovery: `e37099e50`/`231e75898`. Native Codex exchange used synthetic
-Responses and retained a live Session plus a subsequent turn; its Workflow was
-seeded, not a running edge. It proves neither configured accounts nor the new route.
-Release's operation-entry lesson still applies: a helper-only pass is not dispatch.
+Mixed-design/demo/recovery details and proof limits remain at
+`7853a22f5c:scratch/work-on-another-machine-name.md`; synthetic provider evidence
+and a seeded Workflow prove no configured acceptance or dispatch.

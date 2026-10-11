@@ -150,10 +150,9 @@ fn wave_detail_preserves_flow_and_machine() {
     let Evidence::Ok { items: tasks, .. } = &snapshot.tasks else {
         panic!("missing Tasks")
     };
-    assert_eq!(
-        tasks[0].task.sync.as_ref().unwrap().changes[0].field,
-        "creation"
-    );
+    assert_eq!(tasks[0].task.sync.changes[0].field, "creation");
+    assert_eq!(tasks[0].task.id, tasks[0].runtime.as_ref().unwrap().work_id);
+    assert_eq!(tasks[0].task.linear_id.as_deref(), Some("issue-1"));
     let Evidence::Ok { items: runs, .. } = &snapshot.history else {
         panic!("fixture contains recorded Runs");
     };

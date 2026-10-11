@@ -12,7 +12,11 @@
       "completed_at": null,
       "due_date": null,
       "follow_up_sources": [],
-      "sync": null
+      "sync": {
+        "connected": false,
+        "changes": []
+      },
+      "linear_id": null
     },
     "reference": {
       "issue_url": null,
@@ -76,7 +80,11 @@
       "completed_at": null,
       "due_date": null,
       "follow_up_sources": [],
-      "sync": null
+      "sync": {
+        "connected": false,
+        "changes": []
+      },
+      "linear_id": null
     },
     "reference": {
       "issue_url": null,
@@ -404,7 +412,11 @@
       "completed_at": null,
       "due_date": null,
       "follow_up_sources": [],
-      "sync": null
+      "sync": {
+        "connected": false,
+        "changes": []
+      },
+      "linear_id": null
     },
     "reference": {
       "issue_url": null,
@@ -780,7 +792,11 @@
       "completed_at": null,
       "due_date": null,
       "follow_up_sources": [],
-      "sync": null
+      "sync": {
+        "connected": false,
+        "changes": []
+      },
+      "linear_id": null
     },
     "reference": {
       "issue_url": null,
@@ -859,7 +875,11 @@
       "completed_at": null,
       "due_date": null,
       "follow_up_sources": [],
-      "sync": null
+      "sync": {
+        "connected": false,
+        "changes": []
+      },
+      "linear_id": null
     },
     "reference": {
       "issue_url": null,
@@ -1236,7 +1256,11 @@
       "completed_at": null,
       "due_date": null,
       "follow_up_sources": [],
-      "sync": null
+      "sync": {
+        "connected": false,
+        "changes": []
+      },
+      "linear_id": null
     },
     "reference": {
       "issue_url": null,
@@ -1315,7 +1339,11 @@
       "completed_at": null,
       "due_date": null,
       "follow_up_sources": [],
-      "sync": null
+      "sync": {
+        "connected": false,
+        "changes": []
+      },
+      "linear_id": null
     },
     "reference": {
       "issue_url": null,

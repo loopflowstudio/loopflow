@@ -3,9 +3,8 @@
 use rusqlite::{Connection, OptionalExtension};
 
 use crate::durable::{ProjectId, TaskId};
-use crate::id::WaveId;
 use crate::pm::linear::LinearProject;
-use crate::pm::{PmItem, PmSnapshot};
+use crate::pm::PmItem;
 use crate::store::{PlanningState, PmTaskObservation, PmTaskRecord, StoreError, StoreResult};
 
 use super::children::TASK_IDENTIFIER;
@@ -19,47 +18,6 @@ impl SqliteStore {
         tx.commit()?;
         Ok(result)
     }
-
-    pub(crate) fn planning_wave(&self, wave: &WaveId) -> StoreResult<PmSnapshot> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.unchecked_transaction()?;
-        let projects = projects_in(&tx, wave)?;
-        let task_ids = {
-            let mut query = tx.prepare("SELECT t.id FROM tasks t JOIN projects p ON p.id=t.project_id
-                WHERE p.wave_id=?1 AND t.planning_deleted_at IS NULL ORDER BY t.planning_rank,t.created_at,t.id")?;
-            let ids = query
-                .query_map([wave], |row| row.get::<_, String>(0))?
-                .collect::<Result<Vec<_>, _>>()?;
-            ids
-        };
-        let mut items = Vec::new();
-        for id in task_ids {
-            let observation = task_in(&tx, &TaskId::from_raw(id))?;
-            if observation.state != PlanningState::Removed {
-                if let Some(record) = observation.record {
-                    items.push(record.item);
-                }
-            }
-        }
-        tx.commit()?;
-        Ok(PmSnapshot { projects, items })
-    }
-}
-
-fn projects_in(conn: &Connection, wave: &WaveId) -> StoreResult<Vec<LinearProject>> {
-    let project_ids = {
-        let mut query = conn.prepare(
-            "SELECT id FROM projects WHERE wave_id=?1 ORDER BY planning_rank,created_at,id",
-        )?;
-        let ids = query
-            .query_map([wave], |row| row.get::<_, String>(0))?
-            .collect::<Result<Vec<_>, _>>()?;
-        ids
-    };
-    project_ids
-        .iter()
-        .map(|id| project_in(conn, &ProjectId::from_raw(id)))
-        .collect::<StoreResult<Vec<_>>>()
 }
 
 pub(super) fn project_in(conn: &Connection, id: &ProjectId) -> StoreResult<LinearProject> {

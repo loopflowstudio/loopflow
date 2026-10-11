@@ -626,24 +626,23 @@ acceptance remain at
 
 ## Tasks across machines (LOO-412, 2026-10-10)
 
-Jack Heart selected Linear, shared Git or default user-keyed Git per repository.
-Outages buffer locally, without fallback/publisher election. One typed writer
-owns local/imported fields; execution/attempts stay local. Preserve causality,
-losers and uncertainty. Gate/installation remain unproved.
+Jack Heart selected Linear, shared or default user-keyed Git per repository.
+One typed writer owns local/imported fields; outages buffer without fallback or
+election. Execution/attempts stay local; preserve causal losers and uncertainty.
+Gate/installation unproved.
 
-Jack requires the full audit before review. Acquisition returns canonical Task;
-typed edits supply save receipts. Status/snapshots still replace due dates and
-omit prose. Absent observations cannot erase saved fields. Preserve IDs, bindings,
-rank and field revision/age; omission settles nothing.
-Fixtures seed selection through the writer. Follow-up conversion retains unknown
-creation/relation effects, never synthetic comment success. Git candidates prove
-no application/publication; read errors retain cache.
+Full audit precedes review. Acquisition and Wave/roadmap/Work-frame summaries read
+canonical Tasks: prose/dates, local IDs, Linear bindings and sync evidence.
+Status remains provider-shaped; retain age, invalidation and pending membership.
+Follow-up conversion retains uncertain effects; Git candidates prove no publication.
 
-Cron retains installed ownership independently of file location and nonzero
-operation failures ([evidence](release/MEMORY.md)).
-[Remaining audit](../../scratch/work-on-another-machine-name.md) precedes #1491's
-review-only republication. No landing, installation, schedule
-activation or real Work export. Prior proofs: `41378adacf:wave/infrastructure/MEMORY.md`.
+Jack assigned LOO-427's combined reduction here; its `bd295866bb` baseline is
+checkpointed. Stack order is unresolved; preserve tabs, Machine ownership and admission,
+adapting triggers to the released frontier.
+[Design and remaining audit](../../scratch/work-on-another-machine-name.md) own
+integration and #1491's review boundary. Cron preserves installed ownership and
+nonzero failures ([evidence](release/MEMORY.md)). No landing, installation, schedule
+activation or real export. Prior proofs: `41378adacf:wave/infrastructure/MEMORY.md`.
 
 ## Planning and launch preservation (curated 2026-10-02)
 

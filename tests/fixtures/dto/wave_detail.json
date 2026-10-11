@@ -104,7 +104,7 @@
     "items": [
       {
         "task": {
-          "id": "issue-1",
+          "id": "ts_22222222222222222222222222222222",
           "identifier": "INF-123",
           "name": "Surface nightly failures",
           "description": "Surface one focused failure.",
@@ -171,7 +171,8 @@
                 "error": "Offline"
               }
             ]
-          }
+          },
+          "linear_id": "issue-1"
         },
         "reference": {
           "issue_url": "https://linear.app/loopflow/issue/INF-123/surface-nightly-failures",
@@ -638,7 +639,8 @@
                 "error": "Offline"
               }
             ]
-          }
+          },
+          "linear_id": null
         },
         "reference": {
           "issue_url": null,

@@ -69,8 +69,8 @@ proof. Public ProjectContent and its operation arguments are also removed; Proje
 is domain-owned. Linear/migration Markdown stays private; retained rotation receipts
 keep their original bytes. Canonical Project operations, rotation and CLI/Desktop summaries now read Work;
 the ProjectPlanning wrapper and public PM-shaped Project reads are removed. Shared
-rank survives the reader cut. Composed Linear prose saves now have focused proof. Provider/Task snapshot
-projections and the adapter-only observation boundary remain. This is partial implementation, not completion of the accepted model. The new audit identifies remaining storage, acquisition, Git,
+rank survives the reader cut. Composed Linear prose saves now have focused proof. Task status projections and the adapter-only observation boundary remain;
+Wave/roadmap/Work-frame summaries now read canonical Tasks. This is partial implementation, not completion of the accepted model. The new audit identifies remaining storage, acquisition, Git,
 CLI/Desktop, config, skills and test cuts against the merged October 10 source.
 Its conditional deletions require behavioral proof before removing their evidence.
 

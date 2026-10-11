@@ -863,10 +863,8 @@ fn offline_cli_completion_and_reopening_reach_desktop_without_refresh() {
                         for task in items {
                             if let Some(runtime) = task.runtime {
                                 if runtime.status == expected
-                                    && task.task.sync.as_ref().is_some_and(|sync| {
-                                        sync.changes.iter().any(|change| {
-                                            change.field == "state" && change.error.is_some()
-                                        })
+                                    && task.task.sync.changes.iter().any(|change| {
+                                        change.field == "state" && change.error.is_some()
                                     })
                                 {
                                     assert_eq!(

@@ -61,8 +61,8 @@ pub(crate) struct SessionCommand {
 /// The local relay is the client transport; only upstream identifies the AgentProcess.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct NativeConnection {
-    pub(crate) relay: String,
-    pub(crate) upstream: String,
+    pub(crate) relay: PathBuf,
+    pub(crate) upstream: PathBuf,
 }
 
 #[allow(clippy::too_many_arguments)] // Provider inputs plus native skill flags and context file.
@@ -227,23 +227,16 @@ pub(crate) fn resume_session_with_env(
     command.attachment = attachment;
     command.remote = remote;
     if let Some(remote) = &command.remote {
-        match harness {
-            "codex" => {
-                command.args.splice(
-                    1..1,
-                    ["--remote".into(), format!("unix://{}", remote.relay)],
-                );
-            }
-            "opencode" => {
-                command.args = vec![
-                    "attach".into(),
-                    remote.relay.clone(),
-                    "--session".into(),
-                    provider_session.agent_session.to_string(),
-                ];
-            }
-            _ => bail!("This provider has no native remote connection"),
+        if harness != "codex" {
+            bail!("This provider has no native remote connection");
         }
+        command.args.splice(
+            1..1,
+            [
+                "--remote".into(),
+                format!("unix://{}", remote.relay.display()),
+            ],
+        );
     }
     let mut environment = BTreeMap::from([(
         crate::session_record::CAPTURE_KEY_ENV.to_string(),
@@ -669,7 +662,7 @@ fn native_provider_attachment(
                     "Remote client has no recorded AgentProcess endpoint".into(),
                 )
             })?;
-            if connection.0 != remote.upstream {
+            if Path::new(&connection.0) != remote.upstream {
                 return Err(crate::store::StoreError::InvalidAuthority(
                     "Remote client endpoint differs from its AgentProcess".into(),
                 ));
@@ -2064,8 +2057,8 @@ mod tests {
                 context: None,
                 attachment: Some((session.id.clone(), attached.clone())),
                 remote: Some(NativeConnection {
-                    relay: home.join("relay.sock").to_string_lossy().into_owned(),
-                    upstream: endpoint.to_string_lossy().into_owned(),
+                    relay: home.join("relay.sock"),
+                    upstream: endpoint.clone(),
                 }),
             };
             let result = session_command_status_with_env(&command, &environment, None, None, None);
@@ -2074,8 +2067,8 @@ mod tests {
             command.remote = None;
             let local = session_command_status_with_env(&command, &environment, None, None, None);
             command.remote = Some(NativeConnection {
-                relay: home.join("relay.sock").to_string_lossy().into_owned(),
-                upstream: home.join("other.sock").to_string_lossy().into_owned(),
+                relay: home.join("relay.sock"),
+                upstream: home.join("other.sock"),
             });
             let wrong_endpoint =
                 session_command_status_with_env(&command, &environment, None, None, None);

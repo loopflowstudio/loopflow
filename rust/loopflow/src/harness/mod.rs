@@ -18,9 +18,6 @@ mod dispatch_tests;
 mod lf_tag;
 pub(crate) mod native_titles;
 pub mod opencode;
-pub(crate) mod opencode_connection;
-
-mod opencode_dispatch;
 pub(crate) mod opencode_history;
 mod opencode_mapping;
 
@@ -341,7 +338,7 @@ impl HarnessKind {
             // Claude approvals ride the per-turn CLI flags built from
             // AgentConfig, not a runtime channel; no policy to thread.
             Self::Claude => Box::new(claude::ClaudeHarness::new(event_tx)),
-            Self::OpenCode => Box::new(opencode::OpenCodeHarness::new(event_tx)),
+            Self::OpenCode => Box::new(opencode::OpenCodeHarness::new(event_tx, approval)),
         }
     }
 }

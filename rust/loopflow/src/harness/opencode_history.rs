@@ -1,51 +1,70 @@
 //! OpenCode user messages correlate requests; assistant steps remain subordinate.
-//! One stream reader owns observation state. Writers save origins directly to the
-//! store, so dispatch never needs to lock or mutate that reader.
 
 use crate::id::AgentSessionId;
 use std::collections::BTreeMap;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::Result;
 use serde_json::{json, Value};
 
 use crate::chat::types::{ConversationEvent, Lifecycle};
-use crate::session::SessionEventKind;
+use crate::session::{SessionEventKind, SessionTurnOrigin};
 use crate::store::sqlite::SqliteStore;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub(super) struct History {
-    pub(super) owner: super::agent_process::AttachmentOwner,
+    pub(super) owner: Option<super::agent_process::AttachmentOwner>,
     requests: BTreeMap<String, Request>,
-    pub(super) native_permissions: bool,
     attention: super::attention::Attention,
 }
 
 #[derive(Debug, Default)]
 struct Request {
-    // Emitted boundary, not admission: failed receipt saves leave it unreported.
+    origin: Option<SessionTurnOrigin>,
     started: bool,
     completed: bool,
 }
 
 impl History {
-    pub(super) fn new(owner: super::agent_process::AttachmentOwner) -> Self {
+    pub(super) fn new(owner: Option<super::agent_process::AttachmentOwner>) -> Self {
         Self {
             owner,
-            requests: BTreeMap::new(),
-            native_permissions: false,
-            attention: Default::default(),
+            ..Self::default()
         }
+    }
+    /// The attachment that fences native writes; absent until the server starts.
+    pub(super) fn owner(&self) -> Result<super::agent_process::AttachmentOwner> {
+        self.owner
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("OpenCode server not started"))
     }
 
     /// One server event of conversation `thread`, read for attention only.
     pub(super) fn attend(&mut self, thread: &AgentSessionId, event: &Value) {
-        let (store, session, attachment) = &self.owner;
-        self.attention.record(
-            store,
-            session,
-            attachment,
-            super::attention::opencode(event, thread.as_str()),
+        if let Some((store, session, attachment)) = &self.owner {
+            self.attention.record(
+                store,
+                session,
+                attachment,
+                super::attention::opencode(event, thread.as_str()),
+            );
+        }
+    }
+
+    pub(super) fn request(&mut self) -> Result<String> {
+        let id = format!("msg_{}", uuid::Uuid::new_v4().simple());
+        let origin = self
+            .owner
+            .as_ref()
+            .map(|(store, session, attachment)| store.session_turn_origin(session, attachment))
+            .transpose()?;
+        self.requests.insert(
+            id.clone(),
+            Request {
+                origin,
+                ..Request::default()
+            },
         );
+        Ok(id)
     }
 
     pub(super) fn observe(
@@ -54,37 +73,21 @@ impl History {
         messages: &[Value],
     ) -> Result<Vec<ConversationEvent>> {
         let mut events = Vec::new();
-        let (store, session, attachment) = &self.owner;
-        for (request, receipt) in native_receipts(thread, messages) {
-            // Origins are immutable. Recover once; subsequent observations only
-            // advance native receipts and this reader's emitted boundaries.
-            if !self.requests.contains_key(request) {
-                if let Some((origin, completed)) =
-                    store.session_request(session, thread, request)?
-                {
-                    // Attribution is evidence, not authority. Only requests of
-                    // this same surviving provider belong to the live reader.
-                    if origin.agent_process_id == attachment.agent_process_id {
-                        store.record_session_turn_origin(thread, request, &origin)?;
-                        self.requests.insert(
-                            request.to_owned(),
-                            Request {
-                                started: completed,
-                                completed,
-                            },
-                        );
-                    }
+        let receipts = native_receipts(thread, messages);
+        for (request, receipt) in receipts {
+            let submitted = self.requests.get_mut(&request);
+            if let Some(submitted) = submitted.as_ref().filter(|submitted| !submitted.started) {
+                if let (Some((store, _, _)), Some(origin)) = (&self.owner, &submitted.origin) {
+                    store.record_session_turn_origin(thread, &request, origin)?;
                 }
-            }
-            record_receipts(store, session, thread, request, &receipt)?;
-            let Some(submitted) = self.requests.get_mut(request) else {
-                continue;
-            };
-            if !submitted.started {
                 events.push(ConversationEvent::TurnStarted {
-                    turn_id: request.to_owned(),
+                    turn_id: request.clone(),
                 });
             }
+            if let Some((store, session, _)) = &self.owner {
+                record_receipts(store, session, thread, &request, &receipt)?;
+            }
+            let Some(submitted) = submitted else { continue };
             submitted.started = true;
             if !receipt.completion.is_null() && !submitted.completed {
                 submitted.completed = true;
@@ -106,7 +109,7 @@ impl History {
                     });
                 }
                 events.push(ConversationEvent::TurnCompleted {
-                    turn_id: request.to_owned(),
+                    turn_id: request,
                     status,
                 });
             }
@@ -121,29 +124,15 @@ impl History {
     }
 }
 
-/// Save attribution before submission without sharing the reader's mutable state.
-pub(super) fn record_request(
-    (store, session, attachment): &super::agent_process::AttachmentOwner,
-    thread: &AgentSessionId,
-) -> Result<String> {
-    let id = format!("msg_{}", uuid::Uuid::new_v4().simple());
-    let origin = store.session_turn_origin(session, attachment)?;
-    store.record_session_request(Some(thread), &id, &origin)?;
-    Ok(id)
-}
-
 #[derive(Debug, Default)]
-struct Receipt<'a> {
-    messages: Vec<&'a Value>,
+struct Receipt {
+    messages: Vec<Value>,
     completion: Value,
     output: Option<Value>,
 }
 
-fn native_receipts<'a>(
-    thread: &AgentSessionId,
-    messages: &'a [Value],
-) -> BTreeMap<&'a str, Receipt<'a>> {
-    let mut receipts = BTreeMap::<&str, Receipt>::new();
+fn native_receipts(thread: &AgentSessionId, messages: &[Value]) -> BTreeMap<String, Receipt> {
+    let mut receipts = BTreeMap::<String, Receipt>::new();
     for message in messages {
         let info = &message["info"];
         if info["sessionID"] != thread.as_str() || info["role"] != "assistant" {
@@ -152,7 +141,11 @@ fn native_receipts<'a>(
         let Some(parent) = info["parentID"].as_str() else {
             continue;
         };
-        receipts.entry(parent).or_default().messages.push(message);
+        receipts
+            .entry(parent.into())
+            .or_default()
+            .messages
+            .push(message.clone());
     }
     for receipt in receipts.values_mut() {
         receipt.messages.sort_by(|a, b| {
@@ -219,7 +212,7 @@ fn record_receipts(
     session: &str,
     thread: &AgentSessionId,
     request: &str,
-    receipt: &Receipt<'_>,
+    receipt: &Receipt,
 ) -> Result<()> {
     for message in &receipt.messages {
         let info = &message["info"];
@@ -248,182 +241,46 @@ fn record_receipts(
     Ok(())
 }
 
-#[derive(Debug)]
-pub(super) struct Snapshot {
-    pub(super) messages: Vec<Value>,
-    pending: Vec<Value>,
-}
-
-/// Acquire permissions before messages so every pending tool can resolve its
-/// originating request. Output and replies consume this same ordered readback.
-pub(super) async fn read_snapshot(
+pub(super) async fn read_messages(
     client: &reqwest::Client,
     endpoint: &str,
     thread: &AgentSessionId,
-) -> Result<Snapshot> {
-    let mut pending: Vec<Value> = client
-        .get(format!("{endpoint}/permission"))
-        .timeout(std::time::Duration::from_secs(10))
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await?;
-    pending.retain(|permission| permission["sessionID"] == thread.as_str());
-    let messages = client
+) -> Result<Vec<Value>> {
+    Ok(client
         .get(format!("{endpoint}/session/{thread}/message"))
         .timeout(std::time::Duration::from_secs(10))
         .send()
         .await?
         .error_for_status()?
         .json()
-        .await?;
-    Ok(Snapshot { messages, pending })
+        .await?)
 }
 
-/// Pending native permissions own reply eligibility; repeated observations and
-/// reconnect cannot repeat an already attempted reply.
-impl Snapshot {
-    pub(super) async fn reply_pending_permissions(
-        &self,
-        endpoint: &str,
-        thread: &AgentSessionId,
-        owner: &super::agent_process::AttachmentOwner,
-    ) -> Result<()> {
-        for permission in &self.pending {
-            self.reply_permission(endpoint, thread, owner, permission, json!({"reply":"once"}))
-                .await?;
-        }
-        Ok(())
-    }
-
-    pub(super) async fn reply_native_permission(
-        &self,
-        endpoint: &str,
-        thread: &AgentSessionId,
-        owner: &super::agent_process::AttachmentOwner,
-        id: &str,
-        payload: Value,
-    ) -> Result<()> {
-        anyhow::ensure!(
-            matches!(
-                payload["reply"].as_str(),
-                Some("once" | "always" | "reject")
-            ),
-            "Invalid native permission reply"
-        );
-        let permission = self
-            .pending
-            .iter()
-            .find(|permission| permission["id"] == id)
-            .ok_or_else(|| anyhow!("Permission is not pending in this conversation"))?;
-        self.reply_permission(endpoint, thread, owner, permission, payload)
-            .await
-    }
-
-    async fn reply_permission(
-        &self,
-        endpoint: &str,
-        thread: &AgentSessionId,
-        owner: &super::agent_process::AttachmentOwner,
-        permission: &Value,
-        payload: Value,
-    ) -> Result<()> {
-        let id = permission["id"]
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("OpenCode permission has no identity"))?;
-        let assistant = permission["tool"]["messageID"].as_str().ok_or_else(|| {
-            anyhow::anyhow!("OpenCode permission has no originating assistant message")
-        })?;
-        let request = self
-            .messages
-            .iter()
-            .find(|message| message["info"]["id"] == assistant)
-            .and_then(|message| message["info"]["parentID"].as_str())
-            .ok_or_else(|| anyhow::anyhow!("OpenCode permission has no originating request"))?;
-        let (store, session, attachment) = owner;
-        if !store
-            .session_request(session, thread, request)?
-            .is_some_and(|(origin, _)| origin.agent_process_id == attachment.agent_process_id)
-        {
-            return Err(anyhow::anyhow!(
-                "OpenCode permission belongs to an unselected request"
-            ));
-        }
-        let owner = owner.clone();
-        let endpoint = endpoint.to_string();
-        let thread = thread.clone();
-        let id = id.to_string();
-        let request = request.to_string();
-        with_attached_http(owner, move |(store, session, _), client| {
-            let first_attempt =
-                store.record_session_permission_reply(session, &thread, &id, &request, &payload)?;
-            if first_attempt {
-                let response = client
-                    .post(format!("{endpoint}/permission/{id}/reply"))
-                    .json(&payload)
-                    .send()
-                    .and_then(reqwest::blocking::Response::error_for_status);
-                if response.is_ok() {
-                    return Ok(());
-                }
-            }
-            // A lost response can follow acceptance. Readback may settle
-            // absence, but a still-pending permission never permits replay.
-            let pending: Vec<Value> = client
-                .get(format!("{endpoint}/permission"))
-                .send()
-                .and_then(reqwest::blocking::Response::error_for_status)
-                .and_then(|response| response.json())
-                .context("OpenCode permission reply readback")?;
-            if pending.iter().any(|permission| {
-                permission["sessionID"] == thread.as_str() && permission["id"] == id
-            }) {
-                return Err(anyhow!(
-                    "OpenCode permission {id} reply is uncertain; not replaying"
-                ));
-            }
-            Ok(())
-        })
-        .await
-    }
-}
-
-/// Run bounded HTTP and its durable receipts under frozen attachment authority.
-/// The worker keeps the fence through caller cancellation; it never retries I/O.
-pub(super) async fn with_attached_http<T: Send + 'static>(
-    owner: super::agent_process::AttachmentOwner,
-    write: impl FnOnce(&super::agent_process::AttachmentOwner, &reqwest::blocking::Client) -> Result<T>
-        + Send
-        + 'static,
-) -> Result<T> {
-    tokio::task::spawn_blocking(move || {
-        let client = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(10))
-            .build()?;
-        let (store, session, attachment) = &owner;
-        // Keep operation errors intact; the store only owns attachment validation.
-        store.with_session_attachment(session, attachment, || Ok(write(&owner, &client)))?
-    })
-    .await?
-}
-
-// An uncertain HTTP result never permits a second submission here.
+// Native submission is bounded and serialized with attachment handoff. An
+// uncertain HTTP result is retained as uncertain; never submit it twice here.
 pub(super) async fn post(
-    owner: super::agent_process::AttachmentOwner,
+    (store, session, attachment): super::agent_process::AttachmentOwner,
     url: String,
     payload: Value,
 ) -> Result<()> {
-    with_attached_http(owner, move |_, client| {
-        client
-            .post(url)
-            .json(&payload)
-            .send()
-            .and_then(reqwest::blocking::Response::error_for_status)
-            .context("OpenCode native request")?;
-        Ok(())
+    tokio::task::spawn_blocking(move || {
+        store.with_session_attachment(&session, &attachment, || {
+            reqwest::blocking::Client::new()
+                .post(url)
+                .timeout(std::time::Duration::from_secs(10))
+                .json(&payload)
+                .send()
+                .and_then(reqwest::blocking::Response::error_for_status)
+                .map(|_| ())
+                .map_err(|error| {
+                    crate::store::StoreError::InvalidData(format!(
+                        "OpenCode native request: {error}"
+                    ))
+                })
+        })
     })
-    .await
+    .await??;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -435,123 +292,8 @@ mod tests {
     use crate::store::sqlite::SqliteStore;
     use serde_json::json;
 
-    #[tokio::test]
-    async fn permission_recovery_never_replays_an_uncertain_reply() {
-        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-        use std::sync::Arc;
-        use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
-
-        for accepted in [true, false] {
-            let home = tempfile::tempdir().unwrap();
-            let path = home.path().join("store.db");
-            let store = SqliteStore::open_ephemeral(&path).unwrap();
-            let process = LfProcessId::new();
-            rusqlite::Connection::open(&path)
-                .unwrap()
-                .execute(
-                    "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
-                    [process.as_str()],
-                )
-                .unwrap();
-            store.test_session("session", &crate::session_record::new_artifact_key());
-            let first = store
-                .claim_session_attachment("session", None, &process, false)
-                .unwrap();
-            let thread = "thread".into();
-            let owner = (store.clone(), "session".into(), first.clone());
-            let request = super::record_request(&owner, &thread).unwrap();
-            let messages = vec![json!({"info":{"id":"assistant","sessionID":"thread",
-                "parentID":request,"role":"assistant","time":{"created":1}},"parts":[]})];
-            let pending = Arc::new(AtomicBool::new(true));
-            let replies = Arc::new(AtomicUsize::new(0));
-            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-            let endpoint = format!("http://{}", listener.local_addr().unwrap());
-            let server = {
-                let pending = pending.clone();
-                let replies = replies.clone();
-                let messages = messages.clone();
-                tokio::spawn(async move {
-                    loop {
-                        let (socket, _) = listener.accept().await.unwrap();
-                        let mut socket = BufReader::new(socket);
-                        let mut line = String::new();
-                        socket.read_line(&mut line).await.unwrap();
-                        let post = line.starts_with("POST /permission/permission/reply ");
-                        let read_messages = line.starts_with("GET /session/thread/message ");
-                        assert!(post || read_messages || line.starts_with("GET /permission "));
-                        let mut length = 0;
-                        loop {
-                            line.clear();
-                            socket.read_line(&mut line).await.unwrap();
-                            if line == "\r\n" {
-                                break;
-                            }
-                            if let Some(value) = line.to_lowercase().strip_prefix("content-length:")
-                            {
-                                length = value.trim().parse::<usize>().unwrap();
-                            }
-                        }
-                        if post {
-                            let mut body = vec![0; length];
-                            socket.read_exact(&mut body).await.unwrap();
-                            assert_eq!(
-                                serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
-                                json!({"reply":"once"})
-                            );
-                            replies.fetch_add(1, Ordering::SeqCst);
-                            if accepted {
-                                pending.store(false, Ordering::SeqCst);
-                            }
-                            // Lose the response after the provider may have applied it.
-                            continue;
-                        }
-                        let body = if read_messages { json!(messages) } else if pending.load(Ordering::SeqCst) {
-                            json!([{"id":"permission","sessionID":"thread","tool":{"messageID":"assistant"}}])
-                        } else { json!([]) }.to_string();
-                        socket.get_mut().write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
-                    }
-                })
-            };
-            let client = reqwest::Client::new();
-            let snapshot = super::read_snapshot(&client, &endpoint, &thread)
-                .await
-                .unwrap();
-            let result = snapshot
-                .reply_pending_permissions(&endpoint, &thread, &owner)
-                .await;
-            assert_eq!(result.is_ok(), accepted);
-            assert_eq!(replies.load(Ordering::SeqCst), 1);
-            let current = store
-                .claim_session_attachment("session", Some(&first), &process, false)
-                .unwrap();
-            // Reopen without reconstructing a reader: saved intent alone supplies
-            // attribution and deduplication, even before any native observation.
-            let reopened = SqliteStore::open_ephemeral(&path).unwrap();
-            let recovered = (reopened, "session".into(), current);
-            let snapshot = super::read_snapshot(&client, &endpoint, &thread)
-                .await
-                .unwrap();
-            let result = snapshot
-                .reply_pending_permissions(&endpoint, &thread, &recovered)
-                .await;
-            assert_eq!(result.is_ok(), accepted);
-            assert_eq!(replies.load(Ordering::SeqCst), 1);
-            // Even a newly pending observation cannot grant a stale reader writes.
-            pending.store(true, Ordering::SeqCst);
-            let snapshot = super::read_snapshot(&client, &endpoint, &thread)
-                .await
-                .unwrap();
-            assert!(snapshot
-                .reply_pending_permissions(&endpoint, &thread, &owner)
-                .await
-                .is_err());
-            assert_eq!(replies.load(Ordering::SeqCst), 1);
-            server.abort();
-        }
-    }
-
     #[test]
-    fn pending_request_survives_launcher_loss_without_replay_or_reassigned_usage() {
+    fn native_steps_recover_once_without_reassigning_usage_or_inventing_completion() {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("store.db");
         let store = SqliteStore::open_ephemeral(&path).unwrap();
@@ -567,8 +309,8 @@ mod tests {
         let attachment = store
             .claim_session_attachment("session", None, &process, false)
             .unwrap();
-        let history = History::new((store.clone(), "session".into(), attachment.clone()));
-        let request = super::record_request(&history.owner, &"thread".into()).unwrap();
+        let mut history = History::new(Some((store.clone(), "session".into(), attachment.clone())));
+        let request = history.request().unwrap();
         let message = |id: &str, input: u64, finish: &str| {
             json!({
             "info":{"id":id,"sessionID":"thread","parentID":request,"role":"assistant",
@@ -588,34 +330,10 @@ mod tests {
             [second.as_str()],
         )
         .unwrap();
-        let current = store
-            .claim_session_attachment("session", Some(&attachment), &second, false)
+        store
+            .claim_session_attachment("session", Some(&attachment), &second, true)
             .unwrap();
-        assert_eq!(current.agent_process_id, attachment.agent_process_id);
-        assert_ne!(current.token, attachment.token);
-        assert!(super::record_request(&history.owner, &"thread".into()).is_err());
         assert!(!history.admitted(&request));
-        assert!(
-            !store
-                .session_history("session", 0, 0)
-                .unwrap()
-                .iter()
-                .any(|row| {
-                    matches!(
-                        row.kind,
-                        SessionEventKind::Started | SessionEventKind::Completed
-                    )
-                }),
-            "pre-submission evidence cannot invent native admission"
-        );
-        // Lose every launcher-local object before the first native receipt.
-        drop(history);
-        let reopened = SqliteStore::open_ephemeral(&path).unwrap();
-        let mut history = History::new((reopened, "session".into(), current));
-        assert!(history
-            .observe(&"other-thread".into(), &[])
-            .unwrap()
-            .is_empty());
         for (index, input) in [20, 40, 30].into_iter().enumerate() {
             let events = history
                 .observe(
@@ -652,13 +370,14 @@ mod tests {
             )));
             assert!(history.admitted(&request));
         }
-        // A reconnect retains settled requests without emitting new turn boundaries.
+        // A reconnect can recover history without claiming these requests or
+        // emitting a new local turn boundary.
         let mut reconnected = History::new(history.owner.clone());
         assert!(reconnected
             .observe(&"thread".into(), &messages)
             .unwrap()
             .is_empty());
-        assert!(reconnected.admitted(&request));
+        assert!(!reconnected.admitted(&request));
         let recovered = store.input_history(input.as_str()).unwrap();
         assert_eq!(recovered.usage.input_tokens, Some(50));
         assert_eq!(recovered.usage.output_tokens, Some(10));

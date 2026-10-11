@@ -105,11 +105,8 @@ impl ReaderState {
         self.turn_substantive
     }
 
-    pub(super) fn observe_messages<'a>(
-        &mut self,
-        messages: impl IntoIterator<Item = &'a Value>,
-    ) -> Vec<ConversationEvent> {
-        let mut events = Vec::new();
+    pub(super) fn observe_messages(&mut self, messages: &[Value]) -> Vec<ConversationEvent> {
+        let mut mapped = MappedEvent::default();
         for message in messages {
             let info = &message["info"];
             if info["sessionID"] != self.session_id.as_str() || info["role"] != "assistant" {
@@ -123,10 +120,10 @@ impl ReaderState {
             }
             self.current_turn_id = Some(request.into());
             for part in message["parts"].as_array().into_iter().flatten() {
-                map_part_updated(part, self, &mut events);
+                map_part_updated(part, self, &mut mapped);
             }
         }
-        events
+        mapped.events
     }
 
     pub(super) fn observe_lifecycle(&mut self, event: &ConversationEvent) {
@@ -162,13 +159,19 @@ struct ToolLifecycle {
     completed: bool,
 }
 
-pub(super) fn map_event(raw: &Value, state: &mut ReaderState) -> Vec<ConversationEvent> {
-    let mut events = Vec::new();
+#[derive(Debug, Default)]
+pub(super) struct MappedEvent {
+    pub(super) events: Vec<ConversationEvent>,
+    pub(super) permission_requests: Vec<String>,
+}
+
+pub(super) fn map_event(raw: &Value, state: &mut ReaderState) -> MappedEvent {
+    let mut mapped = MappedEvent::default();
     let event_type = raw.get("type").and_then(Value::as_str).unwrap_or_default();
     let properties = raw.get("properties").unwrap_or(raw);
 
     if !state.accepts(properties) {
-        return events;
+        return mapped;
     }
 
     // Track the last accepted event for disconnect evidence. The seq is
@@ -199,24 +202,21 @@ pub(super) fn map_event(raw: &Value, state: &mut ReaderState) -> Vec<Conversatio
                     map_part_updated(
                         &serde_json::json!({"type":kind,"id":part,"text":text}),
                         state,
-                        &mut events,
+                        &mut mapped,
                     );
                 }
             }
         }
-        "session.diff" => map_diff(properties, state, &mut events),
-        "session.error" => map_error(properties, state, &mut events),
+        "permission.asked" => map_permission(properties, &mut mapped),
+        "session.diff" => map_diff(properties, state, &mut mapped),
+        "session.error" => map_error(properties, state, &mut mapped),
         _ => {}
     }
 
-    events
+    mapped
 }
 
-fn map_part_updated(
-    properties: &Value,
-    state: &mut ReaderState,
-    events: &mut Vec<ConversationEvent>,
-) {
+fn map_part_updated(properties: &Value, state: &mut ReaderState, mapped: &mut MappedEvent) {
     let part = properties.get("part").unwrap_or(properties);
     let part_type = part
         .get("type")
@@ -243,7 +243,7 @@ fn map_part_updated(
             let content = delta.to_owned();
             *previous = text.into();
             state.mark_substantive();
-            events.push(if part_type == "reasoning" {
+            mapped.events.push(if part_type == "reasoning" {
                 ConversationEvent::ReasoningDelta { turn_id, content }
             } else {
                 ConversationEvent::TextDelta { turn_id, content }
@@ -253,11 +253,11 @@ fn map_part_updated(
     }
 
     if part_type.contains("tool") {
-        map_tool_part(part, state, events);
+        map_tool_part(part, state, mapped);
     }
 }
 
-fn map_tool_part(part: &Value, state: &mut ReaderState, events: &mut Vec<ConversationEvent>) {
+fn map_tool_part(part: &Value, state: &mut ReaderState, mapped: &mut MappedEvent) {
     let Some(turn_id) = state.current_turn_id() else {
         return;
     };
@@ -277,7 +277,7 @@ fn map_tool_part(part: &Value, state: &mut ReaderState, events: &mut Vec<Convers
 
     if !lifecycle.started {
         lifecycle.started = true;
-        events.push(ConversationEvent::ItemStarted {
+        mapped.events.push(ConversationEvent::ItemStarted {
             turn_id: turn_id.clone(),
             item: build_tool_item(part, &tool_id, Lifecycle::Running, false),
         });
@@ -285,14 +285,25 @@ fn map_tool_part(part: &Value, state: &mut ReaderState, events: &mut Vec<Convers
 
     if matches!(status, Lifecycle::Completed | Lifecycle::Failed) && !lifecycle.completed {
         lifecycle.completed = true;
-        events.push(ConversationEvent::ItemCompleted {
+        mapped.events.push(ConversationEvent::ItemCompleted {
             turn_id,
             item: build_tool_item(part, &tool_id, status, true),
         });
     }
 }
 
-fn map_diff(properties: &Value, state: &mut ReaderState, events: &mut Vec<ConversationEvent>) {
+fn map_permission(properties: &Value, mapped: &mut MappedEvent) {
+    if let Some(request_id) = properties.get("id").and_then(Value::as_str) {
+        mapped.permission_requests.push(request_id.to_string());
+    } else {
+        tracing::debug!(
+            properties = ?properties,
+            "opencode permission event missing canonical id"
+        );
+    }
+}
+
+fn map_diff(properties: &Value, state: &mut ReaderState, mapped: &mut MappedEvent) {
     let Some(turn_id) = state.current_turn_id().map(str::to_string) else {
         return;
     };
@@ -304,10 +315,12 @@ fn map_diff(properties: &Value, state: &mut ReaderState, events: &mut Vec<Conver
         return;
     };
     state.mark_substantive();
-    events.push(ConversationEvent::DiffUpdated { turn_id, diff });
+    mapped
+        .events
+        .push(ConversationEvent::DiffUpdated { turn_id, diff });
 }
 
-fn map_error(properties: &Value, state: &mut ReaderState, events: &mut Vec<ConversationEvent>) {
+fn map_error(properties: &Value, state: &mut ReaderState, mapped: &mut MappedEvent) {
     let code = properties
         .get("code")
         .and_then(Value::as_str)
@@ -333,7 +346,7 @@ fn map_error(properties: &Value, state: &mut ReaderState, events: &mut Vec<Conve
         terminal_error_message: Some(crate::harness::opencode::sanitize_error_message(&message)),
         provider_output_tokens: None,
     };
-    events.push(ConversationEvent::Error {
+    mapped.events.push(ConversationEvent::Error {
         code,
         message,
         evidence: Some(evidence),
@@ -513,7 +526,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn native_request_correlates_output_without_idle_completion() {
+    fn native_request_correlates_output_and_permission_without_idle_completion() {
         let mut state = ReaderState::new("session".into(), None, "opencode");
         let message = |text: &str| json!({"info":{"id":"assistant","sessionID":"session","role":"assistant","parentID":"request"},"parts":[{"id":"part","sessionID":"session","messageID":"assistant","type":"text","text":text}]});
         let first = state.observe_messages(&[message("Final")]);
@@ -529,9 +542,17 @@ mod tests {
             &json!({"type":"message.part.delta","properties":{"sessionID":"session","messageID":"assistant","partID":"part","field":"text","delta":"Final answer"}}),
             &mut state,
         );
-        assert!(delta.is_empty(), "snapshot already delivered this delta");
+        assert!(
+            delta.events.is_empty(),
+            "snapshot already delivered this delta"
+        );
+        let permission = map_event(
+            &json!({"type":"permission.asked","properties":{"sessionID":"session","id":"per_1","tool":{"messageID":"assistant","callID":"call"}}}),
+            &mut state,
+        );
+        assert_eq!(permission.permission_requests, ["per_1"]);
         for status in ["busy", "idle"] {
-            assert!(map_event(&json!({"type":"session.status","properties":{"sessionID":"session","status":{"type":status}}}), &mut state).is_empty());
+            assert!(map_event(&json!({"type":"session.status","properties":{"sessionID":"session","status":{"type":status}}}), &mut state).events.is_empty());
         }
     }
 }

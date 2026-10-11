@@ -15,7 +15,6 @@ HOME = Path(__file__).resolve().parent.parent
 SESSIONS = HOME / "native-sessions.json"
 EVENTS = queue.Queue()
 REPLIES = {}
-PERMISSIONS = {}
 LOCK = threading.Lock()
 
 
@@ -86,11 +85,8 @@ def _launch(session, request, prompt):
         permission = "per_" + uuid.uuid4().hex
         reply = threading.Event()
         REPLIES[permission] = reply
-        pending = dict(sessionID=session, id=permission,
-                       tool={"messageID": assistant, "callID": "call_fixture"})
-        with LOCK:
-            PERMISSIONS[permission] = pending
-        _event("permission.asked", **pending)
+        _event("permission.asked", sessionID=session, id=permission,
+               tool={"messageID": assistant, "callID": "call_fixture"})
         if not reply.wait(15):
             info["error"] = {
                 "name": "APIError", "data": {"message": "fixture permission unanswered"}
@@ -161,9 +157,6 @@ class Server(BaseHTTPRequestHandler):
                     return
                 self.wfile.write(("data: " + json.dumps(event) + "\n\n").encode())
                 self.wfile.flush()
-        elif self.path == "/permission":
-            with LOCK:
-                self._json(list(PERMISSIONS.values()))
         elif self.path.startswith("/session/"):
             session = self.path.split("/")[2]
             with LOCK:
@@ -171,10 +164,14 @@ class Server(BaseHTTPRequestHandler):
                     self._json({}, 404)
                 else:
                     self._json(
-                        sessions[session] if self.path.endswith("/message") else {"id": session, "permission":SESSION_PERMISSIONS.get(session, [])}
+                        sessions[session] if self.path.endswith("/message") else {"id": session}
                     )
         else:
             self._json({})
+
+    def do_PATCH(self):
+        self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        self._json({})
 
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
@@ -182,7 +179,6 @@ class Server(BaseHTTPRequestHandler):
             session = "ses_" + uuid.uuid4().hex
             with LOCK:
                 sessions[session] = []
-                SESSION_PERMISSIONS[session] = body.get("permission", [])
                 _save(sessions)
             self._json({"id": session})
         elif self.path.endswith("/prompt_async"):
@@ -200,10 +196,7 @@ class Server(BaseHTTPRequestHandler):
             ).start()
         elif self.path.startswith("/permission/"):
             assert body == {"reply": "once"}
-            permission = self.path.split("/")[2]
-            with LOCK:
-                PERMISSIONS.pop(permission)
-            REPLIES[permission].set()
+            REPLIES[self.path.split("/")[2]].set()
             self._json({})
         else:
             self._json({})
@@ -217,7 +210,6 @@ if "serve" not in sys.argv:
     if __WAIT__:  # noqa: F821 — substituted by the Rust fixture before execution
         sys.stdin.readline()
     raise SystemExit(0)
-SESSION_PERMISSIONS = {}
 sessions = json.loads(SESSIONS.read_text()) if SESSIONS.exists() else {}
 ThreadingHTTPServer(
     ("127.0.0.1", int(sys.argv[sys.argv.index("--port") + 1])), Server

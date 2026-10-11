@@ -391,10 +391,9 @@ fn opencode_native_history_preserves_output_tools_and_usage_missingness() {
         let attachment = store
             .claim_session_attachment(&session, None, &process, false)
             .unwrap();
-        let mut history = History::new((store.clone(), session.clone(), attachment));
+        let mut history = History::new(Some((store.clone(), session.clone(), attachment)));
+        let request = history.request().unwrap();
         let agent_session = AgentSessionId::from(session.as_str());
-        let request =
-            super::opencode_history::record_request(&history.owner, &agent_session).unwrap();
         let mut display =
             opencode_mapping::ReaderState::new(agent_session.clone(), None, "opencode");
         let mut message = json!({
@@ -418,7 +417,7 @@ fn opencode_native_history_preserves_output_tools_and_usage_missingness() {
             json!({"type":"session.status","properties":{"sessionID":session,"status":{"type":"idle"},"usage":{"input_tokens":999}}}),
             json!({"type":"session.error","properties":{"sessionID":session,"code":"command_failed","message":"Bash exited 1"}}),
         ] {
-            let events = opencode_mapping::map_event(&event, &mut display);
+            let events = opencode_mapping::map_event(&event, &mut display).events;
             assert!(events
                 .iter()
                 .all(|event| matches!(event, ConversationEvent::Error { .. })));
@@ -459,27 +458,9 @@ fn opencode_native_history_preserves_output_tools_and_usage_missingness() {
 }
 
 #[test]
-fn opencode_queued_requests_complete_independently() {
-    let home = tempfile::tempdir().unwrap();
-    let path = home.path().join("store.db");
-    let store = crate::store::sqlite::SqliteStore::open_ephemeral(&path).unwrap();
-    let process = crate::id::LfProcessId::new();
-    rusqlite::Connection::open(&path)
-        .unwrap()
-        .execute(
-            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
-            [process.as_str()],
-        )
-        .unwrap();
-    store.test_session("session", &crate::session_record::new_artifact_key());
-    let attachment = store
-        .claim_session_attachment("session", None, &process, false)
-        .unwrap();
-    let mut history = History::new((store, "session".into(), attachment));
-    let request =
-        super::opencode_history::record_request(&history.owner, &"session".into()).unwrap();
-    let queued =
-        super::opencode_history::record_request(&history.owner, &"session".into()).unwrap();
+fn opencode_native_error_completes_only_its_request() {
+    let mut history = History::default();
+    let request = history.request().unwrap();
     let message = json!({"info":{"id":"assistant","parentID":request,"role":"assistant","sessionID":"session",
         "time":{"created":1,"completed":2},"error":{"name":"APIError","data":{"message":"provider rejected request"}}},"parts":[]});
     let events = history
@@ -488,27 +469,8 @@ fn opencode_queued_requests_complete_independently() {
     assert!(
         matches!(&events[..], [ConversationEvent::TurnStarted {turn_id}, ConversationEvent::Error {message,..}, ConversationEvent::TurnCompleted {turn_id:completed,status:Lifecycle::Failed}] if turn_id == &request && completed == &request && message == "provider rejected request")
     );
-    let mut queued_message = json!({"info":{"id":"queued-assistant","parentID":queued,
-        "role":"assistant","sessionID":"session","time":{"created":3}},"parts":[]});
-    let events = history
-        .observe(
-            &"session".into(),
-            &[message.clone(), queued_message.clone()],
-        )
-        .unwrap();
-    assert!(
-        matches!(&events[..], [ConversationEvent::TurnStarted { turn_id }] if turn_id == &queued)
-    );
-
-    queued_message["info"]["time"]["completed"] = json!(4);
-    queued_message["info"]["finish"] = json!("stop");
-    let messages = [message, queued_message];
-    let events = history.observe(&"session".into(), &messages).unwrap();
-    assert!(
-        matches!(&events[..], [ConversationEvent::TurnCompleted { turn_id, status: Lifecycle::Completed }] if turn_id == &queued)
-    );
     assert!(history
-        .observe(&"session".into(), &messages)
+        .observe(&"session".into(), &[message])
         .unwrap()
         .is_empty());
 }

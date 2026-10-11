@@ -239,21 +239,16 @@ leader death or unknown descendants grants no signaling.
 `82b5d90d5` proves A → B → A rejection with stand-ins, not configured relay.
 CI: `be4a2b2af:wave/infrastructure/MEMORY.md`, this heading.
 
-LOO-447: fenced stop/abort, signal-free drop, custody until group death; external
-watchdog. OpenCode saves endpoint/attempts before effects; creation carries rules/title,
-not PATCH. History owns reading; SQLite retains origins. Shell lacks IDs. Prior proofs:
-`7fec3b53f:wave/infrastructure/MEMORY.md`, this heading.
-Display follows current attachment; caller authority stays frozen. Atomic UUID receipts retain uncorrelated output and original replay disposition.
-Client counters ignore them; rate-limit completion bypasses History.
-`f43f18afa` replaces idle-coalescing tests with per-request completion proof;
-one failed request cannot complete a queued one. Ordered transport, receipt-based
-projection and public death orders remain unfinished.
-No fence reacquisition or permanent custody;
-EOF/history/write errors grant no settlement or teardown.
-Foreground exclusion precedes death inspection: an exited terminal provider
-still cannot be settled by headless close.
-Claude lacks a demonstrated native-client bridge for stream-json. Endpoints prove no client bridge; supervisor adoption remains unselected.
-Preserve takeover. Plan: `scratch/stop-and-take-over-claude.md`.
+Jack Heart's October 10 decision `fd830a3f` supersedes live takeover for Claude
+and OpenCode: stop through the AgentProcess record, resume the same native
+conversation, and publish. Codex live handoff removal belongs to separate work;
+retain its generations, fences and saved connection here. No landing authorized.
+Delete Claude replay and OpenCode relay/recovery preparation, including the shared
+named-lifeline rewrite. Preserve exact stop, foreground exclusion, native history
+and uncertain turns. Public stop/resume and frozen-authority fixtures pass;
+Linux, configured and installed acceptance remain unproved.
+Prior live-takeover evidence: `5e95ce9a4:wave/infrastructure/MEMORY.md`, this heading.
+Plan: `scratch/stop-and-take-over-claude.md`.
 
 ## Execution vocabulary (LOO-441/442/446, 2026-10-10)
 

@@ -2,7 +2,8 @@
 //! Unknown identity, duplicate PID/birth and unknown attachment life grant no signal authority.
 use crate::id::LfProcessId;
 use crate::journal::{
-    process_evidence, process_identity_evidence, OsProcess, ProcessIdentityEvidence,
+    process_evidence, process_identity_evidence, process_started_at, OsProcess,
+    ProcessIdentityEvidence,
 };
 use crate::os_process::terminate_process_group;
 use crate::process::SessionAttachment;
@@ -33,8 +34,10 @@ pub(super) fn open_owner(
 /// reach its record under the owner's attachment before the provider runs.
 fn record_identity(
     (store, session, attachment): &AttachmentOwner,
-) -> impl FnOnce(u32, i64) -> std::io::Result<()> + Send + '_ {
-    move |pid, started_at| {
+) -> impl FnOnce(u32) -> std::io::Result<()> + Send + '_ {
+    move |pid| {
+        let started_at = process_started_at(pid)?
+            .ok_or_else(|| std::io::Error::other("AgentProcess birth unavailable before exec"))?;
         store
             .record_agent_process_identity(session, attachment, pid, started_at)
             .map_err(std::io::Error::other)
@@ -46,6 +49,7 @@ fn record_identity(
 /// observed exit. Synchronous admission cannot detach a launch on async cancellation.
 pub(crate) fn spawn(
     command: tokio::process::Command,
+    lifeline: Option<&std::path::Path>,
     owner: &AttachmentOwner,
 ) -> Result<tokio::process::Child> {
     let (store, session, attachment) = owner;
@@ -57,9 +61,8 @@ pub(crate) fn spawn(
             .into_owned();
         store.with_session_attachment(session, attachment, || {
             store.record_agent_process_launch(session, attachment, command.as_std())?;
-            let lifeline = store.agent_process_lifeline_path(&attachment.agent_process_id)?;
             let spawned =
-                crate::os_process::spawn_agent_process(command, &lifeline, record_identity(owner));
+                crate::os_process::spawn_agent_process(command, lifeline, record_identity(owner));
             if spawned.is_err() {
                 store.record_agent_process_exit(session, attachment, false)?;
             }
@@ -610,7 +613,7 @@ mod tests {
         let owner = |attachment| (store.clone(), session.id.clone(), attachment);
         let mut command = tokio::process::Command::new("/bin/sh");
         command.env_clear().args(["-c", "exit 42"]);
-        let mut child = super::spawn(command, &owner(first.clone())).unwrap();
+        let mut child = super::spawn(command, None, &owner(first.clone())).unwrap();
         let recorded = store.process(&first.agent_process_id).unwrap().unwrap();
         assert_eq!(recorded.pid, child.id());
         assert!(recorded.os_started_at.is_some());
@@ -630,7 +633,7 @@ mod tests {
             .env_clear()
             .args(["-c", "printf effect > \"$1\"", "fixture"])
             .arg(&marker);
-        assert!(super::spawn(stale, &owner(first.clone())).is_err());
+        assert!(super::spawn(stale, None, &owner(first.clone())).is_err());
         assert!(!marker.exists());
         assert_eq!(
             store.session_attachment(&session.id).unwrap(),
@@ -644,7 +647,7 @@ mod tests {
             .is_none());
 
         let missing = tokio::process::Command::new(home.path().join("absent-provider"));
-        assert!(super::spawn(missing, &owner(next.clone())).is_err());
+        assert!(super::spawn(missing, None, &owner(next.clone())).is_err());
         let failed = store.process(&next.agent_process_id).unwrap().unwrap();
         assert!(failed.completed_at.is_some());
         assert!(

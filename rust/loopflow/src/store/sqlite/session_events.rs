@@ -146,7 +146,7 @@ impl SqliteStore {
     ) -> StoreResult<i64> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let seq = record_event_in(&tx, session, Some(thread), turn, kind, payload)?;
+        let seq = record_event_in(&tx, session, thread, turn, kind, payload)?;
         tx.commit()?;
         Ok(seq)
     }
@@ -186,193 +186,6 @@ impl SqliteStore {
         .ok_or_else(|| StoreError::InvalidAuthority("Session attachment changed".into()))
     }
 
-    /// Save an intended native request before sending it. This is not admission.
-    /// A missing native Session remains unknown until the provider echoes the UUID.
-    pub(crate) fn record_session_request(
-        &self,
-        thread: Option<&AgentSessionId>,
-        request: &str,
-        origin: &crate::session::SessionTurnOrigin,
-    ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        record_event_in(
-            &tx,
-            &origin.session_id,
-            thread,
-            request,
-            SessionEventKind::Observed,
-            &serde_json::json!({"request_origin": origin}),
-        )?;
-        tx.commit()?;
-        Ok(())
-    }
-
-    /// Save a permission reply before HTTP. Existing attempts are uncertain, not
-    /// permission to send again. The caller holds the attachment fence.
-    pub(crate) fn record_session_permission_reply(
-        &self,
-        session: &str,
-        thread: &AgentSessionId,
-        permission: &str,
-        request: &str,
-        response: &Value,
-    ) -> StoreResult<bool> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let turn = format!("permission:{permission}");
-        let exists: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM session_events WHERE session_id=?1
-             AND provider_thread=?2 AND provider_turn=?3 AND kind='observed')",
-            params![session, thread, turn],
-            |row| row.get(0),
-        )?;
-        if exists {
-            return Ok(false);
-        }
-        record_event_in(
-            &tx,
-            session,
-            Some(thread),
-            &turn,
-            SessionEventKind::Observed,
-            &serde_json::json!({"permission_reply":{"id":permission,"request":request,"response":response}}),
-        )?;
-        tx.commit()?;
-        Ok(true)
-    }
-
-    /// Recover original attribution, never the replacement attachment's input.
-    pub(crate) fn session_request(
-        &self,
-        session: &str,
-        thread: &AgentSessionId,
-        request: &str,
-    ) -> StoreResult<Option<(crate::session::SessionTurnOrigin, bool)>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let saved: Option<(String, bool)> = conn
-            .query_row(
-                "SELECT json_extract(e.payload,'$.request_origin'), EXISTS(SELECT 1 FROM session_events done
-                WHERE done.session_id=e.session_id AND done.provider_thread=?2
-                  AND done.provider_turn=e.provider_turn AND done.kind='completed')
-             FROM session_events e WHERE e.session_id=?1 AND (e.provider_thread=?2 OR e.provider_thread IS NULL)
-               AND e.provider_turn=?3 AND e.kind='observed' AND e.receipt_key=''
-               AND json_type(e.payload,'$.request_origin')='object'
-               AND NOT EXISTS(SELECT 1 FROM session_events admitted
-                 WHERE admitted.session_id=e.session_id AND admitted.provider_turn=e.provider_turn
-                   AND admitted.kind='started' AND admitted.provider_thread!=?2
-                   AND admitted.agent_process_id=json_extract(e.payload,'$.request_origin.agent_process_id'))",
-                params![session, thread, request],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional()?;
-        saved
-            .map(|(payload, completed)| Ok((serde_json::from_str(&payload)?, completed)))
-            .transpose()
-    }
-
-    /// Correlate an ordered, UUID-keyed result with one admission. Selection and
-    /// all result receipts commit together, so reopened or concurrent readers
-    /// cannot consume the next admission with the same result. Results without
-    /// an admission retain that disposition; later input cannot claim old output.
-    /// Return the committed completion/observation sequence, including on replay.
-    /// Consumers project that receipt, never infer completion from a successful call.
-    pub(crate) fn record_ordered_session_result(
-        &self,
-        session: &str,
-        agent_process: &crate::id::LfProcessId,
-        thread: Option<&AgentSessionId>,
-        events: &[(SessionEventKind, Value)],
-        completed: &Value,
-    ) -> StoreResult<i64> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let result_id = completed["result_id"]
-            .as_str()
-            .filter(|id| !id.is_empty())
-            .ok_or_else(|| StoreError::InvalidData("Ordered result lacks its identity".into()))?;
-        let receipt = format!("uncorrelated-result:{agent_process}:{result_id}");
-        let observation = serde_json::json!({
-            "agent_process_id": agent_process,
-            "uncorrelated_result": completed,
-            "events": events,
-        });
-        let uncorrelated: Option<(i64, Option<AgentSessionId>, String)> = tx
-            .query_row(
-                "SELECT seq,provider_thread,payload FROM session_events
-             WHERE session_id=?1 AND kind='observed' AND receipt_key=?2",
-                params![session, receipt],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .optional()?;
-        if let Some((seq, saved_thread, payload)) = uncorrelated {
-            if saved_thread.as_ref() != thread
-                || serde_json::from_str::<Value>(&payload)? != observation
-            {
-                return Err(StoreError::InvalidData(
-                    "Conflicting uncorrelated result".into(),
-                ));
-            }
-            return Ok(seq);
-        }
-        let repeated: Option<(AgentSessionId, String)> = tx.query_row(
-            "SELECT done.provider_thread,done.provider_turn FROM session_events done
-             JOIN session_events start ON start.session_id=done.session_id
-               AND start.provider_thread=done.provider_thread AND start.provider_turn=done.provider_turn
-               AND start.kind='started' AND start.agent_process_id=?2
-             WHERE done.session_id=?1 AND done.kind='completed'
-               AND json_extract(done.payload,'$.result_id')=?3",
-            params![session, agent_process, result_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        ).optional()?;
-        let selected = match repeated {
-            Some(turn) => Some(turn),
-            None => tx
-                .query_row(
-                    "SELECT e.provider_thread,e.provider_turn FROM session_events e
-                 WHERE e.session_id=?1 AND e.agent_process_id=?2 AND e.kind='started'
-                   AND NOT EXISTS(SELECT 1 FROM session_events done
-                     WHERE done.session_id=e.session_id AND done.provider_thread=e.provider_thread
-                       AND done.provider_turn=e.provider_turn AND done.kind='completed')
-                 ORDER BY e.seq LIMIT 1",
-                    params![session, agent_process],
-                    |row| Ok((row.get::<_, AgentSessionId>(0)?, row.get::<_, String>(1)?)),
-                )
-                .optional()?,
-        };
-        let Some((saved_thread, turn)) = selected else {
-            // No synthetic turn or completion: this evidence can never settle
-            // work admitted after it was observed, even after reader restart.
-            tx.execute(
-                "INSERT INTO session_events(session_id,provider_thread,kind,receipt_key,observed_at,payload)
-                 VALUES(?1,?2,'observed',?3,?4,?5)",
-                params![session, thread, receipt, time::OffsetDateTime::now_utc().unix_timestamp(),
-                    serde_json::to_string(&observation)?],
-            )?;
-            let seq = tx.last_insert_rowid();
-            tx.commit()?;
-            return Ok(seq);
-        };
-        if thread != Some(&saved_thread) {
-            return Err(StoreError::InvalidData(
-                "Ordered result lacks its identity or changed conversation".into(),
-            ));
-        }
-        for (kind, payload) in events {
-            record_event_in(&tx, session, Some(&saved_thread), &turn, *kind, payload)?;
-        }
-        let seq = record_event_in(
-            &tx,
-            session,
-            Some(&saved_thread),
-            &turn,
-            SessionEventKind::Completed,
-            completed,
-        )?;
-        tx.commit()?;
-        Ok(seq)
-    }
-
     /// Retain correlated origin after takeover without reading current assignment.
     pub(crate) fn record_session_turn_origin(
         &self,
@@ -385,7 +198,7 @@ impl SqliteStore {
         let seq = record_event_in(
             &tx,
             &origin.session_id,
-            Some(thread),
+            thread,
             turn,
             SessionEventKind::Started,
             &serde_json::json!({}),
@@ -580,7 +393,7 @@ impl SqliteStore {
 fn record_event_in(
     tx: &rusqlite::Transaction<'_>,
     session: &str,
-    thread: Option<&AgentSessionId>,
+    thread: &AgentSessionId,
     turn: &str,
     kind: SessionEventKind,
     payload: &Value,
@@ -593,7 +406,7 @@ fn record_event_in(
     };
     let existing: Option<(i64, String)> = tx.query_row(
         "SELECT seq,payload FROM session_events
-         WHERE session_id=?1 AND provider_thread IS ?2 AND provider_turn=?3 AND kind=?4 AND receipt_key=?5",
+         WHERE session_id=?1 AND provider_thread=?2 AND provider_turn=?3 AND kind=?4 AND receipt_key=?5",
         params![session,thread,turn,kind.as_str(),receipt],
         |row| Ok((row.get(0)?,row.get(1)?)),
     ).optional()?;

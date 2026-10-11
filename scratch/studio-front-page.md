@@ -632,3 +632,6 @@ strip links to its own site in a new tab.
 - Jack Heart: "just cut" the requirements bullets, the Linear and herdr/cmux line, and the closing Download → `x11` ends on Works with. The "Free and open source (MIT)." closing heading went with them, since nothing was left under it and the line under the top Download says it.
 
 - Jack Heart: "need to get a --machine command in that command list" → `lf --machine mini run pursue  # on another machine, over ssh` added to the `x11` terminal card, after `lf run pursue`. Syntax follows `lf --machine <machine-id> <args...>` in docs/architecture-reference.md; "mini" is the example id from docs/getting-started.md.
+
+- Jack Heart: "the fact that we missed --machine suggests we might have missed other important reasons things that you want to have in the \"join\" of \"i want my laucnher to be able to configure this kind of thing for me\"" → Claude listed the launcher's options from `rust/loopflow/src/lf/mod.rs` and rebuilt the `x11` terminal card as one launch command with a line per option (machine, account, agent and model, Task, docs, headless or interactive, what to run), then `resume`, `usage`, `land`. The combined command is assembled from the flag definitions and was not run.
+- Jack Heart: "Skills in sequence: a Graph" → the `run pursue` line is annotated "a Flow: Skills in a graph". Claude's reading; unconfirmed.

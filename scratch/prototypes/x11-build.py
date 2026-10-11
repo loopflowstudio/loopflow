@@ -131,19 +131,22 @@ main = f'''
   <h2><code>lf</code>: the CLI for agent workflows.</h2>
   <div class="halves">
     <article>
-      <p>Everything above is <code>lf</code> underneath. Use it anywhere you would launch Claude Code, Codex, or OpenCode: it launches agents, runs Skills and Flows, keeps every session, and manages your accounts and usage.</p>
+      <p>Everything above is <code>lf</code> underneath. One command says where an agent runs, on whose login, with which model, on which piece of work, and what it does. Set it once in a Flow and every launch is the same.</p>
       <p>Private, secure remote jobs and telemetry made easy through <code>ssh</code>.</p>
       <p class="more"><a href="/cli">The CLI ↗</a><a href="/docs/authoring#flows">Skills and Flows ↗</a></p>
     </article>
     <article>
-<pre tabindex="0" aria-label="lf commands" class="term"><span class="p">$</span> <b>lf</b> -a codex : "fix the test"     <span class="c">  # launch an agent</span>
-<span class="p">$</span> <b>lf</b> skill design "Add CSV export" <span class="c">  # a saved prompt: a Skill</span>
-<span class="p">$</span> <b>lf</b> run pursue                    <span class="c">  # Skills in sequence: a Flow</span>
-<span class="p">$</span> <b>lf</b> --machine mini run pursue     <span class="c">  # on another machine, over ssh</span>
-<span class="p">$</span> <b>lf</b> task run EXP-12               <span class="c">  # its worktree, then its Flow</span>
-<span class="p">$</span> <b>lf</b> resume                        <span class="c">  # back to the last Session</span>
-<span class="p">$</span> <b>lf</b> usage --task EXP-12           <span class="c">  # what that Task cost</span>
-<span class="p">$</span> <b>lf</b> land                          <span class="c">  # merge when checks pass</span></pre>
+<pre tabindex="0" aria-label="lf commands" class="term"><span class="p">$</span> <b>lf</b> --machine mini \\         <span class="c"># where it runs</span>
+     --account claude=you@ \\  <span class="c"># whose login pays</span>
+     -a claude:opus \\         <span class="c"># which agent and model</span>
+     --task EXP-12 \\          <span class="c"># which work, in its checkout</span>
+     --docs docs/api.md \\     <span class="c"># what it reads first</span>
+     -b \\                     <span class="c"># headless, or -i to talk</span>
+     run pursue               <span class="c"># a Flow: Skills in a graph</span>
+
+<span class="p">$</span> <b>lf</b> resume                   <span class="c"># back to the last Session</span>
+<span class="p">$</span> <b>lf</b> usage --task EXP-12      <span class="c"># what that Task cost</span>
+<span class="p">$</span> <b>lf</b> land                     <span class="c"># merge when checks pass</span></pre>
     </article>
   </div>
 </section>

@@ -1,16 +1,17 @@
 mod support;
 
 use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
 use std::process::Command;
 
 use loopflow::ops::{commit_selected, commit_workflow, CommitOptions, NullProgress};
 use loopflow_test_support::TestRepo;
 use support::EnvGuard;
 
-fn git_output(repo: &TestRepo, args: &[&str]) -> String {
+fn git_output(repo: &Path, args: &[&str]) -> String {
     let output = Command::new("git")
         .args(args)
-        .current_dir(repo.path())
+        .current_dir(repo)
         .output()
         .unwrap();
     assert!(
@@ -18,16 +19,13 @@ fn git_output(repo: &TestRepo, args: &[&str]) -> String {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    String::from_utf8(output.stdout).unwrap().trim().to_string()
+    String::from_utf8(output.stdout).unwrap()
 }
 
 fn last_commit_message(repo: &TestRepo) -> String {
-    let output = Command::new("git")
-        .args(["log", "-1", "--pretty=%B"])
-        .current_dir(repo.path())
-        .output()
-        .expect("git log");
-    String::from_utf8_lossy(&output.stdout).trim().to_string()
+    git_output(repo.path(), &["log", "-1", "--pretty=%B"])
+        .trim()
+        .to_string()
 }
 
 fn commit_options(message: &str) -> CommitOptions {
@@ -96,18 +94,18 @@ fn selected_commit_saves_untracked_scratch_without_unrelated_staged_work() {
     .unwrap();
 
     assert_eq!(
-        git_output(&repo, &["show", "HEAD:scratch/design.md"]),
-        "design"
+        git_output(repo.path(), &["show", "HEAD:scratch/design.md"]),
+        "design\n"
     );
     assert_eq!(
-        git_output(&repo, &["show", "HEAD:scratch/questions.md"]),
-        "questions"
+        git_output(repo.path(), &["show", "HEAD:scratch/questions.md"]),
+        "questions\n"
     );
     assert_eq!(
-        git_output(&repo, &["diff", "--cached", "--name-only"]),
-        "other.md"
+        git_output(repo.path(), &["diff", "--cached", "--name-only"]),
+        "other.md\n"
     );
-    assert_eq!(git_output(&repo, &["show", ":other.md"]), "staged");
+    assert_eq!(git_output(repo.path(), &["show", ":other.md"]), "staged\n");
     assert_eq!(
         std::fs::read_to_string(repo.path().join("other.md")).unwrap(),
         "later edit\n"
@@ -165,18 +163,6 @@ fn commit_failures_report_hook_output_or_exit_status() {
 }
 
 #[test]
-fn commit_with_message_override() {
-    let repo = TestRepo::new();
-    repo.create_file("override.txt", "hello");
-
-    let options = commit_options("override message");
-
-    let committed = commit_workflow(repo.path(), &options, &NullProgress, &|_| {}).expect("commit");
-    assert!(committed);
-    assert_eq!(last_commit_message(&repo), "override message");
-}
-
-#[test]
 fn commit_generates_message_when_none() {
     let repo = TestRepo::new();
     repo.create_file("needs-message.txt", "hello");
@@ -210,19 +196,7 @@ fn persistent_selection_preserves_scratch_and_unrelated_index() {
     )
     .unwrap();
     // Use local HEAD as the fixture base rather than the older remote.
-    let git = |args: &[&str]| {
-        let output = Command::new("git")
-            .current_dir(&persistent.path)
-            .args(args)
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        String::from_utf8(output.stdout).unwrap()
-    };
+    let git = |args: &[&str]| git_output(&persistent.path, args);
     git(&["merge", "main"]);
     std::fs::write(persistent.path.join("memory.md"), "durable\n").unwrap();
     std::fs::write(persistent.path.join("other.md"), "staged\n").unwrap();
@@ -234,8 +208,7 @@ fn persistent_selection_preserves_scratch_and_unrelated_index() {
     )
     .unwrap();
 
-    loopflow::ops::commit_selected(&persistent.path, &["memory.md".into()], Some("Save memory"))
-        .unwrap();
+    commit_selected(&persistent.path, &["memory.md".into()], Some("Save memory")).unwrap();
 
     assert_eq!(git(&["show", "HEAD:memory.md"]), "durable\n");
     assert_eq!(

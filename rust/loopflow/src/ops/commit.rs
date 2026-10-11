@@ -168,7 +168,10 @@ pub fn commit_workflow(
         }
     }
 
-    if !has_staged_changes(repo)? {
+    if git_stdout(repo, &["diff", "--cached", "--name-only"])?
+        .trim()
+        .is_empty()
+    {
         progress.status("Nothing staged to commit");
         return Ok(false);
     }
@@ -203,16 +206,6 @@ pub fn commit_workflow(
     Ok(true)
 }
 
-fn has_staged_changes(repo: &Path) -> OpsResult<bool> {
-    let output = std::process::Command::new("git")
-        .arg("diff")
-        .arg("--cached")
-        .arg("--quiet")
-        .current_dir(repo)
-        .status()?;
-    Ok(!output.success())
-}
-
 fn format_commit_message(task: &str, sources: &[String], title: Option<&str>) -> String {
     let prefix = if sources.is_empty() {
         format!("lf {task}")
@@ -239,7 +232,7 @@ fn generate_commit_message(repo: &Path, agent_override: Option<&str>) -> OpsResu
         .content
         .ok_or_else(|| OpsError::Message("commit-message skill has no content".to_string()))?;
 
-    let diff = staged_diff(repo)?;
+    let diff = git_stdout(repo, &["diff", "--cached"])?;
     let diff = truncate_chars(&diff, 20_000);
 
     let prompt = format!(
@@ -281,14 +274,6 @@ fn generate_commit_message(repo: &Path, agent_override: Option<&str>) -> OpsResu
     let combined = format!("{}\n{}", result.stdout, result.stderr);
     parse_commit_message(&combined)
         .ok_or_else(|| OpsError::Message("failed to parse commit message from agent".to_string()))
-}
-
-fn staged_diff(repo: &Path) -> OpsResult<String> {
-    let output = std::process::Command::new("git")
-        .args(["diff", "--cached"])
-        .current_dir(repo)
-        .output()?;
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
 fn parse_commit_message(raw: &str) -> Option<CommitMessage> {

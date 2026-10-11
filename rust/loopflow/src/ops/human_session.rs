@@ -609,7 +609,12 @@ pub(crate) async fn open(
         session
     };
     let native = NativeSession::of(session)?;
-    let Some(provider_session) = store.sqlite.input_provider_session(&session.artifact_key)? else {
+    let provider_session = store.sqlite.input_provider_session(&session.artifact_key)?;
+    if resume && matches!(native.provider, "claude" | "opencode") {
+        crate::lf::commands::util::require_provider_session_process(&native.dir)?;
+        stop_headless_for_resume(store, session, provider_session.as_ref()).await?;
+    }
+    let Some(provider_session) = provider_session else {
         let surface = surface(store, session).await?;
         if resume {
             open_waiting(store, &session.id).await?;
@@ -653,6 +658,61 @@ pub(crate) async fn open(
     }
     Ok(result)
 }
+/// End the recorded headless group before reopening its native conversation.
+/// Missing native identity must refuse before stopping otherwise useful work.
+async fn stop_headless_for_resume(
+    store: &SharedStore,
+    session: &LfSession,
+    provider: Option<&crate::session_record::ProviderSessionRef>,
+) -> Result<()> {
+    let Some(expected) = store.sqlite.session_attachment(&session.id)? else {
+        return Ok(());
+    };
+    let Some(agent) = store
+        .sqlite
+        .agent_processes()?
+        .into_iter()
+        .find(|agent| agent.process.id == expected.agent_process_id)
+    else {
+        return Ok(());
+    };
+    if agent.interactive || agent.process.completed_at.is_some() {
+        return Ok(());
+    }
+    let provider = provider.ok_or_else(|| {
+        anyhow!(
+            "Native conversation identity is unavailable; cannot stop and resume this headless run"
+        )
+    })?;
+    if let Some(thread) = store.sqlite.session_thread(&session.id)? {
+        anyhow::ensure!(
+            thread == provider.agent_session,
+            "Recorded conversation differs from the headless conversation"
+        );
+    }
+    let process = crate::journal::current_lf_process_id()
+        .ok_or_else(|| anyhow!("Connecting requires the current lf Process"))?;
+    let sqlite = store.sqlite.clone();
+    let id = session.id.clone();
+    tokio::task::spawn_blocking(move || {
+        let attachment = sqlite.claim_session_attachment(&id, Some(&expected), &process, false)?;
+        sqlite.finish_session_attachment(&id, &attachment, "interrupted", || {
+            if !crate::harness::agent_process::close_session_agent_process(&sqlite, &id)? {
+                return Err(crate::store::StoreError::InvalidAuthority(
+                    "Headless AgentProcess identity is unavailable".into(),
+                ));
+            }
+            Ok(true)
+        })
+    })
+    .await??;
+    eprintln!(
+        "Stopped headless {}; resuming the same native conversation (not live takeover).",
+        session.provider.as_deref().unwrap_or("provider")
+    );
+    Ok(())
+}
+
 /// Connect to one existing provider thread. Native UI traffic crosses the same
 /// attachment fence as the headless writer; client exit leaves the provider alive.
 #[cfg(unix)]
@@ -1370,6 +1430,129 @@ fn read_observation_chunk(_: &mut [u8]) -> std::io::Result<Option<usize>> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    #[test]
+    fn public_open_stops_headless_group_and_resumes_saved_conversation() {
+        use std::os::unix::fs::PermissionsExt;
+        const CHILD: &str = "LOOPFLOW_RESUME_TEST_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            for provider in ["claude", "opencode"] {
+                let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+                child.args(["--exact", "ops::human_session::tests::public_open_stops_headless_group_and_resumes_saved_conversation", "--nocapture"]);
+                for (key, _) in std::env::vars_os() {
+                    if key.to_string_lossy().starts_with("LF_") {
+                        child.env_remove(key);
+                    }
+                }
+                let output = child.env(CHILD, provider).output().unwrap();
+                assert!(
+                    output.status.success(),
+                    "{}\n{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+            return;
+        }
+        let provider_name = std::env::var(CHILD).unwrap();
+        let ledger = crate::journal::TestLedgerGuard::new();
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let home = ledger.home();
+        let bin = home.join("bin");
+        std::fs::create_dir(&bin).unwrap();
+        let lf = bin.join("lf");
+        std::fs::write(&lf, "#!/bin/sh\nexit 95\n").unwrap();
+        std::fs::set_permissions(&lf, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::env::set_var("LF_BIN", &lf);
+        let native = bin.join(&provider_name);
+        std::fs::write(&native, "#!/bin/sh\nstate=$(ps -o stat= -p \"$(cat provider-pid)\" | tr -d ' ')\ncase \"$state\" in \"\"|Z*) ;; *) exit 96;; esac\nprintf '%s\\n' \"$@\" > client-args\n").unwrap();
+        std::fs::set_permissions(&native, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let _path = crate::test_ambient::EnvGuard::clear(&["PATH"]);
+        std::env::set_var("PATH", format!("{}:/usr/bin:/bin", bin.display()));
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        crate::journal::with_process(|| {
+            crate::journal::admit_process(home, &["lf".into(), "session".into()]);
+            runtime.block_on(async {
+                let store = std::sync::Arc::new(
+                    crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
+                        home.join("loopflow.db"),
+                    ))
+                    .await?,
+                );
+                let capture = crate::session_record::CaptureHandle::begin_at(
+                    home,
+                    crate::session_record::SessionCaptureSpec {
+                        harness: provider_name.clone(),
+                        model: None,
+                        surface: "headless".into(),
+                        cwd: home.into(),
+                        repo: None,
+                        worktree: None,
+                        skill: None,
+                        subjects: vec![],
+                        flow: crate::session_record::SessionFlowMembership::Independent,
+                        work: None,
+                    },
+                )?;
+                let session = store
+                    .sqlite
+                    .session_for_artifact(&capture.artifact_key())?
+                    .unwrap();
+                let launcher = crate::id::LfProcessId::new();
+                rusqlite::Connection::open(home.join("loopflow.db"))?.execute(
+                    "INSERT INTO processes(id,trace_id,started_at) SELECT ?1,trace_id,started_at FROM processes WHERE id=?2",
+                    rusqlite::params![launcher, crate::journal::current_lf_process_id().unwrap()],
+                )?;
+                let first = store.sqlite.claim_session_attachment(&session.id, None, &launcher, true)?;
+                let mut command = tokio::process::Command::new("/bin/sleep");
+                command
+                    .env_clear()
+                    .arg("60")
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null());
+                let mut provider = crate::harness::agent_process::spawn(
+                    command,
+                    None,
+                    &(store.sqlite.clone(), session.id.clone(), first.clone()),
+                )?;
+                std::fs::write(home.join("provider-pid"), provider.id().unwrap().to_string())?;
+                // Without native identity, connect must leave the running provider alone.
+                let refused = super::open(&store, &session.id, super::OpenMode::Try, true).await;
+                assert!(refused.unwrap_err().to_string().contains("identity is unavailable"));
+                assert!(provider.try_wait()?.is_none());
+                assert_eq!(store.sqlite.session_attachment(&session.id)?, Some(first.clone()));
+                crate::session_record::write_provider_session(
+                    &capture.artifact_dir(), &"saved-thread".into(), None,
+                )?;
+                let origin = store.sqlite.session_turn_origin(&session.id, &first)?;
+                store.sqlite.record_session_turn_origin(&"saved-thread".into(), "pending", &origin)?;
+                let result = super::open(&store, &session.id, super::OpenMode::Try, true).await;
+                let alive = crate::journal::OsProcess::group_is_alive(provider.id().unwrap())?;
+                if alive {
+                    provider.kill().await?;
+                }
+                result?;
+                assert!(!alive, "native resume left the headless provider running");
+                let row = store.sqlite.process(&first.agent_process_id)?.unwrap();
+                assert!(row.completed_at.is_some());
+                assert!(store.sqlite.with_session_attachment(&session.id, &first, || Ok(())).is_err());
+                let history = store.sqlite.session_history(&session.id, 0, 0)?;
+                assert!(history.iter().any(|event| event.provider_turn.as_deref() == Some("pending")
+                    && event.kind == crate::session::SessionEventKind::Started));
+                assert!(!history.iter().any(|event| event.provider_turn.as_deref() == Some("pending")
+                    && event.kind == crate::session::SessionEventKind::Completed));
+                let args = std::fs::read_to_string(home.join("client-args"))?;
+                let flag = if provider_name == "claude" { "--resume" } else { "--session" };
+                assert!(args.contains(&format!("{flag}\nsaved-thread\n")), "{args}");
+                assert_eq!(store.sqlite.input_provider_session(&session.artifact_key)?.unwrap()
+                    .agent_session.as_str(), "saved-thread");
+                Ok::<_, anyhow::Error>(())
+            })
+        })
+        .unwrap();
+    }
+
     #[test]
     fn session_states_fixture_has_only_process_or_unknown_states() {
         let states: Vec<super::SessionState> = serde_json::from_str(include_str!(

@@ -3,6 +3,7 @@
 import base64
 import hashlib
 import os
+import signal
 import socket
 import struct
 import subprocess
@@ -95,6 +96,12 @@ def main() -> None:
                         child.kill()
                         child.wait()
                     reader.join(timeout=5)
+
+    # A native app-server outlives its client. Keep the recorded group leader
+    # available for exact-authority shutdown, rather than stranding its watchdog
+    # when this single-client transport fixture finishes.
+    while True:
+        signal.pause()
 
 
 if __name__ == "__main__":

@@ -592,3 +592,5 @@ strip links to its own site in a new tab.
 - Jack Heart: "instead of \", use bold or italics?" → in the `x10` thesis, Waves and Tasks are italic, not quoted.
 
 - Jack Heart, on the thesis: "sans-serif" → the three paragraphs at the top of `x10` are set in the site's sans face.
+
+- Jack Heart: "Turning ideas and requirements into an concrete design." → added as the first item under "What agents automate" in `x10`. Placement is Claude's guess; Jack did not say which column or where.

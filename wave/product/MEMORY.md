@@ -575,9 +575,6 @@ Task findings may challenge Wave purpose and Wave findings repository direction;
 accepted decisions return to owners without adding control authority or making
 operation a prerequisite for independent Tasks.
 
-Archived VSM evidence establishes no installed adoption, delivery, KR or external
-progress; absent planning reads did not prove an empty backlog.
-
 ## Named participants and review feedback (curated 2026-09-25)
 
 Original attribution/continuation sources and dated gate receipts:

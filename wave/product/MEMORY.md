@@ -77,12 +77,13 @@ LOO-406/#1503 includes Linux reconnect and observed-reopening regression evidenc
 (Infra memory); composed Git/Desktop proof remains. Linear's unconditional writes
 can overwrite unseen reopening: readback proves observed state, not atomicity.
 
-Jack selected user-keyed Git plans by default, explicit shared opt-in, Linear wins;
-otherwise host preference then last-write-wins with recoverable edits. Code remotes
-grant neither identity nor publication permission. Joins select/publish nothing; Wave selection inherits to descendants.
-Multiple destinations must not split the repository window.
-Private-ancestry holds retain journals/dependents and local moves;
-peers keep old values, so omission is not convergence.
+Jack selected user-keyed Git by default, explicit shared opt-in and Linear winning
+observed conflicts. October 10's LOO-412 direction supersedes manual destination
+connect/use/select and per-Wave enrollment: one configured transport per repository,
+Linear or personal/shared Git. Mixed Linear/Git exchange is no longer a target.
+Code remotes grant neither identity nor real-data publication permission.
+Earlier selection/private-ancestry evidence remains in
+`16e9c950b9:wave/product/MEMORY.md`, **Direction after October 7**.
 
 LOO-427 composes LOO-412's `19e31f64d` journals, common receipts, unplaced-Wave
 reads and destination-level Desktop Work stream. Mixed Linear/Git stays disabled.
@@ -178,10 +179,19 @@ owner-pinned reads. Foreign physical Task IDs cannot disprove local corresponden
 late preparation retains its original Work. Files refuses changed owners without redirecting drafts. Native acceptance/admission remain unproved. Failures: `2feed22e1109:wave/product/MEMORY.md`,
 this paragraph; checks: `scratch/findings.md`, **Work-tab cutover**.
 
-**Confirmation cannot elect execution.** `4c43550c2`: divergent revisions and
-independent refs both confirm, not Task allocation. `42990dea3` shares membership
-checks, not admission. A pinned Machine/key remains unreviewed: establishment,
-associated identity and unavailable-Machine recovery need a decision. Jack authorized committed LOO-412 stacking, not dirty peer work or runtime replication.
+**Confirmation cannot elect execution.** `4c43550c2`'s divergent revisions and
+independent refs confirm without allocating execution; `42990dea3` shares membership,
+not admission. LOO-414 owns arbitration establishment, associated identity and
+unavailable-owner recovery; no-owner first-start refusal remains.
+
+Jack Heart accepted LOO-427 for queue then Task-completing shipping on October 10
+(`16e9c950b9`), superseding the demo hold without claiming missing proof. LOO-397
+owns broader explanations/discovery; LOO-391 native Work-tab/input/read, configured
+remote panes and running-Flow exchange proof; LOO-416 relaunch persistence;
+LOO-452 richer keys; LOO-453 readiness/events. The comparison owns full allocations.
+LOO-412's configured-transport dependency still needs integration; neither committed
+code nor Jack's shipping approval proves a combined-tree gate. No installation,
+live migration/publication or provider-account use is authorized.
 
 ## Task delivery boundary (LOO-418, reconciled 2026-10-09)
 
@@ -342,13 +352,11 @@ with their replacements (Started, steer cursors, attribution, normalization).
 SQL strings can compile against deleted columns. Whole-suite failures after passing
 slices are retained in the archive; diff rewritten plans for accidentally dropped work.
 
-October 6 gate passed Rust 2265, Clippy, Desktop and website with inherited LF
-pins cleared, after one stale-migration repair. Four checkout-refresh tests failed
-on Jack's host lacking the draft; eleven chapter tests failed only under `--lib`.
-No real provider step, killed driver, populated migration, Desktop Start against
-real lf or cron Flow was proved. September 30's provider continuation, remote
-association, cross-Task focus and symlink-transition proof also remained absent.
-October 7 retired numeric layout/soak acceptance, not those evidence limits.
+October 6 gate and failed checkout-refresh/chapter tests are retained at
+`16e9c950b9:wave/product/MEMORY.md`, **Task conversation and Workflows**.
+Real-provider, killed-driver, populated-migration, configured Desktop/cron and
+September 30 continuation/association/focus proof remained absent. October 7
+retired numeric layout/soak acceptance, not those limits.
 
 ## Session and operate pairs (2026-10-05)
 
@@ -553,12 +561,8 @@ clipboard input. 5whys remains explicit systemic investigation; reduce and polis
 remain optional surveys, with no accepted removal. Research includes conversational
 codebase questions. Realign reconciles memory; pr-message owns PR authorship.
 
-Historical recipes/consolidation: `c7359a7415f29c181b8e5bf2383cb5ba683d0586:wave/product/MEMORY.md`,
-this heading; superseded by October 6–7's Workflow decisions.
-The consolidation retired duplicate memory skills (PR #1319), expand, and older
-Task/governance report pipelines. QA repairs authorized defects while independent
-audits stay read-only. Delivery retains distinct publication, reviewer merge,
-bare landing and Task-completing landing. Missing launch history proves neither
+Historical consolidation: `16e9c950b9:wave/product/MEMORY.md`, this heading.
+Workflow decisions supersede those recipes; missing launch history proves neither
 disuse nor caller authorship.
 
 Jack requested single S1–S5 skills and identified their sequence as VSM. The
@@ -571,10 +575,8 @@ Task findings may challenge Wave purpose and Wave findings repository direction;
 accepted decisions return to owners without adding control authority or making
 operation a prerequisite for independent Tasks.
 
-The design and evidence linked in that archive
-retain decisions and simulations. September 28 passes lacked planning reads, not
-backlog; five-step VSM/incident handoffs, installed adoption and delivery lack
-configured proof. No KR or external progress is earned.
+Archived VSM evidence establishes no installed adoption, delivery, KR or external
+progress; absent planning reads did not prove an empty backlog.
 
 ## Named participants and review feedback (curated 2026-09-25)
 

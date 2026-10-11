@@ -203,54 +203,36 @@ Ordering/disposition retain distinct receipt owners. Raw-SQL selection conflicte
 with the Git journal; fixtures now bind through the writer. Full evidence:
 `7e63c994d0:scratch/work-on-another-machine-name.md`.
 
-### Canonical Task acquisition — October 10
+### Canonical readers and remaining acquisition cut — October 10
 
-Task reads persisted rank, assignee, due date, state and completion directly;
-creation writes these once. Acquisition and `lf task create --json` return the
-saved canonical Task with local IDs and explicit Linear binding. Create reloads
-after foreground exchange to include accepted synchronization. CLI text uses the
-saved title. `ResolvedTask`, `ops/task_pm.rs` and `task_planning_item` are removed.
-Placement reads the retained provider branch directly; PR context reuses the
-existing URL reader. The retained follow-up consumer reads canonical due dates
-and explicit URL metadata, without reconstructing an issue. The follow-through lifecycle still requires deletion.
-Cold placement, comments, PR ownership and sweep consume saved identity; sweep
-compares canonical Project IDs. Acquisition still validates Linear ownership.
-No schema, execution or acquisition-validity changes.
+`18520565d6`, `96607a9a46` and `eda4a98097` establish canonical Task
+creation/status/acquisition and Wave/roadmap/Work-frame summaries. Local IDs,
+explicit Linear bindings and separate acquisition validity/age survive; saved
+content and local execution no longer depend on fabricated PM views.
+`planning_task`, `plan_read`, `ResolvedTask`, `ops/task_pm.rs`, `planning_wave`,
+`PmTaskSummary` and `task_planning_item` are deleted. CLI creation reloads after
+foreground exchange. Cold placement, comments, PR ownership and sweep use saved
+identity; provider branch/URL metadata remain explicit.
 
-### Remaining reader cut — October 10
+Project ingestion no longer returns a `LinearProject`; its unused async Store
+forwarder and association/validation return plumbing are deleted. Field delivery
+checks the fetched non-null revision against the canonical Project binding and
+accepted revision, retaining independent archive/membership evidence. A provider
+observation with the same revision can still be ineligible: confirmed archival or
+unresolved Team membership must refuse delivery without consuming the local save.
+Task delivery already uses its accepted-into-Work revision fence. The preservation
+fixture now compares against the Task returned by insertion, not its unsaved
+constructor revision.
 
-Wave, roadmap and Work-frame Task summaries now read canonical Tasks and Projects,
-without `planning_wave`, its fabricated Project inventory, `PmTaskSummary` or the
-local/provider-ID join. Summary IDs are local, `linear_id` is an explicit optional
-binding and sync evidence is required; Swift consumes that contract. Saved due
-dates and prose no longer depend on provider inventory in these surfaces. Execution,
-checkout and Workflow reads remain independent. Source checks are recorded below.
-
-`96607a9a46` completes the requested status/create reader cut after `18520565d6`:
-Task status returns canonical Task and Project records, not `PmTaskRecord`.
-CLI status retains local identity, due date and prose; Wave/roadmap/Work-frame
-summaries and Swift carry separate acquisition state and original observation time.
-Invalidation, positive removal and pending membership do not replace saved content
-or move captured Workflow/Process history. A foreign observation without owned Work
-returns evidence and no Task; its original record stays in the acquisition store.
-Status/wait share async store reads; duplicate lookup/inspection wrappers are deleted.
-
-`planning_task` and `plan_read::{task_in,project_in}` are now deleted, including
-fixture dependencies. Ordinary assertions read canonical Work and separate acquisition
-state; inbound fixtures supply provider facts rather than reconstructing them from Work.
-Delivery checks the issue binding and non-null revision accepted into the Task row,
-not the newest retained observation. The regression exercises stale and foreign
-observations without provider writes or local Workflow changes. Review repaired
-completion fixtures that assumed a foreground save stayed pending: they now use
-an explicit outage and captured Workflow, without changing production behavior.
-
-The remaining acquisition cut confines `PmSnapshot` and provider observations and
-removes their hierarchy from ordinary readers. Project delivery still consumes
-`put_pm_project`'s provider-shaped result; its replacement must retain accepted
-Project revision evidence. Then bindings, ordinary follow-ups,
-cron and the remaining typed journal/provider-hierarchy audit remain required.
-Acquisition availability, admission and delivery are separate. Earlier tracing:
-`582c134439:scratch/work-on-another-machine-name.md`.
+**Delete — do not maintain:** ordinary `PmSnapshot` results and escaping
+Project/Task observations, then the duplicate provider hierarchy and typed journal
+vocabularies in the audit. Snapshot confinement is still incomplete; removing the
+Project delivery return value does not finish it. Next come bindings, ordinary
+follow-ups, cron and the remaining audit. No partial publication or readiness.
+Earlier reader tracing, fixture corrections and exact proof limits remain at
+`dc0d82caa2:scratch/work-on-another-machine-name.md`, the two canonical-reader
+headings. Outage/completion fixtures retain captured Workflow; stale and foreign
+observations grant no delivery or execution authority.
 
 Rotation now consumes and returns canonical Tasks, including saved dates/prose and
 explicit bindings. It no longer reconstructs PM records, substitutes IDs or repeats
@@ -334,7 +316,7 @@ The original acquisition tracing is preserved at
 `a849341234:scratch/work-on-another-machine-name.md`; the absorbed review is at
 `f2ca2063b5:scratch/project-acquisition-dependency.md`. Its missing prose proof is
 superseded above, not its private-observation requirement. The public canonical
-Project reader cut (`52e7da7f35`) is complete. Remaining delivery/snapshot consumers of
+Project reader cut (`52e7da7f35`) is complete. Remaining snapshot consumers of
 `LinearProject` belong to this acquisition prerequisite, before bindings, ordinary
 follow-ups, cron and the rest of the audit. No partial publication or readiness.
 
@@ -382,11 +364,12 @@ still governs; no execution or delivery-attempt exchange is authorized.
   cut. Regenerate them after the entire accepted reduction, before review-only
   republication. No readiness or landing follows from this persistence checkpoint.
 
-Checks: `cargo build -p loopflow --bin lf`, fmt/Clippy and eight focused reader/delivery/completion/offline fixtures pass (seven network-isolated); broader verification stays gate-owned.
+Checks: CLI build, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and 12 network-isolated tests (accepted-revision delivery, prose, Project preservation, offline refiling) pass; gate owns broader verification.
 
 
-Context: authored memory/scratch fit; generated Task seed/steers/workspace exceeds
-16,000 tokens by over 5,400. Authored edits cannot remove that stored input.
+Context: authored memory/scratch fit; `lf context --skill compress --json` reports
+the generated Task seed/steers/workspace over 21,000 tokens (over 5,000 above 16,000).
+Authored edits cannot remove that stored input; no limit was raised.
 
 Earlier transport evidence: `ae96102580e:scratch/work-on-another-machine-name.md`.
 The mixed model is superseded; its synthetic proofs establish no installed acceptance.

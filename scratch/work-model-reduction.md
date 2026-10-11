@@ -58,6 +58,8 @@ from the existing shared columns. Acquisition returns that canonical Task; ordin
 `work/project.rs`. Optional Linear IDs remain bindings, never replacement domain IDs. Keep
 optimistic revisions, timestamps, historical iteration events and legacy mappings.
 The whole Task struct remains unsuitable for exchange because it contains local data.
+Project ingestion and association no longer return provider records; their unused
+async forwarding API is deleted. Snapshot confinement remains.
 The composed prose save/delivery/acquisition path now has focused proof and explicit
 field-revision/age retention across newer partial observations. The `PmProject`
 symbol and `plan_read` projections are removed; `PmSnapshot.projects`
@@ -288,7 +290,8 @@ explicit optional Linear bindings and required sync evidence. `PmTaskSummary`,
 `planning_wave` and their dual-ID joins are removed. Creation now returns canonical Task and the CLI uses its title; `task_planning_item`
 is deleted. Placement/PR consumers read explicit branch/URL metadata. Task status now returns canonical Task/Project records; summaries expose acquisition
 state/age independently of delivery, including Swift decoding and display. Remaining:
-provider-shaped reconstruction in delivery and snapshots.
+provider-shaped snapshot results. Project delivery now checks accepted Work revision
+and retained archive/membership evidence, not a returned provider record.
 
 **Swift (under `swift/`):** `Models/WaveWorkMap.swift`'s Project/Task planning
 snapshots and `PlanningKeyResult`; `Models/WavePlan.swift`, `PlanningSync.swift`,

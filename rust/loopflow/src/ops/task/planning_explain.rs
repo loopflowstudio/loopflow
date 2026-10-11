@@ -204,11 +204,6 @@ async fn read_planning(
                 project: project.id.to_string(),
                 previous_project: task.project_id.to_string(),
             });
-            for wave in [super::owning_wave(store, &task).await?, destination] {
-                if let Err(error) = crate::ops::pm::require_planning_home(store, &wave).await {
-                    report.impediments.push(error.to_string());
-                }
-            }
             if let Err(error) =
                 store
                     .sqlite

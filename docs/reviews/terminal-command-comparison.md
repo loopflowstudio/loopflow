@@ -10,19 +10,22 @@ implementation, not native or multi-Machine proof.
 |---|---|
 | Broader invocation explanations; installed CLI vs running app discovery | [LOO-397](https://linear.app/loopflow/issue/LOO-397) |
 | Native Work-tab/draft/focus/input proof, configured remote panes, planning exchange during a Flow | [LOO-391](https://linear.app/loopflow/issue/LOO-391) |
-| Exclusive first start of delegated shared Tasks; detached retry-safe execution | [LOO-414](https://linear.app/loopflow/issue/LOO-414) |
+| Detached execution retries and unavailable-admission-authority recovery | [LOO-414](https://linear.app/loopflow/issue/LOO-414) |
 | Restore Work tabs and pane locations after app exit | [LOO-416](https://linear.app/loopflow/issue/LOO-416) |
 | Keyboard customization and richer terminal chords | [LOO-452](https://linear.app/loopflow/issue/LOO-452) |
 | Exact-view readiness, bounded waits and change observation | [LOO-453](https://linear.app/loopflow/issue/LOO-453) |
 
-LOO-412's current direction selects one configured planning transport per
-repository; mixed Linear/Git exchange and manual per-Wave enrollment are superseded.
-`lf planning status` remains. This accepted diff implements the earlier enrollment
-baseline, not that newer configuration path. The operator’s October 10 brief interpretation
-leaves the unmerged transport/domain replacement with LOO-412; it is not a shipping
-prerequisite. Actual main conflicts and failing checks still require repair.
-Shared first-start refusal remains until LOO-414
-establishes admission; no missing checkout or negative peer read authorizes start.
+LOO-427 is stacked on [LOO-412 · Run a Task on a new Machine](https://github.com/loopflowstudio/loopflow/pull/1491),
+as Jack Heart requested on October 11. The combined implementation uses one
+configured planning transport per repository and the canonical planning writer;
+manual per-Wave enrollment and mixed-provider projection are removed. This
+supersedes the earlier baseline-first shipping interpretation. LOO-412 must land first.
+
+October 11: Jack Heart moved minimum exclusive first-start admission into LOO-427.
+Git-default planning makes the current no-owner refusal block ordinary new Tasks
+as well as delegated ones. That repair is required before landing; LOO-414 retains
+detached launch retries and unavailable-authority recovery. Missing checkouts and
+negative peer observations cannot authorize a first start.
 
 
 Inline `# lf-doc: ambiguous` comments annotate retired spellings for today's

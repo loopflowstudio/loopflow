@@ -234,13 +234,6 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         };
         let original_plans = plans();
         assert_eq!(original_plans.len(), 2);
-        let canonical_plan: String = connection
-            .query_row(
-                "SELECT id FROM repository_plans WHERE repo=?1 AND selected=1",
-                [alpha.repo()],
-                |row| row.get(0),
-            )
-            .unwrap();
         let resolved = store
             .get_wave_at(&WaveLocator::discover(&repo_a, "legacy").unwrap())
             .await
@@ -248,27 +241,13 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
             .unwrap();
         assert_eq!(resolved.id(), legacy.id());
         assert_eq!(plans(), original_plans);
-        let selected_plan: String = connection
-            .query_row(
-                "SELECT id FROM repository_plans WHERE repo=?1 AND selected=1",
-                [resolved.repo()],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(selected_plan, canonical_plan);
-
-        assert_eq!(
-            resolved.repo(),
-            std::fs::canonicalize(&repo_a)
-                .unwrap()
-                .display()
-                .to_string()
-        );
-        // Resolving one Wave repairs the repository scope for its sibling too.
+        // Reading an alias retains the registered identity and does not relocate
+        // this Wave, its sibling or their planning evidence.
+        assert_eq!(resolved.repo(), legacy.repo());
         for wave in [&legacy, &sibling] {
             assert_eq!(
                 store.get_wave(wave.id()).await.unwrap().unwrap().repo(),
-                resolved.repo()
+                wave.repo()
             );
         }
         let observation = store

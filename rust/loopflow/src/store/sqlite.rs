@@ -1759,66 +1759,6 @@ impl SqliteStore {
         wave.transpose()
     }
 
-    pub(crate) fn repair_wave_repo(
-        &self,
-        wave_id: &WaveId,
-        expected_repo: &str,
-        target_repo: &str,
-    ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current = tx
-            .query_row(
-                "SELECT repo, slug FROM wave_addresses WHERE id = ?1",
-                params![wave_id],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-            )
-            .optional()?
-            .ok_or_else(|| StoreError::InvalidData(format!("Wave {wave_id} is not registered")))?;
-        if current.0 == target_repo {
-            tx.commit()?;
-            return Ok(());
-        }
-        if current.0 != expected_repo {
-            return Err(StoreError::InvalidData(format!(
-                "Wave {wave_id} repository changed from {expected_repo} while its canonical path was being repaired"
-            )));
-        }
-        let collision = tx
-            .query_row(
-                "SELECT id FROM wave_addresses
-                 WHERE repo = ?1 AND slug = ?2 AND id != ?3 AND retired_at IS NULL",
-                params![target_repo, current.1, wave_id],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()?;
-        if let Some(collision) = collision {
-            return Err(StoreError::InvalidData(format!(
-                "cannot repair Wave {wave_id} repository to {target_repo}: locator belongs to Wave {collision}"
-            )));
-        }
-        // Canonicalization changes one repository identity, including every Wave
-        // and shared planning entity under that alias. Move them atomically;
-        // uniqueness conflicts must preserve both observations, never merge them.
-        // A legacy symlink locator can already have a plan ID. Retain it as an
-        // alias while keeping the canonical location's selected plan.
-        tx.execute("UPDATE repository_plans SET selected=0 WHERE repo=?1 AND EXISTS(SELECT 1 FROM repository_plans WHERE repo=?2 AND selected=1)", params![expected_repo,target_repo])?;
-        for table in [
-            "repository_plans",
-            "waves",
-            "pm_projects",
-            "pm_items",
-            "pm_project_name_cutover",
-        ] {
-            tx.execute(
-                &format!("UPDATE {table} SET repo = ?2 WHERE repo = ?1"),
-                params![expected_repo, target_repo],
-            )?;
-        }
-        tx.commit()?;
-        Ok(())
-    }
-
     pub fn find_waves_by_slug(&self, slug: &str) -> StoreResult<Vec<Wave>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(

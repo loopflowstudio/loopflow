@@ -493,25 +493,16 @@ impl Store {
             }
         };
         let all = run_sqlite(&self.sqlite, move |store| store.list_waves(None)).await?;
-        for wave in all {
-            if wave.repo() == canonical.to_string() {
-                continue;
-            }
-            let equivalent = crate::repository::CanonicalRepo::discover(Path::new(wave.repo()))
-                .is_ok_and(|stored| stored == canonical);
-            if !equivalent {
-                continue;
-            }
-            let wave_id = wave.id().clone();
-            let expected_repo = wave.repo().to_string();
-            let target_repo = canonical.to_string();
-            run_sqlite(&self.sqlite, move |store| {
-                store.repair_wave_repo(&wave_id, &expected_repo, &target_repo)
+        // Repository aliases are a read concern; inspection must not relocate
+        // durable planning rows or require a writable store.
+        Ok(all
+            .into_iter()
+            .filter(|wave| {
+                wave.repo() == canonical.to_string()
+                    || crate::repository::CanonicalRepo::discover(Path::new(wave.repo()))
+                        .is_ok_and(|stored| stored == canonical)
             })
-            .await?;
-        }
-        let repo = canonical.to_string();
-        run_sqlite(&self.sqlite, move |store| store.list_waves(Some(&repo))).await
+            .collect())
     }
 
     /// A chord's contents: the waves whose `parent_wave_id` is `parent`,
@@ -555,14 +546,7 @@ impl Store {
             }
             return Ok(None);
         };
-        let wave_id = wave.id().clone();
-        let expected_repo = wave.repo().to_string();
-        let target_repo = locator.repo().to_string();
-        run_sqlite(&self.sqlite, move |store| {
-            store.repair_wave_repo(&wave_id, &expected_repo, &target_repo)
-        })
-        .await?;
-        self.get_wave(wave.id()).await
+        Ok(Some(wave.clone()))
     }
 
     pub async fn find_waves_by_slug(&self, slug: &str) -> StoreResult<Vec<Wave>> {
@@ -2474,13 +2458,13 @@ mod tests {
             store.placement(&predecessor_work).await.unwrap().machine_id,
             next_home
         );
-        // Acquiring a Project does not create a local execution placement.
-        assert!(store
+        // A new Project inherits its Wave's assignment without allocating execution.
+        let inherited = store
             .placement(&WorkRef::Project(transferred.project_id.clone()))
             .await
-            .unwrap_err()
-            .to_string()
-            .contains("has no Machine placement"));
+            .unwrap();
+        assert_eq!(inherited.machine_id, next_home);
+        assert_eq!(inherited.source, WorkRef::Wave(wave.id().clone()));
         // A delayed response omits the now-known successor. Rejection must
         // preserve both normalized facts and the durable Task transfer.
         assert!(store.put_pm_snapshot(delayed, None).await.is_err());

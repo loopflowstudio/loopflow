@@ -1632,10 +1632,10 @@ fn project_edits_save_offline_in_both_connection_modes() {
                     "--json",
                 ],
             );
-            assert_eq!(read["name"], "Remote name");
-            assert_eq!(read["workflow"], "research");
-            assert_eq!(read["krs"][0]["holds"], true);
-            assert_eq!(read["pm_snapshot_synced_at"], 18);
+            assert_eq!(read["project"]["name"], "Remote name");
+            assert_eq!(read["project"]["workflow"], "research");
+            assert_eq!(read["project"]["krs"][0]["holds"], true);
+            assert_eq!(read["project"]["pm_snapshot_synced_at"], 18);
             let revision: String = rusqlite::Connection::open(home.path().join("loopflow.db"))
                 .unwrap()
                 .query_row(
@@ -1764,7 +1764,10 @@ fn project_edits_save_offline_in_both_connection_modes() {
                     "--json",
                 ],
             );
-            assert_eq!(read["krs"][0]["text"], "Keep the concurrent provider plan");
+            assert_eq!(
+                read["project"]["krs"][0]["text"],
+                "Keep the concurrent provider plan"
+            );
             assert!(store
                 .pending_project_changes(&id)
                 .unwrap()
@@ -2142,15 +2145,14 @@ fn place_wave_on_remote(
     store
         .add_machine(&machine, machine.as_str(), machine.as_str(), "/remote/repo")
         .unwrap();
-    db.execute(
-        "INSERT INTO work_placements(wave_id,machine_id,enabled,placed_at) VALUES(?1,?2,1,7)
-         ON CONFLICT(wave_id) DO UPDATE SET machine_id=excluded.machine_id,placed_at=excluded.placed_at",
-        rusqlite::params![wave.as_str(), machine.as_str()],
-    )
-    .unwrap();
-    store
-        .placement(&loopflow::durable::WorkRef::Wave(wave.clone()))
-        .unwrap()
+    let repo = store.get_wave(wave).unwrap().unwrap();
+    let home = Path::new(db.path().unwrap()).parent().unwrap();
+    serde_json::from_value(lf(
+        Path::new(repo.repo()),
+        home,
+        &["wave", "place", wave.as_str(), machine.as_str(), "--json"],
+    ))
+    .unwrap()
 }
 
 #[test]
@@ -3069,7 +3071,7 @@ fn planning_sync_tracks_creation_errors_uncertainty_conflicts_and_settlement() {
             .as_array()
             .unwrap()
             .iter()
-            .find(|p| p["work_id"] == project)
+            .find(|p| p["id"] == project)
             .unwrap()["sync"]
             .clone()
     };
@@ -3283,7 +3285,7 @@ fn wave_planning_reads_current_and_historical_chapters_without_starting_work() {
         home.path(),
         &["wave", "workflow", "show", wave.slug(), "--json"],
     );
-    assert_eq!(selected["workflow"], "code");
+    assert_eq!(selected["project"]["workflow"], "code");
     assert_eq!(store.task(&task_id).unwrap().unwrap(), task);
     assert_eq!(store.project(&historical.id).unwrap().unwrap(), historical);
     lf(

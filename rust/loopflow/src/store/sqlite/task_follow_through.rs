@@ -221,6 +221,8 @@ impl SqliteStore {
              FROM task_events e JOIN tasks t ON t.id = e.task_id
              LEFT JOIN tasks target ON target.id=json_extract(e.kind_json, '$.link.issue_id')
                 OR target.external_issue_id=json_extract(e.kind_json, '$.link.issue_id')
+                OR EXISTS(SELECT 1 FROM task_creation_intents c WHERE c.task_id=target.id
+                    AND json_extract(c.export_json,'$.id')=json_extract(e.kind_json,'$.link.issue_id'))
              WHERE json_extract(e.kind_json, '$.kind') = 'follow_through_linked'
              ORDER BY e.id",
         )?;

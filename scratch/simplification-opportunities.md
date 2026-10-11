@@ -1,7 +1,7 @@
 # Simplification Opportunities
 
-October 10, 2026. Jack Heart selected 427 stacked on 412, ready to land after
-412. Published `fe5262b093` is integrated; focused verification is in progress.
+October 11, 2026. Jack Heart selected 427 stacked on 412, ready to land after
+412. Published `c77e72b6b7` is integrated; gate repairs are in progress.
 412 owns combined simplification. No second planning rewrite is launched here.
 
 ## Integration boundary

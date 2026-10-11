@@ -1489,7 +1489,10 @@ pub(super) fn resolve_task_id_in(
         "SELECT t.id, COALESCE(t.issue_title, t.issue_identifier, t.id) FROM tasks t
          LEFT JOIN projects p ON p.id=t.project_id LEFT JOIN waves w ON w.id=p.wave_id
          WHERE (t.id=?1 OR t.external_issue_id=?1 OR t.issue_identifier=?1
-            OR substr(lower(t.id), 6, length(?2))=?2) AND (?3 IS NULL OR w.repo=?3)
+            OR substr(lower(t.id), 6, length(?2))=?2
+            OR EXISTS(SELECT 1 FROM task_creation_intents c WHERE c.task_id=t.id
+                AND json_extract(c.export_json,'$.id')=?1))
+            AND (?3 IS NULL OR w.repo=?3)
          ORDER BY t.id",
     )?;
     let mut tasks = statement
@@ -2356,7 +2359,7 @@ mod local_planning_tests {
         let edited = store
             .edit_task(
                 &local.id,
-                0,
+                mapped.revision,
                 &PmItemUpdate {
                     name: Some("A mapping does not transfer authority".into()),
                     description: None,
@@ -2546,7 +2549,7 @@ mod local_planning_tests {
         for draft in [
             "agent_process",
             "lf_process_ids",
-            "planning_peers",
+            "process_terminal",
             "task_checkout_machine",
         ] {
             conn.execute_batch(&current_draft_sql(draft)).unwrap();

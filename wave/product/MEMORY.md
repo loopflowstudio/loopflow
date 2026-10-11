@@ -85,14 +85,12 @@ Code remotes grant neither identity nor real-data publication permission.
 Earlier selection/private-ancestry evidence remains in
 `16e9c950b9:wave/product/MEMORY.md`, **Direction after October 7**.
 
-LOO-427 composes LOO-412's `19e31f64d` journals, common receipts, unplaced-Wave
-reads and destination-level Desktop Work stream. Mixed Linear/Git stays disabled.
-**Retained uncertainty constrains effects, not saves/acquisition.** Save clocks
-order intentions; unresolved losers hold delivery. Complete lists alone settle
-order; primary-only moves retain input. Provider facts retain separate savepoints,
-ages/baselines and causal frontiers. Import reuses portable fields.
-Entity revisions cannot order relationships; scalar/list replay cannot clear
-freshness or unseen notices.
+October 11: Jack Heart requested passing tests and merge for LOO-427 after
+LOO-412. Parent `c77e72b6b7` is integrated. Its writer/configured transport replaces
+manual enrollment and mixed-provider projection. Git-default planning makes no-owner refusal block new Tasks too: Jack Heart moved first-start admission into 427; LOO-414 keeps recovery.
+Missing checkout or negative peer reads never establish permission to start.
+Earlier journals, receipts, causal-frontier and uncertainty lessons:
+`f123df571f:wave/product/MEMORY.md`, **Direction after October 7**.
 
 Binding retains locators/Work/execution; imports allocate identity, exporting no
 RepositoryId. Locator readings need observation fences: A→B→A and concurrent

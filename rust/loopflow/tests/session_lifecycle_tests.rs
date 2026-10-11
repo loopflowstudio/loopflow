@@ -318,7 +318,7 @@ fi
         native
     );
     let status = fixture.json(&["task", "status", task_id, "--json"]);
-    let project = status["planning"]["project"]["id"].as_str().unwrap();
+    let project = status["project"]["id"].as_str().unwrap();
     let selected = fixture.run(&["wave", "workflow", "set", "--project", project, "proof"]);
     assert!(selected.status.success(), "{selected:?}");
     managed_codex_account(&fixture);

@@ -697,7 +697,8 @@ prompt budgets.
 Mac app. Without a Task it opens the current repository. `--session` selects an
 existing Task-associated conversation; `--diff` reveals its retained Changes
 browser without replacing file selection or drafts. Bare Task opening acquires no
-conversation or checkout. A `--diff` request without `--session` uses the Task's
+conversation or checkout, even when its execution location is unavailable.
+Session and Changes requests still require that location. A `--diff` request without `--session` uses the Task's
 ordinary primary-Session owner to choose/prepare its conversation.
 
 JSON returns `opening`, not `usable`: macOS accepting a link proves no native

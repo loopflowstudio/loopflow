@@ -1,14 +1,14 @@
 # Desktop control on shared Work — LOO-427
 
-**Status (October 10, 2026):** Jack Heart requested preparing LOO-427 stacked
+**Status (October 11, 2026):** Jack Heart requested preparing LOO-427 stacked
 on LOO-412, with landing only after 412 lands. The recorded parent is PR #1491.
-Merge `74d84dc391` integrates published parent `fe5262b093`; unpublished 412 work stays there.
+Merge `f123df571f` integrates published parent `c77e72b6b7`; unpublished 412 work stays there.
 The earlier baseline-first delivery interpretation is superseded. This integration
 preserves accepted Work tabs, pane controls and recorded-Machine execution while
 adopting 412's canonical Work and configured planning transport. Reduction for both
 Tasks remains coordinated with 412; no publication or landing readiness is claimed.
 
-Check: `cargo fmt`, `cargo clippy --all-targets --jobs 4 -- -D warnings`, and focused delegation/migration/remote-source tests pass; combined-tree gate pending; native proof stays with LOO-391.
+Check: affected Rust suites 170/184 pass; seven contract failures repaired (focused reruns pass), seven first-start failures remain; fmt/all-target Clippy pass; headless Desktop 503 tests and Swift boundary pass; Python/website repairs pass focused checks. Native proof: LOO-391.
 
 ## Shipping scope — Jack Heart, October 10
 
@@ -23,9 +23,9 @@ with the following explicit follow-ups, not claims that their behavior is proved
 - LOO-391 (Product), broadened: native Work-tab/draft/focus retention, targeted input
   and bounded reads, configured remote Session/Files/log/shell behavior, and planning
   exchange while a Flow runs with disconnect/reconnect and execution preserved.
-- LOO-414 (Infrastructure), broadened: exclusive shared first-start admission alongside
-  retry-safe detached remote launch. Current no-owner refusal remains until an explicit
-  admission authority and unavailable-owner recovery are implemented. No started-Task transfer.
+- LOO-414 (Infrastructure): detached remote launch retries and unavailable-authority
+  recovery. October 11 brings minimum exclusive first-start admission into this PR;
+  no started-Task transfer.
 - LOO-416 (Infrastructure), broadened: saved repository/Wave/Task workspaces and
   content-owned Machine locations across relaunch, distinct from in-window retention.
 - LOO-452 (Product), already sufficient: shortcut customization and terminal chords,
@@ -294,25 +294,43 @@ both first-start refusal boundaries remain pending an accepted admission owner.
 
 ## Implementation sequence — one PR
 
-### Admission — deferred to LOO-414
+### Admission — This slice (Jack Heart, October 11)
 
-`task_location::resolve` and `require_task_planning` retain shared first-start
-refusal. The common `repositories::task_is_shared_in` predicate shares membership,
-not admission. Local-only work, planning saves/acquisition and retained execution
-remain usable. Remote companions, selectors and Work tabs are checkpointed; none
-supplies cross-Machine arbitration.
+Jack Heart selected “Bring minimum admission into 427” after Git-default planning
+made ordinary new Tasks hit the deferred refusal. This supersedes deferral of
+first-start admission, not the prohibition on transferring started Tasks.
 
-`4c43550c2`'s transport counterexamples show divergent revisions and independent
-refs both confirming. Confirmation, negative peer readings and local transactions
-cannot reserve execution. Later delegation cannot move a started Task. The proposed
-pinned admission Machine/key remains unreviewed: establishment, associated identity
-and unavailable-owner recovery need a decision in LOO-414. Two-Machine allocation,
-retry/disconnect and no-replay proof belongs there.
+**Build:** stamp each new locally created Task with an immutable admission authority:
+its creating Machine and repository locator. Exchange this binding with planning.
+That Machine owns one atomic, permanent first-execution claim per Task. Claims
+are local execution records, never last-writer-wins planning fields. Concurrent
+requests return the same winner; retries after a lost reply read that winner.
+The executing Machine retains only a positively confirmed receipt. There is no
+expiry, stealing or failover based on absence. Existing started Tasks retain their
+checkout Machine. Historical shared Tasks lacking a trustworthy authority remain
+unavailable; migration cannot invent one independently on several Machines.
 
-Earlier sequence, proposal and counterexamples:
-`16e9c950b9:scratch/compare-cmux-s-command-line.md`, **Latest direction — October 9**.
-Jack Heart's October 10 shipping decision defers this implementation; it does not
-accept the delegated first-start path as complete or authorize Task transfer.
+`lf task admission TASK --json` reads that authority; `--claim MACHINE` requests
+first execution there. Ordinary checkout/run performs this before Git allocation.
+Preview may propose an unclaimed Task's effective delegation but never claims it.
+An existing claim wins over later delegation. Addressed replies carry Task,
+authority, request nonce and execution owner. Unknown/disconnected authority
+refuses clearly, preserving saved planning. No extra provider/account path.
+
+Use the existing Task migration draft. The common planning writer preserves the
+binding across import/refile and refuses replacement. Delete the blanket shared
+Task refusal only where an established authority/confirmed claim replaces it.
+Keep identity validation, terminal planning restrictions and checkout leases.
+
+**Done when:** headless two-Machine fixtures prove one winner under concurrent
+claims, same-owner retry after a lost reply, delegation before versus after claim,
+unavailable-authority refusal without allocation, immutable exchange, and ordinary
+new Task checkout/run. Run the affected Rust gate and existing migration proof.
+LOO-414 keeps detached launch retry/recovery and unavailable-authority recovery.
+No live migration or Machine transfer is authorized.
+
+Historical independent-ref counterexample: `4c43550c2`; earlier unreviewed binding
+proposal: `16e9c950b9:scratch/compare-cmux-s-command-line.md`, **Latest direction — October 9**.
 
 ### 2. Shared Work identity, delegation and routing
 
@@ -355,7 +373,8 @@ Detailed APIs, fixture limits and prior status:
 composition (October 9)**. Headless proofs establish neither automatic background
 identity refresh, configured SSH nor mounted native surfaces.
 
-**Remaining ownership:** LOO-414 owns exclusive first-start admission; LOO-391
+**Remaining ownership:** this PR owns minimum first-start admission; LOO-414 keeps
+recovery and detached launch retries. LOO-391
 owns configured remote panes and planning exchange during a running Flow. Repeat
 exchange must retain controls, divergent execution history and pending inputs
 through disconnect/reconnect, comments, completion and causal reopening. Seeded
@@ -369,11 +388,13 @@ Machine's ordinary store. Only portable planning synchronizes. Incoming completi
 cannot move a Workflow, stop a Process or clean a checkout. No real-data publication
 is authorized.
 
-LOO-412's published `fe5262b093` is integrated through merge `74d84dc391`.
+LOO-412's published `c77e72b6b7` is integrated through merge `f123df571f`.
 Configured transport and its typed planning writer replace manual enrollment and
 mixed-provider projections. Delegation uses that same writer; local defaults stay
 local, authored assignments exchange, and recorded checkout Machines remain pinned.
-The obsolete planning-creation lookup is removed from Task reads and follow-through.
+The obsolete planning-creation table is removed. Retained creation receipts still
+resolve historical filing identity before provider confirmation; they grant no
+claim that a remote creation succeeded.
 
 Jack Heart selected this stack order on October 10: prepare 427 now, land only
 after 412. Later unpublished 412 reductions remain with 412 and require another

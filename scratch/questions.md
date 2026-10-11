@@ -47,13 +47,13 @@ history. Full prior measurement/source: `5c5f6477cc:scratch/questions.md`, this
 heading. October 10 reduction refresh: generated goal 40,741/16,000 tokens;
 authored scratch is being curated independently.
 
-## Admission authority — October 9, unresolved
+## Admission authority — October 11
 
-The [plan's admission boundary](compare-cmux-s-command-line.md#admission--deferred-to-loo-414)
-owns the counterexample, unreviewed Machine/key proposal and required proof.
-Who establishes the arbitration binding, how associated identities share it, and
-how unavailable-Machine recovery works remain undecided. No coordinator is inferred;
-first-start refusal stays, without claiming the requested path is complete.
+Jack Heart moved minimum first-start admission into LOO-427. The plan's
+[admission slice](compare-cmux-s-command-line.md#admission--this-slice-jack-heart-october-11)
+records the creating-Machine coordinator as an implementation choice, not a
+separately reviewed product decision. No automatic recovery/transfer is included;
+LOO-414 retains unavailable-authority recovery and detached launch retries.
 
 ## Explicit repository association — October 9
 

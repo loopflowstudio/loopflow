@@ -674,3 +674,5 @@ strip links to its own site in a new tab.
 - Jack Heart, on the third paragraph: "In the header is very wrong. We do not want to. People are not thinking about our header" → the paragraph no longer refers to the header. It opens "Your work has defined processes: how an idea gets researched, designed, implemented, validated, shipped. Loopflow is a template system for them." (his earlier sentence and his phrase "template system"). Copy on this page does not refer to the page's own parts.
 
 - Jack Heart: "Cut the skills of prompts and" (message ended there) → "A skill is a prompt saved as a file." removed from the `x11` third paragraph. What else he meant to cut is unknown.
+
+- Jack Heart quoted the review point that the page doesn't say which product it is (Mac app first, cmux second, no stated relation). → in `x11`: the line under Download reads "Free and open source (MIT). Use the Mac app, or run `lf` in the terminal you already have. It is the same work in both."; the first picture is labelled "In the Mac app" and the second "The same work, in your terminal". Which surface leads the page is Jack's call and is not changed.

@@ -175,10 +175,10 @@ Work-keyed cutover remains unimplemented. Passive Task navigation/bare remote li
 no longer acquire Sessions; explicit Session/Changes survives. `ff61b6bc` selects
 shell-default Split, no empty option. `d6640b8c68` retains shell Machine/path through
 layout/Undo; unknown refuses.
-Session content now captures recorded location for rendering, targeting and Split;
-changed readings fence old targets and Undo, while absent rows retain evidence.
-Remote-shell location, registry and DTO cutover remain. No native acceptance;
-admission unresolved.
+`94d5195497`: content owns terminal identity; changed Session locations fence
+occurrences/Undo, absent rows retain evidence. Registry targeting/membership still
+use checkout equality, not Work. Tabs, remote-shell/Files/log locations and DTO
+cutover remain; no native acceptance or admission decision.
 
 **Confirmation cannot elect execution.** `4c43550c2`: divergent revisions and
 independent refs both confirm, not Task allocation. `42990dea3` shares membership

@@ -59,8 +59,8 @@ and a remote bare Task link entered the Session-opening branch solely because it
 had an execution location. Both implicit paths are deleted. Explicit Session and
 Changes requests still connect through the existing owner. Model fixtures prove
 local/remote bare links await page readiness without Session acquisition; they do
-not prove rendered navigation or tabs. The Work-keyed registry, per-pane locations,
-outer-tree deletion and DTO cutover remain unfinished.
+not prove rendered navigation or tabs. The Work-keyed registry and exact-target DTO cutover remain unfinished;
+the outer tree is now deleted.
 
 Inventory simplification and its 49-test passing result remain at
 `a81245920:scratch/findings.md`, this heading.
@@ -86,10 +86,8 @@ failed builds and prior commands. Current guarantees:
 - Task-owned CLI placement still resolves local filesystem operations; retained
   pane location is not filesystem CAS. No configured peer or native proof.
 
-The local Files fixture first failed on a missing inner `try`, then passed.
-Earlier remote-shell equality, missing bundled helper and local-Machine fixture
-failures remain in the archive. The fixture uses its owned helper, not an installed
-fallback. No failed attempt establishes a passing scenario.
+Earlier Files/shell fixture failures and owned-helper corrections remain at
+`92cd05cbf3:scratch/findings.md`, **Content-location cuts**.
 
 Check: `scripts/test_desktop.sh --filter 'TaskFilesTests/localFilesKeepTheirContentLocationAndDraftWithoutPlanning|MultiplexerStoreTests/fileLocationSurvivesLayoutChanges|DesktopPaneControlTests' -Xswiftc -gnone --no-parallel` — PASS (build, 22 tests; reused unchanged); full cutover: implement; native: demo.
 
@@ -97,8 +95,8 @@ The earlier empty-error checkpoint failures are retained in `92cd05cbf3`; the
 subsequent `lf commit` succeeded as that revision. Pre-checkpoint bytes also survive
 in `/tmp/loo427-compress-ka0wKM/working.patch` and its `scratch/` copy.
 
-**Remaining cut:** Work-keyed registry, content-routed Flow logs, tabs/navigation,
-exact-target DTOs and outer-layout deletion. `retainedPane` and
+**Remaining cut:** Work-keyed registry, content-routed Flow logs, tabs/navigation
+and exact-target DTOs. `retainedPane` and
 `reconcileMembership` still encode checkout identity. Admission remains independent
 and unresolved. October 10 filesystem inspection found no Product child Wave
 directories; Infrastructure’s planning memory retains the same execution boundary.
@@ -112,4 +110,14 @@ This does not implement Work tabs or alter their deletion targets.
 
 Check: `cargo test -p loopflow --lib task_workspace_context_covers_committed_staged_unstaged_and_untracked_bytes` (LF variables cleared, closed stdin), `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo build -p loopflow --bin lf`, `git diff --check` — PASS (1 test); installed input adoption and native UI remain unproved.
 
-Check: `git diff --check` — PASS (reconciliation only; prior code checks reused); native judgment remains at demo.
+## Outer-layout deletion — October 10
+
+Removed the outer checkout tree, picker/split-slot controls, alternate retained-
+terminal route and Rust/Swift outer-layout DTOs. `WorkspaceIdentity` remains a
+location value. New Session explicitly selects repository content; existing Task
+panes and draft retention survive. Review removed two exclusive outer-slot tests
+and preserved the native shell/draft assertions without their obsolete split UI.
+This does not implement Work tabs: same-path Work still shares the old registry
+key. No tab hide/reopen or Work-key stale-target proof is claimed.
+
+Check: `scripts/test_desktop.sh --filter 'DTOFixtureTests|WorktreeWorkspaceTests|TaskCaptureTests|DesktopPaneControlTests' -Xswiftc -gnone --no-parallel` — PASS (78 tests); `cargo test -p loopflow --test dto_fixtures desktop` — PASS (6); fmt, Clippy and diff check — PASS. Native: demo.

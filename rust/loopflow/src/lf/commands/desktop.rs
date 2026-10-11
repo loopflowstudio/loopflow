@@ -27,7 +27,6 @@ pub struct DesktopWindowInspection {
     pub session: Option<DesktopSessionInspection>,
     pub supported_operations: Vec<String>,
     pub workspaces: Vec<DesktopWorkspaceInspection>,
-    pub layouts: Vec<DesktopWorktreeInspection>,
     pub opening: Option<DesktopOpening>,
 }
 
@@ -72,23 +71,6 @@ pub struct DesktopLayoutInspection {
     pub axis: Option<String>,
     pub ratio: Option<f64>,
     pub children: Vec<DesktopLayoutInspection>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct DesktopWorktreeInspection {
-    pub machine_id: String,
-    pub repository_path: String,
-    pub focused_slot: String,
-    pub layout: DesktopWorktreeNode,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct DesktopWorktreeNode {
-    pub slot: Option<String>,
-    pub machine_id: Option<String>,
-    pub worktree: Option<String>,
-    pub axis: Option<String>,
-    pub children: Vec<DesktopWorktreeNode>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -1062,13 +1044,6 @@ impl DesktopInspection {
                 "  Supported: {}",
                 window.supported_operations.join(", ")
             ));
-            for layout in &window.layouts {
-                lines.push(format!(
-                    "  Workspace slots for {}:{} · focused {}",
-                    layout.machine_id, layout.repository_path, layout.focused_slot
-                ));
-                layout.layout.render(4, &mut lines);
-            }
             for workspace in &window.workspaces {
                 lines.push(format!(
                     "  {}:{} · focused {} · zoom {} · hidden [{}]",
@@ -1104,28 +1079,6 @@ impl DesktopLayoutInspection {
                 self.ratio
                     .map(|ratio| ratio.to_string())
                     .unwrap_or_else(|| "unknown".into())
-            ));
-            for child in &self.children {
-                child.render(indent + 2, lines);
-            }
-        }
-    }
-}
-
-impl DesktopWorktreeNode {
-    fn render(&self, indent: usize, lines: &mut Vec<String>) {
-        if let Some(slot) = &self.slot {
-            lines.push(format!(
-                "{:indent$}{slot}: {}:{}",
-                "",
-                self.machine_id.as_deref().unwrap_or("unbound"),
-                self.worktree.as_deref().unwrap_or("unbound")
-            ));
-        } else {
-            lines.push(format!(
-                "{:indent$}split {}",
-                "",
-                self.axis.as_deref().unwrap_or("unknown")
             ));
             for child in &self.children {
                 child.render(indent + 2, lines);

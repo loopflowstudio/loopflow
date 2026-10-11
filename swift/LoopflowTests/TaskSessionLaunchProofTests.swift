@@ -202,7 +202,6 @@ struct TaskSessionLaunchProofTests {
             }
             #expect(terminal.surface == surface)
         }
-        registry.layout(for: fixtureWorkspace(repo)).select(fixtureWorkspace(repo))
         model.navigation.content = .terminals
         try await settle(window)
         ghostty_surface_text(surface, "\n", 1)

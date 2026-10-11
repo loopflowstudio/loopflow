@@ -551,14 +551,13 @@ struct WorkNavigationProofTests {
         #expect(terminals[0].surface == surfaces[0])
     }
 
-    @Test("Session rows restore their shell and companion layout across worktree slots")
+    @Test("Session rows restore their shell and companion layout across navigation")
     func sessionRowRestoresWorktree() async throws {
         _ = NSApplication.shared
         GhosttyManager.shared.initialize()
         let repo = "/src/loopflow"
         let paths = [repo, "/src/loopflow.task"]
         let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
-        let outer = registry.layout(for: fixtureWorkspace(repo))
         var terminals: [GhosttyMetalView] = []
         var records: [[String: Any]] = []
         for (index, path) in paths.enumerated() {
@@ -609,30 +608,11 @@ struct WorkNavigationProofTests {
         for index in [1, 0] {
             try view.inspect().find(viewWithAccessibilityIdentifier: "session-row-row-\(index)").button().tap()
             try await settle(window)
-            #expect(outer.focusedPath == fixtureWorkspace(paths[index]))
             #expect(window.firstResponder === terminals[index * 2])
             #expect(terminals[index * 2].window === window)
             #expect(terminals[(1 - index) * 2].window == nil)
             #expect(paths.map { registry.workspace(for: fixtureWorkspace($0)).multiplexer.layout } == layouts)
         }
-
-        let firstSlot = outer.focusedSlotId
-        try view.inspect().find(viewWithAccessibilityLabel: "Split worktrees right").button().tap()
-        outer.select(fixtureWorkspace(paths[1]))
-        try await settle(window)
-        #expect(terminals.allSatisfy { $0.window === window })
-        #expect(paths.map { registry.workspace(for: fixtureWorkspace($0)).multiplexer.layout } == layouts)
-        try view.inspect().find(viewWithAccessibilityIdentifier: "session-row-row-0").button().tap()
-        try await settle(window)
-        #expect(outer.layout.slots.count == 2)
-        #expect(outer.focusedSlotId == firstSlot)
-        #expect(window.firstResponder === terminals[0])
-        outer.close(firstSlot)
-        try await settle(window)
-        try view.inspect().find(viewWithAccessibilityIdentifier: "session-row-row-0").button().tap()
-        try await settle(window)
-        #expect(window.firstResponder === terminals[0])
-        #expect(paths.map { registry.workspace(for: fixtureWorkspace($0)).multiplexer.layout } == layouts)
 
         let store = registry.workspace(for: fixtureWorkspace(repo)).sessionStore(repoPath: repo, query: query)
         #expect(store.sessions.allSatisfy { $0.state == .live })

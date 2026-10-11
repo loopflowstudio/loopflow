@@ -48,8 +48,8 @@ unresolved, not a prerequisite for these tabs.
 **October 10 correction:** Jack Heart selected Split → shell, with no empty-pane
 option (comment `ff61b6bc-f40c-4545-a203-82ced3afd335`). Implemented through the
 existing shell-location owner for CLI, shortcuts and pane menus; missing remote
-location refuses before layout mutation. Work-keyed tabs, Flow-log query routing, outer-layout deletion and inspection/DTO
-cutover remain unimplemented. Files now resolves remote content directly, without link priming.
+location refuses before layout mutation. Work-keyed tabs, Flow-log query routing and exact-target DTO
+cutover remain unimplemented. The outer layout and its inspection DTOs are deleted. Files now resolves remote content directly, without link priming.
 
 **Completed prerequisites:** Session/shell and Files locations are content-owned;
 local Files retains its opening placement through missing planning and Close/Undo.
@@ -89,10 +89,13 @@ LOO-416, not a second persistence system here.
 
 ### Current owners → minimal cutover
 
-Reconciled against `4cde15a0d3` (October 10): the registry still keys both
-workspaces and outer layouts by `WorkspaceIdentity`; `WorkModel` still emits
-`inspectLayouts()`, and the Flow-log view discards its content location.
-Input-inventory compression in that checkpoint changes none of these owners.
+October 10 deletion cut: `WorktreeLayout`/store/view, checkout picker and
+`showsRetainedTerminals` are removed, including Rust/Swift outer-layout inspection.
+Navigation now renders the selected contents through the existing multiplexer;
+New Session selects repository content rather than an alternate checkout route.
+The registry still keys workspaces by `WorkspaceIdentity`; Flow log still ignores
+its content location. This is an internal deletion checkpoint, not implemented
+Work tabs. Rekeying, tab retention/navigation and exact-target DTOs remain together.
 The October 9 review is historical:
 `scratch/pr-review.html` (retained local artifact, not tracked in Git). Its stopped-pursuit account, mutation-wide
 inspection replies and pre-caller-inference examples are superseded; it is not
@@ -157,12 +160,11 @@ Opening another Work cannot cancel or discard the first Work's draft.
 
 ### Delete — do not maintain in this slice
 
-Remove outer `WorktreeLayout`/`WorktreeLayoutStore` and `WorktreeNodeView`, registry
-`layouts`/`inspectLayouts`, checkout-picker/split-slot controls and the
-`showsRetainedTerminals` alternate route when consumers switch. Retain
-`WorkspaceIdentity` for actual locations. Replace exclusive outer-slot assertions
-in `WorktreeWorkspaceTests` with Work-tab retention tests; keep all useful native
-lifetime, shell and multiplexer checks. Do not modernize an outer-slot API first.
+Deleted: outer `WorktreeLayout`/store/view, registry `layouts`/`inspectLayouts`,
+checkout-picker/split-slot controls and `showsRetainedTerminals`.
+`WorkspaceIdentity.swift` retains location only. Exclusive outer-slot assertions
+are removed; native lifetime, shell and multiplexer coverage survives. Add
+Work-tab retention assertions with the pending rekey; do not restore the outer tree.
 
 Delete Session-as-page/global-selection branches and ordinary Session hierarchy
 rows where they compete with Work tabs. Keep Session discovery through Work's

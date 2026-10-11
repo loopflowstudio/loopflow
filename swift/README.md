@@ -560,7 +560,8 @@ lf task run LOO-427 --explain --json
 
 Inspection reads the open repository windows through macOS automation without
 launching the app, changing focus or acquiring a Session. Window incarnations,
-Machine/checkout layouts and hidden panes come from the retained workspace owners;
+pane layouts and hidden panes come from the retained workspace owners;
+there is no outer checkout-slot layout or checkout-split menu.
 Task recommendations/run legality and Session actions retain their separate
 source availability. Saved or failed readings supply no actions. Inspection
 preserves Task source dates; Session observation time remains unavailable rather

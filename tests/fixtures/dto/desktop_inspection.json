@@ -68,20 +68,6 @@
           }
         }
       ],
-      "layouts": [
-        {
-          "machine_id": "home_11111111111111111111111111111111",
-          "repository_path": "/repo",
-          "focused_slot": "task-slot",
-          "layout": {
-            "slot": "task-slot",
-            "machine_id": "home_11111111111111111111111111111111",
-            "worktree": "/repo.task",
-            "axis": null,
-            "children": []
-          }
-        }
-      ],
       "task": {
         "id": "task_44444444444444444444444444444444",
         "reading": "unavailable",
@@ -133,7 +119,6 @@
         "zoom"
       ],
       "workspaces": [],
-      "layouts": [],
       "task": {
         "id": "task_44444444444444444444444444444444",
         "reading": "current",

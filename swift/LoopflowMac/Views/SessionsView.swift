@@ -195,7 +195,6 @@ final class SessionsWorkspace {
 final class SessionsWorkspaceRegistry {
     // Observable only for environment delivery; lazy creation must not invalidate views.
     @ObservationIgnored private var workspaces: [WorkspaceIdentity: SessionsWorkspace] = [:]
-    @ObservationIgnored private var layouts: [WorkspaceIdentity: WorktreeLayoutStore] = [:]
     let surfaces = GhosttySurfacePool()
     private(set) var localMachineId: String?
     private(set) var machineError: String?
@@ -207,21 +206,7 @@ final class SessionsWorkspaceRegistry {
         catch { machineError = error.localizedDescription }
     }
 
-    func layout(for repoPath: WorkspaceIdentity) -> WorktreeLayoutStore {
-        if let layout = layouts[repoPath] { return layout }
-        let layout = WorktreeLayoutStore(path: repoPath)
-        layouts[repoPath] = layout
-        return layout
-    }
-
     var paths: [WorkspaceIdentity] { Array(workspaces.keys).sorted { ($0.machineId, $0.worktree) < ($1.machineId, $1.worktree) } }
-
-    func inspectLayouts() -> [DesktopWorktreeInspection] {
-        layouts.sorted { ($0.key.machineId, $0.key.worktree) < ($1.key.machineId, $1.key.worktree) }.map { identity, layout in
-            DesktopWorktreeInspection(machineId: identity.machineId, repositoryPath: identity.worktree,
-                focusedSlot: layout.focusedSlotId, layout: layout.layout)
-        }
-    }
 
     func inspect() -> [DesktopWorkspaceInspection] {
         workspaces.sorted { ($0.key.machineId, $0.key.worktree) < ($1.key.machineId, $1.key.worktree) }.map { identity, workspace in
@@ -646,19 +631,12 @@ struct SessionsContentView: View {
     let machineId: String
     private var rootIdentity: WorkspaceIdentity { WorkspaceIdentity(machineId: machineId, worktree: store.repoPath) }
     private var currentIdentity: WorkspaceIdentity {
-        if navigation.showsRetainedTerminals {
-            return worktreeLayout.focusedPath ?? rootIdentity
-        }
-        if navigation.selectedSessionId != nil {
-            return selectedWorkspace?.identity ?? worktreeLayout.focusedPath ?? rootIdentity
-        }
-        return taskIdentity ?? worktreeLayout.focusedPath ?? rootIdentity
+        selectedWorkspace?.identity ?? taskIdentity ?? rootIdentity
     }
     private var workspace: SessionsWorkspace { workspaces.workspace(for: currentIdentity) }
     @Bindable var model: WorkModel
     private let workspaces: SessionsWorkspaceRegistry
     private let query: RegistryQuery
-    private let worktreeLayout: WorktreeLayoutStore
     private let store: SessionsStore
     @State private var restorePaletteFocus = true
     @State private var launchError: String?
@@ -679,25 +657,17 @@ struct SessionsContentView: View {
         guard model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath else { return nil }
         return store.sessions.first { $0.id == navigation.selectedSessionId }?.record.workspace
     }
-    private var availablePaths: [WorkspaceIdentity] {
-        worktreeLayout.knownPaths.union(store.sessions.compactMap { $0.record.workspace?.identity }).sorted { ($0.machineId, $0.worktree) < ($1.machineId, $1.worktree) }
-    }
-
     init(model: WorkModel, repoPath: String, workspaces: SessionsWorkspaceRegistry,
          machineId: String, query: RegistryQuery = RegistryQueryLocal.shared) {
         self.machineId = machineId
         self.model = model
         self.workspaces = workspaces
         self.query = query
-        worktreeLayout = workspaces.layout(for: WorkspaceIdentity(machineId: machineId, worktree: repoPath))
         let store = workspaces.workspace(for: WorkspaceIdentity(machineId: machineId, worktree: repoPath)).sessionStore(repoPath: repoPath, query: query)
         self.store = store
     }
 
     private var navigation: WorkNavigation { model.navigation }
-    private var usesWorktreeLayout: Bool {
-        navigation.showsRetainedTerminals || taskPath == nil && fileTask == nil
-    }
     private var terminalsVisible: Bool { model.selection?.kind == .task || navigation.content == .terminals }
     private var fileTask: TaskProjection? {
         // A departing repository view must not mount the next repository's
@@ -714,7 +684,6 @@ struct SessionsContentView: View {
                     model.select(work)
                     startConversation()
                 }, onNewShell: {
-                    if worktreeLayout.focusedPath == nil { worktreeLayout.select(rootIdentity) }
                     newShell(in: workspace)
                     navigation.content = .terminals
                 }, onShowTerminals: { navigation.content = .terminals }, onOpenTask: openTask, onNewSession: launchSessionSkill)
@@ -730,10 +699,9 @@ struct SessionsContentView: View {
                             programStatus: focusedProgramStatus,
                             programStatusError: focusedProgramStatusSurface?.observationError
                         ) {
-                            if taskPath != nil && !navigation.showsRetainedTerminals { workspaceCreation }
+                            if taskPath != nil { workspaceCreation }
                             if terminalsVisible {
-                                if usesWorktreeLayout { worktreeChip }
-                                else if let taskPath {
+                                if let taskPath {
                                     Text(URL(fileURLWithPath: taskPath).lastPathComponent)
                                         .font(Typography.code(11)).lineLimit(1)
                                         .frame(maxWidth: 180).layoutPriority(-3)
@@ -747,7 +715,7 @@ struct SessionsContentView: View {
                                 }
                             }
                         }
-                        if terminalsVisible, !navigation.showsRetainedTerminals, let task = fileTask,
+                        if terminalsVisible, let task = fileTask,
                            let wave = model.task(id: task.task.id)?.wave.wave {
                             TaskWorkflowHeader(model: model, task: task.task, wave: wave, work: model.taskWork[task.task.id])
                                 .task(id: taskPage) {
@@ -760,11 +728,11 @@ struct SessionsContentView: View {
                         }
                         ZStack {
                             Group {
-                                if let taskPath, !navigation.showsRetainedTerminals {
-                                    WorktreeTerminalsView(workspace: workspace,
+                                if let taskPath {
+                                    WorkspacePanesView(workspace: workspace,
                                         path: taskPath, isFocused: terminalsVisible, sessions: store)
                                         .id(taskIdentity)
-                                } else if fileTask != nil && !navigation.showsRetainedTerminals {
+                                } else if fileTask != nil {
                                     VStack(spacing: Spacing.md) {
                                         if let task = fileTask { Text(task.task.task.description) }
                                         Button("Prepare workspace") { prepareTaskWorkspace(conversation: false) }
@@ -772,10 +740,8 @@ struct SessionsContentView: View {
                                         if let error = launchError { Text(error).foregroundStyle(Color.statusWarning) }
                                     }.padding()
                                 } else {
-                                    WorktreeNodeView(
-                                        node: worktreeLayout.layout, layout: worktreeLayout,
-                                        workspaces: workspaces, isActive: terminalsVisible,
-                                        showsStrips: worktreeLayout.layout.isSplit, sessions: store)
+                                    WorkspacePanesView(workspace: workspace,
+                                        path: currentIdentity.worktree, isFocused: terminalsVisible, sessions: store)
 
                                 }
                             }
@@ -808,7 +774,7 @@ struct SessionsContentView: View {
         .tint(palette.accent)
         .environment(model)
         .overlay {
-            if terminalsVisible, navigation.palette == nil, usesWorktreeLayout || taskPath != nil {
+            if terminalsVisible, navigation.palette == nil {
                 SessionsShortcutMonitor { _handle($0) }
                     .allowsHitTesting(false).frame(width: 0, height: 0)
             }
@@ -1007,12 +973,11 @@ struct SessionsContentView: View {
         // must never change focus after the human selects another subject.
         if case .shell(let id, let machineId) = store.localTerminal(for: record),
            let path = workspaces.path(containingShell: id, machineId: machineId) {
-            worktreeLayout.select(path)
-            multiplexer.setCollapsed(paneId: id, collapsed: false)
-            multiplexer.setFocusedPane(id)
+            let panes = workspaces.workspace(for: path).multiplexer
+            panes.setCollapsed(paneId: id, collapsed: false)
+            panes.setFocusedPane(id)
             store.surfaces.focus(.shell(id, machineId: machineId))
         } else {
-            worktreeLayout.select(record.workspace?.identity ?? rootIdentity)
             multiplexer.load(sessionId: record.id, location: record.workspace?.identity)
             if let machineId = record.workspace?.machineId {
                 store.surfaces.focus(.session(record.id, machineId: machineId))
@@ -1032,8 +997,7 @@ struct SessionsContentView: View {
         do {
             let lf = try LocalWaveAgentLauncher.controlLfPath()
             let identity = WorkspaceIdentity(machineId: machineId, worktree: launch.repoPath)
-            worktreeLayout.select(identity)
-            navigation.showsRetainedTerminals = true
+            model.select(nil)
             navigation.content = .terminals
             workspaces.workspace(for: identity).multiplexer.newShell(command: launch.arguments(lf: lf), location: identity)
         } catch { launchError = error.localizedDescription }
@@ -1055,7 +1019,6 @@ struct SessionsContentView: View {
         let lf = try LocalWaveAgentLauncher.controlLfPath()
         let identity = requestedIdentity ?? taskIdentity ?? WorkspaceIdentity(machineId: machineId, worktree: scope.repoPath)
         guard identity.machineId == machineId else { throw RegistryQueryError("Open a conversation on its owning Machine") }
-        worktreeLayout.select(identity)
         navigation.content = .terminals
         workspaces.workspace(for: identity).multiplexer.newShell(
             command: ConversationLaunch(scope: scope).arguments(lf: lf), location: identity)
@@ -1079,53 +1042,6 @@ struct SessionsContentView: View {
             origin.preparedTaskWorktrees[taskId] = checkout
         }
         try launch(.task(repo: checkout.worktree, id: issue), in: origin, identity: checkout)
-    }
-
-    /// The focused worktree as a quiet mono chip; its menu holds every
-    /// worktree action, so no slot needs a header of its own.
-    private var worktreeChip: some View {
-        let slot = worktreeLayout.focusedSlotId
-        let path = worktreeLayout.focusedPath
-        return Menu {
-            ForEach(availablePaths, id: \.self) { candidate in
-                Button(URL(fileURLWithPath: candidate.worktree).lastPathComponent) {
-                    worktreeLayout.select(candidate, in: slot)
-                }
-            }
-            Divider()
-            if let path {
-                Button("New shell in this worktree") {
-                    worktreeLayout.focus(slot)
-                    newShell(in: workspaces.workspace(for: path))
-                }
-                .accessibilityLabel("New shell in worktree")
-            }
-            Button("Split worktrees right") { worktreeLayout.split(slot, axis: .vertical) }
-                .accessibilityLabel("Split worktrees right")
-            Button("Split worktrees down") { worktreeLayout.split(slot, axis: .horizontal) }
-                .accessibilityLabel("Split worktrees down")
-            Button("Hide this worktree") { worktreeLayout.close(slot) }
-                .help("Its terminals keep running")
-                .accessibilityLabel("Hide worktree")
-        } label: {
-            HStack(spacing: 5) {
-                Image(systemName: "folder").font(.system(size: 10))
-                Text(path.map { URL(fileURLWithPath: $0.worktree).lastPathComponent } ?? "Choose worktree")
-                    .font(Typography.code(11))
-                    .lineLimit(1)
-            }
-            .foregroundStyle(palette.textSecondary)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 2)
-            .background(palette.surface, in: RoundedRectangle(cornerRadius: 4))
-            .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(palette.border))
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help(path?.worktree ?? "Choose a worktree for this slot")
-        .accessibilityLabel("Worktree")
-        .accessibilityIdentifier("worktree-chip")
     }
 
     private var focusedProgramStatusSurface: ProgramStatusSurface? {
@@ -1193,71 +1109,7 @@ struct SessionsContentView: View {
     }
 }
 
-private struct WorktreeNodeView: View {
-    let node: WorktreeLayout
-    let layout: WorktreeLayoutStore
-    let workspaces: SessionsWorkspaceRegistry
-    let isActive: Bool
-    /// Split worktrees name themselves on a strip; a single worktree is named
-    /// by the toolbar chip and gets no chrome of its own.
-    let showsStrips: Bool
-    let sessions: SessionsStore
-
-    var body: some View { content }
-
-    private var content: AnyView {
-        switch node {
-        case .leaf(let id, let path):
-            return AnyView(VStack(spacing: 0) {
-                if showsStrips {
-                    HStack(spacing: 8) {
-                        Image(systemName: "folder").font(.system(size: 10))
-                        Text(path.map { URL(fileURLWithPath: $0.worktree).lastPathComponent } ?? "Choose worktree")
-                            .font(Typography.code(11))
-                            .lineLimit(1)
-                        Spacer()
-                    }
-                    .foregroundStyle(layout.focusedSlotId == id ? TerminalPalette.foreground : TerminalPalette.dim)
-                    .padding(.horizontal, 12)
-                    .frame(height: 24)
-                    .background(TerminalPalette.background)
-                    .contentShape(Rectangle())
-                    .onTapGesture { layout.focus(id) }
-                    .accessibilityIdentifier("worktree-strip-\(id)")
-                    Rectangle().fill(TerminalPalette.divider).frame(height: 1)
-                }
-                if let path {
-                    WorktreeTerminalsView(
-                        workspace: workspaces.workspace(for: path), path: path.worktree,
-                        isFocused: isActive && layout.focusedSlotId == id,
-                        sessions: sessions
-                    )
-                    .id(path)
-                    .simultaneousGesture(TapGesture().onEnded { layout.focus(id) })
-                } else {
-                    ContentUnavailableView("Choose a worktree", systemImage: "folder",
-                                           description: Text("Choose a worktree from the toolbar to restore its conversation and terminals."))
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(TerminalPalette.background)
-                        .environment(\.colorScheme, .dark)
-                }
-            }
-            .accessibilityIdentifier("worktree-slot-\(id)"))
-        case .split(let axis, let first, let second):
-            if axis == .vertical {
-                return AnyView(HSplitView { child(first); child(second) })
-            }
-            return AnyView(VSplitView { child(first); child(second) })
-        }
-    }
-
-    private func child(_ node: WorktreeLayout) -> WorktreeNodeView {
-        WorktreeNodeView(node: node, layout: layout, workspaces: workspaces, isActive: isActive,
-                         showsStrips: showsStrips, sessions: sessions)
-    }
-}
-
-private struct WorktreeTerminalsView: View {
+private struct WorkspacePanesView: View {
     let workspace: SessionsWorkspace
     let path: String
     let isFocused: Bool
@@ -1922,13 +1774,6 @@ private struct PaneFocusTarget: NSViewRepresentable {
                 window?.makeFirstResponder(nil)
             }
         }
-    }
-}
-
-private extension WorktreeLayout {
-    var isSplit: Bool {
-        if case .split = self { return true }
-        return false
     }
 }
 

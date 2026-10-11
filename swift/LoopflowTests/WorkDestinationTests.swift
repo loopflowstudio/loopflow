@@ -1239,7 +1239,7 @@ struct WorkDestinationTests {
                 DesktopWindowInspection(repository: repository, window: incarnation.uuidString, path: path,
                     selectionKind: nil, selectionId: nil, reading: "current", reason: nil,
                     task: nil, session: nil, supportedOperations: ["hide", "restore"],
-                    workspaces: registry.inspect(), layouts: registry.inspectLayouts(), opening: nil)
+                    workspaces: registry.inspect(), opening: nil)
             }, controlPane: { try registry.controlPane($0, model: model) },
             readText: { try registry.readText($0) }) { url in
                 received.append(url)
@@ -1420,7 +1420,7 @@ struct WorkDestinationTests {
     private func windowInspection(_ repository: String, _ id: UUID) -> DesktopWindowInspection {
         DesktopWindowInspection(repository: repository, window: id.uuidString, path: nil,
             selectionKind: nil, selectionId: nil, reading: "loading", reason: nil,
-            task: nil, session: nil, supportedOperations: ["list"], workspaces: [], layouts: [], opening: nil)
+            task: nil, session: nil, supportedOperations: ["list"], workspaces: [], opening: nil)
     }
 
     @Test func inspectionIncludesOnlyRegisteredWindowIncarnationsWithoutFocusing() {

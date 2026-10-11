@@ -144,6 +144,9 @@ Earlier command names below are dated evidence, not compatibility aliases.
   not an empty pane. CLI and native controls share the existing shell-location
   owner, preserving retained contents and exact targeting. This correction does
   not implement Work tabs or establish native acceptance.
+  **October 10 outer-layout deletion:** checkout-slot splitting/picking and its
+  inspection DTOs are removed; the existing pane multiplexer remains. Work tabs,
+  Work-keyed retention and content-routed Flow logs are still unfinished.
   **October 9 bounded-reader update:** lf3 is published with a verified public
   download and selected in SwiftPM. Exact-target reads now use its fixed buffer;
   inspection advertises `read`. Removed the temporary unavailable-reader result.

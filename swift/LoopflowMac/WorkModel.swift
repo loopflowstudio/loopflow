@@ -451,7 +451,7 @@ final class WorkModel {
             path: repoPath, selectionKind: selection?.kind.rawValue, selectionId: selection?.id,
             reading: reading, reason: workStatus.message,
             task: inspectSelectedTask(), session: inspectSelectedSession(),
-            supportedOperations: ["list", "hide", "restore", "focus", "split", "move", "resize", "zoom", "shell", "files", "flow-log", "read", "text", "key"], workspaces: workspaces.inspect(), layouts: workspaces.inspectLayouts(), opening: taskOpening)
+            supportedOperations: ["list", "hide", "restore", "focus", "split", "move", "resize", "zoom", "shell", "files", "flow-log", "read", "text", "key"], workspaces: workspaces.inspect(), opening: taskOpening)
     }
 
     private func inspectSelectedTask() -> DesktopTaskInspection? {
@@ -1261,7 +1261,6 @@ final class WorkModel {
             }
         } else { selection = requested }
         navigation.selectedSessionId = nil
-        navigation.showsRetainedTerminals = false
         navigation.content = selection == nil ? .overview : .details
         setSelection(selection)
         clearSelectionIfOutsideScope()

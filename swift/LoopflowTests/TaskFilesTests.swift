@@ -423,10 +423,6 @@ struct TaskFilesTests {
         let model = WorkModel(query: query, repoPath: "/src/loopflow")
         await model.refresh()
         let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
-        let generic = registry.layout(for: fixtureWorkspace("/src/loopflow"))
-        generic.select(fixtureWorkspace("/another-checkout"))
-        generic.split(generic.focusedSlotId, axis: .vertical)
-        let original = generic.layout
         let view = SessionsView(model: model, repoPath: "/src/loopflow", workspaces: registry, query: query)
         for (task, location) in [("issue-now", "loopflow.make-lf-work-the-machine"),
                                  ("issue-review", "loopflow.all-wave-roadmap"),
@@ -438,7 +434,6 @@ struct TaskFilesTests {
             #expect(throws: (any Error).self) {
                 try view.inspect().find(viewWithAccessibilityIdentifier: "worktree-chip")
             }
-            #expect(generic.layout == original)
         }
     }
 

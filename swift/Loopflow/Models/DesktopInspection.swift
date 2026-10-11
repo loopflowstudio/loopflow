@@ -38,19 +38,18 @@ public struct DesktopWindowInspection: Codable, Sendable, Equatable {
     public let session: DesktopSessionInspection?
     public let supportedOperations: [String]
     public let workspaces: [DesktopWorkspaceInspection]
-    public let layouts: [DesktopWorktreeInspection]
     public let opening: DesktopOpening?
 
     public init(repository: String, window: String, path: String?, selectionKind: String?, selectionId: String?,
                 reading: String, reason: String?, task: DesktopTaskInspection?,
-                session: DesktopSessionInspection?, supportedOperations: [String], workspaces: [DesktopWorkspaceInspection], layouts: [DesktopWorktreeInspection], opening: DesktopOpening?) {
+                session: DesktopSessionInspection?, supportedOperations: [String], workspaces: [DesktopWorkspaceInspection], opening: DesktopOpening?) {
         self.repository = repository; self.window = window; self.path = path
         self.selectionKind = selectionKind; self.selectionId = selectionId
         self.reading = reading; self.reason = reason; self.task = task
-        self.session = session; self.supportedOperations = supportedOperations; self.workspaces = workspaces; self.layouts = layouts; self.opening = opening
+        self.session = session; self.supportedOperations = supportedOperations; self.workspaces = workspaces; self.opening = opening
     }
     enum CodingKeys: String, CodingKey {
-        case repository, window, path, reading, reason, task, session, workspaces, layouts, opening
+        case repository, window, path, reading, reason, task, session, workspaces, opening
         case selectionKind = "selection_kind", selectionId = "selection_id"
         case supportedOperations = "supported_operations"
     }
@@ -148,40 +147,6 @@ public struct DesktopLayoutInspection: Codable, Sendable, Equatable {
             children = [Self(first, surface: surface), Self(second, surface: surface)]
         }
     }
-}
-
-public struct DesktopWorktreeInspection: Codable, Sendable, Equatable {
-    public let machineId: String
-    public let repositoryPath: String
-    public let focusedSlot: String
-    public let layout: DesktopWorktreeNode
-
-    public init(machineId: String, repositoryPath: String, focusedSlot: String, layout: WorktreeLayout) {
-        self.machineId = machineId; self.repositoryPath = repositoryPath
-        self.focusedSlot = focusedSlot; self.layout = DesktopWorktreeNode(layout)
-    }
-    enum CodingKeys: String, CodingKey {
-        case machineId = "machine_id", repositoryPath = "repository_path", focusedSlot = "focused_slot", layout
-    }
-}
-
-public struct DesktopWorktreeNode: Codable, Sendable, Equatable {
-    public let slot: String?
-    public let machineId: String?
-    public let worktree: String?
-    public let axis: String?
-    public let children: [DesktopWorktreeNode]
-
-    init(_ layout: WorktreeLayout) {
-        switch layout {
-        case .leaf(let id, let path):
-            slot = id; machineId = path?.machineId; worktree = path?.worktree; axis = nil; children = []
-        case .split(let splitAxis, let first, let second):
-            slot = nil; machineId = nil; worktree = nil; axis = splitAxis.rawValue
-            children = [Self(first), Self(second)]
-        }
-    }
-    enum CodingKeys: String, CodingKey { case slot, worktree, axis, children, machineId = "machine_id" }
 }
 
 /// An exact retained view, never a selector that follows current focus.

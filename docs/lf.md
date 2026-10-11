@@ -719,6 +719,7 @@ content incarnation; inspection never creates a surface or cleans up an exited
 child. Neither token authorizes terminal input.
 It requires macOS and a running app with automation access; failure leaves
 `lf task status <task>` available in the terminal.
+The outer checkout-slot `layouts` field is removed; `workspaces` retains pane trees.
 
 Select Work and use pane IDs from the retained layout:
 

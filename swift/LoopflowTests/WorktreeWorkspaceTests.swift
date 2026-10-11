@@ -27,13 +27,6 @@ struct WorktreeWorkspaceTests {
         let files = workspace.files(taskId: "task", issue: "TASK", cwd: "/repo")
         let document = files.document("note.txt")
         document.editor.string = "unfinished draft"
-        let outer = registry.layout(for: fixtureWorkspace("/repo"))
-        outer.split(outer.focusedSlotId, axis: .vertical)
-        outer.select(WorkspaceIdentity(machineId: "peer", worktree: "/remote/task"))
-        let outerReading = try #require(registry.inspectLayouts().first)
-        #expect(outerReading.focusedSlot == outer.focusedSlotId)
-        #expect(outerReading.layout.children.last?.machineId == "peer")
-        #expect(outerReading.layout.axis == "vertical")
         let layout = panes.layout
         let before = registry.paths
         let reading = try #require(registry.inspect().first)
@@ -76,13 +69,8 @@ struct WorktreeWorkspaceTests {
         let files = first.files(taskId: "task", issue: "TASK", cwd: "/repo")
         let document = files.document("note.txt")
         document.editor.string = "draft"
-        let outer = registry.layout(for: local)
-        outer.split(outer.focusedSlotId, axis: .vertical)
-        outer.select(remote)
-        #expect(outer.layout.slots.compactMap(\.path) == [local, remote])
         #expect(other.multiplexer.focusedPane.content == .empty)
         #expect(other.files(taskId: "task", issue: "TASK", cwd: "/repo") !== files)
-        outer.select(local)
         #expect(first.files(taskId: "task", issue: "TASK", cwd: "/repo").document("note.txt") === document)
         #expect(document.editor.string == "draft")
     }
@@ -165,8 +153,6 @@ struct WorktreeWorkspaceTests {
     @Test("Switching worktrees restores companion terminals, layout and focus")
     func restoresWholeWorkspace() {
         let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
-        let outer = registry.layout(for: fixtureWorkspace("/repo"))
-        outer.select(fixtureWorkspace("/repo.design"))
         let design = registry.workspace(for: fixtureWorkspace("/repo.design"))
         design.multiplexer.load(sessionId: "design")
         design.multiplexer.newShell(location: design.identity)
@@ -174,51 +160,12 @@ struct WorktreeWorkspaceTests {
         let original = design.multiplexer.layout
         let focus = design.multiplexer.focusedPaneId
 
-        outer.select(fixtureWorkspace("/repo.other"))
         registry.workspace(for: fixtureWorkspace("/repo.other")).multiplexer.newShell()
-        outer.select(fixtureWorkspace("/repo.design"))
 
-        #expect(registry.workspace(for: outer.focusedPath!) === design)
+        #expect(registry.workspace(for: fixtureWorkspace("/repo.design")) === design)
         #expect(design.multiplexer.layout == original)
         #expect(design.multiplexer.focusedPaneId == focus)
         #expect(registry.path(containingShell: focus, machineId: fixtureMachineId) == fixtureWorkspace("/repo.design"))
-    }
-
-    @Test("Both split levels are independent and closing an outer slot retains its workspace")
-    func independentSplits() {
-        let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
-        let outer = registry.layout(for: fixtureWorkspace("/repo"))
-        let firstSlot = outer.focusedSlotId
-        let first = registry.workspace(for: fixtureWorkspace("/repo"))
-        first.multiplexer.newShell(location: first.identity)
-        outer.split(firstSlot, axis: .vertical)
-        outer.select(fixtureWorkspace("/repo.other"))
-        let secondSlot = outer.focusedSlotId
-        let second = registry.workspace(for: fixtureWorkspace("/repo.other"))
-        second.multiplexer.newShell(location: second.identity)
-        let secondLayout = second.multiplexer.layout
-        first.multiplexer.newShell(location: first.identity)
-
-        #expect(outer.layout.slots.count == 2)
-        #expect(second.multiplexer.layout == secondLayout)
-        outer.close(firstSlot)
-        outer.select(fixtureWorkspace("/repo"))
-        #expect(first.multiplexer.layout.allPanes.count == 2)
-        #expect(second.multiplexer.layout == secondLayout)
-        #expect(outer.focusedSlotId == secondSlot)
-        #expect(registry.workspace(for: fixtureWorkspace("/repo")) === first)
-    }
-
-    @Test("Selecting an already visible worktree focuses it without duplicating its surfaces")
-    func focusesExistingSlot() {
-        let outer = WorktreeLayoutStore(path: fixtureWorkspace("/repo"))
-        let first = outer.focusedSlotId
-        outer.split(first, axis: .horizontal)
-        let empty = outer.focusedSlotId
-        outer.select(fixtureWorkspace("/repo"), in: empty)
-        #expect(outer.focusedSlotId == first)
-        #expect(outer.layout.slots.filter { $0.path == fixtureWorkspace("/repo") }.count == 1)
-        #expect(outer.layout.slots.first { $0.id == empty }?.path == nil)
     }
 
     @Test("A conversation launch does not replace a live shell or another conversation")

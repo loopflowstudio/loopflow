@@ -92,14 +92,6 @@ struct SessionChromeProofTests {
                 .labelView().text().string()
             #expect(label.contains("feature / realign"))
         }
-        #expect(throws: Never.self, "Session worktree location") {
-            let location = try view.inspect().find(viewWithAccessibilityIdentifier: "worktree-chip")
-                .menu().labelView().find(text: "loopflow")
-            #expect(try location.string() == "loopflow")
-        }
-        #expect(throws: (any Error).self) {
-            try view.inspect().find(viewWithAccessibilityIdentifier: "task-worktree-location")
-        }
         #expect(throws: (any Error).self) {
             _ = try view.inspect().find(viewWithAccessibilityIdentifier: "session-action-complete")
         }

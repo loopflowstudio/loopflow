@@ -166,16 +166,16 @@ Jack authorized Product follow-ups LOO-452 (shortcut customization, beyond LOO-4
 and LOO-453 (readiness/events); research:
 [the comparison](../../docs/reviews/terminal-command-comparison.md#rex-composition-and-discoverability-2026-10-10).
 
-Jack Heart (October 10) accepted repository/Wave/Task tabs named for Work; close hides.
-Passive Task navigation/bare remote links
-no longer acquire Sessions; explicit Session/Changes survives. `ff61b6bc` selects
-shell-default Split, no empty option. `d6640b8c68` retains shell Machine/path through
-layout/Undo; unknown refuses.
-`94d5195497`/`cf77ee325a`: content owns terminal/shell routing; Undo never
-replays launch. `d10d5e9a69`/`d86e32d466`: Files reads pane owners without priming;
-same-owner reads reuse documents/transport; changed owners retain drafts. Nonces
-are not document identity. Local Files uses placement;
-Work tabs, logs, registry and targets remain unfinished. Native proof remains.
+Jack Heart (October 10) accepted Work-named repository/Wave/Task tabs; close hides.
+Passive Task navigation/bare remote links acquire no Sessions; explicit
+Session/Changes survives. `ff61b6bc` selects shell-default Split, no empty option.
+`cf77ee325a` makes terminal/shell location content-owned;
+Undo retains location, never launch replay. Unknown refuses.
+`d10d5e9a69`/`d86e32d466` route Files without priming, reusing same-owner
+transports and retaining drafts when owners change. Nonces are not document
+identity. `b295ffba2f`: retained Files owns observation; release cancels it through
+one awaited cleanup path. Hide must retain the store. Stream fixtures prove release. Local Files uses placement; Work tabs,
+Flow-log routing, registry and targets remain unfinished. Native proof remains.
 
 **Confirmation cannot elect execution.** `4c43550c2`: divergent revisions and
 independent refs both confirm, not Task allocation. `42990dea3` shares membership

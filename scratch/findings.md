@@ -119,7 +119,7 @@ planning stays reachable through Debug → Sessions, without fabricated ancestry
 Deleted flat-row benchmarks/disambiguation; native retention fixtures use
 diagnostics. Benchmark population versions distinguish the changed endpoints.
 An initial identifier-search assertion included the ancestor's roll-up; it now
-checks the matching Task menu. Work registry/tabs, Flow-log routing and exact-target
-DTOs remain unfinished. No native acceptance or admission decision follows.
+checks the matching Task menu. Work tabs, Flow-log routing and exact-target DTOs remain unfinished; no native
+acceptance or admission decision.
 
 Check: `scripts/test_desktop.sh --filter WorkNavigationTests -Xswiftc -gnone --no-parallel` — PASS (29 tests); native: demo; full Work cutover: implement.

@@ -122,6 +122,14 @@ prove source behavior; installed concurrent-Flow acceptance remains unproved.
 The slow status/ensure observations and unattributed records-read report have
 no established common cause. Plan: `scratch/stop-the-session-title-hook.md`.
 
+Jack Heart's October 11 Kata report (`d4991d61-da39-4b7a-af0f-15880c234d82`)
+records identical timeouts on consecutive prompts with one background shell.
+This rules out a Loopflow-repository-only incident or a requirement for this
+Wave's Flows. Shared-store admission can explain cross-repository recurrence;
+the Kata lock holder and exact cause remain unconfirmed. The background shell
+alone is no causal evidence. Separate-directory, consecutive-callback fixtures
+retain held contention across prompts; installed Kata acceptance remains open.
+
 ## Program Status direction (LOO-398, 2026-10-07)
 
 Jack Heart selected every-pane Desktop reading, unchanged native passthrough and

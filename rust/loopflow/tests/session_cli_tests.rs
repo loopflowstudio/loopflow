@@ -447,23 +447,25 @@ fn native_title_callback_returns_while_store_is_busy() {
                 "BEGIN IMMEDIATE"
             })
             .unwrap();
-        // Several prompt callbacks compete with the same held writer.
-        let children: Vec<_> = (0..4)
-            .map(|_| spawn_title_callback(home.path(), "native-plain"))
-            .collect();
-        for child in children {
-            let output = finish_title_callback(child);
-            if exclusive {
-                assert!(
-                    output.stdout.is_empty(),
-                    "unknown ownership must not rename: {output:?}"
-                );
-            } else {
-                let title: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-                assert_eq!(
-                    title["hookSpecificOutput"]["sessionTitle"],
-                    "Plan store migration"
-                );
+        // Consecutive prompts must stay bounded while the same writer remains busy.
+        for _ in 0..2 {
+            let children: Vec<_> = (0..4)
+                .map(|_| spawn_title_callback(home.path(), "native-plain"))
+                .collect();
+            for child in children {
+                let output = finish_title_callback(child);
+                if exclusive {
+                    assert!(
+                        output.stdout.is_empty(),
+                        "unknown ownership must not rename: {output:?}"
+                    );
+                } else {
+                    let title: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+                    assert_eq!(
+                        title["hookSpecificOutput"]["sessionTitle"],
+                        "Plan store migration"
+                    );
+                }
             }
         }
     }
@@ -515,6 +517,7 @@ fn spawn_title_callback(home: &std::path::Path, thread: &str) -> std::process::C
     use std::process::Stdio;
 
     let mut child = command(home, &["__session-title", "claude"])
+        .current_dir(home)
         .env("HOME", home)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

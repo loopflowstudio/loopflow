@@ -46,6 +46,19 @@ error or trace; a common cause remains unresolved. Missing historical checkout
 Git errors from task reconcile do not establish SQLite contention. No broader
 status repair is justified by this evidence alone.
 
+Jack Heart reported on 2026-10-11 at about 00:11 PDT that two consecutive
+prompts in a Claude Session in Kata (a branch building on KAT-32) showed the
+same five-second timeout, with one background shell still running (comment
+`d4991d61-da39-4b7a-af0f-15880c234d82`). The incident is neither specific to
+the Loopflow repository nor dependent on this Wave's concurrent Flows.
+Ordinary admission reaches the shared Machine store before inspecting the
+hook's repository or request, so the reproduced wait can affect other
+repositories and repeat while contention persists. The report supplies no
+lock trace: the background shell is context, not an identified lock holder,
+and the Kata incident's exact cause remains unconfirmed. Regression coverage
+now invokes two consecutive batches of callbacks from a separate disposable
+directory while the same writer remains held, under both lock modes.
+
 Review corrected the initial omission of Process history, retained the same
 bounded connection for inherited-parent reads, and prevented an unbounded
 exit-time observation retry. No parallel naming or persistence path remains.
@@ -72,4 +85,4 @@ the live store. Publication belongs to the caller's delivery step; Jack Heart's
 review remains required before landing. No new product decision is needed for
 this bounded repair; correlation of the records-read report remains unknown.
 
-Checks: post-integration builds and network-isolated `session_cli_tests` (20), `journal::tests` (18), and `harness::native_titles::tests` (2) passed with inherited `LF_*` cleared; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` passed; installed concurrent-Flow acceptance remains with gate/release.
+Checks: post-integration builds and network-isolated `session_cli_tests` (20), `journal::tests` (18), and `harness::native_titles::tests` (2) passed with inherited `LF_*` cleared; the Kata report's consecutive-prompt/separate-directory change passed all four `native_title_callback` tests; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` passed; installed concurrent-Flow acceptance remains with gate/release.

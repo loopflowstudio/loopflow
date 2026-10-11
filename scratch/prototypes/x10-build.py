@@ -107,19 +107,8 @@ main = f'''
   </div>
 </section>
 <section class="pair">
-  <h2>What you are making, and how it gets made.</h2>
-  <p class="say">Loopflow is the marriage of two models: one for the work, and one for the flow. <b>Every Task ends shipped.</b> Loopflow uses configurable workflows to ensure that Tasks are designed thoughtfully, built simply, shipped, and validated thoroughly, all automatically.</p>
-  <table class="wh">
-    <thead><tr><th></th><th>The what<small>the work model</small></th><th>The how<small>the flow model</small></th><th>Who</th></tr></thead>
-    <tbody>
-      <tr><th>Plan</th><td><b>Tasks under a Wave</b>Each one states what will be true when it is done.</td><td><b><code>capture-tasks</code></b>A Skill that turns what you said into Tasks.</td><td class="you">You, talking</td></tr>
-      <tr><th>Design</th><td><b>A design</b>Kept with the Task, as you left it.</td><td><b><code>task-design</code>, then the design stop</b>Your agent drafts. It redrafts until you agree.</td><td class="you">You</td></tr>
-      <tr><th>Build</th><td><b>A pull request</b>From the Task’s own copy of the code.</td><td><b><code>pursue</code></b>Implement, tidy, catch up with the rest of the code, publish.</td><td>Your agent</td></tr>
-      <tr><th>Validate</th><td><b>A change you have used</b>The Task waits, marked, until you have.</td><td><b>The demo stop</b>Not right? It goes back through <code>pursue</code>.</td><td class="you">You</td></tr>
-      <tr><th>Ship</th><td><b>A merged pull request</b>The Task is done.</td><td><b><code>ship</code></b>Run the checks, then land it.</td><td>Your agent</td></tr>
-      <tr><th>Remember</th><td><b>Every Session, and the Wave’s memory</b>Filed under the Task they were for.</td><td><b>Reviewed notes</b>Later Sessions start from what earlier ones learned.</td><td>Loopflow</td></tr>
-    </tbody>
-  </table>
+  <h2>Stay in flow, and build what used to take a company.</h2>
+  <p class="say">Loopflow is the marriage of a work model and a flow model: the what and the how. Your work is kept around workstreams and results, not meandering chats, and exactly what needs your attention is on screen. Configurable workflows take each Task from a design to a pull request you have tried and merged. <b>Every Task ends shipped.</b> You have to stay involved. You don’t have to micromanage the coding. You can zoom in and you can zoom out.</p>
   <div class="ledger">
     <div><p class="eyebrow">Stays with you</p><ul><li>What to make</li><li>How it should work</li><li>Whether the design is right</li><li>Whether it works when you use it</li><li>When it is done</li></ul></div>
     <div><p class="eyebrow">Off your hands</p><ul><li>Writing the code</li><li>Keeping it tidy</li><li>Keeping up with the rest of the code</li><li>Opening the pull request</li><li>Running the checks and merging</li></ul></div>

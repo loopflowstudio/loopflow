@@ -1,5 +1,7 @@
 //! Task planning operations against stateful, isolated Linear responses.
 
+#[cfg(test)]
+use crate::test_linear_input::SeedLinearSqlite;
 use std::cell::RefCell;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -1353,7 +1355,7 @@ fn task_completion_ingestion_preserves_baseline_and_atomically_adopts_linear() {
         fixture
             .store
             .sqlite
-            .put_pm_task(&repo.display().to_string(), "linear", &remote, None)
+            .seed_issue(&repo.display().to_string(), "linear", &remote, None)
             .unwrap();
         assert_eq!(
             fixture
@@ -1376,7 +1378,7 @@ fn task_completion_ingestion_preserves_baseline_and_atomically_adopts_linear() {
         assert!(fixture
             .store
             .sqlite
-            .put_pm_task(&repo.display().to_string(), "linear", &remote, None)
+            .seed_issue(&repo.display().to_string(), "linear", &remote, None)
             .is_err());
         assert_eq!(
             fixture
@@ -1403,7 +1405,7 @@ fn task_completion_ingestion_preserves_baseline_and_atomically_adopts_linear() {
         fixture
             .store
             .sqlite
-            .put_pm_task(&repo.display().to_string(), "linear", &remote, None)
+            .seed_issue(&repo.display().to_string(), "linear", &remote, None)
             .unwrap();
         let mut late = remote.item.clone();
         late.state = Some("completed".into());

@@ -1,13 +1,14 @@
 //! Repository Team bindings preserve independent Wave and Project ownership.
 
+#[path = "support/linear_input.rs"]
+mod linear_input;
+use crate::linear_input::{Inventory, InventoryFixture, SeedLinearSqlite};
 use std::path::Path;
 use std::process::{Command, Output};
 
 use loopflow::id::WaveId;
 use loopflow::ops::pm::{canonical_wave_title_path, list_local_waves};
-use loopflow::pm::PmSnapshot;
 use loopflow::store::sqlite::SqliteStore;
-use loopflow::store::PmSnapshotRow;
 use loopflow::work::wave::{Wave, WaveLocator};
 
 fn git(repo: &Path, args: &[&str]) {
@@ -42,7 +43,7 @@ fn snapshot(
     issue_id: &str,
     identifier: &str,
     completed: bool,
-) -> PmSnapshot {
+) -> Inventory {
     serde_json::from_value(serde_json::json!({
         "projects": [{
             "id": project_id,
@@ -77,7 +78,7 @@ fn put_snapshot(
     repo: &Path,
     wave: &str,
     initiative: &str,
-    snapshot: PmSnapshot,
+    snapshot: Inventory,
 ) {
     let registered = store
         .get_wave_at(&WaveLocator::discover(repo, wave).unwrap())
@@ -90,7 +91,7 @@ fn put_snapshot(
     std::fs::create_dir_all(repo.join("wave").join(wave)).unwrap();
     std::fs::write(repo.join("wave").join(wave).join("GOAL.md"), goal).unwrap();
     store
-        .put_pm_snapshot(&PmSnapshotRow {
+        .seed_inventory(&InventoryFixture {
             wave_id: registered.id().clone(),
             provider: "linear".to_string(),
             initiative: initiative.to_string(),
@@ -318,7 +319,7 @@ fn repository_team_matrix() {
         .unwrap()
         .unwrap();
     let accepted = reopened.list_projects(Some(survival.id())).unwrap();
-    let mut planning = PmSnapshotRow {
+    let mut planning = InventoryFixture {
         wave_id: survival.id().clone(),
         provider: "linear".into(),
         initiative: "initiative-survival".into(),
@@ -327,7 +328,7 @@ fn repository_team_matrix() {
     };
     planning.snapshot.projects.extend(ambiguous.projects);
     planning.snapshot.items.extend(ambiguous.items);
-    let error = reopened.put_pm_snapshot(&planning).unwrap_err();
+    let error = reopened.seed_inventory(&planning).unwrap_err();
     assert!(
         error.to_string().contains("does not belong to Initiative"),
         "{error}"

@@ -10,7 +10,7 @@ use crate::durable::WorkRef;
 use crate::pm::linear::LinearClient;
 use crate::store::planning_sync::PlanningChange;
 use crate::store::sqlite::planning_changes::PlanningChanges;
-use crate::store::{PmTaskRecord, Store};
+use crate::store::Store;
 
 use super::{OpsError, OpsResult};
 
@@ -269,11 +269,9 @@ async fn observe(
             ingest_task(
                 store,
                 repo,
-                &PmTaskRecord {
-                    item,
-                    project,
-                    observed_at: time::OffsetDateTime::now_utc().unix_timestamp(),
-                },
+                &item,
+                project.as_ref(),
+                time::OffsetDateTime::now_utc().unix_timestamp(),
             )
             .await?;
             if !store
@@ -361,10 +359,12 @@ fn task_input(store: &Store, change: &PlanningChange) -> OpsResult<Value> {
 pub(super) async fn ingest_task(
     store: &Store,
     repo: &Path,
-    record: &PmTaskRecord,
+    issue: &crate::pm::PmItem,
+    project: Option<&crate::pm::linear::LinearProject>,
+    observed_at: i64,
 ) -> OpsResult<()> {
     let mut confirmed = None;
-    if let Some(project) = &record.project {
+    if let Some(project) = project {
         if let Some(local) = store
             .get_project_by_project(&project.id)
             .await
@@ -387,10 +387,11 @@ pub(super) async fn ingest_task(
     }
     store
         .sqlite
-        .put_pm_task(
+        .accept_linear_issue(
             &repo.to_string_lossy(),
-            "linear",
-            record,
+            issue,
+            project,
+            observed_at,
             confirmed
                 .as_ref()
                 .map(|(wave, initiative)| (wave, initiative.as_str())),

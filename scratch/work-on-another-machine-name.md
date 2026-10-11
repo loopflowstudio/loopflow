@@ -245,10 +245,18 @@ unrelated checkout edits. Connect selects repository Linear even with personal G
 ordinary explicit Git saves no longer print misleading Linear pending notices.
 Historical SQL/input remain intact. This does not complete adapter confinement.
 
-Deletion still remaining: adapter ingestion envelopes and PM APIs,
-target-bearing typed edits/journal, ordinary follow-ups/comments and one cron list.
-The full affected gate and fresh +/- HTML review still precede republication.
-The source cut and focused checks do not establish full-design readiness.
+The current cut deletes production `PmSnapshot`/`PmSnapshotRow`/`PmTaskRecord`,
+`put_pm_snapshot`/`put_pm_task` and both snapshot builders. Concrete Linear
+acceptance preserves the transaction and cancellation-safe lock lifetime; only
+fixtures retain captured input bundles. Review retained detail-rank preservation,
+independent Project/issue revisions, deletion filtering and pre-fetch acquisition
+age. No schema or execution-control change is included.
+
+Still required: private adapter observations/acceptance APIs and PM hierarchy,
+target-bearing edits/journal, ordinary follow-ups/comments and one cron list.
+The 43 focused passes below do not establish the full affected gate, Session-turn
+and live-control preservation, or final review readiness. Those and a fresh +/-
+HTML review still precede review-only republication.
 
 Main #1522 entered at `7d9bf0a4d8`, adding Claude recorded-answer Flow settlement.
 That merge establishes no fresh planning gate acceptance and grants no replay of
@@ -377,6 +385,6 @@ Earlier focused proof: `9dbd6fc2d8`, `dfd3b80611`, `f025e9b7ab`,
 `dfa2cdafba`, `09709a05cc` in this plan. Adapter confinement, typed journal,
 follow-ups, cron, gate and review still precede republication.
 
-Checks: October 11 `git diff --check` and `lf context` pass for prose reconciliation; unchanged source retains `56ea6db9c1` formatting/Clippy/build and 27 focused passes, plus `fbc9c60e62` conversion/rollback/receipt/prose evidence; full gate remains after the audit.
+Checks: October 11 `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo build --bin lf`, 42 focused acquisition/preservation lib tests and `cargo test --test planning_lookup_tests` (1 public CLI test) pass with inherited LF authority cleared and stdin closed; earlier conversion/rollback evidence remains applicable, full gate follows the audit.
 
 Transport evidence: `0181133849` at this path.

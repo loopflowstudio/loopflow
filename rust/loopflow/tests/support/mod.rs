@@ -1,3 +1,6 @@
+#[path = "linear_input.rs"]
+pub mod linear_input;
+use self::linear_input::{InventoryFixture, SeedLinear};
 pub mod planning;
 
 use std::env;
@@ -9,7 +12,7 @@ use std::sync::{Mutex, OnceLock};
 use base64::prelude::*;
 use loopflow::id::WaveId;
 use loopflow::pm::{LinearIssueId, LinearProjectId};
-use loopflow::store::{PmSnapshotRow, StorageConfig, Store};
+use loopflow::store::{StorageConfig, Store};
 use loopflow::work::project::{Project, ProjectId};
 use loopflow::work::task::{LinearWritebackState, Task, TaskId, TaskPr, TaskPrId};
 use loopflow::work::wave::Wave;
@@ -479,8 +482,8 @@ fn register_task_fixture(
             }]
         });
         store
-            .put_pm_snapshot(
-                PmSnapshotRow {
+            .seed_inventory(
+                InventoryFixture {
                     wave_id: wave.id().clone(),
                     provider: "linear".to_string(),
                     initiative: "initiative-task-pr-tests".to_string(),

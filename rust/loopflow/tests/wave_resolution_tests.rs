@@ -6,12 +6,15 @@
 //! then proves the shared Wave status projection honors the original reproduction
 //! end to end from a Wave agent's environment.
 
+#[path = "support/linear_input.rs"]
+mod linear_input;
+use crate::linear_input::{InventoryFixture, SeedLinearSqlite};
 use std::path::Path;
 use std::process::Command;
 
 use loopflow::id::WaveId;
 use loopflow::store::sqlite::SqliteStore;
-use loopflow::store::{PmSnapshotRow, StorageConfig};
+use loopflow::store::StorageConfig;
 use loopflow::work::wave::context::{resolve_managed_wave, WaveResolveError};
 use loopflow::work::wave::Wave;
 
@@ -161,12 +164,12 @@ fn seed(home: &Path, repo: &Path, wave_name: &str) -> Wave {
     );
     store.create_wave(&wave).expect("register wave");
     store
-        .put_pm_snapshot(&PmSnapshotRow {
+        .seed_inventory(&InventoryFixture {
             wave_id: wave.id().clone(),
             provider: "linear".to_string(),
             initiative: "initiative-1".to_string(),
             synced_at: chrono::Utc::now().timestamp(),
-            snapshot: loopflow::pm::PmSnapshot {
+            snapshot: crate::linear_input::Inventory {
                 projects: vec![],
                 items: vec![],
             },

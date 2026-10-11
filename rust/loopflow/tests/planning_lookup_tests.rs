@@ -1,7 +1,10 @@
+#[path = "support/linear_input.rs"]
+mod linear_input;
+use crate::linear_input::{IssueFixture, SeedLinear};
 use std::process::Command;
 
 use loopflow::ops::task::TaskStatus;
-use loopflow::store::{open_ephemeral_store, PlanningState, PmTaskRecord, StorageConfig};
+use loopflow::store::{open_ephemeral_store, PlanningState, StorageConfig};
 use loopflow_test_support::TestRepo;
 use serde_json::json;
 
@@ -22,7 +25,7 @@ fn task_status_reads_projectless_planning_without_allocating_execution() {
             database.clone(),
         )))
         .unwrap();
-    let record: PmTaskRecord = serde_json::from_value(json!({
+    let record: IssueFixture = serde_json::from_value(json!({
         "item":{"id":"issue-1","identifier":"FIX-1","url":null,
             "name":"Inspect before allocating execution","description":"Planning only",
             "rank":0,"completed":false,"state":"unstarted","project_id":null,
@@ -32,7 +35,7 @@ fn task_status_reads_projectless_planning_without_allocating_execution() {
     .unwrap();
     let scope = repo.path().canonicalize().unwrap();
     runtime
-        .block_on(store.put_pm_task(
+        .block_on(store.seed_issue(
             &scope.to_string_lossy(),
             "linear",
             record.clone(),
@@ -45,7 +48,7 @@ fn task_status_reads_projectless_planning_without_allocating_execution() {
     stale.item.identifier = "FIX-2".into();
     stale.observed_at -= 7 * 86400 + 1;
     runtime
-        .block_on(store.put_pm_task(
+        .block_on(store.seed_issue(
             &scope.to_string_lossy(),
             "linear",
             stale.clone(),
@@ -57,7 +60,7 @@ fn task_status_reads_projectless_planning_without_allocating_execution() {
     invalid.item.id = "issue-3".into();
     invalid.item.identifier = "FIX-3".into();
     runtime
-        .block_on(store.put_pm_task(
+        .block_on(store.seed_issue(
             &scope.to_string_lossy(),
             "linear",
             invalid.clone(),
@@ -80,7 +83,7 @@ fn task_status_reads_projectless_planning_without_allocating_execution() {
     removed.item.id = "issue-4".into();
     removed.item.identifier = "FIX-4".into();
     runtime
-        .block_on(store.put_pm_task(
+        .block_on(store.seed_issue(
             &scope.to_string_lossy(),
             "linear",
             removed.clone(),

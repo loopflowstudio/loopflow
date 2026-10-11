@@ -1,3 +1,5 @@
+use crate::linear_input::SeedLinear;
+use support::linear_input;
 mod support;
 
 use std::fs;
@@ -394,11 +396,11 @@ fn lf_command(repo: &Path, home: &Path, args: &[&str], path: Option<&str>) -> Co
 fn observe_planning(task: &support::RegisteredTask, checkout: &Path) {
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let scope = checkout.display().to_string();
-    let mut record: loopflow::store::PmTaskRecord =
+    let mut record: crate::linear_input::IssueFixture =
         loopflow_test_support::retained_task_input(&task.database, &scope, "INF-123");
     record.item.revision = Some("2026-10-04T12:00:00Z".into());
     runtime
-        .block_on(task.store.put_pm_task(&scope, "linear", record, None, None))
+        .block_on(task.store.seed_issue(&scope, "linear", record, None, None))
         .unwrap();
 }
 

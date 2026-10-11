@@ -362,6 +362,7 @@ pub(crate) async fn publish_metric_observations(
 
 #[cfg(test)]
 mod tests {
+    use crate::test_linear_input::SeedLinear;
     use std::ffi::OsString;
     use std::fs;
 
@@ -542,17 +543,17 @@ mod tests {
             .iter()
             .any(|metric| { matches!(metric.evidence, MetricEvidenceDto::Unknown { .. }) }));
 
-        let mut snapshot = crate::store::PmSnapshotRow {
+        let mut snapshot = crate::test_linear_input::InventoryFixture {
             wave_id: wave.id().clone(),
             provider: "linear".into(),
             initiative: "initiative-1".into(),
             synced_at: 1,
-            snapshot: crate::pm::PmSnapshot {
+            snapshot: crate::test_linear_input::Inventory {
                 projects: vec![projects[0].clone()],
                 items: vec![],
             },
         };
-        store.put_pm_snapshot(snapshot.clone(), None).await.unwrap();
+        store.seed_inventory(snapshot.clone(), None).await.unwrap();
         crate::store::sqlite::project_selection::write_project_binding(
             &store.sqlite,
             wave.id(),
@@ -577,11 +578,11 @@ mod tests {
                 metric_id: "task-loop-trust".into(),
                 target: crate::work::wave::metrics::Threshold::AtLeast { value: 1.0 },
             });
-        snapshot.snapshot = crate::pm::PmSnapshot {
+        snapshot.snapshot = crate::test_linear_input::Inventory {
             projects: vec![targeted_project],
             items: vec![],
         };
-        store.put_pm_snapshot(snapshot.clone(), None).await.unwrap();
+        store.seed_inventory(snapshot.clone(), None).await.unwrap();
         let targeted = wave_metric_portfolio(&store, &wave, source_time + Duration::hours(1))
             .await
             .unwrap();
@@ -589,12 +590,12 @@ mod tests {
             .metrics
             .iter()
             .any(|metric| matches!(metric.evidence, MetricEvidenceDto::Met { value: 1.0, .. })));
-        snapshot.snapshot = crate::pm::PmSnapshot {
+        snapshot.snapshot = crate::test_linear_input::Inventory {
             projects: projects.to_vec(),
             items: vec![],
         };
         snapshot.snapshot.projects[0].revision = Some("2026-09-30T00:00:02Z".into());
-        store.put_pm_snapshot(snapshot.clone(), None).await.unwrap();
+        store.seed_inventory(snapshot.clone(), None).await.unwrap();
         let before = store.list_projects(Some(wave.id())).await.unwrap();
         let selected = wave_metric_portfolio(&store, &wave, source_time + Duration::hours(1))
             .await

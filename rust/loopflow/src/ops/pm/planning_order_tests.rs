@@ -1,3 +1,5 @@
+#[cfg(test)]
+use crate::test_linear_input::SeedLinearSqlite;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -415,12 +417,12 @@ fn planning_order_stale_list_cannot_undo_confirmed_reorder() {
             let ctx = crate::ops::pm::resolve_context(repo, "product")
                 .await
                 .unwrap();
-            let stale = crate::store::PmSnapshotRow {
+            let stale = crate::test_linear_input::InventoryFixture {
                 wave_id: tasks[0].wave_id.clone(),
                 provider: "linear".into(),
                 initiative: ctx.initiative.clone(),
                 synced_at: time::OffsetDateTime::now_utc().unix_timestamp(),
-                snapshot: crate::ops::pm::fetch_pm_snapshot_with_store(
+                snapshot: crate::ops::pm::test_fixture::capture_inventory(
                     repo,
                     "product",
                     &ctx,
@@ -432,7 +434,7 @@ fn planning_order_stale_list_cannot_undo_confirmed_reorder() {
             reorder(&fixture.store, &tasks[3], 0);
             deliver(&fixture.store, repo, &tasks[0]).await.unwrap();
             let expected = remote_order(&state).await;
-            fixture.store.sqlite.put_pm_snapshot(&stale).unwrap();
+            fixture.store.sqlite.seed_inventory(&stale).unwrap();
             assert_eq!(local_order(&fixture.store, &tasks), expected);
             assert_no_conflicts(fixture);
         });

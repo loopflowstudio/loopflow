@@ -10,21 +10,19 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use futures_util::future::try_join_all;
-
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
 use crate::ops::util::normalize_wave_name;
 use crate::pm::linear::LinearClient;
 use crate::pm::linear::LinearProject;
-use crate::pm::{PmError, PmItem, PmSnapshot};
+use crate::pm::{PmError, PmItem};
 use crate::provider_auth::{
     provider_token_refresh_due, refresh_stored_provider_token, Provider, TokenRefreshError,
 };
 use crate::repository::RepoId;
 use crate::store::{
-    open_existing_store, open_store, LinearIssueEvidence, PlanningState, PmSnapshotRow,
-    PmTaskRecord, ProviderToken, ProviderTokenReplacement, StorageConfig, Store,
+    open_existing_store, open_store, LinearIssueEvidence, PlanningState, ProviderToken,
+    ProviderTokenReplacement, StorageConfig, Store,
 };
 use crate::work::task::comment::TaskComment;
 use crate::work::task::Task;
@@ -510,47 +508,6 @@ pub(crate) async fn refresh_wave(repo: &Path, wave: &str) -> OpsResult<()> {
     }
 }
 
-async fn fetch_pm_snapshot_with_store(
-    repo: &Path,
-    wave: &str,
-    ctx: &PmContext,
-    store: &Store,
-) -> OpsResult<PmSnapshot> {
-    let projects = checked_projects_with_store(repo, ctx, wave, store).await?;
-    let mut snapshot = fetch_pm_snapshot_for_projects(ctx, projects).await?;
-    let locator = crate::work::wave::WaveLocator::discover(repo, wave)
-        .map_err(|error| OpsError::Message(error.to_string()))?;
-    if let Some(registered) = store
-        .get_wave_at(&locator)
-        .await
-        .map_err(|error| OpsError::Message(error.to_string()))?
-    {
-        let removed = store
-            .deleted_task_issues(registered.id())
-            .await
-            .map_err(|error| OpsError::Message(error.to_string()))?;
-        snapshot.items.retain(|item| !removed.contains(&item.id));
-    }
-    Ok(snapshot)
-}
-
-async fn fetch_pm_snapshot_for_projects(
-    ctx: &PmContext,
-    projects: Vec<LinearProject>,
-) -> OpsResult<PmSnapshot> {
-    let project_items = try_join_all(
-        projects
-            .iter()
-            .map(|project| ctx.client.list_items(&project.id)),
-    )
-    .await
-    .map_err(pm_to_ops)?;
-    Ok(PmSnapshot {
-        projects,
-        items: project_items.into_iter().flatten().collect(),
-    })
-}
-
 pub(crate) async fn lock_wave_planning(wave: &Wave) -> OpsResult<Arc<crate::store::PlanningLocks>> {
     // Keep the existing lock inode namespace shared with already-running callers.
     let path = crate::store::lf_home_dir().join("chapter-locks");
@@ -598,20 +555,28 @@ pub(crate) async fn refresh_pm_snapshot_locked(
     acquisition: Arc<crate::store::PlanningLocks>,
 ) -> OpsResult<()> {
     let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
-    let snapshot = fetch_pm_snapshot_with_store(repo, wave.slug(), ctx, store).await?;
+    let projects = checked_projects_with_store(repo, ctx, wave.slug(), store).await?;
+    let mut items = ctx
+        .client
+        .list_project_issues(&projects)
+        .await
+        .map_err(pm_to_ops)?;
+    let removed = store
+        .deleted_task_issues(wave.id())
+        .await
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    items.retain(|item| !removed.contains(&item.id));
     store
-        .put_pm_snapshot(
-            PmSnapshotRow {
-                wave_id: wave.id().clone(),
-                provider: "linear".to_string(),
-                initiative: ctx.initiative.clone(),
-                synced_at: observed_at,
-                snapshot,
-            },
+        .accept_linear_inventory(
+            wave.id().clone(),
+            ctx.initiative.clone(),
+            projects,
+            items,
+            observed_at,
             Some(acquisition),
         )
         .await
-        .map_err(|err| OpsError::Message(format!("failed to store PM snapshot: {err}")))?;
+        .map_err(|err| OpsError::Message(format!("failed to accept Linear inventory: {err}")))?;
     Ok(())
 }
 
@@ -1078,14 +1043,11 @@ pub(crate) async fn inspect_task_planning_async(
             )));
         }
         store
-            .put_pm_task(
+            .accept_linear_issue(
                 &scope,
-                "linear",
-                PmTaskRecord {
-                    item,
-                    project,
-                    observed_at,
-                },
+                item,
+                project,
+                observed_at,
                 confirmed_wave,
                 acquisition,
             )
@@ -1366,14 +1328,11 @@ async fn accept_reteam_task(
         .is_some_and(|previous| previous != identifier);
     resolved
         .store
-        .put_pm_task(
+        .accept_linear_issue(
             wave.repo(),
-            "linear",
-            PmTaskRecord {
-                item,
-                project: Some(project),
-                observed_at,
-            },
+            item,
+            Some(project),
+            observed_at,
             Some((wave.id().clone(), initiative)),
             Some(acquisition),
         )
@@ -2389,6 +2348,7 @@ mod tests {
     use super::*;
     use crate::ops::NullProgress;
     use crate::pm::test_server::{self, json_response, QueuedResponse};
+    use crate::test_linear_input::{Inventory, InventoryFixture, SeedLinear};
     use axum::http::StatusCode;
     use serde_json::{json, Value};
 
@@ -3090,13 +3050,13 @@ mod tests {
                         .unwrap();
                     resolved
                         .store
-                        .put_pm_snapshot(
-                            PmSnapshotRow {
+                        .seed_inventory(
+                            InventoryFixture {
                                 wave_id: wave.id().clone(),
                                 provider: "linear".into(),
                                 initiative: "initiative-survival".into(),
                                 synced_at: 1,
-                                snapshot: PmSnapshot { projects, items },
+                                snapshot: Inventory { projects, items },
                             },
                             None,
                         )
@@ -3170,7 +3130,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fetch_pm_snapshot_reads_projects_and_their_items() {
+    async fn acquisition_reads_projects_and_their_issues() {
         let (base_url, requests) = test_server::spawn(vec![
             projects_response(json!([project_node("project-123", "Scan")])),
             issues_response(json!([
@@ -3187,7 +3147,7 @@ mod tests {
         let repo = tempfile::tempdir().unwrap();
         let store = isolated_pm_store(repo.path()).await;
 
-        let result = fetch_pm_snapshot_with_store(repo.path(), "scan", &ctx, &store)
+        let result = test_fixture::capture_inventory(repo.path(), "scan", &ctx, &store)
             .await
             .expect("fetch succeeds");
         assert_eq!(result.projects.len(), 1);
@@ -3200,7 +3160,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fetch_pm_snapshot_preserves_moved_and_detached_issue_ownership() {
+    async fn acquisition_preserves_moved_and_detached_issue_ownership() {
         let (base_url, _) = test_server::spawn(vec![
             projects_response(json!([project_node("project-123", "Scan")])),
             issues_response(json!([
@@ -3224,7 +3184,7 @@ mod tests {
         let repo = tempfile::tempdir().unwrap();
         let store = isolated_pm_store(repo.path()).await;
 
-        let snapshot = fetch_pm_snapshot_with_store(repo.path(), "scan", &ctx, &store)
+        let snapshot = test_fixture::capture_inventory(repo.path(), "scan", &ctx, &store)
             .await
             .unwrap();
         assert_eq!(snapshot.items[0].project_id.as_deref(), Some("successor"));

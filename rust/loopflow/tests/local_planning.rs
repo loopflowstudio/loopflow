@@ -1,3 +1,6 @@
+#[path = "support/linear_input.rs"]
+mod linear_input;
+use crate::linear_input::{InventoryFixture, IssueFixture, SeedLinearSqlite};
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::Command;
@@ -1266,12 +1269,12 @@ fn project_reads_keep_canonical_identity_and_authored_order_after_edits() {
             })
             .collect();
         store
-            .put_pm_snapshot(&loopflow::store::PmSnapshotRow {
+            .seed_inventory(&crate::linear_input::InventoryFixture {
                 wave_id: wave.id().clone(),
                 provider: "linear".into(),
                 initiative: "initiative".into(),
                 synced_at: 17,
-                snapshot: loopflow::pm::PmSnapshot {
+                snapshot: crate::linear_input::Inventory {
                     projects,
                     items: vec![serde_json::from_value(serde_json::json!({
                     "id": "linear-task", "identifier": "FIX-1", "name": "Shared title",
@@ -1722,7 +1725,6 @@ fn project_edits_save_offline_in_both_connection_modes() {
 #[test]
 fn task_creation_and_edits_save_offline_in_both_connection_modes() {
     use loopflow::durable::TaskId;
-    use loopflow::store::{PmSnapshotRow, PmTaskRecord};
 
     for (connected, mapped) in [(false, false), (false, true), (true, false), (true, true)] {
         let repo = TestRepo::new();
@@ -1823,7 +1825,7 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
         let second = TaskId::parse(create()["id"].as_str().unwrap()).unwrap();
         assert_ne!(first, second);
         assert_eq!(store.list_tasks(None).unwrap().len(), 2);
-        let mut snapshot = loopflow::pm::PmSnapshot {
+        let mut snapshot = crate::linear_input::Inventory {
             projects: vec![project.clone()],
             items: vec![],
         };
@@ -1846,7 +1848,7 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
                 snapshot.items.push(item);
             }
             store
-                .put_pm_snapshot(&PmSnapshotRow {
+                .seed_inventory(&InventoryFixture {
                     wave_id: wave.id().clone(),
                     provider: "linear".into(),
                     initiative: "initiative".into(),
@@ -1986,10 +1988,10 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             incoming.completed = true;
             incoming.revision = Some("2026-10-08T11:00:00Z".into());
             store
-                .put_pm_task(
+                .seed_issue(
                     &canonical.to_string(),
                     "linear",
-                    &PmTaskRecord {
+                    &IssueFixture {
                         observed_at: 19,
                         project: Some(project.clone()),
                         item: incoming.clone(),
@@ -2038,10 +2040,10 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             incoming.description.clear();
             incoming.revision = Some("2026-10-08T12:00:00Z".into());
             store
-                .put_pm_task(
+                .seed_issue(
                     &canonical.to_string(),
                     "linear",
-                    &PmTaskRecord {
+                    &IssueFixture {
                         observed_at: 20,
                         project: Some(project.clone()),
                         item: incoming,
@@ -2092,8 +2094,8 @@ fn place_wave_on_remote(
 
 #[test]
 fn rotation_saves_membership_and_pending_effects_offline() {
+    use crate::linear_input::InventoryFixture;
     use loopflow::durable::TaskId;
-    use loopflow::store::PmSnapshotRow;
     use loopflow::work::task::NewTask;
 
     for (connected, mapped) in [(false, false), (false, true), (true, false), (true, true)] {
@@ -2162,7 +2164,7 @@ fn rotation_saves_membership_and_pending_effects_offline() {
             team_ids: vec!["fixture-team".into()],
             revision: None,
         };
-        let mut snapshot = loopflow::pm::PmSnapshot {
+        let mut snapshot = crate::linear_input::Inventory {
             projects: vec![observed_project.clone()],
             items: vec![observed_issue(
                 "provider-issue",
@@ -2174,7 +2176,7 @@ fn rotation_saves_membership_and_pending_effects_offline() {
         snapshot.items[0].due_date.clone_from(&active.due_date);
         if mapped {
             store
-                .put_pm_snapshot(&PmSnapshotRow {
+                .seed_inventory(&InventoryFixture {
                     wave_id: wave.id().clone(),
                     provider: "linear".into(),
                     initiative: "initiative".into(),
@@ -2322,7 +2324,7 @@ fn rotation_saves_membership_and_pending_effects_offline() {
             snapshot.items[0].description = "Incoming unrelated edit".into();
             snapshot.items[0].revision = Some("2026-10-08T12:00:00Z".into());
             store
-                .put_pm_snapshot(&PmSnapshotRow {
+                .seed_inventory(&InventoryFixture {
                     wave_id: wave.id().clone(),
                     provider: "linear".into(),
                     initiative: "initiative".into(),
@@ -2351,7 +2353,7 @@ fn rotation_saves_membership_and_pending_effects_offline() {
                 [successor.as_str()],
             )
             .unwrap();
-            let mut echo: loopflow::store::PmTaskRecord =
+            let mut echo: crate::linear_input::IssueFixture =
                 loopflow_test_support::retained_task_input(
                     &home.path().join("loopflow.db"),
                     &canonical.to_string(),
@@ -2372,7 +2374,7 @@ fn rotation_saves_membership_and_pending_effects_offline() {
             echo.item.revision = Some("2026-10-08T12:30:00Z".into());
             echo.observed_at = 22;
             store
-                .put_pm_task(
+                .seed_issue(
                     &canonical.to_string(),
                     "linear",
                     &echo,
@@ -2419,7 +2421,7 @@ fn rotation_saves_membership_and_pending_effects_offline() {
             pending
         );
         if mapped {
-            let mut remote: loopflow::store::PmTaskRecord =
+            let mut remote: crate::linear_input::IssueFixture =
                 loopflow_test_support::retained_task_input(
                     &home.path().join("loopflow.db"),
                     &canonical.to_string(),
@@ -2435,7 +2437,7 @@ fn rotation_saves_membership_and_pending_effects_offline() {
             remote.item.revision = Some("2026-10-08T13:00:00Z".into());
             remote.observed_at = 22;
             store
-                .put_pm_task(
+                .seed_issue(
                     &canonical.to_string(),
                     "linear",
                     &remote,
@@ -2540,14 +2542,14 @@ fn refiling_saves_membership_offline_and_retains_inbound_changes() {
         if mapped {
             db.execute("UPDATE tasks SET external_issue_id='provider-issue',issue_identifier='FIX-1',planning_team_id='fixture-team' WHERE id=?1", [task.id.as_str()]).unwrap();
         }
-        let original = loopflow::store::PmTaskRecord {
+        let original = crate::linear_input::IssueFixture {
             item: observed_issue("provider-issue", "source", "Refile me", "Original"),
             project: observations.first().cloned(),
             observed_at: 1,
         };
         if mapped {
             store
-                .put_pm_task(
+                .seed_issue(
                     &canonical.to_string(),
                     "linear",
                     &original,
@@ -2613,7 +2615,7 @@ fn refiling_saves_membership_offline_and_retains_inbound_changes() {
             incoming.item.revision = Some("2026-10-08T14:00:00Z".into());
             incoming.observed_at += 1;
             store
-                .put_pm_task(
+                .seed_issue(
                     &canonical.to_string(),
                     "linear",
                     &incoming,
@@ -2634,7 +2636,7 @@ fn refiling_saves_membership_offline_and_retains_inbound_changes() {
             incoming.observed_at += 1;
             incoming.item.revision = Some("2026-10-08T14:01:00Z".into());
             store
-                .put_pm_task(
+                .seed_issue(
                     &canonical.to_string(),
                     "linear",
                     &incoming,
@@ -3243,8 +3245,8 @@ fn wave_files_are_checkout_local_and_edits_reach_status_without_ensure() {
 
 #[test]
 fn canonical_status_retains_content_and_execution_across_acquisition_states() {
+    use crate::linear_input::IssueFixture;
     use loopflow::durable::TaskId;
-    use loopflow::store::PmTaskRecord;
     use serde_json::json;
 
     let repo = TestRepo::new();
@@ -3276,7 +3278,7 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
         [id.as_str()],
     )
     .unwrap();
-    let record: PmTaskRecord = serde_json::from_value(json!({
+    let record: IssueFixture = serde_json::from_value(json!({
         "item":{"id":"provider-task","identifier":"FIX-1","name":"Original", "description":"Provider prose",
             "rank":0,"completed":false,"state":"unstarted","project_id":"provider-project", "project":project.slug,
             "team_id":"team","due_date":"2026-10-11", "assignee":null, "url":null},
@@ -3286,7 +3288,7 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
         .unwrap()
         .to_string();
     store
-        .put_pm_task(
+        .seed_issue(
             &scope,
             "linear",
             &record,

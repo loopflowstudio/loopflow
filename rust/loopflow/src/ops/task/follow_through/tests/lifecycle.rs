@@ -1,4 +1,5 @@
 //! One real Task/Flow population, with provider side effects isolated in fixtures.
+use crate::test_linear_input::SeedLinearSqlite;
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::fs::PermissionsExt;
@@ -279,7 +280,7 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
         path: home.path().join("loopflow.db"), store: store.clone(), graphql_url: url,
     }, || {
         let planning = runtime.block_on(crate::ops::pm::test_fixture::refresh_task_input(repo.path(), "FIX-1", PmRefresh::Force)).unwrap();
-        store.sqlite.put_pm_snapshot(&crate::store::PmSnapshotRow {
+        store.sqlite.seed_inventory(&crate::test_linear_input::InventoryFixture {
             wave_id: wave.id().clone(), provider: "linear".into(), initiative: "initiative-1".into(),
             synced_at: time::OffsetDateTime::now_utc().unix_timestamp(),
             snapshot: serde_json::from_value(json!({"projects": [planning.project], "items": [planning.item]})).unwrap(),

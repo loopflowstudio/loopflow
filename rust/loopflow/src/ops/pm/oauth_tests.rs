@@ -1,3 +1,5 @@
+#[cfg(test)]
+use crate::test_linear_input::{Inventory, InventoryFixture, SeedLinear};
 use std::future::Future;
 use std::path::Path;
 use std::sync::Arc;
@@ -13,9 +15,8 @@ use crate::durable::Author;
 use crate::ops::error::OpsResult;
 use crate::pm::test_server::{self, json_response, QueuedResponse};
 use crate::pm::LinearProjectId;
-use crate::pm::PmSnapshot;
 use crate::provider_auth::{LinearRefreshError, LINEAR_REFRESH_CONFIG, LINEAR_REFRESH_URL};
-use crate::store::{open_ephemeral_store, PmSnapshotRow, ProviderToken, StorageConfig};
+use crate::store::{open_ephemeral_store, ProviderToken, StorageConfig};
 use crate::work::project::{Project, ProjectId};
 use crate::work::wave::Wave;
 
@@ -32,18 +33,18 @@ impl Fixture {
         );
     }
 
-    async fn seed_snapshot(&self, wave: &Wave) -> PmSnapshotRow {
-        let row = PmSnapshotRow {
+    async fn seed_snapshot(&self, wave: &Wave) -> InventoryFixture {
+        let row = InventoryFixture {
             wave_id: wave.id().clone(),
             provider: "linear".into(),
             initiative: "initiative-1".into(),
             synced_at: 1,
-            snapshot: PmSnapshot {
+            snapshot: Inventory {
                 projects: vec![],
                 items: vec![],
             },
         };
-        self.store.put_pm_snapshot(row.clone(), None).await.unwrap();
+        self.store.seed_inventory(row.clone(), None).await.unwrap();
         row
     }
 }

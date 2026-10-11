@@ -5,6 +5,9 @@
 //! environment classify the same way. A completeness guard walks the clap tree
 //! and fails CI when a new `--wave`-bearing command is not registered.
 
+#[path = "support/linear_input.rs"]
+mod linear_input;
+use crate::linear_input::{InventoryFixture, SeedLinearSqlite};
 use std::collections::HashSet;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
@@ -14,7 +17,6 @@ use clap::{ArgAction, CommandFactory};
 use loopflow::id::WaveId;
 use loopflow::lf::Cli;
 use loopflow::store::sqlite::SqliteStore;
-use loopflow::store::PmSnapshotRow;
 use loopflow::work::wave::Wave;
 
 // ─── Command registry ───────────────────────────────────────────────────
@@ -322,12 +324,12 @@ fn seed(home: &Path, repo: &Path) -> Wave {
     );
     store.create_wave(&wave).expect("register wave");
     store
-        .put_pm_snapshot(&PmSnapshotRow {
+        .seed_inventory(&InventoryFixture {
             wave_id: wave.id().clone(),
             provider: "linear".to_string(),
             initiative: "initiative-1".to_string(),
             synced_at: chrono::Utc::now().timestamp(),
-            snapshot: loopflow::pm::PmSnapshot {
+            snapshot: crate::linear_input::Inventory {
                 projects: vec![],
                 items: vec![],
             },

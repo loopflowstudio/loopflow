@@ -36,7 +36,7 @@ impl Fixture {
         &self,
         repo: &std::path::Path,
         selector: &str,
-    ) -> crate::store::PmTaskRecord {
+    ) -> crate::test_linear_input::IssueFixture {
         loopflow_test_support::retained_task_input(
             &self.database,
             &repo.to_string_lossy(),
@@ -170,7 +170,7 @@ pub(crate) async fn refresh_task_input(
     repo: &std::path::Path,
     selector: &str,
     refresh: super::PmRefresh,
-) -> crate::ops::OpsResult<crate::store::PmTaskRecord> {
+) -> crate::ops::OpsResult<crate::test_linear_input::IssueFixture> {
     let read = super::inspect_task_planning_async(repo, selector, refresh).await?;
     if read.observation.state != crate::store::PlanningState::Available {
         return Err(crate::ops::OpsError::Message(
@@ -190,4 +190,19 @@ pub(crate) async fn refresh_task_input(
         &scope.to_string(),
         selector,
     ))
+}
+
+pub(super) async fn capture_inventory(
+    repo: &std::path::Path,
+    wave: &str,
+    context: &super::PmContext,
+    store: &Store,
+) -> crate::ops::OpsResult<crate::test_linear_input::Inventory> {
+    let projects = super::checked_projects_with_store(repo, context, wave, store).await?;
+    let items = context
+        .client
+        .list_project_issues(&projects)
+        .await
+        .map_err(super::pm_to_ops)?;
+    Ok(crate::test_linear_input::Inventory { projects, items })
 }

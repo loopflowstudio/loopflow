@@ -838,6 +838,17 @@ impl LinearClient {
             .collect()
     }
 
+    pub(crate) async fn list_project_issues(
+        &self,
+        projects: &[LinearProject],
+    ) -> PmResult<Vec<PmItem>> {
+        let lists = futures_util::future::try_join_all(
+            projects.iter().map(|project| self.list_items(&project.id)),
+        )
+        .await?;
+        Ok(lists.into_iter().flatten().collect())
+    }
+
     pub async fn list_items(&self, project_id: &str) -> PmResult<Vec<PmItem>> {
         self.list_items_including_archived(project_id, false).await
     }
@@ -2413,7 +2424,7 @@ mod tests {
 
     #[test]
     fn task_history_provider_facts_require_valid_observed_completion_dates() {
-        let planning: crate::pm::PmSnapshot = serde_json::from_str(include_str!(
+        let planning: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
             "../../../../tests/fixtures/dto/task_history_planning.json"
         ))
         .unwrap();

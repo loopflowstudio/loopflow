@@ -6,7 +6,7 @@ use crate::planning_exchange::PlanningKind;
 use crate::pm::linear::LinearProject;
 use crate::pm::PmItem;
 use crate::store::sqlite::SqliteStore;
-use crate::store::{PlanningState, PmSnapshotRow, PmTaskRecord, StoreError, StoreResult};
+use crate::store::{PlanningState, StoreError, StoreResult};
 use crate::work::project::ProjectId;
 
 impl SqliteStore {
@@ -145,19 +145,21 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn put_pm_task(
+    pub fn accept_linear_issue(
         &self,
         repo: &str,
-        provider: &str,
-        record: &PmTaskRecord,
+        issue: &PmItem,
+        project: Option<&LinearProject>,
+        observed_at: i64,
         confirmed_wave: Option<(&WaveId, &str)>,
     ) -> StoreResult<()> {
+        let provider = "linear";
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        if let Some(project) = &record.project {
+        if let Some(project) = project {
             validate_project_membership(&conn, repo, provider, project)?;
         }
         let tx = conn.transaction()?;
-        let mut item = record.item.clone();
+        let mut item = issue.clone();
         // Detail queries do not observe relative list order.
         if let Some(rank) = tx.query_row(
             "SELECT rank FROM pm_items WHERE repo=?1 AND provider=?2 AND id=?3 AND project_id IS ?4",
@@ -166,17 +168,17 @@ impl SqliteStore {
             item.rank = rank;
         }
         // Project revisions are independent of the issue revision and request age.
-        if let Some(project) = &record.project {
-            put_project(&tx, repo, provider, record.observed_at, project)?;
+        if let Some(project) = project {
+            put_project(&tx, repo, provider, observed_at, project)?;
         }
-        if put_item(&tx, repo, provider, record.observed_at, &item)? {
+        if put_item(&tx, repo, provider, observed_at, &item)? {
             tx.execute(
                 "UPDATE pm_items SET needs_refresh=0 WHERE repo=?1 AND provider=?2 AND id=?3",
-                params![repo, provider, record.item.id],
+                params![repo, provider, issue.id],
             )?;
         }
         if let Some((wave, initiative)) = confirmed_wave {
-            let project_id = record.item.project_id.as_deref().ok_or_else(|| {
+            let project_id = issue.project_id.as_deref().ok_or_else(|| {
                 StoreError::InvalidData("confirmed Wave requires a Project association".into())
             })?;
             associate_project(&tx, repo, provider, project_id, wave, initiative)?;
@@ -185,8 +187,8 @@ impl SqliteStore {
             &tx,
             repo,
             provider,
-            record.project.as_slice(),
-            std::slice::from_ref(&record.item),
+            project.map(std::slice::from_ref).unwrap_or_default(),
+            std::slice::from_ref(issue),
             confirmed_wave,
         )?;
         tx.commit()?;
@@ -388,15 +390,23 @@ impl SqliteStore {
         })
     }
 
-    pub fn put_pm_snapshot(&self, snapshot: &PmSnapshotRow) -> StoreResult<()> {
+    pub fn accept_linear_inventory(
+        &self,
+        wave: &WaveId,
+        initiative: &str,
+        projects: &[LinearProject],
+        issues: &[PmItem],
+        observed_at: i64,
+    ) -> StoreResult<()> {
+        let provider = "linear";
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let repo: String = conn.query_row(
             "SELECT repo FROM waves WHERE id=?1",
-            [snapshot.wave_id.as_str()],
+            [wave.as_str()],
             |row| row.get(0),
         )?;
-        for project in &snapshot.snapshot.projects {
-            validate_project_membership(&conn, &repo, &snapshot.provider, project)?;
+        for project in projects {
+            validate_project_membership(&conn, &repo, provider, project)?;
         }
         let tx = conn.transaction()?;
         let known = {
@@ -405,71 +415,51 @@ impl SqliteStore {
                  WHERE m.wave_id=?1 AND p.repo=?2 AND p.provider=?3 AND p.archived=0"
             )?;
             let rows = query
-                .query_map(params![snapshot.wave_id, repo, snapshot.provider], |row| {
-                    row.get::<_, String>(0)
-                })?
+                .query_map(params![wave, repo, provider], |row| row.get::<_, String>(0))?
                 .collect::<Result<Vec<_>, _>>()?;
             rows
         };
-        if let Some(missing) = known.iter().find(|id| {
-            !snapshot
-                .snapshot
-                .projects
-                .iter()
-                .any(|project| &project.id == *id)
-        }) {
+        if let Some(missing) = known
+            .iter()
+            .find(|id| !projects.iter().any(|project| &project.id == *id))
+        {
             return Err(StoreError::InvalidData(format!(
                 "Project {missing} omitted without membership removal evidence; refresh planning"
             )));
         }
-        for project in &snapshot.snapshot.projects {
-            put_project(&tx, &repo, &snapshot.provider, snapshot.synced_at, project)?;
-            require_accepted_initiative(
-                &tx,
-                &repo,
-                &snapshot.provider,
-                &project.id,
-                &snapshot.initiative,
-            )?;
+        for project in projects {
+            put_project(&tx, &repo, provider, observed_at, project)?;
+            require_accepted_initiative(&tx, &repo, provider, &project.id, initiative)?;
         }
-        for item in &snapshot.snapshot.items {
-            put_item(&tx, &repo, &snapshot.provider, snapshot.synced_at, item)?;
+        for item in issues {
+            put_item(&tx, &repo, provider, observed_at, item)?;
         }
         tx.execute(
             "INSERT INTO pm_wave_sync(wave_id,provider,initiative,synced_at) VALUES(?1,?2,?3,?4)
              ON CONFLICT(wave_id) DO UPDATE SET provider=excluded.provider,
              initiative=excluded.initiative,synced_at=MAX(pm_wave_sync.synced_at,excluded.synced_at)",
             params![
-                snapshot.wave_id,
-                snapshot.provider,
-                snapshot.initiative,
-                snapshot.synced_at
+                wave,
+                provider,
+                initiative,
+                observed_at
             ],
         )?;
-        for (position, project) in snapshot.snapshot.projects.iter().enumerate() {
+        for (position, project) in projects.iter().enumerate() {
             tx.execute(
                 "INSERT INTO pm_wave_projects(wave_id,project_id,position) VALUES(?1,?2,?3)
                  ON CONFLICT(wave_id,project_id) DO NOTHING",
-                params![snapshot.wave_id, project.id, position as i64],
+                params![wave, project.id, position as i64],
             )?;
         }
-        project_accepted_planning(
-            &tx,
-            &repo,
-            &snapshot.provider,
-            &snapshot.snapshot.projects,
-            &snapshot.snapshot.items,
-            None,
-        )?;
-        for project in &snapshot.snapshot.projects {
+        project_accepted_planning(&tx, &repo, provider, projects, issues, None)?;
+        for project in projects {
             super::planning_order::observe_in(
                 &tx,
                 &repo,
-                &snapshot.provider,
+                provider,
                 &project.id,
-                &snapshot
-                    .snapshot
-                    .items
+                &issues
                     .iter()
                     .filter(|i| i.project_id.as_deref() == Some(&project.id))
                     .cloned()
@@ -1225,6 +1215,7 @@ pub(super) fn put_item(
 
 #[cfg(test)]
 mod tests {
+    use crate::test_linear_input::{SeedLinear, SeedLinearSqlite};
     use rusqlite::{params, Connection};
     use serde_json::json;
 
@@ -1331,7 +1322,7 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         let wave = crate::work::wave::Wave::new(WaveId::new(), "product".into(), "/repo".into());
         store.create_wave(&wave).unwrap();
-        let mut snapshot: crate::pm::PmSnapshot = serde_json::from_str(include_str!(
+        let mut snapshot: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
             "../../../../../tests/fixtures/dto/task_history_planning.json"
         ))
         .unwrap();
@@ -1343,7 +1334,7 @@ mod tests {
         let project = snapshot.projects[0].clone();
         let item = snapshot.items[0].clone();
         store
-            .put_pm_snapshot(&crate::store::PmSnapshotRow {
+            .seed_inventory(&crate::test_linear_input::InventoryFixture {
                 wave_id: wave.id().clone(),
                 provider: "linear".into(),
                 initiative: project.initiative_ids[0].clone(),
@@ -1424,7 +1415,7 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         let wave = crate::work::wave::Wave::new(WaveId::new(), "product".into(), "/repo".into());
         store.create_wave(&wave).unwrap();
-        let mut snapshot: crate::pm::PmSnapshot = serde_json::from_str(include_str!(
+        let mut snapshot: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
             "../../../../../tests/fixtures/dto/task_history_planning.json"
         ))
         .unwrap();
@@ -1434,26 +1425,26 @@ mod tests {
             .items
             .retain(|item| item.project_id.as_deref() == Some(&snapshot.projects[0].id));
         snapshot.items.truncate(1);
-        let mut row = crate::store::PmSnapshotRow {
+        let mut row = crate::test_linear_input::InventoryFixture {
             wave_id: wave.id().clone(),
             provider: "linear".into(),
             initiative,
             synced_at: 42,
             snapshot,
         };
-        store.put_pm_snapshot(&row).unwrap();
+        store.seed_inventory(&row).unwrap();
         let item = &row.snapshot.items[0];
         let task = store.task_by_issue(&item.id).unwrap().unwrap();
         assert!(task.worktree.is_none());
         assert!(store.task_prs(&task.id).unwrap().is_empty());
         assert_eq!(task.title, item.name);
         assert_eq!(task.pm_snapshot_synced_at, Some(42));
-        store.put_pm_snapshot(&row).unwrap();
+        store.seed_inventory(&row).unwrap();
         assert_eq!(store.task_by_issue(&item.id).unwrap().unwrap().id, task.id);
         row.synced_at = 43;
         row.snapshot.items[0].identifier = "MOVED-42".into();
         row.snapshot.items[0].revision = Some("2099-01-01T00:00:00Z".into());
-        store.put_pm_snapshot(&row).unwrap();
+        store.seed_inventory(&row).unwrap();
         assert_eq!(
             store.task_by_issue("MOVED-42").unwrap().unwrap().id,
             task.id
@@ -1464,10 +1455,10 @@ mod tests {
         detail.rank = 99;
         detail.revision = Some("2099-01-02T00:00:00Z".into());
         store
-            .put_pm_task(
+            .seed_issue(
                 "/repo",
                 "linear",
-                &crate::store::PmTaskRecord {
+                &crate::test_linear_input::IssueFixture {
                     item: detail.clone(),
                     project: Some(row.snapshot.projects[0].clone()),
                     observed_at: 44,
@@ -1485,7 +1476,7 @@ mod tests {
             row.snapshot.items[0].rank
         );
         // Replaying the older list cannot roll content back or duplicate the Task.
-        store.put_pm_snapshot(&row).unwrap();
+        store.seed_inventory(&row).unwrap();
         assert_eq!(store.task(&task.id).unwrap().unwrap().title, detail.name);
         assert_eq!(
             store.task_acquisition(&task.id).unwrap().observed_at,
@@ -1494,7 +1485,7 @@ mod tests {
         store
             .observe_pm_issue_change(&detail.id, Some("2099-01-03T00:00:00Z"), false)
             .unwrap();
-        store.put_pm_snapshot(&row).unwrap();
+        store.seed_inventory(&row).unwrap();
         assert_eq!(
             store.task_acquisition(&task.id).unwrap(),
             crate::store::TaskAcquisition {
@@ -1507,7 +1498,7 @@ mod tests {
         store
             .observe_pm_issue_change(&row.snapshot.items[0].id, None, true)
             .unwrap();
-        store.put_pm_snapshot(&row).unwrap();
+        store.seed_inventory(&row).unwrap();
         assert_eq!(
             store.task_by_issue("MOVED-42").unwrap().unwrap().id,
             task.id
@@ -1537,7 +1528,7 @@ mod tests {
         for historical_name in ["Customer requests", "Product — Customer requests"] {
             let mut conn = Connection::open_in_memory().unwrap();
             crate::store::migrations::apply_before_current_draft(&conn, "planning_peers");
-            let snapshot: crate::pm::PmSnapshot = serde_json::from_str(include_str!(
+            let snapshot: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
                 "../../../../../tests/fixtures/dto/task_history_planning.json"
             ))
             .unwrap();
@@ -1614,7 +1605,7 @@ mod tests {
     fn confirming_refresh_uses_released_claim_instead_of_membership_index() {
         let conn = Connection::open_in_memory().unwrap();
         crate::store::migrations::apply_before_current_draft(&conn, "planning_peers");
-        let snapshot: crate::pm::PmSnapshot = serde_json::from_str(include_str!(
+        let snapshot: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
             "../../../../../tests/fixtures/dto/task_history_planning.json"
         ))
         .unwrap();
@@ -1672,7 +1663,7 @@ mod tests {
     fn task_history_enriches_only_absent_completion_dates_at_equal_revision() {
         let conn = Connection::open_in_memory().unwrap();
         crate::store::migrations::apply_before_current_draft(&conn, "planning_peers");
-        let planning: crate::pm::PmSnapshot = serde_json::from_str(include_str!(
+        let planning: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
             "../../../../../tests/fixtures/dto/task_history_planning.json"
         ))
         .unwrap();
@@ -1712,7 +1703,7 @@ mod tests {
     fn due_dates_enrich_absent_history_but_preserve_observed_null_at_equal_revision() {
         let conn = Connection::open_in_memory().unwrap();
         crate::store::migrations::apply_before_current_draft(&conn, "planning_peers");
-        let planning: crate::pm::PmSnapshot = serde_json::from_str(include_str!(
+        let planning: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
             "../../../../../tests/fixtures/dto/task_history_planning.json"
         ))
         .unwrap();
@@ -1785,9 +1776,9 @@ mod tests {
         let store = Store { sqlite };
         let observation = store.linear_issue_evidence("/repo", "fix-1").await.unwrap();
         assert_eq!(observation.state, PlanningState::Available);
-        let detail: crate::store::PmTaskRecord =
+        let detail: crate::test_linear_input::IssueFixture =
             loopflow_test_support::retained_task_input(&database, "/repo", "fix-1");
-        let list = crate::store::PmSnapshotRow {
+        let list = crate::test_linear_input::InventoryFixture {
             wave_id: wave.clone(),
             provider: "linear".into(),
             initiative: "initiative".into(),
@@ -1808,12 +1799,12 @@ mod tests {
 
         // A delayed list cannot resurrect a confirmed removal in either reader.
         store.sqlite.conn.lock().unwrap().execute("INSERT INTO task_deletions(wave_id,issue_id,identifier,confirmed_at) VALUES(?1,'issue','FIX-1',1)", [&wave]).unwrap();
-        store.put_pm_snapshot(list, None).await.unwrap();
+        store.seed_inventory(list, None).await.unwrap();
         let removed = store.linear_issue_evidence("/repo", "FIX-1").await.unwrap();
         assert_eq!(removed.state, PlanningState::Removed);
         assert_eq!(removed.observed_at, Some(detail.observed_at));
         assert_eq!(
-            loopflow_test_support::retained_task_input::<crate::store::PmTaskRecord>(
+            loopflow_test_support::retained_task_input::<crate::test_linear_input::IssueFixture>(
                 &database, "/repo", "FIX-1"
             ),
             detail

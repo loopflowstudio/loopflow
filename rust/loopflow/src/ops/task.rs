@@ -4259,6 +4259,7 @@ mod tests {
     use crate::durable::{TaskState, WorkRef, WorkStatus};
     use crate::pm::{LinearIssueId, LinearProjectId};
     use crate::store::{SharedStore, StorageConfig};
+    use crate::test_linear_input::SeedLinear;
     use crate::work::project::{Project, ProjectId};
     use crate::work::task::{
         GithubPr, Observation, PrMergeMode, PrMergeRequest, PrPresentation, PrPublication, Task,
@@ -4469,9 +4470,9 @@ mod tests {
                 "Recover work.",
             )
             .unwrap();
-            let mut snapshot: crate::pm::PmSnapshot = serde_json::from_str(include_str!(
-                "../../../../tests/fixtures/dto/task_history_planning.json"
-            ))
+            let mut snapshot: crate::test_linear_input::Inventory = serde_json::from_str(
+                include_str!("../../../../tests/fixtures/dto/task_history_planning.json"),
+            )
             .unwrap();
             snapshot.projects.truncate(1);
             snapshot.items.truncate(1);
@@ -4487,8 +4488,8 @@ mod tests {
             snapshot.items[0].description = "Preserve this direction".into();
             snapshot.items[0].revision = Some("2026-10-05T13:00:00Z".into());
             runtime
-                .block_on(fixture.store.put_pm_snapshot(
-                    crate::store::PmSnapshotRow {
+                .block_on(fixture.store.seed_inventory(
+                    crate::test_linear_input::InventoryFixture {
                         wave_id: fixture.task.wave_id.clone(),
                         provider: "linear".into(),
                         initiative: snapshot.projects[0].initiative_ids[0].clone(),

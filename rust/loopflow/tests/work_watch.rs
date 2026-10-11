@@ -1,6 +1,9 @@
 //! `lf monitor work --watch` shows another process's commits. Each test
 //! drives the real binary against a seeded `LF_HOME` and writes from here.
 
+#[path = "support/linear_input.rs"]
+mod linear_input;
+use crate::linear_input::{InventoryFixture, SeedLinearSqlite};
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
@@ -12,7 +15,6 @@ use loopflow::id::WaveId;
 use loopflow::lf::commands::waves::{Evidence, RoadmapSnapshot};
 use loopflow::lf::commands::work_watch::{WorkContent, WorkFrame};
 use loopflow::store::sqlite::SqliteStore;
-use loopflow::store::PmSnapshotRow;
 #[cfg(target_os = "macos")]
 use loopflow::work::task::{TaskEventKind, TaskPr, TaskPrId};
 use loopflow::work::wave::Wave;
@@ -104,7 +106,7 @@ impl Machine {
             "items": items
         });
         self.store
-            .put_pm_snapshot(&PmSnapshotRow {
+            .seed_inventory(&InventoryFixture {
                 wave_id: self.wave.id().clone(),
                 provider: "linear".into(),
                 initiative: "initiative-product".into(),

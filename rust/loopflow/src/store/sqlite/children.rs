@@ -2009,6 +2009,7 @@ impl SqliteStore {
 
 #[cfg(test)]
 mod local_planning_tests {
+
     use rusqlite::params;
     use rusqlite::OptionalExtension;
 
@@ -2453,11 +2454,12 @@ mod local_planning_tests {
         let store = SqliteStore {
             conn: Arc::new(Mutex::new(conn)),
         };
-        let observation: crate::store::PmTaskRecord = loopflow_test_support::retained_task_input_in(
-            &store.conn.lock().unwrap(),
-            "/repo",
-            "LOO-318",
-        );
+        let observation: crate::test_linear_input::IssueFixture =
+            loopflow_test_support::retained_task_input_in(
+                &store.conn.lock().unwrap(),
+                "/repo",
+                "LOO-318",
+            );
         assert_eq!(
             serde_json::to_value(observation.item).unwrap(),
             payload["items"][0]

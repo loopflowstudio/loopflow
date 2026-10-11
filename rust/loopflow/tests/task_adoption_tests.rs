@@ -1,3 +1,5 @@
+use crate::linear_input::{InventoryFixture, SeedLinear};
+use support::linear_input;
 mod support;
 
 use std::fs;
@@ -7,7 +9,7 @@ use std::process::Command;
 
 use loopflow::id::WaveId;
 use loopflow::pm::LinearProjectId;
-use loopflow::store::{open_ephemeral_store, PmSnapshotRow, StorageConfig};
+use loopflow::store::{open_ephemeral_store, StorageConfig};
 use loopflow::work::project::{Project, ProjectId};
 use loopflow::work::wave::Wave;
 use loopflow_test_support::TestRepo;
@@ -111,7 +113,7 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
             created_at: now,
             updated_at: now,
         };
-        let snapshot: loopflow::pm::PmSnapshot = serde_json::from_value(json!({
+        let snapshot: crate::linear_input::Inventory = serde_json::from_value(json!({
             "projects": [{"id":"project-1", "slug":"chapter", "name":"Chapter",
                 "summary":"", "metric_targets":[], "workflow":"adoption", "status":"started",
                 "krs":[], "initiative_ids":["initiative-1"], "team_ids":["team-1"]}],
@@ -134,8 +136,8 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
             let mut historical = snapshot.clone();
             historical.items[0].branch_name = None;
             store
-                .put_pm_snapshot(
-                    PmSnapshotRow {
+                .seed_inventory(
+                    InventoryFixture {
                         wave_id: wave.id().clone(),
                         provider: "linear".into(),
                         initiative: "initiative-1".into(),
@@ -147,8 +149,8 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
                 .await
                 .unwrap();
             store
-                .put_pm_snapshot(
-                    PmSnapshotRow {
+                .seed_inventory(
+                    InventoryFixture {
                         wave_id: wave.id().clone(),
                         provider: "linear".into(),
                         initiative: "initiative-1".into(),
@@ -313,7 +315,7 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
             assert!(saved.iter().all(|flow| current.contains(flow)));
             let saved = current;
             let scope = repo.path().canonicalize().unwrap().display().to_string();
-            let original: loopflow::store::PmTaskRecord =
+            let original: crate::linear_input::IssueFixture =
                 loopflow_test_support::retained_task_input(
                     &home.path().join("loopflow.db"),
                     &scope,
@@ -335,7 +337,7 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
                 let mut restored = original.clone();
                 restored.item.revision = Some(format!("2026-09-30T12:00:{:02}Z", index * 2));
                 runtime
-                    .block_on(store.put_pm_task(&scope, "linear", restored, None, None))
+                    .block_on(store.seed_issue(&scope, "linear", restored, None, None))
                     .unwrap();
                 let mut observed = original.clone();
                 observed.item.revision = Some(format!("2026-09-30T12:00:{:02}Z", index * 2 + 1));
@@ -350,7 +352,7 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
                     observed.item.team_id = Some("another-team".into());
                 }
                 runtime
-                    .block_on(store.put_pm_task(&scope, "linear", observed, None, None))
+                    .block_on(store.seed_issue(&scope, "linear", observed, None, None))
                     .unwrap();
                 if condition == "removed" {
                     runtime

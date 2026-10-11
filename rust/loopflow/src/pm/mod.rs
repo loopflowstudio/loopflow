@@ -108,12 +108,6 @@ pub fn terminal_reason(state: Option<&str>, completed: bool) -> Option<&'static 
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct PmSnapshot {
-    pub projects: Vec<LinearProject>,
-    pub items: Vec<PmItem>,
-}
-
 pub(crate) fn validate_project_ownership(
     wave: &str,
     initiative_id: &str,

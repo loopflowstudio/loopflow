@@ -54,3 +54,9 @@ pub mod work;
 #[cfg(test)]
 #[path = "../tests/support/ambient.rs"]
 pub(crate) mod test_ambient;
+
+#[cfg(test)]
+extern crate self as loopflow;
+#[cfg(test)]
+#[path = "../tests/support/linear_input.rs"]
+pub(crate) mod test_linear_input;

@@ -1,3 +1,5 @@
+use crate::linear_input::SeedLinear;
+use support::linear_input;
 mod support;
 
 use std::fs;
@@ -69,7 +71,7 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
         }
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let scope = repo.path().canonicalize().unwrap().display().to_string();
-        let mut record: loopflow::store::PmTaskRecord =
+        let mut record: crate::linear_input::IssueFixture =
             loopflow_test_support::retained_task_input(&registered.database, &scope, "INF-123");
         record.project.as_mut().unwrap().workflow = "proof".into();
         record.project.as_mut().unwrap().revision = Some("2026-10-07T12:00:00Z".into());
@@ -96,7 +98,7 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
             .block_on(
                 registered
                     .store
-                    .put_pm_task(&scope, "linear", record, None, None),
+                    .seed_issue(&scope, "linear", record, None, None),
             )
             .unwrap();
         // Old valid planning still admits a launch without reaching the provider.
@@ -585,16 +587,17 @@ impl WorkflowTask {
             .display()
             .to_string();
         let store = &self.registered.store;
-        let mut record: loopflow::store::PmTaskRecord = loopflow_test_support::retained_task_input(
-            &self.registered.database,
-            &scope,
-            "INF-123",
-        );
+        let mut record: crate::linear_input::IssueFixture =
+            loopflow_test_support::retained_task_input(
+                &self.registered.database,
+                &scope,
+                "INF-123",
+            );
         record.item.revision = Some("2026-10-06T12:00:00Z".into());
         record.item.state = Some("completed".into());
         record.item.completed = true;
         runtime
-            .block_on(store.put_pm_task(&scope, "linear", record, None, None))
+            .block_on(store.seed_issue(&scope, "linear", record, None, None))
             .unwrap();
     }
 
@@ -669,17 +672,18 @@ fn checkout_leaves_workflow_selection_to_the_first_run() {
     let sqlite =
         loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
             .unwrap();
-    let mut observation: loopflow::store::PmTaskRecord = loopflow_test_support::retained_task_input(
-        &fixture.registered.database,
-        &scope,
-        &fixture.registered.task.identifier,
-    );
+    let mut observation: crate::linear_input::IssueFixture =
+        loopflow_test_support::retained_task_input(
+            &fixture.registered.database,
+            &scope,
+            &fixture.registered.task.identifier,
+        );
     observation.item.id = "unplaced-issue".into();
     observation.item.identifier = "INF-124".into();
     observation.item.name = "Workflow chosen at first run".into();
     observation.item.branch_name = None;
     runtime
-        .block_on(store.put_pm_task(&scope, "linear", observation, None, None))
+        .block_on(store.seed_issue(&scope, "linear", observation, None, None))
         .unwrap();
     let task = runtime
         .block_on(store.get_task_by_issue("INF-124"))
@@ -1200,15 +1204,15 @@ fn linear_completion_and_reopening_preserve_workflow_and_supersede_old_end() {
         .display()
         .to_string();
     let store = &task.registered.store;
-    let mut record: loopflow::store::PmTaskRecord =
+    let mut record: crate::linear_input::IssueFixture =
         loopflow_test_support::retained_task_input(&task.registered.database, &scope, "INF-123");
     let stale = record.clone();
     record.item.revision = Some("2026-10-07T12:00:00Z".into());
     record.item.state = Some("started".into());
     record.item.completed = false;
-    rt.block_on(store.put_pm_task(&scope, "linear", record, None, None))
+    rt.block_on(store.seed_issue(&scope, "linear", record, None, None))
         .unwrap();
-    rt.block_on(store.put_pm_task(&scope, "linear", stale, None, None))
+    rt.block_on(store.seed_issue(&scope, "linear", stale, None, None))
         .unwrap();
     assert_eq!(task.state(), "active");
     assert_eq!(task.workflow(), ended);

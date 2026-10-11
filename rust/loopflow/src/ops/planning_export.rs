@@ -8,7 +8,7 @@ use crate::durable::WorkRef;
 use crate::pm::linear::LinearClient;
 use crate::store::sqlite::planning_changes::PlanningChanges;
 use crate::store::sqlite::planning_export::PlanningExport;
-use crate::store::{PmTaskRecord, Store};
+use crate::store::Store;
 
 use super::{OpsError, OpsResult};
 
@@ -216,11 +216,9 @@ async fn observe(
             super::planning_delivery::ingest_task(
                 store,
                 repo,
-                &PmTaskRecord {
-                    item,
-                    project,
-                    observed_at: time::OffsetDateTime::now_utc().unix_timestamp(),
-                },
+                &item,
+                project.as_ref(),
+                time::OffsetDateTime::now_utc().unix_timestamp(),
             )
             .await?;
         }

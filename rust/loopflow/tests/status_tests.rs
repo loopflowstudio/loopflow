@@ -2,6 +2,9 @@
 //! promises must be the JSON it emits, and the wave you are standing in must be
 //! the wave it reports. Drives the real binary against a seeded `LF_HOME`.
 
+#[path = "support/linear_input.rs"]
+mod linear_input;
+use crate::linear_input::{InventoryFixture, SeedLinearSqlite};
 #[path = "support/planning.rs"]
 mod planning;
 
@@ -14,7 +17,7 @@ use loopflow::id::WaveId;
 use loopflow::pm::{LinearIssueId, LinearProjectId};
 use loopflow::store::migrations;
 use loopflow::store::sqlite::SqliteStore;
-use loopflow::store::{PmSnapshotRow, StorageConfig};
+use loopflow::store::StorageConfig;
 use loopflow::work::project::{Project, ProjectEventKind, ProjectId};
 use loopflow::work::task::{
     LinearWritebackState, Observation, PrMergeMode, Task, TaskId, TaskPr, TaskPrId,
@@ -99,7 +102,7 @@ fn put_project_snapshot(home: &Path, wave: &Wave, project: &Project) {
     let store = SqliteStore::new(&home.join("loopflow.db")).expect("open status store");
     select_project(home, wave, project.linear_id.as_ref().unwrap().as_str());
     store
-        .put_pm_snapshot(&PmSnapshotRow {
+        .seed_inventory(&InventoryFixture {
             wave_id: wave.id().clone(),
             provider: "linear".to_string(),
             initiative: "initiative-infrastructure".to_string(),
@@ -207,7 +210,7 @@ fn seed_stale_project_work(
     home: &Path,
     abandon_stale_project: bool,
     current_task: bool,
-) -> PmSnapshotRow {
+) -> InventoryFixture {
     const STALE_WORK_ID: &str = "proj_e972b70272fbb5e91c096ebe657f9f9b";
     const STALE_PROJECT_ID: &str = "f56c583c-c360-4dc4-ba12-4b5a02268623";
     const STALE_TASK_WORK_ID: &str = "task_40fbeeaadfbca5367aa7391432ae84ff";
@@ -379,14 +382,14 @@ fn seed_stale_project_work(
             }
         ]
     });
-    let snapshot = PmSnapshotRow {
+    let snapshot = InventoryFixture {
         wave_id: wave.id().clone(),
         provider: "linear".into(),
         initiative: "initiative-product".into(),
         synced_at: now.unix_timestamp(),
         snapshot: serde_json::from_value(payload).unwrap(),
     };
-    store.put_pm_snapshot(&snapshot).expect("seed PM snapshot");
+    store.seed_inventory(&snapshot).expect("seed PM snapshot");
     snapshot
 }
 
@@ -646,7 +649,7 @@ Count dispatched Task loops that settle without rescue.
     let sqlite = SqliteStore::new(&home.path().join("loopflow.db")).expect("open store");
     let now = OffsetDateTime::now_utc();
     sqlite
-        .put_pm_snapshot(&PmSnapshotRow {
+        .seed_inventory(&InventoryFixture {
             wave_id: wave.id().clone(),
             provider: "linear".to_string(),
             initiative: "initiative-product".to_string(),
@@ -1042,7 +1045,7 @@ fn exact_task_roadmap_scopes_duplicate_identifiers_to_registered_repositories() 
     snapshot.snapshot.items[0].completed = true;
     snapshot.wave_id = other.id().clone();
     snapshot.initiative = "other-initiative".into();
-    store.put_pm_snapshot(&snapshot).unwrap();
+    store.seed_inventory(&snapshot).unwrap();
     assert!(store
         .task_by_issue("PRD-52")
         .unwrap_err()
@@ -1102,7 +1105,7 @@ fn ordinary_task_due_date_is_visible_before_checkout() {
     child.completed_at = None;
     planning.snapshot.items.push(child.clone());
     planning.synced_at += 1;
-    store.put_pm_snapshot(&planning).unwrap();
+    store.seed_inventory(&planning).unwrap();
     let status = status_json(home.path(), &["product"], None);
     let row = status["tasks"]["items"]
         .as_array()

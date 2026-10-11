@@ -626,8 +626,9 @@ accepted revision plus archive/membership eligibility; foreign facts grant no ow
 Missing issue content cannot hide a canonical parent's archive or membership
 dispute. Projection, receipts and acquisition now read concrete observation columns;
 whole Project/issue bodies are removed by the Task draft. Partial fields retain
-presence and prose age; public ingestion envelopes remain. Concrete Linear bindings
-are implemented; repository transport selection remains separate from those bindings.
+presence and prose age. Public snapshot/detail envelopes and generic-provider
+acceptance APIs are removed; concrete observations still need adapter confinement.
+Concrete Linear bindings are separate from repository transport selection.
 Populated conversion and rollback proof belongs to the plan. Typed values alone
 are not a typed journal: field-addressed mutations still require reduction.
 Jack Heart excludes old-version support; an unshipped Git encoding needs no dual

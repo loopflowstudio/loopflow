@@ -2297,6 +2297,7 @@ fn truncate_start(value: &str, width: usize) -> String {
 
 #[cfg(test)]
 mod tests {
+    use crate::test_linear_input::SeedLinear;
     use std::sync::Arc;
     use time::OffsetDateTime;
 
@@ -2331,13 +2332,13 @@ mod tests {
             directory.path().display().to_string(),
         );
         store.create_wave(&wave).await.unwrap();
-        let planning: crate::pm::PmSnapshot = serde_json::from_str(include_str!(
+        let planning: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
             "../../../../../tests/fixtures/dto/task_history_planning.json"
         ))
         .unwrap();
         store
-            .put_pm_snapshot(
-                crate::store::PmSnapshotRow {
+            .seed_inventory(
+                crate::test_linear_input::InventoryFixture {
                     wave_id: wave.id().clone(),
                     provider: "linear".into(),
                     initiative: "initiative".into(),
@@ -2445,8 +2446,8 @@ mod tests {
             );
             store.create_wave(&wave).await.unwrap();
             store
-                .put_pm_snapshot(
-                    crate::store::PmSnapshotRow {
+                .seed_inventory(
+                    crate::test_linear_input::InventoryFixture {
                         wave_id: wave.id().clone(),
                         provider: "linear".into(),
                         initiative: "initiative".into(),
@@ -2533,7 +2534,7 @@ mod tests {
         item.completed = true;
         item.state = Some("completed".into());
         items.push(item);
-        let snapshot = crate::store::PmSnapshotRow {
+        let snapshot = crate::test_linear_input::InventoryFixture {
             wave_id: wave.id().clone(),
             provider: "linear".into(),
             initiative: "initiative".into(),
@@ -2545,7 +2546,7 @@ mod tests {
             }], "items":items}))
             .unwrap(),
         };
-        store.put_pm_snapshot(snapshot.clone(), None).await.unwrap();
+        store.seed_inventory(snapshot.clone(), None).await.unwrap();
         // Old applied abandonment receipts do not imply native deletion.
         let shared = super::SharedTaskReads::read(&store).await.unwrap();
         let before = super::wave_tasks(&store, &wave, false, None, &shared)
@@ -2569,7 +2570,7 @@ mod tests {
                     item.revision = Some("2026-09-30T00:00:01Z".into());
                 }
             }
-            store.put_pm_snapshot(stale, None).await.unwrap();
+            store.seed_inventory(stale, None).await.unwrap();
             let reopened = Arc::new(
                 crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
                     database.clone(),
@@ -2622,7 +2623,7 @@ mod tests {
             &missing.contract_issues[..],
             [crate::work::wave::metrics::MetricContractIssueDto::ChapterUnavailable { .. }]
         ));
-        store.put_pm_snapshot(crate::store::PmSnapshotRow {
+        store.seed_inventory(crate::test_linear_input::InventoryFixture {
             wave_id: wave.id().clone(), provider: "linear".into(), initiative: "initiative".into(), synced_at: 2,
             snapshot: serde_json::from_value(serde_json::json!({"projects":[{
                 "id":"999bdbdd-c045-41a6-8ffc-a97c4a40b0b3", "slug":"first", "name":"First chapter", "summary":"",
@@ -2647,17 +2648,17 @@ mod tests {
             items[0].status,
             crate::work::project::ProjectStatus::Started
         );
-        let unreadable = crate::store::PmSnapshotRow {
+        let unreadable = crate::test_linear_input::InventoryFixture {
             wave_id: wave.id().clone(),
             provider: "linear".into(),
             initiative: "initiative".into(),
             synced_at: 3,
-            snapshot: crate::pm::PmSnapshot {
+            snapshot: crate::test_linear_input::Inventory {
                 projects: vec![],
                 items: vec![],
             },
         };
-        assert!(store.put_pm_snapshot(unreadable, None).await.is_err());
+        assert!(store.seed_inventory(unreadable, None).await.is_err());
         assert!(matches!(
             super::project_planning(&store, &wave).await,
             super::Evidence::Ok { items, .. } if items.len() == 1
@@ -2741,13 +2742,13 @@ mod tests {
             url: None,
         };
         store
-            .put_pm_snapshot(
-                crate::store::PmSnapshotRow {
+            .seed_inventory(
+                crate::test_linear_input::InventoryFixture {
                     wave_id: wave.id().clone(),
                     provider: "linear".into(),
                     initiative: "initiative".into(),
                     synced_at: 2,
-                    snapshot: crate::pm::PmSnapshot {
+                    snapshot: crate::test_linear_input::Inventory {
                         projects: vec![
                             project(predecessor, "Old ordinary plan"),
                             project(selected, "Summer work — customer requests"),

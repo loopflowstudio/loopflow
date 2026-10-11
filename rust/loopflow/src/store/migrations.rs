@@ -4872,7 +4872,7 @@ mod tests {
                 conn.execute_batch(draft.sql).unwrap();
             }
         }
-        let mut snapshot: crate::pm::PmSnapshot = serde_json::from_str(include_str!(
+        let mut snapshot: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
             "../../../../tests/fixtures/dto/task_history_planning.json"
         ))
         .unwrap();

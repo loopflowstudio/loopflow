@@ -1,5 +1,7 @@
 #![allow(clippy::await_holding_lock)] // Serialize process-wide Machine selection for each async fixture.
 
+#[cfg(test)]
+use crate::test_linear_input::{Inventory, InventoryFixture, IssueFixture, SeedLinear};
 use std::sync::Arc;
 
 use axum::http::StatusCode;
@@ -11,8 +13,6 @@ use super::test_fixture::{now, Fixture, PlanningEnvironment};
 use super::{inspect_task_planning_async, PmRefresh, PM_TEST_CONTEXT};
 use crate::id::WaveId;
 use crate::pm::test_server::{json_response, spawn, QueuedResponse};
-use crate::pm::PmSnapshot;
-use crate::store::{PmSnapshotRow, PmTaskRecord};
 
 fn issue(project: serde_json::Value) -> serde_json::Value {
     json!({"data":{"issue":{
@@ -39,13 +39,13 @@ fn project() -> serde_json::Value {
         "teams":{"nodes":[{"id":"team-1"}]}})
 }
 
-fn snapshot(wave: &WaveId, record: &PmTaskRecord) -> PmSnapshotRow {
-    PmSnapshotRow {
+fn snapshot(wave: &WaveId, record: &IssueFixture) -> InventoryFixture {
+    InventoryFixture {
         wave_id: wave.clone(),
         provider: "linear".into(),
         initiative: "initiative-1".into(),
         synced_at: record.observed_at,
-        snapshot: PmSnapshot {
+        snapshot: Inventory {
             projects: record.project.clone().into_iter().collect(),
             items: vec![record.item.clone()],
         },
@@ -118,7 +118,7 @@ async fn fresh_lookup_and_wave_list_share_planning_without_execution() {
             let mut snapshot = snapshot(wave.id(), &record);
             fixture
                 .store
-                .put_pm_snapshot(snapshot.clone(), None)
+                .seed_inventory(snapshot.clone(), None)
                 .await
                 .unwrap();
             let refreshed = refresh_task_input(&repo, "FIX-1", PmRefresh::Force)
@@ -132,7 +132,7 @@ async fn fresh_lookup_and_wave_list_share_planning_without_execution() {
             edited.observed_at += 1;
             fixture
                 .store
-                .put_pm_task(
+                .seed_issue(
                     &repo.to_string_lossy(),
                     "linear",
                     edited.clone(),
@@ -153,7 +153,7 @@ async fn fresh_lookup_and_wave_list_share_planning_without_execution() {
             );
             snapshot.snapshot.items.clear();
             snapshot.synced_at += 2;
-            fixture.store.put_pm_snapshot(snapshot, None).await.unwrap();
+            fixture.store.seed_inventory(snapshot, None).await.unwrap();
             assert_eq!(
                 refresh_task_input(&repo, "fix-1", PmRefresh::Never)
                     .await
@@ -232,7 +232,7 @@ async fn rejected_project_snapshot_preserves_durable_project_facts() {
     let fixture = Fixture::new().await;
     std::env::set_var("LF_HOME", fixture.directory.path());
     let (_repo, wave) = fixture.planning_repo().await;
-    let mut snapshot: PmSnapshot = serde_json::from_str(include_str!(
+    let mut snapshot: Inventory = serde_json::from_str(include_str!(
         "../../../../../tests/fixtures/dto/task_history_planning.json"
     ))
     .unwrap();
@@ -240,7 +240,7 @@ async fn rejected_project_snapshot_preserves_durable_project_facts() {
     snapshot.projects.truncate(1);
     snapshot.projects[0].revision = Some("2026-10-05T12:00:00Z".into());
     snapshot.projects[0].initiative_ids = vec!["initiative-1".into()];
-    let mut snapshot = PmSnapshotRow {
+    let mut snapshot = InventoryFixture {
         wave_id: wave.id().clone(),
         provider: "linear".into(),
         initiative: "initiative-1".into(),
@@ -249,13 +249,13 @@ async fn rejected_project_snapshot_preserves_durable_project_facts() {
     };
     fixture
         .store
-        .put_pm_snapshot(snapshot.clone(), None)
+        .seed_inventory(snapshot.clone(), None)
         .await
         .unwrap();
     let retained = fixture.store.list_projects(Some(wave.id())).await.unwrap();
     snapshot.snapshot.projects[0].name = "Conflicting name".into();
     snapshot.synced_at = 2;
-    assert!(fixture.store.put_pm_snapshot(snapshot, None).await.is_err());
+    assert!(fixture.store.seed_inventory(snapshot, None).await.is_err());
     assert_eq!(
         fixture.store.list_projects(Some(wave.id())).await.unwrap(),
         retained
@@ -489,7 +489,7 @@ async fn missing_detail_invalidates_cached_admission_without_claiming_deletion()
                 .is_err());
             fixture
                 .store
-                .put_pm_snapshot(snapshot(wave.id(), &original), None)
+                .seed_inventory(snapshot(wave.id(), &original), None)
                 .await
                 .unwrap();
             assert!(refresh_task_input(&repo, "FIX-1", PmRefresh::Never)
@@ -522,7 +522,7 @@ async fn automatic_refresh_reports_failure_with_retained_observation_age() {
     std::env::set_var("LF_HOME", fixture.directory.path());
     let (repo, _) = fixture.planning_repo().await;
     fixture.seed(now() + 3600).await;
-    let record: crate::store::PmTaskRecord = serde_json::from_value(json!({
+    let record: crate::test_linear_input::IssueFixture = serde_json::from_value(json!({
         "item": {"id":"issue-1", "identifier":"FIX-1", "revision":"2026-09-29T12:00:00.123Z",
             "url":null, "name":"Last known title", "description":"", "rank":0,
             "completed":false,"state":"unstarted","project_id":null,"project":null,
@@ -532,7 +532,7 @@ async fn automatic_refresh_reports_failure_with_retained_observation_age() {
     .unwrap();
     fixture
         .store
-        .put_pm_task(
+        .seed_issue(
             &repo.to_string_lossy(),
             "linear",
             record.clone(),
@@ -604,7 +604,7 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
             let mut list = snapshot(wave.id(), &original);
             fixture
                 .store
-                .put_pm_snapshot(list.clone(), None)
+                .seed_inventory(list.clone(), None)
                 .await
                 .unwrap();
             let mut confirmed = original.clone();
@@ -614,13 +614,13 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
             confirmed.observed_at -= 1;
             fixture
                 .store
-                .put_pm_task(&scope, "linear", confirmed.clone(), None, None)
+                .seed_issue(&scope, "linear", confirmed.clone(), None, None)
                 .await
                 .unwrap();
             list.synced_at += 10;
             fixture
                 .store
-                .put_pm_snapshot(list.clone(), None)
+                .seed_inventory(list.clone(), None)
                 .await
                 .unwrap();
             assert_eq!(
@@ -643,7 +643,7 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
             conflicting.item.name = "Contradiction at the same revision".into();
             assert!(fixture
                 .store
-                .put_pm_task(&scope, "linear", conflicting, None, None)
+                .seed_issue(&scope, "linear", conflicting, None, None)
                 .await
                 .is_err());
             assert_eq!(
@@ -661,7 +661,7 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
             delayed.observed_at += 20;
             fixture
                 .store
-                .put_pm_task(&scope, "linear", delayed, None, None)
+                .seed_issue(&scope, "linear", delayed, None, None)
                 .await
                 .unwrap();
             assert!(refresh_task_input(&repo, "FIX-1", PmRefresh::Never)
@@ -681,7 +681,7 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
             confirmed.item.completed = true;
             fixture
                 .store
-                .put_pm_task(&scope, "linear", confirmed.clone(), None, None)
+                .seed_issue(&scope, "linear", confirmed.clone(), None, None)
                 .await
                 .unwrap();
             // Duplicate and older change receipts cannot invalidate an equal/newer observation.
@@ -709,7 +709,7 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
                 .is_err());
             fixture
                 .store
-                .put_pm_task(&scope, "linear", confirmed.clone(), None, None)
+                .seed_issue(&scope, "linear", confirmed.clone(), None, None)
                 .await
                 .unwrap();
             assert_eq!(
@@ -726,10 +726,10 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
             confirmed.item.revision = Some("2026-09-29T12:00:00.126Z".into());
             fixture
                 .store
-                .put_pm_task(&scope, "linear", confirmed, None, None)
+                .seed_issue(&scope, "linear", confirmed, None, None)
                 .await
                 .unwrap();
-            fixture.store.put_pm_snapshot(list, None).await.unwrap();
+            fixture.store.seed_inventory(list, None).await.unwrap();
             assert!(refresh_task_input(&repo, "FIX-1", PmRefresh::Never)
                 .await
                 .is_err());
@@ -753,7 +753,7 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
             uncached.item.identifier = "FIX-2".into();
             fixture
                 .store
-                .put_pm_task(&scope, "linear", uncached, None, None)
+                .seed_issue(&scope, "linear", uncached, None, None)
                 .await
                 .unwrap();
             assert!(refresh_task_input(&repo, "FIX-2", PmRefresh::Never)
@@ -934,7 +934,7 @@ async fn project_revisions_order_shared_facts_and_unordered_membership_stays_unr
             let mut list = snapshot(wave.id(), &original);
             fixture
                 .store
-                .put_pm_snapshot(list.clone(), None)
+                .seed_inventory(list.clone(), None)
                 .await
                 .unwrap();
             let mut newer = original.clone();
@@ -946,14 +946,14 @@ async fn project_revisions_order_shared_facts_and_unordered_membership_stays_unr
             newer.observed_at -= 1;
             fixture
                 .store
-                .put_pm_task(&repo.to_string_lossy(), "linear", newer.clone(), None, None)
+                .seed_issue(&repo.to_string_lossy(), "linear", newer.clone(), None, None)
                 .await
                 .unwrap();
             // The list arrived later but its provider revision is older.
             list.synced_at += 60;
             fixture
                 .store
-                .put_pm_snapshot(list.clone(), None)
+                .seed_inventory(list.clone(), None)
                 .await
                 .unwrap();
             let stored = refresh_task_input(&repo, "FIX-1", PmRefresh::Never)
@@ -979,7 +979,7 @@ async fn project_revisions_order_shared_facts_and_unordered_membership_stays_unr
             omitted.snapshot.items.clear();
             assert!(fixture
                 .store
-                .put_pm_snapshot(omitted, None)
+                .seed_inventory(omitted, None)
                 .await
                 .unwrap_err()
                 .to_string()
@@ -1005,7 +1005,7 @@ async fn project_revisions_order_shared_facts_and_unordered_membership_stays_unr
                 project.initiative_ids = vec!["different-wave".into()];
                 let result = fixture
                     .store
-                    .put_pm_task(&repo.to_string_lossy(), "linear", conflicting, None, None)
+                    .seed_issue(&repo.to_string_lossy(), "linear", conflicting, None, None)
                     .await;
                 if revision != Some("2026-09-29T11:00:00Z") {
                     assert!(result.is_err());
@@ -1031,7 +1031,7 @@ async fn project_revisions_order_shared_facts_and_unordered_membership_stays_unr
             // Replaying old membership cannot clear the explicit uncertainty.
             fixture
                 .store
-                .put_pm_snapshot(list.clone(), None)
+                .seed_inventory(list.clone(), None)
                 .await
                 .unwrap();
             assert!(refresh_task_input(&repo, "FIX-1", PmRefresh::Never)
@@ -1058,7 +1058,7 @@ async fn project_revisions_order_shared_facts_and_unordered_membership_stays_unr
                 .unwrap();
             list.snapshot.projects.clear();
             list.snapshot.items.clear();
-            fixture.store.put_pm_snapshot(list, None).await.unwrap();
+            fixture.store.seed_inventory(list, None).await.unwrap();
             for task in fixture.store.list_tasks(None).await.unwrap() {
                 assert!(task.worktree.is_none());
                 assert!(fixture.store.task_prs(&task.id).await.unwrap().is_empty());
@@ -1353,7 +1353,7 @@ async fn delayed_absence_preserves_a_newer_accepted_task() {
                     entered.wait().await;
                     fixture
                         .store
-                        .put_pm_task(
+                        .seed_issue(
                             &repo.to_string_lossy(),
                             "linear",
                             confirmed.clone(),

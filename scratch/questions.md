@@ -21,24 +21,21 @@
 Repaired admission, selectors and Git decoding: `17314daeb5:scratch/questions.md`.
 Jack Heart requires removal, not just renaming the hierarchy.
 
-Connect now selects repository Linear and retains its Team; repeated-operation
-fixture passes (history 1824734). Git-miss routing also uses the selected transport;
-the public CLI regression passes (1824996), retaining zero Tasks/issue observations.
-These prove no live Linear/SSH or installed result. Earlier traces:
-`/tmp/loo412-questions-before-routing-recheck.md`.
-
-Reteam no longer commits sentinel cleanup or requires a clean checkout. Its
-operation fixture preserves an unrelated edit and the original Git commit.
+Connect selects repository Linear and retains its Team; Git-miss lookup respects
+that transport without allocating Work. Reteam preserves unrelated edits and
+creates no cleanup commit. Exact source proofs and prior counterevidence:
+`4e78739a9f:scratch/questions.md`; live Linear/SSH and installation remain unproved.
 
 ## Next implementation boundary — October 11
 
-Persistence conversion is checkpointed at `fbc9c60e62`; its
-released-0.13.11 fixture covers the seeded records listed below. Broader
-independent/delayed observations remain for gate. Next confine acquisition and
-delivery to concrete Linear inputs; remove generic public PM store APIs and
-envelopes. The accepted HTML permits private `LinearProject` responses. Renaming
-`PmItem`/snapshot wrappers while retaining a parallel public hierarchy is insufficient.
-Typed-edit/journal, follow-up, cron and review obligations remain.
+Persistence conversion is checkpointed at `fbc9c60e62`. The next source cut
+removes production snapshot/detail envelopes and generic-provider acceptance APIs;
+43 focused preservation/CLI checks pass. Concrete acceptance methods and
+`PmItem`/`LinearProject` still escape the adapter. Confine those inputs and delete
+the remaining PM hierarchy before the typed-edit/journal, follow-up, cron and
+review obligations. The accepted HTML permits private Linear responses; moving
+or renaming public models alone is insufficient. Broader independent/delayed
+observations, Session turns and live-control preservation remain for gate.
 
 Conversion review repairs: confirming refresh compares the retained claim;
 membership/assignee receipt baselines preserve omitted versus explicit null.

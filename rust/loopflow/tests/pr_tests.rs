@@ -1,3 +1,5 @@
+use crate::linear_input::SeedLinear;
+use support::linear_input;
 mod support;
 
 use std::fs;
@@ -491,17 +493,18 @@ fn task_snapshot_reads_its_current_parent_project() {
     repo.create_branch(branch);
     let task = register_task_with_pr(home.path(), repo.path(), branch, &base);
     let runtime = tokio::runtime::Runtime::new().expect("task runtime");
-    let mut observation: loopflow::store::PmTaskRecord = loopflow_test_support::retained_task_input(
-        &task.database,
-        &repo.path().to_string_lossy(),
-        &task.task.identifier,
-    );
+    let mut observation: crate::linear_input::IssueFixture =
+        loopflow_test_support::retained_task_input(
+            &task.database,
+            &repo.path().to_string_lossy(),
+            &task.task.identifier,
+        );
     let project = observation.project.as_mut().unwrap();
     project.slug = "current-project".into();
     project.revision = Some("2026-10-05T12:00:00Z".into());
     let project_id = project.id.clone();
     runtime
-        .block_on(task.store.put_pm_task(
+        .block_on(task.store.seed_issue(
             &repo.path().to_string_lossy(),
             "linear",
             observation,
@@ -915,15 +918,16 @@ fn task_pr_missing_cached_linear_url_refuses_before_remote_mutation() {
     push_branch(&repo, branch);
     let task = register_task_with_pr(home.path(), repo.path(), branch, &base);
     let runtime = tokio::runtime::Runtime::new().expect("task runtime");
-    let mut observation: loopflow::store::PmTaskRecord = loopflow_test_support::retained_task_input(
-        &task.database,
-        &repo.path().to_string_lossy(),
-        &task.task.identifier,
-    );
+    let mut observation: crate::linear_input::IssueFixture =
+        loopflow_test_support::retained_task_input(
+            &task.database,
+            &repo.path().to_string_lossy(),
+            &task.task.identifier,
+        );
     observation.item.url = None;
     observation.item.revision = Some("2026-09-30T00:00:00Z".into());
     runtime
-        .block_on(task.store.put_pm_task(
+        .block_on(task.store.seed_issue(
             &repo.path().to_string_lossy(),
             "linear",
             observation,

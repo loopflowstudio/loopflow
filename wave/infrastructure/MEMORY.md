@@ -356,23 +356,15 @@ under this heading.
 
 ## Review replacement (2026-10-04)
 
-Jack Heart authorized LOO-377's autonomous repair; PR #1429 merged as c5dc238b0afb
-with hosted CI passing. Restart serializes review launch, fences writers and
-retains exact stop evidence for retry. Independent reviews remain protected.
-LOO-370's replacement Flow finished after recovery; its Task completed October 6
-under the opaque-root decision above.
-Installed acceptance remains unproved;
-LOO-373 owns the retained landing-placement reconciliation error.
+Jack Heart authorized LOO-377; #1429 merged as `c5dc238b0afb`, hosted CI passing.
+LOO-370 recovered and completed October 6 under the opaque-root decision.
+Installed acceptance is unproved; LOO-373 owns landing-placement reconciliation.
 
-A review's service, attached lf and provider are distinct process owners.
-Record the service's exact Exec before child launch. Acquire the existing launch
-lock before the attachment fence: reservation/spawn must settle before collecting
-owners, and reobserve the same Flow afterward. Retirement must fence review
-writers and retain captures/native history without recording successful review.
-Save exact process identities before signaling: native stop removes client receipts,
-so an interruption before replacement otherwise destroys retry evidence. The
-public restart fixture reproduces that boundary with no Session provider PID;
-retry uses saved identities. Unknown ownership and independent reviews still block.
+Save service, attached lf and provider identities before stop removes receipts.
+Lock launch before attachment fencing; settle spawn, then reobserve the Flow.
+Retain native history without inventing review success; protect unknown owners
+and independent reviews. Evidence:
+`c28b7d0197:wave/infrastructure/MEMORY.md`, this heading.
 
 ## Transient recovery (LOO-326, curated 2026-10-09)
 
@@ -925,8 +917,15 @@ runs prove no firing, and old gaps do not keep later telemetry red.
 
 ## Gotchas
 
+- **Commit failures need both Git streams** (2026-10-11). Jack Heart requested
+  repair and publication without landing. Selected scratch failed because staging
+  excluded it in ordinary checkouts and stderr-only conversion hid Git's stdout.
+  Shared diagnostics retain both streams or a silent failure's exit status;
+  scratch exclusion belongs only to persistent workspaces. Separate-index proofs
+  preserve staged and working bytes. Disposable CLI and 90 commit/Git/worktree
+  tests pass; full CI and installed acceptance remain unproved.
 - **Desktop gates are headless** (rechecked at `bc6d11661`). `--swift` runs app/model/view checks; `--loopflow` builds app/UI runners. `scripts/test.py --all` excludes the explicit-only `--ui-host` diagnostic. The historical runner hang remains at `bc6d11661:wave/infrastructure/MEMORY.md` under Gotchas; changing the gate proves no repair of that hang. Compile-only and skipped checks prove no interaction behavior.
-- **Run `cargo test` to completion before trusting a green-looking suite.** A failing lib target makes cargo skip every later target, so lib failures mask bin failures.
+- **Wait for `cargo test` to finish:** lib failures skip later targets.
 - **Rust compilation does not validate SQLite column names.** Runtime SQL whose shape depends on a released schema must be shared with a behavior test that prepares and executes it against the materialized migration head. Epoch Work ownership is three exclusive foreign keys (`wave_id`, `project_id`, `task_id`); generic kind/id belongs to explicit routes such as synchronous cross-Work questions, not to Epochs.
 - **Source history must reconstruct every applied release frontier.** Preserve
   an unknown store frontier and its old binary; match embedded SQL against the
@@ -940,11 +939,11 @@ runs prove no firing, and old gaps do not keep later telemetry red.
   at `migrations/drafts/` passes locally and fails the release tree at compile
   time.
 - **Installation tests need OS-account isolation.** Jack Heart’s October 5 steer forbids the three LOO-370 host checks named in TESTING.md: getpwuid bypasses HOME/LF_HOME. PR #1444 supplies disposable-account proofs; until integrated, isolated CI owns them. Ordinary fixtures also scrub inherited LF_* authority.
-- **Concurrent editing corrupts a file; concurrent rebasing corrupts history.** Two agents sharing one worktree shared its `rebase-merge` state dir: conflicts resolved themselves between commands and `done` advanced 6→22 with no `--continue` from the losing session. Check for a live agent before working — or rebasing — a wave worktree; the agent that owns the worktree owns its `.git` sequencer.
+- **One writer owns a checkout and its Git sequencer.** Concurrent-edit/rebase incident: `6016eca30585:wave/infrastructure/MEMORY.md`, Gotchas.
 - **Linear Project UUIDs survive renames; derived slugs do not.** Canonical local
   Project fields own content; optional Linear bindings and observations retain
   integration evidence. No `projects/*.md` cache. Reconcile history by stable IDs.
-- **Environment configures a process; it must never decide what the process is.** An earlier runtime chose between booting a listener and being a resident from inherited environment, so a promoted wave could attach to its parent's listener with the parent's token. The current `lf wave` surface keeps that role explicit.
+- **Environment configures a process; it must never decide what the process is.** Keep roles explicit. Inherited-listener incident: `6016eca30585:wave/infrastructure/MEMORY.md`, Gotchas.
 - **Provider omission cannot erase canonical Work.** A Project absent from a
   current inventory can still own unfinished Tasks. Read canonical content with
   separate acquisition validity/age; missing or contradictory observations neither

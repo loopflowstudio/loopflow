@@ -67,7 +67,7 @@ main = f'''
 </section>
 <section class="thesis">
   <p >Coding agents can do amazing things for you, but they ask amazing focus of you. How can you, a human with a single locus of attention, stay in sync with an entire parallel agent swarm? Shipping tens of thousands of lines is the easy part. Making them lines worth keeping — lines you don’t revert next month — is the hard part.</p>
-  <p >Loopflow helps you do that by arranging your agent sessions around clear work boundaries: long-lived areas of responsibility and objectives (“Waves”) and concrete outcomes (“Tasks”). You don’t have to keep every session window open for fear of it disappearing, or remember why you wanted to do this massive change in the first place.</p>
+  <p >Loopflow helps you do that by arranging your agent sessions around clear work boundaries: long-lived areas of responsibility and objectives (<em>Waves</em>) and concrete outcomes (<em>Tasks</em>). You don’t have to keep every session window open for fear of it disappearing, or remember why you wanted to do this massive change in the first place.</p>
   <p >Your work has defined workflows — how an idea gets researched, designed, implemented, validated, shipped, etc. — and the points at which you want to get involved: be that early on in design, later on in trying it out, both, or neither. Each Wave and Task has an associated workflow that is used to drive work forward and ensures that each session you come to in Loopflow is one where your input really matters.</p>
 </section>
 <section id="mac" class="x5 x6">

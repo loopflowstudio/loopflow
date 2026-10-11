@@ -104,6 +104,9 @@ result, and stay alive until the harness closes stdin. Include
 `explicit_agent_wins_through_task_nested_flows_and_provider_children` when
 integrating Claude transport changes; bound the test so missing acknowledgements
 fail locally instead of exhausting the merge queue's deadline.
+Cross-provider replay fixtures must install stand-ins for both the recorded and
+override providers, with a fixture/system-only PATH. A developer's installed
+provider must neither satisfy a missing fixture nor receive a test launch.
 
 ## Quick Reference
 

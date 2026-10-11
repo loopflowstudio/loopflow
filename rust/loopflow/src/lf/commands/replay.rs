@@ -160,9 +160,7 @@ mod tests {
         let bin = home.path().join("bin");
         std::fs::create_dir(&bin).unwrap();
         let evidence = home.path().join("replay-evidence");
-        let provider = bin.join(harness);
-        let provider_source = if harness == "claude" {
-            r#"#!/usr/bin/python3
+        let claude_source = r#"#!/usr/bin/python3
 import json, os, sys
 if '--version' in sys.argv:
     print('fixture')
@@ -178,17 +176,23 @@ for line in sys.stdin:
     print(json.dumps(message), flush=True)
     print(json.dumps({'type': 'system', 'subtype': 'init', 'session_id': 'replay-thread'}), flush=True)
     print(json.dumps({'type': 'result', 'uuid': 'replay-result', 'session_id': 'replay-thread', 'subtype': 'success', 'is_error': False, 'result': 'not the answer', 'structured_output': {'decision': 'advance'}}), flush=True)
-"#.to_string()
-        } else {
-            include_str!("../../../tests/support/opencode_server.py").replace("__WAIT__", "False")
-        };
-        std::fs::write(&provider, provider_source).unwrap();
-        std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+"#;
+        // Replay can switch providers; both the source and override must use
+        // stand-ins, never a provider installed on the test host.
+        for (name, source) in [
+            ("claude", claude_source.to_string()),
+            (
+                "opencode",
+                include_str!("../../../tests/support/opencode_server.py")
+                    .replace("__WAIT__", "False"),
+            ),
+        ] {
+            let provider = bin.join(name);
+            std::fs::write(&provider, source).unwrap();
+            std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
 
-        let path = std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(
-            &std::env::var_os("PATH").unwrap_or_default(),
-        )))
-        .unwrap();
+        let path = std::env::join_paths([bin, "/usr/bin".into(), "/bin".into()]).unwrap();
         let keys = [
             "PATH",
             "LF_BIN",
@@ -310,6 +314,8 @@ for line in sys.stdin:
         assert_eq!(overridden.model.as_deref(), Some("opencode/other"));
         let mut expected = request.clone();
         expected.agent = "opencode:opencode/other".into();
+        // Claude's selected account cannot transfer to an OpenCode replay.
+        expected.account_id = None;
         assert_eq!(overridden.process, Some(expected));
         let (_, retained) =
             crate::session_record::resolve_manifest(home.path(), &source_id).unwrap();

@@ -299,7 +299,7 @@ routing tests cover switches, ownership moves, missing rows and rejected orphan
 imports; existing import/execution preservation fixtures remain required.
 This changes no execution admission: LOO-427 must adapt its stacked membership
 consumer without interpreting a route or absent placement as first-start authority.
-LOO-414's unresolved authority still blocks stack readiness. Affected gate and fresh +/- review remain.
+LOO-414's unresolved authority still blocks stack readiness; this Task's source review does not settle it.
 
 Cron checks: 51 focused Rust tests pass; two conversion/filtering proofs and the
 public direct/Flow nonzero regression pass, plus Clippy and generated CLI reference.
@@ -314,20 +314,22 @@ Writer transport/causal proofs: `eda4a98097` in this plan.
 
 ## Remaining proof and review
 
-- Gate owns the full affected suites, release-frontier materialization and headless
-  Desktop checks. Existing Linux TLS fixtures own connected public Linear acceptance;
-  real two-machine SSH and installation remain unobserved. Source checks use the CLI
-  built in this worktree with disposable stores and simulated providers/transport.
+- Affected gate, materialization and headless Desktop ran; failures and repaired
+  checks are recorded below. Linux TLS fixtures own connected public Linear proof;
+  real two-machine SSH and installation remain unobserved. Source checks use this
+  worktree's CLI, disposable stores and simulated providers/transport.
 - Configuration switches retain prior history and uncertain effects. They do not
   transfer another Machine's delivery attempts. Automatic migration of previously
   Git-imported, unmapped work into Linear remains an open design question; no
   exactly-once or seamless switching acceptance is claimed.
-- `pr-review.html` is absent. `work-model.html` and `pr-review-sources.json` retain
-  earlier review material, not final acceptance. A fresh one-page +/- HTML review
-  follows the entire reduction and affected gate, before review-only republication.
+- [Fresh +/- review](pr-review.html) covers the complete reduction at `bb93899d1f`
+  against `6016eca305`. `pr-review-sources.json` pins twelve verified excerpts and
+  the source-built offline Task/comment capture. Browser discovery returned no
+  browsers; visual inspection is unavailable. Local markup checks pass. Earlier
+  `work-model.html` is inventory, not final acceptance.
 
 Earlier focused proof: `9dbd6fc2d8`, `dfd3b80611`, `f025e9b7ab`,
-`dfa2cdafba`, `09709a05cc` in this plan. Gate and review still precede republication.
+`dfa2cdafba`, `09709a05cc` in this plan. Publication remains review-only.
 
 Earlier focused checks and seven intermittent nextest leak observations remain at
 `97c482815c:scratch/work-on-another-machine-name.md`. The full October 11 Rust
@@ -352,8 +354,8 @@ all three focused regressions. Final fmt/Clippy and three source-built remote CL
 checks pass at `bb93899d1f`. Logs: `/tmp/loo412-gate-*`.
 Website reports horizontal overflow at 1440px (1475px content width); homepage,
 CSS and its test are unchanged against base. This is retained counterevidence,
-not a passing gate. Fresh review remains.
+not a passing gate. The review exposes these limits; Jack Heart has not accepted it.
 
 Transport evidence: `0181133849` at this path; earlier simulated adoption: `5960415b3:scratch/remote-task-demo.md` (not real SSH or integrated acceptance).
 
-Follow-up cut sanity: `cargo check --all-targets`, fmt/Clippy, 4 recovery/export tests, 3 CLI/Flow tests, 2 merge/process preservation tests, 29 wire/relation/history/catalog tests, headless Desktop build/31 Swift tests and 4 skill-alignment tests pass; full affected/materialized gate remains.
+Follow-up cut sanity is retained at `4bd94e9b3c` in this plan; the later affected/materialized results above supersede its pending-gate status.

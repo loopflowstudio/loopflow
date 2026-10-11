@@ -1,76 +1,165 @@
 {
-  "base": "906576f39d4f0dc0c1c7e87c6ecbc178a44fb3e8",
-  "head": "c8fe4628affc13ac0553c14cd5bec5e5896369a1",
-  "working_tree": false,
-  "sources": [
+  "base": "6016eca30585ae11194ad0dc490d4df7931975c7",
+  "head": "bb93899d1ff723f6309768dbec49bbd21083a261",
+  "excerpts": [
     {
-      "path": "rust/loopflow/src/engine/config.rs",
-      "symbol": "PlanningConfig",
-      "revision": "c8fe4628affc13ac0553c14cd5bec5e5896369a1",
-      "start": 176,
-      "end": 185,
-      "text": "pub enum PlanningConfig {\n    Git {\n        #[serde(default = \"default_planning_remote\")]\n        remote: String,\n        /// Omit for this user's stable personal ref.\n        #[serde(default)]\n        shared: Option<String>,\n    },\n    Linear {},\n}",
-      "sha256": "85604faabab8357f1427a288492289589a53bb05f77993c14ec5c82d2e4eead2"
+      "revision": "6016eca30585ae11194ad0dc490d4df7931975c7",
+      "file": "rust/loopflow/src/work/project.rs",
+      "symbol": "pub struct Project {",
+      "first": 16,
+      "last": 30,
+      "text": "pub struct Project {\n    pub id: ProjectId,\n    /// Authored local planning or accepted Linear facts.\n    pub plan: ProjectPlan,\n    /// Current ownership. Wave name and checkout are resolved from this id.\n    pub wave_id: WaveId,\n    /// Completed Project judgment passes. This is durable domain progress, not\n    /// the lifetime of a Project process.\n    pub iteration: u32,\n    /// Set when abandonment is *requested*, not when it is applied. No launch\n    /// path may start a Run for Project Work carrying this.\n    pub abandon_intent: Option<AbandonIntent>,\n    pub created_at: OffsetDateTime,\n    pub updated_at: OffsetDateTime,\n}\n",
+      "sha256": "eb7657a20c811893a45aeb15a785bf726417f7023873aa5768f85854f371eb19"
     },
     {
-      "path": "rust/loopflow/src/ops/planning_sync.rs",
-      "symbol": "sync_after_save",
-      "revision": "c8fe4628affc13ac0553c14cd5bec5e5896369a1",
-      "start": 45,
-      "end": 76,
-      "text": "pub(crate) async fn sync_after_save(store: &Store, repo: &str) {\n    let attempt = async {\n        let config = crate::engine::config::load_config(Some(Path::new(repo)))\n            .map_err(message)?\n            .unwrap_or_default();\n        match config.planning_transport() {\n            crate::engine::config::PlanningConfig::Git { .. } => {\n                publish_repository(store, repo).await\n            }\n            crate::engine::config::PlanningConfig::Linear {} => {\n                tokio::time::timeout(std::time::Duration::from_secs(5), async {\n                    super::planning_export::sync_repository_exports(store, repo).await?;\n                    let (fields, comments, state) = tokio::join!(\n                        super::planning_delivery::sync_repository_fields(store, repo),\n                        super::linear_observe::sync_repository_deliveries(store, repo, false),\n                        super::linear_observe::sync_repository_deliveries(store, repo, true)\n                    );\n                    fields?;\n                    comments?;\n                    state?;\n                    Ok(())\n                })\n                .await\n                .map_err(message)?\n            }\n        }\n    };\n    if let Err(error) = attempt.await {\n        tracing::debug!(%error, \"planning synchronization pending after local save\");\n        eprintln!(\"Saved locally; planning synchronization pending. See `lf planning status`.\");\n    }\n}",
-      "sha256": "6284208b62eda4b81d7a718561b0542d9a2b4c739d974937b5c963df02ce0d99"
+      "revision": "bb93899d1ff723f6309768dbec49bbd21083a261",
+      "file": "rust/loopflow/src/work/project.rs",
+      "symbol": "pub struct Project {",
+      "first": 47,
+      "last": 68,
+      "text": "pub struct Project {\n    pub id: ProjectId,\n    pub summary: String,\n    pub slug: String,\n    pub name: String,\n    pub description: String,\n    pub krs: Vec<ProjectKR>,\n    pub metric_targets: Vec<crate::work::wave::metrics::MetricTarget>,\n    pub workflow: String,\n    pub status: ProjectStatus,\n    /// Optional Linear binding, not a second owner of this record.\n    pub linear_id: Option<LinearProjectId>,\n    /// Acquisition time of the retained Linear observation, never a write clock.\n    pub pm_snapshot_synced_at: Option<i64>,\n    /// Current ownership. Wave name and checkout are resolved from this id.\n    pub wave_id: WaveId,\n    /// Set when abandonment is *requested*, not when it is applied. No launch\n    /// path may start a Run for Project Work carrying this.\n    pub abandon_intent: Option<AbandonIntent>,\n    pub created_at: OffsetDateTime,\n    pub updated_at: OffsetDateTime,\n}\n",
+      "sha256": "6596001706b9d91032d184ab72edba3d418d251f74fb641d4208bcbc1f4b2d39"
     },
     {
-      "path": "rust/loopflow/src/store/sqlite/task_content.rs",
-      "symbol": "SqliteStore::edit_task",
-      "revision": "c8fe4628affc13ac0553c14cd5bec5e5896369a1",
-      "start": 160,
-      "end": 172,
-      "text": "        if changed {\n            let mut edits = Vec::new();\n            if let Some(value) = &patch.name {\n                edits.push(Edit::TaskTitle(Some(value.clone())));\n            }\n            if let Some(value) = &patch.description {\n                edits.push(Edit::TaskDescription(Some(value.clone())));\n            }\n            if let Some(value) = &patch.assignee {\n                edits.push(Edit::TaskAssignee(value.clone()));\n            }\n            planning_write::local(&tx, PlanningKind::Task, id.as_str(), &edits)?;\n        }",
-      "base_start": 141,
-      "base_end": 148,
-      "base_text": "        if changed {\n            tx.execute(\n                \"UPDATE tasks SET issue_title=COALESCE(?2,issue_title),issue_description=COALESCE(?3,issue_description),\n                 planning_assignee=CASE WHEN ?4 THEN ?5 ELSE planning_assignee END,\n                 planning_revision=planning_revision+1,updated_at=?6 WHERE id=?1\",\n                params![id.as_str(),patch.name,patch.description,patch.assignee.is_some(),patch.assignee.as_ref().and_then(|v|v.as_deref()),now_unix()],\n            )?;\n        }",
-      "sha256": "42c98c06ea71d02a1c779201fa2ace3b6c6cdd5d9739b4bfda92a67706f5366d"
+      "revision": "6016eca30585ae11194ad0dc490d4df7931975c7",
+      "file": "rust/loopflow/src/work/task/mod.rs",
+      "symbol": "pub struct Task {",
+      "first": 556,
+      "last": 581,
+      "text": "pub struct Task {\n    pub id: TaskId,\n    /// Authored local planning or accepted Linear facts.\n    pub plan: TaskPlan,\n    pub pm_writeback: PmWritebackState,\n    /// Root ownership. Wave name and checkout are resolved from this id.\n    pub wave_id: WaveId,\n    /// Required runtime parent. Every Task reports through one durable Project\n    /// Work; its Wave retains root inspection and override authority.\n    pub project_id: ProjectId,\n    pub worktree: Option<PathBuf>,\n    pub workspace_slug: String,\n    pub branch: String,\n    pub base_commit: String,\n    pub parent_pr_id: Option<TaskPrId>,\n    /// Explicit choice for every Flow step; None uses the step/config defaults.\n    pub agent: Option<String>,\n    /// Set when abandonment is *requested*, not when it is applied. No launch\n    /// path may start a Run for Task Work carrying this.\n    pub abandon_intent: Option<AbandonIntent>,\n    pub created_at: OffsetDateTime,\n    pub updated_at: OffsetDateTime,\n    /// Per-command view derived from the active PR's durable observation cache.\n    #[serde(skip)]\n    pub observation: Observation,\n}\n",
+      "sha256": "871217c21e14de3c6e1f409c4e9cbc82583d7cb2f09e1942a83ce6faf636d76e"
     },
     {
-      "path": "rust/loopflow/src/store/sqlite/planning_peers.rs",
-      "symbol": "import_peer_planning \u2192 planning_write::write",
-      "revision": "c8fe4628affc13ac0553c14cd5bec5e5896369a1",
-      "start": 246,
-      "end": 255,
-      "text": "                    planning_write::ensure_record(&save, repo, object, edits)?;\n                    require_repository(&save, repo, object)?;\n                    // Wave selection points to Projects inserted later in this import.\n                    let selected: Vec<_> = edits\n                        .iter()\n                        .filter(|e| !matches!(e, PlanningEdit::WaveProject(_)))\n                        .cloned()\n                        .collect();\n                    planning_write::write(&save, object, &selected, WriteOrigin::Import)?;\n                    require_repository(&save, repo, object)?;",
-      "sha256": "11935462ac8d34d286aa0103f13d6109b30f9bd136aef21326271e9aae63b4f9"
+      "revision": "bb93899d1ff723f6309768dbec49bbd21083a261",
+      "file": "rust/loopflow/src/work/task/mod.rs",
+      "symbol": "pub struct Task {",
+      "first": 575,
+      "last": 614,
+      "text": "pub struct Task {\n    pub id: TaskId,\n    /// Local optimistic-write revision; independent of Linear observation age.\n    pub revision: u64,\n    pub identifier: String,\n    pub title: String,\n    pub description: String,\n    /// Shared planning fields; independent of local execution and Workflow position.\n    pub rank: u32,\n    pub assignee: Option<String>,\n    pub due_date: Option<String>,\n    pub state: Option<String>,\n    pub completed: bool,\n    pub completed_at: Option<String>,\n    /// Optional Linear binding, not a second owner of this record.\n    pub linear_id: Option<LinearIssueId>,\n    /// Acquisition time of the retained Linear observation, never a write clock.\n    pub pm_snapshot_synced_at: Option<i64>,\n    pub pm_writeback: LinearWritebackState,\n    /// Root ownership. Wave name and checkout are resolved from this id.\n    pub wave_id: WaveId,\n    /// Required runtime parent. Every Task reports through one durable Project\n    /// Work; its Wave retains root inspection and override authority.\n    pub project_id: ProjectId,\n    pub worktree: Option<PathBuf>,\n    pub workspace_slug: String,\n    pub branch: String,\n    pub base_commit: String,\n    pub parent_pr_id: Option<TaskPrId>,\n    /// Explicit choice for every Flow step; None uses the step/config defaults.\n    pub agent: Option<String>,\n    /// Set when abandonment is *requested*, not when it is applied. No launch\n    /// path may start a Run for Task Work carrying this.\n    pub abandon_intent: Option<AbandonIntent>,\n    pub created_at: OffsetDateTime,\n    pub updated_at: OffsetDateTime,\n    /// Per-command view derived from the active PR's durable observation cache.\n    #[serde(skip)]\n    pub observation: Observation,\n}\n",
+      "sha256": "54f9fd4e380e3d78e988eb5e800ea7b2465eb1ff246bd545ea8047cff2be8e5b"
     },
     {
-      "path": "rust/loopflow/src/store/sqlite/planning_write.rs",
-      "symbol": "write: capture only local changes",
-      "revision": "c8fe4628affc13ac0553c14cd5bec5e5896369a1",
-      "start": 317,
-      "end": 322,
-      "text": "    if matches!(origin, WriteOrigin::Local) {\n        // Initial rows and every subsequent write use this same typed snapshot.\n        capture(conn, object)?;\n    }\n    Ok(!changed.is_empty())\n}",
-      "sha256": "e737578ea4c9cd78238229f97c2f6b55e55db4716d4d05ad4026a8c9fb1cc876"
+      "revision": "bb93899d1ff723f6309768dbec49bbd21083a261",
+      "file": "rust/loopflow/src/work/edit.rs",
+      "symbol": "pub struct WorkEdit {",
+      "first": 9,
+      "last": 12,
+      "text": "pub struct WorkEdit {\n    pub target: String,\n    pub change: WorkValue,\n}\n",
+      "sha256": "d4173a2b94448b6d27c1122924b93a08c7fdd44800b10e448a796c7c752ba8a3"
     },
     {
-      "path": "rust/loopflow/src/ops/run.rs",
-      "symbol": "resolve_work_selection",
-      "revision": "c8fe4628affc13ac0553c14cd5bec5e5896369a1",
-      "start": 126,
-      "end": 128,
-      "text": "    if let Some(value) = selection.task {\n        let value = value.trim();\n        let task = crate::ops::task::resolve_task(store, repo, value).await?;",
-      "base_start": 126,
-      "base_end": 133,
-      "base_text": "    if let Some(value) = selection.task {\n        let value = value.trim();\n        let task = if let Ok(id) = TaskId::parse(value) {\n            store.get_task(&id).await.map_err(run_error)?\n        } else {\n            store.get_task_by_issue(value).await.map_err(run_error)?\n        }\n        .ok_or_else(|| run_error(format!(\"Task {value:?} is not registered\")))?;",
-      "sha256": "5c4f5d36f83e444e2184f827f5d880b939f953cf4877416ee059efb00479e99c"
+      "revision": "bb93899d1ff723f6309768dbec49bbd21083a261",
+      "file": "rust/loopflow/src/work/edit.rs",
+      "symbol": "work_values! {",
+      "first": 65,
+      "last": 97,
+      "text": "work_values! {\n    (WaveName, \"wave_name\", String),\n    (WaveParent, \"wave_parent\", Option<String>),\n    (WaveProject, \"wave_project\", Option<String>),\n    (ProjectWave, \"project_wave\", String),\n    (ProjectLinearId, \"project_linear_id\", Option<String>),\n    (ProjectSlug, \"project_slug\", Option<String>),\n    (ProjectName, \"project_name\", Option<String>),\n    (ProjectSummary, \"project_summary\", String),\n    (ProjectDescription, \"project_description\", Option<String>),\n    (ProjectStatus, \"project_status\", crate::work::project::ProjectStatus),\n    (ProjectRank, \"project_rank\", u32),\n    (ProjectInitiatives, \"project_initiatives\", Vec<String>),\n    (ProjectTeams, \"project_teams\", Vec<String>),\n    (TaskProject, \"task_project\", String),\n    (TaskLinearId, \"task_linear_id\", Option<String>),\n    (TaskIdentifier, \"task_identifier\", String),\n    (TaskTitle, \"task_title\", Option<String>),\n    (TaskDescription, \"task_description\", Option<String>),\n    (TaskRank, \"task_rank\", u32),\n    (TaskAssignee, \"task_assignee\", Option<String>),\n    (TaskDueDate, \"task_due_date\", Option<String>),\n    (TaskDeletedAt, \"task_deleted_at\", Option<i64>),\n    (TaskUrl, \"task_url\", Option<String>),\n    (TaskBranch, \"task_branch\", Option<String>),\n    (TaskTeam, \"task_team\", Option<String>),\n    (CommentTask, \"comment_task\", String),\n    (Workflow, \"workflow\", String),\n    (Krs, \"krs\", Vec<crate::work::project::ProjectKR>),\n    (MetricTargets, \"metric_targets\", Vec<crate::work::wave::metrics::MetricTarget>),\n    (Disposition, \"disposition\", Disposition),\n    (CommentContent, \"comment_content\", CommentContent),\n}\n",
+      "sha256": "d0db803158b1e4c2ae35720c414aefb16837399eed396736b5f096bef219daf6"
     },
     {
-      "path": "rust/loopflow/src/ops/task/remote.rs",
-      "symbol": "TaskSource::require_checkout",
-      "revision": "c8fe4628affc13ac0553c14cd5bec5e5896369a1",
-      "start": 57,
-      "end": 66,
-      "text": "    pub fn require_checkout(&self, task: &Task) -> OpsResult<()> {\n        let worktree = task.worktree()?;\n        let branch = crate::engine::git::current_branch(worktree)?;\n        if branch.as_deref() != Some(&self.branch) || !is_ancestor(worktree, &self.commit, \"HEAD\")?\n        {\n            return Err(task_error(format!(\"Task {} needs branch {} at commit {}; run `lf sync` in {} before continuing; existing work is preserved\", self.identifier, self.branch, self.commit, worktree.display())));\n        }\n        Ok(())\n    }\n}",
-      "sha256": "c64c933f78f7f3e8812c8cbc996e0436dd72c0e90e12da0c2de4df38cb943c3b"
+      "revision": "bb93899d1ff723f6309768dbec49bbd21083a261",
+      "file": "rust/loopflow/src/ops/task.rs",
+      "symbol": "pub(crate) async fn task_comment_async(",
+      "first": 4202,
+      "last": 4239,
+      "text": "pub(crate) async fn task_comment_async(\n    repo: &Path,\n    wave: Option<&str>,\n    issue: &str,\n    message: Option<&str>,\n    steer: bool,\n) -> OpsResult<TaskComments> {\n    let (store, task) = resolve_saved_task(repo, wave, issue).await?;\n    if let Some(message) = message {\n        append_task_comment(&store, &task, message, steer)?;\n        let owner = store\n            .get_wave(&task.wave_id)\n            .await\n            .map_err(|error| OpsError::Message(error.to_string()))?\n            .ok_or_else(|| OpsError::Message(\"Task Wave is missing\".into()))?;\n        super::planning_sync::sync_after_save(&store, owner.repo()).await;\n    }\n    let refresh_error = if message.is_none() && task.linear_id.is_some() {\n        match tokio::time::timeout(\n            std::time::Duration::from_secs(5),\n            super::linear_observe::refresh_task_comments(&store, &task),\n        )\n        .await\n        {\n            Ok(Ok(())) => None,\n            Ok(Err(error)) => Some(error.to_string()),\n            Err(_) => Some(\"Comment refresh timed out; showing saved comments\".into()),\n        }\n    } else {\n        None\n    };\n    let mut thread = store\n        .sqlite\n        .task_comments(&task.id)\n        .map_err(|error| OpsError::Message(error.to_string()))?;\n    thread.refresh_error = refresh_error;\n    Ok(thread)\n}\n",
+      "sha256": "bf574530f30a16188ef8ad3a641daa5561dbb2ce8c0717e96b2932c470fb9113"
+    },
+    {
+      "revision": "bb93899d1ff723f6309768dbec49bbd21083a261",
+      "file": "rust/loopflow/src/ops/planning_sync.rs",
+      "symbol": "pub(crate) async fn sync_after_save(",
+      "first": 58,
+      "last": 87,
+      "text": "pub(crate) async fn sync_after_save(store: &Store, repo: &str) {\n    let attempt = async {\n        let config = crate::config::load_config(Some(Path::new(repo)))\n            .map_err(message)?\n            .unwrap_or_default();\n        match config.planning_transport() {\n            crate::config::PlanningConfig::Git { .. } => publish_repository(store, repo).await,\n            crate::config::PlanningConfig::Linear {} => {\n                tokio::time::timeout(std::time::Duration::from_secs(5), async {\n                    super::planning_export::sync_repository_exports(store, repo).await?;\n                    let (fields, comments, state) = tokio::join!(\n                        super::planning_delivery::sync_repository_fields(store, repo),\n                        super::linear_observe::sync_repository_deliveries(store, repo, false),\n                        super::linear_observe::sync_repository_deliveries(store, repo, true)\n                    );\n                    fields?;\n                    comments?;\n                    state?;\n                    Ok(())\n                })\n                .await\n                .map_err(message)?\n            }\n        }\n    };\n    if let Err(error) = attempt.await {\n        tracing::debug!(%error, \"planning synchronization pending after local save\");\n        eprintln!(\"Saved locally; planning synchronization pending. See `lf planning status`.\");\n    }\n}\n",
+      "sha256": "a1ae38e255afedd7e4e7cd9233b54daa023dbf611b54b0c0ff4133c252f8b55d"
+    },
+    {
+      "revision": "bb93899d1ff723f6309768dbec49bbd21083a261",
+      "file": "rust/loopflow/src/store/sqlite/task_comments.rs",
+      "symbol": "fn write_comment(",
+      "first": 87,
+      "last": 117,
+      "text": "fn write_comment(conn: &Connection, task: &TaskId, comment: &TaskComment) -> StoreResult<()> {\n    planning_write::create(\n        conn,\n        \"\",\n        &crate::work::edit::WorkEdit::for_target(\n            &comment.id,\n            &[\n                Edit::CommentTask(task.to_string()),\n                Edit::CommentContent(crate::work::edit::CommentContent {\n                    body: comment.body.clone(),\n                    author: comment.author.clone(),\n                    created_at: comment.created_at.clone(),\n                }),\n            ],\n        ),\n    )\n}\n\n// Local and acquired comments share the field writer; only local saves enqueue delivery.\nfn insert_authored_comment(\n    conn: &Connection,\n    task: &TaskId,\n    comment: &TaskComment,\n) -> StoreResult<()> {\n    write_comment(conn, task, comment)?;\n    conn.execute(\n        \"INSERT INTO task_comment_deliveries(comment_id,comment_json) VALUES(?1,?2)\",\n        params![comment.id, serde_json::to_string(comment)?],\n    )?;\n    Ok(())\n}\n",
+      "sha256": "b1191a6474425e351eda506a8897747107d29d4254c85f055d76f4ec3eaa41c9"
+    },
+    {
+      "revision": "bb93899d1ff723f6309768dbec49bbd21083a261",
+      "file": "rust/loopflow/src/store/sqlite/task_comments.rs",
+      "symbol": "    pub fn append_task_comment(",
+      "first": 164,
+      "last": 215,
+      "text": "    pub fn append_task_comment(&self, task: &TaskId, comment: &TaskComment) -> StoreResult<()> {\n        let mut conn = self.conn.lock().expect(\"store mutex poisoned\");\n        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;\n        let task = super::children::task_on(&tx, task)?.ok_or(StoreError::NotFound)?;\n        super::children::require_task_not_deleted(&tx, &task)?;\n        let created_at = comment.created_at.as_deref().ok_or_else(|| {\n            StoreError::InvalidData(\"local comments require a creation time\".into())\n        })?;\n        if comment.body.trim().is_empty() {\n            return Err(StoreError::InvalidData(\n                \"Task comment cannot be empty\".into(),\n            ));\n        }\n        let author = serde_json::to_string(&comment.author)?;\n        let previous: Option<(String, String, String, String)> = tx\n            .query_row(\n                \"SELECT task_id,body,author,created_at FROM task_comments WHERE id=?1\",\n                [&comment.id],\n                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),\n            )\n            .optional()?;\n        if let Some(previous) = previous {\n            if previous\n                != (\n                    task.id.to_string(),\n                    comment.body.clone(),\n                    author,\n                    created_at.to_string(),\n                )\n            {\n                return Err(StoreError::InvalidData(\n                    \"comment identity already belongs to another comment\".into(),\n                ));\n            }\n            return Ok(());\n        }\n        insert_authored_comment(&tx, &task.id, comment)?;\n        if let TaskCommentAuthor::Person { name } = &comment.author {\n            if crate::ops::linear_observe::is_direction_comment(&comment.body, Some(\"local\")) {\n                let text = match name {\n                    Some(name) => format!(\"Comment {} by {name}:\\n\\n{}\", comment.id, comment.body),\n                    None => format!(\n                        \"Comment {} (attribution unresolved):\\n\\n{}\",\n                        comment.id, comment.body\n                    ),\n                };\n                Self::append_task_steer_in(&tx, &task.id, &crate::durable::Author::User, &text)?;\n            }\n        }\n        tx.commit()?;\n        Ok(())\n    }\n",
+      "sha256": "ea4389da73f4b92274b40196fd019df4793a420b8d96d5cb73fc0c91803d2183"
+    },
+    {
+      "revision": "bb93899d1ff723f6309768dbec49bbd21083a261",
+      "file": "rust/loopflow/src/store/sqlite/planning_write.rs",
+      "symbol": "pub(crate) fn write(",
+      "first": 441,
+      "last": 472,
+      "text": "pub(crate) fn write(\n    conn: &Connection,\n    edits: &[WorkEdit],\n    origin: WriteOrigin,\n) -> StoreResult<bool> {\n    let mut changed = false;\n    for ((table, id), values) in grouped(edits) {\n        changed |= write_record(conn, table, id, &values, origin)?;\n    }\n    Ok(changed)\n}\n\n/// Save local Work in the caller's transaction, including its causal identity.\npub(crate) fn local(conn: &Connection, edits: &[WorkEdit]) -> StoreResult<bool> {\n    write(conn, edits, WriteOrigin::Local)\n}\n\n/// Create shared records before attaching any machine-local execution data.\npub(crate) fn create(conn: &Connection, repo: &str, edits: &[WorkEdit]) -> StoreResult<()> {\n    let records = grouped(edits);\n    // Foreign-key parents exist before children even when the caller's edits\n    // arrive in a different order. Capturing fields still uses the common writer.\n    for table in WORK_TABLES {\n        for (&(record_table, id), values) in &records {\n            if record_table == table {\n                ensure_record(conn, repo, table, id, values)?;\n            }\n        }\n    }\n    write(conn, edits, WriteOrigin::Local)?;\n    Ok(())\n}\n",
+      "sha256": "e5c0a7d1324fd59e4de65c4abd2306d1e78ef4f6717aeabe86cf0b262947c821"
+    },
+    {
+      "revision": "bb93899d1ff723f6309768dbec49bbd21083a261",
+      "file": "rust/loopflow/src/config.rs",
+      "symbol": "pub struct CronDef {",
+      "first": 207,
+      "last": 211,
+      "text": "pub struct CronDef {\n    pub name: String,\n    pub command: Vec<String>,\n    pub schedule: String,\n}\n",
+      "sha256": "3027a771c7bf4866e867f878f93df633e5189501b1702abfbc051a62b3e46f3c"
     }
-  ]
+  ],
+  "cli_capture": {
+    "root": "/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo412-review-demo-ndfvx_rh",
+    "rows": [
+      {
+        "args": [
+          "wave",
+          "list",
+          "--json"
+        ],
+        "exit": 0,
+        "stdout": "[]\n",
+        "stderr": ""
+      },
+      {
+        "args": [
+          "task",
+          "create",
+          "--title",
+          "Inspect shared Work",
+          "--json"
+        ],
+        "exit": 0,
+        "stdout": "{\n  \"id\": \"task_e0b1c48fb5d547a58518181d8288936c\",\n  \"revision\": 1,\n  \"identifier\": \"lf-e0b1c48\",\n  \"title\": \"Inspect shared Work\",\n  \"description\": \"Inspect shared Work\",\n  \"rank\": 0,\n  \"assignee\": null,\n  \"due_date\": null,\n  \"state\": \"unstarted\",\n  \"completed\": false,\n  \"completed_at\": null,\n  \"linear_id\": null,\n  \"pm_snapshot_synced_at\": null,\n  \"pm_writeback\": {\n    \"state\": \"current\"\n  },\n  \"wave_id\": \"05c3a216-b671-48b8-ae33-323f79530fb7\",\n  \"project_id\": \"proj_a1958501cdc54205946e6d965f8ce0e8\",\n  \"worktree\": null,\n  \"workspace_slug\": \"\",\n  \"branch\": \"\",\n  \"base_commit\": \"\",\n  \"parent_pr_id\": null,\n  \"agent\": null,\n  \"abandon_intent\": null,\n  \"created_at\": [\n    2026,\n    284,\n    14,\n    19,\n    53,\n    0,\n    0,\n    0,\n    0\n  ],\n  \"updated_at\": [\n    2026,\n    284,\n    14,\n    19,\n    53,\n    0,\n    0,\n    0,\n    0\n  ]\n}\n",
+        "stderr": "Saved locally; planning synchronization pending. See `lf planning status`.\n"
+      },
+      {
+        "args": [
+          "task",
+          "comment",
+          "task_e0b1c48fb5d547a58518181d8288936c",
+          "The follow-up is saved locally.",
+          "--json"
+        ],
+        "exit": 0,
+        "stdout": "{\"identifier\":\"lf-e0b1c48\",\"comments\":[{\"id\":\"6b379fa6-5b00-4cd5-919b-b77204aa9a4e\",\"body\":\"The follow-up is saved locally.\\n\\n<!-- loopflow-steer:6b379fa6-5b00-4cd5-919b-b77204aa9a4e -->\",\"author\":{\"kind\":\"person\",\"name\":null},\"created_at\":\"2026-10-11T14:19:53.601034Z\"}],\"pending_sync\":[],\"conflicts\":{},\"refresh_error\":null}\n",
+        "stderr": "Saved locally; planning synchronization pending. See `lf planning status`.\n"
+      },
+      {
+        "args": [
+          "task",
+          "comment",
+          "task_e0b1c48fb5d547a58518181d8288936c",
+          "--json"
+        ],
+        "exit": 0,
+        "stdout": "{\"identifier\":\"lf-e0b1c48\",\"comments\":[{\"id\":\"6b379fa6-5b00-4cd5-919b-b77204aa9a4e\",\"body\":\"The follow-up is saved locally.\\n\\n<!-- loopflow-steer:6b379fa6-5b00-4cd5-919b-b77204aa9a4e -->\",\"author\":{\"kind\":\"person\",\"name\":null},\"created_at\":\"2026-10-11T14:19:53.601034Z\"}],\"pending_sync\":[],\"conflicts\":{},\"refresh_error\":null}\n",
+        "stderr": ""
+      }
+    ]
+  },
+  "rendering": "Browser discovery returned an empty list; visual inspection unavailable."
 }

@@ -9,7 +9,8 @@ approval from Jack. This is accepted scope, with conditional deletions identifie
 
 This audit and [design](work-on-another-machine-name.md) share one delivery scope.
 Canonical readers, concrete observation columns and private acquisition exist.
-All fifteen structural areas are implemented; affected gate/review remains.
+All fifteen structural areas are implemented. The design records gate failures,
+repaired affected checks and the [fresh source review](pr-review.html).
 Ordinary follow-ups, bindings and cron conversion are in §13–14. These precede Jack Heart's next
 review of PR #1491. Publication is review-only; landing, installation and export
 of actual Work to the public repository remain unauthorized.
@@ -359,7 +360,7 @@ Earlier counterexamples: `7ec3ff7dc4:scratch/follow-up-recovery-review.md`.
 Four recovery/export tests and the adapted CLI/Flow/monitor proof pass: ordinary
 creation/comments buffer offline, completion preserves the live Flow and its later
 arrival. Public completion, historical relation readback and Rust/Swift wire checks
-pass. Materialized/affected gate remains before review.
+pass. The design records the later materialized/affected gate and repair results.
 
 ## 14. Config, cron, naming and public documentation
 
@@ -406,7 +407,9 @@ alignment in the same diff as public removals.
 
 ## Proof and stop conditions
 
-Remaining order: affected/materialized/headless gate, then fresh +/- review. Each cut deletes its replaced paths in the same diff.
+Affected/materialized/headless checks and the fresh +/- review are recorded in the
+pursuit design. Each cut deletes its replaced paths in the same diff. Publication
+is for review; installed acceptance and Jack Heart's judgment are not claimed.
 
 Before dropping persistent state, inventory the released frontier and current
 Task-owned draft. Main merged at `db36f20ba8` materialized LOO-406 and optional

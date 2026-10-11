@@ -26,11 +26,10 @@ pub(crate) async fn find_task(
     repo: &str,
     selector: &str,
 ) -> OpsResult<Option<crate::work::task::Task>> {
-    let scope = crate::repository::CanonicalRepo::discover(Path::new(repo)).map_err(message)?;
     let read = || {
         store
             .sqlite
-            .resolve_task_id(selector, Some(&scope.to_string()))?
+            .resolve_task_id(selector, Some(repo))?
             .map(|id| store.sqlite.task(&id))
             .transpose()
             .map(Option::flatten)
@@ -327,21 +326,27 @@ pub(crate) struct PlanningSync {
 
 impl PlanningSync {
     /// Repository planning follows every foreground provider, not Task attribution.
-    pub(crate) fn start_for_directory(directory: &std::path::Path) -> OpsResult<Self> {
-        super::task::block_on_task(async {
-            let store = super::planning_sync::planning_store().await?;
-            let repo = crate::repository::CanonicalRepo::discover(directory)
-                .map_err(|error| OpsError::Message(error.to_string()))?
-                .to_string();
-            Self::start(std::sync::Arc::new(store), repo)
-                .map_err(|error| OpsError::Message(error.to_string()))
+    pub(crate) fn start_for_directory(directory: &Path) -> OpsResult<Self> {
+        let repo = crate::repository::CanonicalRepo::discover(directory)
+            .map_err(message)?
+            .to_string();
+        let config = storage_config_from_env()?;
+        Self::connect(repo, async move {
+            open_planning_store(&config).await.map(Arc::new)
         })
     }
 
-    pub(crate) fn start(store: SharedStore, repo: String) -> std::io::Result<Self> {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()?;
+    pub(crate) fn start(store: SharedStore, repo: String) -> OpsResult<Self> {
+        Self::connect(repo, async move { Ok(store) })
+    }
+
+    // One thread owns initialization and exchange. Callers may already be inside
+    // an async runtime; startup errors still return before the provider launches.
+    fn connect(
+        repo: String,
+        open: impl Future<Output = OpsResult<SharedStore>> + Send + 'static,
+    ) -> OpsResult<Self> {
+        let (ready, started) = std::sync::mpsc::sync_channel(1);
         let (stop, stopped) = tokio::sync::oneshot::channel();
         #[cfg(test)]
         let context = super::linear::LINEAR_TEST_CONTEXT
@@ -350,7 +355,25 @@ impl PlanningSync {
         let thread = std::thread::Builder::new()
             .name("planning-sync".into())
             .spawn(move || {
+                let runtime = match tokio::runtime::Builder::new_current_thread()
+                    .enable_all().build() {
+                    Ok(runtime) => runtime,
+                    Err(error) => {
+                        let _ = ready.send(Err(message(error)));
+                        return;
+                    }
+                };
                 let drive = async {
+                    let store = match open.await {
+                        Ok(store) => store,
+                        Err(error) => {
+                            let _ = ready.send(Err(error));
+                            return;
+                        }
+                    };
+                    if ready.send(Ok(())).is_err() {
+                        return;
+                    }
                     tokio::select! {
                         _ = stopped => {},
                         _ = repeat_sync("Git planning acquisition", Duration::from_secs(5), || {
@@ -387,10 +410,12 @@ impl PlanningSync {
                 }
                 runtime.block_on(drive);
             })?;
-        Ok(Self {
+        let connection = Self {
             stop: Some(stop),
             thread: Some(thread),
-        })
+        };
+        started.recv().map_err(message)??;
+        Ok(connection)
     }
 }
 

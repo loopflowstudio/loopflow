@@ -639,6 +639,7 @@ mod tests {
     async fn controller_free_task_supports_multiple_independent_bindings() {
         let (directory, store) = test_store().await;
         let repo = directory.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
         let worktree = directory.path().join("repo.runtime-research");
         std::fs::create_dir_all(&worktree).unwrap();
         let wave = Wave::new(
@@ -956,6 +957,7 @@ mod tests {
     async fn hierarchical_work_selectors_must_match() {
         let (directory, store) = test_store().await;
         let repo = directory.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
         let worktree = directory.path().join("repo.runtime-research");
         std::fs::create_dir_all(&worktree).unwrap();
         let wave = Wave::new(

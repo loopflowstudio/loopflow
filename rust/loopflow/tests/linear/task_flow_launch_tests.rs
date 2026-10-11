@@ -1494,13 +1494,6 @@ fn successful_final_flow_keeps_arrival_when_completion_fails_and_never_replays()
     assert_eq!(flows.len(), 1);
     assert_eq!(flows[0].0.as_deref(), Some("succeeded"));
     task.publish(true);
-    task.ok(&[
-        "task",
-        "follow-up",
-        "INF-123",
-        "--none",
-        "Accepted checks complete",
-    ]);
     task.ok(&["task", "complete", "INF-123"]);
     assert_eq!(task.workflow(), arrived);
     assert_eq!(support::recorded_flows(task.home.path()), flows);

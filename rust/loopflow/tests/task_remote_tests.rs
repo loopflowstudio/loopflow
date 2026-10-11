@@ -176,6 +176,16 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"inspected"
             .output()
             .unwrap()
     };
+    // The legacy placement fixture seeds SQL directly. An ordinary Work save
+    // records its shared fields through the same writer used before dispatch.
+    let edited = command(&[
+        "task",
+        "edit",
+        fixture.task.id.as_str(),
+        "--title",
+        "Inspect pushed implementation",
+    ]);
+    assert!(edited.status.success(), "{edited:?}");
     let added = command(&["machine", "add", "fixture", "--repo", "repo", "--json"]);
     assert!(
         added.status.success(),

@@ -329,17 +329,29 @@ Writer transport/causal proofs: `eda4a98097` in this plan.
 Earlier focused proof: `9dbd6fc2d8`, `dfd3b80611`, `f025e9b7ab`,
 `dfa2cdafba`, `09709a05cc` in this plan. Gate and review still precede republication.
 
-Prior checks and fixture limits: `6b7015d056` at this path. The earlier nextest
-leaky-test report for `unreviewed_backlog_remains_while_started_work_moves` remains
-unexplained and belongs to gate; no retry or timeout adjustment was added.
-Earlier focused writer, migration, transport, Rust/Swift DTO, fmt/Clippy and CLI
-build passes remain at `52f7f3f99f` in this plan. Gate still owns materialized/headless
-acceptance; these checks are not a full gate.
-Additional intermittent nextest leaks: `flow_compositions_round_trip_distinct_compositions_and_required_children` and `due_dates_enrich_absent_history_but_preserve_observed_null_at_equal_revision`; causes unresolved, retained for gate.
+Earlier focused checks and seven intermittent nextest leak observations remain at
+`97c482815c:scratch/work-on-another-machine-name.md`. The full October 11 Rust
+run reported no leaks; that observation does not diagnose the earlier handles.
 
-Receipt sanity: `cargo fmt`, LF-cleared `cargo clippy --all-targets -- -D warnings`, CLI build, focused nextest receipt/migration/Linear/local-planning checks, 25 Rust DTO fixtures and 30 Swift DTO tests pass after fixture updates. Gate owns materialized/headless acceptance and the three earlier leaks plus `planning_export_late_readback_preserves_newer_edits_and_inventory_identity` and `project_markdown_rejects_ambiguous_targets`. Routing checks additionally reported leaks in `provider_columns_preserve_released_observations_and_local_execution` and `observed_reopening_beats_delayed_completion` (a pure exchange test); causes remain unknown. `git diff --check` and `lf context` pass.
+Gate repair (October 11): `.lf/tmp/gate/run-66673` failed. Rust materialization
+ran 2,416 tests: 2,386 passed, 30 failed, 18 skipped. Repairs move sync store
+initialization into its existing runtime thread, use the canonical store selector
+without requiring an existing checkout, exclude null placements from pruning,
+and retain revision triggers for mutable route rows. Fixture repairs remove old
+follow-up calls, share capture/process ledgers, isolate native Claude inspection,
+update cron argv and prompt goldens, and correct required Swift sync fields.
+The remote fixture now saves its directly seeded Task through the ordinary writer
+before dispatch; it does not substitute an import for Git exchange.
 
-Routing sanity: `cargo fmt`, LF-cleared `cargo clippy --all-targets -- -D warnings`, CLI build, focused nextest routing/writer/migration/watch and exchange/Git/foreground checks (25 tests, plus the updated config regression) pass; the two new leaks above remain for gate. `git diff --check` and `lf context` pass.
+Checks: 19 isolated checkout tests, architecture/release-config regressions,
+the self-sandboxed Desktop observation check, 19 repaired headless Swift tests and
+Swift boundaries pass. Materialized recheck: 150/153 pass, including migrations,
+public SSH dispatch, Session recovery and live exchange; no leaks. Three failures
+exposed ordinary-folder resolution and cron classification; both repairs pass
+all three focused regressions. Final fmt/Clippy pass. Logs: `/tmp/loo412-gate-*`.
+Website reports horizontal overflow at 1440px (1475px content width); homepage,
+CSS and its test are unchanged against base. This is retained counterevidence,
+not a passing gate. Fresh review remains.
 
 Transport evidence: `0181133849` at this path; earlier simulated adoption: `5960415b3:scratch/remote-task-demo.md` (not real SSH or integrated acceptance).
 

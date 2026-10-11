@@ -40,39 +40,6 @@ impl Drop for Running {
     }
 }
 
-// Unit-only provider injection cannot cross a subprocess boundary. Build the
-// ordinary CLI, then use it for execution and every observation of this store.
-fn build_cli() -> PathBuf {
-    let output = Command::new("cargo")
-        .args([
-            "build",
-            "-p",
-            "loopflow",
-            "--bin",
-            "lf",
-            "--message-format=json",
-        ])
-        .current_dir(env!("CARGO_MANIFEST_DIR"))
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "{}\n{}",
-        String::from_utf8_lossy(&output.stderr),
-        String::from_utf8_lossy(&output.stdout)
-    );
-    String::from_utf8(output.stdout)
-        .unwrap()
-        .lines()
-        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
-        .find_map(|entry| {
-            (entry["target"]["name"] == "lf")
-                .then(|| entry["executable"].as_str().map(PathBuf::from))
-                .flatten()
-        })
-        .expect("Cargo reports the CLI artifact")
-}
-
 fn command(binary: &Path, repo: &Path, home: &Path, args: &[&str]) -> Command {
     let mut command = Command::new(binary);
     command
@@ -211,7 +178,7 @@ fn ordinary_task_comments_and_completion_preserve_live_flow_and_arrival() {
     let _environment =
         crate::test_ambient::EnvGuard::clear(&keys.iter().map(String::as_str).collect::<Vec<_>>());
     std::env::set_var("PATH", &path);
-    let binary = build_cli();
+    let binary = PathBuf::from(loopflow_test_support::lf_binary());
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let (home, store, repo, mut source, wave) = fixture(&runtime);
     std::env::set_var("LF_HOME", home.path());

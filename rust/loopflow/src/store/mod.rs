@@ -1230,11 +1230,13 @@ mod tests {
             .execute_batch(
                 "CREATE TABLE tasks (
                     id TEXT PRIMARY KEY,
-                    worktree TEXT NOT NULL,
+                    worktree TEXT,
                     abandoned_at INTEGER,
                     planning_completed INTEGER
                  );
                  CREATE TABLE task_workflows (task_id TEXT PRIMARY KEY, node TEXT NOT NULL, edge INTEGER);
+                 INSERT INTO tasks VALUES ('unplaced', NULL, NULL, NULL);
+                 INSERT INTO tasks VALUES ('legacy-unplaced', '', NULL, NULL);
                  INSERT INTO tasks VALUES ('running', '/repo.running', NULL, NULL);
                  INSERT INTO tasks VALUES ('waiting', '/repo.waiting', NULL, NULL);
                  INSERT INTO tasks VALUES ('completed', '/repo.completed', NULL, 1);

@@ -8,8 +8,8 @@ use std::process::Command;
 use loopflow::durable::WorkStatus;
 use loopflow::ops::task::{task_complete, task_snapshot, task_status};
 use loopflow::ops::{
-    commit_workflow, create_or_update_pr, current_pr, present_pr_review, CommitOptions,
-    NullProgress, OpsError, PrOptions,
+    commit_workflow, current_pr, present_pr_review, CommitOptions, NullProgress, OpsError,
+    PrOptions,
 };
 use loopflow::work::task::{
     GithubPr, PrMergeMode, PrMergeRequest, PrPhase, PrPresentation, PrPublication,
@@ -19,6 +19,19 @@ use support::{
     codex_app_server_script, counting_open_script, presentation_attempts, register_task_with_pr,
     EnvGuard,
 };
+
+// These acquisition fixtures run inside the library. Pin its test-only process
+// ledger to the same disposable Machine as Session captures and Work.
+fn create_or_update_pr(
+    repo: &std::path::Path,
+    options: &PrOptions,
+    progress: &impl loopflow::ops::Progress,
+) -> Result<loopflow::ops::PrResult, OpsError> {
+    let home = std::env::var_os("LF_HOME").expect("fixture selects a disposable Machine");
+    crate::journal::with_test_ledger(std::path::PathBuf::from(home).join("loopflow.db"), || {
+        loopflow::ops::create_or_update_pr(repo, options, progress)
+    })
+}
 
 fn write_gh_script(pr_list: &str, pr_diff: Option<&str>) -> String {
     let diff = pr_diff.unwrap_or("");

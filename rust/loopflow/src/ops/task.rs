@@ -728,7 +728,10 @@ pub(crate) async fn resolve_task(
     if let Some(source) = &source {
         source.require_pushed(repo)?;
     }
-    let main = crate::git::worktrees::main_repo_root(repo).map_err(task_error)?;
+    let main = crate::repository::CanonicalRepo::discover(repo)
+        .map_err(task_error)?
+        .as_path()
+        .to_path_buf();
     if let Err(error) =
         super::planning_sync::acquire_repository(store, &main.to_string_lossy()).await
     {

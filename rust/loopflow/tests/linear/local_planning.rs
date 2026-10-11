@@ -112,17 +112,9 @@ fn stored_task_publishes_and_completes_after_verified_merge() {
     lf(repo.path(), home.path(), &["pr", "reconcile"]);
     let merged = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
     assert_ne!(merged["execution"]["status"], "done");
-    assert!(worktree.exists(), "retain checkout until follow-through");
-    lf(
-        repo.path(),
-        home.path(),
-        &[
-            "task",
-            "follow-up",
-            id,
-            "--none",
-            "No accepted remaining work",
-        ],
+    assert!(
+        worktree.exists(),
+        "retain checkout until explicit completion"
     );
     lf(repo.path(), home.path(), &["task", "complete", id]);
     let completed = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);

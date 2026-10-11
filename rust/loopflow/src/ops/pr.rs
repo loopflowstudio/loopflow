@@ -2570,7 +2570,10 @@ esac
                 TaskPrCopyLifecycle::Published,
                 "no Task settlement is requested.",
             ),
-            (TaskPrCopyLifecycle::Completes, "then complete the Task."),
+            (
+                TaskPrCopyLifecycle::Completes,
+                "complete the delivered outcome.",
+            ),
         ] {
             copy = normalize_task_pr_copy(copy, Some(&context), &lifecycle).unwrap();
             assert!(copy

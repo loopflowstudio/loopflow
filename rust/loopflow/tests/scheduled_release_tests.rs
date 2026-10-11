@@ -693,6 +693,7 @@ exit 0
         fs::rename(installed.path, &path).unwrap();
         fs::write(path, plist).unwrap();
         release.flow = "release-run".into();
+        *release.command.last_mut().unwrap() = "release-run".into();
         if scenario == "telemetry-history" {
             // Seed a previously observed, unchanged schedule and one retained
             // failed prerequisite older than the history presentation window.

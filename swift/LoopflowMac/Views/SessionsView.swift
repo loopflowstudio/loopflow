@@ -16,6 +16,17 @@ final class PaneHover {
     var paneId: String?
 }
 
+extension PaneState {
+    /// Content owns terminal identity; workspace placement grants no location fallback.
+    var terminal: TerminalIdentity? {
+        switch content {
+        case .shell(let location): location.map { .shell(id, machineId: $0.machineId) }
+        case .session(let id, let location): location.map { .session(id, machineId: $0.machineId) }
+        case .empty, .files, .flowLog: nil
+        }
+    }
+}
+
 /// One window's terminal workspace for a checkout: the pane layout and the
 /// pool of live surfaces behind it.
 @MainActor
@@ -30,15 +41,6 @@ final class SessionsWorkspace {
     func setCollapsed(paneId: String, collapsed: Bool) {
         Perf.begin(Perf.retainedWorkspaceAction, collapsed ? "collapse" : "expand", id: "workspace")
         multiplexer.setCollapsed(paneId: paneId, collapsed: collapsed)
-    }
-
-    /// One mapping for retained pane observation; never follows focus or allocates a surface.
-    func terminal(for pane: PaneState) -> TerminalIdentity? {
-        switch pane.content {
-        case .shell: pane.shellLocation.map { .shell(pane.id, machineId: $0.machineId) }
-        case .session(let id, let location): location.map { .session(id, machineId: $0.machineId) }
-        case .empty, .files, .flowLog: nil
-        }
     }
 
     let identity: WorkspaceIdentity
@@ -124,11 +126,11 @@ final class SessionsWorkspace {
         surfaceClosed = NotificationCenter.default.publisher(for: .ghosttySurfaceClosed)
             .sink { [weak self] notification in
                 guard let terminal = notification.object as? TerminalIdentity,
-                      case .shell(let paneId, let machineId) = terminal else { return }
+                      case .shell(let paneId, _) = terminal else { return }
                 MainActor.assumeIsolated {
                     guard let self,
                           let pane = self.multiplexer.layout.pane(for: paneId),
-                          pane.shellLocation?.machineId == machineId
+                          pane.terminal == terminal
                     else { return }
                     self.multiplexer.close(paneId)
                 }
@@ -178,7 +180,7 @@ final class SessionsWorkspaceRegistry {
             let panes = workspace.multiplexer
             return DesktopWorkspaceInspection(machineId: identity.machineId, worktree: identity.worktree,
                 layout: DesktopLayoutInspection(panes.layout) { pane in
-                    workspace.terminal(for: pane).flatMap { surfaces.surfaceIncarnation(for: $0) }
+                    pane.terminal.flatMap { surfaces.surfaceIncarnation(for: $0) }
                 }, focusedPane: panes.focusedPaneId,
                 zoomedPane: panes.zoomedPaneId, hiddenPanes: panes.collapsedPaneIds.sorted())
         }
@@ -210,7 +212,7 @@ final class SessionsWorkspaceRegistry {
         let (workspace, pane) = try retainedPane(for: request.target)
         let store = workspace.multiplexer
         let result: DesktopTextResult
-        if let terminal = workspace.terminal(for: pane) {
+        if let terminal = pane.terminal {
             result = try surfaces.readText(request, terminal: terminal)
         } else {
             result = .unavailable(reason: .notTerminal)
@@ -238,12 +240,12 @@ final class SessionsWorkspaceRegistry {
         var result: PaneState? = pane
         switch request.action {
         case .text(let surface, let text):
-            guard let terminal = workspace.terminal(for: pane) else {
+            guard let terminal = pane.terminal else {
                 throw RegistryQueryError("The addressed pane is not a terminal; no input was sent.")
             }
             try surfaces.insertText(text, terminal: terminal, surface: surface)
         case .key(let surface, let key):
-            guard let terminal = workspace.terminal(for: pane) else {
+            guard let terminal = pane.terminal else {
                 throw RegistryQueryError("The addressed pane is not a terminal; no input was sent.")
             }
             try surfaces.sendKey(key, terminal: terminal, surface: surface)
@@ -297,7 +299,7 @@ final class SessionsWorkspaceRegistry {
     func path(containingShell id: String, machineId: String) -> WorkspaceIdentity? {
         workspaces.first {
             guard let pane = $0.value.multiplexer.layout.pane(for: id) else { return false }
-            return pane.shellLocation?.machineId == machineId
+            return pane.terminal == .shell(id, machineId: machineId)
         }?.key
     }
 
@@ -1083,7 +1085,7 @@ struct SessionsContentView: View {
     }
 
     private var focusedProgramStatusSurface: ProgramStatusSurface? {
-        workspace.terminal(for: multiplexer.focusedPane).flatMap { store.surfaces.programStatus(for: $0) }
+        multiplexer.focusedPane.terminal.flatMap { store.surfaces.programStatus(for: $0) }
     }
 
     private var focusedProgramStatus: ProgramStatusRecords? {
@@ -1103,7 +1105,7 @@ struct SessionsContentView: View {
         let pane = multiplexer.focusedPane
         switch pane.content {
         case .shell:
-            guard let terminal = workspace.terminal(for: pane) else { return [] }
+            guard let terminal = pane.terminal else { return [] }
             return store.sessions.filter { store.localTerminal(for: $0.record) == terminal }
         case .session(let id, _):
             return store.sessions.filter { $0.id == id }
@@ -1117,7 +1119,7 @@ struct SessionsContentView: View {
         case .empty, .flowLog, .files:
             return
         case .shell:
-            if let terminal = workspace.terminal(for: pane) { store.surfaces.release(terminal) }
+            if let terminal = pane.terminal { store.surfaces.release(terminal) }
         case .session:
             return
         }
@@ -1534,7 +1536,7 @@ private struct SessionPaneView: View {
 
     private func closePane() {
         if case .shell = pane.content {
-            if let terminal = workspace.terminal(for: pane) { sessions.surfaces.release(terminal) }
+            if let terminal = pane.terminal { sessions.surfaces.release(terminal) }
         }
         store.close(pane.id)
     }
@@ -1570,7 +1572,7 @@ private struct SessionPaneView: View {
 
     private var paneSessions: [SessionItem] {
         if case .shell = pane.content {
-            guard let terminal = workspace.terminal(for: pane) else { return [] }
+            guard let terminal = pane.terminal else { return [] }
             return sessions.sessions.filter {
                 sessions.localTerminal(for: $0.record) == terminal
             }
@@ -1605,7 +1607,7 @@ private struct SessionPaneView: View {
                 emptyWorkspace
             }
         case .shell:
-            if let location = pane.shellLocation {
+            if let location = pane.shellLocation, let terminal = pane.terminal {
                 let isLocal = location.machineId == workspace.localMachineId
                 if !isLocal && store.shellCommands[pane.id] == nil {
                     Text("Reopen the Task and add a new remote shell. No local shell was opened.")
@@ -1613,7 +1615,7 @@ private struct SessionPaneView: View {
                     GhosttyTerminalView(
                         workingDirectory: isLocal ? location.worktree : NSHomeDirectory(),
                         argv: store.shellCommands[pane.id] ?? [],
-                        terminal: .shell(pane.id, machineId: location.machineId),
+                        terminal: terminal,
                         surfacePool: sessions.surfaces,
                         isFocused: isFocused,
                         onFocus: focusPane
@@ -1747,11 +1749,12 @@ private struct SessionPaneView: View {
 
     @ViewBuilder
     private func _terminal(item: SessionItem, surface: SessionRecord) -> some View {
-        if let location = pane.sessionLocation, surface.workspace?.identity == location {
+        if let location = pane.sessionLocation, surface.workspace?.identity == location,
+           let terminal = pane.terminal {
             GhosttyTerminalView(
                 workingDirectory: sessions.presentationDirectory(for: surface, checkout: location.worktree),
                 argv: surface.openArgv,
-                terminal: .session(surface.id, machineId: location.machineId),
+                terminal: terminal,
                 surfacePool: sessions.surfaces,
                 isFocused: isFocused,
                 onSurfaceCreated: {
@@ -1800,10 +1803,10 @@ private struct SessionPaneView: View {
         case .session:
             item?.surface.flatMap { record in
                 guard record.workspace?.identity == pane.sessionLocation else { return nil }
-                return workspace.terminal(for: pane)
+                return pane.terminal
             }
         case .shell:
-            workspace.terminal(for: pane)
+            pane.terminal
         case .empty, .flowLog, .files:
             nil
         }

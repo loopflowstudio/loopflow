@@ -38,7 +38,7 @@ struct DesktopPaneControlTests {
         let peer = WorkspaceIdentity(machineId: "peer", worktree: identity.worktree)
         workspace.multiplexer.load(sessionId: "conversation", location: peer)
         let pane = workspace.multiplexer.focusedPane
-        #expect(workspace.terminal(for: pane) == .session("conversation", machineId: "peer"))
+        #expect(pane.terminal == .session("conversation", machineId: "peer"))
         let before = workspace.multiplexer.layout
         registry.reconcileMembership([])
         #expect(workspace.multiplexer.layout == before)
@@ -58,7 +58,7 @@ struct DesktopPaneControlTests {
         let split = try #require(try workspace.split(current.id, axis: .vertical))
         #expect(split.shellLocation == identity)
         workspace.multiplexer.updateSessionLocation("conversation", location: nil)
-        #expect(workspace.terminal(for: try #require(workspace.multiplexer.pane(forSessionId: "conversation"))) == nil)
+        #expect((try #require(workspace.multiplexer.pane(forSessionId: "conversation"))).terminal == nil)
     }
 
     @Test func literalTextDoesNotInterpretEscapesOrAcceptControlKeys() throws {
@@ -118,14 +118,14 @@ struct DesktopPaneControlTests {
         let location = WorkspaceIdentity(machineId: "peer", worktree: "/remote/task")
         let shell = try #require(workspace.multiplexer.newShell(command: ["peer-shell"], location: location))
         let terminal = TerminalIdentity.shell(shell.id, machineId: "peer")
-        #expect(workspace.terminal(for: shell) == terminal)
+        #expect(shell.terminal == terminal)
         NotificationCenter.default.post(name: .ghosttySurfaceClosed,
             object: TerminalIdentity.shell(shell.id, machineId: fixtureMachineId))
         #expect(workspace.multiplexer.layout.pane(for: shell.id) == shell)
         NotificationCenter.default.post(name: .ghosttySurfaceClosed, object: terminal)
         #expect(workspace.multiplexer.focusedPane.content == .empty)
         let unknown = try #require(workspace.multiplexer.newShell())
-        #expect(workspace.terminal(for: unknown) == nil)
+        #expect(unknown.terminal == nil)
     }
 
     @Test(arguments: [DesktopTextRegion.screen, .scrollback, .selection])
@@ -221,7 +221,7 @@ struct DesktopPaneControlTests {
         let destination = target(pane, window: windowID)
         register(router, window: windowID, registry: registry)
         func text(_ pane: PaneState) throws -> String {
-            let terminal = try #require(workspace.terminal(for: pane))
+            let terminal = try #require(pane.terminal)
             let surface = try #require(registry.surfaces.surfaceIncarnation(for: terminal))
             let result = try router.readText(.init(target: target(pane, window: windowID),
                 surface: surface, region: .screen, maxBytes: 65536)).result

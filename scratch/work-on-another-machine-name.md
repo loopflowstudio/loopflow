@@ -364,12 +364,9 @@ public command/Flow regression where an operation failure stays nonzero, not onl
 parser/filter tests. Read coverage: the sole immediate child, Release, has both
 its GOAL and complete memory inspected; no child-specific history is moved here.
 
-The published transport baseline remains one typed transactional writer for local
-creation/edit, comments, disposition, selection/order and imports. Git capture shares
-that transaction; imports emit no echo. Immutable causal changes retain losers;
-accepted heads exclude rejected projections. Savepoints isolate projection failures.
-Only the configured destination exchanges Work, never execution or delivery attempts.
-Earlier baseline detail: `c8fe4628a:scratch/work-on-another-machine-name.md`.
+The typed writer's transport baseline and causal/import proofs remain at
+`eda4a98097:scratch/work-on-another-machine-name.md`. The retained contract above
+still governs; no execution or delivery-attempt exchange is authorized.
 
 ## Remaining proof and review
 
@@ -389,7 +386,7 @@ Checks: `cargo build -p loopflow --bin lf`, fmt/Clippy and eight focused reader/
 
 
 Context: authored memory/scratch fit; generated Task seed/steers/workspace exceeds
-16,000 tokens by over 5,300. Authored edits cannot remove that stored input.
+16,000 tokens by over 5,400. Authored edits cannot remove that stored input.
 
 Earlier transport evidence: `ae96102580e:scratch/work-on-another-machine-name.md`.
 The mixed model is superseded; its synthetic proofs establish no installed acceptance.

@@ -87,7 +87,7 @@ fn watch_updates_and_releases_only_its_reader_on_eof_or_closed_stdout() {
     let client_started = time::OffsetDateTime::now_utc().unix_timestamp();
     let id = "run_00000000000000000000000000000001";
     let dir = home.path().join("runs/00").join(id);
-    fs::create_dir_all(dir.join("provider-clients")).unwrap();
+    fs::create_dir_all(&dir).unwrap();
     let manifest = serde_json::json!({
         "schema_version": 1, "artifact_key": id, "caller_artifact_key": null,
         "created_at": "2020-01-01T00:00:00Z", "harness": "cat", "model": null,
@@ -100,14 +100,6 @@ fn watch_updates_and_releases_only_its_reader_on_eof_or_closed_stdout() {
         serde_json::to_vec(&manifest).unwrap(),
     )
     .unwrap();
-    let receipt = dir
-        .join("provider-clients")
-        .join(format!("{}.json", client.0.id()));
-    let native = serde_json::json!({
-        "schema_version": 1, "pid": client.0.id(), "terminal_id": null,
-        "started_at": time::OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339).unwrap(),
-    });
-    fs::write(&receipt, serde_json::to_vec(&native).unwrap()).unwrap();
     let initialized = command(home.path(), &["session", "list", "--json"])
         .output()
         .unwrap();
@@ -120,7 +112,7 @@ fn watch_updates_and_releases_only_its_reader_on_eof_or_closed_stdout() {
         rusqlite::params![id, db.last_insert_rowid()],
     )
     .unwrap();
-    // Membership comes from the recorded AgentProcess, not the client receipt.
+    // Membership comes from the recorded AgentProcess.
     let agent = loopflow::id::LfProcessId::new();
     db.execute(
         "INSERT INTO processes(id,trace_id,kind,agent_session_id,started_at,pid,os_started_at,

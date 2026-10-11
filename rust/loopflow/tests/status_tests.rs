@@ -56,7 +56,9 @@ fn test_project(wave: &Wave, slug: &str, updated_at: OffsetDateTime) -> Project 
         ),
         slug: slug.to_string(),
         name: slug.replace('-', " "),
-        prompt_context: "Keep status truthful.".to_string(),
+        description: "Keep status truthful.".to_string(),
+        krs: Vec::new(),
+        metric_targets: Vec::new(),
         pm_snapshot_synced_at: Some(updated_at.unix_timestamp()),
 
         wave_id: wave.id().clone(),
@@ -220,7 +222,9 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool, current_tas
         linear_id: Some(LinearProjectId::new(STALE_PROJECT_ID).expect("recorded PM Project id")),
         slug: "technical-architecture".to_string(),
         name: "Technical Architecture".to_string(),
-        prompt_context: "Keep the system legible and minimally simple.".to_string(),
+        description: "Keep the system legible and minimally simple.".to_string(),
+        krs: Vec::new(),
+        metric_targets: Vec::new(),
         pm_snapshot_synced_at: Some(now.unix_timestamp() - 1),
 
         wave_id: wave.id().clone(),
@@ -313,7 +317,9 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool, current_tas
         ),
         slug: "auditability".to_string(),
         name: "Auditability".to_string(),
-        prompt_context: "Every claim points to its receipt.".to_string(),
+        description: "Every claim points to its receipt.".to_string(),
+        krs: Vec::new(),
+        metric_targets: Vec::new(),
         pm_snapshot_synced_at: Some(now.unix_timestamp()),
 
         wave_id: wave.id().clone(),

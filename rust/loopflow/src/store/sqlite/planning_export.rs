@@ -109,10 +109,11 @@ impl SqliteStore {
             }
             PlanningChanges::Project(id) => {
                 let project = super::plan_read::project_in(&tx, id)?;
+                let description = super::children::project_in(&tx, id)?.description;
                 let input = json!({"id":uuid,"teamIds":[team],"name":project.name,"description":project.summary,
-                    "content":crate::pm::render_project_content(&crate::pm::ProjectContent {
+                    "content":format!("{}\n{}", description, crate::pm::render_project_content(&crate::pm::ProjectContent {
                         workflow:project.workflow.clone(),krs:project.krs.clone(),metric_targets:project.metric_targets.clone()
-                    }),"useDefaultTemplate":false});
+                    })),"useDefaultTemplate":false});
                 (serde_json::to_value(project)?, input)
             }
         };

@@ -57,6 +57,12 @@ retaining the losing receipt. This grants no execution or cleanup authority.
 Task content is read directly from `Task` (identifier, title and description),
 with its local write revision, optional Linear binding and observation age retained.
 `Project` likewise owns its fields directly; neither has a separate Plan wrapper.
+Project prose, workflow, KRs and metric targets are separate stored fields. Local
+reads and the shared typed writer never parse or regenerate Markdown. Conversion
+reads the released Markdown once inside the migration transaction, preserves saved
+workflow selection and observation age, and seeds Git history only after conversion.
+Prompt assembly and Linear delivery render at their boundaries; malformed legacy
+content refuses the migration rather than discarding criteria.
 `ProjectKR` is an explicit judgment. `MetricTarget` names a metric and a numeric
 `Threshold`, independently of the Wave's observations. Project iteration is no longer
 live state; its stored values and historical judgment events remain readable evidence.

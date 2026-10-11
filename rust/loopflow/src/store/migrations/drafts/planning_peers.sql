@@ -1,4 +1,10 @@
 -- depends_on: optional_task_pr
+-- Structured Project content replaces the internal Markdown round trip.
+-- The migration runner converts the retained description before seeding the journal.
+ALTER TABLE projects RENAME COLUMN project_prompt_context TO description;
+ALTER TABLE projects ADD COLUMN krs TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(krs));
+ALTER TABLE projects ADD COLUMN metric_targets TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(metric_targets));
+
 -- Local-only Git planning. Linear effects keep their existing local owners.
 CREATE TABLE planning_peer_changes (
     id TEXT PRIMARY KEY,

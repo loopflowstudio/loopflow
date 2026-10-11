@@ -71,7 +71,9 @@ fn project(wave: &Wave) -> Project {
         linear_id: Some(LinearProjectId::new("project-alpha").unwrap()),
         slug: "architecture".to_string(),
         name: "Architecture".to_string(),
-        prompt_context: "Keep identity boring.".to_string(),
+        description: "Keep identity boring.".to_string(),
+        krs: Vec::new(),
+        metric_targets: Vec::new(),
         pm_snapshot_synced_at: Some(now.unix_timestamp()),
 
         wave_id: wave.id().clone(),

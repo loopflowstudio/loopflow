@@ -310,6 +310,37 @@ pub fn project_slug(name: &str) -> String {
     slug
 }
 
+/// Preserve authored bytes outside the managed Linear sections.
+pub(crate) fn project_prose(content: &str) -> String {
+    let mut targets = false;
+    let mut krs = false;
+    let mut criterion = false;
+    let mut prose = String::new();
+    for line in content.split_inclusive('\n') {
+        let trimmed = line.trim();
+        if trimmed.starts_with("workflow:") || trimmed.starts_with("flow:") {
+            continue;
+        }
+        if trimmed.starts_with('#') {
+            targets = trimmed == "## Metric targets";
+            krs = trimmed == "## KRs";
+            criterion = false;
+            if targets || krs {
+                continue;
+            }
+        }
+        // Text preceding the first KR is not consumed by the criterion parser.
+        // It is authored prose even when it sits under the managed heading.
+        if krs && trimmed.starts_with("- ") {
+            criterion = true;
+        }
+        if !targets && !(krs && criterion) {
+            prose.push_str(line);
+        }
+    }
+    prose
+}
+
 pub fn parse_project_content(content: &str) -> PmResult<ProjectContent> {
     enum Section {
         None,
@@ -422,19 +453,8 @@ pub fn parse_project_content(content: &str) -> PmResult<ProjectContent> {
 
 impl ProjectContent {
     pub fn validate(&self) -> PmResult<()> {
-        let mut ids = std::collections::BTreeSet::new();
-        for metric in &self.metric_targets {
-            if metric.metric_id.trim().is_empty()
-                || !metric.target.value().is_finite()
-                || !ids.insert(&metric.metric_id)
-            {
-                return Err(PmError::Message(
-                    "chapter metric targets require unique nonempty metric IDs and finite values"
-                        .into(),
-                ));
-            }
-        }
-        Ok(())
+        crate::work::project::validate_metric_targets(&self.metric_targets)
+            .map_err(PmError::Message)
     }
 }
 

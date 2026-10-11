@@ -4787,7 +4787,9 @@ mod tests {
             linear_id: Some(LinearProjectId::new("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3").unwrap()),
             slug: "task-recovery".to_string(),
             name: "Task recovery".to_string(),
-            prompt_context: "Keep automatic Task recovery bounded.".to_string(),
+            description: "Keep automatic Task recovery bounded.".to_string(),
+            krs: Vec::new(),
+            metric_targets: Vec::new(),
             pm_snapshot_synced_at: Some(now.unix_timestamp()),
 
             wave_id: wave.id().clone(),

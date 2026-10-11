@@ -75,10 +75,10 @@ fn projects_in(conn: &Connection, wave: &WaveId) -> StoreResult<Vec<PmProject>> 
 }
 
 pub(super) fn project_in(conn: &Connection, id: &ProjectId) -> StoreResult<PmProject> {
-    let (mut project, context, initiatives, teams): (PmProject, String, String, String) = conn.query_row(
+    let (mut project, krs, targets, initiatives, teams): (PmProject, String, String, String, String) = conn.query_row(
         "SELECT COALESCE(p.external_project_id,p.id),p.project_slug,p.project_name,p.project_summary,
-            p.project_prompt_context,p.workflow,p.status,p.planning_provider_revision,
-            p.planning_initiatives,p.planning_teams
+            p.krs,p.workflow,p.status,p.planning_provider_revision,
+            p.planning_initiatives,p.planning_teams,p.metric_targets
          FROM projects p
          WHERE p.id=?1",
         [id.as_str()], |row| Ok((PmProject {
@@ -86,12 +86,10 @@ pub(super) fn project_in(conn: &Connection, id: &ProjectId) -> StoreResult<PmPro
             workflow: row.get(5)?, status: serde_json::from_value(serde_json::Value::String(row.get(6)?))
                 .map_err(|error| rusqlite::Error::FromSqlConversionFailure(6,rusqlite::types::Type::Text,Box::new(error)))?, revision: row.get(7)?,
             krs: Vec::new(), metric_targets: Vec::new(), initiative_ids: Vec::new(), team_ids: Vec::new(),
-        },row.get(4)?,row.get(8)?,row.get(9)?)),
+        },row.get(4)?,row.get(10)?,row.get(8)?,row.get(9)?)),
     )?;
-    let content = crate::pm::parse_project_content(&context)
-        .map_err(|error| StoreError::InvalidData(error.to_string()))?;
-    project.krs = content.krs;
-    project.metric_targets = content.metric_targets;
+    project.krs = serde_json::from_str(&krs)?;
+    project.metric_targets = serde_json::from_str(&targets)?;
     project.initiative_ids = serde_json::from_str(&initiatives)?;
     project.team_ids = serde_json::from_str(&teams)?;
     Ok(project)

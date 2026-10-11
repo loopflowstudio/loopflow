@@ -875,7 +875,9 @@ mod durable_store_tests {
             linear_id: Some(LinearProjectId::new("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3").unwrap()),
             slug: "probe".to_string(),
             name: "Probe".to_string(),
-            prompt_context: "Probe Task execution".to_string(),
+            description: "Probe Task execution".to_string(),
+            krs: Vec::new(),
+            metric_targets: Vec::new(),
             pm_snapshot_synced_at: Some(now.unix_timestamp()),
 
             wave_id: wave_id.clone(),

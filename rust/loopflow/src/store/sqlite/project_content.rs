@@ -8,7 +8,7 @@ use serde_json::Value;
 use crate::durable::ProjectId;
 use crate::id::WaveId;
 use crate::planning::PlanningChange;
-use crate::pm::{PmProject, ProjectContent};
+use crate::pm::ProjectContent;
 use crate::store::{StoreError, StoreResult};
 
 use super::planning_changes::PlanningChanges;
@@ -33,7 +33,7 @@ impl SqliteStore {
         }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current = super::plan_read::project_in(&tx, project)?;
+        let current = super::children::project_in(&tx, project)?;
         let mut changed = false;
         for (field, previous, value) in [
             ("name", current.name, name),
@@ -93,7 +93,7 @@ impl SqliteStore {
         }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current = super::plan_read::project_in(&tx, project)?;
+        let current = super::children::project_in(&tx, project)?;
         let repo: String = tx.query_row(
             "SELECT w.repo FROM projects p JOIN waves w ON w.id=p.wave_id WHERE p.id=?1",
             [project.as_str()],
@@ -104,7 +104,6 @@ impl SqliteStore {
         write_content(
             &tx,
             project,
-            &current,
             &ProjectContent {
                 workflow: name.into(),
                 krs: current.krs.clone(),
@@ -129,8 +128,7 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current = super::plan_read::project_in(&tx, project)?;
-        write_content(&tx, project, &current, content)?;
+        write_content(&tx, project, content)?;
         tx.commit()?;
         Ok(())
     }
@@ -139,9 +137,9 @@ impl SqliteStore {
 pub(super) fn write_content(
     conn: &Connection,
     project: &ProjectId,
-    current: &PmProject,
     content: &ProjectContent,
 ) -> StoreResult<()> {
+    let current = super::children::project_in(conn, project)?;
     for (field, previous, value) in [
         (
             "workflow",
@@ -184,19 +182,6 @@ pub(super) fn save_content(
     Ok(())
 }
 
-pub(super) fn read_content(conn: &Connection, project: &ProjectId) -> StoreResult<ProjectContent> {
-    let (body, workflow): (String, String) = conn.query_row(
-        "SELECT COALESCE(project_prompt_context,''),workflow FROM projects WHERE id=?1",
-        [project.as_str()],
-        |row| Ok((row.get(0)?, row.get(1)?)),
-    )?;
-    let mut content = crate::pm::parse_project_content(&body)
-        .map_err(|error| StoreError::InvalidData(error.to_string()))?;
-    // Match the common reader: the saved selection owns workflow, not old prose.
-    content.workflow = workflow;
-    Ok(content)
-}
-
 #[cfg(test)]
 mod tests {
     use crate::id::WaveId;
@@ -211,7 +196,7 @@ mod tests {
         store.create_wave(&wave).unwrap();
         let project = crate::durable::ProjectId::new();
         let conn = store.conn.lock().unwrap();
-        conn.execute("INSERT INTO projects(id,wave_id,created_at,updated_at,project_slug,project_name,project_prompt_context)
+        conn.execute("INSERT INTO projects(id,wave_id,created_at,updated_at,project_slug,project_name,description)
             VALUES(?1,?2,1,1,'product','Original','')",rusqlite::params![project.as_str(),wave.id()]).unwrap();
         conn.execute_batch(
             "CREATE TRIGGER fail_project_save BEFORE UPDATE ON projects
@@ -261,7 +246,7 @@ mod tests {
                 .unwrap()
                 .execute(
                     "INSERT INTO projects(id,wave_id,external_project_id,created_at,updated_at,
-                 project_slug,project_name,project_prompt_context) VALUES(?1,?2,?3,1,1,?4,?4,'')",
+                 project_slug,project_name,description) VALUES(?1,?2,?3,1,1,?4,?4,'')",
                     rusqlite::params![project.as_str(), wave.id(), mapping, name],
                 )
                 .unwrap();

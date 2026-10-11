@@ -85,7 +85,7 @@ impl SqliteStore {
                 )?;
                 durable::inherit_project_placement(&tx, &successor)?;
             } else {
-                let previous = super::plan_read::project_in(&tx, &successor)?;
+                let previous = super::children::project_in(&tx, &successor)?;
                 PlanningChanges::Project(&successor).record(
                     &tx,
                     "name",
@@ -98,7 +98,7 @@ impl SqliteStore {
                     serde_json::to_value(previous.status)?,
                     serde_json::json!("started"),
                 )?;
-                super::project_content::write_content(&tx, &successor, &previous, &input.content)?;
+                super::project_content::write_content(&tx, &successor, &input.content)?;
                 let available:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM projects WHERE id=?1 AND wave_id=?2 AND status IN ('backlog','planned','started'))",params![successor.as_str(),input.wave_id],|r|r.get(0))?;
                 if !available {
                     return Err(StoreError::InvalidAuthority(

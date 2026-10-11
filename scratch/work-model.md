@@ -62,8 +62,9 @@ prove a provider exited or authorize cleanup. Local absence cannot prove peer ab
 ## Current source and evidence
 
 The existing pass removed plan wrappers and confined Linear comment observations
-(`28913feeda`, `105e1d15ad`). This is partial implementation, not completion of the
-accepted model. The new audit identifies remaining storage, acquisition, Git,
+(`28913feeda`, `105e1d15ad`). Project persistence also replaces internal Markdown with typed description,
+workflow, KRs and targets, including transactional conversion and peer fidelity
+proof. This is partial implementation, not completion of the accepted model. The new audit identifies remaining storage, acquisition, Git,
 CLI/Desktop, config, skills and test cuts against the merged October 10 source.
 Its conditional deletions require behavioral proof before removing their evidence.
 

@@ -18,13 +18,15 @@ pub struct ProjectKR {
     pub holds: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Project {
     pub id: ProjectId,
     pub summary: String,
     pub slug: String,
     pub name: String,
-    pub prompt_context: String,
+    pub description: String,
+    pub krs: Vec<ProjectKR>,
+    pub metric_targets: Vec<crate::work::wave::metrics::MetricTarget>,
     pub workflow: String,
     pub status: crate::pm::ProjectStatus,
     /// Optional Linear binding, not a second owner of this record.
@@ -121,4 +123,22 @@ impl Project {
             .as_ref()
             .ok_or(PlanningError::NoLinearMapping)
     }
+}
+
+pub(crate) fn validate_metric_targets(
+    targets: &[crate::work::wave::metrics::MetricTarget],
+) -> Result<(), String> {
+    let mut ids = std::collections::BTreeSet::new();
+    for metric in targets {
+        if metric.metric_id.trim().is_empty()
+            || !metric.target.value().is_finite()
+            || !ids.insert(&metric.metric_id)
+        {
+            return Err(
+                "Project metric targets require unique nonempty metric IDs and finite values"
+                    .into(),
+            );
+        }
+    }
+    Ok(())
 }

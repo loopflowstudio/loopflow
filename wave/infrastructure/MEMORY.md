@@ -629,19 +629,20 @@ acceptance remain at
 Jack Heart selected repository-configured Linear, shared Git or default user-keyed
 Git. Outages buffer locally without fallback or publisher election. One typed
 writer owns local/imported fields; execution and attempts stay local. Preserve Git
-causality and losers. Gate and installation remain unproved.
+causality, losers and uncertain effects. Gate and installation remain unproved.
 
-Jack's October 10 review selects one Project, direct Task content, explicit Linear
-integration, ProjectKR/MetricTarget, one TaskComment, ordinary Tasks/comments instead
-of FollowThrough gates, and one repository cron command list. Preserve uncertain
-effects, historical evidence, schedule identity/timing and Machine ownership.
-Implementation is incomplete; [the design](../../scratch/work-on-another-machine-name.md)
-owns remaining work. Publish #1491 for review only; no landing, installation,
-live schedule activation or real Work export to the public repository.
+Jack accepted the entire One Work deletion audit: one
+Project, direct Task fields, explicit Linear integration, typed criteria/comments,
+ordinary Tasks/comments instead of FollowThrough, one repository cron command list,
+and deletion of duplicate readers, writers and provider hierarchies. Preserve
+historical evidence, schedule identity/timing and Machine ownership. Typed Project
+persistence replaces internal Markdown. The [design](../../scratch/work-on-another-machine-name.md)
+owns remaining work. Republish #1491 only after the full reduction, for review;
+no landing, installation, live schedule activation or real Work export.
 
-Historical mixed recovery: `e37099e50`/`231e75898`; prior transport/synthetic Codex
-proofs: `ae96102580e:scratch/work-on-another-machine-name.md`. They establish no
-installed acceptance. Source conversion cannot transfer installed schedule authority.
+Historical recovery: `e37099e50`/`231e75898`; transport/synthetic Codex proofs:
+`ae96102580e:scratch/work-on-another-machine-name.md`. Source conversion cannot
+transfer installed schedule authority.
 
 ## Planning and launch preservation (curated 2026-10-02)
 

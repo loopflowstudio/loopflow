@@ -381,7 +381,9 @@ fn register_task_fixture(
         ),
         slug: "task-pr-tests".to_string(),
         name: "Task PR tests".to_string(),
-        prompt_context: "Keep Task PR transitions durable.".to_string(),
+        description: "Keep Task PR transitions durable.".to_string(),
+        krs: Vec::new(),
+        metric_targets: Vec::new(),
         pm_snapshot_synced_at: Some(now.unix_timestamp()),
 
         wave_id: wave.id().clone(),

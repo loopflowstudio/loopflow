@@ -45,7 +45,7 @@ pub(crate) fn render_task_context(
         description = task.description,
         project = project.name,
         project_id = project.linear_id.as_ref().map(|id| id.as_str()).unwrap_or("local"),
-        project_context = project.prompt_context,
+        project_context = render_project_context(project),
         direction = render_steers(steers),
         task_snapshot_synced_at = task.pm_snapshot_synced_at.map(|at| at.to_string()).unwrap_or_else(|| "not observed".into()),
         project_snapshot_synced_at = project.pm_snapshot_synced_at.map(|at| at.to_string()).unwrap_or_else(|| "not observed".into()),
@@ -56,6 +56,25 @@ pub(crate) fn render_task_context(
         base_commit = task.base_commit,
         placement = placement,
     )
+}
+
+fn render_project_context(project: &crate::work::project::Project) -> String {
+    let targets = serde_json::to_string_pretty(&project.metric_targets)
+        .expect("validated metric targets serialize");
+    let mut content = format!(
+        "{}\n## Metric targets\n\n```json\n{targets}\n```",
+        project.description
+    );
+    if !project.workflow.trim().is_empty() {
+        content.push_str(&format!("\n\nworkflow: {}", project.workflow.trim()));
+    }
+    content.push_str("\n\n## KRs");
+    for kr in &project.krs {
+        let marker = if kr.holds { "x" } else { " " };
+        content.push_str(&format!("\n\n- [{marker}] {}", kr.text.trim()));
+    }
+    content.push('\n');
+    content
 }
 
 fn render_wave_context(repo: &Path, wave: &str, metric_context: &str) -> String {
@@ -312,7 +331,9 @@ mod tests {
             linear_id: Some(LinearProjectId::new(planning_id).unwrap()),
             slug: slug.to_string(),
             name: slug.to_string(),
-            prompt_context: "Ship the requested behavior.".to_string(),
+            description: "Ship the requested behavior.".to_string(),
+            krs: Vec::new(),
+            metric_targets: Vec::new(),
             pm_snapshot_synced_at: Some(now.unix_timestamp()),
 
             wave_id: wave.id().clone(),

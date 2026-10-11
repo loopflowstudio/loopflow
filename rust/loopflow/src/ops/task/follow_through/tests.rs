@@ -456,7 +456,9 @@ fn fixture(
         name: "Chapter".into(),
         workflow: "feature".into(),
         status: crate::pm::ProjectStatus::Started,
-        prompt_context: String::new(),
+        description: String::new(),
+        krs: Vec::new(),
+        metric_targets: Vec::new(),
         pm_snapshot_synced_at: Some(now.unix_timestamp()),
 
         wave_id: wave.id().clone(),

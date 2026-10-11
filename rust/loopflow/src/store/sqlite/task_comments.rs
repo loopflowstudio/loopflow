@@ -257,7 +257,7 @@ mod tests {
         let task = TaskId::new();
         {
             let conn = store.conn.lock().unwrap();
-            conn.execute("INSERT INTO projects(id,wave_id,created_at,updated_at,project_slug,project_name,project_prompt_context)
+            conn.execute("INSERT INTO projects(id,wave_id,created_at,updated_at,project_slug,project_name,description)
                 VALUES(?1,?2,1,1,'planning','Planning','')", rusqlite::params![project.as_str(), wave.id()]).unwrap();
             conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,issue_title,issue_description,created_at,updated_at,workspace_slug)
                 VALUES(?1,?2,'linear-task','FIX-1','Keep identity','',1,1,'keep-identity')", rusqlite::params![task.as_str(), project.as_str()]).unwrap();

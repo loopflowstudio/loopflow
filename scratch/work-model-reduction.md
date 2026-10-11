@@ -52,8 +52,9 @@ pass; do not implement them again. `ProjectKR`, `MetricTarget` and domain
 **Locations:** `work/project.rs`, `work/task/mod.rs`, `work/task/comment.rs`,
 `pm/mod.rs`, `planning.rs`, and their SQL serialization in `store/sqlite/`.
 
-Project still carries rendered `prompt_context` rather than direct KRs and targets;
-Task's direct title/description do not yet absorb the shared fields read through
+Project persistence now has direct description, KRs and targets; its internal
+Markdown read/write round trip is removed. Public ProjectContent and PM-shaped
+readers remain. Task's direct title/description do not yet absorb the shared fields read through
 `PmItem` (disposition, assignee, due date and ordering). Complete their actual domain
 representation before deleting the old views. Move domain `ProjectStatus` out of
 `pm`. Optional Linear IDs remain bindings, never replacement domain IDs. Keep
@@ -68,7 +69,8 @@ and `PmWave`; `ops/project.rs::ProjectPlanning` and its reread of a Project thro
 Work readers. `PmTaskRecord` / `PmTaskObservation` must cease being alternate Task
 read results, including the embedded Project clone inside a Task observation.
 
-**Evidence:** `project_in` parses stored prompt Markdown; `task_in` reconstructs
+**Evidence:** `project_in` still rebuilds a PM-shaped Project from typed columns;
+`task_in` reconstructs
 provider-shaped fields and joins provider observations for due date/membership.
 `COALESCE(external_project_id,id)` and `COALESCE(external_issue_id,id)` let read
 results change ID meaning. Normal `store/children.rs` / `sqlite/children.rs` readers
@@ -123,14 +125,15 @@ An old observation remains old after conversion.
 
 ## 5. Delete the internal Markdown storage round trip
 
-**Locations:** `sqlite/project_content.rs::{read_content,write_content,apply_content,
-update_project_content,select_project_workflow}`, `sqlite/planning_write.rs`'s
+**Locations:** `sqlite/project_content.rs::{write_content,update_project_content,
+select_project_workflow}`, `sqlite/planning_write.rs`'s
 special Project reads/writes, `pm/mod.rs::{parse_project_content,
 render_project_content,render_metric_targets,render_krs}`, and `ops/chapter.rs`.
 
-Store authored prose and typed KRs/targets/workflow once on Project. Delete local
-parse-render-parse helpers and the ProjectContent argument threaded through ordinary
-operations. A private Linear parser/renderer still owns managed description
+Structured persistence and removal of `read_content`/writer Markdown assembly
+are implemented. Finish removing the ProjectContent argument threaded through
+ordinary operations. The migration alone parses released Markdown before journal
+seeding; malformed content refuses without losing original bytes. A private Linear parser/renderer still owns managed description
 sections; prompt assembly renders its own output. Preserve unrelated authored prose
 and partial-response omissions. Wave workflow definitions and a Task's captured
 Workflow are different responsibilities and remain separate.

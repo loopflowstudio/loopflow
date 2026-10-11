@@ -1104,7 +1104,7 @@ fn project_creation_binding_and_activation_save_offline() {
         );
         for mapped in [false, true] {
             let provider = "11111111-1111-4111-8111-111111111111";
-            db.execute("UPDATE projects SET external_project_id=?2,status='backlog',project_prompt_context=?3,workflow='feature' WHERE id=?1", rusqlite::params![id.as_str(),mapped.then_some(provider),"workflow: feature\n\n## KRs\n\n- [ ] Preserve Tasks\n"]).unwrap();
+            db.execute("UPDATE projects SET external_project_id=?2,status='backlog',krs=?3,workflow='feature' WHERE id=?1", rusqlite::params![id.as_str(),mapped.then_some(provider),r#"[{"text":"Preserve Tasks","holds":false}]"#]).unwrap();
             db.execute(
                 "UPDATE waves SET current_project_id=NULL WHERE id=?1",
                 [wave.id()],

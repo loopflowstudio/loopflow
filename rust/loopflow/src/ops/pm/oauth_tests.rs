@@ -119,7 +119,9 @@ async fn pm_read_linear_oauth_recovers() {
         linear_id: Some(LinearProjectId::new("project-1").unwrap()),
         slug: "reliability".into(),
         name: "Reliability".into(),
-        prompt_context: "Retain this planning history.".into(),
+        description: "Retain this planning history.".into(),
+        krs: Vec::new(),
+        metric_targets: Vec::new(),
         pm_snapshot_synced_at: Some(1),
 
         wave_id: wave.id().clone(),
@@ -192,7 +194,7 @@ async fn pm_read_linear_oauth_recovers() {
     assert_eq!(refreshed.linear_id, project.linear_id);
     assert_eq!(refreshed.status, crate::pm::ProjectStatus::Started);
     assert_eq!(refreshed.workflow, "feature");
-    assert!(refreshed.prompt_context.contains("Fresh proof"));
+    assert!(refreshed.krs.iter().any(|kr| kr.text == "Fresh proof"));
     assert!(refreshed.pm_snapshot_synced_at > project.pm_snapshot_synced_at);
     assert_eq!(
         fixture

@@ -849,9 +849,6 @@ impl SqliteStore {
     pub fn insert_project(&self, project: &Project) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let mut content = crate::pm::parse_project_content(&project.prompt_context)
-            .map_err(|e| StoreError::InvalidData(e.to_string()))?;
-        content.workflow = project.workflow.clone();
         planning_write::create(
             &transaction,
             "",
@@ -863,10 +860,11 @@ impl SqliteStore {
                 Edit::ProjectSlug(Some(project.slug.clone())),
                 Edit::ProjectName(Some(project.name.clone())),
                 Edit::ProjectSummary(project.summary.clone()),
+                Edit::ProjectDescription(Some(project.description.clone())),
                 Edit::ProjectStatus(project.status),
-                Edit::Workflow(content.workflow),
-                Edit::Krs(content.krs),
-                Edit::MetricTargets(content.metric_targets),
+                Edit::Workflow(project.workflow.clone()),
+                Edit::Krs(project.krs.clone()),
+                Edit::MetricTargets(project.metric_targets.clone()),
             ],
         )?;
         transaction.execute("UPDATE projects SET pm_snapshot_synced_at=?2,abandon_requested_at=?3,abandon_reason=?4,created_at=?5,updated_at=?6 WHERE id=?1",params![
@@ -879,13 +877,9 @@ impl SqliteStore {
 
     pub fn project(&self, project_id: &ProjectId) -> StoreResult<Option<Project>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.query_row(
-            PROJECT_SELECT,
-            params![project_id.as_str()],
-            map_project_row,
-        )
-        .optional()
-        .map_err(StoreError::from)
+        project_in(&conn, project_id)
+            .optional()
+            .map_err(StoreError::from)
     }
 
     pub fn project_by_project(&self, project: &str) -> StoreResult<Option<Project>> {
@@ -1756,15 +1750,19 @@ pub(super) fn task_events_after_in(
 }
 
 const PROJECT_COLUMNS: &str = "SELECT
-    id, external_project_id, project_slug, project_name, project_prompt_context,
+    id, external_project_id, project_slug, project_name, description,
     wave_id, pm_snapshot_synced_at, abandon_requested_at, abandon_reason,
-    created_at, updated_at, workflow, status, project_summary
+    created_at, updated_at, workflow, status, project_summary, krs, metric_targets
     FROM projects";
 pub(super) const PROJECT_SELECT: &str = "SELECT
-    id, external_project_id, project_slug, project_name, project_prompt_context,
+    id, external_project_id, project_slug, project_name, description,
     wave_id, pm_snapshot_synced_at, abandon_requested_at, abandon_reason,
-    created_at, updated_at, workflow, status, project_summary
+    created_at, updated_at, workflow, status, project_summary, krs, metric_targets
     FROM projects WHERE id=?1";
+pub(super) fn project_in(conn: &Connection, id: &ProjectId) -> rusqlite::Result<Project> {
+    conn.query_row(PROJECT_SELECT, [id.as_str()], map_project_row)
+}
+
 pub(super) fn map_project_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
     let abandon_intent = match (
         row.get::<_, Option<i64>>(7)?,
@@ -1785,7 +1783,11 @@ pub(super) fn map_project_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Proje
             .map(LinearProjectId::from_raw),
         slug: row.get(2)?,
         name: row.get(3)?,
-        prompt_context: row.get(4)?,
+        description: row.get(4)?,
+        krs: serde_json::from_str(&row.get::<_, String>(14)?)
+            .map_err(|error| invalid_column(14, error))?,
+        metric_targets: serde_json::from_str(&row.get::<_, String>(15)?)
+            .map_err(|error| invalid_column(15, error))?,
         pm_snapshot_synced_at: row.get(6)?,
         workflow: row.get(11)?,
         status: serde_json::from_value(serde_json::Value::String(row.get(12)?))
@@ -2274,6 +2276,9 @@ mod local_planning_tests {
         }
         conn.execute_batch(&current_draft_sql("optional_task_pr"))
             .unwrap();
+        let peers = current_draft_sql("planning_peers");
+        conn.execute_batch(&peers).unwrap();
+        crate::store::migrations::seed_peer_planning(&conn, &peers).unwrap();
         let order: String = conn
             .query_row(
                 "SELECT task_order_json FROM pm_projects WHERE id='current'",
@@ -2336,7 +2341,7 @@ mod local_planning_tests {
         assert_eq!(retained.worktree.unwrap().to_str(), Some("/repo/task"));
         let project = store.project(&project).unwrap().unwrap();
         assert_eq!(project.linear_id.unwrap().as_str(), "linear-project");
-        assert_eq!(project.prompt_context, "Retain KRs");
+        assert_eq!(project.description, "Retain KRs");
         assert_eq!(
             store.conn.lock().unwrap().query_row("SELECT issue_id,identifier FROM task_issue_identities WHERE wave_id=?1 AND identifier='LOO-2'", [&orphan_wave], |row| Ok((row.get::<_, String>(0)?,row.get::<_, String>(1)?))).optional().unwrap(),
             Some(("orphan-issue".into(), "LOO-2".into()))

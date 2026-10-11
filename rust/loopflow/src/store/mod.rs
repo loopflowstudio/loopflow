@@ -1525,7 +1525,9 @@ mod tests {
             linear_id: Some(LinearProjectId::new("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3").unwrap()),
             slug: "developer-efficiency".to_string(),
             name: "Developer Efficiency".to_string(),
-            prompt_context: "Definition:\nKeep local work fast.".to_string(),
+            description: "Definition:\nKeep local work fast.".to_string(),
+            krs: Vec::new(),
+            metric_targets: Vec::new(),
             pm_snapshot_synced_at: Some(now.unix_timestamp()),
 
             wave_id: wave.id().clone(),
@@ -2605,14 +2607,8 @@ mod tests {
         assert_eq!(accepted.snapshot.projects, vec![confirmed.clone()]);
         let durable = store.get_project(&project.id).await.unwrap().unwrap();
         assert_eq!(durable.pm_snapshot_synced_at, Some(10));
-        assert_eq!(
-            crate::pm::parse_project_content(&durable.prompt_context)
-                .unwrap()
-                .metric_targets,
-            confirmed.metric_targets
-        );
-        assert!(!durable.prompt_context.contains("flow:"));
-        assert!(durable.prompt_context.contains(&confirmed.krs[0].text));
+        assert_eq!(durable.metric_targets, confirmed.metric_targets);
+        assert_eq!(durable.krs, confirmed.krs);
         let other = Wave::new(WaveId::new(), "other".into(), wave.repo().into());
         store.create_wave(&other).await.unwrap();
         assert!(store

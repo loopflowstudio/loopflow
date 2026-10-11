@@ -159,19 +159,22 @@ retains pending work; reconnect acquires before publishing. No agent turn is rep
 
 ## Implementation boundary — 2026-10-10
 
-The internal model cut removes TaskPlan and ProjectPlan, moves their fields onto
-Task/Project, removes Project iteration from the live type (retaining stored values
-and events), and moves ProjectKR/MetricTarget to their domain owners with Threshold.
-Linear writeback types now name Linear. TaskComment lives under Task; private-to-crate
-LinearComment/LinearIssueObservation replace public Issue models. One adapter conversion
-owns authorship and both save paths share the typed writer. Receipt bytes, stale-read
-handling and direction identity remain unchanged. No schema or transport shape changed.
+TaskPlan/ProjectPlan and live Project iteration are removed. TaskComment is domain
+owned; provider observations remain adapter-internal. Project now stores description,
+workflow, KRs and metric targets directly. The shared local/import writer and local
+readers no longer parse/render stored Markdown; prompt assembly renders on demand.
+The one Task draft converts released content before seeding causal history, retaining
+saved workflow selection, observation age, mappings and pending delivery. Invalid
+criteria roll back the conversion. Tests cover multiline KR fidelity across restart
+and Git import, transactional failure, released content conversion and retained local
+Workflow/checkout/effect evidence. These are source proofs, not installed acceptance.
 
-This is not the complete Next pursuit. Remaining: structured Project persistence,
-replacement of ProjectContent/shared PmProject, integration-owned bindings and
-observations, Linear configuration/command names, normal
-Tasks/comments replacing FollowThrough and its gates/UI, and the repository cron
-list/conversion. The PR is not ready to republish for this reduction.
+Still required: remove public ProjectContent and ordinary PmProject/PmItem readers,
+complete provider acquisition/prose ownership and integration bindings, remove
+whole-model JSON patching and duplicate edit/journal vocabularies, then finish
+CLI/Desktop/config projections. The existing FollowThrough and cron reductions and
+the entire accepted deletion audit remain unfinished. No partial publication or
+review-readiness claim is authorized by this persistence cut.
 
 The published transport baseline remains one typed transactional writer for local
 creation/edit, comments, disposition, selection/order and imports. Git capture shares
@@ -190,15 +193,15 @@ Earlier baseline detail: `c8fe4628a:scratch/work-on-another-machine-name.md`.
   transfer another Machine's delivery attempts. Automatic migration of previously
   Git-imported, unmapped work into Linear remains an open design question; no
   exactly-once or seamless switching acceptance is claimed.
-- [One-page +/- review](pr-review.html) and its source manifest now describe this
-  reduction. The installed CLI has no `lf screenshot` command, so visual capture
-  is unavailable. Publication is review-only; do not land.
+- The [one-page +/- review](pr-review.html) and source manifest retain the prior
+  cut. Regenerate them after the entire accepted reduction, before review-only
+  republication. No readiness or landing follows from this persistence checkpoint.
 
-Checks: `cargo build -p loopflow --bin lf`, fmt, all-target Clippy and four focused comment/DTO tests pass; gate owns full suites/Swift. Foreground fixtures now permit immediate delivery and force an outage before testing conflict adoption.
+Checks: `cargo test -p loopflow --lib` filters `structured_project_`, `project_content::tests`, and retained-link migration pass (6); `cargo build -p loopflow --bin lf`, `cargo fmt`, and `cargo clippy --all-targets -- -D warnings` pass; gate owns affected/materialized/Swift verification.
 
-Context: authored memory/scratch fit. The generated Task launch manifest and retained
-steers exceed the 16,000-token goal budget by 2,230 tokens at this check; they are not an authored source to trim.
-Do not delete direction to hide the overage.
+Context: authored memory/scratch fit. The generated Task launch seed and retained
+steers exceed the 16,000-token goal budget by 2,491 tokens in the latest inspected manifest. The generated
+seed is not an authored source to trim. The complete manifest was inspected. Direction remains preserved.
 
 ## Delete — do not maintain
 
@@ -220,5 +223,3 @@ Mixed receipt recovery: `e37099e50`/`231e75898`. Native Codex exchange used synt
 Responses and retained a live Session plus a subsequent turn; its Workflow was
 seeded, not a running edge. It proves neither configured accounts nor the new route.
 Release's operation-entry lesson still applies: a helper-only pass is not dispatch.
-
-Sync check: `cargo test -p loopflow --lib edits_imports_and_failed_saves_share_atomic_planning_without_execution` passed (1 test; LF_* cleared, stdin closed); broader verification remains with gate/CI.

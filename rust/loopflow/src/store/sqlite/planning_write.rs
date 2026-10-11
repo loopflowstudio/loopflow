@@ -97,6 +97,7 @@ planning_fields! {
     (Project, ProjectSlug, "project_slug", Option<String>),
     (Project, ProjectName, "project_name", Option<String>),
     (Project, ProjectSummary, "project_summary", String),
+    (Project, ProjectDescription, "description", Option<String>),
     (Project, ProjectStatus, "status", crate::pm::ProjectStatus),
     (Project, ProjectRank, "planning_rank", u32),
     (Project, ProjectInitiatives, "planning_initiatives", String),
@@ -128,27 +129,9 @@ impl PlanningEdit {
             Self::ProjectInitiatives(v) | Self::ProjectTeams(v) => {
                 serde_json::from_str::<Vec<String>>(v)?;
             }
-            Self::Workflow(v) => crate::pm::ProjectContent {
-                workflow: v.clone(),
-                krs: Vec::new(),
-                metric_targets: Vec::new(),
+            Self::MetricTargets(v) => {
+                crate::work::project::validate_metric_targets(v).map_err(StoreError::InvalidData)?
             }
-            .validate()
-            .map_err(|e| StoreError::InvalidData(e.to_string()))?,
-            Self::Krs(v) => crate::pm::ProjectContent {
-                workflow: String::new(),
-                krs: v.clone(),
-                metric_targets: Vec::new(),
-            }
-            .validate()
-            .map_err(|e| StoreError::InvalidData(e.to_string()))?,
-            Self::MetricTargets(v) => crate::pm::ProjectContent {
-                workflow: String::new(),
-                krs: Vec::new(),
-                metric_targets: v.clone(),
-            }
-            .validate()
-            .map_err(|e| StoreError::InvalidData(e.to_string()))?,
             _ => {}
         }
         Ok(())
@@ -171,17 +154,9 @@ pub(crate) fn table(kind: PlanningKind) -> &'static str {
 }
 
 pub(crate) fn read(conn: &Connection, object: &PlanningObject) -> StoreResult<Vec<PlanningEdit>> {
-    let mut fields = fields(object.kind);
-    let content = if object.kind == PlanningKind::Project {
-        fields.retain(|field| !matches!(*field, "workflow" | "krs" | "metric_targets"));
-        Some(super::project_content::read_content(
-            conn,
-            &crate::durable::ProjectId::from_raw(&object.id),
-        )?)
-    } else {
-        None
-    };
+    let fields = fields(object.kind);
     let expressions: Vec<_> = fields.iter().map(|field| match *field {
+        "krs" | "metric_targets" => field.to_string(),
         "disposition" => "json_object('planning_state',planning_state,'planning_completed',planning_completed,'planning_completed_at',planning_completed_at)".into(),
         "content" => "json_object('body',body,'author',author,'created_at',created_at)".into(),
         field => format!("json_quote({field})"),
@@ -196,20 +171,13 @@ pub(crate) fn read(conn: &Connection, object: &PlanningObject) -> StoreResult<Ve
             .map(|i| row.get::<_, String>(i))
             .collect::<Result<Vec<_>, _>>()
     })?;
-    let mut edits: Vec<_> = fields
+    let edits: Vec<_> = fields
         .into_iter()
         .zip(values)
         .map(|(field, value)| {
             PlanningEdit::from_value(object.kind, field, serde_json::from_str(&value)?)
         })
         .collect::<StoreResult<_>>()?;
-    if let Some(content) = content {
-        edits.extend([
-            PlanningEdit::Workflow(content.workflow),
-            PlanningEdit::Krs(content.krs),
-            PlanningEdit::MetricTargets(content.metric_targets),
-        ]);
-    }
     Ok(edits)
 }
 
@@ -224,7 +192,6 @@ pub(crate) fn write(
         .map(|edit| Ok((edit.field(), edit.value()?)))
         .collect::<StoreResult<_>>()?;
     let mut columns = BTreeMap::new();
-    let mut content = None;
     let mut changed = Vec::new();
     for edit in edits {
         edit.validate()?;
@@ -250,21 +217,6 @@ pub(crate) fn write(
             continue;
         }
         match edit {
-            PlanningEdit::Workflow(_) | PlanningEdit::Krs(_) | PlanningEdit::MetricTargets(_) => {
-                if content.is_none() {
-                    content = Some(super::project_content::read_content(
-                        conn,
-                        &crate::durable::ProjectId::from_raw(&object.id),
-                    )?);
-                }
-                let content = content.as_mut().expect("content loaded");
-                match edit {
-                    PlanningEdit::Workflow(v) => content.workflow = v.clone(),
-                    PlanningEdit::Krs(v) => content.krs = v.clone(),
-                    PlanningEdit::MetricTargets(v) => content.metric_targets = v.clone(),
-                    _ => unreachable!(),
-                }
-            }
             PlanningEdit::Disposition(v) => {
                 if !matches!(v.planning_completed, 0 | 1) {
                     return Err(StoreError::InvalidData("invalid completion value".into()));
@@ -284,16 +236,6 @@ pub(crate) fn write(
             }
         }
         changed.push(edit);
-    }
-    if let Some(content) = content {
-        content
-            .validate()
-            .map_err(|e| StoreError::InvalidData(e.to_string()))?;
-        columns.insert(
-            "project_prompt_context".into(),
-            Value::String(crate::pm::render_project_content(&content)),
-        );
-        columns.insert("workflow".into(), content.workflow.into());
     }
     if !columns.is_empty() {
         let assignments = columns
@@ -428,7 +370,7 @@ pub(crate) fn ensure_record(
         }
         PlanningKind::Project => {
             conn.execute(
-                "INSERT INTO projects(id,wave_id,created_at,updated_at,project_prompt_context) VALUES(?1,?2,unixepoch(),unixepoch(),'')",
+                "INSERT INTO projects(id,wave_id,created_at,updated_at,description) VALUES(?1,?2,unixepoch(),unixepoch(),'')",
                 params![object.id, required("wave_id")?],
             )?;
         }
@@ -549,6 +491,64 @@ mod tests {
             })
             .unwrap();
         id
+    }
+
+    #[test]
+    fn structured_project_fields_survive_restart_and_peer_import_without_markdown() {
+        let left = tempfile::tempdir().unwrap();
+        let right = tempfile::tempdir().unwrap();
+        let path = left.path().join("db");
+        let a = SqliteStore::open_ephemeral(&path).unwrap();
+        let task = plan(&a);
+        let project = a.task(&task).unwrap().unwrap().project_id;
+        let mut saved = a.project(&project).unwrap().unwrap();
+        // These strings would be interpreted as Markdown by the retired storage path.
+        saved.description = "Authored purpose\nworkflow: literal prose".into();
+        saved.workflow = "review".into();
+        saved.krs = vec![crate::work::project::ProjectKR {
+            text: "First line\n## Not a section\n- [ ] not another KR".into(),
+            holds: true,
+        }];
+        saved.metric_targets = vec![crate::work::wave::metrics::MetricTarget {
+            metric_id: "recovery".into(),
+            target: crate::work::wave::metrics::Threshold::AtLeast { value: 1.0 },
+        }];
+        a.insert_project(&saved).unwrap();
+        drop(a);
+        let a = SqliteStore::open_ephemeral(&path).unwrap();
+        assert_eq!(a.project(&project).unwrap().unwrap(), saved);
+        let b = SqliteStore::open_ephemeral(&right.path().join("db")).unwrap();
+        let route =
+            PlanningDestination::new("/synthetic.git", "refs/loopflow/planning/shared/test")
+                .unwrap();
+        for store in [&a, &b] {
+            store.bind_peer_planning("/repo", &route).unwrap();
+            store.use_peer_planning("/repo", Some(&route.id())).unwrap();
+        }
+        let journal = a.export_peer_planning("/repo", &route.id()).unwrap();
+        b.import_peer_planning("/repo", &route.id(), "revision", &journal)
+            .unwrap();
+        let received = b.project(&project).unwrap().unwrap();
+        assert_eq!(received.description, saved.description);
+        assert_eq!(received.krs, saved.krs);
+        assert_eq!(received.metric_targets, saved.metric_targets);
+        assert_eq!(received.workflow, saved.workflow);
+        let current = a.project(&project).unwrap().unwrap();
+        let pending = a.pending_project_changes(&project).unwrap();
+        a.conn.lock().unwrap().execute_batch("CREATE TRIGGER fail_project_capture BEFORE INSERT ON planning_peer_changes BEGIN SELECT RAISE(ABORT,'injected failure'); END;").unwrap();
+        assert!(a
+            .select_project_workflow(
+                &project,
+                "another",
+                "nodes: {}\nedges: [{from: start, to: end}]\n"
+            )
+            .is_err());
+        assert_eq!(a.project(&project).unwrap().unwrap(), current);
+        assert_eq!(a.pending_project_changes(&project).unwrap(), pending);
+        assert!(a
+            .wave_workflow(&saved.wave_id, "another")
+            .unwrap()
+            .is_none());
     }
 
     #[test]

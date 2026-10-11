@@ -136,7 +136,7 @@ new picker is silently performed. Do not auto-retry per stream update. Closing t
 last tab must not trigger entry again. Existing remote ownership and takeover rules
 remain unchanged; no unavailable owner becomes a local fallback.
 
-## Removed predecessors
+## Delete — do not maintain
 
 The cut deletes Debug Session/Orphan navigation, the generic New Session composer,
 SessionSkillPicker/SessionSkillLaunch and selected-skill storage, DiscoveryEntry,
@@ -289,6 +289,13 @@ selection exists. The service serializes mutations after pending reads.
 `PortfolioDiscovery.repos`, its scan/launch union, Swift membership persistence,
 old PortfolioRepo and scan-only tests are removed. `RepositoryPath` retains only
 explicit-open validation from RepoScanner; authored-Wave discovery remains.
+Compression also removes `WorkModel.refreshPortfolio`'s duplicate CLI reader and
+error state, `WavesView.repos`' copied membership, and RepositoryPath's unused
+FileManager field. Repository windows apply PortfolioService's shared reading;
+the Portfolio view derives membership directly. Failed reads retain membership,
+activation still refreshes authored Waves, and canceled/superseded discovery cannot
+replace newer data. The delayed-read test now covers serialized service mutation.
+No deletion targets remain in the portfolio cut.
 
 Review fixed a global Clap `--json` identity collision and a rewritten-path mismatch
 between shared membership and authored Waves. Failed folder reads retain the last
@@ -348,7 +355,12 @@ from the older capture. Swift round-trip assertions compare shared readings;
 Foundation's `/var` spelling differs from Rust's canonical `/private/var` path.
 The retained-Work test removes a nonempty membership while preserving the exact
 conversation, pane layout and unsaved document.
-A generation check prevents a delayed portfolio read from restoring membership
-after a newer reading removed it; the focused regression passes.
+WorkModel fences asynchronous authored-Wave discovery; PortfolioService serializes
+shared reads and mutations so a delayed read cannot overwrite a later removal.
 
-Check (October 11 portfolio): `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo test -p loopflow --lib portfolio::tests` (3), `cargo test -p loopflow --test portfolio_cli_tests` (1), isolated `session_lifecycle_tests work_first_repository_entry_preserves_primary_and_mixed_inventory` (1), and headless `scripts/test_desktop.sh` filtered to PortfolioServiceTests/authored-Wave/composed-entry cases (7 distinct tests, including the real CLI round trip via LOOPFLOW_PORTFOLIO_TEST_BIN) pass; `git diff --check` and `lf context` pass; broader suites belong to gate and configured native review still requires a compatible installed release.
+Earlier Rust portfolio, formatting/lint and fixture-generation checks remain at
+`d43aa248d3:scratch/get-me-using-lf.md`; this compression changes only Swift and notes.
+Review preserved successful-read gating at startup and authored-Wave refresh on
+activation while removing duplicate membership reads.
+
+Check (October 11 compression): `LOOPFLOW_PORTFOLIO_TEST_BIN=/Users/jack/src/loopflow.make-loopflow-a-work-first/target/debug/lf scripts/test_desktop.sh --filter 'PortfolioServiceTests|WorkModelTests/authoredWavesRemainVisible|WorkCacheTests/savedLaunchRepository|WorkNavigationTests/composedWorkFirstEntry|WorkNavigationTests/unavailablePlanningPreservesRepositorySelection' -Xswiftc -gnone` — Desktop build and 9 tests pass; `git diff --check` and `lf context` pass; broader suites belong to gate, configured native review still needs a compatible installed release.

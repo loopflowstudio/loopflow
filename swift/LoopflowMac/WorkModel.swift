@@ -708,7 +708,7 @@ final class WorkModel {
     private var workActivityGeneration = 0
 
     /// A launch repository taken from the saved workspace without running
-    /// `git`; `refreshPortfolio` checks it off the main thread.
+    /// `git`; `applyPortfolio` checks it off the main thread.
     @ObservationIgnored private var unverifiedRepoPath: String?
 
     init(query: RegistryQuery, repoPath: String? = nil, cache: WorkCache? = nil) {
@@ -1199,34 +1199,22 @@ final class WorkModel {
         await refreshWorkActivity()
     }
 
-    private(set) var portfolioError: String?
     private var portfolioGeneration = 0
 
-    func refreshPortfolio(
-        initialRepoPath: String?
-    ) async {
-        guard !usesFixedFixture else { return }
+    /// Consume the shared membership; only authored Wave discovery is window-local.
+    func applyPortfolio(_ discovered: [PortfolioRepo], initialRepoPath: String?) async {
+        guard !usesFixedFixture, !Task.isCancelled else { return }
         portfolioGeneration &+= 1
         let generation = portfolioGeneration
-        let discovered: [PortfolioRepo]
-        do {
-            let portfolio = try await query.portfolio()
-            if let error = portfolio.error { throw RegistryQueryError(error) }
-            discovered = portfolio.repos
-        } catch {
-            if generation == portfolioGeneration { portfolioError = error.localizedDescription }
-            return
-        }
         await Self.resolveRepoOrigins(discovered.map(\.path))
         let authored = await PortfolioDiscovery.authoredWaves(in: discovered)
-        guard generation == portfolioGeneration else { return }
+        guard generation == portfolioGeneration, !Task.isCancelled else { return }
         if let trusted = unverifiedRepoPath {
             unverifiedRepoPath = nil
             let checked = await Task.detached { PortfolioDiscovery.resolveLaunchRepo(trusted) }.value
             if repoPath == trusted, checked != trusted { setRepoPath(checked) }
         }
-        guard generation == portfolioGeneration else { return }
-        portfolioError = nil
+        guard generation == portfolioGeneration, !Task.isCancelled else { return }
         repos = discovered
         authoredWavesByRepo = authored
         if repoPath == nil, let initialRepoPath {

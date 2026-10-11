@@ -281,7 +281,7 @@ struct WorkCacheTests {
         #expect(returning.repoPath == Self.repo)
         #expect(returning.sessions.value?.isEmpty == false)
 
-        await returning.refreshPortfolio(initialRepoPath: nil)
+        await returning.applyPortfolio([], initialRepoPath: nil)
         #expect(returning.repoPath == nil)
     }
 

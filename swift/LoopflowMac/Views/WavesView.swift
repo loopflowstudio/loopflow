@@ -27,8 +27,12 @@ struct WavesView: View {
 
     @State private var repoStates: [String: PortfolioRepoState] = [:]
 
-    /// Membership from the Machine-local lf portfolio.
-    @State private var repos: [PortfolioRepo] = []
+    private var repos: [PortfolioRepo] {
+        if AppTestMode.current() == .mockWaves {
+            return [PortfolioRepo(path: MockWaveFixture.repoPath, error: nil)]
+        }
+        return portfolioService.repos
+    }
 
     /// Authored waves discovered on disk per repo path: `<repo>/wave/<name>/GOAL.md`.
     /// Merged with registered waves so not-yet-launched waves are still listed.
@@ -154,8 +158,7 @@ struct WavesView: View {
             ensureRepoStates()
             await syncRepoStates()
         }
-        .onChange(of: portfolioService.repos.map(\.path)) { _, _ in
-            repos = portfolioService.repos
+        .onChange(of: portfolioService.repos) { _, _ in
             Task {
                 await refreshAuthoredWaves()
                 ensureRepoStates()
@@ -448,16 +451,9 @@ struct WavesView: View {
         try await state.createWave(name: name)
     }
 
-    /// Discover Portfolio repositories off the main thread; workspace opening
-    /// belongs to the identity-keyed scene, not this utility window.
     private func refreshRepos() async {
-        if AppTestMode.shouldBypassRegistry {
-            repos = portfolioService.repos
-            return
-        }
-
+        guard !AppTestMode.shouldBypassRegistry else { return }
         await portfolioService.refresh()
-        repos = portfolioService.repos
     }
 
     /// Enumerate each rail repo's authored waves — `<repo>/wave/<name>/GOAL.md`
@@ -521,7 +517,6 @@ struct WavesView: View {
         // A persisted production repo filter must not hide the deterministic
         // fixture list while leaving its selected detail onscreen.
         selection = .all
-        repos = [repo]
         let state = repoStates[repo.path]
             ?? PortfolioRepoState(repo: repo, registryQuery: RegistryQueryLocal.shared)
         state.applyConnectedWaves(MockWaveFixture.waves, plans: MockWaveFixture.plans)

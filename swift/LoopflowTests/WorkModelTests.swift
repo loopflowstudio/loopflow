@@ -213,23 +213,16 @@ struct WorkModelTests {
         }
         try git(["init", "-q"], at: repo)
 
-        let portfolioQuery = RegistryQuery { args, _ in
-            if args.first == "portfolio" {
-                return "{\"configured\":true,\"mode\":\"manual\",\"root\":\"/src\",\"repos\":[{\"path\":\"\(repo.resolvingSymlinksInPath().path)\",\"error\":null}],\"error\":null}"
-            }
-            throw RegistryQueryError("unexpected read")
-        }
-        let model = WorkModel(query: portfolioQuery)
+        let model = WorkModel(query: fixture.query)
         model.applyFixture(
             roadmap: .available(fixture.roadmap),
             waves: .available([]),
             workActivity: .available(fixture.workActivity),
             repos: []
         )
-        await model.refreshPortfolio(
-            initialRepoPath: nil
+        await model.applyPortfolio(
+            [PortfolioRepo(path: repo.resolvingSymlinksInPath().path, error: nil)], initialRepoPath: nil
         )
-        #expect(model.portfolioError == nil)
         #expect(model.repos.count == 1)
         model.setRepoPath(repo.path)
 

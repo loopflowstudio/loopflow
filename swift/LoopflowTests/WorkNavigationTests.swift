@@ -28,9 +28,6 @@ struct WorkNavigationTests {
         let machine = try #require(primary.workspace).machineId
         let primaryJSON = String(decoding: try data("primary"), as: UTF8.self)
         let query = RegistryQuery { args, _ in
-            if args == ["portfolio", "--json"] {
-                return #"{"configured":true,"mode":"manual","root":"/src","repos":[],"error":null}"#
-            }
             if args == ["wave", "list", "--json"] { return "[]" }
             if args == ["session", "ensure", "--json"] || args == ["session", "connect", primary.id, "--json"] { return primaryJSON }
             throw RegistryQueryError("Unexpected operation: \(args)")
@@ -86,8 +83,7 @@ struct WorkNavigationTests {
         try view.body.inspect().callOnChange(oldValue: true, newValue: model.repositoryEntryReady)
         model.select(.task(id: task.id))
         #expect(model.repos.count == 1)
-        await model.refreshPortfolio(initialRepoPath: repo)
-        #expect(model.portfolioError == nil)
+        await model.applyPortfolio([], initialRepoPath: repo)
         #expect(model.repos.isEmpty)
         #expect(registry.retained(taskKey) === workspace)
         #expect(workspace.multiplexer.layout == layout)
@@ -678,7 +674,7 @@ struct WorkNavigationTests {
         await source.replaceRoadmap(String(decoding: try JSONSerialization.data(withJSONObject: snapshot), as: UTF8.self))
         await model.refresh()
         #expect(model.selection == .task(id: "issue-review"))
-        await model.refreshPortfolio(initialRepoPath: nil)
+        await model.applyPortfolio([], initialRepoPath: nil)
         #expect(model.selection == .task(id: "issue-review"))
         model.setRepoPath("/src/context")
         model.setRepoPath("/src/loopflow")

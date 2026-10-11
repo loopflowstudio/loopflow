@@ -52,16 +52,18 @@ struct PortfolioServiceTests {
         #expect(service.selection == (try await query.portfolio()))
     }
 
-    @Test func delayedReadingCannotRestoreRemovedMembership() async {
+    @Test func mutationWaitsForPendingReading() async {
         let transport = DelayedPortfolioReading()
-        let model = WorkModel(query: RegistryQuery { _, _ in await transport.read() })
-        let earlier = Task { await model.refreshPortfolio(initialRepoPath: nil) }
+        let service = PortfolioService(query: RegistryQuery { _, _ in await transport.read() })
+        let earlier = Task { await service.refresh() }
         while !(await transport.isWaiting) { await Task.yield() }
-        await model.refreshPortfolio(initialRepoPath: nil)
+        let removal = Task { await service.perform(["remove", "/removed/repo"]) }
         await transport.release()
         await earlier.value
-        #expect(model.portfolioError == nil)
-        #expect(model.repos.isEmpty)
+        await removal.value
+        #expect(service.error == nil)
+        #expect(service.repos.isEmpty)
+        #expect(!service.isPending)
     }
 
     @Test func sharedFixtureDecodes() throws {
@@ -141,9 +143,11 @@ private actor PortfolioTransport {
 
 private actor DelayedPortfolioReading {
     private var continuation: CheckedContinuation<String, Never>?
+    private var reads = 0
     var isWaiting: Bool { continuation != nil }
     func read() async -> String {
-        if continuation != nil {
+        reads += 1
+        if reads > 1 {
             return #"{"configured":true,"mode":"manual","root":"/src","repos":[],"error":null}"#
         }
         return await withCheckedContinuation { continuation = $0 }

@@ -57,7 +57,7 @@ struct RepoView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .foregroundStyle(palette.text)
-            if let error = model.portfolioError {
+            if let error = portfolioService.error {
                 Text(error).font(.caption).foregroundStyle(palette.textSecondary)
                     .textSelection(.enabled).padding(Spacing.sm)
             }
@@ -96,15 +96,16 @@ struct RepoView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             Task {
                 await portfolioService.refresh()
-                await model.refreshPortfolio(initialRepoPath: initialRepoPath)
+                if portfolioService.error == nil {
+                    await model.applyPortfolio(portfolioService.repos, initialRepoPath: initialRepoPath)
+                }
                 await model.rereadDefinitions()
             }
         }
-        .task {
-            await portfolioService.refresh()
-            await model.refreshPortfolio(
-                initialRepoPath: initialRepoPath
-            )
+        .task { await portfolioService.refresh() }
+        .task(id: portfolioService.selection) {
+            guard let selection = portfolioService.selection, selection.error == nil else { return }
+            await model.applyPortfolio(portfolioService.repos, initialRepoPath: initialRepoPath)
         }
         .task { await model.keepWorkCurrent() }
         .onChange(of: model.workScope) { _, _ in model.syncWorkScope() }
@@ -115,13 +116,6 @@ struct RepoView: View {
             defer { CIWatchers.shared.close(repo) }
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(3600))
-            }
-        }
-        .onChange(of: portfolioService.repos.map(\.path)) { _, _ in
-            Task {
-                await model.refreshPortfolio(
-                    initialRepoPath: initialRepoPath
-                )
             }
         }
     }

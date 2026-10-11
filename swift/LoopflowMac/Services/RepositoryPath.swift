@@ -3,8 +3,6 @@
 import Foundation
 
 struct RepositoryPath {
-    var fileManager: FileManager = .default
-
     /// Collapse a Git working-tree root to its main worktree.
     ///
     /// Non-repositories and plain subdirectories return nil. A linked worktree
@@ -65,5 +63,4 @@ struct RepositoryPath {
     private func isDirectory(_ url: URL) -> Bool {
         (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
     }
-
 }

@@ -630,8 +630,9 @@ Linear acquisition commits observations with Work; projection uses retained IDs.
 Ordering takes local IDs; new disposition receipts keep state evidence only. Rejected
 membership must retain its dispute marker even when Work acceptance rolls back.
 Concrete Linear bindings are separate from repository transport selection.
-Populated conversion and rollback proof belongs to the plan. Typed values alone
-are not a typed journal: field-addressed mutations still require reduction.
+Populated fixtures prove stored Session/control preservation, not provider control.
+Typed values are not a typed journal; concrete owners must replace the remaining
+SQLite observation/projection module, not rename it.
 Jack Heart excludes old-version support; an unshipped Git encoding needs no dual
 decoder. Released SQLite preservation and selected-format causal history remain
 separate obligations. No configured old-ref conversion need was established.

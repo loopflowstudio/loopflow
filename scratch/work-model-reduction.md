@@ -194,8 +194,10 @@ ranges. Whole-model `reconcile<T>` is deleted: Project and Task acquisition now
 reconcile the typed edits passed to the common writer. An explicit Linear field
 mapping limits receipt settlement to supplied fields; provider models are no longer
 serialized, patched and reconstructed. Task membership uses canonical Project IDs.
-Composed prose proof is now recorded above; the private-observation boundary and
-provider-cache reduction remain incomplete.
+Composed prose proof is recorded above. `dac4cb1ba6` confines fetched-model
+acceptance to Linear; `06e95d98fe` removes the generic PM facade. The remaining
+SQLite observation/projection owner and duplicate receipt translation belong to
+the typed-writer cut; adapter confinement is no longer outstanding.
 
 Remaining: remove parallel edit structures that only rename the same values
 (`name`, `issue_title`, `TaskTitle`, for example), receipt string-field addressing
@@ -272,7 +274,7 @@ and chapter rotation; execution admission and sorted planning locks remain.
 
 **Locations:** `store/planning_sync.rs`, `ops/planning_delivery.rs`, `ops/planning_export.rs`,
 `sqlite/planning_sync.rs`, `sqlite/planning_export.rs`, `sqlite/planning_order.rs`,
-`ops/linear_observe.rs::PlanningSync`.
+`ops/planning_sync.rs::PlanningSync`.
 
 Root `planning.rs` is removed: `NewTask` belongs to `work/task`, Linear IDs and
 `LinearBindingError` to `linear`, and receipt/status types to `store/planning_sync`.
@@ -280,6 +282,11 @@ No compatibility reexports remain. Remove redundant content copies used for disp
 duplicate field translation. Keep immutable creation inputs where an uncertain
 external effect really needs them. PlanningSync, store opening and Wave locks now belong to
 `ops/planning_sync.rs`; Linear observation no longer owns Git exchange.
+
+`store/sqlite/planning.rs` still combines observation invalidation, accepted-revision
+eligibility and retained-ID Work projection. Jack Heart expects this module to
+disappear too. Its responsibilities need concrete owners during the writer cut,
+with duplicate translation deleted; moving the file alone does not satisfy it.
 
 Do not unify creation, comments, ordering, deletion and disposition into a new
 universal effect lifecycle merely for symmetry. Their existing receipts,
@@ -352,8 +359,8 @@ current docs, authored goals and surviving fixtures use those fields. Historical
 SQL/captures and the one-time `pm.linear_project` selection import retain bytes.
 Reteam still confirms remote ownership and preserves delayed observations, but no
 longer commits unrelated checkout edits to remove obsolete configuration sentinels.
-Provider-shaped acquisition APIs and the remaining PM hierarchy are still required
-cuts; this binding deletion does not establish adapter confinement.
+Provider-shaped acquisition APIs are removed (§3). The remaining receipt/writer
+hierarchy still requires reduction; concrete bindings alone did not establish it.
 
 The existing pass owns cron unification: one list of ordinary scheduled commands,
 existing parser for scope filtering, no parallel Wave-specific cron interpretation.

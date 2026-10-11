@@ -181,7 +181,9 @@ The duplicate global issue resolver is removed. Git lookup misses cannot select
 Linear, and Linear refresh skips unmapped local Projects without changing them.
 Existing credential fencing, receipt recovery, lock names and refresh ages remain.
 
-Remaining: target-bearing typed edits/journal, ordinary follow-ups and one cron list;
+`dac4cb1ba6` completed the public acquisition API cut; `06e95d98fe` removed the
+PM facade. Supplied feedback based on `b6df256d0f` predates both. Remaining:
+target-bearing typed edits/journal, ordinary follow-ups and one cron list;
 materialized/headless affected gate and fresh +/- HTML review before review-only
 republication. Populated Session/attachment preservation is covered below. Concrete adapter naming alone does not
 finish the remaining writer/delivery hierarchy. No installation was performed.
@@ -287,6 +289,11 @@ and causal/losing values remain required. Record creation no longer
 reconstructs a generic JSON field map. The target-bearing edit/journal, provider
 hierarchy, follow-ups and cron cuts remain required.
 
+The surviving `store/sqlite/planning.rs` still mixes observation invalidation,
+accepted-revision eligibility and Work projection. Its removal is part of the
+writer reduction, preserving those responsibilities under concrete owners and
+deleting duplicate translation, not a standalone relocation.
+
 Cron conversion must retain the installed owner independently of file location.
 Release's October 5 memory records both jobs installed under Infrastructure,
 including the release definition authored in the child; changing the list cannot
@@ -319,6 +326,6 @@ Earlier focused proof: `9dbd6fc2d8`, `dfd3b80611`, `f025e9b7ab`,
 `dfa2cdafba`, `09709a05cc` in this plan. Typed journal,
 follow-ups, cron, gate and review still precede republication.
 
-Prior checks and fixture limits: `1930805f40` at this path. Current command/result: `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo build -p loopflow --bin lf` pass; LF-cleared/headless `cargo nextest run -p loopflow --lib` filters Linear/local planning (181) and writer/chapter (10) pass. Nextest marked the pure `unreviewed_backlog_remains_while_started_work_moves` test leaky; it creates no child or I/O, so no fixture-owned handle repair is identified. Retain this runner observation for gate; no retry or timeout change was added. Final populated migration/import and selected-Git-miss checks pass (3). Full gate follows the audit.
+Prior checks and fixture limits: `1930805f40` at this path. Current command/result: `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo build -p loopflow --bin lf` pass; LF-cleared/headless `cargo nextest run -p loopflow --lib` filters Linear/local planning (181) and writer/chapter (10) pass. Nextest marked the pure `unreviewed_backlog_remains_while_started_work_moves` test leaky; it creates no child or I/O, so no fixture-owned handle repair is identified. Retain this runner observation for gate; no retry or timeout change was added. Final populated migration/import and selected-Git-miss checks pass (3). October 11 prose reconciliation: `git diff --check` passes; `lf context` confirms both budgets fit; unchanged source checks reused. Full gate follows the audit.
 
 Transport evidence: `0181133849` at this path; earlier simulated adoption: `5960415b3:scratch/remote-task-demo.md` (not real SSH or integrated acceptance).

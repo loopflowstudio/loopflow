@@ -1,481 +1,232 @@
 # Session steer subscriptions
 
-Task `lf-9c03797`, 2026-10-11. Jack Heart accepted the Session-only primitive and
-wrappers for pursuit (“ok, pursue”). After the stopped Flow reported the Codex
-handoff and OpenCode boundary gaps, Jack Heart renewed pursuit (“pursuse!”).
-The working branch replaces event-backed launch/live injection with immutable
-publications, bounded Session delivery and receipt-backed provider callbacks.
-The indivisible cutover is implemented locally; verification and review below
-remain required before publication.
+Task `lf-9c03797`, 2026-10-11. Jack Heart accepted Session-only delivery with
+repository/Work wrappers (“ok, pursue”), then renewed pursuit after the provider
+gaps (“pursuse!”). One indivisible PR replaces publication, launch seeding and
+live injection together. The replacement is implemented locally; authored review
+and gate/CI acceptance remain. No product approval is missing.
 
-## Current implementation — reconciled 2026-10-11
+## Remaining work
 
-Publication writers preserve local comment and Linear acquisition transactions,
-stable source/revision keys, known names and historical unresolved attribution.
-One migration converts Task/Project direction and nested TaskObserved copies,
-including orphaned historical copies, while retaining planning receipts.
-Scope derives from existing Task checkout/explicit associations and Wave ancestry.
-Repository/Wave commands report Machine-local publication and unavailable exchange.
+- Gate runs affected suites and automated acceptance once. Configured
+  Codex/OpenCode and native-model acceptance remain unproved. Protocol stand-ins
+  establish transport and receipt behavior, never model acceptance.
+- Review/demo exercises the experience below. No follow-up Tasks or separate
+  cutover PRs are selected. Repository/Wave exchange remains explicitly unavailable;
+  existing remote routing selects the destination Machine's Session store.
+- SwiftPM's nested sandbox could not start in the previous step. The changed
+  author model compiled and round-tripped independently; CI owns the full suite.
 
-Startup, tool and continuation callbacks reserve at most eight revisions within
-the existing 10,000-byte context owner. Full immutable source files cover selected
-excerpts; paginated Session status exposes pending counts, capability observations,
-receipt evidence and explicit retry. Source revisions and association changes
-cancel prepared batches before output. An exclusive nonblocking Session fence
-proves that no emitter holds a prepared reservation; it does not infer death from
-age. Uncertain/emitted attempts never automatically replay.
+The complete prior design, provider-source findings and dated implementation
+account are preserved at
+`0d04805ab35f2ba0ee4d72dec3cc9caa1d1aa051:scratch/session-steer-subscriptions.md`.
+That account is evidence, not configured acceptance.
 
-Deleted: Flow node cursors and `--steers-after`, TaskInput steer polling and seed
-receipts, live steer injection, inline event bodies, the old event-backed readers,
-and prompt-component steer attribution. The saved Task brief contains no consumed
-direction. Interrupt polling and attached-client input remain.
+## Accepted behavior
 
-Remaining work is the authored review and gate/CI's affected suites and
-configured-provider acceptance. Local focused verification passes. No full model-acceptance claim is made:
-current callbacks report local emission as unconfirmed.
+Publish authored repository, Wave, Task or direct Session direction for delivery
+at the next supported provider boundary. A Session receives its scope and
+ancestors, never siblings or parents. Taskless Sessions receive repository and
+direct direction. Existing Rust checkout/explicit associations and Wave ancestry
+own matching; no second Work tree or Session registry.
 
-Main's #1518/#1521 already supply checkout-based context refresh and a rendered
-10,000-byte hook ceiling; extend that owner rather than adding another budget or
-context reader. Main's #1524 preserves Codex live handoff while Claude/OpenCode
-stop and resume native history. Neither change resolves callback authority.
-Helper tests cannot establish public launch/hook dispatch or configured provider
-acceptance.
+Each Session receives direction independently. Publishing starts no turn, worker,
+replacement conversation or terminal input. Idle Sessions stay idle. A new
+Session or newly added association receives existing applicable, nonsuperseded
+publications through the same bounded seed. Leaving and re-entering a scope does
+not replay emitted history. Resume, compaction and provider replacement preserve
+receipts; a new Flow-step Session has its own receipts.
 
-Integrated #1522 (`6016eca305`) now routes headless Claude through the shared
-harness and records correlated native answers for Flow decisions. Steering uses
-that owner; the deleted batch launcher and transcript-answer fallback stay deleted.
-`ClaudeHarness::send_input` combines non-query skill context and the correlated
-query into one fenced seed write. It still calls `ensure_process` before that
-write, and replacement there still updates the AgentProcess. The startup cycle
-and identity activation obligations therefore survive this merge. The public
-startup fixture must preserve both seed records, native identity and Flow answer
-correlation, including after replacement; a small single-message probe is insufficient.
+Routine agent progress stays excluded. Authored history, names, immutable source
+revisions, planning conflicts and outbound Linear receipts survive. Unknown
+historical attribution remains unresolved, never inferred from the account owner.
+Linear publication and local hook emission establish neither model reading nor
+compliance. This work is separate from LOO-427's Desktop/CLI changes.
 
-## Startup fence counterexample — 2026-10-11
+## Data and public surface
 
-The proposed synchronous startup emitter cannot acquire the existing **exclusive**
-Session attachment lock while the launching client holds it to send the first input.
-Claude 2.1.296 runs `SessionStart` before consuming stream-json stdin. Under that
-legal ordering, the hook waits for the client, the client waits for stdin drainage,
-and `harness/dispatch.rs::write_fenced` reaches its two-second deadline.
-`harness/claude.rs::send_input` then treats the partial seed as failed and tears down
-the provider. Extending the timeout does not remove the cycle.
-
-The [reproducer](claude-startup-fence.py) starts the installed Claude executable with
-a disposable Home/config, synthetic fixture authentication and a loopback model
-endpoint. Its startup hook takes the same OS `flock` exclusion as the proposed
-emitter; the parent holds that exclusion while writing the first stream-json input.
-The 131,133-byte input wrote only 512 bytes before two seconds elapsed. A separate
-4,194,365-byte probe also wrote only 512 bytes. The hook marker appeared before any
-stdin was sent. This proves the configured provider ordering and the proposed
-lock cycle; it does not claim an existing production regression, successful model
-delivery, or a complete public `lf` launch test.
-
-**Draft authority revision:** attachment mutation keeps exclusive exclusion;
-provider context output and native input dispatch need compatible read-side
-exclusion, or an explicit startup protocol that completes before fenced input.
-The read-side option needs an audit that each transport already serializes its own
-writes, and proofs that takeover cannot cross either write. No choice is established
-by the receipt tests. Simply emitting after dropping the fence is invalid: a
-replacement could take authority before the output is exposed. Startup identity
-activation also needs its own proof: Claude can replace the AgentProcess inside
-`ensure_process`, after harness configuration was built; an adapter installed only
-before `Harness::start` becomes stale on that path.
-
-At the withdrawn attempt, dependent cutover stopped. Production Rust and tests
-were restored to `a839b8fad2`, retaining all old delivery paths together. The withdrawn experimental diff is preserved
-at `0ffdb9c04acdca129767b0e45719e6f00390bed2:scratch/session-steer-subscriptions.patch.gz`,
-based on `a839b8fad2`. It remains historical evidence in Git. That withdrawn diff
-lacked Work wrappers, source revision keys, native bootstrap, OpenCode integration,
-prepared recovery, complete migration preservation and public adapter proofs.
-Four draft receipt tests passed (idle pending/one emission, uncertain write/explicit
-retry, render failure, and provider handoff/replacement); they do not establish the
-provider cutover. No migration touched the installed store.
-
-The replacement below resolves that counterexample before old-path removal.
-Its public fixture forces startup/input overlap and preserves the complete seed;
-the dispatch race holds takeover through both sides of the exchange.
-
-## Shared startup exclusion — implementation evidence, 2026-10-11
-
-The working change separates shared transport exclusion from exclusive provider
-lifetime changes. Claude owns its stdin through `&mut self`; Codex's writer queue
-and connection proxy each own their socket. Their bounded writes now use
-`with_session_dispatch`; spawn, stop, replacement and attachment changes keep
-`with_session_attachment` and its exclusive fence. OpenCode's serialized HTTP submission uses the same
-bounded shared dispatch fence.
-
-The public `session_steers` launch fixture invokes an external Claude skill with
-150,000 UTF-8 bytes of clipboard context. Its stand-in waits for input to become
-readable without draining it, then takes shared hook exclusion and invokes the
-real context command. It verifies the complete non-query context, correlated
-query, native identity and retained answer. This is a protocol transport proof:
-the fixture forces overlap and invokes production provider-bound hook exclusion.
-It also resumes the Task-associated Session with a fresh AgentProcess and verifies
-that the new capability names it, while preserving native identity and distinct
-answer correlation. It now includes oversized Unicode direction, checks the combined
-rendered ceiling, and verifies that resume does not replay the emitted revision.
-The dispatch race fixture proves takeover waits for both shared writers and the
-former claim cannot dispatch afterward.
-
-The configured Claude 2.1.296 probe with `--shared` accepted all 131,133 bytes
-within the existing two-second bound; the original exclusive counterexample
-remains recorded above. Neither probe contacts a real model endpoint.
-
-### Provider capability activation
-
-The common `agent_process::{spawn,spawn_native}` functions reserve the capability
-against their frozen attachment and supply it through private `LF_PROVIDER_CONTEXT`
-immediately before the provider launch. This replaces the draft's early binding
-in saved context declarations, which missed Claude's `ensure_process` replacement
-and native OpenCode's earlier plugin assembly. The capability grants context
-output only; SQLite validates the selected AgentProcess and native binding under
-shared exclusion. A root startup callback activates an unbound native identity;
-subsequent callbacks must match. Child callbacks with `agent_id` are excluded before
-activation. Replacement rejects the old capability; client handoff preserves it.
-Capability reservation alone is not installation evidence; `activated_at` records
-an observed callback, not provider acceptance of its context.
-
-A public callback fixture retains the launch environment through A → B → A,
-then verifies output, child/foreign-thread rejection and replacement rejection.
-It uses a stand-in provider and the actual hook CLI/store claim APIs, not a
-configured Codex reconnect. OpenCode now generates adapter invocation UUIDs and
-refreshes each transform instead of caching consumable direction in its text;
-the protocol fixture invokes the actual receipt command from the shipped JavaScript,
-checks internal retry input reuse and a later transform without reinjection. The
-single draft also owns publications and receipts.
-
-## What to build
-
-Deliver authored repository, Wave, Task and direct Session direction through one
-durable Session subscription, at its next supported provider boundary, with bounded
-context and honest delivery evidence.
-
-## Accepted scope
-
-Infrastructure owns execution continuity and exact control authority. This is
-separate from LOO-427's Desktop/CLI changes.
-
-Jack Heart's October 11 accepted brief requires downward propagation, independent
-Session delivery, launch Task context and idle staying idle. His current request:
-“Replace the old injection paths together; make acknowledgement and provider
-limitations concrete before implementation.”
-
-The [accepted brief](../.lf/prompts/20261011-004454-11ad3078-2666-480c-aadd-d14954b69317-amVmgg-summary.md)
-supersedes exact-scope-only direction. Jack Heart's subsequent review selected
-Session-only delivery with repository and Work wrappers; no combined `SteerTarget`.
-
-This is an indivisible replacement: internal slices, one PR. Delivery ownership,
-launch seeding and old-path deletion cannot ship independently without two cursors.
-No follow-up Tasks are proposed.
-
-## Provider delivery authority — 2026-10-11
-
-Codex live handoff outlives the launch claim. `store/sqlite/processes.rs::attach_in`
-preserves `agent_process_id` when `replace_provider=false` but always creates a new
-attachment token. `harness/codex.rs::start_inner` installs the hook configuration
-on the provider thread. `harness/codex_connection.rs::serve` forwards reconnect's
-`thread/resume` with only `threadId`, deliberately removing configuration overrides.
-
-Counterexample: A launches a provider with an adapter tied to A's claim; B takes
-over the same provider; a Task steer arrives; the next tool invokes the original
-adapter. Comparing A's token with B's rejects delivery forever on that provider.
-Blindly substituting the current token instead would give an old callback new
-authority, including after A → B → A. Retiring live handoff is outside this Task
-and is explicitly excluded by Infrastructure's AgentProcess direction.
-
-Bind context delivery to the recorded AgentProcess and native conversation through
-one private launch-owned capability. Reuse existing provider provenance if it
-establishes that binding; otherwise add the capability in the Task's single
-migration. Neither caller-supplied identities nor the current attachment token
-can grant it. Attachment-only handoff preserves the capability; provider replacement
-revokes it. Reject child-conversation callbacks.
-
-Under the Session fence, validate that binding, observe the current attachment
-claim and hold exclusion through the bounded output write. Receipts record the
-provider identity and observed claim. The shared startup exclusion described above preserves that lifetime fence. This grants no attached-client input or general process-control authority.
-Prove A → B → A handoff, replacement and stale/child rejection through the public
-hook boundary. Explicit adapter rebinding is not a second delivery path.
-
-Provider contract findings that survive either choice:
-
-- Codex's published common `session_id` can name the parent for subagent hooks.
-  The pinned [0.161.0 schema](https://github.com/openai/codex/blob/rust-v0.161.0/codex-rs/hooks/src/schema.rs)
-  includes optional `agent_id` on `PostToolUse` and `UserPromptSubmit`; filtering
-  solely by Session ID would consume the parent's receipts from a child. Pin a
-  parent/child fixture using that field before enabling delivery.
-- OpenCode [1.18.33's plugin contract](https://github.com/anomalyco/opencode/blob/v1.18.33/packages/plugin/src/index.ts)
-  passes an empty input to `experimental.chat.messages.transform`, not a request
-  ID. Its [prompt loop](https://github.com/anomalyco/opencode/blob/v1.18.33/packages/opencode/src/session/prompt.ts)
-  creates the new assistant message separately from the supplied history, then
-  calls the transform before `handle.process`. Its
-  [processor](https://github.com/anomalyco/opencode/blob/v1.18.33/packages/opencode/src/session/processor.ts)
-  retries the resulting stream input internally. A callback identifier cannot
-  be labelled a provider request identity. Use a locally generated adapter invocation
-  ID, explicitly named as such, for the delivery attempt. Session/publication
-  receipts, not a supposed provider request ID, prevent reselection. Internal
-  provider retries reuse the transformed input; a later callback does not append
-  an emitted publication again. A lost transform remains emitted/unconfirmed under
-  the reviewed retry policy. Pin that behavior in a protocol fixture; source
-  inspection alone proves no configured delivery.
-
-## The demo
-
-Run two conversations on one Task, a sibling Task conversation, a parent Wave
-conversation and a taskless Session. Keep one idle. Publish a repository steer,
-a parent Wave steer, a Task steer and a direct Session steer. Continue through a
-tool in each active conversation: each receives precisely its applicable direction,
-with author and source. The idle conversation starts nothing; its next ordinary
-continuation receives pending direction. Inspect per-Session evidence, then resume
-and compact: neither operation continually replays old steers. Repeat with a
-failed tool and an oversized Unicode message; complete source remains readable.
-
-## Data structures and ownership
-
-Use existing `RepoId`, `WaveId`, `TaskId`, `LfSessionId` and the Rust Session/Work
-association resolver. No second hierarchy or Session registry.
-
-- `SteerPublication`: stable UUID, source identity/revision, author,
-  exact text and local acquisition sequence. This is the immutable published
-  revision of direction; comments retain their mutable planning thread and sync
-  receipts. Unique source/revision prevents reacquisition echoes. No timestamp
-  cursor or equality-by-body deduplication. Source ownership stays with the
-  existing repository, Work or Session record; it is not a delivery target enum.
-- `SessionSteerSubscription`: one row keyed by Session, with association revision
-  and activation evidence. Scope is derived, never another editable membership list.
-- `SteerDelivery`: Session, publication, batch/attempt, provider conversation,
-  attachment claim, boundary key, rendered payload hash and evidence. Unique
-  `(Session, publication, attempt)`; explicit retry creates another attempt.
-
-One migration draft against the released frontier adds publication and delivery
-storage and converts historical Task/Project steer events to stable publications.
-Keep event IDs and authored history through references to migrated publications;
-remove duplicate event bodies/readers after consumer cutover. Unrelated event kinds
-and Linear receipts survive. Historical records without a structured source retain
-their complete text and deterministic origin key; do not parse attribution out of
-prose or invent correspondence with a comment. New writers record source keys.
-
-Task comment save/acquisition (`store/sqlite/task_comments.rs`,
-`ops/linear_observe.rs`) publishes qualifying revisions in its existing transaction,
-preserving outbound Linear receipts. Those receipts prove planning publication,
-not provider-context acceptance. Definition edits acquired by
-`store/sqlite/children.rs` also publish direction with stable source/revision keys.
-A newer adopted comment revision supersedes pending older revisions from that
-source, retaining both; already emitted revisions remain history and the correction
-is new direction. Progress markers remain excluded.
-
-## Publication and matching
-
-The primitive is `steer_session(session, publication)`: idempotently make one
-publication pending for one durable Session. Repository and Work commands are
-thin wrappers over existing association resolution and this primitive. They save
-direction with its source owner and resolve affected Sessions; they do not create
-relay conversations or require an operator Session to propagate direction.
-Preserve historical Project direction in reads; adding Project publication is
-outside the accepted scope.
-
-Proposed public commands extend existing owners: `lf comment <task> ... --steer`,
-`lf wave comment <wave> ... --steer`, `lf repo comment ... --steer`, and
-`lf session steer <session> ...`. Resolve names through existing selectors.
-Return publication identity and saved status immediately; publishing starts no
-turn. `lf session steers <session> --json` exposes pending/emitted/confirmed and
-capability evidence; `lf session steers <session> --retry <publication>` requests
-another delivery attempt, without waking the Session.
-
-At launch and each boundary, the wrapper reconciles direction from the Session's
-current applicable Task, Wave ancestors and repository through `steer_session`.
-This catches new associations and interrupted publication fan-out without a worker.
-Direct Session commands use the primitive immediately. Match publication IDs, so a steer
-reached through multiple associations appears once. Nothing propagates upward or
-sideways. Repository-less Sessions still receive direct direction. Unknown ancestry
-is reported; it never broadens scope to all Work.
-
-Reviewed backlog default: a new Session or newly added association receives existing
-applicable, nonsuperseded direction through the same bounded seed. Existing receipts
-remain valid; leaving and re-entering a scope does not replay it. Removed-scope,
-not-yet-emitted batches are cancelled and recomputed. Emitted history never changes.
-A new Flow-step Session gets its own bounded seed; repeating within the same
-Session does not. No per-node suppression survives.
-
-## Key functions and boundary transaction
-
-```rust
-steer_session(session: LfSessionId, publication: SteerPublicationId) -> Result<()>
-steer_work(work: WorkRef, input: AuthoredSteer) -> Result<SteerPublication>
-steer_repository(repo: RepoId, input: AuthoredSteer) -> Result<SteerPublication>
-prepare_delivery(session: LfSessionId, boundary: ProviderBoundary)
-    -> Result<Option<SteerBatch>>
-record_delivery(batch: SteerBatchId, evidence: DeliveryEvidence) -> Result<()>
-session_steers(session: LfSessionId) -> Result<SessionSteerStatus>
+```sh
+lf comment TASK "keep the public name" --steer
+lf wave comment WAVE "preserve native history" --steer
+lf repo comment "retain source attribution" --steer
+lf session steer SESSION "inspect the last failure"
+lf session steers SESSION --json --limit 32
+lf session steers SESSION --after 42 --json
+lf session steers SESSION --source PUBLICATION
+lf session steers SESSION --retry PUBLICATION
 ```
 
-Direct Session publication saves its source on that Session. Repeated
-`steer_session` calls preserve pending entries and receipts; only explicit retry
-creates another attempt. Provider delivery takes a Session, never a Work target.
+The existing `lf comment` Task shorthand survives the scoped commands.
+Publication returns saved identity immediately. Repository and Wave commands
+explicitly report Machine-local persistence and unavailable shared exchange.
+Remote Session commands use existing destination routing; claims and receipts
+never enter shared planning transport. No new cross-machine bus is authorized.
 
-`prepare_delivery` serializes selection and reservation in SQLite, using the current
-attachment fence and provider conversation identity. It reserves exact publication
-IDs before rendering; concurrent callbacks cannot select them again. Duplicate
-boundary callbacks return no second payload. Rendering/filesystem failure before
-emission releases the reservation. Do not hold a transaction across provider I/O.
+`SteerPublication` owns UUID, local sequence, source/revision key, author and exact
+text. Unique source/revision prevents reacquisition echoes; equal text or time
+is not identity. A correction supersedes pending older revisions of its source;
+already emitted revisions remain history and the correction is new direction.
 
-Implementation decision, 2026-10-11: the synchronous startup callback prepares
-the launch batch after durable Session/AgentProcess allocation. The Task brief is
-assembled independently beforehand and contains no steer bodies. This avoids a
-second launch reservation before native identity exists, preserves the oversized
-combined skill/query seed, and uses exactly the subsequent hook receipt path.
-Publications arriving after selection remain pending. Reference reload at
-compaction/resume cannot bypass receipts; brief, workspace, Project context and
-compact-only skill behavior remain available.
+`session_steers` owns the idempotent Session/publication association and explicit
+retry attempt. Reconciliation derives applicable publications directly from
+existing Work membership. A set-based insert implements the Session-only primitive;
+publication wrappers and callbacks share it. No editable membership list exists.
+The unused public `steer_session` wrapper and write-only
+`session_steer_subscriptions` table are removed: its association JSON and activation
+time had no readers, while native activation already belongs to `steer_adapters`.
 
-## Acknowledgement and crashes
+`steer_batches` records provider identity, observed attachment claim, boundary,
+payload hash and evidence. `steer_deliveries` records the selected publication,
+attempt and excerpt flag. Public status pages expose pending counts and adapter
+observations without materializing the whole backlog.
 
-Evidence means exactly:
+Task comment save/acquisition and definition adoption publish inside their existing
+planning transaction. The single migration draft converts historical Task/Project
+steer events and nested TaskObserved copies to publication references, including
+orphaned copies, while retaining complete text and planning receipts. Historical
+Project direction stays readable; new Project publication is outside scope.
+Released migrations remain immutable. No installed store was migrated for this work.
+
+## Provider authority and startup exclusion
+
+The capability belongs to the selected AgentProcess and native conversation,
+not the launching client's attachment token. Codex's live provider survives
+A → B → A client handoff; the installed callback must survive too. Replacement
+revokes its authority. Blindly substituting the latest client claim would authorize
+stale callbacks. Removing Codex live handoff is outside this Task.
+
+`agent_process::{spawn,spawn_native}` reserves the capability against the frozen
+attachment and supplies private `LF_PROVIDER_CONTEXT` immediately before launch.
+This includes Claude's `ensure_process` replacement and native OpenCode startup.
+A root startup callback may activate an unbound native identity; later callbacks
+must match the recorded identity. Child callbacks with `agent_id` are excluded
+before activation. Capability reservation is not installation or acceptance;
+`activated_at` means an authenticated callback was observed.
+
+Provider input dispatch and context output hold shared Session exclusion through
+bounded writes. Spawn, stop, replacement and attachment mutation stay exclusive.
+Claude serializes stdin through `&mut self`; Codex's writer queue and proxy each
+own their socket; OpenCode serializes HTTP submission. SQLite transactions finish
+before transport I/O. Neither dropping the fence before output nor increasing
+its timeout can substitute for this split.
+
+The withdrawn design used exclusive input and hook fences. Claude 2.1.296 invokes
+SessionStart before draining stdin: the hook waited for the writer, the writer
+waited for drainage, and only 512 of 131,133 bytes wrote within two seconds.
+A 4,194,365-byte probe also wrote only 512 bytes. The installed-provider probe used
+a disposable Home, synthetic authentication and an unavailable loopback endpoint;
+it proved ordering, not model delivery. Its `--shared` variant wrote all 131,133
+bytes within the same bound. Preserve this counterexample.
+
+The reproducer is archived at
+`0d04805ab35f2ba0ee4d72dec3cc9caa1d1aa051:scratch/claude-startup-fence.py`.
+The withdrawn incomplete diff remains at
+`0ffdb9c04acdca129767b0e45719e6f00390bed2:scratch/session-steer-subscriptions.patch.gz`,
+based on `a839b8fad2`. Four receipt tests from that attempt proved no cutover.
+Main #1522 (`6016eca305`) supplies the shared Claude harness and native answer
+correlation; its deleted batch launcher and transcript-answer fallback stay deleted.
+
+The replacement's public `session_steers` fixture forces startup/input overlap
+without draining the combined seed, then invokes the actual hook command. It
+preserves 150,000 UTF-8 clipboard bytes, both skill/query records, native identity
+and correlated answers. Resume uses a fresh AgentProcess and capability while
+preserving native identity and distinct answer correlation. Oversized direction
+stays within the combined rendered ceiling and is not replayed on resume.
+The dispatch race proves takeover waits for both shared writers and rejects the
+former claim afterward. The handoff fixture preserves the original launch
+environment across A → B → A and rejects children, foreign native identity and
+replacement. These are public protocol proofs, not configured Codex reconnect.
+
+## Delivery transaction and bounds
+
+Startup prepares the first batch after Session/AgentProcess allocation. The Task
+brief is assembled independently and contains no steer bodies. This avoids a
+second seed reservation before native identity exists. Main #1518/#1521's context
+reader remains the sole owner of refreshed checkout files and the rendered
+10,000-byte ceiling; compact-only skill context and native history survive.
+
+A boundary validates authority, reconciles scope, reserves at most eight revisions
+in acquisition order and records the observed attachment claim. Concurrent
+callbacks cannot select the same receipt; repeated boundary IDs produce no second
+payload. Rendering materializes only selected immutable source files. Each inline
+item is capped at 1,024 bytes with UTF-8-safe excerpts, attribution and a complete
+source pointer. Combined reference/steer context stays within 10,000 rendered
+bytes. Receipts record excerpt-only delivery; pointers prove no source read.
+
+After rendering, reconcile again and cancel a prepared batch if a source revision
+or association changed. New arrivals wait for the next boundary. Rendering or
+source-write failure releases the reservation. Do not hold SQLite transactions
+across output. `emit_session_steers` returns whether it wrote a payload so the
+caller can supply ordinary reference context when no steer was emitted.
 
 | Evidence | Meaning |
 | --- | --- |
-| Saved / pending | Publication exists; no emission attempt has begun |
-| Prepared | Exact payload reserved; not yet exposed to the provider |
-| Emission uncertain | Write was about to begin or was interrupted; receipt cannot establish acceptance |
-| Emitted, unconfirmed | Hook output completed locally; provider acceptance remains unknown |
-| Confirmed in context | An owned provider input/history record contains the batch ID and matching payload hash |
+| Pending | Saved; no emission attempt began |
+| Prepared | Selected and reserved; no bytes exposed |
+| Uncertain | Write was about to begin or failed; acceptance unknown |
+| Emitted | Local output completed; provider acceptance unconfirmed |
+| Confirmed | Owned provider input/history contains batch ID and matching hash |
 
-Mark emission uncertain before the external write, then emitted after successful
-write. Crashing between these operations cannot be made exactly-once by SQLite.
-Known pre-emission failures remain pending and retry at the next boundary. The
-reviewed default for uncertain/emitted batches preserves evidence without automatic
-replay; explicit retry is available. Unsupported adapters
-must retain uncertainty rather than manufacture confirmation from exit zero, elapsed
-time, another tool call or model-generated acknowledgement. Confirmed input never
-means the model understood or followed direction.
+Mark uncertain before output and emitted afterward. No current adapter produces
+confirmed evidence. Exit zero, elapsed time, a later tool or model-generated
+acknowledgement cannot confirm acceptance. Uncertain/emitted attempts never replay
+automatically; explicit retry creates another attempt without waking the Session.
+Retry cannot select inapplicable history.
 
-Process replacement retains Session receipts. A stale attached client cannot emit
-or advance them; the surviving provider's scoped adapter uses the authority above.
-Reconcile prepared attempts only after acquiring the exclusive Session fence,
-which no active shared emitter can coexist with; age alone grants no authority. No background polling, Stop-hook
-continuation, auto-turn, replacement worker or terminal keystroke injection.
+Recovery cancels prepared reservations only after acquiring exclusive, nonblocking
+Session exclusion, proving that no shared emitter remains. Age or liveness
+inference grants no recovery authority. Emitted history survives scope changes.
 
-## Context bounds
+## Provider boundaries
 
-Use one 10,000-byte rendered budget across Loopflow's additions at a boundary,
-including escaping, attribution and source pointers. Reserve space for a short
-steer notice before reference files; the active skill remains accessible as today.
-Drain pending revisions in local acquisition order, in bounded batches. Cap inline
-items at 32; oversized items get a marked UTF-8-safe excerpt and an immutable
-complete source file. Materialize only the selected page, not the whole backlog.
-Report remaining count and a paginated source command. Receipts identify exactly
-which revisions were represented, including excerpt-only delivery; a pointer is
-not evidence that the full source was read. New direction arriving during rendering
-is eligible at the next boundary. Source-write failure consumes nothing.
-
-## Provider boundaries and limits
-
-Documentation inspected October 11; these are adapter targets, not configured proof.
-
-| Provider | Proposed active boundary | Limit / evidence required |
+| Provider | Supported adapter boundary | Retained proof limits |
 | --- | --- | --- |
-| Codex | Synchronous `PostToolUse` additional context; startup/resume/compact and ordinary user continuation share preparation | Documented tools include shell, edits and MCP; shell nonzero exit is covered. Prove nested code-mode visibility and actual enabled surface. Hook stdout alone is unconfirmed. |
-| Claude | `PostToolUse` and `PostToolUseFailure` additional context; startup/resume/compact and ordinary user continuation | Failure hooks exclude pre-execution validation rejection and cancellation. Next supported boundary remains pending. Parallel callbacks share reservations. |
-| OpenCode | Existing messages transform, before a model request after tools | Use an adapter invocation ID, not a provider request ID; receipt selection prevents reinjection. Pin retry/error behavior against 1.18.33. An ephemeral transform is not durable confirmation. |
+| Codex | Synchronous PostToolUse; startup/resume/compact and UserPromptSubmit | Exact declaration trust hashes cover each event. Published 0.161.0 `agent_id` can identify children even when `session_id` names the parent. Configured nested code-mode visibility remains unproved. |
+| Claude | PostToolUse, PostToolUseFailure, startup/resume/compact and UserPromptSubmit | Validation rejection and cancellation need not emit a failure hook; direction waits for a supported boundary. |
+| OpenCode | Messages transform before the next model request | 1.18.33 gives empty transform input, not a provider request ID. Generate an adapter invocation UUID. Internal processor retries reuse transformed input; later callbacks replace the ephemeral part without reselecting consumed receipts. Lost transforms remain emitted/unconfirmed. |
 
-Sources: [Codex hooks](https://learn.chatgpt.com/docs/hooks),
-[Claude hooks](https://code.claude.com/docs/en/hooks),
-[OpenCode plugins](https://opencode.ai/docs/plugins/).
-
-Install only Loopflow-owned launch declarations, preserving user hooks/settings.
-Extend Codex's existing exact-declaration trust hashing beyond SessionStart; no
-global trust bypass. Providers may skip unavailable/untrusted hooks: status reports
-the reason and pending count. Already-open providers without the adapter remain unavailable until a provider
-start installs the declaration. Codex attachment-only reconnect strips configuration
-overrides and cannot be treated as installation; no hot-reload or retroactive
-installation claim.
-All hooks use the provider delivery authority above; cwd never selects a Session.
-
-Remote execution uses the destination Machine's existing command routing and local
-Session store. Direct Session publication routes there; it is never planning data.
-Work publications travel only through configured shared planning transport, retaining
-source/revision identities; Session receipts and claims never synchronize. If transport
-cannot exchange a scope, report unavailable exchange. No new cross-machine bus.
+The shipped JavaScript protocol fixture invokes the real receipt command and
+covers retry-input reuse, lost transforms and later callbacks. It proves no
+configured OpenCode acceptance. Provider source findings and exact URLs remain
+in the prior design reference above. Preserve user hooks/settings and native
+titles, guide loading and compaction. No global trust bypass. Already-open
+providers without declarations need a provider start; Codex attachment reconnect
+strips configuration overrides and is not adapter installation.
 
 ## Delete — do not maintain
 
-The withdrawn patch lives only at the Git reference above; retain the startup
-reproducer until the replacement passes its public fixture. The production targets below are removed in the working replacement. Paths are
-under `rust/loopflow/src/` unless stated otherwise.
+Completed in this branch; no known production deletion target remains:
 
-- `RunningFlow.steers` and its node cursor logic in `lf/commands/flow.rs`;
-  `Cli.steers_after`, forwarding/clone code in `lf/mod.rs`, and the seed filter in
-  `lf/commands/run.rs` / `ops/task_input.rs`.
-- `ops/child.rs::inject_live_steers`; TaskInput's steer cursor, seed-through receipt
-  and five-second steer injection. Retain interrupt polling and attachment input;
-  rename the remaining timer for interrupts. Preserve other `send_current` callers.
-- Exclusive tests `store/mod.rs::live_steers_inject_new_comments_and_defer_when_not_steerable`
-  and `rust/loopflow/tests/flow_tests.rs::a_repeated_node_receives_only_task_direction_newer_than_its_last_run`.
-  Replace their behavioral coverage with independent Session receipt tests.
+- `RunningFlow.steers`, per-node cursors, `Cli.steers_after` and forwarding/seed
+  filters; exclusive repeated-node test in `tests/flow_tests.rs`.
+- `ops/child.rs::inject_live_steers`, TaskInput steer polling/cursors/seed receipts
+  and exclusive live-injection test. Interrupt polling and attached-client input
+  remain; other `send_current` callers remain valid.
 - Event-backed `task_steers`, `steers_since`, `append_steer` and
-  `append_task_steer_in` in `store/sqlite/durable.rs` and `store/durable.rs` after
-  publication migration. Cut comment/definition writers in
-  `store/sqlite/{task_comments,children}.rs` and readers in
-  `lf/commands/{activity,waves}.rs` over to the publication projection.
-  Preserve progress exclusion, ordering, author/history and conflict tests.
-- The inline author predicate in `store/sqlite/ci_incidents.rs::ci_incidents_since`
-  also reads steer event bodies. Its human-assistance projection must join the
-  publication after migration; `store/mod.rs::ci_incident_reports_find_human_help_in_task_comments`
-  retains that behavior. Nested `ProjectEventKind::TaskObserved` copies of Task
-  steer events need publication references too; changing only top-level events
-  leaves duplicate bodies and incompatible historical JSON.
-- Re-injection through saved Task summary references in `context_block.rs`;
-  split the launch steer batch from the refreshed brief. Retain file refresh,
-  compact-only skill context and native history.
+  `append_task_steer_in`; duplicate event bodies and launch prompt attribution.
+  Comment/definition writers, activity/Wave readers and CI human-assistance
+  projection consume publications. Progress exclusion and history tests survive.
+- Consumed direction in refreshed Task summary references; the refreshed brief
+  remains independent of publication receipts.
+- Write-only `session_steer_subscriptions` and unused `steer_session` entry point.
+  The draft is edited in place; no intermediate-schema migration is added.
+- Scratch startup reproducer after the public replacement fixture passed;
+  precise historical source and counterexample are retained above.
 
-## Forbidden outcomes
+## Acceptance experience
 
-Two injection mechanisms; Flow/global consumption cursors; automatically waking
-idle Sessions; applying sibling direction; promoting hook success to model-read
-proof; replaying the full thread after compact; silently dropping oversized text;
-mirrored Work ownership; using delivery to move Workflow or control a Process;
-claiming remote exchange or already-open coverage from local fixture success.
+Use two conversations on one Task, a sibling Task conversation, parent Wave and
+taskless Session; keep one idle. Publish repository, ancestor Wave, Task and
+direct Session direction. Active conversations receive exactly their applicable
+publications at supported tools, with author/source; idle starts nothing and gets
+pending direction on ordinary continuation. Inspect per-Session receipts, then
+resume and compact without replay. Exercise failed tools, Unicode/backlog bounds,
+concurrent/duplicate callbacks, pre/post-write failures, explicit retry, replacement,
+association/ancestry changes, revision deduplication and released-frontier history.
 
-## Internal slices
+Headless fixtures use disposable stores, cleared inherited `LF_*` and fixture
+`LF_BIN` inside the network boundary. Gate owns broader Flow/lib suites, remote
+routing, unavailable/untrusted/open-provider cases and configured acceptance;
+review owns the real experience. Never report unavailable checks as passes.
 
-1. Resolve startup exclusion/identity and prove provider-bound emission and OpenCode
-   adapter invocation identity alongside the publication/receipt transaction and released-frontier
-   migration; cut launch seeding over and delete old Flow/live-injection ownership
-   together. Include minimal provider consumers so removal does not strand delivery.
-2. Complete all provider boundary adapters, exact trust and status/retry surfaces;
-   prove races, process replacement, backlog and bounded source access.
-3. Exercise public CLI/provider fixtures; update `docs/architecture/planning.md`,
-   `docs/architecture-reference.md` and steering/context command documentation.
-   No separate PR or compatibility period between slices.
-
-Review repairs: cancel superseded/removed-scope batches before output, keep retries
-from selecting inapplicable history, preserve nested migration copies and CI-help
-reads, record excerpt evidence, and retain the established `lf comment` Task
-shorthand after adding scoped comments. No replacement path remains alongside
-the deleted injection owners.
-
-## Done when
-
-Add a headless `session_steers` integration target. With inherited `LF_*` removed,
-disposable stores and fixture `LF_BIN` pinned inside the fixture network boundary:
-
-```sh
-cargo test -p loopflow --test session_steers < /dev/null
-cargo test -p loopflow --lib < /dev/null
-cargo test -p loopflow --test flow_tests < /dev/null
-cargo fmt --check
-cargo clippy --all-targets -- -D warnings
-```
-
-Expected: scope/ancestor matrix, independent peers, taskless/direct delivery,
-idle zero launches, launch races, concurrent/duplicate hooks, failed tools,
-pre/post-write crashes, explicit retry, resume/compact, binding/ancestry changes,
-source revision deduplication, Unicode/backlog bounds and released-frontier
-preservation all pass. Interactive and headless protocol fixtures cover all three
-adapters and unavailable/untrusted/open-process cases; remote fixtures preserve
-the planning/execution separation. Add DTO fixtures in each consuming language
-if the status shape crosses that boundary. Configured provider probes use isolated
-homes and headless fake endpoints; unavailable probes are explicitly deferred to
-capable CI, never recorded as passes.
-
-Check: `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, isolated `session_steers` (3), receipt/migration tests (8), takeover race, Task comments, CI-help, Linear observation and DTO fixtures pass; standalone Swift author-model compile/round trip passes (SwiftPM nested sandbox unavailable); full affected suites, configured Codex/OpenCode/native-model probes and authored review remain gate/CI/demo coverage.
+Check: `uv run python scripts/test_network.py cargo test -p loopflow --lib store::sqlite::steers::tests < /dev/null` (8) and `--test session_steers < /dev/null` (3), `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `lf context` pass; full Swift/configured-provider/broader acceptance remains with gate/CI.

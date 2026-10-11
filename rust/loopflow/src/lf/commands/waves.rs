@@ -554,7 +554,6 @@ fn current_wave(wave: &WaveSnapshot) -> bool {
     wave.status != WorkStatus::Abandoned && wave.retired_at.is_none()
 }
 
-/// `lf wave status [wave]` — one Wave's current plan, Tasks and Session evidence.
 /// Publication is local; Session claims and receipts never enter planning sync.
 pub fn comment(wave: Option<&str>, message: &str) -> Result<()> {
     tokio::runtime::Runtime::new()?.block_on(async {
@@ -583,6 +582,7 @@ pub fn comment(wave: Option<&str>, message: &str) -> Result<()> {
     })
 }
 
+/// `lf wave status [wave]` — one Wave's current plan, Tasks and Session evidence.
 pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {

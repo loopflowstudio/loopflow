@@ -32,7 +32,7 @@ fn fixture() -> (tempfile::TempDir, SqliteStore, SteerAdapter) {
         .unwrap();
     let adapter = store.reserve_steer_adapter("session", &claim).unwrap();
     store
-        .with_provider_context(&adapter, "native", true, |_| Ok(()))
+        .with_provider_context(&adapter, "native", true, || Ok(()))
         .unwrap();
     (home, store, adapter)
 }

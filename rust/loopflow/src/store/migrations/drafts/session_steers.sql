@@ -26,11 +26,6 @@ CREATE TABLE steer_publications (
 );
 CREATE INDEX steer_publications_task ON steer_publications(task_id, seq);
 CREATE INDEX steer_publications_wave ON steer_publications(wave_id, seq);
-CREATE TABLE session_steer_subscriptions (
-    session_id TEXT PRIMARY KEY REFERENCES agent_sessions(id),
-    association_revision TEXT NOT NULL,
-    activated_at INTEGER NOT NULL
-);
 CREATE TABLE session_steers (
     session_id TEXT NOT NULL REFERENCES agent_sessions(id),
     publication_id TEXT NOT NULL REFERENCES steer_publications(id),

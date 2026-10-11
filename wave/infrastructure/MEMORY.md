@@ -266,15 +266,13 @@ The design selects a private provider-bound capability across Codex handoff and
 local OpenCode invocation IDs, never fabricated provider request IDs. Child
 callbacks and replaced providers retain no authority; emission is not confirmation.
 
-Implementation exposed a startup lock cycle: Claude 2.1.296 invokes SessionStart
-before draining stdin. With exclusive hook and input fencing, only 512 of 131,133
-bytes wrote within dispatch's two seconds. The configured isolated probe establishes
-ordering, not a public lf launch or delivery pass. Production source was restored;
-the design retains the diff's Git reference and scratch probe. #1522 now routes
-headless Claude through the shared harness; its combined skill-context/query seed
-still uses exclusive dispatch. Native-answer capture fixes no startup exclusion or
-identity activation. Four draft receipt tests prove no cutover. Startup authority
-and provider acceptance remain unresolved in `scratch/session-steer-subscriptions.md`.
+Claude 2.1.296's exclusive startup-hook/input cycle wrote only 512 of 131,133
+bytes in two seconds. Shared dispatch plus exclusive takeover resolves it.
+`0d04805ab3` preserves oversized launch/resume, handoff, replacement/child rejection
+and OpenCode retry protocol proofs, not configured model acceptance. Old injection
+paths are deleted. Compression removes the unread subscription snapshot; receipts
+and provider activation retain observed state. The design retains contrary evidence
+and gate/CI's broader/configured acceptance: `scratch/session-steer-subscriptions.md`.
 
 ## Process-owned liveness (LOO-451, 2026-10-10)
 

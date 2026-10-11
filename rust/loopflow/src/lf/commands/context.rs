@@ -127,7 +127,7 @@ pub fn emit_block(
             adapter,
             thread,
             event == "SessionStart" || event == "OpenCodeMessagesTransform",
-            |_| {
+            || {
                 let invocation = input["tool_use_id"]
                     .as_str()
                     .or_else(|| input["adapter_invocation_id"].as_str())
@@ -138,8 +138,7 @@ pub fn emit_block(
                     "{event}:{}:{invocation}",
                     input["turn_id"].as_str().unwrap_or("")
                 );
-                let emitted = std::cell::Cell::new(false);
-                store.emit_session_steers(
+                let emitted = store.emit_session_steers(
                     adapter,
                     thread,
                     &boundary,
@@ -159,13 +158,9 @@ pub fn emit_block(
                             excerpts,
                         })
                     },
-                    |text| {
-                        write(text)?;
-                        emitted.set(true);
-                        Ok(())
-                    },
+                    write,
                 )?;
-                if !emitted.get() {
+                if !emitted {
                     write(&render("")?)?;
                 }
                 Ok(())

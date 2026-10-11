@@ -46,7 +46,7 @@ impl SqliteStore {
         adapter: &SteerAdapter,
         thread: &str,
         startup: bool,
-        write: impl FnOnce(&SessionAttachment) -> StoreResult<T>,
+        write: impl FnOnce() -> StoreResult<T>,
     ) -> StoreResult<T> {
         let _fence = self.lock_session_dispatch(&adapter.session)?;
         {
@@ -84,10 +84,7 @@ impl SqliteStore {
             )?;
             tx.commit()?;
         }
-        let claim = self
-            .session_attachment(&adapter.session)?
-            .ok_or(StoreError::NotFound)?;
-        write(&claim)
+        write()
     }
 }
 
@@ -115,7 +112,6 @@ const COLUMNS: &str = "p.id,p.seq,p.source,p.revision,p.author,p.text";
 
 /// Callers supply exactly one existing source owner; these columns are private,
 /// never a wire target or a second Work hierarchy.
-#[allow(clippy::too_many_arguments)]
 pub(super) fn publish_in(
     conn: &Connection,
     owner: (&str, &str),
@@ -166,16 +162,6 @@ pub(super) fn publish_in(
     Ok(result)
 }
 
-fn steer_session_in(
-    conn: &Connection,
-    session: &str,
-    publication: &crate::id::SteerPublicationId,
-) -> StoreResult<()> {
-    conn.execute("INSERT INTO session_steers(session_id,publication_id) VALUES(?1,?2) ON CONFLICT DO NOTHING",
-        params![session,publication])?;
-    Ok(())
-}
-
 fn reconcile(conn: &Connection, session: &str) -> StoreResult<()> {
     let exists: bool = conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM agent_sessions WHERE id=?1)",
@@ -185,6 +171,7 @@ fn reconcile(conn: &Connection, session: &str) -> StoreResult<()> {
     if !exists {
         return Err(StoreError::NotFound);
     }
+    // Membership is derived here; receipts alone retain delivery state.
     // Reuse Task inventory's association rule, including explicit binds and
     // checkout membership. UNION terminates even in malformed cyclic ancestry.
     let scopes = format!("WITH RECURSIVE member_tasks(id) AS (
@@ -199,11 +186,6 @@ fn reconcile(conn: &Connection, session: &str) -> StoreResult<()> {
          OR p.repo=(SELECT repo FROM agent_sessions WHERE id=?1))
         AND NOT EXISTS(SELECT 1 FROM steer_publications newer WHERE newer.source=p.source AND newer.seq>p.seq)
         )", super::task_work::session_tasks("s"));
-    conn.execute(
-        "INSERT INTO session_steer_subscriptions(session_id,association_revision,activated_at)
-        VALUES(?1,'',unixepoch()) ON CONFLICT DO NOTHING",
-        [session],
-    )?;
     // A revision or association change cancels the whole not-yet-written batch.
     // Its emitter checks the reservation again before exposing any bytes.
     conn.execute(
@@ -220,12 +202,13 @@ fn reconcile(conn: &Connection, session: &str) -> StoreResult<()> {
         SELECT id FROM steer_batches WHERE evidence='cancelled')",
         [session],
     )?;
-    let mut matched = conn.prepare(&format!("{scopes} SELECT id FROM applicable"))?;
-    for publication in matched.query_map([session], |row| {
-        row.get::<_, crate::id::SteerPublicationId>(0)
-    })? {
-        steer_session_in(conn, session, &publication?)?;
-    }
+    conn.execute(
+        &format!(
+            "{scopes} INSERT INTO session_steers(session_id,publication_id)
+        SELECT ?1,id FROM applicable WHERE true ON CONFLICT DO NOTHING"
+        ),
+        [session],
+    )?;
     conn.execute(
         &format!(
             "{scopes} UPDATE session_steers SET applicable=(publication_id IN applicable)
@@ -237,16 +220,6 @@ fn reconcile(conn: &Connection, session: &str) -> StoreResult<()> {
     conn.execute(&format!("{scopes} DELETE FROM session_steers WHERE session_id=?1
         AND NOT EXISTS(SELECT 1 FROM steer_deliveries d WHERE d.session_id=?1 AND d.publication_id=session_steers.publication_id)
         AND publication_id NOT IN applicable"), [session])?;
-    conn.execute(
-        &format!(
-            "{scopes} UPDATE session_steer_subscriptions SET association_revision=(
-        SELECT json_array(s.repo,
-            (SELECT json_group_array(id) FROM (SELECT id FROM member_tasks ORDER BY id)),
-            (SELECT json_group_array(id) FROM (SELECT id FROM member_waves ORDER BY id)))
-        FROM agent_sessions s WHERE s.id=?1) WHERE session_id=?1"
-        ),
-        [session],
-    )?;
     Ok(())
 }
 
@@ -338,15 +311,6 @@ impl SqliteStore {
         Ok(publication)
     }
 
-    pub fn steer_session(
-        &self,
-        session: &str,
-        publication_id: &crate::id::SteerPublicationId,
-    ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        steer_session_in(&conn, session, publication_id)
-    }
-
     pub fn session_steers(
         &self,
         session: &str,
@@ -358,13 +322,12 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         reconcile(&tx, session)?;
-        let result = tx.prepare(&format!("SELECT {COLUMNS},s.attempt,COALESCE(b.evidence,CASE WHEN s.applicable=1 THEN 'pending' ELSE 'cancelled' END),b.id,b.payload_hash,d.excerpted
+        let mut items = tx.prepare(&format!("SELECT {COLUMNS},s.attempt,COALESCE(b.evidence,CASE WHEN s.applicable=1 THEN 'pending' ELSE 'cancelled' END),b.id,b.payload_hash,d.excerpted
             FROM session_steers s JOIN steer_publications p ON p.id=s.publication_id
             LEFT JOIN steer_deliveries d ON d.session_id=s.session_id AND d.publication_id=s.publication_id AND d.attempt=s.attempt
             LEFT JOIN steer_batches b ON b.id=d.batch_id WHERE s.session_id=?1 AND p.seq>?2 ORDER BY p.seq LIMIT ?3"))?
             .query_map(params![session,after,(limit+1) as i64],|r| Ok(SessionSteerStatus { publication: publication(r)?, attempt:r.get(6)?, evidence:r.get(7)?, batch_id:r.get(8)?,payload_hash:r.get(9)?,excerpted:r.get(10)? }))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
-        let mut items = result;
         let next_after = if items.len() > limit {
             items.truncate(limit);
             items.last().map(|item| item.publication.sequence)
@@ -441,8 +404,8 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Emission completion is deliberately unconfirmed. Only owned provider
-    /// history containing the batch and hash could establish confirmation.
+    /// Returns whether a payload was written, not whether it was accepted. Only
+    /// owned provider history containing the batch and hash could confirm it.
     pub(crate) fn emit_session_steers(
         &self,
         adapter: &SteerAdapter,
@@ -450,7 +413,7 @@ impl SqliteStore {
         boundary: &str,
         render: impl FnOnce(&str, &[SteerPublication], usize) -> StoreResult<SteerContext>,
         write: impl FnOnce(&str) -> StoreResult<()>,
-    ) -> StoreResult<()> {
+    ) -> StoreResult<bool> {
         let _lock = self.lock_session_dispatch(&adapter.session)?;
         let batch = crate::id::SteerBatchId::new();
         let selected = {
@@ -468,14 +431,14 @@ impl SqliteStore {
             reconcile(&tx, &adapter.session)?;
             let duplicate: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM steer_batches WHERE agent_process_id=?1 AND boundary=?2 AND evidence!='cancelled')",params![adapter.agent_process_id,boundary],|r|r.get(0))?;
             if duplicate {
-                return Ok(());
+                return Ok(false);
             }
             let rows = tx.prepare(&format!("SELECT {COLUMNS} FROM session_steers s JOIN steer_publications p ON p.id=s.publication_id
                 WHERE s.session_id=?1 AND s.applicable=1 AND NOT EXISTS(SELECT 1 FROM steer_deliveries d
                 WHERE d.session_id=s.session_id AND d.publication_id=s.publication_id AND d.attempt=s.attempt)
                 ORDER BY p.seq LIMIT 8"))?.query_map([&adapter.session],publication)?.collect::<rusqlite::Result<Vec<_>>>()?;
             if rows.is_empty() {
-                return Ok(());
+                return Ok(false);
             }
             tx.execute("INSERT INTO steer_batches(id,session_id,agent_process_id,provider_thread,attachment_token,boundary,evidence,created_at)
                 VALUES(?1,?2,?3,?4,?5,?6,'prepared',unixepoch())",params![batch,adapter.session,adapter.agent_process_id,provider_thread,claim,boundary])?;
@@ -518,7 +481,7 @@ impl SqliteStore {
                 params![batch,hash])? == 1;
             tx.commit()?;
             if !retained {
-                return Ok(());
+                return Ok(false);
             }
         }
         write(&payload.text)?;
@@ -526,7 +489,7 @@ impl SqliteStore {
             "UPDATE steer_batches SET evidence='emitted' WHERE id=?1",
             [batch],
         )?;
-        Ok(())
+        Ok(true)
     }
 }
 

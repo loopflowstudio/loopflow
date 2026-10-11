@@ -18,20 +18,20 @@ public enum ProjectStatus: String, Decodable, Sendable, Hashable {
 }
 
 public struct ProjectPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable {
-    public let sync: PlanningSyncStatus?
+    public let sync: PlanningSyncStatus
     public let current: Bool
     public let id: String
-    public let workId: String?
+    public let linearId: String?
     public let slug: String
     public let name: String
     public let workflow: String
     public let status: ProjectStatus
-    public let metricTargets: [ChapterMetricTarget]
+    public let metricTargets: [MetricTarget]
     public let krs: [PlanningKeyResult]
 
     enum CodingKeys: String, CodingKey {
         case id, slug, name, workflow, status, krs, current, sync
-        case workId = "work_id"
+        case linearId = "linear_id"
         case metricTargets = "metric_targets"
     }
 }
@@ -77,9 +77,25 @@ public struct PlanningKeyResult: Decodable, Sendable, Identifiable, Hashable {
     public let holds: Bool
 }
 
+public struct TaskAcquisition: Decodable, Sendable, Hashable {
+    public let state: State
+    public let observedAt: Int64?
+
+    public enum State: String, Decodable, Sendable {
+        case available, invalid, removed, absent, unavailable
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case state
+        case observedAt = "observed_at"
+    }
+}
+
 public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable {
-    public let sync: PlanningSyncStatus?
+    public let acquisition: TaskAcquisition
+    public let sync: PlanningSyncStatus
     public let id: String
+    public let linearId: String?
     public let identifier: String
     public let name: String
     public let description: String
@@ -92,7 +108,8 @@ public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable 
     public let assignee: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, identifier, name, description, rank, completed, state, assignee, sync
+        case id, identifier, name, description, rank, completed, state, assignee, sync, acquisition
+        case linearId = "linear_id"
         case completedAt = "completed_at"
         case dueDate = "due_date"
         case followUpSources = "follow_up_sources"

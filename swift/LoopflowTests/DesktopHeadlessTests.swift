@@ -38,22 +38,25 @@ private final class Feed {
 @Suite("Desktop without a display")
 @MainActor
 struct DesktopHeadlessTests {
-    @Test("Git planning shows selection, unknown changes and held records without claiming convergence")
+    @Test("Git planning shows retained mutations and read failures without claiming convergence")
     func peerPlanningStatus() throws {
         let data = try Data(contentsOf: fixtures.appendingPathComponent("peer_planning_status.json"))
         let statuses = try JSONDecoder().decode([PeerPlanningStatus].self, from: data)
         let view = PeerPlanningView(reading: .unavailable(lastGood: statuses, reason: "reader exited"))
-        for text in ["Showing the last sync status", "Local changes unknown", "Local changes pending",
-                     "Selected for future root Waves", "Held task retained-task: retained projection conflict",
+        for text in ["Showing the last sync status", "Local changes pending",
+                     "Configured for this repository", "Held task retained-task: retained projection conflict",
                      "Publication: unconfirmed (attempted-publication)", "Fetched: newer-fetch",
-                     "Retained import: retained-import", "Sync status unavailable: reader exited"] {
+                     "Retained import: retained-import", "Sync status unavailable: reader exited",
+                     "Retained alternative", "\"Retained title\"",
+                     "Candidate, not confirmed", "\"Maya\"",
+                     "Mutation: comment-head"] {
             #expect(try view.inspect().find(text: text).string() == text)
         }
         let local = PeerPlanningView(reading: .available([]))
-        #expect(try local.inspect().find(text: "Future root Waves: local").string() == "Future root Waves: local")
+        #expect(try local.inspect().find(text: "No active Git planning destination").string() == "No active Git planning destination")
         let unknown = PeerPlanningView(reading: .unavailable(lastGood: nil, reason: "store unavailable"))
         #expect(try unknown.inspect().findAll(ViewType.Text.self).allSatisfy {
-            try $0.string() != "Future root Waves: local"
+            try $0.string() != "No active Git planning destination"
         })
     }
 
@@ -75,7 +78,7 @@ struct DesktopHeadlessTests {
         #expect(model.peerPlanning.value?.count == 2)
         let view = RoadmapView(model: model, onOpenWave: { _ in })
         let statusView = try view.inspect().find(PeerPlanningView.self)
-        #expect(try statusView.find(text: "Local changes unknown").string() == "Local changes unknown")
+        #expect(try statusView.find(text: "Local changes pending").string() == "Local changes pending")
     }
 
     @Test("Planning sync shows saves, uncertainty and retained losing edits, then clears settled work")

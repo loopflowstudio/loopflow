@@ -13,11 +13,11 @@ pub fn seed_unplaced_task(database: &Path, task: &Task) {
             params![
                 task.id.as_str(),
                 task.project_id.as_str(),
-                task.plan.linear_id.as_ref().map(|id| id.as_str()),
-                task.plan.identifier,
-                task.plan.title,
-                task.plan.description,
-                task.plan.pm_snapshot_synced_at,
+                task.linear_id.as_ref().map(|id| id.as_str()),
+                task.identifier,
+                task.title,
+                task.description,
+                task.pm_snapshot_synced_at,
                 task.created_at.unix_timestamp(),
                 task.updated_at.unix_timestamp(),
                 task.agent

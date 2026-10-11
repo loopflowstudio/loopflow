@@ -613,14 +613,14 @@ pub(crate) fn land_repo(
             if pr.phase() == crate::work::task::PrPhase::Merged {
                 let next = match state {
                     crate::durable::TaskState::Done => {
-                        format!("Task {} is complete.", task.plan.identifier)
+                        format!("Task {} is complete.", task.identifier)
                     }
                     crate::durable::TaskState::Abandoned => {
-                        format!("Task {} is abandoned.", task.plan.identifier)
+                        format!("Task {} is abandoned.", task.identifier)
                     }
                     _ => format!(
                         "Finish follow-through, then run lf task complete {}.",
-                        task.plan.identifier
+                        task.identifier
                     ),
                 };
                 progress.status(&format!("Pull request already merged. {next}"));
@@ -917,15 +917,10 @@ pub fn sync_planning(
 
 pub fn refresh_status(wave: Option<&str>) -> Result<String> {
     let repo = crate::repo::working_directory()?;
-    let result = crate::ops::pm::pm_show(
-        &repo,
-        &crate::ops::pm::PmShowOptions {
-            wave: planning_wave(&repo, wave)?,
-            refresh: crate::ops::pm::PmRefresh::Force,
-        },
-        &crate::ops::NullProgress,
-    )?;
-    Ok(result.wave)
+    let wave =
+        planning_wave(&repo, wave)?.ok_or_else(|| anyhow::anyhow!("Select a Wave to refresh"))?;
+    tokio::runtime::Runtime::new()?.block_on(crate::ops::pm::refresh_wave(&repo, &wave))?;
+    Ok(wave)
 }
 
 pub fn run_repo(cmd: &RepoCommand) -> Result<()> {

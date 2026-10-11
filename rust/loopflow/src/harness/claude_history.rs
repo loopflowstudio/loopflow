@@ -179,9 +179,8 @@ mod tests {
             )
             .unwrap()
             .unwrap();
-        assert!(answer.exact);
         assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&answer.text).unwrap(),
+            serde_json::from_str::<serde_json::Value>(&answer).unwrap(),
             value
         );
     }

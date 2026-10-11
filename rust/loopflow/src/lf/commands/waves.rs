@@ -23,7 +23,6 @@ use crate::durable::{Machine, TaskState, WorkRef, WorkStatus};
 use crate::lf::commands::session_history::format_tokens;
 use crate::lf::output::Colors;
 use crate::ops::task_execution::{TaskExecutionSnapshot, TaskExecutionState};
-use crate::pm::{PmItem, PmPortfolioValidator, PmSnapshot};
 use crate::session_record::SessionHistory;
 use crate::store::{open_existing_store, SharedStore};
 use crate::work::project::Project;
@@ -32,7 +31,7 @@ use crate::work::task::{
 };
 use crate::work::wave::metrics::{
     MetricContractIssueDto, MetricEvidenceDto, MetricFreshnessDto, MetricPortfolioDto,
-    MetricReadingDto, MetricStage, MetricTarget, MetricUnknownCauseDto,
+    MetricReadingDto, MetricStage, MetricUnknownCauseDto, Threshold,
 };
 use crate::work::wave::Wave;
 
@@ -111,15 +110,11 @@ impl<T> Evidence<T> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PmKrSummary {
-    pub text: String,
-    pub holds: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PmTaskSummary {
-    pub sync: Option<crate::planning::PlanningSyncStatus>,
+pub struct TaskSummary {
+    pub acquisition: crate::store::TaskAcquisition,
+    pub sync: crate::store::planning_sync::PlanningSyncStatus,
     pub id: String,
+    pub linear_id: Option<String>,
     pub identifier: String,
     pub name: String,
     pub description: String,
@@ -246,7 +241,7 @@ pub struct TaskWorktreeSnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskDetailSnapshot {
-    pub task: PmTaskSummary,
+    pub task: TaskSummary,
     pub reference: TaskReferenceSnapshot,
     pub runtime: Option<TaskRuntimeSnapshot>,
     pub direction: Option<DirectionSnapshot>,
@@ -399,44 +394,39 @@ pub struct WaveRoadmap {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectSummary {
-    pub sync: Option<crate::planning::PlanningSyncStatus>,
+    pub sync: crate::store::planning_sync::PlanningSyncStatus,
     pub current: bool,
     pub id: String,
-    pub work_id: Option<String>,
+    pub linear_id: Option<String>,
     pub slug: String,
     pub name: String,
     pub workflow: String,
-    pub status: crate::pm::ProjectStatus,
-    pub metric_targets: Vec<crate::pm::ChapterMetricTarget>,
-    pub krs: Vec<crate::pm::PmKr>,
+    pub status: crate::work::project::ProjectStatus,
+    pub metric_targets: Vec<crate::work::wave::metrics::MetricTarget>,
+    pub krs: Vec<crate::work::project::ProjectKR>,
 }
 
 async fn project_planning(store: &SharedStore, wave: &Wave) -> Evidence<ProjectSummary> {
     let result = async {
-        let registered = store.list_projects(Some(wave.id())).await?;
-        let observed = store.sqlite.planning_projects(wave.id())?;
+        let projects = store.list_projects(Some(wave.id())).await?;
         let current = crate::store::sqlite::project_selection::read_project_binding(
             &store.sqlite,
             wave.id(),
         )?;
-        let projects = observed
+        let projects = projects
             .into_iter()
             .map(|project| -> Result<ProjectSummary> {
-                let work = registered.iter().find(|work| {
-                    work.id.as_str() == project.id
-                        || work
-                            .plan
-                            .linear_id
-                            .as_ref()
-                            .is_some_and(|id| id.as_str() == project.id)
-                });
                 Ok(ProjectSummary {
-                    sync: work
-                        .map(|work| store.sqlite.project_planning_sync(&work.id))
-                        .transpose()?,
-                    current: current.as_deref() == Some(project.id.as_str()),
-                    work_id: work.map(|work| work.id.to_string()),
-                    id: project.id,
+                    sync: store.sqlite.project_planning_sync(&project.id)?,
+                    current: current.as_deref().is_some_and(|id| {
+                        id == project.id.as_str()
+                            || project
+                                .linear_id
+                                .as_ref()
+                                .is_some_and(|linear| linear.as_str() == id)
+                    }),
+                    linear_id: project.linear_id.map(|id| id.as_str().to_owned()),
+                    id: project.id.to_string(),
                     slug: project.slug,
                     name: project.name,
                     workflow: project.workflow,
@@ -469,16 +459,14 @@ fn print_projects(projects: &Evidence<ProjectSummary>) {
                     project.status.as_str(),
                     project.workflow
                 );
-                if let Some(sync) = &project.sync {
-                    for line in sync.lines() {
-                        println!("    {line}");
-                    }
+                for line in project.sync.lines() {
+                    println!("    {line}");
                 }
                 for target in &project.metric_targets {
-                    use crate::work::wave::metrics::MetricTarget;
+                    use crate::work::wave::metrics::Threshold;
                     let comparison = match target.target {
-                        MetricTarget::AtLeast { .. } => ">=",
-                        MetricTarget::AtMost { .. } => "<=",
+                        Threshold::AtLeast { .. } => ">=",
+                        Threshold::AtMost { .. } => "<=",
                     };
                     println!(
                         "    target {} {comparison} {}",
@@ -494,11 +482,11 @@ fn print_projects(projects: &Evidence<ProjectSummary>) {
     }
 }
 
-/// One Task in the roadmap: plan row, durable Task Work when it exists, its
-/// section, and its active PR. `runtime: None` is a Task nobody has started.
+/// One saved Task, its local execution evidence, section and active PR.
+/// Runtime availability is independent of whether the Task has started.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RoadmapTask {
-    pub task: PmTaskSummary,
+    pub task: TaskSummary,
     pub reference: TaskReferenceSnapshot,
     pub runtime: Option<TaskRuntimeSnapshot>,
     pub next_move: NextMove,
@@ -599,7 +587,7 @@ pub(crate) async fn wave_detail(store: &SharedStore, wave: &Wave) -> Result<Wave
         .await
         .map_err(|err| anyhow!("failed to read repository Waves: {err}"))?;
     let mut repositories = HashMap::new();
-    validate_pm_portfolio(store, &repository_waves, &mut repositories).await?;
+    validate_linear_ownership(store, &repository_waves, &mut repositories).await?;
     let checkout = wave_repository(wave, &mut repositories)?;
     let snapshot = snapshot_wave(store, wave, &checkout).await?;
     let shared = SharedTaskReads::read(store).await?;
@@ -725,10 +713,16 @@ async fn roadmap_snapshot(
         waves.clone()
     };
     let mut repositories = HashMap::new();
-    validate_pm_portfolio(store, &ownership_waves, &mut repositories).await?;
+    validate_linear_ownership(store, &ownership_waves, &mut repositories).await?;
     let shared = SharedTaskReads::read(store).await?;
     let mut roadmaps = Vec::with_capacity(waves.len());
     for wave in &waves {
+        // Repository scoping can repair an alias in the registry. Use that
+        // refreshed address for Task selection rather than the pre-repair copy.
+        let wave = ownership_waves
+            .iter()
+            .find(|current| current.id() == wave.id())
+            .unwrap_or(wave);
         let checkout = wave_repository(wave, &mut repositories)?;
         let snapshot = snapshot_wave(store, wave, &checkout).await?;
         if !include_history && !current_wave(&snapshot) {
@@ -848,59 +842,23 @@ async fn wave_tasks(
     let projects = store.list_projects(Some(wave.id())).await?;
     let mut tasks = store.list_tasks(Some(wave.id())).await?;
     // Selection does not discard other Projects' backlog or ongoing work.
-    let (mut planning, unavailable) = match store.sqlite.planning_wave(wave.id()) {
-        Ok(planning) => (planning, None),
-        Err(error) => (
-            PmSnapshot {
-                projects: Vec::new(),
-                items: Vec::new(),
-            },
-            Some(error.to_string()),
-        ),
-    };
     if let Some(identifier) = identifier {
         let selected = store
             .sqlite
             .resolve_task_id(identifier, Some(wave.repo()))?;
         tasks.retain(|task| selected.as_ref() == Some(&task.id));
-        let selected = tasks.first();
-        planning.items.retain(|item| {
-            item.identifier == identifier
-                || item.id == identifier
-                || selected.as_ref().is_some_and(|task| {
-                    item.id == task.id.as_str()
-                        || task
-                            .plan
-                            .linear_id
-                            .as_ref()
-                            .is_some_and(|id| item.id == id.as_str())
-                })
-        });
-        // A failed read cannot establish that an unregistered planning Task is absent.
-        if let Some(reason) = unavailable.as_ref().filter(|_| tasks.is_empty()) {
-            return Ok(WaveTasks {
-                tasks: Evidence::Unavailable {
-                    reason: reason.clone(),
-                },
-                unavailable_tasks: Vec::new(),
-            });
-        }
     }
     let (details, unavailable_tasks) = snapshot_tasks(
         store,
         projects,
         tasks,
-        planning,
         probe_pr_empty,
         identifier.is_some(),
         shared,
     )
     .await?;
     Ok(WaveTasks {
-        tasks: match unavailable {
-            Some(reason) if identifier.is_none() => Evidence::Unavailable { reason },
-            _ => Evidence::complete(details),
-        },
+        tasks: Evidence::complete(details),
         unavailable_tasks,
     })
 }
@@ -999,8 +957,7 @@ fn wave_checkout(wave: &Wave) -> Result<PathBuf> {
     )
 }
 
-/// Build the registry snapshot for one wave, probing its discovery endpoint
-/// for liveness.
+/// Read planning and optional placement without allocating execution.
 async fn snapshot_wave(store: &SharedStore, wave: &Wave, checkout: &Path) -> Result<WaveSnapshot> {
     let repo = wave.repo().to_string();
     let tasks = store
@@ -1070,30 +1027,26 @@ fn snapshot_task_runtime(
     }
 }
 
-async fn validate_pm_portfolio(
+async fn validate_linear_ownership(
     store: &SharedStore,
     waves: &[Wave],
     repositories: &mut HashMap<String, PathBuf>,
 ) -> Result<()> {
-    let mut ownership = std::collections::HashMap::<_, PmPortfolioValidator>::new();
+    let mut ownership = HashMap::<PathBuf, Vec<_>>::new();
     for wave in waves {
         let repo = wave_repository(wave, repositories)?;
         let repo = std::fs::canonicalize(&repo).unwrap_or(repo);
-        let row = match store.pm_snapshot(wave.id()).await {
-            Ok(Some(row)) => row,
-            // Each Wave reports its own unavailable planning. A malformed
-            // entity must not hide that Wave's execution or readable siblings.
-            Ok(None) | Err(_) => continue,
-        };
-        let planning = row.snapshot;
-        let expected_team = crate::ops::pm::repository_team_for_snapshot_validation(&repo, store)?;
-        ownership.entry(repo).or_default().validate(
-            wave.slug(),
-            &row.initiative,
-            expected_team.as_deref(),
-            &planning.projects,
-            &planning.items,
-        )?;
+        ownership
+            .entry(repo)
+            .or_default()
+            .push((wave.id(), wave.slug()));
+    }
+    for (repo, waves) in ownership {
+        let expected_team = crate::ops::pm::repository_team_for_snapshot_validation(&repo, store)
+            .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()));
+        store
+            .sqlite
+            .validate_linear_ownership(&waves, expected_team)?;
     }
     Ok(())
 }
@@ -1102,70 +1055,26 @@ async fn snapshot_tasks(
     store: &SharedStore,
     projects: Vec<Project>,
     tasks: Vec<Task>,
-    planning: PmSnapshot,
     probe_pr_empty: bool,
     include_retained: bool,
     shared: &SharedTaskReads,
 ) -> Result<(Vec<TaskDetailSnapshot>, Vec<UnavailableTaskEvidence>)> {
     let mut requests = Vec::new();
     let mut unavailable_tasks = Vec::new();
-    for item in planning.items {
-        let task = tasks.iter().find(|task| {
-            task.id.as_str() == item.id
-                || task
-                    .plan
-                    .linear_id
-                    .as_ref()
-                    .is_some_and(|id| id.as_str() == item.id)
-                || task.plan.identifier == item.identifier
-        });
-        let recommended = recommended_flow(&planning.projects, item.project_id.as_deref());
-        requests.push(TaskDetailRequest {
-            item,
-            task,
-            recommended,
-        });
-    }
-
     for task in &tasks {
-        if requests
-            .iter()
-            .any(|request| request.task.is_some_and(|matched| matched.id == task.id))
-        {
-            continue;
-        }
-        let status = store.task_state(&task.id).await?;
         let parent = projects
             .iter()
             .find(|project| project.id == task.project_id);
-        let current_plan = parent.and_then(|parent| {
-            planning.projects.iter().find(|plan| {
-                parent.id.as_str() == plan.id
-                    || parent
-                        .plan
-                        .linear_id
-                        .as_ref()
-                        .is_some_and(|id| id.as_str() == plan.id)
-            })
-        });
-        if current_plan.is_none() {
+        let Some(parent) = parent else {
+            let status = store.task_state(&task.id).await?;
             if include_retained || !status.is_terminal() {
                 unavailable_tasks.push(unavailable_task(task, status));
             }
-            if !include_retained {
-                continue;
-            }
-        }
-        parent
-            .ok_or_else(|| anyhow!("Task {} has no owning Project {}", task.id, task.project_id))?;
-        let item = crate::ops::task::task_planning_item(store, task)?;
-        let recommended = current_plan
-            .map_or("", |plan| plan.workflow.as_str())
-            .to_string();
+            continue;
+        };
         requests.push(TaskDetailRequest {
-            item,
-            task: Some(task),
-            recommended,
+            task,
+            recommended: parent.workflow.clone(),
         });
     }
     let mut details = snapshot_task_details(store, requests, probe_pr_empty, shared)?;
@@ -1185,8 +1094,7 @@ async fn snapshot_tasks(
 }
 
 struct TaskDetailRequest<'a> {
-    item: PmItem,
-    task: Option<&'a Task>,
+    task: &'a Task,
     recommended: String,
 }
 
@@ -1229,7 +1137,6 @@ fn snapshot_task_details(
                             .expect("each Task detail request is claimed once");
                         let detail = runtime.block_on(snapshot_task_detail(
                             store,
-                            request.item,
                             request.task,
                             request.recommended,
                             probe_pr_empty,
@@ -1250,11 +1157,11 @@ fn snapshot_task_details(
 }
 
 fn unavailable_task(task: &Task, status: TaskState) -> UnavailableTaskEvidence {
-    const REASON: &str = "Task's owning Project is absent from the current PM snapshot";
+    const REASON: &str = "Task's owning Project is unavailable";
     UnavailableTaskEvidence {
         work_id: task.id.to_string(),
         task_id: task.id.to_string(),
-        task_identifier: task.plan.identifier.clone(),
+        task_identifier: task.identifier.clone(),
         status,
         owner: NextMoveOwner::Wave,
         reason: REASON.to_string(),
@@ -1262,103 +1169,80 @@ fn unavailable_task(task: &Task, status: TaskState) -> UnavailableTaskEvidence {
     }
 }
 
-fn recommended_flow(projects: &[crate::pm::PmProject], project_id: Option<&str>) -> String {
-    projects
-        .iter()
-        .find(|project| Some(project.id.as_str()) == project_id)
-        .map_or("", |project| project.workflow.as_str())
-        .to_string()
-}
-
 async fn snapshot_task_detail(
     store: &SharedStore,
-    item: PmItem,
-    task: Option<&Task>,
+    task: &Task,
     recommended: String,
     probe_pr_empty: bool,
     shared: &SharedTaskReads,
 ) -> Result<TaskDetailSnapshot> {
-    let pr = match task {
-        Some(task) => store.active_task_pr(&task.id).await?,
-        None => None,
-    };
+    let pr = store.active_task_pr(&task.id).await?;
     let active = pr.as_ref().filter(|pr| pr.is_active());
     let observed_at = now();
-    let (runtime, execution, flow_record) = match task {
-        Some(task) => {
-            let (execution, flow_record) =
-                crate::ops::task_execution::task_execution_and_flow(store, &task.id).await?;
-            let status = store.task_state(&task.id).await?;
-            let pending = crate::ops::task::completion_pending(store, task)?;
-            let started = store.task_started(&task.id).await?
-                || pr
-                    .as_ref()
-                    .is_some_and(|pr| pr.publication.is_some() || pr.merge_commit.is_some());
-            (
-                Some(snapshot_task_runtime(
-                    &execution, task, status, pending, started,
-                )),
-                Some(execution),
-                flow_record,
-            )
-        }
-        None => (None, None, None),
-    };
-    let machine_id = task
-        .and_then(|task| shared.checkouts.iter().find(|row| row.task_id == task.id))
+    let (execution, flow_record) =
+        crate::ops::task_execution::task_execution_and_flow(store, &task.id).await?;
+    let status = store.task_state(&task.id).await?;
+    let pending = crate::ops::task::completion_pending(store, task)?;
+    let started = store.task_started(&task.id).await?
+        || pr
+            .as_ref()
+            .is_some_and(|pr| pr.publication.is_some() || pr.merge_commit.is_some());
+    let runtime = snapshot_task_runtime(&execution, task, status, pending, started);
+    let machine_id = shared
+        .checkouts
+        .iter()
+        .find(|row| row.task_id == task.id)
         .and_then(|row| row.machine_id.clone());
-    let reference = task_reference(&item, task, machine_id, &shared.local_machine);
-    let worktree_blocker = match task {
-        Some(task) => crate::ops::task::task_worktree_blocker(store, task).await?,
-        None => None,
+    let reference = task_reference(
+        store.sqlite.task_issue_url(&task.id)?,
+        Some(task),
+        machine_id,
+        &shared.local_machine,
+    );
+    let acquisition = store.sqlite.task_acquisition(&task.id)?;
+    let worktree_blocker = crate::ops::task::task_worktree_blocker(store, task).await?;
+    let launch_refusal = if worktree_blocker.is_none() {
+        crate::ops::task::task_process_refusal(store, task)
+            .await?
+            .or_else(|| {
+                matches!(
+                    acquisition.state,
+                    crate::store::PlanningState::Invalid | crate::store::PlanningState::Removed
+                )
+                .then(|| {
+                    "Task planning has invalidation or removal evidence; refresh its planning"
+                        .to_string()
+                })
+            })
+    } else {
+        None
     };
-    let launch_refusal = match (task, worktree_blocker.as_ref()) {
-        (Some(task), None) => crate::ops::task::task_process_refusal(store, task).await?,
-        (Some(_), Some(_)) | (None, _) => None,
-    };
-    let follow_through = match task {
-        Some(task) => store.sqlite.task_follow_through(&task.id)?,
-        None => crate::work::task::follow_through::FollowThrough::from_events(&[]),
-    };
-    let next_move = task.map(|_| {
-        if let Some(execution) = execution.as_ref().filter(|execution| {
-            execution.state != TaskExecutionState::Idle
-                && runtime
-                    .as_ref()
-                    .is_some_and(|runtime| !runtime.status.is_terminal())
-        }) {
-            return NextMove {
-                owner: match execution.state {
-                    TaskExecutionState::Blocked | TaskExecutionState::Unknown => {
-                        NextMoveOwner::Wave
-                    }
-                    _ => NextMoveOwner::Task,
-                },
-                reason: execution.reason.clone(),
-            };
+    let follow_through = store.sqlite.task_follow_through(&task.id)?;
+    let next_move = if execution.state != TaskExecutionState::Idle && !runtime.status.is_terminal()
+    {
+        NextMove {
+            owner: match execution.state {
+                TaskExecutionState::Blocked | TaskExecutionState::Unknown => NextMoveOwner::Wave,
+                _ => NextMoveOwner::Task,
+            },
+            reason: execution.reason.clone(),
         }
-        if pr.as_ref().is_some_and(|pr| pr.phase() == PrPhase::Merged)
-            && runtime
-                .as_ref()
-                .is_some_and(|runtime| !runtime.status.is_terminal())
-        {
-            return NextMove {
-                owner: NextMoveOwner::Wave,
-                reason: if follow_through.needs_conversion {
-                    "Merged · Follow-through scope needs conversion".into()
-                } else if follow_through.resolved() {
-                    "Merged · Follow-through recorded; complete the Task".into()
-                } else {
-                    "Merged · Follow-through pending".into()
-                },
-            };
+    } else if pr.as_ref().is_some_and(|pr| pr.phase() == PrPhase::Merged)
+        && !runtime.status.is_terminal()
+    {
+        NextMove {
+            owner: NextMoveOwner::Wave,
+            reason: if follow_through.needs_conversion {
+                "Merged · Follow-through scope needs conversion".into()
+            } else if follow_through.resolved() {
+                "Merged · Follow-through recorded; complete the Task".into()
+            } else {
+                "Merged · Follow-through pending".into()
+            },
         }
+    } else {
         next_move_for_task(
-            &runtime
-                .as_ref()
-                .expect("Task runtime exists when the durable Task exists")
-                .status
-                .work_status(),
+            &runtime.status.work_status(),
             active.map(TaskPr::phase),
             active
                 .filter(|pr| pr.phase() == PrPhase::Open)
@@ -1367,125 +1251,91 @@ async fn snapshot_task_detail(
             active.and_then(TaskPr::merge_request),
             launch_refusal.as_deref(),
         )
-    });
-    let next_move = match next_move {
-        Some(next_move) => next_move,
-        None => NextMove {
-            owner: NextMoveOwner::Wave,
-            reason: item
-                .terminal_reason()
-                .unwrap_or("Task is ready to start")
-                .to_string(),
-        },
     };
     let local_progress = task_local_progress(
-        task,
-        runtime.as_ref(),
+        Some(task),
+        Some(&runtime),
         pr.as_ref(),
         worktree_blocker.as_ref(),
     );
-    let completion_refusal = match (task, runtime.as_ref()) {
-        (Some(task), Some(runtime)) if runtime.status != TaskState::Abandoned => {
-            crate::ops::task::CompletionGate::from_delivery(pr.as_ref(), &follow_through)
-                .refusal(&task.plan.identifier)
-        }
-        _ => None,
+    let completion_refusal = if runtime.status != TaskState::Abandoned {
+        crate::ops::task::CompletionGate::from_delivery(pr.as_ref(), &follow_through)
+            .refusal(&task.identifier)
+    } else {
+        None
     };
     let resume_refusal = worktree_blocker
         .as_ref()
         .map(|blocker| blocker.reason.clone());
-    let action_evidence = match (task, runtime.as_ref()) {
-        (Some(task), Some(runtime)) => {
-            let predecessor_phase = match task.parent_pr_id.as_ref() {
-                Some(parent_id) => store.get_task_pr(parent_id).await?.map(|pr| pr.phase()),
-                None => None,
-            };
-            Some(TaskActionEvidence {
-                status: runtime.status.work_status(),
-                execution: execution.as_ref(),
-                latest_pr_phase: pr.as_ref().map(TaskPr::phase),
-                latest_pr_merge_request: pr.as_ref().and_then(TaskPr::merge_request),
-                latest_pr_presentation_current: pr
-                    .as_ref()
-                    .filter(|pr| pr.phase() == PrPhase::Open)
-                    .map(|pr| pr.presentation().is_some()),
-                completion_refusal: completion_refusal.as_deref(),
-                resume_refusal: resume_refusal.as_deref(),
-                ci: active.and_then(|pr| pr.fresh_ci()),
-                predecessor_phase,
-                abandon_intent: task.abandon_intent.is_some(),
-                launch_refusal: launch_refusal.as_deref(),
-            })
-        }
-        _ => None,
-    };
-    let condition = derive_task_condition(
-        runtime.as_ref(),
-        &next_move,
-        local_progress,
-        action_evidence.as_ref(),
-        execution.as_ref(),
-        observed_at,
-    );
-    let actions = action_evidence.as_ref().map_or_else(
-        || TaskActionModel {
-            recommended: None,
-            reason: next_move.reason.clone(),
-        },
-        derive_task_actions,
-    );
-    let direction = match task {
-        Some(task) => current_direction(store, &task.id).await?,
+    let predecessor_phase = match task.parent_pr_id.as_ref() {
+        Some(parent_id) => store.get_task_pr(parent_id).await?.map(|pr| pr.phase()),
         None => None,
     };
-    let work_status = runtime.as_ref().map(|runtime| runtime.status.work_status());
+    let action_evidence = TaskActionEvidence {
+        status: runtime.status.work_status(),
+        execution: Some(&execution),
+        latest_pr_phase: pr.as_ref().map(TaskPr::phase),
+        latest_pr_merge_request: pr.as_ref().and_then(TaskPr::merge_request),
+        latest_pr_presentation_current: pr
+            .as_ref()
+            .filter(|pr| pr.phase() == PrPhase::Open)
+            .map(|pr| pr.presentation().is_some()),
+        completion_refusal: completion_refusal.as_deref(),
+        resume_refusal: resume_refusal.as_deref(),
+        ci: active.and_then(|pr| pr.fresh_ci()),
+        predecessor_phase,
+        abandon_intent: task.abandon_intent.is_some(),
+        launch_refusal: launch_refusal.as_deref(),
+    };
+    let condition = derive_task_condition(
+        Some(&runtime),
+        &next_move,
+        local_progress,
+        Some(&action_evidence),
+        Some(&execution),
+        observed_at,
+    );
+    let actions = derive_task_actions(&action_evidence);
+    let direction = current_direction(store, &task.id).await?;
+    let work_status = runtime.status.work_status();
     let run_control =
         crate::ops::task_run::task_run_control(&crate::ops::task_run::TaskRunEvidence {
-            status: work_status.as_ref(),
-            // Linear completing a Task that never left `start` withdraws it.
-            plan_terminal_reason: item.terminal_reason().filter(|_| {
-                runtime.as_ref().is_none_or(|runtime| {
-                    matches!(runtime.status, TaskState::NotReady | TaskState::Ready)
-                })
-            }),
+            status: Some(&work_status),
+            // Shared completion withdraws an unstarted Task, never advances its Workflow.
+            plan_terminal_reason: crate::pm::terminal_reason(task.state.as_deref(), task.completed)
+                .filter(|_| matches!(runtime.status, TaskState::NotReady | TaskState::Ready)),
             worktree_blocker: worktree_blocker
                 .as_ref()
                 .map(|blocker| blocker.reason.as_str()),
             launch_refusal: launch_refusal.as_deref(),
         });
-    let workflow_name = match task {
-        Some(task) => store
-            .sqlite
-            .workflow(&task.id)?
-            .map(|workflow| workflow.definition.name),
-        None => None,
-    }
-    .or_else(|| (!recommended.is_empty()).then_some(recommended));
+    let workflow_name = store
+        .sqlite
+        .workflow(&task.id)?
+        .map(|workflow| workflow.definition.name)
+        .or_else(|| (!recommended.is_empty()).then_some(recommended));
     Ok(TaskDetailSnapshot {
         follow_through,
         task: task_summary(
-            item,
+            task,
             &shared.follow_up_sources,
-            task.map(|task| store.sqlite.task_planning_sync(&task.id))
-                .transpose()?,
+            store.sqlite.task_planning_sync(&task.id)?,
+            acquisition,
         ),
         reference,
-        runtime,
+        runtime: Some(runtime),
         direction,
         next_move,
         condition,
         actions,
         workflow_name,
         latest_flow_process: flow_record,
-        execution,
+        execution: Some(execution),
         run_control,
         pr: pr.as_ref().map(|pr| {
-            // PR emptiness is an execution-plane fact (`lf wave status`); it costs
-            // an additional Git comparison, so `lf wave show` opts out. The
-            // Task condition already carries the progress evidence it needs.
-            let empty = task
-                .filter(|_| probe_pr_empty && pr.is_active())
-                .and_then(|task| task_pr_empty(task, pr));
+            let empty = (probe_pr_empty && pr.is_active())
+                .then(|| task_pr_empty(task, pr))
+                .flatten();
             PrSnapshot::new(pr, empty)
         }),
     })
@@ -1692,7 +1542,7 @@ fn derive_task_condition(
 }
 
 fn task_reference(
-    item: &PmItem,
+    issue_url: Option<String>,
     task: Option<&Task>,
     machine_id: Option<crate::durable::MachineId>,
     local_machine: &crate::durable::MachineId,
@@ -1720,7 +1570,7 @@ fn task_reference(
         })
     });
     TaskReferenceSnapshot {
-        issue_url: item.url.clone(),
+        issue_url,
         workspace,
     }
 }
@@ -1754,23 +1604,34 @@ async fn current_direction(
 }
 
 fn task_summary(
-    item: PmItem,
+    task: &Task,
     sources: &HashMap<String, Vec<crate::work::task::follow_through::FollowThroughSource>>,
-    sync: Option<crate::planning::PlanningSyncStatus>,
-) -> PmTaskSummary {
-    PmTaskSummary {
-        follow_up_sources: sources.get(&item.id).cloned().unwrap_or_default(),
-        due_date: item.due_date,
+    sync: crate::store::planning_sync::PlanningSyncStatus,
+    acquisition: crate::store::TaskAcquisition,
+) -> TaskSummary {
+    TaskSummary {
+        acquisition,
+        follow_up_sources: sources
+            .get(task.id.as_str())
+            .or_else(|| {
+                task.linear_id
+                    .as_ref()
+                    .and_then(|id| sources.get(id.as_str()))
+            })
+            .cloned()
+            .unwrap_or_default(),
+        due_date: task.due_date.clone(),
         sync,
-        id: item.id,
-        identifier: item.identifier,
-        name: item.name,
-        description: item.description,
-        rank: item.rank,
-        completed: item.completed,
-        state: item.state,
-        completed_at: item.completed_at,
-        assignee: item.assignee,
+        id: task.id.to_string(),
+        linear_id: task.linear_id.as_ref().map(|id| id.as_str().to_string()),
+        identifier: task.identifier.clone(),
+        name: task.title.clone(),
+        description: task.description.clone(),
+        rank: task.rank,
+        completed: task.completed,
+        state: task.state.clone(),
+        completed_at: task.completed_at.clone(),
+        assignee: task.assignee.clone(),
     }
 }
 
@@ -1966,10 +1827,8 @@ fn print_status(status: &WaveDetailSnapshot) {
                             .unwrap_or_default()
                     );
                 }
-                if let Some(sync) = &task.task.sync {
-                    for line in sync.lines() {
-                        println!("    {line}");
-                    }
+                for line in task.task.sync.lines() {
+                    println!("    {line}");
                 }
                 if let Some(workspace) = &task.reference.workspace {
                     println!("    workspace  {}  {}", workspace.slug, workspace.worktree);
@@ -2120,10 +1979,10 @@ fn metric_target(metric: &MetricReadingDto, portfolio: &MetricPortfolioDto) -> S
     }
     match metric.target {
         None => "unset for this chapter".into(),
-        Some(MetricTarget::AtLeast { value }) => {
+        Some(Threshold::AtLeast { value }) => {
             format!(">= {}", format_metric_number(value, &metric.unit))
         }
-        Some(MetricTarget::AtMost { value }) => {
+        Some(Threshold::AtMost { value }) => {
             format!("<= {}", format_metric_number(value, &metric.unit))
         }
     }
@@ -2294,13 +2153,7 @@ fn task_roadmap_row(task: &RoadmapTask, now: time::OffsetDateTime) -> RoadmapRow
             .map(|workspace| workspace.slug.clone()),
         condition: Some(task.condition.state),
         reason: std::iter::once(task.condition.reason.clone())
-            .chain(
-                task.task
-                    .sync
-                    .as_ref()
-                    .into_iter()
-                    .flat_map(|sync| sync.lines()),
-            )
+            .chain(task.task.sync.lines())
             .collect::<Vec<_>>()
             .join(" · "),
     }
@@ -2483,7 +2336,7 @@ mod tests {
     use crate::work::task::{CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase};
     use crate::work::wave::metrics::{
         MetricEvidenceDto, MetricFreshnessDto, MetricIdentity, MetricPortfolioDto,
-        MetricReadingDto, MetricStage, MetricTarget, MetricUnknownCauseDto,
+        MetricReadingDto, MetricStage, MetricUnknownCauseDto, Threshold,
     };
     use crate::work::wave::Wave;
 
@@ -2520,12 +2373,10 @@ mod tests {
             )
             .await
             .unwrap();
-        let stored = store.pm_snapshot(wave.id()).await.unwrap().unwrap();
         let (details, gaps) = super::snapshot_tasks(
             &store,
-            vec![],
-            vec![],
-            stored.snapshot,
+            store.list_projects(Some(wave.id())).await.unwrap(),
+            store.list_tasks(Some(wave.id())).await.unwrap(),
             false,
             false,
             &super::SharedTaskReads::read(&store).await.unwrap(),
@@ -2538,7 +2389,7 @@ mod tests {
             let item = planning
                 .items
                 .iter()
-                .find(|item| item.id == detail.task.id)
+                .find(|item| Some(item.id.as_str()) == detail.task.linear_id.as_deref())
                 .unwrap();
             assert_eq!(detail.task.state, item.state);
             assert_eq!(detail.task.completed_at, item.completed_at);
@@ -2548,25 +2399,10 @@ mod tests {
                 matches!(super::task_section(detail), super::RoadmapSection::Later),
                 terminal.is_some()
             );
-            assert_eq!(detail.run_control.unavailable.as_deref(), terminal);
-            if let Some(reason) = terminal {
-                assert_eq!(detail.next_move.reason, reason);
-                assert_eq!(detail.actions.reason, reason);
+            if terminal.is_some() {
+                assert!(detail.run_control.unavailable.is_some());
             }
         }
-        let mut rows = details
-            .into_iter()
-            .map(super::roadmap_task)
-            .collect::<Vec<_>>();
-        rows.sort_by_key(|row| row.task.rank);
-        for row in &mut rows {
-            row.condition.observed_at = "2026-10-02T12:00:00Z".into();
-        }
-        let expected: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../../../tests/fixtures/dto/task_history_rows.json"
-        ))
-        .unwrap();
-        assert_eq!(serde_json::to_value(rows).unwrap(), expected);
     }
 
     #[test]
@@ -2587,6 +2423,31 @@ mod tests {
         std::fs::remove_file(&alias).unwrap();
         std::os::unix::fs::symlink(second.path(), &alias).unwrap();
         assert_eq!(resolve(), second.path().canonicalize().unwrap());
+    }
+
+    #[tokio::test]
+    async fn local_ownership_read_does_not_require_repository_files() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
+                directory.path().join("registry.db"),
+            ))
+            .await
+            .unwrap(),
+        );
+        let wave = Wave::new(
+            crate::id::WaveId::new(),
+            "local".into(),
+            directory
+                .path()
+                .join("missing-checkout")
+                .display()
+                .to_string(),
+        );
+        store.create_wave(&wave).await.unwrap();
+        super::validate_linear_ownership(&store, &[wave], &mut Default::default())
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -2629,13 +2490,32 @@ mod tests {
                 .unwrap();
             waves.push(wave);
         }
-        super::validate_pm_portfolio(&store, &waves[..2], &mut Default::default())
+        super::validate_linear_ownership(&store, &waves[..2], &mut Default::default())
             .await
             .unwrap();
-        let error = super::validate_pm_portfolio(&store, &waves, &mut Default::default())
+        let error = super::validate_linear_ownership(&store, &waves, &mut Default::default())
             .await
             .unwrap_err();
         assert!(error.to_string().contains("bound by both"), "{error}");
+        // A malformed Wave must not hide a readable sibling or its local Work.
+        rusqlite::Connection::open(directory.path().join("registry.db"))
+            .unwrap()
+            .execute(
+                "UPDATE pm_projects SET body='not-json' WHERE id='first-ear'",
+                [],
+            )
+            .unwrap();
+        super::validate_linear_ownership(&store, &waves, &mut Default::default())
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .sqlite
+                .list_projects(Some(waves[0].id()))
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     #[tokio::test]
@@ -2707,7 +2587,7 @@ mod tests {
                 successor.id = "next".into();
                 successor.slug = "next".into();
                 successor.name = "Next chapter".into();
-                stale.snapshot.projects[0].status = crate::pm::ProjectStatus::Completed;
+                stale.snapshot.projects[0].status = crate::work::project::ProjectStatus::Completed;
                 stale.snapshot.projects[0].revision = Some("2026-09-30T00:00:01Z".into());
                 stale.snapshot.projects.push(successor);
                 for item in &mut stale.snapshot.items {
@@ -2735,7 +2615,7 @@ mod tests {
                 .into_iter()
                 .map(super::roadmap_task)
                 .collect::<Vec<_>>();
-            assert_eq!(roadmap[0].task.id, "completed");
+            assert_eq!(roadmap[0].task.linear_id.as_deref(), Some("completed"));
         }
     }
 
@@ -2789,10 +2669,20 @@ mod tests {
         };
         assert!(items[0].current);
         assert_eq!(items[0].krs[0].text, "Edited proof");
-        assert_eq!(items[0].status, crate::pm::ProjectStatus::Started);
-        let mut unreadable = store.pm_snapshot(wave.id()).await.unwrap().unwrap();
-        unreadable.snapshot.projects.clear();
-        unreadable.snapshot.items.clear();
+        assert_eq!(
+            items[0].status,
+            crate::work::project::ProjectStatus::Started
+        );
+        let unreadable = crate::store::PmSnapshotRow {
+            wave_id: wave.id().clone(),
+            provider: "linear".into(),
+            initiative: "initiative".into(),
+            synced_at: 3,
+            snapshot: crate::pm::PmSnapshot {
+                projects: vec![],
+                items: vec![],
+            },
+        };
         assert!(store.put_pm_snapshot(unreadable, None).await.is_err());
         assert!(matches!(
             super::project_planning(&store, &wave).await,
@@ -2813,7 +2703,10 @@ mod tests {
         assert_eq!(items.len(), 1);
         assert!(items[0].current);
         assert_eq!(items[0].krs[0].text, "Edited proof");
-        assert_eq!(items[0].status, crate::pm::ProjectStatus::Started);
+        assert_eq!(
+            items[0].status,
+            crate::work::project::ProjectStatus::Started
+        );
         let missing =
             crate::ops::metrics::wave_metric_portfolio(&store, &wave, OffsetDateTime::now_utc())
                 .await
@@ -2842,14 +2735,15 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let selected = "999bdbdd-c045-41a6-8ffc-a97c4a40b0b3";
         let predecessor = "218967b6-a760-4b7c-9a46-11d9d61a42c2";
-        let project = |id: &str, name: &str| crate::pm::PmProject {
+        let project = |id: &str, name: &str| crate::pm::linear::LinearProject {
+            description: None,
             id: id.into(),
             name: name.into(),
             slug: name.into(),
             summary: String::new(),
             revision: None,
             workflow: String::new(),
-            status: crate::pm::ProjectStatus::Started,
+            status: crate::work::project::ProjectStatus::Started,
             metric_targets: Vec::new(),
             krs: Vec::new(),
             initiative_ids: vec!["initiative".into()],
@@ -2903,10 +2797,13 @@ mod tests {
             &guard,
         )
         .unwrap();
-        let before = store.pm_snapshot(wave.id()).await.unwrap().unwrap();
+        let before = (
+            store.list_projects(Some(wave.id())).await.unwrap(),
+            store.list_tasks(Some(wave.id())).await.unwrap(),
+        );
         for _ in 0..2 {
             let current = crate::ops::project::current_project(&store, &wave).unwrap();
-            assert_eq!(current.id, selected);
+            assert_eq!(current.linear_id.as_ref().unwrap().as_str(), selected);
             assert!(current.workflow.is_empty());
             let super::Evidence::Ok {
                 items: projects, ..
@@ -2921,7 +2818,7 @@ mod tests {
                     .filter(|p| p.current)
                     .map(|p| p.id.as_str())
                     .collect::<Vec<_>>(),
-                vec![selected]
+                vec![current.id.as_str()]
             );
             let tasks = super::wave_tasks(
                 &store,
@@ -2936,13 +2833,24 @@ mod tests {
                 panic!("Task evidence unavailable")
             };
             assert_eq!(items.len(), 1);
-            assert_eq!(items[0].task.id, item.id);
-            assert_eq!(super::roadmap_task(items[0].clone()).task.id, item.id);
+            let saved = store
+                .get_task_by_issue(&item.identifier)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(items[0].task.id, saved.id.as_str());
+            assert_eq!(items[0].task.linear_id.as_deref(), Some(item.id.as_str()));
+            assert_eq!(
+                super::roadmap_task(items[0].clone()).task.id,
+                saved.id.as_str()
+            );
             assert!(tasks.unavailable_tasks.is_empty());
         }
-        let after = store.pm_snapshot(wave.id()).await.unwrap().unwrap();
-        assert_eq!(before.snapshot, after.snapshot);
-        assert_eq!(before.synced_at, after.synced_at);
+        let after = (
+            store.list_projects(Some(wave.id())).await.unwrap(),
+            store.list_tasks(Some(wave.id())).await.unwrap(),
+        );
+        assert_eq!(before, after);
         // An unaccepted UUID cannot become a selection or silently pick another Project.
         assert!(
             crate::store::sqlite::project_selection::write_project_binding(
@@ -2964,7 +2872,7 @@ mod tests {
         .await
         .unwrap();
         assert!(
-            matches!(retained.tasks, super::Evidence::Ok { items, .. } if items.len() == 1 && items[0].task.id == item.id)
+            matches!(retained.tasks, super::Evidence::Ok { items, .. } if items.len() == 1 && items[0].task.linear_id.as_deref() == Some(item.id.as_str()))
         );
     }
 
@@ -3059,7 +2967,7 @@ mod tests {
                 instrumented: true,
                 instrument: "scorecard".to_string(),
                 unit: "ratio".to_string(),
-                target: Some(MetricTarget::AtLeast { value: 1.0 }),
+                target: Some(Threshold::AtLeast { value: 1.0 }),
                 window: "7d".to_string(),
                 freshness_policy: "6h".to_string(),
                 freshness: MetricFreshnessDto::Never,

@@ -157,20 +157,42 @@ impl SqliteStore {
             [machine_id.as_str()],
             |_| Ok(()),
         )?;
-        let column = format!("{}_id", work.kind());
-        // Reaffirming explicit intent preserves its timestamp and journal entry;
-        // selecting a legacy assignment explicitly is still a new authored save.
-        tx.execute(
-            &format!(
-                "INSERT INTO work_placements ({column}, machine_id, enabled, placed_at, provenance)
-                 VALUES (?1, ?2, 1, ?3, 'explicit')
-                 ON CONFLICT({column}) DO UPDATE SET
-                    machine_id=excluded.machine_id, placed_at=excluded.placed_at,
-                    provenance=excluded.provenance
-                 WHERE machine_id IS NOT excluded.machine_id OR provenance IS NOT excluded.provenance"
-            ),
-            params![work.id(), machine_id.as_str(), now_unix()],
-        )?;
+        let kind = match work {
+            WorkRef::Wave(_) => crate::planning_exchange::PlanningKind::Wave,
+            WorkRef::Project(_) => crate::planning_exchange::PlanningKind::Project,
+            WorkRef::Task(_) => crate::planning_exchange::PlanningKind::Task,
+        };
+        let object = crate::planning_exchange::PlanningObject {
+            kind,
+            id: work.id().to_owned(),
+        };
+        let current = super::planning_write::read(&tx, &object)?
+            .into_iter()
+            .find_map(|edit| {
+                if let super::planning_write::PlanningEdit::Delegation(_, assignment) = edit {
+                    assignment
+                } else {
+                    None
+                }
+            });
+        if !current.as_ref().is_some_and(|assignment| {
+            assignment.machine_id == *machine_id
+                && assignment.provenance == PlacementProvenance::Explicit
+        }) {
+            super::planning_write::local(
+                &tx,
+                kind,
+                work.id(),
+                &[super::planning_write::PlanningEdit::Delegation(
+                    kind,
+                    Some(super::planning_write::Delegation {
+                        machine_id: machine_id.clone(),
+                        placed_at: now_unix(),
+                        provenance: PlacementProvenance::Explicit,
+                    }),
+                )],
+            )?;
+        }
         let placement = placement_in(&tx, work)?;
         tx.commit()?;
         Ok(placement)
@@ -778,12 +800,12 @@ mod durable_store_tests {
     use crate::durable::{ProjectId, TaskId, WorkRef};
 
     use crate::id::WaveId;
-    use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
+    use crate::pm::{LinearIssueId, LinearProjectId};
     use crate::session::{LfSession, TitleSource, WorkSource};
     use crate::store::sqlite::SqliteStore;
 
     use crate::work::project::Project;
-    use crate::work::task::{PmWritebackState, Task, TaskEventKind, TaskPr, TaskPrId};
+    use crate::work::task::{LinearWritebackState, Task, TaskEventKind, TaskPr, TaskPrId};
 
     fn unpublished_conversation(
         task_id: Option<TaskId>,
@@ -836,20 +858,19 @@ mod durable_store_tests {
         drop(conn);
         let project = Project {
             id: project_id.clone(),
-            plan: ProjectPlan {
-                summary: String::new(),
-                workflow: "feature".into(),
-                status: crate::pm::ProjectStatus::Started,
-                linear_id: Some(
-                    LinearProjectId::new("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3").unwrap(),
-                ),
-                slug: "probe".to_string(),
-                name: "Probe".to_string(),
-                prompt_context: "Probe Task execution".to_string(),
-                pm_snapshot_synced_at: Some(now.unix_timestamp()),
-            },
+
+            summary: String::new(),
+            workflow: "feature".into(),
+            status: crate::work::project::ProjectStatus::Started,
+            linear_id: Some(LinearProjectId::new("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3").unwrap()),
+            slug: "probe".to_string(),
+            name: "Probe".to_string(),
+            description: "Probe Task execution".to_string(),
+            krs: Vec::new(),
+            metric_targets: Vec::new(),
+            pm_snapshot_synced_at: Some(now.unix_timestamp()),
+
             wave_id: wave_id.clone(),
-            iteration: 0,
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -859,21 +880,21 @@ mod durable_store_tests {
             &store,
             &wave_id,
             None,
-            project.plan.linear_id.as_ref().unwrap().as_str(),
+            project.linear_id.as_ref().unwrap().as_str(),
             &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
         )
         .unwrap();
         let task = Task {
             id: task_id.clone(),
-            plan: TaskPlan {
-                revision: 0,
-                linear_id: Some(LinearIssueId::new("task-uuid").unwrap()),
-                identifier: "PROBE-1".to_string(),
-                title: "Probe Task execution".to_string(),
-                description: "Exercise the Task Flow store".to_string(),
-                pm_snapshot_synced_at: Some(now.unix_timestamp()),
-            },
-            pm_writeback: PmWritebackState::Current,
+
+            revision: 0,
+            linear_id: Some(LinearIssueId::new("task-uuid").unwrap()),
+            identifier: "PROBE-1".to_string(),
+            title: "Probe Task execution".to_string(),
+            description: "Exercise the Task Flow store".to_string(),
+            pm_snapshot_synced_at: Some(now.unix_timestamp()),
+
+            pm_writeback: LinearWritebackState::Current,
             wave_id,
             project_id,
             worktree: Some(PathBuf::from("/repo.probe")),
@@ -885,6 +906,12 @@ mod durable_store_tests {
             abandon_intent: None,
             created_at: now,
             updated_at: now,
+            rank: 0,
+            assignee: None,
+            due_date: None,
+            state: None,
+            completed: false,
+            completed_at: None,
             observation: crate::work::task::Observation::NotRequired,
         };
         let pr = TaskPr {
@@ -1040,6 +1067,67 @@ mod durable_store_tests {
     }
 
     #[test]
+    fn delegation_exchange_retains_checkout_and_does_not_echo_imports() {
+        use crate::durable::{MachineId, WorkRef};
+        use crate::planning_exchange::{PlanningKind, PlanningMutation, PlanningObject};
+        let (_dir, store, task_id) = store_with_task();
+        store.ensure_repository("/repo").unwrap();
+        let before = store.task_execution_route(&task_id).unwrap();
+        let task = store.task(&task_id).unwrap().unwrap();
+        let wave = WorkRef::Wave(task.wave_id.clone());
+        let remote = MachineId::new();
+        store
+            .add_machine(&remote, "worker", "worker", "/repo")
+            .unwrap();
+        store.place_work(&wave, &remote).unwrap();
+        let binding = crate::planning_git::PlanningDestination::new(
+            "/tmp/unused-planning.git",
+            "refs/loopflow/planning/shared/test",
+        )
+        .unwrap();
+        let destination = store.bind_peer_planning("/repo", &binding).unwrap();
+        let mut snapshot = store.export_peer_planning("/repo", &destination).unwrap();
+        let object = PlanningObject {
+            kind: PlanningKind::Wave,
+            id: task.wave_id.to_string(),
+        };
+        let parents = snapshot
+            .heads()
+            .filter(|(_, change)| change.object == object && change.field == "delegation")
+            .map(|(id, _)| id.to_owned())
+            .collect();
+        let clock = snapshot
+            .changes
+            .values()
+            .map(|change| change.clock)
+            .max()
+            .unwrap()
+            + 1;
+        snapshot.changes.insert(
+            "remote-reset".into(),
+            PlanningMutation {
+                object,
+                field: "delegation".into(),
+                value: serde_json::Value::Null,
+                clock,
+                parents,
+            },
+        );
+        store
+            .import_peer_planning("/repo", &destination, "remote-revision", &snapshot)
+            .unwrap();
+        assert_eq!(
+            store.placement(&wave).unwrap().machine_id,
+            store.local_machine().unwrap().id
+        );
+        assert_eq!(store.task_execution_route(&task_id).unwrap(), before);
+        assert_eq!(
+            store.export_peer_planning("/repo", &destination).unwrap(),
+            snapshot
+        );
+    }
+
+    #[test]
     fn delegation_preserves_legacy_provenance_until_explicitly_selected() {
         use crate::durable::{MachineId, PlacementProvenance, WorkRef};
         let (_dir, store, task_id) = store_with_task();
@@ -1130,9 +1218,9 @@ mod durable_store_tests {
         let task = store.task(&task_id).unwrap().unwrap();
         let mut other = store.project(&task.project_id).unwrap().unwrap();
         other.id = ProjectId::new();
-        other.plan.linear_id =
+        other.linear_id =
             Some(LinearProjectId::new("218967b6-a760-4b7c-9a46-11d9d61a42c2").unwrap());
-        other.plan.name = "An unrelated ordinary plan".into();
+        other.name = "An unrelated ordinary plan".into();
         store.insert_project(&other).unwrap();
         // Another Started Project does not compete with the configured identity.
         let (new_task, pr) = unregistered_task(&store, &task_id, dir.path().join("new"));
@@ -1148,14 +1236,14 @@ mod durable_store_tests {
             &store,
             &task.wave_id,
             Some("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3"),
-            other.plan.linear_id.as_ref().unwrap().as_str(),
+            other.linear_id.as_ref().unwrap().as_str(),
             &guard,
         )
         .unwrap();
         let (mut rejected, mut rejected_pr) =
             unregistered_task(&store, &task_id, dir.path().join("rejected"));
-        rejected.plan.linear_id = Some(LinearIssueId::new("third-issue").unwrap());
-        rejected.plan.identifier = "PROBE-3".into();
+        rejected.linear_id = Some(LinearIssueId::new("third-issue").unwrap());
+        rejected.identifier = "PROBE-3".into();
         rejected.workspace_slug = "rejected".into();
         rejected_pr.slug = "rejected".into();
         rejected_pr.branch = "rejected".into();
@@ -1462,8 +1550,8 @@ mod durable_store_tests {
         let mut task = store.task(existing).unwrap().unwrap();
         let mut pr = store.task_prs(existing).unwrap().remove(0);
         task.id = TaskId::new();
-        task.plan.linear_id = Some(LinearIssueId::new("later-issue").unwrap());
-        task.plan.identifier = "PROBE-2".into();
+        task.linear_id = Some(LinearIssueId::new("later-issue").unwrap());
+        task.identifier = "PROBE-2".into();
         task.worktree = Some(checkout);
         task.workspace_slug = "later-checkout".into();
         pr.id = TaskPrId::new();

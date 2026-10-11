@@ -1,9 +1,7 @@
 use loopflow::durable::TaskState;
 use loopflow::lf::commands::waves::{Evidence, RoadmapSnapshot, WaveDetailSnapshot};
-use loopflow::ops::pm::PmShowResult;
 use loopflow::work::wave::metrics::MetricPortfolioDto;
 
-const PM_SHOW: &str = include_str!("../../../tests/fixtures/dto/pm_show.json");
 const WAVE_DETAIL: &str = include_str!("../../../tests/fixtures/dto/wave_detail.json");
 const ROADMAP: &str = include_str!("../../../tests/fixtures/dto/roadmap_snapshot.json");
 const METRIC_PORTFOLIO: &str = include_str!("../../../tests/fixtures/dto/metric_portfolio.json");
@@ -60,7 +58,8 @@ fn active_sessions_preserve_identity_waiting_clients_and_incomplete_evidence() {
 
 #[test]
 fn task_comments_keep_authorship_and_require_every_field() {
-    use loopflow::ops::pm::{TaskCommentAuthor, TaskComments};
+    use loopflow::ops::pm::TaskComments;
+    use loopflow::work::task::comment::TaskCommentAuthor;
     let json = include_str!("../../../tests/fixtures/dto/task_comments.json");
     let thread: TaskComments = serde_json::from_str(json).unwrap();
     assert_eq!(thread.comments[0].author, TaskCommentAuthor::Integration);
@@ -80,47 +79,6 @@ fn task_comments_keep_authorship_and_require_every_field() {
         .unwrap()
         .remove("author");
     assert!(serde_json::from_value::<TaskComments>(missing).is_err());
-}
-
-#[test]
-fn pm_show_preserves_repository_team_and_project_ownership() {
-    let snapshot: PmShowResult = serde_json::from_str(PM_SHOW).unwrap();
-
-    assert_eq!(snapshot.wave, "survival/infrastructure");
-    assert_eq!(
-        snapshot.projects[0].initiative_ids,
-        ["initiative-infrastructure"]
-    );
-    assert_eq!(snapshot.projects[0].name, "Gmail");
-    assert_eq!(snapshot.projects[0].workflow, "feature");
-    assert_eq!(snapshot.projects[0].team_ids, ["team-loo"]);
-    assert_eq!(snapshot.items[0].identifier, "LOO-2");
-    assert_eq!(snapshot.items[0].state.as_deref(), Some("unstarted"));
-    assert_eq!(snapshot.items[0].completed_at, None);
-    assert_eq!(
-        snapshot.items[0].project_id.as_deref(),
-        Some("project-gmail")
-    );
-    assert_eq!(snapshot.items[0].team_id.as_deref(), Some("team-loo"));
-
-    let round_trip = serde_json::to_string(&snapshot).unwrap();
-    assert_eq!(
-        serde_json::from_str::<PmShowResult>(&round_trip).unwrap(),
-        snapshot
-    );
-}
-
-#[test]
-fn pm_show_preserves_an_unmapped_team_as_null() {
-    let mut fixture: serde_json::Value = serde_json::from_str(PM_SHOW).unwrap();
-    fixture["items"][0]["team_id"] = serde_json::Value::Null;
-
-    let snapshot: PmShowResult = serde_json::from_value(fixture.clone()).unwrap();
-    assert_eq!(snapshot.items[0].team_id, None);
-    assert_eq!(
-        serde_json::to_value(&snapshot.items[0]).unwrap(),
-        fixture["items"][0]
-    );
 }
 
 #[test]
@@ -145,17 +103,13 @@ fn wave_detail_preserves_flow_and_machine() {
     else {
         panic!("missing Projects")
     };
-    assert_eq!(
-        projects[0].sync.as_ref().unwrap().changes[1].field,
-        "task_order"
-    );
+    assert_eq!(projects[0].sync.changes[1].field, "task_order");
     let Evidence::Ok { items: tasks, .. } = &snapshot.tasks else {
         panic!("missing Tasks")
     };
-    assert_eq!(
-        tasks[0].task.sync.as_ref().unwrap().changes[0].field,
-        "creation"
-    );
+    assert_eq!(tasks[0].task.sync.changes[0].field, "creation");
+    assert_eq!(tasks[0].task.id, tasks[0].runtime.as_ref().unwrap().work_id);
+    assert_eq!(tasks[0].task.linear_id.as_deref(), Some("issue-1"));
     let Evidence::Ok { items: runs, .. } = &snapshot.history else {
         panic!("fixture contains recorded Runs");
     };
@@ -170,7 +124,10 @@ fn wave_detail_preserves_flow_and_machine() {
     };
     assert_eq!(items[0].workflow, "task-design");
     assert!(items[0].current);
-    assert_eq!(items[0].status, loopflow::pm::ProjectStatus::Started);
+    assert_eq!(
+        items[0].status,
+        loopflow::work::project::ProjectStatus::Started
+    );
 
     let encoded = serde_json::to_string(&snapshot).unwrap();
     let decoded: WaveDetailSnapshot = serde_json::from_str(&encoded).unwrap();
@@ -408,55 +365,29 @@ fn session_input_history_retains_distinct_native_results_and_unknown_process() {
 }
 
 #[test]
-fn task_status_preserves_planning_freshness_without_execution() {
+fn task_status_preserves_canonical_work_and_acquisition_evidence() {
     use loopflow::ops::task::TaskStatus;
     let json = include_str!("../../../tests/fixtures/dto/task_status.json");
-    let states: Vec<TaskStatus> = serde_json::from_str(json).unwrap();
+    let status: TaskStatus = serde_json::from_str(json).unwrap();
+    let task = status.task.as_ref().unwrap();
+    let project = status.project.as_ref().unwrap();
+    assert_eq!(task.title, "Route incoming mail");
+    assert_eq!(task.project_id, project.id);
+    assert_ne!(task.id.as_str(), task.linear_id.as_ref().unwrap().as_str());
+    assert_eq!(project.description, "Retained authored prose.");
+    assert_eq!(status.observed_at, Some(1790683200));
     assert_eq!(
-        states[0]
-            .planning
-            .as_ref()
-            .unwrap()
-            .item
-            .branch_name
-            .as_deref(),
-        Some("dev/fix-1-existing")
+        status.planning_state,
+        loopflow::store::PlanningState::Available
     );
-    assert_eq!(
-        states
-            .iter()
-            .map(|state| state.planning_state)
-            .collect::<Vec<_>>(),
-        vec![
-            loopflow::store::PlanningState::Available,
-            loopflow::store::PlanningState::Unavailable,
-            loopflow::store::PlanningState::Unavailable,
-            loopflow::store::PlanningState::Invalid,
-            loopflow::store::PlanningState::Removed,
-            loopflow::store::PlanningState::Absent,
-        ]
-    );
-    for state in &states[3..] {
-        assert_eq!(state.planning, states[0].planning);
-    }
-    assert!(!states[0].planning_stale);
-    assert!(states[0].planning_error.is_none());
-    assert!(states[0].execution.is_none());
-    assert!(states[1].planning_stale);
-    assert_eq!(
-        states[1].planning_error.as_deref(),
-        Some("Linear unavailable")
-    );
-    assert_eq!(states[0].planning, states[1].planning);
-    assert!(states[2].planning.is_none());
-    assert!(states[2].planning_error.is_some());
-    assert_eq!(
-        serde_json::to_value(states).unwrap(),
-        serde_json::from_str::<serde_json::Value>(json).unwrap()
-    );
-    let mut missing: serde_json::Value = serde_json::from_str(json).unwrap();
-    missing[0].as_object_mut().unwrap().remove("planning_stale");
-    assert!(serde_json::from_value::<Vec<TaskStatus>>(missing).is_err());
+    assert!(!status.planning_stale);
+    assert!(status.planning_error.is_none());
+    assert!(status.execution.is_none());
+    let value: serde_json::Value = serde_json::from_str(json).unwrap();
+    assert_eq!(serde_json::to_value(status).unwrap(), value);
+    let mut missing = value;
+    missing.as_object_mut().unwrap().remove("planning_stale");
+    assert!(serde_json::from_value::<TaskStatus>(missing).is_err());
 }
 
 #[test]
@@ -851,12 +782,12 @@ fn planning_sync_preserves_delivery_and_losing_values() {
         "../../../tests/fixtures/dto/planning_sync.json"
     ))
     .unwrap();
-    let sync: loopflow::planning::PlanningSyncStatus =
+    let sync: loopflow::store::planning_sync::PlanningSyncStatus =
         serde_json::from_value(value.clone()).unwrap();
     assert!(sync.connected);
     assert_eq!(
         sync.changes[1].state,
-        loopflow::planning::PlanningSyncState::Uncertain
+        loopflow::store::planning_sync::PlanningSyncState::Uncertain
     );
     assert_eq!(sync.changes[2].local_value, "Local title");
     assert_eq!(
@@ -1045,24 +976,45 @@ fn session_connect_explanations_preserve_intent_and_unavailable_evidence() {
 }
 
 #[test]
-fn peer_planning_status_keeps_unknown_local_state_and_retained_receipts() {
+fn peer_planning_status_keeps_journal_and_independent_receipts() {
     let value: serde_json::Value = serde_json::from_str(include_str!(
         "../../../tests/fixtures/dto/peer_planning_status.json"
     ))
     .unwrap();
     let statuses: Vec<loopflow::store::PeerPlanningStatus> =
         serde_json::from_value(value.clone()).unwrap();
-    assert_eq!(statuses[0].pending_local, None);
+    assert!(statuses[0].pending_local);
     assert_eq!(
         statuses[0].publication_state.as_deref(),
         Some("unconfirmed")
     );
     assert_eq!(statuses[0].conflicts.len(), 1);
-    assert_eq!(statuses[1].pending_local, Some(true));
+    assert!(statuses[1].pending_local);
+    assert_eq!(
+        statuses[1].changes["comment-head"].value["author"],
+        serde_json::json!({"kind": "person", "name": "Maya"})
+    );
+    assert_eq!(statuses[1].changes["title-loser"].value, "Retained title");
+    assert!(!statuses[1].candidates.contains("title-loser"));
+    assert!(statuses[1].changes["title-head"]
+        .parents
+        .contains("title-loser"));
+    for status in &statuses {
+        let journal = loopflow::planning_exchange::PlanningSnapshot {
+            changes: status.changes.clone(),
+        };
+        journal.validate().unwrap();
+        assert_eq!(
+            status.candidates,
+            journal.winners().map(|(id, _)| id.to_owned()).collect()
+        );
+    }
     assert_eq!(serde_json::to_value(&statuses).unwrap(), value);
-    let mut missing = value[1].clone();
-    missing.as_object_mut().unwrap().remove("conflicts");
-    assert!(serde_json::from_value::<loopflow::store::PeerPlanningStatus>(missing).is_err());
+    for field in ["conflicts", "changes", "candidates", "pending_local"] {
+        let mut missing = value[1].clone();
+        missing.as_object_mut().unwrap().remove(field);
+        assert!(serde_json::from_value::<loopflow::store::PeerPlanningStatus>(missing).is_err());
+    }
 }
 
 #[test]

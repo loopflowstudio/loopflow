@@ -7,10 +7,10 @@ use std::process::Command;
 
 use loopflow::durable::{MachineId, WorkRef, WorkStatus};
 use loopflow::id::WaveId;
-use loopflow::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
+use loopflow::pm::{LinearIssueId, LinearProjectId};
 use loopflow::store::{PmSnapshotRow, StorageConfig};
 use loopflow::work::project::{Project, ProjectId};
-use loopflow::work::task::{Observation, PmWritebackState, Task, TaskId, TaskPr, TaskPrId};
+use loopflow::work::task::{LinearWritebackState, Observation, Task, TaskId, TaskPr, TaskPrId};
 use loopflow::work::wave::context::{resolve_managed_wave, WaveResolveError};
 use loopflow::work::wave::relocate::relocate_wave;
 use loopflow::work::wave::{Wave, WaveLocator};
@@ -64,18 +64,19 @@ fn project(wave: &Wave) -> Project {
     let now = OffsetDateTime::now_utc();
     Project {
         id: ProjectId::new(),
-        plan: ProjectPlan {
-            summary: String::new(),
-            workflow: "feature".into(),
-            status: loopflow::pm::ProjectStatus::Started,
-            linear_id: Some(LinearProjectId::new("project-alpha").unwrap()),
-            slug: "architecture".to_string(),
-            name: "Architecture".to_string(),
-            prompt_context: "Keep identity boring.".to_string(),
-            pm_snapshot_synced_at: Some(now.unix_timestamp()),
-        },
+
+        summary: String::new(),
+        workflow: "feature".into(),
+        status: loopflow::work::project::ProjectStatus::Started,
+        linear_id: Some(LinearProjectId::new("project-alpha").unwrap()),
+        slug: "architecture".to_string(),
+        name: "Architecture".to_string(),
+        description: "Keep identity boring.".to_string(),
+        krs: Vec::new(),
+        metric_targets: Vec::new(),
+        pm_snapshot_synced_at: Some(now.unix_timestamp()),
+
         wave_id: wave.id().clone(),
-        iteration: 0,
         abandon_intent: None,
         created_at: now,
         updated_at: now,
@@ -87,15 +88,15 @@ fn task(wave: &Wave, project: &Project, repo: &Path) -> (Task, TaskPr) {
     let id = TaskId::new();
     let task = Task {
         id: id.clone(),
-        plan: TaskPlan {
-            revision: 0,
-            linear_id: Some(LinearIssueId::new("issue-alpha").unwrap()),
-            identifier: "LOO-127".to_string(),
-            title: "Repository-owned Waves".to_string(),
-            description: "Preserve Task history through relocation.".to_string(),
-            pm_snapshot_synced_at: Some(now.unix_timestamp()),
-        },
-        pm_writeback: PmWritebackState::Current,
+
+        revision: 0,
+        linear_id: Some(LinearIssueId::new("issue-alpha").unwrap()),
+        identifier: "LOO-127".to_string(),
+        title: "Repository-owned Waves".to_string(),
+        description: "Preserve Task history through relocation.".to_string(),
+        pm_snapshot_synced_at: Some(now.unix_timestamp()),
+
+        pm_writeback: LinearWritebackState::Current,
         wave_id: wave.id().clone(),
         project_id: project.id.clone(),
         worktree: Some(repo.join("task-worktree")),
@@ -107,6 +108,12 @@ fn task(wave: &Wave, project: &Project, repo: &Path) -> (Task, TaskPr) {
         abandon_intent: None,
         created_at: now,
         updated_at: now,
+        rank: 0,
+        assignee: None,
+        due_date: None,
+        state: None,
+        completed: false,
+        completed_at: None,
         observation: Observation::NotRequired,
     };
     let pr = TaskPr {
@@ -197,7 +204,7 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         let sibling = Wave::new(WaveId::new(), "sibling".into(), alias.display().to_string());
         store.create_wave(&sibling).await.unwrap();
         let snapshot: loopflow::pm::PmSnapshot =
-            serde_json::from_str(include_str!("../../../tests/fixtures/dto/pm_show.json")).unwrap();
+            serde_json::from_str(include_str!("fixtures/linear_snapshot.json")).unwrap();
         store
             .put_pm_snapshot(
                 PmSnapshotRow {
@@ -227,13 +234,6 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         };
         let original_plans = plans();
         assert_eq!(original_plans.len(), 2);
-        let canonical_plan: String = connection
-            .query_row(
-                "SELECT id FROM repository_plans WHERE repo=?1 AND selected=1",
-                [alpha.repo()],
-                |row| row.get(0),
-            )
-            .unwrap();
         let resolved = store
             .get_wave_at(&WaveLocator::discover(&repo_a, "legacy").unwrap())
             .await
@@ -241,38 +241,15 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
             .unwrap();
         assert_eq!(resolved.id(), legacy.id());
         assert_eq!(plans(), original_plans);
-        let selected_plan: String = connection
-            .query_row(
-                "SELECT id FROM repository_plans WHERE repo=?1 AND selected=1",
-                [resolved.repo()],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(selected_plan, canonical_plan);
-
-        assert_eq!(
-            resolved.repo(),
-            std::fs::canonicalize(&repo_a)
-                .unwrap()
-                .display()
-                .to_string()
-        );
-        // Resolving one Wave repairs the repository scope for its sibling too.
+        // Reading an alias retains the registered identity and does not relocate
+        // this Wave, its sibling or their planning evidence.
+        assert_eq!(resolved.repo(), legacy.repo());
         for wave in [&legacy, &sibling] {
             assert_eq!(
                 store.get_wave(wave.id()).await.unwrap().unwrap().repo(),
-                resolved.repo()
+                wave.repo()
             );
         }
-        assert_eq!(
-            store
-                .pm_snapshot(legacy.id())
-                .await
-                .unwrap()
-                .unwrap()
-                .snapshot,
-            snapshot
-        );
         let observation = store
             .pm_task_observation(resolved.repo(), "linear", "LOO-2")
             .await
@@ -597,13 +574,14 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     assert_eq!(moved_grandchild.slug(), "platform/child/leaf");
     assert_eq!(moved_grandchild.parent_wave_id(), Some(child.id()));
     assert!(!repo_d.join("wave/platform").exists());
+    let conn = rusqlite::Connection::open(&database).unwrap();
     assert_eq!(
-        store
-            .pm_snapshot(alpha.id())
-            .await
-            .unwrap()
-            .unwrap()
-            .initiative,
+        conn.query_row(
+            "SELECT initiative FROM pm_wave_sync WHERE wave_id=?1",
+            [alpha.id().as_str()],
+            |r| r.get::<_, String>(0)
+        )
+        .unwrap(),
         "initiative-alpha"
     );
     assert_eq!(

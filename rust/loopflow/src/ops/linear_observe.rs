@@ -16,10 +16,12 @@ use crate::store::{SharedStore, Store};
 use crate::work::task::Task;
 
 pub(crate) fn connected(repo: &str) -> bool {
-    crate::config::load_config_or_default(Some(std::path::Path::new(repo)))
-        .pm
-        .and_then(|pm| pm.linear_team)
-        .is_some()
+    crate::config::load_config(Some(std::path::Path::new(repo))).is_ok_and(|config| {
+        matches!(
+            config.unwrap_or_default().planning_transport(),
+            crate::config::PlanningConfig::Linear {}
+        )
+    })
 }
 
 /// Explicit steering carries its marker, whichever account published it.
@@ -50,7 +52,7 @@ pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> O
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?
         .ok_or_else(|| OpsError::Message(format!("Task {} is missing", task.id)))?;
-    let Some(issue) = &task.plan.linear_id else {
+    let Some(issue) = &task.linear_id else {
         return Ok(());
     };
     let wave = store
@@ -113,10 +115,10 @@ impl PlanningSync {
                     tokio::select! {
                         _ = stopped => {},
                         _ = repeat_sync("Git planning acquisition", Duration::from_secs(5), || {
-                            super::planning_peer::acquire_repository(&store, &repo)
+                            super::planning_sync::acquire_repository(&store, &repo)
                         }) => {},
                         _ = repeat_sync("Git planning publication", Duration::from_secs(1), || {
-                            super::planning_peer::publish_repository(&store, &repo)
+                            super::planning_sync::publish_repository(&store, &repo)
                         }) => {},
                         _ = repeat_sync("comment acquisition", Duration::from_secs(15), || {
                             refresh_repository_comments(&store, &repo)
@@ -192,24 +194,21 @@ async fn refresh_repository_comments(store: &SharedStore, repo: &str) -> OpsResu
             .list_tasks(Some(wave.id()))
             .await
             .map_err(|error| OpsError::Message(error.to_string()))?;
-        futures_util::future::join_all(
-            tasks
-                .iter()
-                .filter(|task| task.plan.linear_id.is_some())
-                .map(|task| async {
-                    match tokio::time::timeout(
-                        Duration::from_secs(5),
-                        refresh_task_comments(store, task),
-                    )
-                    .await
-                    {
-                        Ok(Ok(())) => {}
-                        result => {
-                            tracing::debug!(?result, task = %task.id, "comment acquisition pending")
-                        }
+        futures_util::future::join_all(tasks.iter().filter(|task| task.linear_id.is_some()).map(
+            |task| async {
+                match tokio::time::timeout(
+                    Duration::from_secs(5),
+                    refresh_task_comments(store, task),
+                )
+                .await
+                {
+                    Ok(Ok(())) => {}
+                    result => {
+                        tracing::debug!(?result, task = %task.id, "comment acquisition pending")
                     }
-                }),
-        )
+                }
+            },
+        ))
         .await;
         Ok::<(), OpsError>(())
     }))
@@ -244,7 +243,11 @@ async fn refresh_repository_planning(store: &Store, repository: &str) -> OpsResu
     Ok(())
 }
 
-async fn sync_repository_deliveries(store: &Store, repository: &str, state: bool) -> OpsResult<()> {
+pub(super) async fn sync_repository_deliveries(
+    store: &Store,
+    repository: &str,
+    state: bool,
+) -> OpsResult<()> {
     if !connected(repository) {
         return Ok(());
     }
@@ -292,7 +295,7 @@ pub(crate) async fn sync_task_state(store: &Store, task: &Task) -> OpsResult<()>
             .await
             .map_err(|e| message(&e))?
             .ok_or_else(|| OpsError::Message("Task is missing".into()))?;
-        let Some(issue) = &task.plan.linear_id else {
+        let Some(issue) = &task.linear_id else {
             return Ok(());
         };
         let project = store
@@ -314,7 +317,7 @@ pub(crate) async fn sync_task_state(store: &Store, task: &Task) -> OpsResult<()>
             .await
             .map_err(|e| message(&e))?
             .ok_or_else(|| OpsError::Message("Linked Linear issue is unavailable".into()))?;
-        if observed.project_id.as_deref() != project.plan.linear_id.as_ref().map(|id| id.as_str()) {
+        if observed.project_id.as_deref() != project.linear_id.as_ref().map(|id| id.as_str()) {
             return Err(OpsError::Message(
                 "Task membership changed in Linear; retained local decision".into(),
             ));
@@ -391,7 +394,7 @@ pub(crate) async fn sync_task_comments(store: &Store, task: &Task) -> OpsResult<
         .await
         .map_err(|error| message(&error))?
         .ok_or_else(|| OpsError::Message("Task is missing".into()))?;
-    let Some(issue) = &task.plan.linear_id else {
+    let Some(issue) = &task.linear_id else {
         return Ok(());
     };
     let comments = store

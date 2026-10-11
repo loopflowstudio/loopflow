@@ -8,7 +8,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use super::{
     capture_is_prepared, conversation_background_name, conversation_process_is_running,
     lock_session_process, publish_prepared_input, session_not_found, start_durable_session,
-    surface, NativeSession, SessionRecord,
+    surface, SessionRecord,
 };
 use crate::session::{LfSession, PrimaryScope, TitleSource, WorkSource};
 use crate::store::SharedStore;
@@ -98,7 +98,7 @@ pub(crate) async fn replace(store: &SharedStore, id: &str) -> Result<SessionReco
     if previous.completed_at.is_none() {
         let lock_id = previous.id.clone();
         let _launch = tokio::task::spawn_blocking(move || lock_session_process(&lock_id)).await??;
-        stop_client(&previous)
+        stop_agent(store, &previous)
             .with_context(|| format!("stop primary Session {id}; it remains primary"))?;
     }
     let mut successor = match &scope {
@@ -146,7 +146,17 @@ pub(super) async fn admit_workspace(
         return Ok(session);
     };
     if conversation_process_is_running(&session.id).await?
-        || !NativeSession::of(&session)?.clients()?.is_empty()
+        || store
+            .sqlite
+            .session_summary(
+                &session.id,
+                time::OffsetDateTime::now_utc().unix_timestamp(),
+            )?
+            .is_some_and(|summary| {
+                summary.agent_process_id.is_some()
+                    && summary.agent_process_evidence
+                        != crate::journal::ProcessIdentityEvidence::Dead
+            })
     {
         return Ok(session);
     }
@@ -194,8 +204,7 @@ fn task_session(
         .sqlite
         .task(task)?
         .ok_or_else(|| anyhow!("Task {task} is unavailable"))?;
-    let title =
-        crate::naming::generated_session_title(None, None, Some(&plan.plan.title), &binding.cwd);
+    let title = crate::naming::generated_session_title(None, None, Some(&plan.title), &binding.cwd);
     Ok(LfSession {
         task_id: Some(task.clone()),
         wave_id: Some(binding.wave_id.clone()),
@@ -297,16 +306,12 @@ async fn start(store: &SharedStore, session: LfSession) -> Result<SessionRecord>
     surface(store, &session).await
 }
 
-fn stop_client(session: &LfSession) -> Result<()> {
+fn stop_agent(store: &SharedStore, session: &LfSession) -> Result<()> {
     #[cfg(test)]
     if super::action_test::stop(&session.artifact_key) {
         return Ok(());
     }
-    let native = NativeSession::of(session)?;
-    if !native.dir.is_dir() {
-        return Ok(());
-    }
-    native.stop_clients(crate::session_record::ProviderClientStopReason::Completed)
+    crate::harness::agent_process::stop_session_agent(&store.sqlite, &session.id)
 }
 
 /// Admission and replacement of one scope are serial across processes.

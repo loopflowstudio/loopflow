@@ -9,19 +9,57 @@ use time::OffsetDateTime;
 use crate::child::AbandonIntent;
 pub use crate::durable::ProjectId;
 use crate::id::WaveId;
-use crate::planning::ProjectPlan;
+use crate::pm::{LinearBindingError, LinearProjectId};
 use crate::work::task::{TaskEventKind, TaskId};
 
+/// Shared Project status, independent of a provider’s display label.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ProjectStatus {
+    Backlog,
+    Planned,
+    Started,
+    Paused,
+    Completed,
+    Canceled,
+}
+
+impl ProjectStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Backlog => "backlog",
+            Self::Planned => "planned",
+            Self::Started => "started",
+            Self::Paused => "paused",
+            Self::Completed => "completed",
+            Self::Canceled => "canceled",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectKR {
+    pub text: String,
+    pub holds: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Project {
     pub id: ProjectId,
-    /// Authored local planning or accepted Linear facts.
-    pub plan: ProjectPlan,
+    pub summary: String,
+    pub slug: String,
+    pub name: String,
+    pub description: String,
+    pub krs: Vec<ProjectKR>,
+    pub metric_targets: Vec<crate::work::wave::metrics::MetricTarget>,
+    pub workflow: String,
+    pub status: ProjectStatus,
+    /// Optional Linear binding, not a second owner of this record.
+    pub linear_id: Option<LinearProjectId>,
+    /// Acquisition time of the retained Linear observation, never a write clock.
+    pub pm_snapshot_synced_at: Option<i64>,
     /// Current ownership. Wave name and checkout are resolved from this id.
     pub wave_id: WaveId,
-    /// Completed Project judgment passes. This is durable domain progress, not
-    /// the lifetime of a Project process.
-    pub iteration: u32,
     /// Set when abandonment is *requested*, not when it is applied. No launch
     /// path may start a Run for Project Work carrying this.
     pub abandon_intent: Option<AbandonIntent>,
@@ -102,4 +140,30 @@ impl HistoricalFailure {
             occurred_at: event.created_at,
         })
     }
+}
+
+impl Project {
+    pub fn linear_id(&self) -> Result<&LinearProjectId, LinearBindingError> {
+        self.linear_id
+            .as_ref()
+            .ok_or(LinearBindingError::NoLinearMapping)
+    }
+}
+
+pub(crate) fn validate_metric_targets(
+    targets: &[crate::work::wave::metrics::MetricTarget],
+) -> Result<(), String> {
+    let mut ids = std::collections::BTreeSet::new();
+    for metric in targets {
+        if metric.metric_id.trim().is_empty()
+            || !metric.target.value().is_finite()
+            || !ids.insert(&metric.metric_id)
+        {
+            return Err(
+                "Project metric targets require unique nonempty metric IDs and finite values"
+                    .into(),
+            );
+        }
+    }
+    Ok(())
 }

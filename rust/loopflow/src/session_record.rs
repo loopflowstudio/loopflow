@@ -23,8 +23,7 @@ use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
-use crate::agent::stream::{ResultSubtype, StreamEvent};
-use crate::chat::types::{ConversationEvent, ConversationItem, ItemDelta, Lifecycle, TurnUsage};
+use crate::chat::types::{ConversationEvent, ItemDelta, TurnUsage};
 use crate::naming::generated_session_title;
 use crate::store::{StoreError, StoreResult};
 
@@ -91,6 +90,7 @@ pub struct AgentProcessRequest {
     pub conversation_context: Option<crate::context_block::ContextDelivery>,
     pub task_prompt: String,
     pub skill_invocation: Option<crate::skills::invocation::SkillInvocation>,
+    pub output_schema: Option<serde_json::Value>,
     pub agent: String,
     pub account_id: Option<crate::store::ProviderAccountId>,
     pub max_turns: Option<u32>,
@@ -110,6 +110,7 @@ impl AgentProcessRequest {
             conversation_context: config.conversation_context.clone(),
             task_prompt: config.task_prompt.clone(),
             skill_invocation: config.skill_invocation.clone(),
+            output_schema: config.output_schema.clone(),
             agent: config.agent().to_string(),
             account_id: config.provider_account_id.clone(),
             max_turns: config.max_turns,
@@ -220,30 +221,6 @@ impl ProviderSessionRef {
         }
         Ok(())
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub(crate) struct ProviderClientRef {
-    schema_version: u32,
-    pub(crate) pid: u32,
-    pub(crate) terminal_id: Option<String>,
-    #[serde(with = "time::serde::rfc3339")]
-    pub(crate) started_at: OffsetDateTime,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum ProviderClientStopReason {
-    Retired,
-    Moved,
-    // Primary succession still completes its predecessor; old receipts remain readable.
-    Completed,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-struct ProviderClientStop {
-    schema_version: u32,
-    reason: ProviderClientStopReason,
 }
 
 #[derive(Serialize)]
@@ -1382,77 +1359,6 @@ fn provider_session_from_events(
     Ok(provider_session)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct FinalAnswer {
-    pub text: String,
-    pub exact: bool,
-}
-
-#[derive(Default)]
-struct TurnProse {
-    tagged: Option<String>,
-    untagged: Option<String>,
-    streamed: String,
-}
-
-impl TurnProse {
-    fn answer(self) -> Option<FinalAnswer> {
-        self.tagged
-            .map(|text| FinalAnswer { text, exact: true })
-            .or_else(|| self.untagged.map(|text| FinalAnswer { text, exact: true }))
-            .or_else(|| {
-                (!self.streamed.is_empty()).then_some(FinalAnswer {
-                    text: self.streamed,
-                    exact: false,
-                })
-            })
-    }
-}
-
-/// Reduce retained observations; only a successful provider turn supplies a conclusion.
-pub(crate) fn final_answer(events: Vec<serde_json::Value>) -> std::io::Result<Option<FinalAnswer>> {
-    let mut turns = HashMap::<String, TurnProse>::new();
-    let mut answer = None;
-    for event in events {
-        let envelope: EventEnvelope =
-            serde_json::from_value(event).map_err(std::io::Error::other)?;
-        if envelope.schema_version != SCHEMA_VERSION {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "unsupported capture event schema",
-            ));
-        }
-        let CaptureEvent::Conversation { event } = envelope.event else {
-            continue;
-        };
-        match *event {
-            ConversationEvent::TextDelta { turn_id, content } => {
-                turns
-                    .entry(turn_id)
-                    .or_default()
-                    .streamed
-                    .push_str(&content);
-            }
-            ConversationEvent::ItemCompleted {
-                turn_id,
-                item: ConversationItem::Message { text, phase, .. },
-            } => match phase.as_deref() {
-                Some("final_answer") => turns.entry(turn_id).or_default().tagged = Some(text),
-                None => turns.entry(turn_id).or_default().untagged = Some(text),
-                Some(_) => {}
-            },
-            ConversationEvent::TurnCompleted { turn_id, status } => {
-                let prose = turns.remove(&turn_id).unwrap_or_default();
-                if status == Lifecycle::Completed {
-                    answer = prose.answer().or(answer);
-                }
-            }
-            _ => {}
-        }
-    }
-    Ok(answer)
-}
-
 pub(crate) fn write_provider_session(
     dir: &Path,
     agent_session: &AgentSessionId,
@@ -1482,88 +1388,6 @@ pub(crate) fn write_provider_session(
     }).map_err(std::io::Error::other)
 }
 
-pub(crate) fn read_provider_clients(dir: &Path) -> std::io::Result<Vec<ProviderClientRef>> {
-    let root = dir.join("provider-clients");
-    let entries = match fs::read_dir(&root) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(error),
-    };
-    let mut clients = Vec::new();
-    for entry in entries {
-        let entry = entry?;
-        if !entry.file_type()?.is_file() {
-            continue;
-        }
-        let client: ProviderClientRef =
-            serde_json::from_slice(&fs::read(entry.path())?).map_err(std::io::Error::other)?;
-        if client.schema_version != SCHEMA_VERSION || client.pid <= 1 {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "invalid provider client reference",
-            ));
-        }
-        clients.push(client);
-    }
-    clients.sort_by_key(|client| client.pid);
-    Ok(clients)
-}
-
-pub(crate) fn write_provider_client(dir: &Path, pid: u32) -> std::io::Result<()> {
-    if pid <= 1 {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "provider client pid must identify a child process",
-        ));
-    }
-    let input = input_id_from_dir(dir)?;
-    if row_store(dir)
-        .map_err(std::io::Error::other)?
-        .session_for_artifact(&input)
-        .map_err(std::io::Error::other)?
-        .is_none()
-    {
-        return Err(std::io::Error::other(
-            "provider client has no admitted Session",
-        ));
-    }
-    remove_provider_client_stop(dir, pid)?;
-    let root = dir.join("provider-clients");
-    fs::create_dir_all(&root)?;
-    let path = root.join(format!("{pid}.json"));
-    let staging = root.join(format!(".{pid}-{}.staging", Uuid::new_v4()));
-    write_private_exclusive(
-        &staging,
-        &serde_json::to_vec_pretty(&ProviderClientRef {
-            schema_version: SCHEMA_VERSION,
-            pid,
-            terminal_id: current_terminal_id(),
-            started_at: OffsetDateTime::now_utc(),
-        })
-        .map_err(std::io::Error::other)?,
-    )?;
-    fs::rename(staging, path)?;
-    sync_dir(&root)
-}
-
-pub(crate) fn provider_client_matches(
-    client: &ProviderClientRef,
-    harness: &str,
-    pid: u32,
-    started_at: i64,
-    command: &str,
-) -> bool {
-    pid == client.pid
-        && (started_at - client.started_at.unix_timestamp()).abs() <= 5
-        && command.split_whitespace().any(|word| {
-            Path::new(word)
-                .file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name == harness || name.starts_with(&format!("{harness}-")))
-                || word.contains(&format!("/{harness}"))
-        })
-}
-
 /// A terminal marker is valid only on the PTY where the shell installed it.
 /// Inherited environment after app, SSH, or background handoff is not attachment.
 pub(crate) fn current_terminal_id() -> Option<String> {
@@ -1583,75 +1407,6 @@ pub(crate) fn current_terminal_id() -> Option<String> {
         .to_str()
         .ok()?;
     (actual == expected).then_some(id)
-}
-
-pub(crate) fn read_provider_client_stop(
-    dir: &Path,
-    pid: u32,
-) -> std::io::Result<Option<ProviderClientStopReason>> {
-    let path = dir
-        .join("provider-client-stops")
-        .join(format!("{pid}.json"));
-    let bytes = match fs::read(path) {
-        Ok(bytes) => bytes,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(error),
-    };
-    let stop: ProviderClientStop = serde_json::from_slice(&bytes).map_err(std::io::Error::other)?;
-    if stop.schema_version != SCHEMA_VERSION {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "invalid provider client stop",
-        ));
-    }
-    Ok(Some(stop.reason))
-}
-
-pub(crate) fn write_provider_client_stop(
-    dir: &Path,
-    pid: u32,
-    reason: ProviderClientStopReason,
-) -> std::io::Result<()> {
-    if pid <= 1 {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "provider client pid must identify a child process",
-        ));
-    }
-    read_manifest(dir)?;
-    let root = dir.join("provider-client-stops");
-    fs::create_dir_all(&root)?;
-    let path = root.join(format!("{pid}.json"));
-    let staging = root.join(format!(".{pid}-{}.staging", Uuid::new_v4()));
-    write_private_exclusive(
-        &staging,
-        &serde_json::to_vec_pretty(&ProviderClientStop {
-            schema_version: SCHEMA_VERSION,
-            reason,
-        })
-        .map_err(std::io::Error::other)?,
-    )?;
-    fs::rename(staging, path)?;
-    sync_dir(&root)
-}
-
-pub(crate) fn remove_provider_client_stop(dir: &Path, pid: u32) -> std::io::Result<()> {
-    let root = dir.join("provider-client-stops");
-    let path = root.join(format!("{pid}.json"));
-    match fs::remove_file(path) {
-        Ok(()) => sync_dir(&root),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error),
-    }
-}
-
-pub(crate) fn remove_provider_client(dir: &Path, pid: u32) -> std::io::Result<()> {
-    let path = dir.join("provider-clients").join(format!("{pid}.json"));
-    match fs::remove_file(path) {
-        Ok(()) => sync_dir(&dir.join("provider-clients")),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error),
-    }
 }
 
 /// Who chose a Session's current title. A human name is never replaced by a
@@ -2106,7 +1861,7 @@ impl CaptureHandle {
         next.input_published = false;
         let (next, attachment) =
             store.claim_session_input(next, expected.as_ref(), &lf_process_id, || {
-                runtime::close_session_agent_process(&store, session)
+                crate::harness::agent_process::close_session_agent_process(&store, session)
             })?;
         // Continue the Session's attribution; the manifest still describes the
         // actual process cwd supplied by the caller.
@@ -2459,10 +2214,6 @@ impl CaptureHandle {
         self.with_capture(|capture| capture.record_raw(stream, line));
     }
 
-    pub(crate) fn record_stream_event(&self, event: &StreamEvent) {
-        self.with_capture(|capture| capture.record_stream_event(event));
-    }
-
     pub(crate) fn record_conversation(&self, event: ConversationEvent) {
         self.with_capture(|capture| capture.record_conversation(event));
     }
@@ -2503,7 +2254,7 @@ impl CaptureHandle {
             );
         }
         let next = store.replace_session_agent_process(session, expected, resume_thread, || {
-            runtime::close_session_agent_process(&store, session)
+            crate::harness::agent_process::close_session_agent_process(&store, session)
         })?;
         capture.attachment = Some((session.clone(), next));
         if let Err(error) = capture.fail_and_begin_attempt(provider, model, account_id) {
@@ -2543,7 +2294,7 @@ impl CaptureHandle {
         });
     }
 
-    pub(crate) fn final_answer(&self) -> StoreResult<Option<FinalAnswer>> {
+    pub(crate) fn final_answer(&self) -> StoreResult<Option<String>> {
         let capture = self.0.lock().expect("Session capture mutex poisoned");
         row_store(&capture.dir)?.input_final_answer(&capture.manifest.artifact_key)
     }
@@ -2636,7 +2387,7 @@ impl SessionCapture {
         let title = generated_session_title(
             context,
             manifest.skill.as_deref(),
-            task.as_ref().map(|task| task.plan.title.as_str()),
+            task.as_ref().map(|task| task.title.as_str()),
             &manifest.cwd,
         );
         let session = store.create_session(
@@ -2755,52 +2506,6 @@ impl SessionCapture {
             stream: stream.to_string(),
             line: line.to_string(),
         })
-    }
-
-    fn record_stream_event(&mut self, event: &StreamEvent) -> std::io::Result<()> {
-        match event {
-            StreamEvent::Text(text) => self.append_event(CaptureEvent::Text { text: text.clone() }),
-            StreamEvent::ToolUse { name, summary } => self.append_event(CaptureEvent::ToolUse {
-                name: name.clone(),
-                summary: summary.clone(),
-            }),
-            StreamEvent::Usage {
-                input_tokens,
-                output_tokens,
-                cache_read_tokens,
-            } => self.append_usage(
-                TurnUsage {
-                    input_tokens: *input_tokens,
-                    output_tokens: *output_tokens,
-                    cache_read_tokens: *cache_read_tokens,
-                    ..TurnUsage::default()
-                },
-                false,
-            ),
-            StreamEvent::Result {
-                subtype,
-                cost_usd,
-                duration_secs,
-            } => {
-                if cost_usd.is_some() {
-                    self.append_usage(
-                        TurnUsage {
-                            cost_usd: *cost_usd,
-                            ..TurnUsage::default()
-                        },
-                        true,
-                    )?;
-                }
-                self.append_event(CaptureEvent::Result {
-                    outcome: match subtype {
-                        ResultSubtype::Success => "completed",
-                        ResultSubtype::Error => "failed",
-                    }
-                    .to_string(),
-                    duration_secs: *duration_secs,
-                })
-            }
-        }
     }
 
     fn record_conversation(&mut self, event: ConversationEvent) -> std::io::Result<()> {
@@ -2956,7 +2661,7 @@ pub(crate) fn resume_session_agent_process(
 ) -> StoreResult<crate::process::SessionAttachment> {
     let expected = store.session_attachment(session)?;
     store.resume_session_attachment(session, expected.as_ref(), lf_process_id, || {
-        runtime::close_session_agent_process(store, session)
+        crate::harness::agent_process::close_session_agent_process(store, session)
     })
 }
 
@@ -3314,14 +3019,12 @@ mod tests {
     use std::io::Write;
 
     use super::{
-        read_provider_clients, read_provider_session, remove_provider_client,
-        write_provider_client, AgentProcessRequest, CaptureHandle, SessionCaptureManifest,
+        read_provider_session, AgentProcessRequest, CaptureHandle, SessionCaptureManifest,
         SessionCaptureSpec, SubjectAttribution, TerminalReceipt,
     };
-    use crate::agent::stream::{ResultSubtype, StreamEvent};
     use crate::agent::AgentCapabilities;
     use crate::agent::AgentConfig;
-    use crate::chat::types::{ConversationEvent, ConversationItem, TurnUsage};
+    use crate::chat::types::{ConversationEvent, TurnUsage};
 
     #[test]
     fn terminal_attachment_probe() {
@@ -3967,10 +3670,9 @@ mod tests {
 
         capture.mark_spawn_requested();
         capture.record_raw("stderr", "provider diagnostic");
-        capture.record_stream_event(&StreamEvent::Text("provider response".to_string()));
-        capture.record_stream_event(&StreamEvent::ToolUse {
-            name: "shell".to_string(),
-            summary: "inspect files".to_string(),
+        capture.record_conversation(ConversationEvent::TextDelta {
+            turn_id: "provider-turn".to_string(),
+            content: "provider response".to_string(),
         });
         capture.record_conversation(ConversationEvent::UsageCheckpoint {
             turn_id: "provider-turn".to_string(),
@@ -3990,8 +3692,7 @@ mod tests {
         assert!(!events.contains("\"final_receipt\":true"));
         assert!(events.contains("\"type\":\"user_input\""));
         assert!(events.contains("\"type\":\"provider_output\""));
-        assert!(events.contains("\"type\":\"text\""));
-        assert!(events.contains("\"type\":\"tool_use\""));
+        assert!(events.contains("\"type\":\"text_delta\""));
         let terminal = fs::read(dir.join("terminal.json")).unwrap();
         let terminal: TerminalReceipt = serde_json::from_slice(&terminal).unwrap();
         assert_eq!(terminal.outcome, "completed");
@@ -4010,45 +3711,6 @@ mod tests {
         let unchanged: TerminalReceipt =
             serde_json::from_slice(&fs::read(dir.join("terminal.json")).unwrap()).unwrap();
         assert_eq!(unchanged.outcome, "completed");
-    }
-
-    #[test]
-    fn final_answer_reader_returns_the_conclusion_without_commentary() {
-        let _lock = crate::journal::test_env_lock();
-        let _ambient = crate::test_ambient::EnvGuard::new();
-        let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
-        let home = tempfile::tempdir().unwrap();
-        let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
-        capture.record_conversation(ConversationEvent::ItemCompleted {
-            turn_id: "turn-1".to_string(),
-            item: ConversationItem::Message {
-                id: "commentary".to_string(),
-                text: "still working".to_string(),
-                phase: Some("commentary".to_string()),
-            },
-        });
-        capture.record_conversation(ConversationEvent::ItemCompleted {
-            turn_id: "turn-1".to_string(),
-            item: ConversationItem::Message {
-                id: "answer".to_string(),
-                text: "final report".to_string(),
-                phase: Some("final_answer".to_string()),
-            },
-        });
-        capture.record_conversation(ConversationEvent::TurnCompleted {
-            turn_id: "turn-1".to_string(),
-            status: crate::chat::types::Lifecycle::Completed,
-        });
-        capture.finish("completed").unwrap();
-
-        fs::remove_dir_all(capture.artifact_dir()).unwrap();
-        assert_eq!(
-            capture.final_answer().unwrap(),
-            Some(super::FinalAnswer {
-                text: "final report".to_string(),
-                exact: true,
-            })
-        );
     }
 
     #[test]
@@ -4084,6 +3746,8 @@ mod tests {
         });
         capture.finish("completed").unwrap();
 
+        // Capture prose remains readable, but cannot substitute for native turn output.
+        assert_eq!(capture.final_answer().unwrap(), None);
         let file = fs::read_to_string(capture.artifact_dir().join("events.jsonl")).unwrap();
         assert_eq!(file.matches("item/agentMessage/delta").count(), 4);
         assert_eq!(file.matches("\"type\":\"text_delta\"").count(), 4);
@@ -4120,37 +3784,6 @@ mod tests {
                 r#"{"method":"item/completed","params":{}}"#,
                 "turn_completed:",
             ]
-        );
-    }
-
-    #[test]
-    fn final_answer_reader_recovers_legacy_streamed_prose_honestly() {
-        let home = tempfile::tempdir().unwrap();
-        let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
-        capture.record_conversation(ConversationEvent::TurnStarted {
-            turn_id: "turn-1".to_string(),
-        });
-        capture.record_conversation(ConversationEvent::TextDelta {
-            turn_id: "turn-1".to_string(),
-            content: "working\n".to_string(),
-        });
-        capture.record_conversation(ConversationEvent::TextDelta {
-            turn_id: "turn-1".to_string(),
-            content: "final report".to_string(),
-        });
-        capture.record_conversation(ConversationEvent::TurnCompleted {
-            turn_id: "turn-1".to_string(),
-            status: crate::chat::types::Lifecycle::Completed,
-        });
-        capture.finish("completed").unwrap();
-
-        fs::remove_dir_all(capture.artifact_dir()).unwrap();
-        assert_eq!(
-            capture.final_answer().unwrap(),
-            Some(super::FinalAnswer {
-                text: "working\nfinal report".to_string(),
-                exact: false,
-            })
         );
     }
 
@@ -4433,6 +4066,14 @@ mod tests {
     fn resume_refuses_live_agent_that_cannot_be_ended() {
         let ledger = crate::journal::TestLedgerGuard::new();
         let (store, attachment, mut process, next) = attached_session(&ledger);
+        store
+            .record_session_connection(
+                "conversation",
+                &attachment,
+                ledger.home().join("absent.sock").to_str().unwrap(),
+                &"saved-thread".into(),
+            )
+            .unwrap();
         // A provider outside a group of its own is never signalled.
         let mut provider = std::process::Command::new("sleep")
             .arg("30")
@@ -4448,18 +4089,19 @@ mod tests {
         process.wait().unwrap();
 
         let error = super::resume_session_agent_process(&store, "conversation", &next).unwrap_err();
-        assert!(
-            error.to_string().contains("has no observed exit"),
-            "{error}"
-        );
-        assert!(provider.try_wait().unwrap().is_none());
-        assert_eq!(
-            store.session_attachment("conversation").unwrap(),
-            Some(attachment.clone())
-        );
-
+        let remained_alive = provider.try_wait().unwrap().is_none();
+        let retained_attachment = store.session_attachment("conversation").unwrap();
         provider.kill().unwrap();
         provider.wait().unwrap();
+        assert!(
+            error
+                .to_string()
+                .contains("does not lead its own process group"),
+            "{error}"
+        );
+        assert!(remained_alive);
+        assert_eq!(retained_attachment, Some(attachment.clone()));
+
         let replacement =
             super::resume_session_agent_process(&store, "conversation", &next).unwrap();
         assert_ne!(replacement.agent_process_id, attachment.agent_process_id);
@@ -4589,27 +4231,6 @@ mod tests {
     }
 
     #[test]
-    fn provider_clients_are_independent_and_remove_exactly() {
-        let home = tempfile::tempdir().unwrap();
-        let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
-        let dir = capture.artifact_dir();
-
-        write_provider_client(&dir, 101).unwrap();
-        write_provider_client(&dir, 202).unwrap();
-        assert_eq!(
-            read_provider_clients(&dir)
-                .unwrap()
-                .into_iter()
-                .map(|client| client.pid)
-                .collect::<Vec<_>>(),
-            [101, 202]
-        );
-
-        remove_provider_client(&dir, 101).unwrap();
-        assert_eq!(read_provider_clients(&dir).unwrap()[0].pid, 202);
-    }
-
-    #[test]
     fn two_runs_about_one_task_keep_distinct_identity_and_shared_provenance() {
         let home = tempfile::tempdir().unwrap();
         let selector = "task:LOO-267".to_string();
@@ -4696,10 +4317,15 @@ mod tests {
         let dir = capture.artifact_dir();
 
         capture.mark_spawn_requested();
-        capture.record_stream_event(&StreamEvent::Usage {
-            input_tokens: Some(10),
-            output_tokens: Some(4),
-            cache_read_tokens: None,
+        capture.record_conversation(ConversationEvent::UsageCheckpoint {
+            turn_id: "provider-turn".to_string(),
+            usage: TurnUsage {
+                input_tokens: Some(10),
+                output_tokens: Some(4),
+                cache_read_tokens: None,
+                ..TurnUsage::default()
+            },
+            final_receipt: false,
         });
         capture
             .0
@@ -4711,10 +4337,15 @@ mod tests {
                 Some(crate::store::ProviderAccountId::parse("fallback-account").unwrap()),
             )
             .unwrap();
-        capture.record_stream_event(&StreamEvent::Usage {
-            input_tokens: Some(12),
-            output_tokens: Some(5),
-            cache_read_tokens: None,
+        capture.record_conversation(ConversationEvent::UsageCheckpoint {
+            turn_id: "provider-turn".to_string(),
+            usage: TurnUsage {
+                input_tokens: Some(12),
+                output_tokens: Some(5),
+                cache_read_tokens: None,
+                ..TurnUsage::default()
+            },
+            final_receipt: false,
         });
         capture.finish("completed").expect("settle capture");
 
@@ -4769,23 +4400,38 @@ mod tests {
             .expect("publish Session capture manifest");
         let dir = capture.artifact_dir();
 
-        capture.record_stream_event(&StreamEvent::Usage {
-            input_tokens: Some(10),
-            output_tokens: None,
-            cache_read_tokens: None,
+        capture.record_conversation(ConversationEvent::UsageCheckpoint {
+            turn_id: "provider-turn".to_string(),
+            usage: TurnUsage {
+                input_tokens: Some(10),
+                output_tokens: None,
+                cache_read_tokens: None,
+                ..TurnUsage::default()
+            },
+            final_receipt: false,
         });
-        capture.record_stream_event(&StreamEvent::Usage {
-            input_tokens: None,
-            output_tokens: Some(4),
-            cache_read_tokens: None,
+        capture.record_conversation(ConversationEvent::UsageCheckpoint {
+            turn_id: "provider-turn".to_string(),
+            usage: TurnUsage {
+                input_tokens: None,
+                output_tokens: Some(4),
+                cache_read_tokens: None,
+                ..TurnUsage::default()
+            },
+            final_receipt: false,
         });
         capture.record_conversation(ConversationEvent::TurnStarted {
             turn_id: "provider-turn-2".to_string(),
         });
-        capture.record_stream_event(&StreamEvent::Usage {
-            input_tokens: Some(3),
-            output_tokens: None,
-            cache_read_tokens: None,
+        capture.record_conversation(ConversationEvent::UsageCheckpoint {
+            turn_id: "provider-turn-2".to_string(),
+            usage: TurnUsage {
+                input_tokens: Some(3),
+                output_tokens: None,
+                cache_read_tokens: None,
+                ..TurnUsage::default()
+            },
+            final_receipt: false,
         });
         capture.finish("completed").unwrap();
 
@@ -4811,15 +4457,25 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
 
-        capture.record_stream_event(&StreamEvent::Usage {
-            input_tokens: Some(10),
-            output_tokens: None,
-            cache_read_tokens: None,
+        capture.record_conversation(ConversationEvent::UsageCheckpoint {
+            turn_id: "provider-turn".to_string(),
+            usage: TurnUsage {
+                input_tokens: Some(10),
+                output_tokens: None,
+                cache_read_tokens: None,
+                ..TurnUsage::default()
+            },
+            final_receipt: false,
         });
-        capture.record_stream_event(&StreamEvent::Usage {
-            input_tokens: Some(15),
-            output_tokens: Some(4),
-            cache_read_tokens: None,
+        capture.record_conversation(ConversationEvent::UsageCheckpoint {
+            turn_id: "provider-turn".to_string(),
+            usage: TurnUsage {
+                input_tokens: Some(15),
+                output_tokens: Some(4),
+                cache_read_tokens: None,
+                ..TurnUsage::default()
+            },
+            final_receipt: false,
         });
         capture
             .0
@@ -4827,15 +4483,23 @@ mod tests {
             .unwrap()
             .fail_and_begin_attempt("fallback".to_string(), None, None)
             .unwrap();
-        capture.record_stream_event(&StreamEvent::Usage {
-            input_tokens: Some(12),
-            output_tokens: Some(3),
-            cache_read_tokens: None,
+        capture.record_conversation(ConversationEvent::UsageCheckpoint {
+            turn_id: "provider-turn".to_string(),
+            usage: TurnUsage {
+                input_tokens: Some(12),
+                output_tokens: Some(3),
+                cache_read_tokens: None,
+                ..TurnUsage::default()
+            },
+            final_receipt: false,
         });
-        capture.record_stream_event(&StreamEvent::Result {
-            subtype: ResultSubtype::Success,
-            cost_usd: Some(0.25),
-            duration_secs: Some(1.0),
+        capture.record_conversation(ConversationEvent::UsageCheckpoint {
+            turn_id: "provider-turn".to_string(),
+            usage: TurnUsage {
+                cost_usd: Some(0.25),
+                ..TurnUsage::default()
+            },
+            final_receipt: true,
         });
         capture.finish("completed").unwrap();
 

@@ -9,15 +9,17 @@ use super::{classify_task, TaskDisposition, TaskStartEvidence};
 use crate::ops::pm::test_fixture::PlanningEnvironment;
 use crate::ops::pm::{pm_sync, resolve_context, PmSyncOptions, PmTestContext, PM_TEST_CONTEXT};
 use crate::ops::NullProgress;
-use crate::planning::{LinearIssueId, TaskPlan};
-use crate::pm::{PmItem, PmProject, ProjectStatus};
+use crate::pm::linear::LinearProject;
+use crate::pm::LinearIssueId;
 use crate::store::{open_ephemeral_store, CredentialType, ProviderToken, StorageConfig};
-use crate::work::task::{Observation, PmWritebackState, Task, TaskId, TaskPr, TaskPrId};
+use crate::work::project::ProjectStatus;
+use crate::work::task::{LinearWritebackState, Observation, Task, TaskId, TaskPr, TaskPrId};
 use crate::work::wave::{ensure_wave_row, WaveLocator};
 use time::OffsetDateTime;
 
-fn project(id: &str, name: &str, status: ProjectStatus) -> PmProject {
-    PmProject {
+fn project(id: &str, name: &str, status: ProjectStatus) -> LinearProject {
+    LinearProject {
+        description: None,
         revision: None,
         id: id.into(),
         name: name.into(),
@@ -32,27 +34,6 @@ fn project(id: &str, name: &str, status: ProjectStatus) -> PmProject {
     }
 }
 
-fn task(state: &str) -> PmItem {
-    PmItem {
-        branch_name: None,
-        revision: None,
-        id: "issue".into(),
-        identifier: "FIX-1".into(),
-        url: None,
-        name: "Work".into(),
-        description: String::new(),
-        rank: 0,
-        completed: state == "completed",
-        completed_at: None,
-        due_date: None,
-        state: Some(state.into()),
-        project_id: Some("old".into()),
-        project: Some("old".into()),
-        team_id: Some("team-1".into()),
-        assignee: None,
-    }
-}
-
 #[test]
 fn unreviewed_backlog_remains_while_started_work_moves() {
     let mut evidence = TaskStartEvidence {
@@ -63,25 +44,25 @@ fn unreviewed_backlog_remains_while_started_work_moves() {
         completed: false,
     };
     assert_eq!(
-        classify_task(&task("unstarted"), &evidence).0,
+        classify_task(Some("unstarted"), false, &evidence).0,
         TaskDisposition::Historical
     );
     assert_eq!(
-        classify_task(&task("started"), &evidence).0,
+        classify_task(Some("started"), false, &evidence).0,
         TaskDisposition::Move
     );
     assert_eq!(
-        classify_task(&task("completed"), &evidence).0,
+        classify_task(Some("completed"), true, &evidence).0,
         TaskDisposition::Historical
     );
     evidence.authored = None;
     assert_eq!(
-        classify_task(&task("backlog"), &evidence).0,
+        classify_task(Some("backlog"), false, &evidence).0,
         TaskDisposition::Unresolved
     );
     evidence.begun = true;
     assert_eq!(
-        classify_task(&task("backlog"), &evidence).0,
+        classify_task(Some("backlog"), false, &evidence).0,
         TaskDisposition::Move
     );
 }
@@ -96,28 +77,28 @@ fn unresolved_abandonment_requires_explicit_settlement() {
         completed: false,
     };
     assert_eq!(
-        classify_task(&task("unstarted"), &evidence).0,
+        classify_task(Some("unstarted"), false, &evidence).0,
         TaskDisposition::Unresolved
     );
     assert_eq!(
-        classify_task(&task("canceled"), &evidence).0,
+        classify_task(Some("canceled"), false, &evidence).0,
         TaskDisposition::Historical
     );
     evidence.begun = true;
     assert_eq!(
-        classify_task(&task("unstarted"), &evidence).0,
+        classify_task(Some("unstarted"), false, &evidence).0,
         TaskDisposition::Unresolved
     );
     evidence.begun = false;
     evidence.authored = Some(true);
     assert_eq!(
-        classify_task(&task("unstarted"), &evidence).0,
+        classify_task(Some("unstarted"), false, &evidence).0,
         TaskDisposition::Unresolved
     );
     evidence.abandoned = false;
     evidence.completed = true;
     assert_eq!(
-        classify_task(&task("unstarted"), &evidence).0,
+        classify_task(Some("unstarted"), false, &evidence).0,
         TaskDisposition::Unresolved
     );
 }
@@ -281,7 +262,7 @@ async fn context(home: &std::path::Path, repo: &std::path::Path, url: &str) -> P
 async fn seed_project(
     store: &crate::store::Store,
     wave: &crate::work::wave::Wave,
-    plan: &PmProject,
+    plan: &LinearProject,
 ) -> crate::work::project::Project {
     if let Some(existing) = store.get_project_by_project(&plan.id).await.unwrap() {
         return existing;
@@ -290,21 +271,17 @@ async fn seed_project(
     let project = crate::work::project::Project {
         id: crate::work::project::ProjectId::new(),
         wave_id: wave.id().clone(),
-        plan: crate::planning::ProjectPlan {
-            summary: String::new(),
-            linear_id: Some(crate::planning::LinearProjectId::new(plan.id.clone()).unwrap()),
-            slug: plan.slug.clone(),
-            name: plan.name.clone(),
-            prompt_context: crate::pm::render_project_content(&crate::pm::ProjectContent {
-                workflow: plan.workflow.clone(),
-                krs: plan.krs.clone(),
-                metric_targets: plan.metric_targets.clone(),
-            }),
-            pm_snapshot_synced_at: Some(now.unix_timestamp()),
-            workflow: plan.workflow.clone(),
-            status: plan.status,
-        },
-        iteration: 0,
+
+        summary: String::new(),
+        linear_id: Some(crate::pm::LinearProjectId::new(plan.id.clone()).unwrap()),
+        slug: plan.slug.clone(),
+        name: plan.name.clone(),
+        description: String::new(),
+        krs: plan.krs.clone(),
+        metric_targets: plan.metric_targets.clone(),
+        pm_snapshot_synced_at: Some(now.unix_timestamp()),
+        workflow: plan.workflow.clone(),
+        status: plan.status,
         abandon_intent: None,
         created_at: now,
         updated_at: now,
@@ -336,15 +313,15 @@ async fn local_task(
     let now = OffsetDateTime::now_utc();
     let task = Task {
         id: TaskId::new(),
-        plan: TaskPlan {
-            revision: 0,
-            linear_id: Some(LinearIssueId::new(issue).unwrap()),
-            identifier: format!("FIX-{issue}"),
-            title: "Retain execution".into(),
-            description: String::new(),
-            pm_snapshot_synced_at: Some(now.unix_timestamp()),
-        },
-        pm_writeback: PmWritebackState::Current,
+
+        revision: 0,
+        linear_id: Some(LinearIssueId::new(issue).unwrap()),
+        identifier: format!("FIX-{issue}"),
+        title: "Retain execution".into(),
+        description: String::new(),
+        pm_snapshot_synced_at: Some(now.unix_timestamp()),
+
+        pm_writeback: LinearWritebackState::Current,
         wave_id: wave.id().clone(),
         project_id: parent.id,
         worktree: Some(worktree.into()),
@@ -356,6 +333,12 @@ async fn local_task(
         abandon_intent: None,
         created_at: now,
         updated_at: now,
+        rank: 0,
+        assignee: None,
+        due_date: None,
+        state: None,
+        completed: false,
+        completed_at: None,
         observation: Observation::default(),
     };
     let pr = TaskPr {
@@ -586,13 +569,7 @@ async fn explicit_sync_converts_legacy_flow_without_renaming_or_losing_content()
         provider.lock().await.projects["00000000-0000-4000-8000-000000000001"].clone();
     assert_ne!(observed.as_object_mut().unwrap().remove("updatedAt"), None);
     assert_eq!(observed, expected);
-    let snapshot = store.pm_snapshot(&task.wave_id).await.unwrap().unwrap();
-    let snapshot = snapshot.snapshot;
-    let synced = snapshot
-        .projects
-        .iter()
-        .find(|project| project.id == "00000000-0000-4000-8000-000000000001")
-        .unwrap();
+    let synced = store.get_project(&task.project_id).await.unwrap().unwrap();
     assert_eq!(synced.workflow, "custom");
     assert_eq!(synced.krs.len(), 1);
     assert_eq!(synced.krs[0].text, "Keep this KR");
@@ -629,30 +606,32 @@ async fn archived_predecessor_is_history_even_when_linear_still_says_started() {
     PM_TEST_CONTEXT
         .scope(home, async {
             let ctx = resolve_context(&repo, "a").await.unwrap();
-            let snapshot = crate::ops::pm::refresh_pm_snapshot(&repo, "a", &ctx)
+            crate::ops::pm::refresh_pm_snapshot(&repo, "a", &ctx)
                 .await
                 .unwrap();
-            assert!(snapshot.projects.iter().any(
-                |project| project.id == "a-current" && project.status == ProjectStatus::Started
-            ));
+            let store = super::pm_store().await.unwrap();
+            let projects = store.list_projects(None).await.unwrap();
+            assert!(projects.iter().any(|project| project
+                .linear_id
+                .as_ref()
+                .map(|id| id.as_str())
+                == Some("a-current")
+                && project.status == ProjectStatus::Started));
             assert_eq!(
-                snapshot
-                    .projects
+                projects
                     .iter()
-                    .find(|project| project.id == "00000000-0000-4000-8000-000000000001")
+                    .find(|project| project.linear_id.as_ref().map(|id| id.as_str())
+                        == Some("00000000-0000-4000-8000-000000000001"))
                     .unwrap()
                     .status,
                 ProjectStatus::Completed
             );
-            assert!(snapshot.items.iter().any(|item| item.id == "a-started"
-                && item.project_id.as_deref() == Some("00000000-0000-4000-8000-000000000001")));
-            let store = super::pm_store().await.unwrap();
             let retained = store.get_task(&task.id).await.unwrap().unwrap();
             assert_eq!(retained.id, task.id);
             assert_eq!(retained.project_id, task.project_id);
             assert_eq!(retained.worktree, task.worktree);
-            assert_eq!(retained.plan.linear_id, task.plan.linear_id);
-            assert_eq!(retained.plan.title, "a-started");
+            assert_eq!(retained.linear_id, task.linear_id);
+            assert_eq!(retained.title, "a-started");
             assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
             assert_eq!(store.sqlite.task_flows(&task.id).unwrap(), flow);
         })

@@ -15,7 +15,7 @@ use super::{run_planning_write, run_sqlite, Store, StoreResult};
 impl Store {
     pub(crate) async fn create_task(
         &self,
-        input: &crate::planning::NewTask,
+        input: &crate::work::task::NewTask,
         acquisition: Arc<super::PlanningLocks>,
     ) -> StoreResult<Task> {
         let input = input.clone();
@@ -271,10 +271,10 @@ impl Store {
         .await
     }
 
-    pub async fn apply_linear_observation(
+    pub(crate) async fn apply_linear_observation(
         &self,
         task_id: &TaskId,
-        observation: crate::pm::IssueObservation,
+        observation: crate::pm::linear::LinearIssueObservation,
         observed_at: OffsetDateTime,
     ) -> StoreResult<LinearObservationOutcome> {
         let task_id = task_id.clone();

@@ -15,22 +15,25 @@
                 "activation": null,
                 "observed_at": 1791502111,
                 "pending_successor": null,
-                "project_id": "project-1",
+                "project_id": "proj_a0b7b80262214dc6b24c91242560d139",
                 "state": "ready"
               },
               "projects": {
                 "items": [
                   {
                     "current": true,
-                    "id": "project-1",
+                    "id": "proj_a0b7b80262214dc6b24c91242560d139",
                     "krs": [],
                     "metric_targets": [],
                     "name": "Provider destination",
                     "slug": "provider-destination",
                     "status": "started",
-                    "work_id": "proj_a0b7b80262214dc6b24c91242560d139",
                     "workflow": "feature",
-                    "sync": null
+                    "sync": {
+                      "connected": false,
+                      "changes": []
+                    },
+                    "linear_id": "project-1"
                   }
                 ],
                 "state": "ok",
@@ -111,7 +114,15 @@
                       "name": "Verify installed release",
                       "rank": 1,
                       "state": "unstarted",
-                      "sync": null
+                      "sync": {
+                        "connected": false,
+                        "changes": []
+                      },
+                      "linear_id": null,
+                      "acquisition": {
+                        "state": "available",
+                        "observed_at": null
+                      }
                     },
                     "workflow_name": "feature"
                   },
@@ -337,7 +348,15 @@
                       "name": "Deliver the command",
                       "rank": 0,
                       "state": "completed",
-                      "sync": null
+                      "sync": {
+                        "connected": false,
+                        "changes": []
+                      },
+                      "linear_id": null,
+                      "acquisition": {
+                        "state": "available",
+                        "observed_at": null
+                      }
                     },
                     "workflow_name": "delivery"
                   }
@@ -628,7 +647,15 @@
         "name": "Deliver the command",
         "rank": 0,
         "state": "completed",
-        "sync": null
+        "sync": {
+          "connected": false,
+          "changes": []
+        },
+        "linear_id": null,
+        "acquisition": {
+          "state": "available",
+          "observed_at": null
+        }
       },
       "workflow_name": "delivery"
     },
@@ -1652,22 +1679,25 @@
                 "activation": null,
                 "observed_at": 1791502111,
                 "pending_successor": null,
-                "project_id": "project-1",
+                "project_id": "proj_a0b7b80262214dc6b24c91242560d139",
                 "state": "ready"
               },
               "projects": {
                 "items": [
                   {
                     "current": true,
-                    "id": "project-1",
+                    "id": "proj_a0b7b80262214dc6b24c91242560d139",
                     "krs": [],
                     "metric_targets": [],
                     "name": "Provider destination",
                     "slug": "provider-destination",
                     "status": "started",
-                    "work_id": "proj_a0b7b80262214dc6b24c91242560d139",
                     "workflow": "feature",
-                    "sync": null
+                    "sync": {
+                      "connected": false,
+                      "changes": []
+                    },
+                    "linear_id": "project-1"
                   }
                 ],
                 "state": "ok",
@@ -1748,7 +1778,15 @@
                       "name": "Verify installed release",
                       "rank": 1,
                       "state": "unstarted",
-                      "sync": null
+                      "sync": {
+                        "connected": false,
+                        "changes": []
+                      },
+                      "linear_id": null,
+                      "acquisition": {
+                        "state": "available",
+                        "observed_at": null
+                      }
                     },
                     "workflow_name": "feature"
                   },
@@ -1959,7 +1997,15 @@
                       "name": "Deliver the command",
                       "rank": 0,
                       "state": "completed",
-                      "sync": null
+                      "sync": {
+                        "connected": false,
+                        "changes": []
+                      },
+                      "linear_id": null,
+                      "acquisition": {
+                        "state": "available",
+                        "observed_at": null
+                      }
                     },
                     "workflow_name": "delivery"
                   }
@@ -2235,7 +2281,15 @@
         "name": "Deliver the command",
         "rank": 0,
         "state": "completed",
-        "sync": null
+        "sync": {
+          "connected": false,
+          "changes": []
+        },
+        "linear_id": null,
+        "acquisition": {
+          "state": "available",
+          "observed_at": null
+        }
       },
       "workflow_name": "delivery"
     },
@@ -3056,22 +3110,25 @@
                 "activation": null,
                 "observed_at": 1791502111,
                 "pending_successor": null,
-                "project_id": "project-1",
+                "project_id": "proj_a0b7b80262214dc6b24c91242560d139",
                 "state": "ready"
               },
               "projects": {
                 "items": [
                   {
                     "current": true,
-                    "id": "project-1",
+                    "id": "proj_a0b7b80262214dc6b24c91242560d139",
                     "krs": [],
                     "metric_targets": [],
                     "name": "Provider destination",
                     "slug": "provider-destination",
                     "status": "started",
-                    "work_id": "proj_a0b7b80262214dc6b24c91242560d139",
                     "workflow": "feature",
-                    "sync": null
+                    "sync": {
+                      "connected": false,
+                      "changes": []
+                    },
+                    "linear_id": "project-1"
                   }
                 ],
                 "state": "ok",
@@ -3081,7 +3138,7 @@
                 "items": [
                   {
                     "actions": {
-                      "reason": "Task FIX-1 cannot complete until its gates close: Merged \u00b7 Follow-through pending; file follow-ups or record `lf task follow-up <issue> --none REASON`",
+                      "reason": "Task FIX-1 cannot complete until its gates close: Merged · Follow-through pending; file follow-ups or record `lf task follow-up <issue> --none REASON`",
                       "recommended": "no_action"
                     },
                     "condition": {
@@ -3264,7 +3321,15 @@
                       "name": "Deliver the command",
                       "rank": 0,
                       "state": "unstarted",
-                      "sync": null
+                      "sync": {
+                        "connected": false,
+                        "changes": []
+                      },
+                      "linear_id": null,
+                      "acquisition": {
+                        "state": "available",
+                        "observed_at": null
+                      }
                     },
                     "workflow_name": "delivery"
                   }
@@ -3335,7 +3400,7 @@
     },
     "row": {
       "actions": {
-        "reason": "Task FIX-1 cannot complete until its gates close: Merged \u00b7 Follow-through pending; file follow-ups or record `lf task follow-up <issue> --none REASON`",
+        "reason": "Task FIX-1 cannot complete until its gates close: Merged · Follow-through pending; file follow-ups or record `lf task follow-up <issue> --none REASON`",
         "recommended": "no_action"
       },
       "condition": {
@@ -3518,14 +3583,22 @@
         "name": "Deliver the command",
         "rank": 0,
         "state": "unstarted",
-        "sync": null
+        "sync": {
+          "connected": false,
+          "changes": []
+        },
+        "linear_id": null,
+        "acquisition": {
+          "state": "available",
+          "observed_at": null
+        }
       },
       "workflow_name": "delivery"
     },
     "status": {
       "execution": {
         "actions": {
-          "reason": "Task FIX-1 cannot complete until its gates close: Merged \u00b7 Follow-through pending; file follow-ups or record `lf task follow-up <issue> --none REASON`",
+          "reason": "Task FIX-1 cannot complete until its gates close: Merged · Follow-through pending; file follow-ups or record `lf task follow-up <issue> --none REASON`",
           "recommended": "no_action"
         },
         "agent": null,

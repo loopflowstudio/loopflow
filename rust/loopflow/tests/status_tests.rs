@@ -11,13 +11,13 @@ use std::process::Command;
 
 use loopflow::child::ChildRef;
 use loopflow::id::WaveId;
-use loopflow::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
+use loopflow::pm::{LinearIssueId, LinearProjectId};
 use loopflow::store::migrations;
 use loopflow::store::sqlite::SqliteStore;
 use loopflow::store::{PmSnapshotRow, StorageConfig};
 use loopflow::work::project::{Project, ProjectEventKind, ProjectId};
 use loopflow::work::task::{
-    Observation, PmWritebackState, PrMergeMode, Task, TaskId, TaskPr, TaskPrId,
+    LinearWritebackState, Observation, PrMergeMode, Task, TaskId, TaskPr, TaskPrId,
 };
 use loopflow::work::wave::metrics::{
     load_metric_contract, MetricObservation, ObservationAcceptance,
@@ -47,20 +47,21 @@ fn seed(home: &Path, wave_name: &str) -> Wave {
 fn test_project(wave: &Wave, slug: &str, updated_at: OffsetDateTime) -> Project {
     Project {
         id: ProjectId::new(),
-        plan: ProjectPlan {
-            summary: String::new(),
-            workflow: "feature".into(),
-            status: loopflow::pm::ProjectStatus::Started,
-            linear_id: Some(
-                LinearProjectId::new(uuid::Uuid::new_v4().to_string()).expect("Linear Project id"),
-            ),
-            slug: slug.to_string(),
-            name: slug.replace('-', " "),
-            prompt_context: "Keep status truthful.".to_string(),
-            pm_snapshot_synced_at: Some(updated_at.unix_timestamp()),
-        },
+
+        summary: String::new(),
+        workflow: "feature".into(),
+        status: loopflow::work::project::ProjectStatus::Started,
+        linear_id: Some(
+            LinearProjectId::new(uuid::Uuid::new_v4().to_string()).expect("Linear Project id"),
+        ),
+        slug: slug.to_string(),
+        name: slug.replace('-', " "),
+        description: "Keep status truthful.".to_string(),
+        krs: Vec::new(),
+        metric_targets: Vec::new(),
+        pm_snapshot_synced_at: Some(updated_at.unix_timestamp()),
+
         wave_id: wave.id().clone(),
-        iteration: 0,
         abandon_intent: None,
         created_at: updated_at,
         updated_at,
@@ -82,9 +83,9 @@ fn select_project(home: &Path, wave: &Wave, project_id: &str) {
 fn put_project_snapshot(home: &Path, wave: &Wave, project: &Project) {
     let payload = serde_json::json!({
         "projects": [{
-            "id": project.plan.linear_id.as_ref().unwrap().as_str(),
-            "slug": project.plan.slug,
-            "name": project.plan.name,
+            "id": project.linear_id.as_ref().unwrap().as_str(),
+            "slug": project.slug,
+            "name": project.name,
             "summary": "Keep status truthful.",
             "metric_targets": [],
             "workflow": "feature", "status": "started",
@@ -96,11 +97,7 @@ fn put_project_snapshot(home: &Path, wave: &Wave, project: &Project) {
         "items": []
     });
     let store = SqliteStore::new(&home.join("loopflow.db")).expect("open status store");
-    select_project(
-        home,
-        wave,
-        project.plan.linear_id.as_ref().unwrap().as_str(),
-    );
+    select_project(home, wave, project.linear_id.as_ref().unwrap().as_str());
     store
         .put_pm_snapshot(&PmSnapshotRow {
             wave_id: wave.id().clone(),
@@ -206,7 +203,11 @@ fn prepend_test_bin(command: &mut Command, home: &Path) {
     command.env("PATH", std::env::join_paths(paths).expect("test PATH"));
 }
 
-fn seed_stale_project_work(home: &Path, abandon_stale_project: bool, current_task: bool) {
+fn seed_stale_project_work(
+    home: &Path,
+    abandon_stale_project: bool,
+    current_task: bool,
+) -> PmSnapshotRow {
     const STALE_WORK_ID: &str = "proj_e972b70272fbb5e91c096ebe657f9f9b";
     const STALE_PROJECT_ID: &str = "f56c583c-c360-4dc4-ba12-4b5a02268623";
     const STALE_TASK_WORK_ID: &str = "task_40fbeeaadfbca5367aa7391432ae84ff";
@@ -218,44 +219,43 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool, current_tas
     let now = OffsetDateTime::now_utc();
     let stale = Project {
         id: ProjectId::parse(STALE_WORK_ID).expect("recorded Project Work id"),
-        plan: ProjectPlan {
-            summary: String::new(),
-            workflow: "feature".into(),
-            status: loopflow::pm::ProjectStatus::Started,
-            linear_id: Some(
-                LinearProjectId::new(STALE_PROJECT_ID).expect("recorded PM Project id"),
-            ),
-            slug: "technical-architecture".to_string(),
-            name: "Technical Architecture".to_string(),
-            prompt_context: "Keep the system legible and minimally simple.".to_string(),
-            pm_snapshot_synced_at: Some(now.unix_timestamp() - 1),
-        },
+
+        summary: String::new(),
+        workflow: "feature".into(),
+        status: loopflow::work::project::ProjectStatus::Started,
+        linear_id: Some(LinearProjectId::new(STALE_PROJECT_ID).expect("recorded PM Project id")),
+        slug: "technical-architecture".to_string(),
+        name: "Technical Architecture".to_string(),
+        description: "Keep the system legible and minimally simple.".to_string(),
+        krs: Vec::new(),
+        metric_targets: Vec::new(),
+        pm_snapshot_synced_at: Some(now.unix_timestamp() - 1),
+
         wave_id: wave.id().clone(),
-        iteration: 0,
         abandon_intent: None,
         created_at: now,
         updated_at: now,
     };
     store.insert_project(&stale).expect("seed stale Project");
-    select_project(home, &wave, stale.plan.linear_id.as_ref().unwrap().as_str());
+    select_project(home, &wave, stale.linear_id.as_ref().unwrap().as_str());
     let stale_task = Task {
         id: TaskId::parse(STALE_TASK_WORK_ID).expect("recorded Task Work id"),
-        plan: TaskPlan {
-            revision: 0,
-            linear_id: Some(
-                LinearIssueId::new(if current_task {
-                    "task-prd-52"
-                } else {
-                    "linear-task-w2-127"
-                })
-                .expect("recorded PM Task id"),
-            ),
-            identifier: "W2-127".to_string(),
-            title: "Preserve historical architecture evidence".to_string(),
-            description: "This Task outlived its retired Linear Project.".to_string(),
-            pm_snapshot_synced_at: Some(now.unix_timestamp() - 1),
-        },
-        pm_writeback: PmWritebackState::Current,
+
+        revision: 0,
+        linear_id: Some(
+            LinearIssueId::new(if current_task {
+                "task-prd-52"
+            } else {
+                "linear-task-w2-127"
+            })
+            .expect("recorded PM Task id"),
+        ),
+        identifier: "W2-127".to_string(),
+        title: "Preserve historical architecture evidence".to_string(),
+        description: "This Task outlived its retired Linear Project.".to_string(),
+        pm_snapshot_synced_at: Some(now.unix_timestamp() - 1),
+
+        pm_writeback: LinearWritebackState::Current,
         wave_id: wave.id().clone(),
         project_id: stale.id.clone(),
         worktree: Some(home.join("repo.w2-127")),
@@ -267,6 +267,12 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool, current_tas
         abandon_intent: None,
         created_at: now,
         updated_at: now,
+        rank: 0,
+        assignee: None,
+        due_date: None,
+        state: None,
+        completed: false,
+        completed_at: None,
         observation: Observation::NotRequired,
     };
     let stale_pr = TaskPr {
@@ -311,21 +317,22 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool, current_tas
 
     let current = Project {
         id: ProjectId::new(),
-        plan: ProjectPlan {
-            summary: String::new(),
-            workflow: "feature".into(),
-            status: loopflow::pm::ProjectStatus::Started,
-            linear_id: Some(
-                LinearProjectId::new("95159066-9098-4d0b-8903-01459dc7ec14")
-                    .expect("current PM Project id"),
-            ),
-            slug: "auditability".to_string(),
-            name: "Auditability".to_string(),
-            prompt_context: "Every claim points to its receipt.".to_string(),
-            pm_snapshot_synced_at: Some(now.unix_timestamp()),
-        },
+
+        summary: String::new(),
+        workflow: "feature".into(),
+        status: loopflow::work::project::ProjectStatus::Started,
+        linear_id: Some(
+            LinearProjectId::new("95159066-9098-4d0b-8903-01459dc7ec14")
+                .expect("current PM Project id"),
+        ),
+        slug: "auditability".to_string(),
+        name: "Auditability".to_string(),
+        description: "Every claim points to its receipt.".to_string(),
+        krs: Vec::new(),
+        metric_targets: Vec::new(),
+        pm_snapshot_synced_at: Some(now.unix_timestamp()),
+
         wave_id: wave.id().clone(),
-        iteration: 0,
         abandon_intent: None,
         created_at: now,
         updated_at: now,
@@ -333,11 +340,7 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool, current_tas
     store
         .insert_project(&current)
         .expect("seed current Project");
-    select_project(
-        home,
-        &wave,
-        current.plan.linear_id.as_ref().unwrap().as_str(),
-    );
+    select_project(home, &wave, current.linear_id.as_ref().unwrap().as_str());
 
     let bin = home.join("bin");
     std::fs::create_dir_all(&bin).expect("test bin");
@@ -376,15 +379,15 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool, current_tas
             }
         ]
     });
-    store
-        .put_pm_snapshot(&PmSnapshotRow {
-            wave_id: wave.id().clone(),
-            provider: "linear".to_string(),
-            initiative: "initiative-product".to_string(),
-            synced_at: now.unix_timestamp(),
-            snapshot: serde_json::from_value(payload).expect("parse PM snapshot"),
-        })
-        .expect("seed PM snapshot");
+    let snapshot = PmSnapshotRow {
+        wave_id: wave.id().clone(),
+        provider: "linear".into(),
+        initiative: "initiative-product".into(),
+        synced_at: now.unix_timestamp(),
+        snapshot: serde_json::from_value(payload).unwrap(),
+    };
+    store.put_pm_snapshot(&snapshot).expect("seed PM snapshot");
+    snapshot
 }
 
 fn seed_persisted_merge_request_without_copy(home: &Path) {
@@ -491,10 +494,10 @@ fn project_operator_failures_remain_historical_without_reappearing_on_the_wave()
     let expected_projects = serde_json::json!({
         "state": "ok",
         "items": [{
-            "id": project.plan.linear_id.as_ref().unwrap().as_str(),
-            "work_id": project.id.as_str(),
-            "slug": project.plan.slug,
-            "name": project.plan.name,
+            "id": project.id.as_str(),
+            "linear_id": project.linear_id.as_ref().unwrap().as_str(),
+            "slug": project.slug,
+            "name": project.name,
             "workflow": "feature",
             "status": "started",
             "current": true,
@@ -709,7 +712,16 @@ Count dispatched Task loops that settle without rescue.
     assert_eq!(status["projects"]["state"], "ok");
     let projects = status["projects"]["items"].as_array().unwrap();
     assert_eq!(projects.len(), 1);
-    assert_eq!(projects[0]["id"], project_payload["projects"][0]["id"]);
+    let owned = SqliteStore::new(&home.path().join("loopflow.db"))
+        .unwrap()
+        .list_projects(Some(wave.id()))
+        .unwrap()
+        .remove(0);
+    assert_eq!(projects[0]["id"], owned.id.as_str());
+    assert_eq!(
+        projects[0]["linear_id"],
+        project_payload["projects"][0]["id"]
+    );
     assert_eq!(projects[0]["status"], "started");
     assert_eq!(projects[0]["krs"], project_payload["projects"][0]["krs"]);
     assert_eq!(
@@ -773,7 +785,7 @@ fn orphaned_task_work_preserves_status_and_roadmap_evidence() {
             assert_eq!(projects.len(), 2);
             let projects: Vec<_> = projects
                 .iter()
-                .filter(|project| project["id"] == "95159066-9098-4d0b-8903-01459dc7ec14")
+                .filter(|project| project["linear_id"] == "95159066-9098-4d0b-8903-01459dc7ec14")
                 .collect();
             assert_eq!(projects.len(), 1);
             assert_eq!(projects[0]["slug"], "auditability");
@@ -822,7 +834,26 @@ fn provider_inventory_loss_preserves_saved_planning_in_both_views() {
                     .iter()
                     .find(|old| old["task"]["id"] == task["task"]["id"])
                     .unwrap();
-                assert_eq!(task["task"], previous["task"]);
+                let mut content = task["task"].clone();
+                let mut previous_content = previous["task"].clone();
+                content.as_object_mut().unwrap().remove("acquisition");
+                previous_content
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("acquisition");
+                assert_eq!(content, previous_content);
+                if payload.is_some() && task["task"]["linear_id"] == "task-prd-52" {
+                    assert_eq!(
+                        task["task"]["acquisition"],
+                        serde_json::json!({
+                            "state": "invalid", "observed_at": null
+                        })
+                    );
+                } else {
+                    assert_eq!(task["task"]["acquisition"], previous["task"]["acquisition"]);
+                }
+                assert_eq!(task["runtime"], previous["runtime"]);
+                assert_eq!(task["reference"], previous["reference"]);
             }
         }
     }
@@ -992,7 +1023,7 @@ fn exact_task_roadmap_retains_history_without_starting_work() {
 #[test]
 fn exact_task_roadmap_scopes_duplicate_identifiers_to_registered_repositories() {
     let home = tempfile::tempdir().unwrap();
-    seed_stale_project_work(home.path(), false, false);
+    let mut snapshot = seed_stale_project_work(home.path(), false, false);
     let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
     let original = store.list_waves(None).unwrap().remove(0);
     let other_repo = home.path().join("other-repo");
@@ -1004,7 +1035,6 @@ fn exact_task_roadmap_scopes_duplicate_identifiers_to_registered_repositories() 
         other_repo.display().to_string(),
     );
     store.create_wave(&other).unwrap();
-    let mut snapshot = store.pm_snapshot(original.id()).unwrap().unwrap();
     snapshot.snapshot.projects[0].id = "other-project".into();
     snapshot.snapshot.projects[0].initiative_ids = vec!["other-initiative".into()];
     snapshot.snapshot.items[0].id = "other-task".into();
@@ -1044,19 +1074,24 @@ fn exact_task_roadmap_scopes_duplicate_identifiers_to_registered_repositories() 
             .iter()
             .find(|row| row["wave"]["id"] == other.id().to_string())
             .unwrap();
-        assert_eq!(retained["tasks"]["items"][0]["task"]["id"], "other-task");
+        let task = store.task_by_issue("other-task").unwrap().unwrap();
+        assert_eq!(
+            retained["tasks"]["items"][0]["task"]["id"],
+            task.id.as_str()
+        );
+        assert_eq!(
+            retained["tasks"]["items"][0]["task"]["linear_id"],
+            "other-task"
+        );
         assert_eq!(retained["tasks"]["items"][0]["task"]["completed"], true);
     }
 }
 
 #[test]
-fn due_follow_up_is_visible_before_checkout_and_requires_a_confirmed_source() {
+fn ordinary_task_due_date_is_visible_before_checkout() {
     let home = tempfile::tempdir().unwrap();
-    seed_stale_project_work(home.path(), false, false);
+    let mut planning = seed_stale_project_work(home.path(), false, false);
     let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
-    let source_id = TaskId::parse(PERSISTED_TASK_ID).unwrap();
-    let source = store.task(&source_id).unwrap().unwrap();
-    let mut planning = store.pm_snapshot(&source.wave_id).unwrap().unwrap();
     let mut child = planning.snapshot.items[0].clone();
     child.id = "follow-up-issue".into();
     child.identifier = "W2-FOLLOW".into();
@@ -1068,46 +1103,12 @@ fn due_follow_up_is_visible_before_checkout_and_requires_a_confirmed_source() {
     planning.snapshot.items.push(child.clone());
     planning.synced_at += 1;
     store.put_pm_snapshot(&planning).unwrap();
-    let intent = loopflow::work::task::follow_through::FollowThroughIntent {
-        key: "installed-check".into(),
-        issue_id: child.id.clone(),
-        relation_id: uuid::Uuid::new_v4().to_string(),
-        project_id: child.project_id.clone().unwrap(),
-        team_id: child.team_id.clone().unwrap(),
-        state_id: None,
-        wave: "product".into(),
-        title: child.name.clone(),
-        notes: "Check the installed release after deployment".into(),
-        due: Some("2026-10-09".into()),
-        existing: false,
-    };
-    store.reserve_follow_through(&source_id, &intent).unwrap();
-    let pending = status_json(home.path(), &["product"], None);
-    let pending_child = pending["tasks"]["items"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|row| row["task"]["id"] == child.id)
-        .unwrap();
-    assert_eq!(
-        pending_child["task"]["follow_up_sources"],
-        serde_json::json!([])
-    );
-    let link = loopflow::work::task::follow_through::FollowThroughLink {
-        key: intent.key,
-        issue_id: child.id.clone(),
-        identifier: child.identifier,
-        url: child.url,
-        due: intent.due,
-    };
-    store.link_follow_through(&source_id, &link).unwrap();
-    store.link_follow_through(&source_id, &link).unwrap();
     let status = status_json(home.path(), &["product"], None);
     let row = status["tasks"]["items"]
         .as_array()
         .unwrap()
         .iter()
-        .find(|row| row["task"]["id"] == child.id)
+        .find(|row| row["task"]["linear_id"] == child.id)
         .unwrap();
     assert_eq!(row["runtime"]["started"], false);
     assert!(row["reference"]["workspace"].is_null());
@@ -1117,20 +1118,13 @@ fn due_follow_up_is_visible_before_checkout_and_requires_a_confirmed_source() {
         "current planning owns the date, not the original filing"
     );
     assert_eq!(row["task"]["completed"], false);
-    assert_eq!(
-        row["task"]["follow_up_sources"],
-        serde_json::json!([
-            {"issue_id": source.plan.linear_id.as_ref().unwrap().as_str(), "identifier": source.plan.identifier}
-        ])
-    );
-    assert_eq!(row["follow_through"]["reason"], serde_json::Value::Null);
     let roadmap = roadmap_json(home.path(), "product");
     let roadmap_child = roadmap["waves"]
         .as_array()
         .unwrap()
         .iter()
         .flat_map(|wave| wave["tasks"]["items"].as_array().into_iter().flatten())
-        .find(|row| row["task"]["id"] == child.id)
+        .find(|row| row["task"]["linear_id"] == child.id)
         .unwrap();
     assert_eq!(roadmap_child["task"], row["task"]);
 }

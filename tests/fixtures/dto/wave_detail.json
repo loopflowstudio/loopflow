@@ -104,7 +104,7 @@
     "items": [
       {
         "task": {
-          "id": "issue-1",
+          "id": "ts_22222222222222222222222222222222",
           "identifier": "INF-123",
           "name": "Surface nightly failures",
           "description": "Surface one focused failure.",
@@ -171,6 +171,11 @@
                 "error": "Offline"
               }
             ]
+          },
+          "linear_id": "issue-1",
+          "acquisition": {
+            "state": "available",
+            "observed_at": null
           }
         },
         "reference": {
@@ -638,6 +643,11 @@
                 "error": "Offline"
               }
             ]
+          },
+          "linear_id": null,
+          "acquisition": {
+            "state": "available",
+            "observed_at": null
           }
         },
         "reference": {
@@ -707,8 +717,7 @@
     "state": "ok",
     "items": [
       {
-        "id": "project-1",
-        "work_id": null,
+        "id": "proj_0123456789ab40008000000000000001",
         "slug": "release-feedback",
         "name": "current",
         "workflow": "task-design",
@@ -754,14 +763,15 @@
               "error": "Reply lost; awaiting readback"
             }
           ]
-        }
+        },
+        "linear_id": "project-1"
       }
     ],
     "truncated": false
   },
   "project_readiness": {
     "state": "ready",
-    "project_id": "project-1",
+    "project_id": "proj_0123456789ab40008000000000000001",
     "observed_at": null,
     "pending_successor": null,
     "activation": null

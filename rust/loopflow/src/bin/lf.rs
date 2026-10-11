@@ -656,8 +656,8 @@ fn print_task_snapshot(
         println!("{}", serde_json::to_string_pretty(&snapshot)?);
     } else {
         let pm_writeback = match &snapshot.pm_writeback {
-            loopflow::work::task::PmWritebackState::Current => "current".to_string(),
-            loopflow::work::task::PmWritebackState::Pending { error, .. } => {
+            loopflow::work::task::LinearWritebackState::Current => "current".to_string(),
+            loopflow::work::task::LinearWritebackState::Pending { error, .. } => {
                 format!("pending: {error}")
             }
         };
@@ -814,14 +814,16 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
             target,
             name,
             summary,
+            description,
         } => {
             let saved = tokio::runtime::Runtime::new()?.block_on(project::edit(
                 repo,
                 target.as_plan_target(),
                 name.as_deref(),
                 summary.as_deref(),
+                description.as_deref(),
             ))?;
-            print_planning_sync(&saved.sync);
+            print_planning_sync(&saved.1);
             Ok(())
         }
         WaveCommand::Workflow { cmd } => {
@@ -854,13 +856,15 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
                     WaveWorkflowCommand::Show { target, json } => {
                         let selected = project::workflow(repo, target.as_plan_target()).await?;
                         if *json {
-                            println!("{}", serde_json::to_string_pretty(&selected)?);
-                        } else {
                             println!(
-                                "{} · Workflow {}",
-                                selected.project.name, selected.project.workflow
+                                "{}",
+                                serde_json::to_string_pretty(
+                                    &serde_json::json!({"project":selected.0,"sync":selected.1})
+                                )?
                             );
-                            print_planning_sync(&selected.sync);
+                        } else {
+                            println!("{} · Workflow {}", selected.0.name, selected.0.workflow);
+                            print_planning_sync(&selected.1);
                         }
                     }
                     WaveWorkflowCommand::Set { target, name, file } => {
@@ -871,8 +875,8 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
                             file.as_deref(),
                         )
                         .await?;
-                        println!("{}: Workflow {name}", saved.project.name);
-                        print_planning_sync(&saved.sync);
+                        println!("{}: Workflow {name}", saved.0.name);
+                        print_planning_sync(&saved.1);
                     }
                 }
                 Ok(())
@@ -932,12 +936,22 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
             loopflow::lf::commands::placement::wave(repo, command)
         }
         WaveCommand::UpdatePlan { wave, plan } => {
-            let saved = tokio::runtime::Runtime::new()?.block_on(update_plan(
+            #[derive(serde::Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Input {
+                workflow: String,
+                krs: Vec<loopflow::work::project::ProjectKR>,
+                metric_targets: Vec<loopflow::work::wave::metrics::MetricTarget>,
+            }
+            let input: Input = serde_json::from_slice(&std::fs::read(plan)?)?;
+            let (_, sync) = tokio::runtime::Runtime::new()?.block_on(update_plan(
                 repo,
                 wave.as_deref(),
-                serde_json::from_slice(&std::fs::read(plan)?)?,
+                &input.workflow,
+                &input.krs,
+                &input.metric_targets,
             ))?;
-            print_planning_sync(&saved.sync);
+            print_planning_sync(&sync);
             Ok(())
         }
     }
@@ -955,6 +969,14 @@ fn read_task_draft() -> anyhow::Result<String> {
 
 fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
     match command {
+        TaskCommand::Admission {
+            issue,
+            claim,
+            request,
+            json,
+        } => {
+            loopflow::ops::task_admission::command(issue, claim.as_ref(), request.as_deref(), *json)
+        }
         TaskCommand::Shell { .. }
         | TaskCommand::WatchFiles { .. }
         | TaskCommand::Location { .. } => unreachable!("location reads precede admission"),
@@ -1093,7 +1115,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             if *json {
                 println!("{}", serde_json::to_string_pretty(&issue)?);
             } else {
-                println!("{} · {}", issue.id, issue.name);
+                println!("{} · {}", issue.id, issue.title);
             }
             if loopflow::config::load_config_or_default(Some(repo))
                 .pm
@@ -1115,24 +1137,25 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                         .as_str()
                         .expect("planning state is a string")
                 );
-                if let Some(planning) = &status.planning {
-                    println!("{} · {}", planning.item.identifier, planning.item.name);
+                if let Some(task) = &status.task {
+                    println!("{} · {}", task.identifier, task.title);
                     println!(
-                        "Planning: {} · {} · observed at {}",
-                        planning.item.state.as_deref().unwrap_or("unknown"),
+                        "Planning: {} · {}",
+                        task.state.as_deref().unwrap_or("unknown"),
                         if status.planning_stale {
                             "stale"
                         } else {
                             "current"
-                        },
-                        planning.observed_at
+                        }
                     );
-                    if let Some(due) = &planning.item.due_date {
+                    if let Some(due) = &task.due_date {
                         println!("Due: {due}");
                     }
-                    if planning.project.is_none() {
-                        println!("No Project assigned; managed work requires ownership.");
-                    }
+                } else {
+                    println!("No owned Task; retained observations do not establish ownership.");
+                }
+                if let Some(at) = status.observed_at {
+                    println!("Observed at: {at}");
                 }
                 if let Some(sync) = &status.sync {
                     for line in sync.lines() {
@@ -1350,10 +1373,12 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             } else {
                 for comment in &result.comments {
                     let author = match &comment.author {
-                        loopflow::ops::pm::TaskCommentAuthor::Person { name } => {
+                        loopflow::work::task::comment::TaskCommentAuthor::Person { name } => {
                             name.as_deref().unwrap_or("unnamed person")
                         }
-                        loopflow::ops::pm::TaskCommentAuthor::Integration => "integration",
+                        loopflow::work::task::comment::TaskCommentAuthor::Integration => {
+                            "integration"
+                        }
                     };
                     let date = comment.created_at.as_deref().unwrap_or("date unavailable");
                     let sync = if result.pending_sync.contains(&comment.id) {
@@ -1484,7 +1509,9 @@ fn run() -> anyhow::Result<()> {
             || matches!(
                 cli.command,
                 Some(Commands::Task {
-                    cmd: TaskCommand::Location { .. } | TaskCommand::WatchFiles { .. }
+                    cmd: TaskCommand::Location { .. }
+                        | TaskCommand::WatchFiles { .. }
+                        | TaskCommand::Admission { claim: None, .. }
                 })
             );
         if preview {
@@ -1540,7 +1567,9 @@ fn run() -> anyhow::Result<()> {
     let location_read = matches!(
         cli.command,
         Some(Commands::Task {
-            cmd: TaskCommand::Location { .. } | TaskCommand::WatchFiles { .. }
+            cmd: TaskCommand::Location { .. }
+                | TaskCommand::WatchFiles { .. }
+                | TaskCommand::Admission { claim: None, .. }
         })
     );
     if cli.context || cli.explain || planning_read || location_read {
@@ -1572,6 +1601,23 @@ fn run() -> anyhow::Result<()> {
     loopflow::lf::commands::work_route::resolve_repository_selection(&mut cli)?;
     if cli.context || cli.explain {
         return preview_invocation(&cli, &args);
+    }
+    if let Some(Commands::Task {
+        cmd:
+            TaskCommand::Admission {
+                issue,
+                claim: None,
+                request,
+                json,
+            },
+    }) = &cli.command
+    {
+        return loopflow::ops::task_admission::command(
+            issue,
+            None,
+            request.as_deref(),
+            *json || cli.json,
+        );
     }
     if let Some(Commands::Task {
         cmd:
@@ -2210,7 +2256,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             // An edge that runs nothing: setting out on it is the whole move.
             println!(
                 "Task {} moved along a workflow edge that runs no Flow",
-                task.plan.identifier
+                task.identifier
             );
             return Ok(());
         };
@@ -2234,6 +2280,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             let directory = loopflow::repo::working_directory()?;
             let repo = selected_task_repository(&cli, &directory, Some(task))?;
             let mut binding = prepare_work_binding(&format!("task:{task}"), &repo)?;
+            std::env::remove_var(loopflow::lf::TASK_SOURCE_ENV);
             if let Some(cwd) = cli.bound_cwd.clone() {
                 binding.cwd = cwd;
             }
@@ -2577,7 +2624,7 @@ fn finish_command(result: anyhow::Result<()>) -> anyhow::Result<()> {
     result
 }
 
-fn print_planning_sync(sync: &loopflow::planning::PlanningSyncStatus) {
+fn print_planning_sync(sync: &loopflow::store::planning_sync::PlanningSyncStatus) {
     for line in sync.lines() {
         eprintln!("{line}");
     }

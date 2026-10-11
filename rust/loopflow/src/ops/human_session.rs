@@ -17,7 +17,8 @@ use sha2::{Digest, Sha256};
 
 use crate::durable::WorkRef;
 use crate::session::{LfSession, WorkSource};
-use crate::session_record::{SessionCaptureManifest, SessionTitleSource};
+use crate::session_record::SessionTitleSource;
+use crate::store::sqlite::SqliteStore;
 use crate::store::SharedStore;
 use crate::work::task::Task;
 
@@ -114,9 +115,9 @@ impl OpenMode {
         }
     }
 
-    fn require_action(self, active: bool) -> Result<()> {
-        if self == Self::Refuse && active {
-            require_session_action(SessionState::Active, SessionActionKind::Open)?;
+    fn require_action(self, state: SessionState) -> Result<()> {
+        if self == Self::Refuse {
+            require_session_action(state, SessionActionKind::Open)?;
         }
         Ok(())
     }
@@ -144,7 +145,6 @@ pub enum SessionState {
     Unknown,
     Active,
     Closed,
-    Interrupted,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -176,7 +176,7 @@ pub(crate) fn session_actions(state: SessionState) -> Vec<SessionAction> {
         actions.push((
             MoveHere,
             "Move here",
-            "Stop the other client and resume here; unsent text there is lost",
+            "Transfer control here; unsent text in the previous terminal is not transferred",
             None,
         ));
     }
@@ -247,15 +247,11 @@ pub enum SessionAttention {
     Waiting,
 }
 
-fn session_state(session: &crate::session::SessionSummary, has_clients: bool) -> SessionState {
-    if session.completed_at.is_some() {
-        SessionState::Closed
-    } else if has_clients {
-        SessionState::Active
-    } else if session.attachment_outcome.as_deref() == Some("interrupted") {
-        SessionState::Interrupted
-    } else {
-        SessionState::Unknown
+fn session_state(session: &crate::session::SessionSummary) -> SessionState {
+    match session.agent_process_evidence {
+        crate::journal::ProcessIdentityEvidence::Live => SessionState::Active,
+        crate::journal::ProcessIdentityEvidence::Dead => SessionState::Closed,
+        crate::journal::ProcessIdentityEvidence::Unknown => SessionState::Unknown,
     }
 }
 
@@ -431,38 +427,18 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
             reason: format!("Flow {id} metadata is unavailable"),
         },
     };
-    let mut unavailable = None;
-    // Sessions run where this registry recorded them; no read places one elsewhere.
-    let clients = match (&session.provider, local_capture_dir(&session.artifact_key)) {
-        (Some(provider), Some(dir)) => {
-            match crate::lf::commands::util::active_provider_clients(&dir, provider) {
-                Ok(clients) => clients,
-                Err(error) => {
-                    unavailable = Some(format!("Session client observation unavailable: {error}"));
-                    Vec::new()
-                }
-            }
-        }
-        _ => Vec::new(),
-    };
-    let state = session_state(session, !clients.is_empty());
+    let state = session_state(session);
     let mut actions = session_actions(state);
-    let open_argv = if unavailable.is_none() {
-        match human_open_argv(&session.id) {
-            Ok(argv) => argv,
-            Err(error) => {
-                unavailable = Some(format!("Session connection unavailable: {error}"));
-                Vec::new()
+    let open_argv = match human_open_argv(&session.id) {
+        Ok(argv) => argv,
+        Err(error) => {
+            let reason = format!("Session connection unavailable: {error}");
+            for action in &mut actions {
+                action.unavailable_reason = Some(reason.clone());
             }
+            Vec::new()
         }
-    } else {
-        Vec::new()
     };
-    if let Some(reason) = unavailable {
-        for action in &mut actions {
-            action.unavailable_reason = Some(reason.clone());
-        }
-    }
     let provider = session.provider.clone().unwrap_or_default();
     SessionRecord {
         primary_scope: session.primary_scope.clone(),
@@ -472,7 +448,7 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
         task_primary: session.task_primary,
         task_ids: session.task_ids.clone(),
         id: session.id.clone(),
-        workspace: None, // workspace::associate owns checkout location.
+        workspace: None,
         interactive: session.interactive,
         work,
         wave_id: session.wave_id.clone(),
@@ -493,10 +469,7 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
         state,
         ready_summary: session.ready_summary.clone(),
         open_argv,
-        terminal_ids: clients
-            .into_iter()
-            .filter_map(|client| client.terminal_id)
-            .collect(),
+        terminal_ids: session.terminal_id.clone().into_iter().collect(),
     }
 }
 
@@ -515,7 +488,7 @@ async fn find_session(
     Ok(Some(session))
 }
 
-/// The provider and local client receipts for a conversation's current input.
+/// The provider and capture location for a conversation's current input.
 struct NativeSession<'a> {
     dir: PathBuf,
     provider: &'a str,
@@ -532,19 +505,6 @@ impl<'a> NativeSession<'a> {
                 .as_deref()
                 .ok_or_else(|| anyhow!("Session {} input has no recorded provider", session.id))?,
         })
-    }
-
-    fn clients(&self) -> Result<Vec<crate::session_record::ProviderClientRef>> {
-        crate::lf::commands::util::active_provider_clients(&self.dir, self.provider)
-    }
-
-    fn stop_clients(&self, reason: crate::session_record::ProviderClientStopReason) -> Result<()> {
-        crate::lf::commands::util::replace_provider_clients(
-            &self.dir,
-            self.provider,
-            &self.clients()?,
-            reason,
-        )
     }
 }
 
@@ -688,7 +648,12 @@ pub(crate) async fn open(
         session
     };
     let native = NativeSession::of(session)?;
-    let Some(provider_session) = store.sqlite.input_provider_session(&session.artifact_key)? else {
+    let provider_session = store.sqlite.input_provider_session(&session.artifact_key)?;
+    if resume && matches!(native.provider, "claude" | "opencode") {
+        crate::lf::commands::util::require_provider_session_process(&native.dir)?;
+        stop_headless_for_resume(store, session, provider_session.as_ref()).await?;
+    }
+    let Some(provider_session) = provider_session else {
         let surface = surface(store, session).await?;
         if resume {
             open_waiting(store, &session.id).await?;
@@ -700,7 +665,7 @@ pub(crate) async fn open(
     }
     if resume
         && native.provider == "codex"
-        && connect_live_codex(store, session, &provider_session, mode == OpenMode::Replace).await?
+        && connect_live_codex(store, session, &provider_session).await?
     {
         let session = store
             .sqlite
@@ -709,12 +674,10 @@ pub(crate) async fn open(
         return surface(store, &session).await;
     }
     if resume && mode == OpenMode::Replace {
-        native.stop_clients(crate::session_record::ProviderClientStopReason::Moved)?;
-    }
-    if mode == OpenMode::Refuse {
-        mode.require_action(!native.clients()?.is_empty())?;
+        crate::harness::agent_process::stop_session_agent(&store.sqlite, &session.id)?;
     }
     let mut result = surface(store, session).await?;
+    mode.require_action(result.state)?;
     if resume {
         crate::lf::commands::util::resume_session(
             native.provider,
@@ -732,6 +695,61 @@ pub(crate) async fn open(
     }
     Ok(result)
 }
+/// End the recorded headless group before reopening its native conversation.
+/// Missing native identity must refuse before stopping otherwise useful work.
+async fn stop_headless_for_resume(
+    store: &SharedStore,
+    session: &LfSession,
+    provider: Option<&crate::session_record::ProviderSessionRef>,
+) -> Result<()> {
+    let Some(expected) = store.sqlite.session_attachment(&session.id)? else {
+        return Ok(());
+    };
+    let Some(agent) = store
+        .sqlite
+        .agent_processes()?
+        .into_iter()
+        .find(|agent| agent.process.id == expected.agent_process_id)
+    else {
+        return Ok(());
+    };
+    if agent.interactive || agent.process.completed_at.is_some() {
+        return Ok(());
+    }
+    let provider = provider.ok_or_else(|| {
+        anyhow!(
+            "Native conversation identity is unavailable; cannot stop and resume this headless run"
+        )
+    })?;
+    if let Some(thread) = store.sqlite.session_thread(&session.id)? {
+        anyhow::ensure!(
+            thread == provider.agent_session,
+            "Recorded conversation differs from the headless conversation"
+        );
+    }
+    let process = crate::journal::current_lf_process_id()
+        .ok_or_else(|| anyhow!("Connecting requires the current lf Process"))?;
+    let sqlite = store.sqlite.clone();
+    let id = session.id.clone();
+    tokio::task::spawn_blocking(move || {
+        let attachment = sqlite.claim_session_attachment(&id, Some(&expected), &process, false)?;
+        sqlite.finish_session_attachment(&id, &attachment, "interrupted", || {
+            if !crate::harness::agent_process::close_session_agent_process(&sqlite, &id)? {
+                return Err(crate::store::StoreError::InvalidAuthority(
+                    "Headless AgentProcess identity is unavailable".into(),
+                ));
+            }
+            Ok(true)
+        })
+    })
+    .await??;
+    eprintln!(
+        "Stopped headless {}; resuming the same native conversation (not live takeover).",
+        session.provider.as_deref().unwrap_or("provider")
+    );
+    Ok(())
+}
+
 /// Connect to one existing provider thread. Native UI traffic crosses the same
 /// attachment fence as the headless writer; client exit leaves the provider alive.
 #[cfg(unix)]
@@ -739,24 +757,11 @@ async fn connect_live_codex(
     store: &SharedStore,
     session: &LfSession,
     provider: &crate::session_record::ProviderSessionRef,
-    replace_clients: bool,
 ) -> Result<bool> {
     let expected = store.sqlite.session_attachment(&session.id)?;
     let Some((endpoint, thread)) = store.sqlite.session_connection(&session.id)? else {
         return Ok(false);
     };
-    match tokio::net::UnixStream::connect(&endpoint).await {
-        Ok(socket) => drop(socket),
-        Err(error)
-            if matches!(
-                error.kind(),
-                std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
-            ) =>
-        {
-            return Ok(false)
-        }
-        Err(error) => return Err(error.into()),
-    }
     if thread != provider.agent_session {
         bail!("Recorded conversation differs from the live provider thread");
     }
@@ -797,9 +802,6 @@ async fn connect_live_codex(
             &crate::os_process::agent_process_lifeline_path(Path::new(&endpoint)),
         )
         .context("Codex AgentProcess is stopping after its attached lf exited")?;
-        if replace_clients {
-            NativeSession::of(session)?.stop_clients(crate::session_record::ProviderClientStopReason::Moved)?;
-        }
         store.sqlite.make_session_interactive(&session.id, &attachment)?;
         let directory = tempfile::Builder::new().prefix("lf-connect-").tempdir_in("/tmp")?;
         let remote = directory.path().join("client.sock");
@@ -921,12 +923,6 @@ async fn surface(store: &SharedStore, session: &LfSession) -> Result<SessionReco
         (None, Some(wave)) => Some(WorkRef::Wave(wave.clone())),
         (None, None) => None,
     };
-    let dir = local_capture_dir(&session.artifact_key)
-        .ok_or_else(|| anyhow!("Session {} has an invalid Run reference", session.id))?;
-    let clients = match &session.provider {
-        Some(provider) => crate::lf::commands::util::active_provider_clients(&dir, provider)?,
-        _ => Vec::new(),
-    };
     let metadata = store
         .sqlite
         .session_summary(
@@ -934,7 +930,7 @@ async fn surface(store: &SharedStore, session: &LfSession) -> Result<SessionReco
             time::OffsetDateTime::now_utc().unix_timestamp(),
         )?
         .ok_or_else(|| session_not_found(&session.id))?;
-    let state = session_state(&metadata, !clients.is_empty());
+    let state = session_state(&metadata);
     let actions = session_actions(state);
     let flow_membership = match (&session.flow_lf_process_id, &metadata.flow) {
         (None, _) if metadata.independent => SessionFlowMembership::Independent,
@@ -961,7 +957,7 @@ async fn surface(store: &SharedStore, session: &LfSession) -> Result<SessionReco
         task_primary: metadata.task_primary,
         task_ids: store.sqlite.session_task_ids(&session.id)?,
         id: session.id.clone(),
-        workspace: None, // workspace::associate owns checkout location.
+        workspace: None,
         interactive: session.interactive,
         wave_id: session.wave_id.clone(),
         work_path: session_work_path(store, session).await?,
@@ -978,10 +974,7 @@ async fn surface(store: &SharedStore, session: &LfSession) -> Result<SessionReco
         cwd: session.cwd.display().to_string(),
         state,
         ready_summary: session.ready_summary.clone(),
-        terminal_ids: clients
-            .into_iter()
-            .filter_map(|client| client.terminal_id)
-            .collect(),
+        terminal_ids: metadata.terminal_id.clone().into_iter().collect(),
         open_argv: human_open_argv(&session.id)?,
     };
     workspace::associate(store, std::slice::from_mut(&mut reading)).await?;
@@ -1008,7 +1001,7 @@ async fn session_work_path(store: &SharedStore, session: &LfSession) -> Result<O
     Ok(Some(match &session.task_id {
         None => wave,
         Some(id) => match store.get_task(id).await? {
-            Some(task) => format!("{wave} / {}", task.plan.identifier),
+            Some(task) => format!("{wave} / {}", task.identifier),
             None => format!("Task {id} (unavailable)"),
         },
     }))
@@ -1058,7 +1051,7 @@ pub(crate) async fn bind(store: &SharedStore, id: &str, task: &str) -> Result<Se
         })?;
     eprintln!(
         "Binding {} to {} ({}). Permanent.",
-        session.id, task.plan.identifier, task.plan.title
+        session.id, task.identifier, task.title
     );
     surface(store, &session).await
 }
@@ -1081,8 +1074,8 @@ pub(crate) async fn preview_binding(
     Ok(SessionBindingPreview {
         session_id: session.id,
         task_id: task.id.to_string(),
-        identifier: task.plan.identifier,
-        title: task.plan.title,
+        identifier: task.identifier,
+        title: task.title,
     })
 }
 
@@ -1145,8 +1138,8 @@ pub(crate) async fn spawn_session_process(
     let deadline = tokio::time::Instant::now() + SESSION_START_TIMEOUT;
     loop {
         match crate::session_record::resolve_manifest(&home, artifact_key.as_str()) {
-            Ok((dir, manifest)) => {
-                if session_is_resumable(&dir, &manifest)? {
+            Ok((dir, _manifest)) => {
+                if session_is_resumable(&SqliteStore::open_processes_read_only(&database)?, &dir)? {
                     return Ok(child);
                 }
             }
@@ -1172,11 +1165,21 @@ pub(crate) async fn spawn_session_process(
     }
 }
 
-fn session_is_resumable(dir: &Path, manifest: &SessionCaptureManifest) -> Result<bool> {
+fn session_is_resumable(store: &SqliteStore, dir: &Path) -> Result<bool> {
     if crate::session_record::read_provider_session(dir)?.is_none() {
         return Ok(false);
     }
-    Ok(!crate::lf::commands::util::active_provider_clients(dir, &manifest.harness)?.is_empty())
+    let input = crate::session_record::input_id_from_dir(dir)?;
+    let session = store
+        .session_for_artifact(&input)?
+        .context("Session disappeared")?;
+    let summary = store
+        .session_summary(
+            &session.id,
+            time::OffsetDateTime::now_utc().unix_timestamp(),
+        )?
+        .context("Session disappeared")?;
+    Ok(session_state(&summary) == SessionState::Active)
 }
 
 pub(crate) fn resume_native_session(
@@ -1200,7 +1203,7 @@ pub(crate) fn resume_native_session(
         return Ok(false);
     };
     crate::lf::commands::util::require_provider_session_process(&native.dir)?;
-    native.stop_clients(crate::session_record::ProviderClientStopReason::Moved)?;
+    crate::harness::agent_process::stop_session_agent(&store.sqlite, &session.id)?;
     let environment =
         BTreeMap::from([(HUMAN_SESSION_ENV.to_string(), serde_json::to_string(token)?)]);
     crate::lf::commands::util::resume_session_with_env(
@@ -1350,19 +1353,10 @@ pub(crate) async fn observe_program_status(
         current.agent_process_id.as_ref() == agent_process,
         "Session provider changed"
     );
-    // Re-read capture after the AgentProcess witness. A replacement before or
-    // during client inspection then fails the transactional identity check.
-    let session = store
-        .sqlite
-        .session(&session.id)?
-        .context("Session disappeared")?;
-    let native = NativeSession::of(&session)?;
-    let clients = native
-        .clients()?
-        .into_iter()
-        .filter(|client| client.terminal_id.as_deref() == Some(terminal))
-        .count();
-    anyhow::ensure!(clients == 1, "terminal has no unique active Session client");
+    anyhow::ensure!(
+        current.terminal_id.as_deref() == Some(terminal),
+        "terminal has no active Session attachment"
+    );
     let stream = uuid::Uuid::new_v4().to_string();
     anyhow::ensure!(
         store
@@ -1467,6 +1461,146 @@ fn read_observation_chunk(_: &mut [u8]) -> std::io::Result<Option<usize>> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    #[test]
+    fn public_open_stops_headless_group_and_resumes_saved_conversation() {
+        use std::os::unix::fs::PermissionsExt;
+        const CHILD: &str = "LOOPFLOW_RESUME_TEST_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            for provider in ["claude", "opencode"] {
+                let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+                child.args(["--exact", "ops::human_session::tests::public_open_stops_headless_group_and_resumes_saved_conversation", "--nocapture"]);
+                for (key, _) in std::env::vars_os() {
+                    if key.to_string_lossy().starts_with("LF_") {
+                        child.env_remove(key);
+                    }
+                }
+                let output = child.env(CHILD, provider).output().unwrap();
+                assert!(
+                    output.status.success(),
+                    "{}\n{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+            return;
+        }
+        let provider_name = std::env::var(CHILD).unwrap();
+        let ledger = crate::journal::TestLedgerGuard::new();
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let home = ledger.home();
+        let bin = home.join("bin");
+        std::fs::create_dir(&bin).unwrap();
+        let lf = bin.join("lf");
+        std::fs::write(&lf, "#!/bin/sh\nexit 95\n").unwrap();
+        std::fs::set_permissions(&lf, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::env::set_var("LF_BIN", &lf);
+        let native = bin.join(&provider_name);
+        std::fs::write(&native, "#!/bin/sh\nstate=$(ps -o stat= -p \"$(cat provider-pid)\" | tr -d ' ')\ncase \"$state\" in \"\"|Z*) ;; *) exit 96;; esac\nprintf '%s\\n' \"$@\" > client-args\n").unwrap();
+        std::fs::set_permissions(&native, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let _path = crate::test_ambient::EnvGuard::clear(&["PATH"]);
+        std::env::set_var("PATH", format!("{}:/usr/bin:/bin", bin.display()));
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        crate::journal::with_process(|| {
+            crate::journal::admit_process(home, &["lf".into(), "session".into()]);
+            runtime.block_on(async {
+                let store = std::sync::Arc::new(
+                    crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
+                        home.join("loopflow.db"),
+                    ))
+                    .await?,
+                );
+                let capture = crate::session_record::CaptureHandle::begin_at(
+                    home,
+                    crate::session_record::SessionCaptureSpec {
+                        harness: provider_name.clone(),
+                        model: None,
+                        surface: "headless".into(),
+                        cwd: home.into(),
+                        repo: None,
+                        worktree: None,
+                        skill: None,
+                        subjects: vec![],
+                        flow: crate::session_record::SessionFlowMembership::Independent,
+                        work: None,
+                    },
+                )?;
+                let session = store
+                    .sqlite
+                    .session_for_artifact(&capture.artifact_key())?
+                    .unwrap();
+                let launcher = crate::id::LfProcessId::new();
+                rusqlite::Connection::open(home.join("loopflow.db"))?.execute(
+                    "INSERT INTO processes(id,trace_id,started_at) SELECT ?1,trace_id,started_at FROM processes WHERE id=?2",
+                    rusqlite::params![launcher, crate::journal::current_lf_process_id().unwrap()],
+                )?;
+                let first = store.sqlite.claim_session_attachment(&session.id, None, &launcher, true)?;
+                let mut command = tokio::process::Command::new("/bin/sleep");
+                command
+                    .env_clear()
+                    .arg("60")
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null());
+                let mut provider = crate::harness::agent_process::spawn(
+                    command,
+                    None,
+                    &(store.sqlite.clone(), session.id.clone(), first.clone()),
+                )?;
+                std::fs::write(home.join("provider-pid"), provider.id().unwrap().to_string())?;
+                // Without native identity, connect must leave the running provider alone.
+                let refused = super::open(&store, &session.id, super::OpenMode::Try, true).await;
+                assert!(refused.unwrap_err().to_string().contains("identity is unavailable"));
+                assert!(provider.try_wait()?.is_none());
+                assert_eq!(store.sqlite.session_attachment(&session.id)?, Some(first.clone()));
+                crate::session_record::write_provider_session(
+                    &capture.artifact_dir(), &"saved-thread".into(), None,
+                )?;
+                let origin = store.sqlite.session_turn_origin(&session.id, &first)?;
+                store.sqlite.record_session_turn_origin(&"saved-thread".into(), "pending", &origin)?;
+                let result = super::open(&store, &session.id, super::OpenMode::Try, true).await;
+                let alive = crate::journal::OsProcess::group_is_alive(provider.id().unwrap())?;
+                if alive {
+                    provider.kill().await?;
+                }
+                result?;
+                assert!(!alive, "native resume left the headless provider running");
+                let row = store.sqlite.process(&first.agent_process_id)?.unwrap();
+                assert!(row.completed_at.is_some());
+                assert!(store.sqlite.with_session_attachment(&session.id, &first, || Ok(())).is_err());
+                let history = store.sqlite.session_history(&session.id, 0, 0)?;
+                assert!(history.iter().any(|event| event.provider_turn.as_deref() == Some("pending")
+                    && event.kind == crate::session::SessionEventKind::Started));
+                assert!(!history.iter().any(|event| event.provider_turn.as_deref() == Some("pending")
+                    && event.kind == crate::session::SessionEventKind::Completed));
+                let args = std::fs::read_to_string(home.join("client-args"))?;
+                let flag = if provider_name == "claude" { "--resume" } else { "--session" };
+                assert!(args.contains(&format!("{flag}\nsaved-thread\n")), "{args}");
+                assert_eq!(store.sqlite.input_provider_session(&session.artifact_key)?.unwrap()
+                    .agent_session.as_str(), "saved-thread");
+                Ok::<_, anyhow::Error>(())
+            })
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn session_states_fixture_has_only_process_or_unknown_states() {
+        let states: Vec<super::SessionState> = serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/dto/session_states.json"
+        ))
+        .unwrap();
+        assert_eq!(
+            states,
+            vec![
+                super::SessionState::Unknown,
+                super::SessionState::Active,
+                super::SessionState::Closed
+            ]
+        );
+        assert!(serde_json::from_str::<super::SessionState>("\"interrupted\"").is_err());
+    }
+
     #[test]
     fn codex_connection_launch_preserves_provider_and_rejects_replaced_attachment() {
         use futures_util::{SinkExt, StreamExt};
@@ -1564,8 +1698,6 @@ mod tests {
                     let server = tokio::spawn(tokio::time::timeout(
                         std::time::Duration::from_secs(5),
                         async move {
-                            // The first connection probes reachability; the second reads native history.
-                            drop(listener.accept().await?.0);
                             let mut socket = accept_async(listener.accept().await?.0).await?;
                             while let Some(message) = socket.next().await {
                                 let message = message?;
@@ -1624,7 +1756,7 @@ mod tests {
                     let native =
                         crate::session_record::read_provider_session(&capture.artifact_dir())?
                             .unwrap();
-                    let result = super::connect_live_codex(&store, &session, &native, false).await;
+                    let result = super::connect_live_codex(&store, &session, &native).await;
                     let history = server.await;
                     let alive = provider.try_wait()?.is_none();
                     let row = store.sqlite.process(&original.agent_process_id)?.unwrap();
@@ -1692,8 +1824,9 @@ mod tests {
             program_status: None,
             agent_process_id: None,
             primary_scope: None,
-            attachment_outcome: None,
+            agent_process_evidence: crate::journal::ProcessIdentityEvidence::Unknown,
             waiting: false,
+            terminal_id: None,
             task_terminal: false,
             task_primary: false,
             task_ids: vec![task.clone()],
@@ -1779,11 +1912,30 @@ mod tests {
         assert_eq!(row.ready_summary, summary.ready_summary);
         assert_eq!(row.attention, None);
         summary.ready_summary = None;
-        summary.attachment_outcome = Some("interrupted".into());
+        summary.completed_at = Some(1);
         assert_eq!(
-            super::summary_surface(&summary).state,
-            super::SessionState::Interrupted
+            super::session_state(&summary),
+            super::SessionState::Unknown,
+            "legacy Session rows supply no process evidence"
         );
+        // Session completion does not override its recorded provider's life.
+        for (evidence, expected) in [
+            (
+                crate::journal::ProcessIdentityEvidence::Live,
+                super::SessionState::Active,
+            ),
+            (
+                crate::journal::ProcessIdentityEvidence::Dead,
+                super::SessionState::Closed,
+            ),
+            (
+                crate::journal::ProcessIdentityEvidence::Unknown,
+                super::SessionState::Unknown,
+            ),
+        ] {
+            summary.agent_process_evidence = evidence;
+            assert_eq!(super::session_state(&summary), expected);
+        }
     }
 
     use std::collections::HashSet;
@@ -2066,7 +2218,7 @@ mod tests {
     }
 
     #[test]
-    fn initial_session_publication_requires_history_and_an_owned_client() {
+    fn initial_session_publication_requires_history_and_a_live_agent() {
         let _lock = crate::journal::test_env_lock();
         let _ambient = crate::test_ambient::EnvGuard::new();
         let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
@@ -2088,19 +2240,34 @@ mod tests {
         )
         .unwrap();
         let dir = capture.artifact_dir();
-        let manifest = crate::session_record::read_manifest(&dir).unwrap();
-        assert!(!session_is_resumable(&dir, &manifest).unwrap());
+        let store =
+            crate::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+        assert!(!session_is_resumable(&store, &dir).unwrap());
         crate::session_record::write_provider_session(&dir, &"provider-session".into(), None)
             .unwrap();
-        assert!(!session_is_resumable(&dir, &manifest).unwrap());
+        assert!(!session_is_resumable(&store, &dir).unwrap());
         let mut client = std::process::Command::new("/bin/sleep")
             .arg("60")
             .spawn()
             .unwrap();
-        let publication = crate::session_record::write_provider_client(&dir, client.id());
+        let session = store
+            .session_for_artifact(&capture.artifact_key())
+            .unwrap()
+            .unwrap();
+        let attachment = store
+            .claim_session_attachment(&session.id, None, &crate::id::LfProcessId::new(), true)
+            .unwrap();
+        let publication = store.record_agent_process_identity(
+            &session.id,
+            &attachment,
+            client.id(),
+            crate::journal::process_started_at(client.id())
+                .unwrap()
+                .unwrap(),
+        );
         let resumable = publication
             .map_err(anyhow::Error::from)
-            .and_then(|()| session_is_resumable(&dir, &manifest));
+            .and_then(|()| session_is_resumable(&store, &dir));
         client.kill().unwrap();
         client.wait().unwrap();
         assert!(resumable.unwrap());

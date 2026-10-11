@@ -570,7 +570,7 @@ private extension MetricReading {
     }
 }
 
-private extension MetricTarget {
+private extension Threshold {
     func display(unit: String) -> String {
         switch self {
         case let .atLeast(value): return "≥ \(formatted(value, unit: unit))"
@@ -881,7 +881,7 @@ struct WaveProjectView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(project.name).font(Typography.sectionTitle(15)).textSelection(.enabled)
-            if let sync = project.sync { PlanningSyncView(sync: sync) }
+            PlanningSyncView(sync: project.sync)
             ForEach(project.krs) { kr in
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     Circle()

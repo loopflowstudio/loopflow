@@ -37,7 +37,7 @@ async fn observe_peer(
     request: &str,
 ) -> TaskLocationObservation {
     let result = async {
-        let bytes = crate::lf::commands::ssh::read(
+        let bytes = crate::lf::commands::ssh::request(
             machine,
             &[
                 "--repository".into(),
@@ -123,6 +123,24 @@ pub async fn resolve(store: &SqliteStore, task: &TaskId) -> Result<TaskExecution
         &uuid::Uuid::new_v4().to_string(),
     )
     .await?;
+    if readings
+        .iter()
+        .any(|reading| matches!(reading.location, TaskLocation::Recorded { .. }))
+    {
+        return recorded_route(&route.repository_id, &readings);
+    }
+    if let Some(admission) =
+        super::task_admission::observe(store, task, None, &uuid::Uuid::new_v4().to_string()).await?
+    {
+        return Ok(match admission.owner {
+            Some(machine_id) => TaskExecutionRoute {
+                machine_id,
+                source: TaskExecutionSource::Admission,
+                ..route
+            },
+            None => route,
+        });
+    }
     recorded_route(&route.repository_id, &readings)
 }
 
@@ -199,6 +217,7 @@ pub async fn explain(
     };
     let source = match route.source {
         TaskExecutionSource::EffectiveDelegation => "effective_delegation",
+        TaskExecutionSource::Admission => "first_start_admission",
         TaskExecutionSource::RecordedCheckout => {
             if matches!(&resolution.machine, ContextFact::Bound { value, .. } if value == route.machine_id.as_str())
             {

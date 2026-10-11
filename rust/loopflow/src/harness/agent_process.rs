@@ -9,7 +9,7 @@ use crate::os_process::terminate_process_group;
 use crate::process::SessionAttachment;
 use crate::store::sqlite::SqliteStore;
 use crate::store::{StoreError, StoreResult};
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use std::collections::{HashMap, HashSet};
 
 /// The store, LfSession and frozen attachment one invocation launches and
@@ -47,7 +47,7 @@ fn record_identity(
 /// One headless launch sequence for every harness. Keep the attachment fence
 /// through pre-exec recording, and retain failed attempts without inventing an
 /// observed exit. Synchronous admission cannot detach a launch on async cancellation.
-pub(super) fn spawn(
+pub(crate) fn spawn(
     command: tokio::process::Command,
     lifeline: Option<&std::path::Path>,
     owner: &AttachmentOwner,
@@ -60,7 +60,7 @@ pub(super) fn spawn(
             .to_string_lossy()
             .into_owned();
         store.with_session_attachment(session, attachment, || {
-            store.record_agent_process_launch(session, attachment, command.as_std())?;
+            store.record_agent_process_launch(session, attachment, command.as_std(), false)?;
             let spawned =
                 crate::os_process::spawn_agent_process(command, lifeline, record_identity(owner));
             if spawned.is_err() {
@@ -84,7 +84,7 @@ pub(crate) fn spawn_native(
     let (store, session, attachment) = owner;
     store
         .with_session_attachment(session, attachment, || {
-            store.record_agent_process_launch(session, attachment, &command)?;
+            store.record_agent_process_launch(session, attachment, &command, true)?;
             let spawned =
                 crate::os_process::spawn_native_agent_process(command, record_identity(owner));
             if spawned.is_err() {
@@ -124,6 +124,212 @@ pub(crate) fn stop_native(
         None => stop(),
     }
     .map_err(Into::into)
+}
+
+/// Explicit Move stops the recorded provider under the same fence as takeover.
+/// A native provider shares the terminal's group, so signal only its exact PID.
+/// Headless providers retain the existing descendant/group stop policy.
+pub(crate) fn stop_session_agent(store: &SqliteStore, session: &str) -> Result<()> {
+    let Some(attachment) = store.session_attachment(session)? else {
+        return Ok(());
+    };
+    let agent = store
+        .agent_processes()?
+        .into_iter()
+        .find(|agent| agent.process.id == attachment.agent_process_id);
+    let Some(agent) = agent else {
+        return Ok(());
+    };
+    // Already-dead providers have no observed interruption outcome. Preserve that
+    // uncertainty instead of attributing their death to this Move request.
+    if process_evidence(store, &agent.process.id) == ProcessIdentityEvidence::Dead {
+        anyhow::ensure!(
+            store.settle_agent_process(&agent, || {
+                if process_evidence(store, &agent.process.id) != ProcessIdentityEvidence::Dead {
+                    return Err(StoreError::InvalidAuthority(
+                        "AgentProcess death changed".into(),
+                    ));
+                }
+                Ok(())
+            })?,
+            "Session attachment changed before observing death"
+        );
+        return Ok(());
+    }
+    store.finish_session_attachment(session, &attachment, "interrupted", || {
+        let stop = || -> Result<()> {
+            let (pid, birth) = agent
+                .process
+                .pid
+                .zip(agent.process.os_started_at)
+                .ok_or_else(|| {
+                    anyhow::anyhow!("AgentProcess identity is unknown; resume was not started")
+                })?;
+            match process_identity_evidence(pid, birth) {
+                ProcessIdentityEvidence::Dead => return Ok(()),
+                ProcessIdentityEvidence::Unknown => {
+                    anyhow::bail!("AgentProcess liveness is unknown; resume was not started")
+                }
+                ProcessIdentityEvidence::Live => {}
+            }
+            if !agent.interactive {
+                return terminate_agent_process(pid, birth, agent.provider.as_deref());
+            }
+            for signal in [libc::SIGTERM, libc::SIGKILL] {
+                match process_identity_evidence(pid, birth) {
+                    ProcessIdentityEvidence::Dead => return Ok(()),
+                    ProcessIdentityEvidence::Unknown => {
+                        anyhow::bail!("AgentProcess identity became unknown")
+                    }
+                    ProcessIdentityEvidence::Live => {}
+                }
+                anyhow::ensure!(pid > 1, "invalid AgentProcess PID");
+                let pid = libc::pid_t::try_from(pid)?;
+                // SAFETY: a positive PID whose recorded birth was just checked;
+                // never target the shared foreground process group.
+                if unsafe { libc::kill(pid, signal) } != 0 {
+                    let error = std::io::Error::last_os_error();
+                    if error.raw_os_error() != Some(libc::ESRCH) {
+                        return Err(error.into());
+                    }
+                }
+                for _ in 0..20 {
+                    if process_identity_evidence(pid as u32, birth) == ProcessIdentityEvidence::Dead
+                    {
+                        return Ok(());
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+            }
+            anyhow::bail!("AgentProcess did not exit; resume was not started")
+        };
+        stop().map_err(|error| StoreError::InvalidAuthority(error.to_string()))?;
+        Ok(true)
+    })?;
+    Ok(())
+}
+
+/// Stop a harness's provider without settling its invocation. Group death and
+/// the exit receipt remain under the same frozen attachment fence.
+pub(super) fn stop((store, session, attachment): &AttachmentOwner) -> Result<()> {
+    super::dispatch::off_reactor(|| {
+        store.with_session_attachment(session, attachment, || {
+            if !close_session_agent_process(store, session)? {
+                return Err(StoreError::InvalidAuthority(
+                    "headless AgentProcess identity is unavailable".into(),
+                ));
+            }
+            store.record_agent_process_exit(session, attachment, true)
+        })
+    })
+    .map_err(Into::into)
+}
+
+/// Called with the exact attachment locked, never with SQLite held across I/O.
+/// Foreground providers settle through their launcher, never headless group control.
+pub(crate) fn close_session_agent_process(store: &SqliteStore, session: &str) -> StoreResult<bool> {
+    let Some(attachment) = store.session_attachment(session)? else {
+        return Ok(false);
+    };
+    let agents = store.agent_processes()?;
+    let Some(agent) = agents
+        .iter()
+        .find(|agent| agent.process.id == attachment.agent_process_id)
+    else {
+        return Ok(false);
+    };
+    if agent.interactive {
+        return Ok(false);
+    }
+    let Some((pid, started)) = agent.process.pid.zip(agent.process.os_started_at) else {
+        return Ok(false);
+    };
+    match process_identity_evidence(pid, started) {
+        ProcessIdentityEvidence::Dead => {
+            return confirmed_group_death(pid)
+                .map(|()| true)
+                .map_err(|error| StoreError::InvalidAuthority(error.to_string()));
+        }
+        ProcessIdentityEvidence::Unknown => {
+            return Err(StoreError::InvalidAuthority(
+                "AgentProcess OS identity is unavailable".into(),
+            ))
+        }
+        ProcessIdentityEvidence::Live => {}
+    }
+    if agents.iter().any(|other| {
+        other.process.id != agent.process.id
+            && other.process.pid == Some(pid)
+            && other.process.os_started_at == Some(started)
+    }) {
+        return Err(StoreError::InvalidAuthority(
+            "AgentProcess OS identity has multiple owners".into(),
+        ));
+    }
+    // A Codex server may host unrelated conversations. This is a refusal check,
+    // not another provider-specific signaling path.
+    if agent.provider.as_deref() == Some("codex") {
+        let (endpoint, thread) = store.session_connection(session)?.ok_or_else(|| {
+            StoreError::InvalidAuthority("Codex AgentProcess connection is unavailable".into())
+        })?;
+        crate::harness::codex_connection::validate_agent_process_close(&endpoint, &thread)
+            .map_err(|error| StoreError::InvalidAuthority(error.to_string()))?;
+    }
+    close_agent_process(pid, started)
+        .map_err(|error| StoreError::InvalidAuthority(error.to_string()))?;
+    Ok(true)
+}
+
+/// Stop an exactly recorded headless process group. The caller holds its Session
+/// attachment fence and has refused ambiguous ownership before reaching here.
+fn close_agent_process(pid: u32, started: i64) -> Result<()> {
+    match process_identity_evidence(pid, started) {
+        ProcessIdentityEvidence::Live => {}
+        ProcessIdentityEvidence::Dead => return confirmed_group_death(pid),
+        ProcessIdentityEvidence::Unknown => {
+            return Err(anyhow!("AgentProcess OS identity is unavailable"));
+        }
+    }
+    let group = i32::try_from(pid)?;
+    // SAFETY: getpgid reads process metadata. Only the exact recorded process
+    // leading the group that Loopflow created may authorize a group signal.
+    let owner = unsafe { libc::getpgid(group) };
+    if owner == -1 && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH) {
+        // It exited on its own since the check above; reap it if it is ours.
+        // SAFETY: WNOHANG only reaps our own exited child.
+        unsafe {
+            libc::waitpid(group, std::ptr::null_mut(), libc::WNOHANG);
+        }
+        return confirmed_group_death(pid);
+    }
+    if owner != group {
+        return Err(anyhow!(
+            "recorded process does not lead its own process group"
+        ));
+    }
+    // The leader may exit before its helpers. Use the same group-wide death
+    // judgment as scheduled settlement rather than ending on leader death.
+    if terminate_process_group(pid) {
+        Ok(())
+    } else {
+        Err(anyhow!("AgentProcess group {pid} death is unresolved"))
+    }
+}
+
+// Leader death alone neither proves group death nor authorizes signaling helpers.
+fn confirmed_group_death(pid: u32) -> Result<()> {
+    if crate::os_process::release_agent_lifeline(pid) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while OsProcess::group_is_alive(pid)? && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+    }
+    if OsProcess::group_is_alive(pid)? {
+        return Err(anyhow!(
+            "AgentProcess group {pid} survives its recorded leader"
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Default)]
@@ -317,6 +523,128 @@ mod tests {
     use crate::store::sqlite::SqliteStore;
     use std::os::unix::process::CommandExt;
     use std::process::{Command, Stdio};
+
+    #[test]
+    fn move_after_agent_death_preserves_unknown_outcome() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let session = store.test_session("dead", &crate::session_record::new_artifact_key());
+        let attachment = store
+            .claim_session_attachment(&session.id, None, &LfProcessId::new(), true)
+            .unwrap();
+        let mut command = Command::new("/usr/bin/true");
+        command.env_clear();
+        let mut child = super::spawn_native(
+            command,
+            &(store.clone(), session.id.clone(), attachment.clone()),
+        )
+        .unwrap();
+        child.wait().unwrap();
+        super::stop_session_agent(&store, &session.id).unwrap();
+        let process = store
+            .process(&attachment.agent_process_id)
+            .unwrap()
+            .unwrap();
+        assert!(process.completed_at.is_some());
+        assert!(process.outcome.is_none());
+        assert_eq!(
+            store.session_attachment(&session.id).unwrap(),
+            Some(attachment)
+        );
+    }
+
+    #[test]
+    fn native_move_uses_process_identity_and_terminal_follows_attachment() {
+        let home = tempfile::tempdir().unwrap();
+        let database = home.path().join("db");
+        let store = SqliteStore::open_ephemeral(&database).unwrap();
+        let session = store.test_session("move", &crate::session_record::new_artifact_key());
+        let sql = rusqlite::Connection::open(&database).unwrap();
+        sql.execute(
+            "UPDATE agent_sessions SET interactive=1 WHERE id=?1",
+            [&session.id],
+        )
+        .unwrap();
+        let parent = LfProcessId::new();
+        let next = LfProcessId::new();
+        for id in [&parent, &next] {
+            sql.execute(
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?1,1)",
+                [id],
+            )
+            .unwrap();
+        }
+        let attachment = store
+            .claim_session_attachment(&session.id, None, &parent, true)
+            .unwrap();
+        // Missing birth cannot become permission to signal or replace.
+        assert!(super::stop_session_agent(&store, &session.id).is_err());
+        assert_eq!(
+            store.session_attachment(&session.id).unwrap(),
+            Some(attachment.clone())
+        );
+        let mut command = Command::new("/bin/sleep");
+        command.env_clear().arg("60");
+        let mut child = super::spawn_native(
+            command,
+            &(store.clone(), session.id.clone(), attachment.clone()),
+        )
+        .unwrap();
+        store
+            .record_session_terminal(&session.id, &attachment, Some("first-pane"))
+            .unwrap();
+        let summary = store.session_summary(&session.id, 1).unwrap().unwrap();
+        assert_eq!(summary.terminal_id.as_deref(), Some("first-pane"));
+        assert_eq!(
+            summary.agent_process_evidence,
+            crate::journal::ProcessIdentityEvidence::Live
+        );
+        let replacement = store
+            .claim_session_attachment(&session.id, Some(&attachment), &next, false)
+            .unwrap();
+        assert!(store
+            .session_summary(&session.id, 1)
+            .unwrap()
+            .unwrap()
+            .terminal_id
+            .is_none());
+        assert!(store
+            .record_session_terminal(&session.id, &attachment, Some("stale"))
+            .is_err());
+        store
+            .record_session_terminal(&session.id, &replacement, Some("second-pane"))
+            .unwrap();
+        assert_eq!(
+            store
+                .session_summary(&session.id, 1)
+                .unwrap()
+                .unwrap()
+                .terminal_id
+                .as_deref(),
+            Some("second-pane")
+        );
+        let stopped = super::stop_session_agent(&store, &session.id);
+        // Always reap only this fixture's child, including when the assertion fails.
+        let _ = child.kill();
+        child.wait().unwrap();
+        stopped.unwrap();
+        let summary = store.session_summary(&session.id, 1).unwrap().unwrap();
+        assert_eq!(
+            summary.agent_process_evidence,
+            crate::journal::ProcessIdentityEvidence::Dead
+        );
+        assert!(summary.terminal_id.is_none());
+        assert!(!summary.waiting);
+        assert_eq!(
+            store
+                .process(&attachment.agent_process_id)
+                .unwrap()
+                .unwrap()
+                .outcome
+                .as_deref(),
+            Some("interrupted")
+        );
+    }
 
     #[test]
     fn observed_agent_death_settles_only_a_provably_dead_attachment() {
@@ -666,5 +994,78 @@ mod tests {
         assert_eq!(report.orphaned, [pid], "{provider}");
         assert_eq!(report.reaped, 1, "{provider}");
         assert!(store.agent_processes().unwrap().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod close_tests {
+    use std::io::{BufRead, BufReader};
+    use std::os::unix::process::CommandExt;
+    use std::process::{Child, Command, Stdio};
+
+    struct Group(Child);
+
+    impl Drop for Group {
+        fn drop(&mut self) {
+            crate::os_process::terminate_process_group(self.0.id());
+            let _ = self.0.wait();
+        }
+    }
+
+    #[test]
+    fn exited_leader_does_not_settle_a_surviving_group() {
+        let mut group = Group(
+            Command::new("/bin/sh")
+                .env_clear()
+                .args(["-c", "/bin/sleep 60 & read -r done"])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .process_group(0)
+                .spawn()
+                .unwrap(),
+        );
+        let leader = crate::journal::OsProcess::read(group.0.id())
+            .unwrap()
+            .unwrap();
+        // Closing stdin lets the leader exit after it has spawned its helper.
+        drop(group.0.stdin.take());
+        group.0.wait().unwrap();
+        assert!(super::close_agent_process(leader.pid, leader.started_at).is_err());
+        assert!(crate::journal::OsProcess::group_is_alive(leader.pid).unwrap());
+    }
+
+    #[test]
+    fn close_waits_for_helpers_after_the_leader_exits() {
+        let mut group = Group(
+            Command::new("/bin/sh")
+                .env_clear()
+                .args([
+                    "-c",
+                    "trap 'exit 0' TERM; /bin/sh -c 'trap \"\" TERM; printf \"%s\\n\" $$; exec /bin/sleep 60' & wait",
+                ])
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .process_group(0)
+                .spawn()
+                .unwrap(),
+        );
+        // The helper has installed its TERM handler before close can signal it.
+        let mut ready = String::new();
+        BufReader::new(group.0.stdout.take().unwrap())
+            .read_line(&mut ready)
+            .unwrap();
+        let helper: u32 = ready.trim().parse().unwrap();
+        let leader = crate::journal::OsProcess::read(group.0.id())
+            .unwrap()
+            .unwrap();
+        let child = crate::journal::OsProcess::read(helper).unwrap().unwrap();
+        super::close_agent_process(leader.pid, leader.started_at).unwrap();
+        assert!(!crate::journal::OsProcess::group_is_alive(leader.pid).unwrap());
+        assert_eq!(
+            crate::journal::process_identity_evidence(helper, child.started_at),
+            crate::journal::ProcessIdentityEvidence::Dead
+        );
     }
 }

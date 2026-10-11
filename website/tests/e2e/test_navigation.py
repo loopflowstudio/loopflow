@@ -5,8 +5,8 @@ from playwright.sync_api import Page, expect
 def test_navbar_links_exist(homepage: Page):
     nav = homepage.locator("nav")
     assert nav.locator("a", has_text="Docs").is_visible()
-    assert nav.locator("a", has_text="Flows").is_visible()
-    assert nav.locator("a", has_text="Tasks").is_visible()
+    assert nav.get_by_role("link", name="CLI", exact=True).is_visible()
+    assert nav.get_by_role("link", name="For you", exact=True).is_visible()
 
 
 def test_navbar_docs_link(homepage: Page, base_url: str):
@@ -14,18 +14,18 @@ def test_navbar_docs_link(homepage: Page, base_url: str):
     assert "/docs" in homepage.url
 
 
-@pytest.mark.parametrize("path", ["/", "/docs"])
-def test_flows_navigation(page: Page, base_url: str, path: str) -> None:
+@pytest.mark.parametrize(
+    ("path", "label", "destination"), [("/", "CLI", "/cli"), ("/docs", "Flows", "/cli#flows")]
+)
+def test_cli_navigation(page: Page, base_url: str, path: str, label: str, destination: str) -> None:
     page.goto(f"{base_url}{path}")
     page.get_by_role("navigation", name="Main navigation").get_by_role(
-        "link", name="Flows", exact=True
+        "link", name=label, exact=True
     ).click()
-    expect(page).to_have_url(f"{base_url}/#flows")
-    heading = page.locator("#flows h2")
-    expect(heading).to_be_in_viewport()
-    heading_box = heading.bounding_box()
-    nav_box = page.get_by_role("navigation", name="Main navigation").bounding_box()
-    assert heading_box["y"] >= nav_box["y"] + nav_box["height"]
+    expect(page).to_have_url(f"{base_url}{destination}")
+    heading = page.locator("#flows .plain")
+    heading.scroll_into_view_if_needed()
+    expect(heading).to_be_visible()
 
 
 def test_navbar_install_link(homepage: Page, base_url: str):
@@ -46,11 +46,6 @@ def test_brand_link_to_home(page: Page, base_url: str):
     page.goto(f"{base_url}/docs")
     page.locator(".nav-logo").click()
     assert page.url == f"{base_url}/"
-
-
-def test_cli_redirects_to_docs(page: Page, base_url: str):
-    page.goto(f"{base_url}/cli")
-    assert "/docs" in page.url
 
 
 def test_nav_title_no_overlap_with_links_desktop(homepage: Page):

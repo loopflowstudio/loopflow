@@ -48,7 +48,7 @@ pub fn resolve_repository_selection(cli: &mut Cli) -> Result<()> {
     if matches!(
         cli.command,
         Some(Commands::Task {
-            cmd: TaskCommand::Location { .. }
+            cmd: TaskCommand::Location { .. } | TaskCommand::Admission { .. }
         })
     ) {
         return Ok(()); // Keep the requested portable ID in the reply envelope.
@@ -106,7 +106,7 @@ fn launch_task(cli: &Cli) -> Option<&str> {
     match &cli.command {
         Some(Commands::Desktop { .. })
         | Some(Commands::Task {
-            cmd: TaskCommand::Location { .. },
+            cmd: TaskCommand::Location { .. } | TaskCommand::Admission { .. },
         }) => None,
         Some(Commands::Task {
             cmd: TaskCommand::Run { issue, .. } | TaskCommand::Checkout { issue, .. },
@@ -270,8 +270,8 @@ mod tests {
     use super::{launch_task, repository_path, resolve, resolve_task};
     use crate::durable::{RepositoryId, TaskId};
     use crate::lf::Cli;
-    use crate::planning::NewTask;
     use crate::store::sqlite::SqliteStore;
+    use crate::work::task::NewTask;
     use clap::Parser;
 
     #[test]

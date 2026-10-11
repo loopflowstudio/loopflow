@@ -41,12 +41,13 @@ def test_cleanup_closes_descendant_pipes_even_after_leader_exit(leader_exited: b
         performance._stop(process)
         # EOF requires the surviving descendant to close its inherited pipes.
         assert process.communicate(timeout=5) == ("", "")
-    finally:
+    except BaseException:
         try:
             os.killpg(process.pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
         process.wait()
+        raise
 
 
 @pytest.mark.parametrize("termination", ["signal", "timeout"])

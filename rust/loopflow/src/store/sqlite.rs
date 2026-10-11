@@ -26,13 +26,13 @@ mod ci_incidents;
 mod durable;
 mod flow_inventory;
 mod metrics;
-mod plan_read;
 pub(crate) mod planning;
 pub(crate) mod planning_changes;
 pub(crate) mod planning_export;
 pub(crate) mod planning_order;
 mod planning_peers;
 mod planning_sync;
+pub(crate) mod planning_write;
 mod pr_landings;
 mod processes;
 mod program_status;
@@ -44,6 +44,7 @@ mod repositories;
 mod revisions;
 mod session_events;
 pub(crate) mod sessions;
+pub(crate) mod task_admission;
 mod task_comments;
 mod task_content;
 mod task_follow_through;
@@ -707,26 +708,41 @@ impl SqliteStore {
             wave.repo(),
             wave.parent_wave_id(),
         )?;
+        let parent: Option<Option<String>> = tx
+            .query_row(
+                "SELECT parent_wave_id FROM waves WHERE id=?1",
+                [wave.id()],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let saved = parent.is_some();
+        let edits = if saved {
+            vec![planning_write::PlanningEdit::WaveParent(
+                parent
+                    .flatten()
+                    .or_else(|| wave.parent_wave_id().map(ToString::to_string)),
+            )]
+        } else {
+            vec![
+                planning_write::PlanningEdit::WaveName(wave.name().into()),
+                planning_write::PlanningEdit::WaveParent(
+                    wave.parent_wave_id().map(ToString::to_string),
+                ),
+            ]
+        };
+        planning_write::create(
+            &tx,
+            wave.repo(),
+            crate::planning_exchange::PlanningKind::Wave,
+            wave.id().as_str(),
+            &edits,
+        )?;
+        if !saved {
+            tx.execute("UPDATE waves SET created_at=?2,retired_at=?3,superseded_by_wave_id=?4,retirement_reason=?5 WHERE id=?1",params![wave.id(),created_at,wave.retired_at().map(|at|at.unix_timestamp()),wave.superseded_by_wave_id(),wave.retirement_reason()])?;
+        }
         tx.execute(
-            "INSERT INTO waves (
-                 id, name, repo, created_at, parent_wave_id, promoted_at,
-                 retired_at, superseded_by_wave_id, retirement_reason
-             )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-             ON CONFLICT(id) DO UPDATE SET
-               parent_wave_id = COALESCE(waves.parent_wave_id, excluded.parent_wave_id),
-               promoted_at = COALESCE(waves.promoted_at, excluded.promoted_at)",
-            params![
-                wave.id(),
-                wave.name(),
-                wave.repo(),
-                created_at,
-                wave.parent_wave_id(),
-                wave.promoted_at().map(|at| at.unix_timestamp()),
-                wave.retired_at().map(|at| at.unix_timestamp()),
-                wave.superseded_by_wave_id(),
-                wave.retirement_reason(),
-            ],
+            "UPDATE waves SET promoted_at=COALESCE(promoted_at,?2) WHERE id=?1",
+            params![wave.id(), wave.promoted_at().map(|at| at.unix_timestamp())],
         )?;
         wave_definitions::import_workflows_on(&tx, wave.id().as_str(), Path::new(wave.repo()))?;
         tx.commit()?;
@@ -1744,66 +1760,6 @@ impl SqliteStore {
         wave.transpose()
     }
 
-    pub(crate) fn repair_wave_repo(
-        &self,
-        wave_id: &WaveId,
-        expected_repo: &str,
-        target_repo: &str,
-    ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current = tx
-            .query_row(
-                "SELECT repo, slug FROM wave_addresses WHERE id = ?1",
-                params![wave_id],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-            )
-            .optional()?
-            .ok_or_else(|| StoreError::InvalidData(format!("Wave {wave_id} is not registered")))?;
-        if current.0 == target_repo {
-            tx.commit()?;
-            return Ok(());
-        }
-        if current.0 != expected_repo {
-            return Err(StoreError::InvalidData(format!(
-                "Wave {wave_id} repository changed from {expected_repo} while its canonical path was being repaired"
-            )));
-        }
-        let collision = tx
-            .query_row(
-                "SELECT id FROM wave_addresses
-                 WHERE repo = ?1 AND slug = ?2 AND id != ?3 AND retired_at IS NULL",
-                params![target_repo, current.1, wave_id],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()?;
-        if let Some(collision) = collision {
-            return Err(StoreError::InvalidData(format!(
-                "cannot repair Wave {wave_id} repository to {target_repo}: locator belongs to Wave {collision}"
-            )));
-        }
-        // Canonicalization changes one repository identity, including every Wave
-        // and shared planning entity under that alias. Move them atomically;
-        // uniqueness conflicts must preserve both observations, never merge them.
-        // A legacy symlink locator can already have a plan ID. Retain it as an
-        // alias while keeping the canonical location's selected plan.
-        tx.execute("UPDATE repository_plans SET selected=0 WHERE repo=?1 AND EXISTS(SELECT 1 FROM repository_plans WHERE repo=?2 AND selected=1)", params![expected_repo,target_repo])?;
-        for table in [
-            "repository_plans",
-            "waves",
-            "pm_projects",
-            "pm_items",
-            "pm_project_name_cutover",
-        ] {
-            tx.execute(
-                &format!("UPDATE {table} SET repo = ?2 WHERE repo = ?1"),
-                params![expected_repo, target_repo],
-            )?;
-        }
-        tx.commit()?;
-        Ok(())
-    }
-
     pub fn find_waves_by_slug(&self, slug: &str) -> StoreResult<Vec<Wave>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
@@ -1925,9 +1881,17 @@ impl SqliteStore {
             };
             validate_wave_parent(&tx, &update.wave_id, name, &repo, parent.as_ref())?;
             tx.execute(
-                "UPDATE waves SET repo = ?2, name = ?3, parent_wave_id = ?4
-                 WHERE id = ?1 AND (repo != ?2 OR name != ?3 OR parent_wave_id IS NOT ?4)",
-                params![update.wave_id, repo, name, parent],
+                "UPDATE waves SET repo=?2 WHERE id=?1 AND repo IS NOT ?2",
+                params![update.wave_id, repo],
+            )?;
+            planning_write::local(
+                &tx,
+                crate::planning_exchange::PlanningKind::Wave,
+                update.wave_id.as_str(),
+                &[
+                    planning_write::PlanningEdit::WaveName(name.into()),
+                    planning_write::PlanningEdit::WaveParent(parent.map(|p| p.to_string())),
+                ],
             )?;
         }
         tx.commit()?;

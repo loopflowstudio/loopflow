@@ -1,8 +1,10 @@
 //! Project selection, membership and pending changes settle in one transaction.
 
 use super::planning_changes::PlanningChanges;
+use super::planning_write::{self, PlanningEdit as Edit};
 use super::SqliteStore;
-use crate::durable::{ProjectId, TaskId};
+use crate::durable::ProjectId;
+use crate::planning_exchange::PlanningKind;
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
 use rusqlite::{params, OptionalExtension, TransactionBehavior};
@@ -27,7 +29,14 @@ impl SqliteStore {
                 [&input.wave_id],
                 |row| row.get(0),
             )?;
-            let original = serde_json::to_string(input)?;
+            // Keep the released receipt shape; input fields no longer need a domain wrapper.
+            // Compare JSON values so the original bytes need not be rewritten on retry.
+            let original = serde_json::json!({
+                "wave_id": input.wave_id, "successor_id": input.successor_id,
+                "create": input.create, "project_name": input.project_name,
+                "content": {"workflow": input.workflow, "krs": input.krs,
+                            "metric_targets": input.metric_targets}
+            });
             let settled: Option<(Option<String>, bool, Option<String>)> = tx
                 .query_row(
                     "SELECT reset_name, settled_at IS NOT NULL, local_plan_json
@@ -39,7 +48,12 @@ impl SqliteStore {
             if let Some((ref reset, true, ref intent)) = settled {
                 if reset.as_deref() != Some(name)
                     || selected.as_deref() != Some(&input.successor_id)
-                    || intent.as_deref() != Some(&original)
+                    || intent
+                        .as_deref()
+                        .map(serde_json::from_str::<serde_json::Value>)
+                        .transpose()?
+                        .as_ref()
+                        != Some(&original)
                 {
                     return Err(StoreError::InvalidAuthority(
                         "Project selection or original rotation request changed".into(),
@@ -63,46 +77,41 @@ impl SqliteStore {
             let successor = ProjectId::parse(&input.successor_id)
                 .map_err(|error| StoreError::InvalidData(error.to_string()))?;
             if input.create {
-                tx.execute(
-                    "INSERT INTO projects(id,wave_id,created_at,updated_at,project_slug,project_name,
-                         project_prompt_context,status,workflow)
-                     VALUES(?1,?2,?3,?3,?4,?4,?5,'started',?6)",
-                    params![
-                        successor.as_str(),
-                        input.wave_id,
-                        now,
-                        input.project_name,
-                        crate::pm::render_project_content(&input.content),
-                        input.content.workflow
+                let (teams,initiatives):(String,String)=tx.query_row("SELECT COALESCE((SELECT planning_teams FROM projects WHERE id=?1),'[]'),COALESCE((SELECT planning_initiatives FROM projects WHERE id=?1),'[]')",[predecessor],|r|Ok((r.get(0)?,r.get(1)?)))?;
+                planning_write::create(
+                    &tx,
+                    "",
+                    PlanningKind::Project,
+                    successor.as_str(),
+                    &[
+                        Edit::ProjectWave(input.wave_id.to_string()),
+                        Edit::ProjectSlug(Some(input.project_name.clone())),
+                        Edit::ProjectName(Some(input.project_name.clone())),
+                        Edit::ProjectStatus(crate::work::project::ProjectStatus::Started),
+                        Edit::Workflow(input.workflow.clone()),
+                        Edit::Krs(input.krs.clone()),
+                        Edit::MetricTargets(input.metric_targets.clone()),
+                        Edit::ProjectTeams(serde_json::from_str(&teams)?),
+                        Edit::ProjectInitiatives(serde_json::from_str(&initiatives)?),
                     ],
                 )?;
-                tx.execute("UPDATE projects SET planning_teams=COALESCE((SELECT planning_teams FROM projects WHERE id=?2),'[]'),planning_initiatives=COALESCE((SELECT planning_initiatives FROM projects WHERE id=?2),'[]') WHERE id=?1", params![successor.as_str(),predecessor])?;
-                super::planning_peers::capture_project_content(&tx, &successor)?;
             } else {
-                let previous = super::plan_read::project_in(&tx, &successor)?;
-                PlanningChanges::Project(&successor).record(
-                    &tx,
-                    "name",
-                    serde_json::json!(previous.name),
-                    serde_json::json!(input.project_name),
-                )?;
-                PlanningChanges::Project(&successor).record(
-                    &tx,
-                    "status",
-                    serde_json::to_value(previous.status)?,
-                    serde_json::json!("started"),
-                )?;
-                super::project_content::write_content(&tx, &successor, &previous, &input.content)?;
-                let changed = tx.execute(
-                    "UPDATE projects SET project_name=?3,status='started',updated_at=?4
-                     WHERE id=?1 AND wave_id=?2 AND status IN ('backlog','planned','started')",
-                    params![successor.as_str(), input.wave_id, input.project_name, now],
-                )?;
-                if changed != 1 {
+                let available:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM projects WHERE id=?1 AND wave_id=?2 AND status IN ('backlog','planned','started'))",params![successor.as_str(),input.wave_id],|r|r.get(0))?;
+                if !available {
                     return Err(StoreError::InvalidAuthority(
                         "destination is no longer available".into(),
                     ));
                 }
+                PlanningChanges::Project(&successor).save(
+                    &tx,
+                    &[
+                        Edit::ProjectName(Some(input.project_name.clone())),
+                        Edit::ProjectStatus(crate::work::project::ProjectStatus::Started),
+                        Edit::Workflow(input.workflow.clone()),
+                        Edit::Krs(input.krs.clone()),
+                        Edit::MetricTargets(input.metric_targets.clone()),
+                    ],
+                )?;
             }
             tx.execute(
                 "INSERT INTO project_transitions(wave_id,successor_id,predecessor_id,reset_name,
@@ -115,7 +124,7 @@ impl SqliteStore {
                     name,
                     input.create,
                     now,
-                    original
+                    original.to_string()
                 ],
             )?;
             for task in rotation
@@ -123,50 +132,38 @@ impl SqliteStore {
                 .iter()
                 .filter(|t| t.disposition == crate::ops::chapter::TaskDisposition::Move)
             {
-                let task_id = TaskId::parse(&task.task.id)
-                    .map_err(|e| StoreError::InvalidData(e.to_string()))?;
-                let previous = super::plan_read::task_in(&tx, &task_id)?
-                    .record
-                    .ok_or(StoreError::NotFound)?
-                    .item;
-                PlanningChanges::Task(&task_id).record(
-                    &tx,
-                    "project_id",
-                    serde_json::to_value(previous.project_id)?,
-                    serde_json::json!(successor),
+                let task_id = &task.task.id;
+                let member: bool = tx.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND project_id=?2)",
+                    params![task_id.as_str(), predecessor],
+                    |r| r.get(0),
                 )?;
-                let changed = tx.execute(
-                    "UPDATE tasks SET project_id=?2,planning_revision=planning_revision+1,updated_at=?3
-                     WHERE id=?1 AND project_id=?4",
-                    params![task.task.id, successor.as_str(), now, predecessor],
-                )?;
-                if changed != 1 {
+                if !member {
                     return Err(StoreError::InvalidAuthority(
                         "Task membership changed before rotation".into(),
                     ));
                 }
+                PlanningChanges::Task(task_id)
+                    .save(&tx, &[Edit::TaskProject(successor.to_string())])?;
                 tx.execute(
                     "INSERT INTO project_transition_items(wave_id,successor_id,issue_id)
                      VALUES(?1,?2,?3)",
-                    params![input.wave_id, successor.as_str(), task.task.id],
+                    params![input.wave_id, successor.as_str(), task_id.as_str()],
                 )?;
             }
-            tx.execute(
-                "UPDATE waves SET current_project_id=?2 WHERE id=?1",
-                params![input.wave_id, successor.as_str()],
+            planning_write::local(
+                &tx,
+                PlanningKind::Wave,
+                input.wave_id.as_str(),
+                &[Edit::WaveProject(Some(successor.to_string()))],
             )?;
             if let Some(predecessor) = predecessor {
                 let id = ProjectId::from_raw(predecessor);
-                let previous = super::plan_read::project_in(&tx, &id)?;
-                PlanningChanges::Project(&id).record(
+                PlanningChanges::Project(&id).save(
                     &tx,
-                    "status",
-                    serde_json::to_value(previous.status)?,
-                    serde_json::json!("completed"),
-                )?;
-                tx.execute(
-                    "UPDATE projects SET status='completed',updated_at=?2 WHERE id=?1",
-                    params![predecessor, now],
+                    &[Edit::ProjectStatus(
+                        crate::work::project::ProjectStatus::Completed,
+                    )],
                 )?;
             }
         }

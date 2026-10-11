@@ -1,14 +1,14 @@
 //! Project content and stored Wave workflows share one transaction in every repository.
 
-use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
-use serde_json::Value;
+use super::planning_write::PlanningEdit as Edit;
+use rusqlite::{params, OptionalExtension, TransactionBehavior};
 
 use crate::durable::ProjectId;
 use crate::id::WaveId;
-use crate::planning::PlanningChange;
-use crate::pm::{PmProject, ProjectContent};
-use crate::store::rows::now_unix;
+use crate::store::planning_sync::PlanningChange;
 use crate::store::{StoreError, StoreResult};
+use crate::work::project::ProjectKR;
+use crate::work::wave::metrics::MetricTarget;
 
 use super::planning_changes::PlanningChanges;
 use super::SqliteStore;
@@ -24,6 +24,7 @@ impl SqliteStore {
         project: &ProjectId,
         name: Option<&str>,
         summary: Option<&str>,
+        description: Option<&str>,
     ) -> StoreResult<()> {
         if name.is_some_and(|name| name.trim().is_empty()) {
             return Err(StoreError::InvalidData(
@@ -32,28 +33,16 @@ impl SqliteStore {
         }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current = super::plan_read::project_in(&tx, project)?;
-        let mut changed = false;
-        for (field, previous, value) in [
-            ("name", current.name, name),
-            ("summary", current.summary, summary),
-        ] {
-            if let Some(value) = value {
-                changed |= PlanningChanges::Project(project).record(
-                    &tx,
-                    field,
-                    Value::String(previous),
-                    Value::String(value.into()),
-                )?;
-            }
-        }
-        if changed {
-            tx.execute(
-                "UPDATE projects SET project_name=COALESCE(?2,project_name),
-             project_summary=COALESCE(?3,project_summary),updated_at=?4 WHERE id=?1",
-                params![project.as_str(), name, summary, now_unix()],
-            )?;
-        }
+        let edits: Vec<_> = name
+            .map(|name| Edit::ProjectName(Some(name.into())))
+            .into_iter()
+            .chain(summary.map(|summary| Edit::ProjectSummary(summary.into())))
+            .chain(
+                description
+                    .map(|description| Edit::ProjectDescription(Some(description.trim().into()))),
+            )
+            .collect();
+        PlanningChanges::Project(project).save(&tx, &edits)?;
         tx.commit()?;
         Ok(())
     }
@@ -89,7 +78,6 @@ impl SqliteStore {
         }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current = super::plan_read::project_in(&tx, project)?;
         let repo: String = tx.query_row(
             "SELECT w.repo FROM projects p JOIN waves w ON w.id=p.wave_id WHERE p.id=?1",
             [project.as_str()],
@@ -97,16 +85,7 @@ impl SqliteStore {
         )?;
         crate::workflow::parse_workflow(name, definition, std::path::Path::new(&repo))
             .map_err(StoreError::InvalidData)?;
-        write_content(
-            &tx,
-            project,
-            &current,
-            &ProjectContent {
-                workflow: name.into(),
-                krs: current.krs.clone(),
-                metric_targets: current.metric_targets.clone(),
-            },
-        )?;
+        PlanningChanges::Project(project).save(&tx, &[Edit::Workflow(name.into())])?;
         tx.execute(
             "INSERT INTO wave_workflows(wave_id,name,content)
                 SELECT wave_id,?2,?3 FROM projects WHERE id=?1
@@ -121,91 +100,23 @@ impl SqliteStore {
     pub fn update_project_content(
         &self,
         project: &ProjectId,
-        content: &ProjectContent,
+        workflow: &str,
+        krs: &[ProjectKR],
+        metric_targets: &[MetricTarget],
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current = super::plan_read::project_in(&tx, project)?;
-        write_content(&tx, project, &current, content)?;
+        PlanningChanges::Project(project).save(
+            &tx,
+            &[
+                Edit::Workflow(workflow.into()),
+                Edit::Krs(krs.to_vec()),
+                Edit::MetricTargets(metric_targets.to_vec()),
+            ],
+        )?;
         tx.commit()?;
         Ok(())
     }
-}
-
-pub(super) fn write_content(
-    conn: &Connection,
-    project: &ProjectId,
-    current: &PmProject,
-    content: &ProjectContent,
-) -> StoreResult<()> {
-    for (field, previous, value) in [
-        (
-            "workflow",
-            serde_json::to_value(&current.workflow)?,
-            serde_json::to_value(&content.workflow)?,
-        ),
-        (
-            "krs",
-            serde_json::to_value(&current.krs)?,
-            serde_json::to_value(&content.krs)?,
-        ),
-        (
-            "metric_targets",
-            serde_json::to_value(&current.metric_targets)?,
-            serde_json::to_value(&content.metric_targets)?,
-        ),
-    ] {
-        PlanningChanges::Project(project).record(conn, field, previous, value)?;
-    }
-    save_content(conn, project, content)
-}
-
-/// Persist the combined semantic winners without minting another delivery receipt.
-/// Local edits and peer projection use the same content representation.
-pub(super) fn save_content(
-    conn: &Connection,
-    project: &ProjectId,
-    content: &ProjectContent,
-) -> StoreResult<()> {
-    content
-        .validate()
-        .map_err(|error| StoreError::InvalidData(error.to_string()))?;
-    conn.execute(
-        "UPDATE projects SET project_prompt_context=?2,workflow=?3,updated_at=?4
-         WHERE id=?1 AND (project_prompt_context IS NOT ?2 OR workflow IS NOT ?3)",
-        params![
-            project.as_str(),
-            crate::pm::render_project_content(content),
-            content.workflow,
-            now_unix()
-        ],
-    )?;
-    super::planning_peers::capture_project_content(conn, project)
-}
-
-pub(super) fn read_content(conn: &Connection, project: &ProjectId) -> StoreResult<ProjectContent> {
-    let (body, workflow): (String, String) = conn.query_row(
-        "SELECT COALESCE(project_prompt_context,''),workflow FROM projects WHERE id=?1",
-        [project.as_str()],
-        |row| Ok((row.get(0)?, row.get(1)?)),
-    )?;
-    let mut content = crate::pm::parse_project_content(&body)
-        .map_err(|error| StoreError::InvalidData(error.to_string()))?;
-    // Match the common reader: the saved selection owns workflow, not old prose.
-    content.workflow = workflow;
-    Ok(content)
-}
-
-/// Released-frontier backfill, called by the same migration transaction as SQL.
-pub(crate) fn seed_peer_content(conn: &Connection) -> StoreResult<()> {
-    let mut query = conn.prepare("SELECT id FROM projects ORDER BY id")?;
-    let ids = query
-        .query_map([], |row| row.get::<_, String>(0))?
-        .collect::<Result<Vec<_>, _>>()?;
-    for id in ids {
-        super::planning_peers::capture_project_content(conn, &ProjectId::from_raw(id))?;
-    }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -215,6 +126,113 @@ mod tests {
     use crate::work::wave::Wave;
 
     #[test]
+    fn project_prose_unobserved_baseline_stays_unknown_at_the_same_revision() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let wave = Wave::new(WaveId::new(), "product".into(), "/repo".into());
+        store.create_wave(&wave).unwrap();
+        let mut observed: crate::pm::linear::LinearProject = serde_json::from_value(serde_json::json!({
+            "id":"linear-project", "revision":"2026-10-10T12:00:00Z", "slug":"product", "name":"Product", "summary":"",
+            "workflow":"", "krs":[], "metric_targets":[], "status":"started", "initiative_ids":["initiative"], "team_ids":["team"]
+        })).unwrap();
+        store
+            .put_pm_project(wave.id(), "linear", "initiative", &observed, 1)
+            .unwrap();
+        let project = store.list_projects(Some(wave.id())).unwrap().remove(0);
+        store
+            .edit_project(&project.id, None, None, Some("Saved without a baseline"))
+            .unwrap();
+        let change = store
+            .pending_project_changes(&project.id)
+            .unwrap()
+            .remove(0);
+        assert_eq!(change.base, None);
+        observed.description = Some(String::new());
+        store
+            .put_pm_project(wave.id(), "linear", "initiative", &observed, 2)
+            .unwrap();
+        assert_eq!(store.project(&project.id).unwrap().unwrap().description, "");
+        let conn = store.conn.lock().unwrap();
+        let (value, conflict): (String, String) = conn
+            .query_row(
+                "SELECT value_json,conflict_json FROM project_changes WHERE id=?1",
+                [&change.id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<String>(&value).unwrap(),
+            "Saved without a baseline"
+        );
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&conflict).unwrap()["value"],
+            ""
+        );
+    }
+
+    #[test]
+    fn project_prose_partial_observation_retains_its_original_baseline_and_age() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let wave = Wave::new(WaveId::new(), "product".into(), "/repo".into());
+        store.create_wave(&wave).unwrap();
+        let mut observed: crate::pm::linear::LinearProject = serde_json::from_value(serde_json::json!({
+            "id":"linear-project", "revision":"2026-10-10T12:00:00Z", "slug":"product", "name":"Product", "summary":"", "description":"Baseline",
+            "workflow":"", "krs":[], "metric_targets":[], "status":"started", "initiative_ids":["initiative"], "team_ids":["team"]
+        })).unwrap();
+        store
+            .put_pm_project(wave.id(), "linear", "initiative", &observed, 17)
+            .unwrap();
+        let project = store.list_projects(Some(wave.id())).unwrap().remove(0);
+        observed.description = None;
+        observed.revision = Some("2026-10-10T12:01:00Z".into());
+        observed.summary = "New summary".into();
+        store
+            .put_pm_project(wave.id(), "linear", "initiative", &observed, 29)
+            .unwrap();
+        let saved = store.project(&project.id).unwrap().unwrap();
+        assert_eq!(saved.description, "Baseline");
+        assert_eq!(saved.summary, "New summary");
+        store
+            .edit_project(&project.id, None, None, Some("Next save"))
+            .unwrap();
+        let change = store
+            .pending_project_changes(&project.id)
+            .unwrap()
+            .remove(0);
+        assert_eq!(
+            change.base,
+            Some(serde_json::json!({"value":"Baseline", "revision":"2026-10-10T12:00:00Z"}))
+        );
+        let prose: String = store
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT prose_json FROM pm_projects WHERE id='linear-project'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&prose).unwrap(),
+            serde_json::json!({"value":"Baseline", "revision":"2026-10-10T12:00:00Z", "observed_at":17})
+        );
+        observed.description = Some("Baseline".into());
+        store
+            .put_pm_project(wave.id(), "linear", "initiative", &observed, 30)
+            .unwrap();
+        assert_eq!(
+            store.project(&project.id).unwrap().unwrap().description,
+            "Next save"
+        );
+        assert_eq!(
+            store.pending_project_changes(&project.id).unwrap(),
+            vec![change]
+        );
+    }
+
+    #[test]
     fn project_edit_failure_rolls_back_fields_definitions_and_receipts() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
@@ -222,7 +240,7 @@ mod tests {
         store.create_wave(&wave).unwrap();
         let project = crate::durable::ProjectId::new();
         let conn = store.conn.lock().unwrap();
-        conn.execute("INSERT INTO projects(id,wave_id,created_at,updated_at,project_slug,project_name,project_prompt_context)
+        conn.execute("INSERT INTO projects(id,wave_id,created_at,updated_at,project_slug,project_name,description)
             VALUES(?1,?2,1,1,'product','Original','')",rusqlite::params![project.as_str(),wave.id()]).unwrap();
         conn.execute_batch(
             "CREATE TRIGGER fail_project_save BEFORE UPDATE ON projects
@@ -232,7 +250,7 @@ mod tests {
         drop(conn);
         let before = store.revisions().unwrap();
         assert!(store
-            .edit_project(&project, Some("Changed"), Some("New summary"))
+            .edit_project(&project, Some("Changed"), Some("New summary"), None)
             .is_err());
         assert!(store
             .select_project_workflow(
@@ -241,7 +259,7 @@ mod tests {
                 "nodes: {}\nedges: [{from: start, to: end}]\n"
             )
             .is_err());
-        let read = store.planning_project(&project).unwrap();
+        let read = store.project(&project).unwrap().unwrap();
         assert_eq!(read.name, "Original");
         assert_eq!(read.summary, "");
         assert_eq!(read.workflow, "");
@@ -255,11 +273,6 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let database = home.path().join("store.db");
         let store = SqliteStore::open_ephemeral(&database).unwrap();
-        let content = crate::pm::ProjectContent {
-            workflow: "review".into(),
-            krs: Vec::new(),
-            metric_targets: Vec::new(),
-        };
         let definition = "nodes: {}\nedges: [{from: start, to: end}]\n";
         let mut owners = Vec::new();
         for (name, mapping) in [("offline", None), ("connected", Some("linear-project"))] {
@@ -272,20 +285,24 @@ mod tests {
                 .unwrap()
                 .execute(
                     "INSERT INTO projects(id,wave_id,external_project_id,created_at,updated_at,
-                 project_slug,project_name,project_prompt_context) VALUES(?1,?2,?3,1,1,?4,?4,'')",
+                 project_slug,project_name,description) VALUES(?1,?2,?3,1,1,?4,?4,'')",
                     rusqlite::params![project.as_str(), wave.id(), mapping, name],
                 )
                 .unwrap();
             store
-                .select_project_workflow(&project, &content.workflow, definition)
+                .select_project_workflow(&project, "review", definition)
                 .unwrap();
             let before = store.revisions().unwrap();
             let changes = store.pending_project_changes(&project).unwrap();
             store
-                .select_project_workflow(&project, &content.workflow, definition)
+                .select_project_workflow(&project, "review", definition)
                 .unwrap();
-            store.update_project_content(&project, &content).unwrap();
-            store.edit_project(&project, Some(name), Some("")).unwrap();
+            store
+                .update_project_content(&project, "review", &[], &[])
+                .unwrap();
+            store
+                .edit_project(&project, Some(name), Some(""), None)
+                .unwrap();
             assert_eq!(store.revisions().unwrap(), before);
             assert_eq!(store.pending_project_changes(&project).unwrap(), changes);
             owners.push((wave.id().clone(), project));
@@ -301,10 +318,7 @@ mod tests {
                 store.wave_workflows(&wave).unwrap(),
                 vec![("review".into(), definition.into())]
             );
-            assert_eq!(
-                store.project(&project).unwrap().unwrap().plan.workflow,
-                "review"
-            );
+            assert_eq!(store.project(&project).unwrap().unwrap().workflow, "review");
             for (name, source) in [("invalid/review", definition), ("review", "changed")] {
                 assert!(store
                     .select_project_workflow(&project, name, source)
@@ -318,13 +332,10 @@ mod tests {
                 store.wave_workflow(&wave, "review").unwrap().as_deref(),
                 Some(changed)
             );
-            assert_eq!(
-                store.project(&project).unwrap().unwrap().plan.workflow,
-                "review"
-            );
+            assert_eq!(store.project(&project).unwrap().unwrap().workflow, "review");
         }
         assert!(store
-            .update_project_content(&crate::durable::ProjectId::new(), &content)
+            .update_project_content(&crate::durable::ProjectId::new(), "review", &[], &[])
             .is_err());
     }
 }

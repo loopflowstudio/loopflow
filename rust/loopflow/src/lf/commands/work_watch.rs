@@ -209,8 +209,8 @@ impl Part {
 
     /// Whether a commit that moved revisions from `old` to `new` can change
     /// this part. Planning conditions read Sessions, Flows and unfinished
-    /// Processes; the Session list reads no Process, and only a Wave's Session
-    /// history shows token totals.
+    /// Processes. Sessions read their AgentProcess; only Wave history shows
+    /// token totals.
     fn changed(self, mut old: StoreRevisions, new: StoreRevisions) -> bool {
         if self == Part::PeerPlanning {
             return old.planning != new.planning;
@@ -220,9 +220,6 @@ impl Part {
         }
         if self != Part::Wave {
             old.usage = new.usage;
-        }
-        if self == Part::Sessions {
-            old.processes = new.processes;
         }
         old != new
     }
@@ -236,11 +233,10 @@ impl Part {
             } == new
     }
 
-    fn clock(self) -> Option<Duration> {
+    fn clock(self) -> Duration {
         match self {
-            Part::Planning | Part::Wave => Some(PLANNING_CLOCK),
-            Part::Activity => Some(ACTIVITY_CLOCK),
-            _ => None,
+            Part::Planning | Part::PeerPlanning | Part::Wave => PLANNING_CLOCK,
+            Part::Activity | Part::Sessions | Part::Task | Part::WorkActivity => ACTIVITY_CLOCK,
         }
     }
 
@@ -558,7 +554,7 @@ impl Reader {
                 (None, None) => false,
                 _ => true,
             }
-            || part.clock().is_some_and(|clock| now - read_on >= clock)
+            || now - read_on >= part.clock()
     }
 
     /// When the next clock-driven reading is due.
@@ -567,7 +563,7 @@ impl Reader {
             .into_iter()
             .filter(|part| part.selected(&self.scope))
             .filter_map(|part| {
-                let clock = part.clock()?;
+                let clock = part.clock();
                 let read_on = self.parts.get(&part)?.read_on?;
                 Some((read_on + clock).saturating_duration_since(now))
             })
@@ -595,7 +591,16 @@ impl Reader {
                 Part::PeerPlanning => {
                     let repo = self.scope.repo.clone().context("no repository in scope")?;
                     let root = CanonicalRepo::discover(Path::new(&repo))?;
-                    let destinations = store.peer_planning_status(&root.to_string()).await?;
+                    let config =
+                        crate::config::load_config(Some(root.as_path()))?.unwrap_or_default();
+                    let destinations = if matches!(
+                        config.planning_transport(),
+                        crate::config::PlanningConfig::Linear {}
+                    ) {
+                        Vec::new()
+                    } else {
+                        store.peer_planning_status(&root.to_string()).await?
+                    };
                     WorkContent::PeerPlanning(Some(PeerPlanningPart { repo, destinations }))
                 }
                 Part::Sessions => {
@@ -962,9 +967,11 @@ mod tests {
     }
 
     #[test]
-    fn an_process_alone_does_not_reread_sessions() {
+    fn process_changes_reread_sessions_and_os_death_has_a_clock() {
         let old = revisions(1, 1, 1, 1);
-        assert!(!Part::Sessions.changed(old, revisions(1, 1, 1, 2)));
+        assert!(Part::Sessions.changed(old, revisions(1, 1, 1, 2)));
+        assert_eq!(Part::Sessions.clock(), Part::Activity.clock());
+        assert_eq!(Part::Task.clock(), Part::Activity.clock());
         assert!(Part::Planning.changed(old, revisions(1, 1, 1, 2)));
         assert!(Part::Sessions.changed(old, revisions(2, 1, 1, 1)));
         assert!(!Part::Activity.changed(old, revisions(2, 2, 2, 1)));

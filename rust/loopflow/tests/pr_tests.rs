@@ -491,16 +491,27 @@ fn task_snapshot_reads_its_current_parent_project() {
     repo.create_branch(branch);
     let task = register_task_with_pr(home.path(), repo.path(), branch, &base);
     let runtime = tokio::runtime::Runtime::new().expect("task runtime");
-    let mut planning = runtime
-        .block_on(task.store.pm_snapshot(&task.task.wave_id))
+    let mut observation = runtime
+        .block_on(task.store.pm_task_observation(
+            &repo.path().to_string_lossy(),
+            "linear",
+            &task.task.identifier,
+        ))
         .unwrap()
+        .record
         .unwrap();
-    let project = &mut planning.snapshot.projects[0];
+    let project = observation.project.as_mut().unwrap();
     project.slug = "current-project".into();
     project.revision = Some("2026-10-05T12:00:00Z".into());
     let project_id = project.id.clone();
     runtime
-        .block_on(task.store.put_pm_snapshot(planning, None))
+        .block_on(task.store.put_pm_task(
+            &repo.path().to_string_lossy(),
+            "linear",
+            observation,
+            None,
+            None,
+        ))
         .unwrap();
 
     let snapshot = task_snapshot(&task.task).expect("snapshot Task");
@@ -509,7 +520,7 @@ fn task_snapshot_reads_its_current_parent_project() {
     assert_eq!(snapshot.external_project_id, Some(project_id));
     assert_eq!(
         snapshot.pm_snapshot_synced_at,
-        task.task.plan.pm_snapshot_synced_at
+        task.task.pm_snapshot_synced_at
     );
 }
 
@@ -908,15 +919,26 @@ fn task_pr_missing_cached_linear_url_refuses_before_remote_mutation() {
     push_branch(&repo, branch);
     let task = register_task_with_pr(home.path(), repo.path(), branch, &base);
     let runtime = tokio::runtime::Runtime::new().expect("task runtime");
-    let mut snapshot = runtime
-        .block_on(task.store.pm_snapshot(&task.task.wave_id))
-        .expect("read PM snapshot")
-        .expect("PM snapshot");
-    snapshot.snapshot.items[0].url = None;
-    snapshot.snapshot.items[0].revision = Some("2026-09-30T00:00:00Z".into());
+    let mut observation = runtime
+        .block_on(task.store.pm_task_observation(
+            &repo.path().to_string_lossy(),
+            "linear",
+            &task.task.identifier,
+        ))
+        .unwrap()
+        .record
+        .unwrap();
+    observation.item.url = None;
+    observation.item.revision = Some("2026-09-30T00:00:00Z".into());
     runtime
-        .block_on(task.store.put_pm_snapshot(snapshot, None))
-        .expect("remove cached Task URL");
+        .block_on(task.store.put_pm_task(
+            &repo.path().to_string_lossy(),
+            "linear",
+            observation,
+            None,
+            None,
+        ))
+        .unwrap();
 
     let result = create_or_update_pr(
         repo.path(),
@@ -1422,16 +1444,19 @@ fn end_is_refused_while_a_published_pr_is_unmerged() {
     });
     runtime.block_on(task.store.update_task_pr(&pr)).unwrap();
 
-    let result = task_complete(repo.path(), "INF-123", Some("done"));
-    let message = result
+    let message = task_complete(repo.path(), "INF-123", Some("done"))
         .expect_err("an unmerged published PR must block completion")
         .to_string();
     assert!(
         message.contains("cannot complete") && message.contains("not merged"),
-        "expected a gate refusal naming the unmerged PR, got: {message}"
+        "{message}"
     );
 
-    // The Task and PR are unchanged: no premature completion, no deleted PR.
+    // Refusal preserves the checkout and published PR while refreshing observations.
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("notes.md")).unwrap(),
+        "unpublished\n"
+    );
     let work = runtime
         .block_on(
             task.store
@@ -1445,7 +1470,10 @@ fn end_is_refused_while_a_published_pr_is_unmerged() {
     let prs = runtime
         .block_on(task.store.task_prs(&task.task.id))
         .expect("read PRs");
-    assert_eq!(prs.len(), 1, "published PR must survive the refusal");
+    assert_eq!(prs.len(), 1);
+    assert_eq!(prs[0].id, pr.id);
+    assert_eq!(prs[0].github(), pr.github());
+    assert!(!prs[0].is_settled());
 }
 
 #[test]

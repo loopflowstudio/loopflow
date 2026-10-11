@@ -60,6 +60,9 @@ pub struct Cli {
     /// Captured skill and arguments supplied by the invoking Flow process.
     #[arg(long, hide = true)]
     pub skill_input: Option<std::path::PathBuf>,
+    /// Native final-answer schema supplied by a deciding step.
+    #[arg(long, hide = true, value_parser = |text: &str| serde_json::from_str::<serde_json::Value>(text))]
+    pub output_schema: Option<serde_json::Value>,
     #[arg(skip)]
     pub resolved_invocation: Option<crate::skills::invocation::SkillInvocation>,
 
@@ -244,6 +247,9 @@ impl Cli {
                 input.to_string_lossy().into_owned(),
             ]);
         }
+        if let Some(schema) = &self.output_schema {
+            args.extend(["--output-schema".to_string(), schema.to_string()]);
+        }
         if let Some(steer) = self.steers_after {
             args.extend(["--steers-after".to_string(), steer.to_string()]);
         }
@@ -262,6 +268,7 @@ impl Cli {
             clipboard: self.clipboard,
             agent: self.agent.clone(),
             skill_input: self.skill_input.clone(),
+            output_schema: self.output_schema.clone(),
             resolved_invocation: self.resolved_invocation.clone(),
             account: self.account.clone(),
             only_account: self.only_account.clone(),
@@ -801,7 +808,7 @@ pub enum SessionCommand {
         #[arg(long)]
         search: Option<String>,
     },
-    /// Connect to the live conversation, or resume its saved history
+    /// Stop headless Claude/OpenCode and resume history; connect to Codex live
     #[command(name = "connect")]
     Open {
         /// Session ID or provider conversation ID
@@ -892,6 +899,9 @@ pub enum WaveCommand {
         name: Option<String>,
         #[arg(long)]
         summary: Option<String>,
+        /// Authored chapter prose
+        #[arg(long)]
+        description: Option<String>,
     },
 
     /// Rotate this Wave using its exact destination in a retained chapter plan
@@ -1116,6 +1126,18 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Inspect or reserve the Task's permanent first execution owner
+    Admission {
+        issue: String,
+        /// Request first execution on this Machine; an existing owner wins
+        #[arg(long)]
+        claim: Option<crate::durable::MachineId>,
+        /// Correlate a coordinator reply with this request
+        #[arg(long)]
+        request: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
     /// Read recorded execution location without preparing or transferring Work
     Location {
         issue: String,
@@ -1287,6 +1309,7 @@ impl TaskCommand {
             Self::Shell { issue, .. }
             | Self::WatchFiles { issue, .. }
             | Self::Location { issue, .. }
+            | Self::Admission { issue, .. }
             | Self::Sync { issue, .. }
             | Self::Move { issue, .. }
             | Self::Complete { issue, .. }
@@ -1324,6 +1347,7 @@ impl TaskCommand {
             Self::Shell { issue, .. }
             | Self::WatchFiles { issue, .. }
             | Self::Location { issue, .. }
+            | Self::Admission { issue, .. }
             | Self::Sync { issue, .. }
             | Self::Move { issue, .. }
             | Self::Complete { issue, .. }
@@ -1656,31 +1680,6 @@ pub enum PlanningCommand {
         #[arg(long, value_name = "UUID")]
         recover: Option<String>,
     },
-    /// Pin a remote and user-keyed ref; joining selects no existing work
-    Connect {
-        #[arg(long)]
-        remote: String,
-        /// Explicitly join a shared ref instead of the saved user's ref
-        #[arg(long, value_name = "NAME")]
-        shared: Option<String>,
-    },
-    /// Route future root Waves to a destination, or use 'local' for no sharing
-    Use { destination: String },
-    /// Include existing Waves and their descendants in a destination
-    Select {
-        destination: String,
-        /// Exact Wave IDs; this may make retained history eligible for sharing
-        #[arg(long = "wave", required = true, num_args = 1..)]
-        waves: Vec<String>,
-    },
-    /// Associate an incoming full Work ID with existing local Work; never merge execution or share it
-    Associate {
-        incoming: String,
-        #[arg(long = "with", value_name = "LOCAL_ID")]
-        local: String,
-        #[arg(long, value_name = "PROVIDER_ID")]
-        linear: String,
-    },
     /// Show selection, retained imports and held records without contacting Git
     Status {
         #[arg(long)]
@@ -1698,7 +1697,7 @@ pub enum RepoCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Configure Git planning synchronization without publishing existing work
+    /// Inspect planning synchronization and personal identity
     Planning {
         #[command(subcommand)]
         cmd: PlanningCommand,
@@ -3028,3 +3027,6 @@ pub enum DiscordCommand {
     /// Poll a configured channel and post each Session's final answer
     Serve { wave: String },
 }
+
+/// Pushed code requirements for one remote Task invocation.
+pub const TASK_SOURCE_ENV: &str = "LF_TASK_SOURCE";

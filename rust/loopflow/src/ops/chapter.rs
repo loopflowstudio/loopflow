@@ -9,9 +9,11 @@ use serde::{Deserialize, Serialize};
 use crate::git::{is_clean, rev_parse};
 use crate::id::WaveId;
 use crate::ops::{OpsError, OpsResult};
-use crate::pm::{PmItem, PmProject, ProjectContent, ProjectStatus};
+use crate::pm::linear::LinearProject;
 use crate::store::sqlite::project_selection::read_project_binding;
 use crate::store::Store;
+use crate::work::project::{Project, ProjectStatus};
+use crate::work::task::Task;
 use crate::work::wave::{Wave, WaveLocator};
 
 use super::pm::{lock_wave_planning, pm_store, project_is_foreign, PmContext};
@@ -26,7 +28,7 @@ pub enum TaskDisposition {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChapterTask {
-    pub task: PmItem,
+    pub task: Task,
     pub disposition: TaskDisposition,
     pub reason: String,
     pub observed_at: i64,
@@ -47,7 +49,9 @@ pub struct WaveChapterPlan {
     pub successor_id: String,
     pub create: bool,
     pub project_name: String,
-    pub content: ProjectContent,
+    pub workflow: String,
+    pub krs: Vec<crate::work::project::ProjectKR>,
+    pub metric_targets: Vec<crate::work::wave::metrics::MetricTarget>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -60,8 +64,8 @@ pub struct ChapterRotation {
 pub struct WaveRotation {
     pub wave: String,
     pub successor_id: String,
-    pub predecessor: Option<PmProject>,
-    pub successor: Option<PmProject>,
+    pub predecessor: Option<Project>,
+    pub successor: Option<Project>,
     pub tasks: Vec<ChapterTask>,
 }
 
@@ -150,14 +154,12 @@ pub(crate) async fn rotate(
                 ));
             }
         }
-        if input.content.krs.is_empty()
-            || input.content.krs.iter().any(|kr| kr.text.trim().is_empty())
-        {
+        if input.krs.is_empty() || input.krs.iter().any(|kr| kr.text.trim().is_empty()) {
             return Err(error(
                 "each chapter destination requires nonempty authored KRs",
             ));
         }
-        input.content.validate().map_err(error)?;
+        crate::work::project::validate_metric_targets(&input.metric_targets).map_err(error)?;
         if input.project_name.trim().is_empty() {
             return Err(error("Project name is empty"));
         }
@@ -181,9 +183,7 @@ pub(crate) async fn rotate(
         if located.as_ref().map(Wave::id) != Some(wave.id()) {
             return Err(error("planned Wave belongs to another repository"));
         }
-        super::pm::require_planning_home(&store, &wave).await?;
-        super::metrics::validate_chapter_targets(&wave, &input.content.metric_targets)
-            .map_err(error)?;
+        super::metrics::validate_chapter_targets(&wave, &input.metric_targets).map_err(error)?;
         let acquisition = lock_wave_planning(&wave).await?;
         contexts.push((input, wave, acquisition));
     }
@@ -222,24 +222,26 @@ pub(crate) async fn rotate(
         .map_err(error)?;
     for (input, result) in &mut prepared {
         let id = crate::durable::ProjectId::parse(&input.successor_id).map_err(error)?;
-        let mut successor = store.sqlite.planning_project(&id).map_err(error)?;
-        successor.id = id.to_string();
-        result.successor = Some(successor);
+        result.successor = Some(
+            store
+                .sqlite
+                .project(&id)
+                .map_err(error)?
+                .ok_or_else(|| error("rotation successor disappeared"))?,
+        );
         if let Some(predecessor) = &mut result.predecessor {
-            let id = crate::durable::ProjectId::parse(&predecessor.id).map_err(error)?;
-            *predecessor = store.sqlite.planning_project(&id).map_err(error)?;
-            predecessor.id = id.to_string();
+            *predecessor = store
+                .sqlite
+                .project(&predecessor.id)
+                .map_err(error)?
+                .ok_or_else(|| error("rotation predecessor disappeared"))?;
         }
         for task in &mut result.tasks {
-            let id = crate::durable::TaskId::parse(&task.task.id).map_err(error)?;
-            task.task = super::task::task_planning_item(
-                &store,
-                &store
-                    .sqlite
-                    .task(&id)
-                    .map_err(error)?
-                    .ok_or_else(|| error("rotation Task disappeared"))?,
-            )?;
+            task.task = store
+                .sqlite
+                .task(&task.task.id)
+                .map_err(error)?
+                .ok_or_else(|| error("rotation Task disappeared"))?;
         }
     }
     drop(guards);
@@ -308,23 +310,12 @@ async fn prepare_rotation(
         .map(|r| r.predecessor_id.clone())
         .unwrap_or(binding);
     let projects = store.list_projects(Some(wave.id())).await.map_err(error)?;
-    let project = |id: &str| -> OpsResult<Option<PmProject>> {
-        let Some(saved) = projects.iter().find(|p| p.id.as_str() == id) else {
-            return Ok(None);
-        };
-        let mut projection = store.sqlite.planning_project(&saved.id).map_err(error)?;
-        projection.id = saved.id.to_string();
-        Ok(Some(projection))
-    };
-    let predecessor = predecessor_id
-        .as_deref()
-        .map(project)
-        .transpose()?
-        .flatten();
+    let project = |id: &str| projects.iter().find(|p| p.id.as_str() == id).cloned();
+    let predecessor = predecessor_id.as_deref().and_then(project);
     if predecessor_id.is_some() && predecessor.is_none() {
         return Err(error("selected predecessor is unavailable"));
     }
-    let successor = project(&input.successor_id)?;
+    let successor = project(&input.successor_id);
     if receipt.is_none()
         && (input.create == successor.is_some()
             || predecessor_id.as_deref() == Some(&input.successor_id))
@@ -352,21 +343,19 @@ async fn prepare_rotation(
         {
             continue;
         }
-        let mut item = super::task::task_planning_item(store, &task)?;
-        item.id = task.id.to_string();
-        let mut decision = disposition(store, item).await?;
-        if task.worktree.is_none() && decision.disposition == TaskDisposition::Unresolved {
+        let mut decision = disposition(store, task).await?;
+        if decision.task.worktree.is_none() && decision.disposition == TaskDisposition::Unresolved {
             decision.disposition = TaskDisposition::Historical;
             decision.reason = "unplaced backlog stays with its Project".into();
         }
-        if retained.iter().any(|id| id == task.id.as_str()) {
+        if retained.iter().any(|id| id == decision.task.id.as_str()) {
             decision.disposition = TaskDisposition::Move;
             decision.reason = "retained rotation membership".into();
         }
         if decision.disposition == TaskDisposition::Unresolved {
             return Err(error(format!(
                 "{}: {}",
-                task.plan.identifier, decision.reason
+                decision.task.identifier, decision.reason
             )));
         }
         tasks.push(decision);
@@ -390,7 +379,7 @@ pub(crate) async fn adopt_legacy_projects(
     wave_name: &str,
     ctx: &PmContext,
     apply: bool,
-) -> OpsResult<Vec<PmProject>> {
+) -> OpsResult<Vec<LinearProject>> {
     let locator = WaveLocator::discover(repo, wave_name).map_err(error)?;
     let Some(wave) = store.get_wave_at(&locator).await.map_err(error)? else {
         return Ok(Vec::new());
@@ -516,32 +505,22 @@ pub(crate) async fn adopt_legacy_projects(
     Ok(converted)
 }
 
-async fn disposition(store: &Store, item: PmItem) -> OpsResult<ChapterTask> {
-    let mut evidence = TaskStartEvidence {
-        begun: false,
-        // This Machine's missing Task row says nothing about work on another Machine.
-        authored: None,
-        published: false,
-        abandoned: false,
-        completed: false,
-    };
-    if let Some(task) = store.get_task_by_issue(&item.id).await.map_err(error)? {
-        evidence = store.chapter_task_evidence(&task.id).await.map_err(error)?;
-        let prs = store.task_prs(&task.id).await.map_err(error)?;
-        evidence.published = prs
-            .iter()
-            .any(|pr| pr.publication.is_some() || pr.merge_commit.is_some());
-        if let (Some(pr), Some(worktree)) = (prs.last(), task.worktree.as_ref()) {
-            evidence.authored = is_clean(worktree).ok().and_then(|clean| {
-                rev_parse(worktree, "HEAD")
-                    .ok()
-                    .map(|head| !clean || head != pr.base_commit)
-            });
-        }
+async fn disposition(store: &Store, task: Task) -> OpsResult<ChapterTask> {
+    let mut evidence = store.chapter_task_evidence(&task.id).await.map_err(error)?;
+    let prs = store.task_prs(&task.id).await.map_err(error)?;
+    evidence.published = prs
+        .iter()
+        .any(|pr| pr.publication.is_some() || pr.merge_commit.is_some());
+    if let (Some(pr), Some(worktree)) = (prs.last(), task.worktree.as_ref()) {
+        evidence.authored = is_clean(worktree).ok().and_then(|clean| {
+            rev_parse(worktree, "HEAD")
+                .ok()
+                .map(|head| !clean || head != pr.base_commit)
+        });
     }
-    let (disposition, reason) = classify_task(&item, &evidence);
+    let (disposition, reason) = classify_task(task.state.as_deref(), task.completed, &evidence);
     Ok(ChapterTask {
-        task: item,
+        task,
         disposition,
         reason,
         observed_at: time::OffsetDateTime::now_utc().unix_timestamp(),
@@ -558,9 +537,12 @@ pub struct TaskStartEvidence {
     pub completed: bool,
 }
 
-pub fn classify_task(task: &PmItem, evidence: &TaskStartEvidence) -> (TaskDisposition, String) {
-    let state = task.state.as_deref();
-    let terminal = matches!(state, Some("completed" | "canceled" | "duplicate")) || task.completed;
+fn classify_task(
+    state: Option<&str>,
+    completed: bool,
+    evidence: &TaskStartEvidence,
+) -> (TaskDisposition, String) {
+    let terminal = matches!(state, Some("completed" | "canceled" | "duplicate")) || completed;
     if evidence.abandoned
         && !terminal
         && (state == Some("started")

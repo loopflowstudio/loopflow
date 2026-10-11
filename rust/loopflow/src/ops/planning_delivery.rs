@@ -7,8 +7,8 @@ use std::time::Duration;
 use serde_json::{json, Value};
 
 use crate::durable::WorkRef;
-use crate::planning::PlanningChange;
 use crate::pm::linear::LinearClient;
+use crate::store::planning_sync::PlanningChange;
 use crate::store::sqlite::planning_changes::PlanningChanges;
 use crate::store::{PmTaskRecord, Store};
 
@@ -107,7 +107,7 @@ async fn sync_deletion(
         .await
         .map_err(message)?
         .ok_or_else(|| message("Task is missing"))?;
-    let external = task.plan.linear_id()?.as_str();
+    let external = task.linear_id()?.as_str();
     let (trashed, trash_revision) = client
         .issue_trash(external)
         .await
@@ -259,7 +259,7 @@ async fn observe(
                 .await
                 .map_err(message)?
                 .ok_or_else(|| message("Task is missing"))?;
-            let external = task.plan.linear_id()?.as_str().to_owned();
+            let external = task.linear_id()?.as_str().to_owned();
             let (item, project) = client
                 .issue_ownership(&external)
                 .await
@@ -276,13 +276,11 @@ async fn observe(
                 },
             )
             .await?;
-            let accepted = store
+            if !store
                 .sqlite
-                .planning_task(id)
+                .accepted_task_revision(id, &external, revision.as_deref())
                 .map_err(message)?
-                .record
-                .ok_or_else(|| message("Task planning is unavailable"))?;
-            if accepted.item.revision != revision {
+            {
                 return Err(message(
                     "Newer or unresolved Linear planning retained; field delivery deferred",
                 ));
@@ -295,7 +293,7 @@ async fn observe(
                 .await
                 .map_err(message)?
                 .ok_or_else(|| message("Project is missing"))?;
-            let external = project.plan.linear_id()?.as_str().to_owned();
+            let external = project.linear_id()?.as_str().to_owned();
             let (observed, content) = client
                 .project_content_observation(&external)
                 .await
@@ -307,7 +305,7 @@ async fn observe(
                 .ok_or_else(|| message("Project Wave is missing"))?;
             let initiative = super::pm::read_initiative(repo, wave.slug())
                 .ok_or_else(|| message("Wave has no Linear Initiative"))?;
-            let accepted = store
+            store
                 .sqlite
                 .put_pm_project(
                     &project.wave_id,
@@ -317,9 +315,13 @@ async fn observe(
                     time::OffsetDateTime::now_utc().unix_timestamp(),
                 )
                 .map_err(message)?;
-            if accepted.revision != observed.revision {
+            if !store
+                .sqlite
+                .accepted_project_revision(id, &external, observed.revision.as_deref())
+                .map_err(message)?
+            {
                 return Err(message(
-                    "Newer Linear Project observation retained; field delivery deferred",
+                    "Newer or unresolved Linear Project planning retained; field delivery deferred",
                 ));
             }
             Ok((external, content, observed.revision))
@@ -345,7 +347,7 @@ fn task_input(store: &Store, change: &PlanningChange) -> OpsResult<Value> {
                 .project(&id)
                 .map_err(message)?
                 .ok_or_else(|| message("destination Project is missing"))?;
-            Ok(json!({"projectId":project.plan.linear_id()?.as_str()}))
+            Ok(json!({"projectId":project.linear_id()?.as_str()}))
         }
         _ => Err(message(format!(
             "unsupported Task planning field: {}",
@@ -368,8 +370,7 @@ pub(super) async fn ingest_task(
             .await
             .map_err(message)?
             .filter(|p| {
-                p.plan
-                    .linear_id
+                p.linear_id
                     .as_ref()
                     .is_some_and(|id| id.as_str() == project.id)
             })

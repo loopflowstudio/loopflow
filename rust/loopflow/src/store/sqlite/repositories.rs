@@ -130,6 +130,8 @@ impl SqliteStore {
                     .map_err(|error| StoreError::InvalidData(error.to_string()))?,
                 TaskExecutionSource::RecordedCheckout,
             )
+        } else if let Some(owner) = super::task_admission::owner_in(&tx, task)? {
+            (owner, TaskExecutionSource::Admission)
         } else {
             (
                 super::durable::placement_in(&tx, &WorkRef::Task(task.clone()))?.machine_id,

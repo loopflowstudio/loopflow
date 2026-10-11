@@ -33,6 +33,7 @@ pub struct ClaudeHarness {
     config: Option<AgentConfig>,
     capture: Option<crate::agent::AgentCapture>,
     should_seed_task_prompt: bool,
+    skill_input: Option<String>,
     /// Vendor session id captured from the first turn's `system` event; a
     /// respawn (after interrupt/crash) resumes it via `--resume`.
     agent_session: Arc<Mutex<Option<AgentSessionId>>>,
@@ -78,6 +79,7 @@ impl ClaudeHarness {
             config: None,
             capture: None,
             should_seed_task_prompt: true,
+            skill_input: None,
             agent_session: Arc::new(Mutex::new(None)),
             account_route: None,
             requested_account_id: None,
@@ -124,8 +126,13 @@ impl ClaudeHarness {
             .expect("claude provider session id lock poisoned")
             .clone();
         let context_file = crate::agent::write_system_prompt_file(config, "session")?;
-        let args =
+        let mut args =
             build_claude_stream_session_args(config, resume_id.as_ref(), context_file.as_deref());
+        if let Some(invocation) = &config.skill_invocation {
+            let (flags, input) = invocation.claude_input(config)?;
+            args.extend(flags);
+            self.skill_input = Some(input);
+        }
         let mut cmd = Command::new("claude");
         cmd.args(&args);
         if let Some(context) = &config.conversation_context {
@@ -252,6 +259,12 @@ impl ClaudeHarness {
                 }
                 let result = claude_mapping::process_line(&line, &turn_id(), &events, &mut state);
                 if let Some(session_id) = state.take_agent_session() {
+                    let (store, session, attachment) = &history.owner;
+                    if let Err(error) =
+                        store.record_session_agent_session(session, attachment, &session_id)
+                    {
+                        tracing::warn!(%error, "could not select Claude native conversation");
+                    }
                     *session_slot
                         .lock()
                         .expect("claude provider session id lock poisoned") =
@@ -306,19 +319,10 @@ impl ClaudeHarness {
     /// `send_input` respawns and resumes the captured session.
     async fn kill_process(&mut self) -> Result<()> {
         if self.child.is_some() {
-            // Only an admitted launch produced this child.
-            let (store, session, attachment) = self.owner()?;
-            let child = self.child.as_mut().expect("child presence checked above");
-            super::dispatch::off_reactor(|| {
-                store.with_session_attachment(&session, &attachment, || {
-                    child
-                        .start_kill()
-                        .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))
-                })
-            })?;
-            child.wait().await?;
+            super::agent_process::stop(&self.owner()?)?;
+            // Common close proves group death and reaps our leader. Dropping
+            // the Tokio handle also permits its reaper to collect a late zombie.
             self.child = None;
-            store.record_agent_process_exit(&session, &attachment, true)?;
         }
         self.stdin = None;
         if let Some(task) = self.reader_task.take() {
@@ -451,6 +455,13 @@ impl Harness for ClaudeHarness {
         }
         let mut turn_guard = TurnInProgressGuard::new(self.turn_in_progress.clone());
 
+        self.interrupt_requested.store(false, Ordering::SeqCst);
+        self.ensure_process().await?;
+        let skill_input = self
+            .should_seed_task_prompt
+            .then(|| self.skill_input.take())
+            .flatten();
+
         // The first message of a run carries the task prompt as a preamble.
         let mut turn_content = content.to_string();
         if self.should_seed_task_prompt {
@@ -466,9 +477,6 @@ impl Harness for ClaudeHarness {
                 turn_content = format!("{task_prompt}\n\n{content}");
             }
         }
-
-        self.interrupt_requested.store(false, Ordering::SeqCst);
-        self.ensure_process().await?;
 
         let origin = self.turn_origin()?;
         let turn_id = uuid::Uuid::new_v4().to_string();
@@ -486,10 +494,23 @@ impl Harness for ClaudeHarness {
             turn_id: turn_id.clone(),
         });
 
-        if let Err(error) = self
-            .send_line(user_message_line(&turn_content, &turn_id))
-            .await
-        {
+        // Send non-query skill context and the correlated query through one
+        // write/error path, so either write failure tears down the process.
+        let mut seed = String::new();
+        if let Some(input) = skill_input {
+            if !turn_content.is_empty() {
+                seed = format!(
+                    "{}\n",
+                    serde_json::json!({
+                        "type": "user", "shouldQuery": false,
+                        "message": {"role": "user", "content": turn_content}
+                    })
+                );
+            }
+            turn_content = input;
+        }
+        seed.push_str(&user_message_line(&turn_content, &turn_id));
+        if let Err(error) = self.send_line(seed).await {
             // The process died between spawn and write; tear it down so the
             // next send_input respawns cleanly.
             drop(turn_guard);
@@ -656,7 +677,7 @@ mod tests {
 
     #[tokio::test]
     #[allow(clippy::await_holding_lock)] // Isolate provider and database selection.
-    async fn sequential_managed_sessions_retain_their_exact_claude_agent_processes() {
+    async fn claude_stop_fences_takeover_and_ends_the_recorded_groups() {
         let _lock = crate::journal::test_env_lock();
         let _ambient = crate::test_ambient::EnvGuard::new();
         let original_path = std::env::var_os("PATH").unwrap_or_default();
@@ -668,7 +689,7 @@ mod tests {
         let conn = rusqlite::Connection::open(&database).unwrap();
         let process = crate::id::LfProcessId::new();
         conn.execute(
-            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'trace',1)",
+            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?1,1)",
             [&process],
         )
         .unwrap();
@@ -684,6 +705,11 @@ mod tests {
         let mut recorded = Vec::new();
         for id in ["first", "second"] {
             store.test_session(id, &crate::session_record::new_artifact_key());
+            conn.execute(
+                "UPDATE agent_sessions SET interactive=0, provider='claude' WHERE id=?1",
+                [id],
+            )
+            .unwrap();
             let attachment = store
                 .claim_session_attachment(id, None, &process, true)
                 .unwrap();
@@ -693,22 +719,33 @@ mod tests {
             config.session_attachment = Some((id.into(), attachment.clone()));
             harness.config = Some(config);
             harness.send_input("one turn").await.unwrap();
-            recorded.push((
-                harness.pid().unwrap(),
-                store.agent_process_identity(id).unwrap(),
-            ));
+            let (pid, birth) = store
+                .agent_process_identity(id)
+                .unwrap()
+                .expect("managed Claude publishes exact AgentProcess identity");
+            assert_eq!(harness.pid(), Some(pid));
+            assert!(birth > 0);
+            recorded.push((pid, birth));
             // Retain the first process while the same Process starts the next step.
             harnesses.push(harness);
         }
+        let original = harnesses[0].owner().unwrap().2;
+        let replacement = store
+            .claim_session_attachment("first", Some(&original), &process, false)
+            .unwrap();
+        assert!(harnesses[0].stop().await.is_err());
+        assert_eq!(
+            crate::journal::process_identity_evidence(recorded[0].0, recorded[0].1),
+            crate::journal::ProcessIdentityEvidence::Live
+        );
+        harnesses[0].config.as_mut().unwrap().session_attachment =
+            Some(("first".into(), replacement));
         for harness in &mut harnesses {
             harness.stop().await.unwrap();
         }
         assert_ne!(recorded[0].0, recorded[1].0);
-        for (pid, evidence) in recorded {
-            let (saved, start) =
-                evidence.expect("managed Claude publishes exact AgentProcess identity");
-            assert_eq!(pid, saved);
-            assert!(start > 0);
+        for (pid, _) in recorded {
+            assert!(!crate::journal::OsProcess::group_is_alive(pid).unwrap());
         }
     }
 
@@ -844,6 +881,7 @@ mod tests {
             conversation_context: None,
             task_prompt: "task".to_string(),
             skill_invocation: None,
+            output_schema: None,
             agent: None,
             cwd: Some(format!("/tmp/loopflow-missing-{}", uuid::Uuid::new_v4()).into()),
             max_turns: None,
@@ -940,12 +978,19 @@ done
         rusqlite::Connection::open(&database)
             .unwrap()
             .execute(
-                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'trace',1)",
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?1,1)",
                 [&process],
             )
             .unwrap();
         let admitted = |id: &str| {
             store.test_session(id, &crate::session_record::new_artifact_key());
+            rusqlite::Connection::open(&database)
+                .unwrap()
+                .execute(
+                    "UPDATE agent_sessions SET interactive=0, provider='claude' WHERE id=?1",
+                    [id],
+                )
+                .unwrap();
             let attachment = store
                 .claim_session_attachment(id, None, &process, true)
                 .unwrap();
@@ -993,6 +1038,7 @@ done
             conversation_context: None,
             task_prompt: String::new(),
             skill_invocation: None,
+            output_schema: None,
             agent: None,
             cwd: Some(std::env::temp_dir()),
             max_turns: None,

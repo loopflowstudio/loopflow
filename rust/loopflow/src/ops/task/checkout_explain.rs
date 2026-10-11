@@ -163,7 +163,7 @@ async fn read_checkout(
             }
         }
     } else {
-        let branch = super::task_planning_item(store, &task)?.branch_name;
+        let branch = store.sqlite.task_issue_branch(&task.id)?;
         let (plan, _) = match super::plan_task_placement(&repo, &task, branch.as_deref(), options) {
             Ok(plan) => plan,
             Err(super::OpsError::Message(reason)) => {

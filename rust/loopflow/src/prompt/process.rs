@@ -187,6 +187,7 @@ fn prepare_prompt(
         conversation_context,
         task_prompt,
         skill_invocation,
+        output_schema: None,
         agent: Some(agent),
         max_turns: None,
         resume_token: None,

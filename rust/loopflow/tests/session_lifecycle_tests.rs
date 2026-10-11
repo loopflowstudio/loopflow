@@ -425,7 +425,7 @@ fi
         native
     );
     let status = fixture.json(&["task", "status", task_id, "--json"]);
-    let project = status["planning"]["project"]["id"].as_str().unwrap();
+    let project = status["project"]["id"].as_str().unwrap();
     let selected = fixture.run(&["wave", "workflow", "set", "--project", project, "proof"]);
     assert!(selected.status.success(), "{selected:?}");
     managed_codex_account(&fixture);
@@ -727,7 +727,7 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
         "--search",
         "local-112",
         "--task",
-        &task.task.plan.identifier,
+        &task.task.identifier,
     ]);
     assert_eq!(filtered.as_array().unwrap().len(), 1);
     assert_eq!(filtered[0]["id"], "inventory-112");
@@ -779,13 +779,7 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
             [],
         )
         .unwrap();
-    let list = [
-        "session",
-        "list",
-        "--task",
-        &task.task.plan.identifier,
-        "--json",
-    ];
+    let list = ["session", "list", "--task", &task.task.identifier, "--json"];
     for _ in 0..2 {
         let current = fixture.json(&list);
         assert_eq!(current.as_array().unwrap().len(), 1);
@@ -795,14 +789,15 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
         "session",
         "list",
         "--task",
-        &task.task.plan.identifier,
+        &task.task.identifier,
         "--interactive",
         "all",
         "--history",
         "--json",
     ]);
     assert_eq!(history.as_array().unwrap().len(), 3);
-    assert_eq!(history[0]["state"], "closed");
+    // A historical Session completion without an AgentProcess proves no death.
+    assert_eq!(history[0]["state"], "unknown");
     assert_eq!(fixture.count("agent_sessions"), 113);
 }
 
@@ -1722,10 +1717,16 @@ fn taskless_structured_output_correction_is_bounded_and_preserves_the_conversati
             )
             .unwrap();
         for correction in &steps[2..] {
+            let args = correction["argv"].as_array().unwrap();
+            assert_eq!(args[0], "--batch");
+            assert_eq!(args[1], "--output-schema");
+            let schema: serde_json::Value =
+                serde_json::from_str(args[2].as_str().unwrap()).unwrap();
             assert_eq!(
-                correction["argv"].as_array().unwrap()[..4],
-                ["--batch", "session", "resume", conversation.as_str()]
+                schema["properties"]["decision"]["enum"],
+                serde_json::json!(["advance", "iterate", "blocked"])
             );
+            assert_eq!(args[3..6], ["session", "resume", conversation.as_str()]);
             assert_eq!(correction["key"], decision["key"]);
             assert_eq!(correction["iterations"], decision["iterations"]);
         }

@@ -2,19 +2,20 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use crate::ops::{OpsError, OpsResult};
-use crate::pm::{PmProject, ProjectContent, ProjectStatus};
+use crate::store::planning_sync::PlanningSyncStatus;
 use crate::store::{PlanningLocks, Store};
 use crate::work::project::Project;
+use crate::work::project::ProjectStatus;
 use crate::work::wave::Wave;
 
 fn project_error(message: impl ToString) -> OpsError {
     OpsError::Message(message.to_string())
 }
 
-pub(crate) fn current_project(store: &Store, wave: &Wave) -> OpsResult<PmProject> {
+pub(crate) fn current_project(store: &Store, wave: &Wave) -> OpsResult<Project> {
     let project = store
         .sqlite
-        .selected_planning_project(wave.id())
+        .selected_project(wave.id())
         .map_err(project_error)?
         .ok_or_else(|| project_error(format!("Wave {} has no configured Project", wave.slug())))?;
     if matches!(
@@ -31,7 +32,7 @@ pub(crate) fn current_project(store: &Store, wave: &Wave) -> OpsResult<PmProject
 
 /// Explicitly seed a Wave's shared selection with an existing Project UUID.
 /// Switching an established binding belongs to Project rotation.
-pub async fn bind_project(repo: &Path, name: &str, project_id: &str) -> OpsResult<PmProject> {
+pub async fn bind_project(repo: &Path, name: &str, project_id: &str) -> OpsResult<Project> {
     let store = super::pm::pm_store().await?;
     let wave = crate::work::wave::context::resolve_managed_wave(
         Some(&store),
@@ -50,7 +51,7 @@ pub async fn bind_project(repo: &Path, name: &str, project_id: &str) -> OpsResul
 }
 
 /// Explicit activation; ordinary planning reads never call this operation.
-pub async fn ensure(repo: &Path, name: &str) -> OpsResult<PmProject> {
+pub async fn ensure(repo: &Path, name: &str) -> OpsResult<Project> {
     let store = super::pm::pm_store().await?;
     let wave = crate::work::wave::ensure_wave_row(&store, repo, name)
         .await
@@ -65,14 +66,20 @@ pub async fn ensure(repo: &Path, name: &str) -> OpsResult<PmProject> {
         .sqlite
         .ensure_project(wave.id(), wave.slug())
         .map_err(project_error)?;
-    store.sqlite.planning_project(&id).map_err(project_error)
+    store
+        .sqlite
+        .project(&id)
+        .map_err(project_error)?
+        .ok_or_else(|| project_error("selected Project is missing"))
 }
 
 pub async fn update_plan(
     repo: &Path,
     wave: Option<&str>,
-    content: ProjectContent,
-) -> OpsResult<ProjectPlanning> {
+    workflow: &str,
+    krs: &[crate::work::project::ProjectKR],
+    metric_targets: &[crate::work::wave::metrics::MetricTarget],
+) -> OpsResult<(Project, PlanningSyncStatus)> {
     let store = super::pm::pm_store().await?;
     let ambient = std::env::var(crate::work::wave::context::WAVE_ID_ENV).ok();
     let wave = crate::work::wave::context::resolve_managed_wave(
@@ -84,17 +91,15 @@ pub async fn update_plan(
     .await
     .map_err(project_error)?;
     let _acquisition = super::pm::lock_wave_planning(&wave).await?;
-    let selected = current_project(&store, &wave)?;
-    let project = resolve_project(&store, repo, &selected.id).await?;
-    super::metrics::validate_chapter_targets(&wave, &content.metric_targets)
-        .map_err(project_error)?;
+    let project = current_project(&store, &wave)?;
+    super::metrics::validate_chapter_targets(&wave, metric_targets).map_err(project_error)?;
     store
         .sqlite
-        .update_project_content(&project.id, &content)
+        .update_project_content(&project.id, workflow, krs, metric_targets)
         .map_err(project_error)?;
     drop(_acquisition);
-    super::planning_peer::sync_after_save(&store, wave.repo()).await;
-    planning(&store, &project)
+    super::planning_sync::sync_after_save(&store, wave.repo()).await;
+    read_saved(&store, &project.id)
 }
 
 /// One-time supported import at an explicit mutation boundary. A failed read is
@@ -150,6 +155,24 @@ async fn resolve_project(store: &Store, repo: &Path, selector: &str) -> OpsResul
     let repo = crate::repository::CanonicalRepo::discover(repo)
         .map_err(project_error)?
         .to_string();
+    if crate::durable::ProjectId::parse(selector).is_ok() {
+        let project = store
+            .get_project_by_project(selector)
+            .await
+            .map_err(project_error)?
+            .ok_or_else(|| project_error(format!("Project {selector:?} not found")))?;
+        let wave = store
+            .get_wave(&project.wave_id)
+            .await
+            .map_err(project_error)?;
+        return if wave.is_some_and(|wave| wave.repo() == repo) {
+            Ok(project)
+        } else {
+            Err(project_error(format!(
+                "Project {selector:?} not found in this repository"
+            )))
+        };
+    }
     let waves = store.list_waves(None).await.map_err(project_error)?;
     let projects = store.list_projects(None).await.map_err(project_error)?;
     let projects: Vec<_> = projects
@@ -161,18 +184,16 @@ async fn resolve_project(store: &Store, repo: &Path, selector: &str) -> OpsResul
         })
         .collect();
     if let Some(project) = projects.iter().find(|project| {
-        project.id.as_str() == selector
-            || project
-                .plan
-                .linear_id
-                .as_ref()
-                .is_some_and(|id| id.as_str() == selector)
+        project
+            .linear_id
+            .as_ref()
+            .is_some_and(|id| id.as_str() == selector)
     }) {
         return Ok(project.clone());
     }
     let mut matches = projects
         .into_iter()
-        .filter(|project| project.plan.slug == selector || project.plan.name == selector);
+        .filter(|project| project.slug == selector || project.name == selector);
     let project = matches
         .next()
         .ok_or_else(|| project_error(format!("Project {selector:?} not found")))?;
@@ -205,10 +226,10 @@ async fn resolve_plan(store: &Store, repo: &Path, target: PlanTarget<'_>) -> Ops
     .map_err(project_error)?;
     let selected = store
         .sqlite
-        .selected_planning_project(wave.id())
+        .selected_project(wave.id())
         .map_err(project_error)?
         .ok_or_else(|| project_error(format!("Wave {} has no configured Project", wave.slug())))?;
-    resolve_project(store, repo, &selected.id).await
+    resolve_project(store, repo, selected.id.as_str()).await
 }
 
 fn read_store() -> OpsResult<Store> {
@@ -288,9 +309,12 @@ pub async fn edit(
     target: PlanTarget<'_>,
     name: Option<&str>,
     summary: Option<&str>,
-) -> OpsResult<ProjectPlanning> {
-    if name.is_none() && summary.is_none() {
-        return Err(project_error("wave edit-plan requires --name or --summary"));
+    description: Option<&str>,
+) -> OpsResult<(Project, PlanningSyncStatus)> {
+    if name.is_none() && summary.is_none() && description.is_none() {
+        return Err(project_error(
+            "wave edit-plan requires --name, --summary or --description",
+        ));
     }
     let store = super::pm::pm_store().await?;
     let project = resolve_plan(&store, repo, target).await?;
@@ -302,17 +326,20 @@ pub async fn edit(
     let _acquisition = super::pm::lock_wave_planning(&wave).await?;
     store
         .sqlite
-        .edit_project(&project.id, name, summary)
+        .edit_project(&project.id, name, summary, description)
         .map_err(project_error)?;
     drop(_acquisition);
-    super::planning_peer::sync_after_save(&store, wave.repo()).await;
-    planning(&store, &project)
+    super::planning_sync::sync_after_save(&store, wave.repo()).await;
+    read_saved(&store, &project.id)
 }
 
-pub async fn workflow(repo: &Path, target: PlanTarget<'_>) -> OpsResult<ProjectPlanning> {
+pub async fn workflow(
+    repo: &Path,
+    target: PlanTarget<'_>,
+) -> OpsResult<(Project, PlanningSyncStatus)> {
     let store = read_store()?;
     let project = resolve_plan(&store, repo, target).await?;
-    planning(&store, &project)
+    read_saved(&store, &project.id)
 }
 
 pub async fn set_workflow(
@@ -320,7 +347,7 @@ pub async fn set_workflow(
     target: PlanTarget<'_>,
     name: &str,
     file: Option<&Path>,
-) -> OpsResult<ProjectPlanning> {
+) -> OpsResult<(Project, PlanningSyncStatus)> {
     let store = super::pm::pm_store().await?;
     let project = resolve_plan(&store, repo, target).await?;
     let definition = match file {
@@ -340,27 +367,24 @@ pub async fn set_workflow(
         .select_project_workflow(&project.id, name, &definition)
         .map_err(project_error)?;
     drop(_acquisition);
-    super::planning_peer::sync_after_save(&store, wave.repo()).await;
-    planning(&store, &project)
+    super::planning_sync::sync_after_save(&store, wave.repo()).await;
+    read_saved(&store, &project.id)
 }
 
-#[derive(Debug, serde::Serialize)]
-pub struct ProjectPlanning {
-    pub sync: crate::planning::PlanningSyncStatus,
-    #[serde(flatten)]
-    pub project: PmProject,
-}
-
-fn planning(store: &Store, project: &Project) -> OpsResult<ProjectPlanning> {
-    let sync = store
-        .sqlite
-        .project_planning_sync(&project.id)
-        .map_err(project_error)?;
+fn read_saved(
+    store: &Store,
+    id: &crate::durable::ProjectId,
+) -> OpsResult<(Project, PlanningSyncStatus)> {
     let project = store
         .sqlite
-        .planning_project(&project.id)
+        .project(id)
+        .map_err(project_error)?
+        .ok_or_else(|| project_error("Project is unavailable"))?;
+    let sync = store
+        .sqlite
+        .project_planning_sync(id)
         .map_err(project_error)?;
-    Ok(ProjectPlanning { project, sync })
+    Ok((project, sync))
 }
 
 pub(crate) fn load_workflow(

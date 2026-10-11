@@ -2,8 +2,8 @@
 use crate::child::ChildRef;
 use crate::durable::{Steer, WorkRef};
 use crate::harness::Harness;
-use crate::planning::ProjectPlan;
 use crate::store::SharedStore;
+use crate::work::project::Project;
 use crate::work::task::Task;
 use anyhow::{anyhow, Result};
 use std::io::BufRead;
@@ -42,7 +42,7 @@ pub(crate) async fn read_seed(
         .ok_or_else(|| anyhow!("Task Project is missing"))?;
     let message = format!(
         "{}\n\n{}",
-        task_seed(task, &project.plan, pr.as_ref(), wave, &steers),
+        task_seed(task, &project, pr.as_ref(), wave, &steers),
         crate::ops::task::task_workspace_context(task)?
     );
     Ok(TaskSeed {
@@ -122,7 +122,7 @@ impl TaskInput {
             });
             println!(
                 "task {}> attached; /status, /interrupt, /detach, or type a message/instruction",
-                task.plan.identifier
+                task.identifier
             );
             receiver
         });
@@ -167,11 +167,7 @@ async fn handle_attachment(
         let work = store
             .work_for_child(&ChildRef::Task(task.id.clone()))
             .await?;
-        println!(
-            "{}  {:?}",
-            task.plan.identifier,
-            store.work_status(&work).await?
-        );
+        println!("{}  {:?}", task.identifier, store.work_status(&work).await?);
         return Ok(());
     }
     if line == "/detach" {
@@ -192,7 +188,7 @@ async fn handle_attachment(
 
 pub(crate) fn task_seed(
     task: &Task,
-    project: &ProjectPlan,
+    project: &Project,
     pr: Option<&crate::work::task::TaskPr>,
     wave_name: &str,
     steers: &[Steer],

@@ -22,8 +22,6 @@ pub(crate) mod opencode_history;
 mod opencode_mapping;
 
 use crate::id::AgentSessionId;
-pub(crate) use claude_mapping::rate_limit_signal as claude_rate_limit_signal;
-pub(crate) use codex_mapping::rate_limit_signal as codex_rate_limit_signal;
 /// Name a codex rate-limit window by duration — shared with the subscription
 /// poller so stream and poll observations land on the same window key.
 pub(crate) use codex_mapping::window_name as codex_window_name;

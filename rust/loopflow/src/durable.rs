@@ -82,6 +82,16 @@ impl ProjectId {
 }
 
 impl TaskId {
+    /// Linear UUIDs are also the creation UUID used by locally authored Tasks.
+    pub(crate) fn from_issue(id: &str) -> Self {
+        let uuid = uuid::Uuid::parse_str(id).unwrap_or_else(|_| {
+            uuid::Uuid::new_v5(
+                &uuid::Uuid::NAMESPACE_URL,
+                format!("https://linear.app/issue/{id}").as_bytes(),
+            )
+        });
+        Self(format!("task_{}", uuid.simple()))
+    }
     pub(crate) fn from_raw(value: impl Into<String>) -> Self {
         Self(value.into())
     }
@@ -152,7 +162,24 @@ pub struct TaskExecutionRoute {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskExecutionSource {
     RecordedCheckout,
+    Admission,
     EffectiveDelegation,
+}
+
+/// Immutable first-start coordinator, carried with the Task's planning identity.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskAdmissionAuthority {
+    pub machine_id: MachineId,
+    pub repository_id: RepositoryId,
+}
+
+/// A request-bound reading from the coordinator. A positive owner never expires.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskAdmission {
+    pub request: String,
+    pub task_id: TaskId,
+    pub authority: TaskAdmissionAuthority,
+    pub owner: Option<MachineId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

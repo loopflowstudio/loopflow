@@ -61,13 +61,16 @@ async fn fresh_lookup_and_wave_list_share_planning_without_execution() {
     fixture.seed(now() + 3600).await;
     let mut provider_project = project();
     provider_project["name"] = "Summer work — customer requests".into();
+    let mut provider_issue = issue(provider_project);
+    provider_issue["data"]["issue"]["dueDate"] = "2026-10-15".into();
+    provider_issue["data"]["issue"]["assignee"] = json!({"id":"assignee-1"});
     let (url, _) = spawn(vec![
         team_response(),
-        json_response(StatusCode::OK, issue(provider_project.clone())),
-        json_response(StatusCode::OK, issue(provider_project.clone())),
+        json_response(StatusCode::OK, provider_issue.clone()),
+        json_response(StatusCode::OK, provider_issue.clone()),
         team_response(),
-        json_response(StatusCode::OK, issue(provider_project.clone())),
-        json_response(StatusCode::OK, issue(provider_project)),
+        json_response(StatusCode::OK, provider_issue.clone()),
+        json_response(StatusCode::OK, provider_issue),
     ])
     .await;
     PM_TEST_CONTEXT
@@ -88,24 +91,31 @@ async fn fresh_lookup_and_wave_list_share_planning_without_execution() {
                 record.item.branch_name.as_deref(),
                 Some("dev/fix-1-existing")
             );
-            let resolved =
-                crate::ops::task_pm::resolve_task_async(&repo, "issue-1", PmRefresh::Never)
-                    .await
-                    .unwrap();
-            assert_eq!(resolved.wave, "product");
-            assert_eq!(resolved.item, record.item);
+            let resolved = crate::ops::pm::acquire_task(&repo, "issue-1", PmRefresh::Never)
+                .await
+                .unwrap();
+            assert_eq!(resolved.due_date.as_deref(), Some("2026-10-15"));
+            assert_eq!(resolved.assignee.as_deref(), Some("assignee-1"));
+            assert_eq!(resolved.state.as_deref(), Some("unstarted"));
+            assert!(!resolved.completed);
+            assert!(resolved.completed_at.is_none());
+            assert_eq!(resolved.title, record.item.name);
+            assert_eq!(resolved.description, record.item.description);
+            assert_eq!(
+                resolved.linear_id.as_ref().unwrap().as_str(),
+                record.item.id
+            );
+            assert_eq!(
+                fixture.store.get_task(&resolved.id).await.unwrap(),
+                Some(resolved)
+            );
             for task in fixture.store.list_tasks(None).await.unwrap() {
                 assert!(task.worktree.is_none());
                 assert!(fixture.store.task_prs(&task.id).await.unwrap().is_empty());
                 assert!(!fixture.store.task_started(&task.id).await.unwrap());
             }
             assert_eq!(fixture.store.list_projects(None).await.unwrap().len(), 1);
-            assert!(fixture
-                .store
-                .pm_snapshot(wave.id())
-                .await
-                .unwrap()
-                .is_none());
+            assert_eq!(fixture.wave_refresh_at(&wave), None);
 
             // A list carries membership, not another copy of the Task's title.
             let mut snapshot = snapshot(wave.id(), &record);
@@ -137,13 +147,12 @@ async fn fresh_lookup_and_wave_list_share_planning_without_execution() {
             assert_eq!(
                 fixture
                     .store
-                    .pm_snapshot(wave.id())
+                    .get_task_by_issue("FIX-1")
                     .await
                     .unwrap()
                     .unwrap()
-                    .snapshot
-                    .items[0],
-                edited.item
+                    .title,
+                edited.item.name
             );
             snapshot.snapshot.items.clear();
             snapshot.synced_at += 2;
@@ -157,15 +166,64 @@ async fn fresh_lookup_and_wave_list_share_planning_without_execution() {
             assert_eq!(
                 fixture
                     .store
-                    .pm_snapshot(wave.id())
+                    .list_tasks(Some(wave.id()))
                     .await
                     .unwrap()
-                    .unwrap()
-                    .snapshot
-                    .items
                     .len(),
                 1
             );
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn acquisition_returns_saved_task_fields_without_replacing_pending_edits() {
+    let _lock = crate::journal::test_env_lock();
+    let _restore = PlanningEnvironment::isolate();
+    let fixture = Fixture::new().await;
+    std::env::set_var("LF_HOME", fixture.directory.path());
+    let (repo, _) = fixture.planning_repo().await;
+    fixture.seed(now() + 3600).await;
+    let (url, _) = spawn(vec![
+        team_response(),
+        json_response(StatusCode::OK, issue(project())),
+        json_response(StatusCode::OK, issue(project())),
+    ])
+    .await;
+    PM_TEST_CONTEXT
+        .scope(fixture.context(&url), async {
+            let task = super::acquire_task(&repo, "FIX-1", PmRefresh::Auto)
+                .await
+                .unwrap();
+            let saved = fixture
+                .store
+                .sqlite
+                .edit_task(
+                    &task.id,
+                    task.revision,
+                    &crate::pm::PmItemUpdate {
+                        name: Some("Saved during disconnection".into()),
+                        assignee: Some(Some("pending-assignee".into())),
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+            let pending = fixture.store.sqlite.pending_task_changes(&task.id).unwrap();
+            let acquired = super::acquire_task(&repo, "issue-1", PmRefresh::Never)
+                .await
+                .unwrap();
+            assert_eq!(acquired, saved);
+            assert_eq!(acquired.assignee.as_deref(), Some("pending-assignee"));
+            assert_eq!(acquired.title, "Saved during disconnection");
+            assert_eq!(
+                fixture.store.sqlite.pending_task_changes(&task.id).unwrap(),
+                pending
+            );
+            assert_eq!(acquired.worktree, task.worktree);
+            assert_eq!(acquired.branch, task.branch);
+            assert_eq!(acquired.parent_pr_id, task.parent_pr_id);
+            assert!(fixture.store.task_prs(&task.id).await.unwrap().is_empty());
+            assert!(!fixture.store.task_started(&task.id).await.unwrap());
         })
         .await;
 }
@@ -228,7 +286,7 @@ async fn projectless_task_is_inspectable_but_cannot_resolve_managed_ownership() 
             assert!(record.project.is_none());
             assert!(record.item.project_id.is_none());
             assert!(record.item.project.is_none());
-            let error = crate::ops::task_pm::resolve_task_async(&repo, "FIX-1", PmRefresh::Never)
+            let error = crate::ops::pm::acquire_task(&repo, "FIX-1", PmRefresh::Never)
                 .await
                 .unwrap_err();
             assert!(error.to_string().contains("has no Project"), "{error}");
@@ -437,15 +495,15 @@ async fn missing_detail_invalidates_cached_admission_without_claiming_deletion()
             assert!(read_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
                 .await
                 .is_err());
-            assert!(fixture
-                .store
-                .pm_snapshot(wave.id())
-                .await
-                .unwrap()
-                .unwrap()
-                .snapshot
-                .items
-                .is_empty());
+            assert_ne!(
+                fixture
+                    .store
+                    .pm_task_observation(&repo.to_string_lossy(), "linear", "FIX-1")
+                    .await
+                    .unwrap()
+                    .state,
+                crate::store::PlanningState::Available
+            );
             assert!(fixture
                 .store
                 .deleted_task_issues(wave.id())
@@ -501,7 +559,10 @@ async fn automatic_refresh_reports_failure_with_retained_observation_age() {
             let read = inspect_task_planning_async(&repo, "FIX-1", PmRefresh::Auto)
                 .await
                 .unwrap();
-            assert!(read.is_stale());
+            assert_eq!(
+                read.observation.state,
+                crate::store::PlanningState::Unavailable
+            );
             assert!(read.refresh_error.unwrap().contains("provider unavailable"));
             assert_eq!(read.observation.record.as_ref(), Some(&record));
             assert!(read_task_planning_async(&repo, "FIX-1", PmRefresh::Auto)
@@ -570,13 +631,12 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
             assert_eq!(
                 fixture
                     .store
-                    .pm_snapshot(wave.id())
+                    .get_task_by_issue("FIX-1")
                     .await
                     .unwrap()
                     .unwrap()
-                    .snapshot
-                    .items[0],
-                confirmed.item
+                    .title,
+                confirmed.item.name
             );
             let mut conflicting = confirmed.clone();
             conflicting.item.name = "Contradiction at the same revision".into();
@@ -606,15 +666,15 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
             assert!(read_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
                 .await
                 .is_err());
-            assert!(fixture
-                .store
-                .pm_snapshot(wave.id())
-                .await
-                .unwrap()
-                .unwrap()
-                .snapshot
-                .items
-                .is_empty());
+            assert_ne!(
+                fixture
+                    .store
+                    .pm_task_observation(&repo.to_string_lossy(), "linear", "FIX-1")
+                    .await
+                    .unwrap()
+                    .state,
+                crate::store::PlanningState::Available
+            );
             confirmed.item.revision = Some("2026-09-29T12:00:00.125Z".into());
             confirmed.item.state = Some("completed".into());
             confirmed.item.completed = true;
@@ -672,15 +732,15 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
             assert!(read_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
                 .await
                 .is_err());
-            assert!(fixture
-                .store
-                .pm_snapshot(wave.id())
-                .await
-                .unwrap()
-                .unwrap()
-                .snapshot
-                .items
-                .is_empty());
+            assert_ne!(
+                fixture
+                    .store
+                    .pm_task_observation(&repo.to_string_lossy(), "linear", "FIX-1")
+                    .await
+                    .unwrap()
+                    .state,
+                crate::store::PlanningState::Available
+            );
             // A removal received before acquisition also fences future list/detail writes.
             fixture
                 .store
@@ -886,13 +946,19 @@ async fn project_revisions_order_shared_facts_and_unordered_membership_stays_unr
             assert_eq!(stored.project, newer.project);
             assert_eq!(stored.item.project.as_deref(), Some("renamed-chapter"));
             assert_eq!(stored.observed_at, list.synced_at);
-            let snapshot = fixture.store.pm_snapshot(wave.id()).await.unwrap().unwrap();
-            assert_eq!(
-                snapshot.snapshot.projects[0],
-                newer.project.clone().unwrap()
-            );
-            assert_eq!(snapshot.snapshot.items.len(), 1);
-            assert_eq!(snapshot.snapshot.items[0], stored.item);
+            let saved = fixture
+                .store
+                .get_task_by_issue("FIX-1")
+                .await
+                .unwrap()
+                .unwrap();
+            let saved_project = fixture
+                .store
+                .get_project(&saved.project_id)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(saved_project.name, "Renamed chapter");
             let mut omitted = list.clone();
             omitted.snapshot.projects.clear();
             omitted.snapshot.items.clear();
@@ -904,8 +970,13 @@ async fn project_revisions_order_shared_facts_and_unordered_membership_stays_unr
                 .to_string()
                 .contains("omitted"));
             assert_eq!(
-                fixture.store.pm_snapshot(wave.id()).await.unwrap().unwrap(),
-                snapshot
+                fixture
+                    .store
+                    .get_task_by_issue("FIX-1")
+                    .await
+                    .unwrap()
+                    .unwrap(),
+                saved
             );
             for revision in [
                 Some("2026-09-29T11:00:00Z"),
@@ -950,15 +1021,15 @@ async fn project_revisions_order_shared_facts_and_unordered_membership_stays_unr
             assert!(read_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
                 .await
                 .is_err());
-            assert!(fixture
-                .store
-                .pm_snapshot(wave.id())
-                .await
-                .unwrap()
-                .unwrap()
-                .snapshot
-                .projects
-                .is_empty());
+            assert_ne!(
+                fixture
+                    .store
+                    .pm_task_observation(&repo.to_string_lossy(), "linear", "FIX-1")
+                    .await
+                    .unwrap()
+                    .state,
+                crate::store::PlanningState::Available
+            );
             fixture
                 .store
                 .confirm_pm_project_archival(
@@ -1058,7 +1129,7 @@ async fn cold_detail_resolves_configured_wave_before_projecting() {
                     assert!(result.refresh_error.is_none(), "{:?}", result.refresh_error);
                     assert_eq!(current.id, original.id);
                     assert_eq!(current.wave_id, original.wave_id);
-                    assert_eq!(current.plan.name, "Refreshed plan");
+                    assert_eq!(current.name, "Refreshed plan");
                 } else {
                     assert!(result.refresh_error.is_some());
                     assert_eq!(current, original);
@@ -1067,12 +1138,7 @@ async fn cold_detail_resolves_configured_wave_before_projecting() {
                         vec![original]
                     );
                 }
-                assert!(fixture
-                    .store
-                    .pm_snapshot(wave.id())
-                    .await
-                    .unwrap()
-                    .is_none());
+                assert_eq!(fixture.wave_refresh_at(&wave), None);
             })
             .await;
     }

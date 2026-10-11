@@ -1,5 +1,7 @@
 //! `lf task comment ISSUE` against an isolated Linear GraphQL fixture.
 
+use crate::work::task::comment::TaskCommentAuthor;
+
 use clap::Parser;
 use std::os::unix::fs::PermissionsExt;
 use std::sync::Arc;
@@ -8,7 +10,7 @@ use axum::{extract::State, routing::post, Json, Router};
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
 
-use super::{task_comment_async, PmTestContext, TaskCommentAuthor, PM_TEST_CONTEXT};
+use super::{task_comment_async, PmTestContext, PM_TEST_CONTEXT};
 use crate::store::{open_ephemeral_store, CredentialType, ProviderToken, StorageConfig};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -323,25 +325,18 @@ async fn task_comments_read_and_publish_without_starting_work() {
                 Some("2026-09-27T00:00:01Z"), Some("Keep inbound independent"),
                 json!({"id":"person-1","displayName":"Maya","name":null})));
             // Exercise the ordinary runner, including the native branch and
-            // Claude's batch subprocess branch. The stub never consumes stdin.
+            // Claude's stream-input harness.
             let _homes = crate::test_ambient::EnvGuard::clear(&["HOME", "LF_HOME", "LF_BIN", "PATH", "CODEX_HOME", "CLAUDE_CONFIG_DIR"]);
             let home = directory.path().join("home");
             std::fs::create_dir_all(&home).unwrap();
             std::env::set_var("HOME", &home);
-            std::env::set_var("LF_HOME", &home);
+            // Foreground sync opens the Machine store independently of TaskInput.
+            std::env::set_var("LF_HOME", directory.path());
             let bin = directory.path().join("bin");
             std::fs::create_dir(&bin).unwrap();
             std::env::set_var("PATH", format!("{}:/usr/bin:/bin", bin.display()));
             std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
-            let script = r#"#!/bin/sh
-: > "$FIXTURE_STARTED"
-i=0
-while [ ! -e "$FIXTURE_STOP" ] && [ "$i" -lt 100 ]; do
-    /bin/sleep 0.1
-    i=$((i+1))
-done
-exit 0
-"#;
+            let script = include_str!("../../../tests/support/holding_provider.py");
             for name in ["claude", "codex"] {
                 let executable = bin.join(name);
                 std::fs::write(&executable, script).unwrap();
@@ -389,7 +384,9 @@ exit 0
                         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
                     }
                     let saved = task_comment_async(&repo, None, "FIX-7", Some(&marker), true).await.unwrap();
-                    assert_eq!(saved.pending_sync.len(), 1);
+                    // The foreground save may deliver before returning its thread.
+                    assert!(saved.comments.iter().any(|comment|
+                        comment.id != incoming && comment.body.lines().next() == Some(marker.as_str())));
                     loop {
                         if store.sqlite.pending_task_comments(&task.id).unwrap().is_empty()
                             && store.sqlite.task_comments(&task.id).unwrap().comments.iter()
@@ -402,9 +399,12 @@ exit 0
                 assert_eq!(result.exit_code, 0);
                 assert!(running_check.unwrap(), "{marker} exited before synchronization");
             }
+            // Keep this create pending deliberately; connected saves may deliver immediately.
+            provider.lock().await.thread = Thread::Failing;
             let saved = task_comment_async(&repo, None, "FIX-7", Some("Local value survives"), true)
                 .await.unwrap();
             let collision = saved.pending_sync[0].clone();
+            provider.lock().await.thread = Thread::Empty;
             provider.lock().await.posted.push(comment(&collision,
                 Some("2026-09-27T00:00:03Z"), Some("Provider value survives"),
                 json!({"id":"person-1","displayName":"Maya","name":null})));
@@ -444,8 +444,8 @@ exit 0
             let delivered = store.task_steers(&task.id).await.unwrap();
             assert_eq!(delivered.iter().filter(|steer| steer.text.contains("incoming-after-reconnect")).count(), 1);
             assert!(matches!(store.get_task(&task.id).await.unwrap().unwrap().pm_writeback,
-                crate::work::task::PmWritebackState::Pending {
-                    operation: crate::work::task::PmWritebackOperation::CompleteTask, ..
+                crate::work::task::LinearWritebackState::Pending {
+                    operation: crate::work::task::LinearWritebackOperation::CompleteTask, ..
                 }));
             assert!(!store.task_started(&task.id).await.unwrap());
 

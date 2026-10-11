@@ -1614,7 +1614,7 @@ private struct SessionPaneView: View {
         switch state {
         case .unknown: return TerminalPalette.divider
         case .active: return TerminalPalette.stateDot(.running)
-        case .closed, .interrupted: return TerminalPalette.stateDot(.stopped)
+        case .closed: return TerminalPalette.stateDot(.stopped)
         }
     }
 

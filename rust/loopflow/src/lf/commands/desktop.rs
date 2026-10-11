@@ -518,9 +518,11 @@ fn opening_url(
                 );
                 Some((owner, repository))
             }
-            (ContextFact::Unavailable { reason }, _) => {
+            (ContextFact::Unavailable { reason }, _) if session.is_some() || diff => {
                 bail!("Task execution location unavailable: {reason}. No app was opened.");
             }
+            // Opening the Work page needs no execution admission. Its unavailable
+            // checkout remains visible; Session and Changes requests still need it.
             _ => None,
         }
     } else {

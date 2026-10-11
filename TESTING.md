@@ -609,11 +609,32 @@ accounts or installed data. Ordinary retry, usage, binding and review behavior
 belong in `session_lifecycle_tests`; Chapter convergence belongs in
 `ops::chapter::tests`, including interrupted rotation and second-Machine sync.
 
-`planning_reconnect_tests` runs the public work-watch and Flow reconnect fixtures
-on Linux, using disposable TLS trust and synthetic Linear state. They exercise
-repository/Wave scope without Task selection, selection changes, stdin close/reopen,
-lost replies and independent propagation during rejected field delivery. The
-portable `work_watch` offline-completion test requires a foreground delivery error
+`planning_reconnect_tests` runs public work-watch and Flow reconnect against
+synthetic Linear on Linux, with disposable TLS trust. It covers lost replies,
+independent acquisition during failed delivery, local buffering and retained execution.
+Linear and Git planning run separately; no provider receipt crosses Git.
+`planning_setup_tests` proves configuration selection and personal-key recovery.
+`planning_foreground_tests` exercises disposable custom refs through public CLI and
+Session connections, including offline independent edits, comments, completion and
+unchanged execution. `planning_write` covers atomic local journal capture and import
+through the same typed writer. `task_remote_tests` exercises actual target CLI dispatch
+with simulated SSH/providers; it does not establish configured remote installation.
+
+`tests/e2e/codex_connect.py --codex "$(command -v codex)" --lf target/debug/lf
+--planning-peers --output <dir>` composes a real Codex engine with a synthetic
+Responses endpoint and disposable Git planning. It launches with `--task`, then
+imports edits, comments and completion for that same Task during live connect and
+explicit resume, including after killing the fixture's driver. Its historical
+Workflow is seeded; its Session, drivers and checkout are created by public commands.
+Exchange preserves Workflow/placement, live driver, Session/native identity and
+append-only history without starting an engine or provider turn. After imported
+completion, the current client explicitly starts and completes another turn on the
+same engine. The controlled protocol client is headless, not a rendered TUI or
+running Workflow-edge proof. Prepare the script's uv dependencies before
+running it through `scripts/test_network.py`.
+
+Only attempted effects acknowledge; equal-desired provider readback can instead
+retire an unattempted intention without another write. The portable `work_watch` offline-completion test requires a foreground delivery error
 with no Task selected; local frame propagation alone cannot establish sync lifetime.
 Run these through the same external-network denial wrapper as other CLI fixtures.
 
@@ -836,6 +857,12 @@ fix, verify the installation harness uses the same toolchain policy; a host lint
 pass does not verify the container build. Use `--image` to reproduce an older
 toolchain explicitly.
 
+Locally available images are reused, including between the two CI proof steps;
+run `docker pull public.ecr.aws/docker/library/rust:trixie` to refresh the default
+on a development machine. Cold pulls retry registry throttling with bounded
+backoff within a five-minute download budget. Exhausted acquisition reports an
+infrastructure failure before any installation tests run.
+
 CLI owner-tree changes must include `cargo test -p loopflow --lib flow::graph::tests`
 to verify builtin operation labels, plus the affected proofs above. The regular
 Rust suite skips those installation proofs; a skipped case is not verification.
@@ -933,7 +960,9 @@ cargo test -p loopflow --test planning_reconnect_tests
 Requires `uv`, Python and OpenSSL. The fixture uses an isolated Machine/store and
 local HTTPS proxy with synthetic Linear state and credentials. Its CA is trusted
 only by CLI children through `SSL_CERT_FILE`; macOS platform TLS ignores that
-setting, so reconnect is Linux-only. `task_abandonment` and `local_planning` cover
+setting, so reconnect executes only on Linux. The Rust harness still compiles on
+macOS; its tests are explicitly ignored there, not reported as behavioral passes.
+`task_abandonment` and `local_planning` cover
 portable local decisions and deletion, retry identity and retained execution in
 both connection modes without provider access. No installation or live provider is used.
 
@@ -1090,7 +1119,7 @@ cargo nextest run -p loopflow --test task_github_cache_tests --no-fail-fast
 
 When changing Linear response shapes, run the client tests and PM-operation
 consumers together, including `planning_reconnect_tests` on Linux (a disposable
-container works on macOS). That suite is compiled out on macOS, so a local Rust
+container works on macOS). That suite is explicitly ignored on macOS, so a local Rust
 pass there does not cover its HTTPS fixtures. Keep nullable requested fields,
 including `dueDate`, present in fixture responses. Team migration also reads issue
 comments; its fixtures must include the requested pagination metadata.
@@ -1229,3 +1258,17 @@ live Session without shell-level scrubbing:
 ```bash
 cargo test -p loopflow --test session_cli_tests session_names_are_shared_and_human_names_win
 ```
+
+Headless provider transport changes also run the research-artifact test
+`two_task_research_runs_leave_distinct_uncommitted_artifacts_for_the_next_prompt`
+and Linux `planning_reconnect_tests`. Their stand-ins must consume and echo the
+stream-input request before reporting success; sleeping and emitting an uncorrelated
+print-mode result can race the seed write and fail with a broken pipe.
+
+Headless shutdown checks run on Linux as well as macOS: fast provider exit must
+settle its owned lifeline watchdog without mistaking it for foreign work. Include
+`launch_nonzero_exit`, bare/default launch, mixed-provider Flow and headless resume;
+Session interactivity must not select an individual launch’s process-group policy.
+Changes to AgentProcess launch-mode recording also run the complete
+`session_record::runtime::tests` module: native refusal and headless cleanup
+fixtures must declare opposite launch modes, independent of Session defaults.

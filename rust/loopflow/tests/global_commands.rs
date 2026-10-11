@@ -669,7 +669,7 @@ fn repo_selection_carries_scoped_task_prefix_through_reads_and_writes() {
             )
             .unwrap();
         store
-            .create_task(&loopflow::planning::NewTask {
+            .create_task(&loopflow::work::task::NewTask {
                 due_date: None,
                 id: loopflow::durable::TaskId::parse(id).unwrap(),
                 project_id: loopflow::durable::ProjectId::parse(&project).unwrap(),
@@ -678,16 +678,24 @@ fn repo_selection_carries_scoped_task_prefix_through_reads_and_writes() {
             })
             .unwrap();
     }
-    let unscoped = command(
-        home.path(),
-        selected.path(),
-        &["task", "status", "abcd", "--json"],
-    )
-    .output()
+    // Checkout inference and explicit repository selection resolve the same Task.
+    let inferred: serde_json::Value = serde_json::from_str(&success(
+        command(
+            home.path(),
+            selected.path(),
+            &["task", "status", "abcd", "--json"],
+        )
+        .output()
+        .unwrap(),
+    ))
     .unwrap();
-    assert!(!unscoped.status.success());
-    assert!(String::from_utf8_lossy(&unscoped.stderr).contains("multiple stable Tasks"));
+    assert_eq!(inferred["execution"]["task_id"], first);
     let store = SqliteStore::new(&home.path().join(".lf/loopflow.db")).unwrap();
+    assert!(store
+        .task_by_issue("abcd")
+        .unwrap_err()
+        .to_string()
+        .contains("multiple stable Tasks"));
     let repository = store
         .ensure_repository(selected.path().canonicalize().unwrap().to_str().unwrap())
         .unwrap();
@@ -738,11 +746,11 @@ fn repo_selection_carries_scoped_task_prefix_through_reads_and_writes() {
         assert!(!error.contains("multiple stable Tasks"), "{error}");
     }
     assert_eq!(
-        store.task_by_issue(first).unwrap().unwrap().plan.title,
+        store.task_by_issue(first).unwrap().unwrap().title,
         "Changed selected"
     );
     let untouched = store.task_by_issue(second).unwrap().unwrap();
-    assert_eq!(untouched.plan.title, "Other");
+    assert_eq!(untouched.title, "Other");
     assert!(untouched.worktree.is_none());
     success(
         command(
@@ -1114,15 +1122,7 @@ fn desktop_open_delivers_exact_task_without_preparing_its_execution() {
         command(
             home.path(),
             repo.path(),
-            &[
-                "--task",
-                id,
-                "desktop",
-                "open",
-                "--diff",
-                "--explain",
-                "--json",
-            ],
+            &["--task", id, "desktop", "open", "--explain", "--json"],
         )
         .env("PATH", &path)
         .output()
@@ -1134,7 +1134,7 @@ fn desktop_open_delivers_exact_task_without_preparing_its_execution() {
         command(
             home.path(),
             repo.path(),
-            &["--task", id, "desktop", "open", "--diff", "--json"],
+            &["--task", id, "desktop", "open", "--json"],
         )
         .env("PATH", path)
         .output()
@@ -1149,9 +1149,7 @@ fn desktop_open_delivers_exact_task_without_preparing_its_execution() {
     assert_eq!(preview["url"], opening.url);
     let url = reqwest::Url::parse(&opening.url).unwrap();
     assert_eq!(url.path(), format!("/{id}"));
-    assert!(url
-        .query_pairs()
-        .any(|(key, value)| key == "diff" && value == "true"));
+    assert!(!url.query_pairs().any(|(key, _)| key == "diff"));
     assert!(fs::read_to_string(received)
         .unwrap()
         .ends_with(&format!("{}\n", opening.url)));
@@ -1619,13 +1617,9 @@ fn session_connect_explain_preserves_missing_and_stale_evidence() {
     assert!(stale["actions"][0]["unavailable_reason"].is_null());
     fs::write(&receipt, "unreadable receipt").unwrap();
     let invalid = read(&session.id);
-    assert!(invalid["state"].is_null());
-    assert!(invalid["actions"].as_array().unwrap().is_empty());
-    assert!(invalid["unavailable"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|v| v.as_str().unwrap().contains("cannot read provider clients")));
+    // Native receipt corruption does not replace recorded Process evidence.
+    assert_eq!(invalid["state"], "unknown");
+    assert_eq!(invalid["actions"], stale["actions"]);
     assert_eq!(fs::read_to_string(&receipt).unwrap(), "unreadable receipt");
     db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
     assert_eq!(before, fs::read(db_path).unwrap());
@@ -1658,6 +1652,12 @@ fn session_connect_explain_observes_takeover_without_signaling_owned_client() {
         let db_path = home.path().join(".lf/loopflow.db");
         let db = rusqlite::Connection::open(&db_path).unwrap();
         connection_history(&db, &session);
+        db.execute("INSERT INTO processes(id,kind,trace_id,agent_session_id,pid,os_started_at,started_at) VALUES('00000000000040008000000000000001','agent','fixture',?1,?2,?3,?3)", rusqlite::params![session.id,child.id(),time::OffsetDateTime::now_utc().unix_timestamp()]).unwrap();
+        db.execute(
+            "UPDATE agent_sessions SET agent_process_id='00000000000040008000000000000001' WHERE id=?1",
+            [&session.id],
+        )
+        .unwrap();
         db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
         let before = fs::read(&db_path).unwrap();
         for (flag, blocked) in [
@@ -1671,7 +1671,7 @@ fn session_connect_explain_observes_takeover_without_signaling_owned_client() {
                 command(home.path(), repo.path(), &args).output().unwrap(),
             ))
             .unwrap();
-            assert_eq!(report["state"], "active");
+            assert_eq!(report["state"], "active", "{report}");
             assert_eq!(
                 !report["impediments"].as_array().unwrap().is_empty(),
                 blocked,
@@ -1705,15 +1705,24 @@ fn session_connect_explain_never_probes_or_claims_a_live_endpoint() {
     let endpoint = socket_dir.path().join("live.sock");
     let listener = UnixListener::bind(&endpoint).unwrap();
     listener.set_nonblocking(true).unwrap();
+    let mut child = Command::new("cat")
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
     // Owned endpoint with a retained driver: no provider or account is started.
     db.execute(
-        "INSERT INTO processes(id,trace_id,started_at) VALUES('connection-driver','fixture',1)",
+        "INSERT INTO processes(id,trace_id,started_at) VALUES('00000000000040008000000000000003','fixture',1)",
         [],
     )
     .unwrap();
-    db.execute("INSERT INTO processes(id,kind,trace_id,parent_lf_process_id,agent_session_id,attached_lf_process_id,attachment_token,endpoint,started_at) VALUES('connection-agent','agent','fixture','connection-driver',?1,'connection-driver','claim',?2,1)",
+    db.execute("INSERT INTO processes(id,kind,trace_id,parent_lf_process_id,agent_session_id,attached_lf_process_id,attachment_token,endpoint,started_at) VALUES('00000000000040008000000000000002','agent','fixture','00000000000040008000000000000003',?1,'00000000000040008000000000000003','claim',?2,1)",
         rusqlite::params![session.id, endpoint.to_str().unwrap()]).unwrap();
-    db.execute("UPDATE agent_sessions SET provider='codex',agent_process_id='connection-agent',provider_thread='native-proof' WHERE id=?1", [&session.id]).unwrap();
+    db.execute("UPDATE agent_sessions SET provider='codex',agent_process_id='00000000000040008000000000000002',provider_thread='native-proof' WHERE id=?1", [&session.id]).unwrap();
+    db.execute(
+        "UPDATE processes SET pid=?1,os_started_at=?2 WHERE id='00000000000040008000000000000002'",
+        rusqlite::params![child.id(), time::OffsetDateTime::now_utc().unix_timestamp()],
+    )
+    .unwrap();
     db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
     let before = fs::read(&db_path).unwrap();
     let report: serde_json::Value = serde_json::from_str(&success(
@@ -1741,6 +1750,8 @@ fn session_connect_explain_never_probes_or_claims_a_live_endpoint() {
     assert_eq!(before, fs::read(db_path).unwrap());
     assert!(!home.path().join(".lf/runs").exists());
     assert!(!home.path().join(".lf/human-sessions").exists());
+    drop(child.stdin.take());
+    child.wait().unwrap();
 }
 
 #[test]
@@ -1802,6 +1813,7 @@ fn repository_identity_binding_is_explicit_and_does_not_select_planning() {
         .unwrap(),
     ))
     .unwrap();
+    let planning_before = serde_json::to_value(store.peer_planning_status(&repo).unwrap()).unwrap();
     let other = loopflow::durable::RepositoryId::new();
     let rebound = command(
         target_home.path(),
@@ -1850,7 +1862,10 @@ fn repository_identity_binding_is_explicit_and_does_not_select_planning() {
     );
     assert!(explained.contains(task["id"].as_str().unwrap()));
     assert!(explained.contains(through_prior.id.as_str()));
-    assert!(store.peer_planning_status(&repo).unwrap().is_empty());
+    assert_eq!(
+        serde_json::to_value(store.peer_planning_status(&repo).unwrap()).unwrap(),
+        planning_before
+    );
 }
 
 #[test]
@@ -2524,7 +2539,7 @@ fn task_planning_explain_refile_resolves_destination_and_retains_recorded_work()
     let source = project("source");
     let destination = project("destination");
     let task = store
-        .create_task(&loopflow::planning::NewTask {
+        .create_task(&loopflow::work::task::NewTask {
             due_date: None,
             id: loopflow::durable::TaskId::new(),
             project_id: loopflow::durable::ProjectId::parse(&source).unwrap(),
@@ -2593,7 +2608,7 @@ fn task_planning_explain_refile_resolves_destination_and_retains_recorded_work()
     );
     // Execution addresses the same durable destination, not a new Wave named after its ID.
     let second = store
-        .create_task(&loopflow::planning::NewTask {
+        .create_task(&loopflow::work::task::NewTask {
             due_date: None,
             id: loopflow::durable::TaskId::new(),
             project_id: task.project_id.clone(),
@@ -2668,9 +2683,7 @@ fn task_planning_explain_refile_resolves_destination_and_retains_recorded_work()
     let before = fs::read(&path).unwrap();
     let remote = read("destination");
     assert!(
-        remote["impediments"]
-            .to_string()
-            .contains("run this command with"),
+        remote["impediments"].to_string().contains("recorded work"),
         "{remote}"
     );
     db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
@@ -3028,11 +3041,13 @@ fn task_checkout_explain_proposes_unallocated_work_and_preserves_missing_storage
         .unwrap()
         .worktree
         .is_none());
-    // Explicitly selected Git planning still cannot authorize first start.
-    db.execute("INSERT INTO planning_destinations(repo,id,endpoint,reference) VALUES(?1,'fixture','file:///unavailable','refs/loopflow/planning/users/fixture')",
-        [repo.path().to_str().unwrap()]).unwrap();
-    db.execute("INSERT INTO planning_members(kind,object_id,repo,destination) VALUES('task',?1,?2,'fixture')",
-        rusqlite::params![id,repo.path().to_str().unwrap()]).unwrap();
+    // A historical shared Task has no trustworthy creating-Machine authority.
+    // Git membership alone still cannot authorize its first start.
+    db.execute(
+        "UPDATE tasks SET admission_authority=NULL WHERE id=?1",
+        [id],
+    )
+    .unwrap();
     db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
     let before = fs::read(&path).unwrap();
     let report: serde_json::Value = serde_json::from_str(&success(

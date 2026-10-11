@@ -1,11 +1,12 @@
 //! Task fields and their delivery evidence commit together, before provider I/O.
 
-use rusqlite::{params, TransactionBehavior};
-use serde_json::Value;
+use super::planning_write::{self, PlanningEdit as Edit};
+use crate::planning_exchange::PlanningKind;
+use rusqlite::TransactionBehavior;
 
 use crate::durable::{ProjectId, TaskId};
-use crate::planning::PlanningChange;
 use crate::pm::PmItemUpdate;
+use crate::store::planning_sync::PlanningChange;
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
 use crate::work::task::Task;
@@ -19,9 +20,22 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         super::children::task_on(&tx, id)?.ok_or(StoreError::NotFound)?;
-        let changed = tx.execute("UPDATE tasks SET planning_deleted_at=?2,planning_revision=planning_revision+1,updated_at=?2
-            WHERE id=?1 AND planning_deleted_at IS NULL", params![id.as_str(), now_unix()])?;
-        if changed == 1 {
+        let deleted: bool = tx.query_row(
+            "SELECT planning_deleted_at IS NOT NULL FROM tasks WHERE id=?1",
+            [id.as_str()],
+            |r| r.get(0),
+        )?;
+        let changed = if deleted {
+            false
+        } else {
+            planning_write::local(
+                &tx,
+                PlanningKind::Task,
+                id.as_str(),
+                &[Edit::TaskDeletedAt(Some(now_unix()))],
+            )?
+        };
+        if changed {
             PlanningChanges::Task(id).record(
                 &tx,
                 "deleted",
@@ -51,16 +65,7 @@ impl SqliteStore {
         if current.project_id == *destination {
             return Ok(());
         }
-        tx.execute(
-            "UPDATE tasks SET project_id=?2,planning_revision=planning_revision+1,updated_at=?3 WHERE id=?1",
-            params![id.as_str(), destination.as_str(), now_unix()],
-        )?;
-        PlanningChanges::Task(id).record(
-            &tx,
-            "project_id",
-            serde_json::json!(current.project_id),
-            serde_json::json!(destination),
-        )?;
+        PlanningChanges::Task(id).save(&tx, &[Edit::TaskProject(destination.to_string())])?;
         tx.commit()?;
         Ok(())
     }
@@ -101,44 +106,17 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let task = validate_edit(&tx, id, expected_revision, patch)?;
-        let current = super::plan_read::task_in(&tx, id)?
-            .record
-            .ok_or(StoreError::NotFound)?
-            .item;
-        let mut changed = false;
-        for (field, previous, value) in [
-            (
-                "name",
-                Value::String(current.name),
-                patch.name.as_ref().map(|v| Value::String(v.clone())),
-            ),
-            (
-                "description",
-                Value::String(current.description),
-                patch.description.as_ref().map(|v| Value::String(v.clone())),
-            ),
-            (
-                "assignee",
-                serde_json::to_value(current.assignee)?,
-                patch
-                    .assignee
-                    .as_ref()
-                    .map(serde_json::to_value)
-                    .transpose()?,
-            ),
-        ] {
-            if let Some(value) = value {
-                changed |= PlanningChanges::Task(id).record(&tx, field, previous, value)?;
-            }
+        let mut edits = Vec::new();
+        if let Some(value) = &patch.name {
+            edits.push(Edit::TaskTitle(Some(value.clone())));
         }
-        if changed {
-            tx.execute(
-                "UPDATE tasks SET issue_title=COALESCE(?2,issue_title),issue_description=COALESCE(?3,issue_description),
-                 planning_assignee=CASE WHEN ?4 THEN ?5 ELSE planning_assignee END,
-                 planning_revision=planning_revision+1,updated_at=?6 WHERE id=?1",
-                params![id.as_str(),patch.name,patch.description,patch.assignee.is_some(),patch.assignee.as_ref().and_then(|v|v.as_deref()),now_unix()],
-            )?;
+        if let Some(value) = &patch.description {
+            edits.push(Edit::TaskDescription(Some(value.clone())));
         }
+        if let Some(value) = &patch.assignee {
+            edits.push(Edit::TaskAssignee(value.clone()));
+        }
+        PlanningChanges::Task(id).save(&tx, &edits)?;
         if let Some(rank) = patch.rank {
             super::planning_order::reorder_in(&tx, &task.project_id, id, rank)?;
         }
@@ -156,7 +134,7 @@ fn validate_edit(
 ) -> StoreResult<Task> {
     let task = super::children::task_on(conn, id)?.ok_or(StoreError::NotFound)?;
     super::children::require_task_not_deleted(conn, &task)?;
-    if task.plan.revision != expected_revision {
+    if task.revision != expected_revision {
         return Err(StoreError::InvalidAuthority(
             "Task changed; read its current revision before editing".into(),
         ));

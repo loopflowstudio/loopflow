@@ -153,12 +153,7 @@ pub fn inspect(
             .map_err(|error| anyhow!("Capture final answer unavailable: {error}"))?;
         return match answer {
             Some(answer) => {
-                if !answer.exact {
-                    eprintln!(
-                        "warning: this capture has no final-answer receipt; showing all streamed prose from its last completed provider turn"
-                    );
-                }
-                println!("{}", answer.text);
+                println!("{answer}");
                 Ok(())
             }
             None if snapshot.recorded_outcome.is_none() => Err(anyhow!(

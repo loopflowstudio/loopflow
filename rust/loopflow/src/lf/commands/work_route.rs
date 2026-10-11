@@ -270,8 +270,8 @@ mod tests {
     use super::{launch_task, repository_path, resolve, resolve_task};
     use crate::durable::{RepositoryId, TaskId};
     use crate::lf::Cli;
-    use crate::planning::NewTask;
     use crate::store::sqlite::SqliteStore;
+    use crate::work::task::NewTask;
     use clap::Parser;
 
     #[test]

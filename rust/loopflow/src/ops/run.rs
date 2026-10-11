@@ -468,7 +468,7 @@ mod tests {
         .unwrap();
         let task = store
             .create_task(
-                &crate::planning::NewTask {
+                &crate::work::task::NewTask {
                     due_date: None,
                     id: TaskId::new(),
                     project_id: project.id,

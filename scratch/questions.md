@@ -50,7 +50,7 @@ authored scratch is being curated independently.
 ## Admission authority — October 11
 
 Jack Heart moved minimum first-start admission into LOO-427. The plan's
-[admission slice](compare-cmux-s-command-line.md#admission--this-slice-jack-heart-october-11)
+[admission slice](compare-cmux-s-command-line.md#admission--implemented-jack-heart-october-11)
 records the creating-Machine coordinator as an implementation choice, not a
 separately reviewed product decision. No automatic recovery/transfer is included;
 LOO-414 retains unavailable-authority recovery and detached launch retries.

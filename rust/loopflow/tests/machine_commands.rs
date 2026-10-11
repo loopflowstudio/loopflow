@@ -1224,9 +1224,9 @@ fn flow_context_preview_reads_selected_machine_graph_without_executing_steps() {
 #[test]
 fn imported_execution_location_survives_delegation_and_rejects_stale_peer_reads() {
     use loopflow::durable::{RepositoryId, TaskId};
-    use loopflow::planning::NewTask;
     use loopflow::planning_git::PlanningDestination;
     use loopflow::store::sqlite::SqliteStore;
+    use loopflow::work::task::NewTask;
 
     let fixture = preview_machines();
     let local_repo = loopflow_test_support::TestRepo::new();
@@ -1634,9 +1634,9 @@ fn remote_companions_keep_the_recorded_owner_and_stream_file_changes() {
 #[test]
 fn task_admission_crosses_machines_and_recovers_a_lost_reply_before_checkout() {
     use loopflow::durable::TaskId;
-    use loopflow::planning::NewTask;
     use loopflow::planning_git::PlanningDestination;
     use loopflow::store::sqlite::SqliteStore;
+    use loopflow::work::task::NewTask;
 
     let fixture = preview_machines();
     let local_repo = loopflow_test_support::TestRepo::new();

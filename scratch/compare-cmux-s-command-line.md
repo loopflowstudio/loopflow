@@ -2,13 +2,16 @@
 
 **Status (October 11, 2026):** Jack Heart requested preparing LOO-427 stacked
 on LOO-412, with landing only after 412 lands. The recorded parent is PR #1491.
-Merge `f123df571f` integrates published parent `c77e72b6b7`; unpublished 412 work stays there.
+Merge `b3d9341cc7` integrates published parent `7d9bf0a4d8`; later 412 work stays there.
 The earlier baseline-first delivery interpretation is superseded. This integration
 preserves accepted Work tabs, pane controls and recorded-Machine execution while
 adopting 412's canonical Work and configured planning transport. Reduction for both
 Tasks remains coordinated with 412; no publication or landing readiness is claimed.
 
-Check: Rust nextest 2544/2549 pass; five fixture/coverage repairs await focused rerun; fmt/all-target Clippy and migration validation pass (68 released migrations unchanged); headless Desktop 503 tests/Swift boundary pass; Python/website repairs pass focused checks. CI owns materialized release graph; native proof: LOO-391.
+Check: Rust nextest 2544/2549 pass then all five repairs pass (11 focused); latest-parent suites 102/103 pass then selector repair passes; fmt/all-target Clippy and migration validation pass; Desktop 503 tests plus 45 post-sync DTO tests pass; Python/website repairs pass focused. CI owns materialized release graph; native proof: LOO-391.
+
+**This slice — delivery:** admission is implemented and checked. Publish the stacked
+PR; landing waits for LOO-412, then its integration/CI boundary.
 
 ## Shipping scope — Jack Heart, October 10
 
@@ -261,7 +264,7 @@ Reuse these owners.
 
 **LOO-412 integrated:** configured transport and its typed writer replace manual
 enrollment and mixed-provider projections. The current parent is recorded above.
-No second exchange engine is introduced; minimum admission is the remaining cut.
+No second exchange engine is introduced; minimum admission is implemented below.
 
 `42990dea3` completed both remaining deletions: the stale October 8 walkthrough
 and the duplicate sharing query. The reviewed simulation remains at
@@ -289,13 +292,13 @@ both preparation boundaries now consume the same permanent first-start decision.
 
 ## Implementation sequence — one PR
 
-### Admission — This slice (Jack Heart, October 11)
+### Admission — implemented (Jack Heart, October 11)
 
 Jack Heart selected “Bring minimum admission into 427” after Git-default planning
 made ordinary new Tasks hit the deferred refusal. This supersedes deferral of
 first-start admission, not the prohibition on transferring started Tasks.
 
-**Build:** stamp each new locally created Task with an immutable admission authority:
+**Implemented (`649f894a33`):** stamp each new locally created Task with an immutable admission authority:
 its creating Machine and repository locator. Exchange this binding with planning.
 That Machine owns one atomic, permanent first-execution claim per Task. Claims
 are local execution records, never last-writer-wins planning fields. Concurrent
@@ -341,7 +344,7 @@ exclusive start. History: `28fc5274a`, this section.
 Known started Tasks route by recorded checkout Machine; locally unstarted Tasks
 use effective delegation. Neither changes Machine defaults. LOO-412's TaskSource
 transfer/preparing selector stays excluded: cold planning acquisition and ordinary
-Task preparation survive, but remote first start still needs exclusive admission.
+Task preparation survive, but remote first start consumes exclusive admission.
 
 New Tasks obtain the coordinator’s permanent decision before Git preparation
 and consume the same receipt at placement. Historical shared Tasks lacking an

@@ -175,9 +175,9 @@ mod tests {
 
     use super::SqliteStore;
     use crate::durable::{MachineId, TaskId, WorkRef};
-    use crate::planning::NewTask;
     use crate::planning_exchange::PlanningKind;
     use crate::store::sqlite::planning_write::{self, PlanningEdit};
+    use crate::work::task::NewTask;
 
     fn new_task(store: &SqliteStore, repo: &str) -> TaskId {
         let project = store.ensure_wave_project(repo, "work").unwrap();

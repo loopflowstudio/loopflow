@@ -5158,7 +5158,7 @@ mod tests {
             )
             .unwrap();
         let task = store
-            .create_task(&crate::planning::NewTask {
+            .create_task(&crate::work::task::NewTask {
                 due_date: None,
                 id: TaskId::new(),
                 project_id: fixture.task.project_id.clone(),

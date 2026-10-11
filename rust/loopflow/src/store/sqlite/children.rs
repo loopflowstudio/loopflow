@@ -1517,9 +1517,9 @@ pub(super) fn resolve_task_id_in(
         tasks.retain(|(_, _, owner)| {
             owner.as_deref() == Some(repo)
                 || owner.as_ref().is_some_and(|owner| {
-                    canonical.as_ref().is_some_and(|canonical| {
-                        canonical.contains(std::path::Path::new(owner))
-                    })
+                    canonical
+                        .as_ref()
+                        .is_some_and(|canonical| canonical.contains(std::path::Path::new(owner)))
                 })
         });
     }

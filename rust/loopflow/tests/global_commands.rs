@@ -669,7 +669,7 @@ fn repo_selection_carries_scoped_task_prefix_through_reads_and_writes() {
             )
             .unwrap();
         store
-            .create_task(&loopflow::planning::NewTask {
+            .create_task(&loopflow::work::task::NewTask {
                 due_date: None,
                 id: loopflow::durable::TaskId::parse(id).unwrap(),
                 project_id: loopflow::durable::ProjectId::parse(&project).unwrap(),
@@ -678,16 +678,24 @@ fn repo_selection_carries_scoped_task_prefix_through_reads_and_writes() {
             })
             .unwrap();
     }
-    let unscoped = command(
-        home.path(),
-        selected.path(),
-        &["task", "status", "abcd", "--json"],
-    )
-    .output()
+    // Checkout inference and explicit repository selection resolve the same Task.
+    let inferred: serde_json::Value = serde_json::from_str(&success(
+        command(
+            home.path(),
+            selected.path(),
+            &["task", "status", "abcd", "--json"],
+        )
+        .output()
+        .unwrap(),
+    ))
     .unwrap();
-    assert!(!unscoped.status.success());
-    assert!(String::from_utf8_lossy(&unscoped.stderr).contains("multiple stable Tasks"));
+    assert_eq!(inferred["execution"]["task_id"], first);
     let store = SqliteStore::new(&home.path().join(".lf/loopflow.db")).unwrap();
+    assert!(store
+        .task_by_issue("abcd")
+        .unwrap_err()
+        .to_string()
+        .contains("multiple stable Tasks"));
     let repository = store
         .ensure_repository(selected.path().canonicalize().unwrap().to_str().unwrap())
         .unwrap();
@@ -2531,7 +2539,7 @@ fn task_planning_explain_refile_resolves_destination_and_retains_recorded_work()
     let source = project("source");
     let destination = project("destination");
     let task = store
-        .create_task(&loopflow::planning::NewTask {
+        .create_task(&loopflow::work::task::NewTask {
             due_date: None,
             id: loopflow::durable::TaskId::new(),
             project_id: loopflow::durable::ProjectId::parse(&source).unwrap(),
@@ -2600,7 +2608,7 @@ fn task_planning_explain_refile_resolves_destination_and_retains_recorded_work()
     );
     // Execution addresses the same durable destination, not a new Wave named after its ID.
     let second = store
-        .create_task(&loopflow::planning::NewTask {
+        .create_task(&loopflow::work::task::NewTask {
             due_date: None,
             id: loopflow::durable::TaskId::new(),
             project_id: task.project_id.clone(),

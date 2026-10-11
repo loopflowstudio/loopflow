@@ -614,3 +614,5 @@ strip links to its own site in a new tab.
 - Jack Heart: "cut Everything is done through ephemeral processes (like agent sessions) and ssh" → removed from the `x11` closing text.
 
 - Jack Heart: "replace that second sentence with jsut All telemetry is local." → set in the `x11` closing text.
+
+- Jack Heart: "Private, secure remote jobs and telemetry made easy through `ssh`." → replaces the "can proxy jobs onto remote machines" sentence in the `x11` closing text. Placement is Claude's reading.

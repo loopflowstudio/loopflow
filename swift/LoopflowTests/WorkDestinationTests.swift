@@ -186,17 +186,69 @@ struct WorkDestinationTests {
                 machineId: remoteIdentity.machineId, worktree: remoteIdentity.worktree,
                 pane: targetPane.id, incarnation: targetPane.incarnation)
             try registry.controlPane(.init(target: target, action: .shell), model: model)
-            let shell = try #require(remote.multiplexer.layout.allPanes.first { $0.content == .shell(location: remoteIdentity) })
+            let shell = try #require(remote.multiplexer.layout.allPanes.first { $0.content == .shell(location: remoteIdentity, execution: request.location) })
             let command = try #require(remote.multiplexer.shellCommands[shell.id])
             #expect(Array(command.dropFirst()) == ["--machine", "peer", "--repository", "repository",
                 "task", "shell", remoteID, "--checkout", remoteIdentity.worktree])
             let splitID = try registry.controlPane(.init(target: target, action: .split(axis: .horizontal)), model: model)
-            #expect(remote.multiplexer.layout.pane(for: splitID)?.content == .shell(location: remoteIdentity))
+            #expect(remote.multiplexer.layout.pane(for: splitID)?.content == .shell(location: remoteIdentity, execution: request.location))
             #expect(remote.multiplexer.shellCommands[splitID] == command)
             #expect(remote.multiplexer.layout.pane(for: targetPane.id) == targetPane)
             #expect(remote.multiplexer.focusedPaneId == focus)
             #expect(remote.multiplexer.zoomedPaneId == targetPane.id)
             #expect(companion.document("remote-draft.txt").editor.string == "retained peer draft")
+            // A second same-path owner must not redirect the first pane's shell.
+            // This process owns its lf fixture; constructing argv launches nothing.
+            do {
+                let workspace = SessionsWorkspace(identity: localIdentity)
+                let peer = WorkspaceIdentity(machineId: "peer", worktree: "/remote/task")
+                let first = TaskLocationObservation(request: "first", repositoryID: "repo-a", taskID: "plan-a",
+                    machineID: "peer", observedAt: 1, location: .recorded(taskID: "owner-a", checkout: peer.worktree))
+                let second = TaskLocationObservation(request: "second", repositoryID: "repo-b", taskID: "plan-b",
+                    machineID: "peer", observedAt: 2, location: .recorded(taskID: "owner-b", checkout: peer.worktree))
+                let store = workspace.multiplexer
+                store.load(sessionId: "first", location: peer)
+                store.updateSessionLocation("first", location: peer, execution: first)
+                let original = store.focusedPane
+                let shell = try #require(try workspace.split(original.id, axis: .vertical))
+                store.load(sessionId: "second", location: peer)
+                store.updateSessionLocation("second", location: peer, execution: second)
+                store.updateSessionLocation("first", location: peer) // An ordinary reading keeps the pinned owner.
+                #expect(store.layout.pane(for: original.id) == original)
+                let again = try #require(try workspace.split(shell.id, axis: .horizontal))
+                let command = try #require(store.shellCommands[again.id])
+                #expect(Array(command.dropFirst()) == ["--machine", "peer", "--repository", "repo-a",
+                    "task", "shell", "owner-a", "--checkout", peer.worktree])
+                #expect(again.executionLocation == first)
+                store.close(again.id)
+                store.undoClose()
+                #expect(store.layout.pane(for: again.id)?.executionLocation == first)
+                #expect(store.shellCommands[again.id] == nil) // Undo cannot replay a launch.
+                let afterUndo = try #require(try workspace.split(again.id, axis: .vertical))
+                #expect(store.shellCommands[afterUndo.id] == command)
+
+                let files = try #require(store.show(.files(taskId: "plan-a", execution: first)))
+                let filesSplit = try #require(try workspace.split(files.id, axis: .vertical))
+                #expect(store.shellCommands[filesSplit.id] == command)
+                #expect(store.show(.files(taskId: "plan-a")) == files)
+                #expect(store.layout.allPanes.filter { if case .files = $0.content { true } else { false } }.count == 1)
+
+                store.updateSessionLocation("first", location: WorkspaceIdentity(machineId: "peer", worktree: "/moved"))
+                let changed = try #require(store.pane(forSessionId: "first"))
+                #expect(changed.incarnation != original.incarnation)
+                #expect(changed.executionLocation == nil)
+                let before = store.layout
+                #expect(throws: RegistryQueryError.self) { try workspace.split(changed.id, axis: .vertical) }
+                #expect(store.layout == before)
+                let unavailable = TaskLocationObservation(request: "offline", repositoryID: "repo-a", taskID: "plan-a",
+                    machineID: "peer", observedAt: 3, location: .unavailable(reason: "Offline"))
+                let unavailableFiles = try #require(store.show(.files(taskId: "plan-a", execution: unavailable)))
+                #expect(unavailableFiles.id == files.id)
+                #expect(unavailableFiles.incarnation != files.incarnation)
+                let unavailableLayout = store.layout
+                #expect(throws: RegistryQueryError.self) { try workspace.split(unavailableFiles.id, axis: .vertical) }
+                #expect(store.layout == unavailableLayout)
+            }
             remote.multiplexer.load(sessionId: "replacement")
             let unchanged = remote.multiplexer.layout
             #expect(throws: RegistryQueryError.self) {

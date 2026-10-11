@@ -59,11 +59,13 @@ public final class MultiplexerStore {
 
     /// A fresh record changes the captured location without selecting a pane.
     /// Renew the occurrence so targets captured before a move cannot send input.
-    public func updateSessionLocation(_ sessionId: String, location: WorkspaceIdentity?) {
+    public func updateSessionLocation(_ sessionId: String, location: WorkspaceIdentity?, execution: TaskLocationObservation? = nil) {
         func update(_ node: LayoutNode) -> LayoutNode {
-            guard let pane = node.allPanes.first(where: { $0.sessionId == sessionId }),
-                  pane.sessionLocation != location else { return node }
-            return node.replacingContent(of: pane.id, with: .session(id: sessionId, location: location))
+            guard let pane = node.allPanes.first(where: { $0.sessionId == sessionId }) else { return node }
+            let retained = pane.sessionLocation == location ? pane.executionLocation : nil
+            let content = PaneContent.session(id: sessionId, location: location, execution: execution ?? retained)
+            guard pane.content != content else { return node }
+            return node.replacingContent(of: pane.id, with: content)
         }
         let updated = update(layout)
         if updated != layout { layout = updated }
@@ -104,8 +106,8 @@ public final class MultiplexerStore {
     }
 
     @discardableResult
-    public func split(_ paneId: String, axis: SplitAxis, command: [String] = [], location: WorkspaceIdentity? = nil, focusNewPane: Bool = true) -> PaneState? {
-        _insert(.shell(location: location), beside: paneId, focus: focusNewPane, splitAxis: axis, shellCommand: command)
+    public func split(_ paneId: String, axis: SplitAxis, command: [String] = [], location: WorkspaceIdentity? = nil, execution: TaskLocationObservation? = nil, focusNewPane: Bool = true) -> PaneState? {
+        _insert(.shell(location: location, execution: execution), beside: paneId, focus: focusNewPane, splitAxis: axis, shellCommand: command)
     }
 
     /// Relocate the leaf itself, retaining content occurrence and surface keys.
@@ -187,18 +189,32 @@ public final class MultiplexerStore {
     }
 
     @discardableResult
-    public func newShell(command: [String] = [], location: WorkspaceIdentity? = nil, beside paneId: String? = nil, focus: Bool = true) -> PaneState? {
-        _insert(.shell(location: location), beside: paneId ?? focusedPaneId, focus: focus, shellCommand: command)
+    public func newShell(command: [String] = [], location: WorkspaceIdentity? = nil, execution: TaskLocationObservation? = nil, beside paneId: String? = nil, focus: Bool = true) -> PaneState? {
+        _insert(.shell(location: location, execution: execution), beside: paneId ?? focusedPaneId, focus: focus, shellCommand: command)
     }
 
     /// Reveal a Task's Flow process log or files beside existing terminals,
     /// never replacing them. Explicit targets do not follow later focus.
     @discardableResult
     public func show(_ content: PaneContent, beside paneId: String? = nil, focus: Bool = true) -> PaneState? {
-        if let pane = layout.allPanes.first(where: { $0.content == content }) {
+        let existing = layout.allPanes.first { pane in
+            switch (pane.content, content) {
+            case (.files(let current, _), .files(let requested, _)),
+                 (.flowLog(let current, _), .flowLog(let requested, _)):
+                return current == requested
+            default: return pane.content == content
+            }
+        }
+        if let pane = existing {
+            // A fresh observation can replace the captured owner, but missing
+            // evidence cannot discard the retained remote location or draft.
+            if content.executionLocation != nil, pane.content != content {
+                layout = layout.replacingContent(of: pane.id, with: content)
+                closedState = nil
+            }
             if focus { setFocusedPane(pane.id) }
             else { setCollapsed(paneId: pane.id, collapsed: false) }
-            return pane
+            return layout.pane(for: pane.id)
         } else {
             return _insert(content, beside: paneId ?? focusedPaneId, focus: focus)
         }
@@ -304,7 +320,7 @@ public final class MultiplexerStore {
     /// Removes confirmed resolved or moved Sessions without creating an undo entry.
     public func removeSessions(_ sessionIds: Set<String>) {
         let removes: (PaneState) -> Bool = { pane in
-            guard case .session(let id, _) = pane.content else { return false }
+            guard case .session(let id, _, _) = pane.content else { return false }
             return sessionIds.contains(id)
         }
         let stale = layout.allPanes.filter(removes)

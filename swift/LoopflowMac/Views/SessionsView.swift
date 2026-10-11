@@ -20,8 +20,8 @@ extension PaneState {
     /// Content owns terminal identity; workspace placement grants no location fallback.
     var terminal: TerminalIdentity? {
         switch content {
-        case .shell(let location): location.map { .shell(id, machineId: $0.machineId) }
-        case .session(let id, let location): location.map { .session(id, machineId: $0.machineId) }
+        case .shell(let location, _): location.map { .shell(id, machineId: $0.machineId) }
+        case .session(let id, let location, _): location.map { .session(id, machineId: $0.machineId) }
         case .empty, .files, .flowLog: nil
         }
     }
@@ -45,55 +45,53 @@ final class SessionsWorkspace {
 
     let identity: WorkspaceIdentity
     let localMachineId: String?
-    var executionLocation: TaskLocationObservation?
 
     @discardableResult
     func newShell(beside pane: String? = nil, focus: Bool = true) throws -> PaneState? {
-        let location = try shellLocation(beside: pane ?? multiplexer.focusedPaneId)
-        let command = try shellCommand(at: location)
-        return multiplexer.newShell(command: command, location: location, beside: pane, focus: focus)
+        let (location, execution) = try shellLocation(beside: pane ?? multiplexer.focusedPaneId)
+        let command = try shellCommand(at: location, execution: execution)
+        return multiplexer.newShell(command: command, location: location, execution: execution, beside: pane, focus: focus)
     }
 
     @discardableResult
     func split(_ pane: String, axis: SplitAxis, focus: Bool = true) throws -> PaneState? {
-        let location = try shellLocation(beside: pane)
-        let command = try shellCommand(at: location)
-        return multiplexer.split(pane, axis: axis, command: command, location: location, focusNewPane: focus)
+        let (location, execution) = try shellLocation(beside: pane)
+        let command = try shellCommand(at: location, execution: execution)
+        return multiplexer.split(pane, axis: axis, command: command, location: location, execution: execution, focusNewPane: focus)
     }
 
-    private func shellLocation(beside paneId: String) throws -> WorkspaceIdentity {
+    private func shellLocation(beside paneId: String) throws -> (WorkspaceIdentity, TaskLocationObservation?) {
         guard let pane = multiplexer.layout.pane(for: paneId) else {
             throw RegistryQueryError("The addressed pane disappeared; no shell was opened.")
         }
-        if case .shell(let location) = pane.content {
+        switch pane.content {
+        case .shell(let location, _), .session(_, let location, _):
             guard let location else {
-                throw RegistryQueryError("Shell location is unavailable; no shell was opened.")
+                throw RegistryQueryError("Terminal location is unavailable; no shell was opened.")
             }
-            return location
-        }
-        if case .session(_, let location) = pane.content {
-            guard let location else {
-                throw RegistryQueryError("Session location is unavailable; no shell was opened.")
+            return (location, pane.executionLocation)
+        case .files, .flowLog:
+            if let execution = pane.executionLocation {
+                guard case .recorded(_, let checkout?) = execution.location else {
+                    throw RegistryQueryError("Task location is unavailable; no shell was opened.")
+                }
+                return (WorkspaceIdentity(machineId: execution.machineID, worktree: checkout), execution)
             }
-            return location
+            return (identity, nil)
+        case .empty: return (identity, nil)
         }
-        return identity
     }
 
-    private func shellCommand(at identity: WorkspaceIdentity) throws -> [String] {
-        let command: [String]
-        if identity.machineId == localMachineId { command = [] }
-        else {
-            guard let location = executionLocation, location.machineID == identity.machineId,
-                  case .recorded(let task, let checkout) = location.location,
-                  checkout == identity.worktree else {
-                throw RegistryQueryError("Reopen the remote Task before adding a shell; no local shell was opened.")
-            }
-            command = [try LocalWaveAgentLauncher.controlLfPath(), "--machine", location.machineID,
-                "--repository", location.repositoryID, "task", "shell", task,
-                "--checkout", identity.worktree]
+    private func shellCommand(at identity: WorkspaceIdentity, execution: TaskLocationObservation?) throws -> [String] {
+        if identity.machineId == localMachineId { return [] }
+        guard let location = execution, location.machineID == identity.machineId,
+              case .recorded(let task, let checkout) = location.location,
+              checkout == identity.worktree else {
+            throw RegistryQueryError("Reopen the remote Task before adding a shell; no local shell was opened.")
         }
-        return command
+        return [try LocalWaveAgentLauncher.controlLfPath(), "--machine", location.machineID,
+            "--repository", location.repositoryID, "task", "shell", task,
+            "--checkout", identity.worktree]
     }
     let multiplexer = MultiplexerStore()
     let hover = PaneHover()
@@ -198,12 +196,12 @@ final class SessionsWorkspaceRegistry {
         if case .recorded(let taskID, _) = destination.location?.location { executionTask = taskID }
         else { executionTask = key }
         let workspace = workspace(for: identity)
-        workspace.executionLocation = destination.location
+        workspace.multiplexer.updateSessionLocation(destination.record.id, location: identity, execution: destination.location)
         let fileQuery = destination.location.map { query.pinFiles(to: $0) } ?? query
         let files = workspace.files(taskId: key, issue: executionTask, cwd: identity.worktree, query: fileQuery)
         if destination.showsChanges {
             files.showsChanges = true
-            workspace.multiplexer.show(.files(taskId: task.id), focus: false)
+            workspace.multiplexer.show(.files(taskId: task.id, execution: destination.location), focus: false)
         }
         return files
     }
@@ -259,9 +257,9 @@ final class SessionsWorkspaceRegistry {
                 throw RegistryQueryError("The Task is not associated with this checkout. Inspect its recorded workspace; no pane was changed.")
             }
             let content: PaneContent = if case .files = request.action {
-                .files(taskId: projection.task.id)
+                .files(taskId: projection.task.id, execution: pane.executionLocation)
             } else {
-                .flowLog(taskId: projection.task.id)
+                .flowLog(taskId: projection.task.id, execution: pane.executionLocation)
             }
             result = store.show(content, beside: target.pane, focus: false)
         case .hide: workspace.setCollapsed(paneId: target.pane, collapsed: true)
@@ -852,9 +850,9 @@ struct SessionsContentView: View {
             Button("New shell", systemImage: "terminal") { newShell(in: workspace) }
                 .accessibilityIdentifier("work-add-shell")
             if let task = fileTask?.task.id {
-                Button("Files", systemImage: "doc") { multiplexer.show(.files(taskId: task)) }
+                Button("Files", systemImage: "doc") { multiplexer.show(.files(taskId: task, execution: multiplexer.focusedPane.executionLocation)) }
                     .accessibilityIdentifier("work-add-files")
-                Button("Flow processes", systemImage: "list.bullet.rectangle") { multiplexer.show(.flowLog(taskId: task)) }
+                Button("Flow processes", systemImage: "list.bullet.rectangle") { multiplexer.show(.flowLog(taskId: task, execution: multiplexer.focusedPane.executionLocation)) }
                     .accessibilityIdentifier("work-add-flow-log")
             }
         } label: { Image(systemName: "plus") }
@@ -927,7 +925,7 @@ struct SessionsContentView: View {
             model.beginSessionBinding(record)
         case .flowLog(let id):
             openTask(.task(id: id))
-            multiplexer.show(.flowLog(taskId: id))
+            multiplexer.show(.flowLog(taskId: id, execution: multiplexer.focusedPane.executionLocation))
         }
         model.remember(destination)
     }
@@ -1090,7 +1088,7 @@ struct SessionsContentView: View {
 
     private var focusedProgramStatus: ProgramStatusRecords? {
         guard terminalsVisible else { return nil }
-        if case .session(let id, _) = multiplexer.focusedPane.content {
+        if case .session(let id, _, _) = multiplexer.focusedPane.content {
             return store.sessions.first { $0.id == id }?.record.programStatus
         }
         if let id = focusedProgramStatusSurface?.sessionId {
@@ -1107,7 +1105,7 @@ struct SessionsContentView: View {
         case .shell:
             guard let terminal = pane.terminal else { return [] }
             return store.sessions.filter { store.localTerminal(for: $0.record) == terminal }
-        case .session(let id, _):
+        case .session(let id, _, _):
             return store.sessions.filter { $0.id == id }
         case .empty, .flowLog, .files:
             return []
@@ -1414,7 +1412,7 @@ private struct SessionPaneView: View {
     private var hovering: Bool { hover.paneId == pane.id }
 
     private var item: SessionItem? {
-        guard case .session(let id, _) = pane.content else { return nil }
+        guard case .session(let id, _, _) = pane.content else { return nil }
         return sessions.sessions.first { $0.id == id }
     }
 
@@ -1625,11 +1623,11 @@ private struct SessionPaneView: View {
             } else {
                 Text("Shell location is unavailable. Add a new shell in this Work.")
             }
-        case .flowLog(let taskId):
+        case .flowLog(let taskId, _):
             FlowProcessLog(model: model, taskId: taskId)
                 .background(PaneFocusTarget(isFocused: isFocused))
                 .simultaneousGesture(TapGesture().onEnded { store.setFocusedPane(pane.id) })
-        case .files(let taskId):
+        case .files(let taskId, _):
             let task = model.task(id: taskId)?.task
             let key = task?.runtime?.workId ?? task?.task.identifier ?? taskId
             TaskFilesView(

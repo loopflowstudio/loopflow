@@ -243,6 +243,28 @@ not the provider hierarchy. Offline public rotation
 covers both transport configurations/mapping states and transaction/retry preservation;
 export fixtures cover retained input and later saves.
 
+### Reconciled acquisition boundary — October 10
+
+At `fe5262b093`, the Project delivery return projection is gone; its eligibility
+query still joins `pm_projects` for archive and unresolved membership evidence.
+Removing that table therefore requires a concrete replacement for those facts,
+not merely the accepted revision on Work. The same-revision rejection cases remain
+part of delivery acceptance.
+
+Ordinary snapshot confinement remains next: `ops/pm.rs::load_show_snapshot` returns
+`PmSnapshotRow`, and `lf/commands/waves.rs::validate_pm_portfolio` still reconstructs
+provider inventories. Canonical summaries alone have not removed these consumers.
+Retain cross-Wave ownership contradictions and independently unavailable Waves.
+
+A separate source-confirmed mismatch remains in `require_planning_home`: both
+`task_refile` and chapter rotation reject a remotely placed Wave before their
+planning locks. Shared edits must work locally regardless of execution placement.
+This belongs with the acquisition/LOO-427 boundary, retaining sorted Wave locks,
+checkout locks, backlog eligibility and execution admission. Required proof covers
+both operations with nonlocal assignment and unchanged placement, Workflow and
+Processes. Source finding only. Original review:
+`1f6ee6485b:scratch/planning-placement-review.md`.
+
 ### Released migration frontier — October 10
 
 Merge `db36f20ba8` incorporates main `21dae527b4`: local planning, optional Task PR,
@@ -343,7 +365,13 @@ Release's October 5 memory records both jobs installed under Infrastructure,
 including the release definition authored in the child; changing the list cannot
 reassign those receipts to the child. Its September 28 failure also requires a
 public command/Flow regression where an operation failure stays nonzero, not only
-parser/filter tests. Read coverage: the sole immediate child, Release, has both
+parser/filter tests. Conversion must also retain `(canonical repo,wave,flow)` execution-lock identity
+and inherited descriptor validation while a release child holds the lock; a new
+argv hash or schedule ID must not split exclusion. Original activation, dues and
+receipt classifications survive; historical skill receipts never become Flow
+settlements. Clone/read activates nothing. This is a source-derived preservation
+case, not a reproduced failure (`eda4a98097:scratch/cron-conversion-review.md`).
+Read coverage: the sole immediate child, Release, has both
 its GOAL and complete memory inspected; no child-specific history is moved here.
 
 The typed writer's transport baseline and causal/import proofs remain at
@@ -364,12 +392,11 @@ still governs; no execution or delivery-attempt exchange is authorized.
   cut. Regenerate them after the entire accepted reduction, before review-only
   republication. No readiness or landing follows from this persistence checkpoint.
 
-Checks: CLI build, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and 12 network-isolated tests (accepted-revision delivery, prose, Project preservation, offline refiling) pass; gate owns broader verification.
+Checks: `git diff --check` passes for this prose-only reconciliation; prior build/focused proofs remain recorded at `1f6ee6485b` here; broader verification belongs to gate.
 
-
-Context: authored memory/scratch fit; `lf context --skill compress --json` reports
-the generated Task seed/steers/workspace over 21,000 tokens (over 5,000 above 16,000).
-Authored edits cannot remove that stored input; no limit was raised.
+Context: authored memory/scratch fit. `lf context --skill realign --json` reports
+the generated Task seed/steers/workspace above the 16,000-token limit; authored
+edits cannot remove this stored/generated input. No limit was raised.
 
 Earlier transport evidence: `ae96102580e:scratch/work-on-another-machine-name.md`.
 The mixed model is superseded; its synthetic proofs establish no installed acceptance.

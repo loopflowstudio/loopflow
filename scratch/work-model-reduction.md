@@ -130,7 +130,8 @@ Convert these consumers along with the preceding cut:
 - `sqlite/revisions.rs`: update watched domains when owners/tables disappear.
 
 The replacements read Work plus the exact concrete evidence needed by each
-operation. Repository repair remains atomic and refuses conflicting identities;
+operation. `accepted_project_revision` also still joins `pm_projects` for archive
+and unresolved membership evidence; same-revision observations can be ineligible. Repository repair remains atomic and refuses conflicting identities;
 selection still respects unfinished rotation and current provider observations.
 An old observation remains old after conversion.
 
@@ -262,6 +263,8 @@ Linear setup, OAuth, Team/Initiative mapping and reteam are real integration
 operations. Keep them concrete. A local lookup cannot infer that another Machine
 has never started work; this rewrite grants no distributed execution authority.
 Remote admission must still fetch pushed code and retain dirty or divergent targets.
+The pursuit design records the remaining `require_planning_home` mismatch in Task
+refiling and chapter rotation: shared editing must not require local execution placement.
 
 ## 11. Keep necessary delivery evidence without a generic hierarchy
 

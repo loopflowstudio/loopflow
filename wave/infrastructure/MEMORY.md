@@ -631,18 +631,18 @@ Jack requires the full accepted deletion audit before review: Work, private
 observations, typed journal, bindings, ordinary follow-ups and one cron list.
 Renames are insufficient; gate/install unproved.
 
-`96607a9a46`: canonical status/create and CLI/Swift acquisition proof.
-Delivery requires accepted Work revision; archive/disputed membership still refuse
-it. `plan_read` and Project ingestion return projections are deleted; snapshot
-confinement remains. Foreign observations grant no ownership.
+`fe5262b093`: canonical readers; snapshots remain. Delivery requires accepted Work
+revision plus archive/membership eligibility. Foreign facts grant no ownership.
+Shared refiling/rotation still reject nonlocal Wave placement; source finding,
+not reproduced or repaired. Planning writes must not inherit execution admission.
 
-Jack assigned LOO-427 here (`bd295866bb`); stack order is unresolved. Preserve
-tabs, Machine ownership/admission; adapt delegation to the writer/released frontier.
-[Design and audit](../../scratch/work-on-another-machine-name.md) own remaining
-implementation and #1491's review boundary. Cron retains installed ownership, not
-file location; operation failures stay nonzero ([Release evidence](release/MEMORY.md)). No landing,
-installation, schedule activation or real export. Prior proofs:
-`41378adacf:wave/infrastructure/MEMORY.md`.
+Jack assigned LOO-427 here (`bd295866bb`); stack order remains unresolved. Preserve
+Machine admission and tabs; adapt to the surviving writer/released frontier.
+[Design and audit](../../scratch/work-on-another-machine-name.md) own remaining work.
+Release child memory was read: cron conversion must retain installed ownership,
+lock/child-descriptor identity and dues, not infer them from file location. Operation
+failure stays nonzero. No landing, installation, activation or real export.
+Prior proofs: `41378adacf:wave/infrastructure/MEMORY.md`.
 
 ## Planning and launch preservation (curated 2026-10-02)
 

@@ -344,7 +344,7 @@ impl SqliteStore {
         let capability: String = tx.query_row("SELECT CASE
             WHEN p.id IS NULL OR p.completed_at IS NOT NULL THEN 'idle; pending until next supported provider start'
             WHEN a.agent_process_id IS NULL THEN 'unavailable; provider start required to install adapter'
-            WHEN a.activated_at IS NULL THEN 'installed; no authenticated callback observed (hook may be unavailable or untrusted)'
+            WHEN a.activated_at IS NULL THEN 'capability reserved; no authenticated callback observed (hook may be unavailable or untrusted)'
             ELSE 'authenticated provider callback observed; output acceptance unconfirmed' END
             FROM agent_sessions s LEFT JOIN processes p ON p.id=s.agent_process_id
             LEFT JOIN steer_adapters a ON a.agent_process_id=p.id WHERE s.id=?1",

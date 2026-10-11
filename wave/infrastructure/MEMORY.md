@@ -270,9 +270,13 @@ Claude 2.1.296's exclusive startup-hook/input cycle wrote only 512 of 131,133
 bytes in two seconds. Shared dispatch plus exclusive takeover resolves it.
 `0d04805ab3` preserves oversized launch/resume, handoff, replacement/child rejection
 and OpenCode retry protocol proofs, not configured model acceptance. Old injection
-paths are deleted. Compression removes the unread subscription snapshot; receipts
-and provider activation retain observed state. The design retains contrary evidence
-and gate/CI's broader/configured acceptance: `scratch/session-steer-subscriptions.md`.
+paths are deleted; the withdrawn-cut feedback no longer describes current source.
+`27ce387bdc` removes the unread subscription snapshot; receipts and callback
+activation retain observed state. Reserving a capability proves no installation.
+Release's operation-entry lesson applies: store proofs cannot replace public
+launch proofs, and protocol stand-ins cannot prove model acceptance. The design
+retains contrary evidence and gate/CI's broader/configured acceptance:
+`scratch/session-steer-subscriptions.md`.
 
 ## Process-owned liveness (LOO-451, 2026-10-10)
 

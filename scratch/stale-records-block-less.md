@@ -1,8 +1,10 @@
 # Stale PR bases — lf-cb9012a
 
 Jack Heart requested autonomous investigation and repair through demo and PR review
-on 2026-10-11; publish, do not land. This implementation uses the Task brief as
-the design. No existing scratch design was supplied.
+on 2026-10-11; publication for review is accepted, landing is excluded. The Task
+brief supplies acceptance. Implementation at `ec3cd1179d`, integrated with main
+at `131e8caa4c`, passed publication checks and awaits PR review; the approach below is implemented,
+not yet accepted by Jack Heart. Reconciled 2026-10-11.
 
 ## Outcome and decision
 
@@ -12,16 +14,17 @@ without integration. A saved base is a cached comparison, not evidence that any
 commit is foreign. Keep all branch commits, including inherited dependencies;
 review the actual GitHub range. No rebase or reset is a publication repair.
 
-Delete — do not maintain (removed):
+Removed:
+
 - `verify_task_pr_range_mode`'s saved-base ancestry classification and unbounded
-  commit/file diagnostics; preserve current-branch and managed-Task ownership.
+  commit/file diagnostics; current-branch and managed-Task ownership remain.
 - `was_published_tip` and its reflog exception; current ancestry suffices even
   after reflog expiry or garbage collection of the old base.
-- Tests requiring refusal solely for inherited/divergent saved bases. Replace
-  with command-level publication, range parity and unchanged-history proofs.
+- Tests requiring refusal solely for inherited/divergent saved bases, replaced
+  by command-level publication, range parity and unchanged-history proofs.
 
-Keep empty-range refusal, unrelated-history failure, fresh upstream acquisition,
-stack selection and post-push placement timing for explicit sync. No migration.
+Empty-range refusal, unrelated-history failure, fresh upstream acquisition,
+stack selection and post-push placement timing for explicit sync remain. No migration.
 
 October 11 implementation review found a counterexample to unconditional saved
 base replacement: a stacked child's base is also the comparison fork used after
@@ -49,7 +52,8 @@ main's deletion survives alongside child edits.
 3. **Why did it refuse instead of adapt?** #924 (`7eb5e34c62`) encoded B as an
    ownership boundary to prevent #877/#882's inherited commits entering PRs.
    It conflated a stored comparison with current authorship. No graph comparison
-   proves which dependencies may be removed. Updating B to M preserves them all.
+   proves which dependencies may be removed. Comparing against M preserves them all;
+   stacked placement retains B for integration.
 4. **Why wrong wording and huge output?** #989 (`d587eeca5f`) expanded the
    refusal with complete logs and path lists for M..B and B..M. Two-dot file
    diffs compare endpoint trees, so reversing them repeats paths. “No common
@@ -76,25 +80,21 @@ changed during this investigation. Installed repair remains unproved.
 
 | Path | Evidence and disposition |
 | --- | --- |
-| Publication saved base | Reproduced by existing divergent fixture; replace with current merge-base. |
-| Explicit sync post-integration range | Same shared gate; inherited sibling fixture now must retain commits and heal. |
-| Squash-parent `validate_fork_base` | Saved fork no longer ancestor can refuse before comparison merge; preserving unpublished edits requires a valid comparison. Bound diagnostic; no guessed replay command. |
+| Publication saved base | Reproduced through real CLI; current merge-base now permits publication. |
+| Explicit sync post-integration range | Reproduced; inherited sibling fixture retains commits and refreshes root placement. |
+| Squash-parent `validate_fork_base` | Saved fork no longer ancestor can refuse before comparison merge; preserving unpublished edits requires a valid comparison. Diagnostic is bounded and tested; no guessed replay command. |
 | Task branch / active PR branch mismatch | `resolve_task_pr_base`, `task_pr_context`, `attach_task_github_pr`; source only. Identity reconciliation is separate from comparison-base repair. |
 | Live stack parent's missing branch/record | `resolve_task_pr_upstream`; source only. Missing evidence cannot select main and silently change dependency. |
 | Sync ownership receipt after raw Git | Sync continuation validates pinned branch/HEAD; source only. Stale unlocked receipts are adoptable; live locks remain authority. |
 | Saved GitHub head / merge request | `request_task_pr_merge`, `invalidate_stale_merge_request`; source only. Fresh provider head must fence settlement, never inherit an old approval. |
 | Absent checkout / placement collision | Task preparation retains identity and requires explicit placement recovery; source only, no relocation in this change. |
 
-## Remaining
-
-Gate owns affected suites, including stacked delivery; demo/review owns judgment
-of the full preserved PR range. Publication remains the caller's later Flow step;
-do not land. Installed Etude recovery and hosted GitHub acceptance are unproved.
+## Implemented evidence and review findings
 
 `uv run python scripts/demo_pr_base.py` runs the real `lf pr open` in disposable
 repositories, with external network denied and GitHub simulated. It proves new
 PR creation and existing PR updates against main, preserving HEAD/tree/every
-commit for rebased, inherited, force-rewritten-main, squash-parent and missing
+commit for rebased, inherited, force-rewritten-main, squashed-upstream and missing
 saved bases. The separate stacked regression preserves sync's comparison fork.
 
 Review finding fixed: publication's comparison must not replace a stack's
@@ -102,8 +102,24 @@ integration fork. Removed the redundant reread of saved placement for emptiness.
 Compression shares upstream acquisition between root and parent branches, names
 placement writes explicitly with `BaseUpdate`, and uses one tree comparison for
 both zero commits and commits with no changes. Review found the old quiet-diff
-status treated Git errors as changes; comparing tree IDs propagates read failures. Stack forks and post-push timing
-remain unchanged; no deletion targets remain.
+status treated Git errors as changes; comparing tree IDs propagates read failures.
+Stack forks and post-push timing remain unchanged; no deletion targets remain.
 
+Main's #1532 integration changes commit staging and diagnostics, not comparison
+ownership. No bounded implementation mismatch was found in this reconciliation.
+Release child memory was read in full: its operation-entry lesson supports real
+CLI coverage, and its installed v0.13.5 evidence applies only to #1459's older
+repair. It establishes no installation of this change.
 
-Checks: network-isolated `cargo test -p loopflow --test task_pr_range_tests` (13 passed); `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, demo-script Ruff passed; prior focused unsafe-stack sync pass remains applicable; affected-suite gate/hosted CI deferred to their Flow steps.
+## Remaining
+
+- PR review: assess the preserved inherited range and short diagnostics. The
+  demo's five real-CLI scenarios passed within the affected suites; GitHub was
+  simulated, so hosted acceptance remains unproved.
+- Hosted CI retains its full matrix. Landing is excluded. Installed Etude
+  recovery remains unproved; that checkout was untouched.
+
+No new product decision is required for the implemented approach. Other
+source-only refusal paths remain inventory findings, not reproduced repairs.
+
+Checks: network-isolated `cargo test -p loopflow --test task_pr_range_tests --test task_pr_authority_tests --test sync_tests --test pr_tests --test land_tests -- --nocapture` passed all 116 tests; `git diff --check` passed; prior fmt/Clippy/Ruff passes reused for unchanged code; full matrix remains with CI.

@@ -28,20 +28,13 @@ Task and subordinate Task comments. Linear and Git translate changes into those
 objects. They retain the evidence needed for synchronization without owning another
 writable Work hierarchy. Execution state is machine-local.
 
-## Audit basis and how to use it
+## Audit basis
 
-Read-only inspection covered definitions, callers, SQL, config, transport, CLI/DTOs,
-Swift consumers, fixtures, skills and docs. The tree moved during the existing
-pursuit: `28913feeda` flattened plan wrappers; `105e1d15ad` confined Linear comment
-observations; `24c377f43f` merged main; `58de9907b6` repaired integration. Paths below
-use the post-merge layout under `rust/loopflow/src/` unless otherwise stated.
-This audit supersedes the incomplete provider-cache account in the HTML
-diagnosis at `c8fe4628a`.
-
-This is a deletion map, not a promise to delete every named file wholesale. Remove
-obsolete responsibilities and all their consumers together. Retain real invariants
-under their existing owners. Recheck symbols against the final preceding pass;
-line counts would double-count moved code and already-completed cuts.
+Definitions, consumers, SQL, configuration, transports, CLI/DTOs, Swift, fixtures,
+skills and docs were inspected. Earlier audit tracing remains at
+`f9f9da7d3a:scratch/work-model-reduction.md`; paths below use `rust/loopflow/src/`.
+Remove obsolete responsibilities with their consumers, retaining required invariants.
+Whole-file and whole-table deletions remain conditional where stated.
 
 ## 1. Domain wrappers and the missing fields
 
@@ -52,22 +45,18 @@ ProjectKR, MetricTarget and domain TaskComment are implemented.
 **Locations:** `work/project.rs`, `work/task/mod.rs`, `work/task/comment.rs`,
 `pm/mod.rs`, `planning.rs`, and their SQL serialization in `store/sqlite/`.
 
-Project persistence has direct description, KRs and targets; the internal
-Markdown round trip and public ProjectContent are removed. PM-shaped readers remain.
-Task now reads rank, assignee, due date, state, completion and completion time
-from the existing shared columns. Acquisition returns that canonical Task; ordinary
-`PmItem` projections still require deletion. Domain ProjectStatus now belongs to
-`work/project.rs`. Optional Linear IDs remain bindings, never replacement domain IDs. Keep
-optimistic revisions, timestamps, historical iteration events and legacy mappings.
-The whole Task struct remains unsuitable for exchange because it contains local data.
-Project ingestion and association no longer return provider records; their unused
-async forwarding API is deleted. Snapshot confinement remains.
-The composed prose save/delivery/acquisition path now has focused proof and explicit
-field-revision/age retention across newer partial observations. The `PmProject`
-symbol and `plan_read` projections are removed; `PmSnapshot.projects`
-still exposes the second Project view. Its canonical conversion and private-observation
-boundary remain required before review. Earlier tracing:
-`582c134439:scratch/work-model-reduction.md`.
+Project persists description, workflow, KRs and targets directly; Task persists
+rank, assignee, due date, state and completion. ProjectStatus belongs to the domain.
+Keep optimistic revisions, timestamps, historical iteration events and optional
+Linear mappings. Whole Task records still cannot travel because they carry local data.
+
+Project ingestion/association return no provider record; `plan_read` and the public
+`pm_snapshot` inventory reader are deleted. Snapshot types remain acquisition
+inputs. Confine `PmTaskRecord` and `LinearProject` and convert the retained provider
+hierarchy before considering this cut complete. Composed Project prose saves,
+delivery and readback preserve field revision/age across partial observations;
+that proof does not satisfy the structural cut. Earlier tracing:
+`f9f9da7d3a:scratch/work-model-reduction.md` and `582c134439` at this path.
 
 ## 2. Delete the second local reading stack
 
@@ -84,7 +73,7 @@ not observed provider revision. Canonical status and summaries retain separate
 acquisition state/age. No local/provider-ID substitution remains in that reader.
 
 **Remaining:** confine `PmTaskRecord` / `PmTaskObservation` to acquisition, including
-the embedded Project observation, and remove ordinary `PmSnapshot` results.
+the embedded Project observation. The public snapshot inventory reader is deleted.
 
 **Keep:** explicit missing, invalid, removed and unavailable evidence. A failed
 provider read must not erase cached Work or convert unknown state into absence.
@@ -94,7 +83,7 @@ create another generic reader framework simply to replace these functions.
 ## 3. Collapse accepted-provider-to-Work projection
 
 **Remove or shrink:** `store/sqlite/planning.rs::project_accepted_planning` and
-provider hierarchy readback through `pm_snapshot` / `pm_task_observation_in`.
+provider hierarchy readback through `pm_task_observation_in`.
 The duplicate Task create/update projection branches and `item_edits` are removed:
 one accepted-observation query and typed edit slice now feed the common writer,
 retaining existing identity, rank, pending disposition and membership fences.
@@ -257,7 +246,8 @@ are deleted. Status sync refreshes before its canonical read; acquisition return
 no inventory. `plan_snapshot_read` still governs Task acquisition.
 `PmPortfolioValidator` and ordinary portfolio reconstruction are deleted. The
 store checks narrow retained ownership claims directly; no inventory leaves it.
-`pm_snapshot` remains test-consumed and public pending fixture conversion/deletion;
+The public `pm_snapshot` reader and all callers are removed in this pass. Fixtures
+read canonical Work or concrete retained evidence and replay fetched inputs;
 private acquisition inventory and persistent provider hierarchy remain required cuts.
 
 `PmResolvedTask`, both `pm_resolve_task` wrappers and `ResolvedTask` are deleted;

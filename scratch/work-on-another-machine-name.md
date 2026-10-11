@@ -214,10 +214,9 @@ Task delivery already uses its accepted-into-Work revision fence. The preservati
 fixture now compares against the Task returned by insertion, not its unsaved
 constructor revision.
 
-**Delete — do not maintain:** ordinary `PmSnapshot` results and escaping
-Project/Task observations, then the duplicate provider hierarchy and typed journal
-vocabularies in the audit. Snapshot confinement is still incomplete; removing the
-Project delivery return value does not finish it. Next come bindings, ordinary
+**Delete — do not maintain:** escaping `PmTaskRecord`/`PmTaskObservation`, the
+duplicate provider hierarchy and typed journal vocabularies in the audit. Public
+snapshot inventory reads are deleted; acquisition confinement remains incomplete. Next come bindings, ordinary
 follow-ups, cron and the remaining audit. No partial publication or readiness.
 Earlier reader tracing, fixture corrections and exact proof limits remain at
 `dc0d82caa2:scratch/work-on-another-machine-name.md`, the two canonical-reader
@@ -230,43 +229,29 @@ cover both transports/mapping states and retry preservation. Exact evidence:
 `1d97aa98b2:scratch/work-on-another-machine-name.md`; the provider hierarchy
 remains.
 
-### Reconciled acquisition boundary — October 10
+### Reconciled acquisition boundary
 
-At `fe5262b093`, the Project delivery return projection is gone; its eligibility
-query still joins `pm_projects` for archive and unresolved membership evidence.
-Removing that table therefore requires a concrete replacement for those facts,
-not merely the accepted revision on Work. The same-revision rejection cases remain
-part of delivery acceptance.
+`fe5262b093` removed Project delivery's provider return; eligibility still needs
+`pm_projects` archive and unresolved-membership evidence, including same-revision
+rejection. `94cb65b569` deleted `pm_show`, `load_show_snapshot` and `read_pm_snapshot`.
+`1d97aa98b2` removed planning-only placement restrictions without changing execution
+admission or sorted locks. Proof detail: `f9f9da7d3a` in this plan.
 
-At `94cb65b569`, `pm_show`, `load_show_snapshot` and
-`read_pm_snapshot` are deleted. Wave status sync refreshes before canonical
-reads; OAuth and archived-predecessor fixtures inspect saved Work. At
-`1d97aa98b2`, refiling/rotation no longer require local Wave placement.
-Public offline fixtures cover both transport configurations and mapping states,
-retaining captured Workflow and unknown Process. Sorted planning/checkout locks
-and execution admission remain. Neither cut proves installed acceptance.
+**Ownership reading cut — October 11.** `e0f716aa54` moved status/roadmap
+ownership checks into one SQLite read transaction, deleting `PmPortfolioValidator`
+and portfolio reconstruction. Contradictory Initiative/Team claims, invalidation,
+archival, membership removal and confirmed deletion retain their meaning. Malformed
+Wave observations do not hide readable siblings or refresh ages. Scoped roadmap
+reads follow the repaired Wave address. Evidence: `f9f9da7d3a` in this plan.
 
-**Ownership reading cut — October 11.** Status and roadmap now validate narrow
-retained Initiative/Project/issue claims directly in one SQLite read transaction.
-`PmPortfolioValidator` and ordinary portfolio snapshot reconstruction are deleted;
-no new inventory DTO replaces them. Team configuration errors apply only when
-readable Linear evidence exists. Foreign claims, invalidation, archival, independent
-membership removal and confirmed issue deletion retain their filters. Reads write
-neither canonical Work nor observation ages. Malformed Wave evidence contributes
-no partial claims and does not hide readable siblings. Public status checks exposed
-stale provider-ID/acquisition assertions and a real alias-repair bug: roadmap now
-uses the refreshed Wave address for scoped Task selection. Ordinary due-date
-coverage replaces the obsolete special follow-through assertion.
-
-Remaining: `pm_snapshot` is now test-consumed, but still public; replace those
-fixture reconstructions with canonical Work and concrete retained-evidence assertions,
-then delete it. Acquisition still carries `PmSnapshot`/`PmTaskRecord` and duplicate
-provider content. Finish their private boundary and populated conversion before
-removing persistent owners. Same-revision archive/unresolved-membership refusal in
+This pass removes the public `pm_snapshot` reader and its fixture reconstructions.
+Tests read canonical Work and concrete observation/refresh evidence; stale-response
+fixtures retain fetched input. The empty snapshot round-trip test is deleted.
+Acquisition still carries `PmSnapshot`/`PmTaskRecord` and duplicate provider content.
+Finish its private boundary and populated conversion before deleting persistent
+owners. Same-revision archive/unresolved-membership refusal in
 `accepted_project_revision` remains required. Bindings, ordinary follow-ups, cron,
 typed journal/provider hierarchy and the exhaustive audit still precede review.
-This checkpoint is not full implementation, gate completion or publication readiness.
-Prior boundary and tracing: `0181133849:scratch/work-on-another-machine-name.md`.
 
 ### Released migration frontier — October 10
 
@@ -292,6 +277,27 @@ Jack's `d68f7ceb-eda3-44ee-b880-da77b2fd441a` records 427 removing the
 `task_remote_tests` cold-target transfer expectation: an existing started Task
 cannot acquire another Machine's checkout. That prior pass is not current acceptance.
 Pushed-code validation remains at `task_checkout`; 414 owns exclusive first start.
+
+Jack Heart's October 11 comment `ad19b51f-1b33-49df-a34a-912074f66139`
+reports parent planning failures in 427's combined gate on `fe5262b093`: immediate
+completion/cancellation invalidates pending-receipt assumptions; deletion lacks a
+baseline; historical follow-through cannot resolve old filing. 412 owns those
+semantics and surviving fixture repairs. Deletion now records an active-issue
+baseline; delayed-delivery fixtures create an outage before local save. Canonical
+saved-Task lookup reuses Wave locator repair for repository aliases. 427 owns its
+separate repository registration fix. Historical follow-through repair remains in
+its required lifecycle deletion/conversion, not a revived predecessor.
+
+**Unresolved admission boundary:** Jack Heart's `9462650f-d8b0-4ae4-bd66-61f64e75bd15`
+reports default-Git creation enrolling every new Task in `planning_members`, so
+427's conservative shared first-start rule refuses ordinary new Tasks without a
+recorded owner. Preserve that protection: absent local checkout proves no peer
+absence. Reconcile creation/admission with LOO-414 before stack readiness; no
+policy relaxation or new authority is approved. The October 11 read of LOO-414's
+brief confirms authority identity, repository association, establishment and
+unavailable-owner recovery are undecided. A read-only contribution failed because
+414 has no checkout; no worker was launched. This blocks stack readiness, not
+independent source reduction. 412 still has no landing authority.
 
 Preserve Work-keyed Desktop tabs, content-owned Machine locations, nearest-ancestor
 delegation for unstarted Tasks, recorded-owner admission before checkout preparation,
@@ -336,18 +342,11 @@ single `planning_peers` draft adds that evidence and prose receipts, preserving
 receipt bytes, identities, attempts and sequence high-water marks. Released
 `0.13.11.001_release.sql` remains unchanged; LOO-406 has no draft after `db36f20ba8`.
 
-**The structural acquisition prerequisite is not complete.** The fabricated
-`plan_read` Project and Task views are deleted. `PmSnapshot.projects` and ordinary
-snapshot consumers still expose `LinearProject`; confining these observations and
-removing the second hierarchy remains required before audit sections 1–3 are complete.
-Project export reads canonical Project directly. No replaced type alias remains.
-
-Acquisition tracing: `a849341234` in this plan and
-`f2ca2063b5:scratch/project-acquisition-dependency.md`. Prose proof supersedes that gap,
-not the private-observation requirement. The public canonical
-Project reader cut (`52e7da7f35`) is complete. Remaining snapshot consumers of
-`LinearProject` belong to this acquisition prerequisite, before bindings, ordinary
-follow-ups, cron and the rest of the audit. No partial publication or readiness.
+Private acquisition and retained provider hierarchy conversion remain prerequisites
+for audit sections 1–3. Canonical exports/readers are complete; snapshot ingestion
+still exposes Linear observations. Tracing: `a849341234` in this plan and
+`f2ca2063b5:scratch/project-acquisition-dependency.md`. Prose proof does not satisfy
+that structural boundary or authorize partial publication.
 
 Compression removes the fabricated Git recovery record/value hierarchy: status and
 CLI/Desktop now inspect retained journal mutations directly, with candidate IDs
@@ -392,7 +391,7 @@ Writer transport/causal proofs: `eda4a98097` in this plan.
   cut. Regenerate them after the entire accepted reduction, before review-only
   republication. No readiness or landing follows from this persistence checkpoint.
 
-Checks: `cargo test -p loopflow --lib ownership_` (8), `cargo test -p loopflow --test status_tests` (14, worktree CLI), `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, diff/context checks pass; full gate remains after the complete reduction.
+Checks: LF-cleared `cargo build -p loopflow --bin lf`, `cargo clippy --all-targets -- -D warnings`, `cargo test -p loopflow --lib ops::pm:: -- --test-threads=1` (108 pass; one subprocess entry ignored), affected store/CLI/integration suites with repaired failures rerun, fmt, architecture and diff/context checks pass. Full gate/HTML/republication remain after the audit; earlier ownership checks are retained at `f9f9da7d3a` in this plan.
 
 Context: authored budgets fit. Generated Task context exceeds its 16,000-token
 limit; no authored content or limit change can resolve that overage.

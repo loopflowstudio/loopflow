@@ -924,8 +924,8 @@ runs prove no firing, and old gaps do not keep later telemetry red.
   excluded it in ordinary checkouts and stderr-only conversion hid Git's stdout.
   Shared diagnostics retain both streams or a silent failure's exit status;
   scratch exclusion belongs only to persistent workspaces. Separate-index proofs
-  preserve staged and working bytes. Disposable CLI and tests
-  pass; broader Git verification and installed acceptance remain unproved.
+  preserve staged and working bytes. Disposable CLI and 89 commit/Git/worktree
+  tests pass; full CI and installed acceptance remain unproved.
 - **Desktop gates are headless** (rechecked at `bc6d11661`). `--swift` runs app/model/view checks; `--loopflow` builds app/UI runners. `scripts/test.py --all` excludes the explicit-only `--ui-host` diagnostic. The historical runner hang remains at `bc6d11661:wave/infrastructure/MEMORY.md` under Gotchas; changing the gate proves no repair of that hang. Compile-only and skipped checks prove no interaction behavior.
 - **Wait for `cargo test` to finish:** lib failures skip later targets.
 - **Rust compilation does not validate SQLite column names.** Runtime SQL whose shape depends on a released schema must be shared with a behavior test that prepares and executes it against the materialized migration head. Epoch Work ownership is three exclusive foreign keys (`wave_id`, `project_id`, `task_id`); generic kind/id belongs to explicit routes such as synchronous cross-Work questions, not to Epochs.

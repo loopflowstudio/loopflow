@@ -22,8 +22,8 @@ index. Persistent scratch policy and unrelated staged bytes remain covered.
 Failed staged reads now propagate shared Git errors. The deleted local runners,
 staged-read helpers and duplicate message test need no replacement.
 
-Remaining: gate's broader affected-suite verification and the caller's publication
-step. The shared Git formatter affects callers beyond commit, so the seven focused
-tests do not establish broader Git compatibility. No landing is authorized.
+Remaining: publication for review. Shared Git unit, Git integration and worktree
+suites now pass alongside the commit regressions. Full CI and installed acceptance
+remain unproved. No landing is authorized.
 
-Checks: `cargo test -p loopflow --test commit_tests -- --skip commit_generates_message_when_none` passed (7); `cargo clippy --all-targets -- -D warnings` and `cargo fmt --check` passed; prior disposable branch CLI passed. Agent invocation is excluded from this focused suite; broader suites belong to gate.
+Checks: network-isolated `cargo test -p loopflow --lib git::` passed (43) and `cargo test -p loopflow --test git_tests --test worktree_tests --test commit_tests -- --skip commit_generates_message_when_none` passed (46); prior `cargo clippy --all-targets -- -D warnings`, `cargo fmt --check` and disposable branch CLI passed unchanged. Agent invocation remains excluded; full matrix belongs to CI.

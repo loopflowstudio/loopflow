@@ -42,7 +42,12 @@ Harness stop fixtures exercise current/stale ownership. Existing common close te
 cover foreground exclusion and surviving helpers. These establish no configured
 provider or installed acceptance.
 
-Implementation and review are complete; publication remains. No product decision is open.
+Implementation and review are complete at `f2096ffce`; publication and Linux CI
+remain. The original live-takeover demo and both-death-order acceptance are
+superseded by Jack's stop-and-resume decision, not claimed as passing. Codex's
+handoff remains unchanged apart from the shared close path. No product decision
+is open. Release's distinction between process exit and product outcome also
+applies here: a stopped group proves neither turn completion nor successful resume.
 
 ## Checks
 

@@ -245,8 +245,8 @@ conversation, and publish. Codex live handoff removal belongs to separate work;
 retain its generations, fences and saved connection here. No landing authorized.
 Delete Claude replay and OpenCode relay/recovery preparation, including the shared
 named-lifeline rewrite. Preserve exact stop, foreground exclusion, native history
-and uncertain turns. Public stop/resume and frozen-authority fixtures pass;
-Linux, configured and installed acceptance remain unproved.
+and uncertain turns. `f2096ffce`'s public stop/resume and frozen-authority fixtures
+pass; publication and Linux CI remain. Configured/installed acceptance is unproved.
 Prior live-takeover evidence: `5e95ce9a4:wave/infrastructure/MEMORY.md`, this heading.
 Plan: `scratch/stop-and-take-over-claude.md`.
 

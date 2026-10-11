@@ -478,8 +478,7 @@ final class WorkModel {
               let url = TaskLink(issue: found.task.task.identifier, repo: found.wave.wave.repo).url else { return }
         let key = workspaceKey(for: .task(id: id), repository: workspaceRepository ?? "")
         let retainedConversation = workspaceRegistry?.retained(key)?.multiplexer.layout.allPanes.contains {
-            if case .session = $0.content { return true }
-            return false
+            $0.sessionId != nil
         } ?? false
         if !retainedConversation, taskOpening?.status == .opening,
            taskLinkExpectedID == found.task.id, taskLinkConversation { return }

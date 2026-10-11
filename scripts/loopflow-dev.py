@@ -301,12 +301,9 @@ def cmd_ghostty_build() -> int:
 def cmd_run() -> int:
     """Build and launch the app."""
     print("Building and running Loopflow...")
-    result = run(["swift", "build"], cwd=SWIFT_DIR, check=False)
-    if result.returncode != 0:
-        return result.returncode
-
-    _stop_loopflow_app(DEV_APP)
-    _install_dev_app()
+    result = cmd_install()
+    if result != 0:
+        return result
     if not _check_repository_opening(REPO_ROOT):
         return 1
     # Tell the app which checkout initiated the launch. Repository discovery
@@ -364,12 +361,9 @@ def _print_run_debug_checklist() -> None:
 def cmd_run_debug(repo: Path = REPO_ROOT) -> int:
     """Build and run with stdout visible. `repo` is the repo the app opens."""
     print("Building and running Loopflow (debug mode with logs)...")
-    result = run(["swift", "build"], cwd=SWIFT_DIR, check=False)
-    if result.returncode != 0:
-        return result.returncode
-
-    _stop_loopflow_app(DEV_APP)
-    _install_dev_app()
+    result = cmd_install()
+    if result != 0:
+        return result
     if not _check_repository_opening(repo):
         return 1
     print("Logs: ~/Library/Logs/Loopflow/")

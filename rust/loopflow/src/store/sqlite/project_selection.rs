@@ -6,8 +6,8 @@ use super::SqliteStore;
 use crate::durable::ProjectId;
 use crate::id::WaveId;
 use crate::planning_exchange::PlanningKind;
-use crate::pm::PmProject;
 use crate::store::{PlanningLocks, StoreError, StoreResult};
+use crate::work::project::Project;
 
 pub(super) fn read_in(conn: &Connection, wave: &WaveId) -> StoreResult<Option<String>> {
     Ok(conn.query_row(
@@ -101,14 +101,14 @@ pub(crate) fn write_project_binding(
 }
 
 impl SqliteStore {
-    pub(crate) fn bind_project(&self, wave: &WaveId, project: &str) -> StoreResult<PmProject> {
+    pub(crate) fn bind_project(&self, wave: &WaveId, project: &str) -> StoreResult<Project> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let project = bind_in(&tx, wave, project)?;
-        let candidate = super::plan_read::project_in(&tx, &project)?;
+        let candidate = super::children::project_in(&tx, &project)?;
         let competing: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM project_transitions WHERE wave_id=?1 AND settled_at IS NULL
             AND (successor_id NOT IN (?2,?3) OR predecessor_id IS NOT NULL OR reset_name IS NOT NULL))",
-            params![wave,project.as_str(),candidate.id],|row|row.get(0))?;
+            params![wave,project.as_str(),candidate.linear_id.as_ref().map(|id| id.as_str()).unwrap_or(project.as_str())],|row|row.get(0))?;
         if competing {
             return Err(StoreError::InvalidAuthority(
                 "an unfinished Project transition owns selection".into(),
@@ -195,7 +195,7 @@ impl SqliteStore {
             }
         };
         let id = ProjectId::from_raw(id);
-        let project = super::plan_read::project_in(&tx, &id)?;
+        let project = super::children::project_in(&tx, &id)?;
         if !matches!(
             project.status,
             crate::work::project::ProjectStatus::Backlog
@@ -312,10 +312,7 @@ pub struct ProjectActivation {
 }
 
 impl SqliteStore {
-    pub(crate) fn selected_planning_project(
-        &self,
-        wave: &WaveId,
-    ) -> StoreResult<Option<PmProject>> {
+    pub(crate) fn selected_project(&self, wave: &WaveId) -> StoreResult<Option<Project>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.unchecked_transaction()?;
         let readiness = readiness_in(&tx, wave)?;
@@ -333,7 +330,7 @@ impl SqliteStore {
             [wave],
             |row| row.get(0),
         )?;
-        let project = super::plan_read::project_in(&tx, &ProjectId::from_raw(id))?;
+        let project = super::children::project_in(&tx, &ProjectId::from_raw(id))?;
         tx.commit()?;
         Ok(Some(project))
     }
@@ -349,7 +346,7 @@ impl SqliteStore {
 // supply an accepted entity without claiming a complete provider membership list.
 fn readiness_in(conn: &Connection, wave: &WaveId) -> StoreResult<ProjectReadiness> {
     Ok(conn.query_row(
-            "SELECT COALESCE(p.external_project_id,p.id), p.pm_snapshot_synced_at,
+            "SELECT p.id, p.pm_snapshot_synced_at,
              CASE WHEN w.current_project_id IS NULL THEN 'unconfigured'
                   WHEN p.id IS NULL OR p.project_name IS NULL OR p.project_slug IS NULL OR p.description IS NULL THEN 'unavailable'
                   WHEN f.id IS NOT NULL AND NOT json_valid(f.body) THEN 'unavailable'
@@ -430,7 +427,7 @@ mod tests {
         );
         assert_eq!(store.revisions().unwrap(), before);
         assert_eq!(store.pending_project_changes(&id).unwrap(), changes);
-        assert_eq!(store.planning_project(&id).unwrap().name, "Later edit");
+        assert_eq!(store.project(&id).unwrap().unwrap().name, "Later edit");
         let receipt: (String,bool) = store.conn.lock().unwrap().query_row("SELECT successor_id,settled_at IS NOT NULL FROM project_transitions WHERE wave_id=?1",[wave.id()],|row|Ok((row.get(0)?,row.get(1)?))).unwrap();
         assert_eq!(receipt, (reserved.into(), true));
         assert!(store.project(&id).unwrap().unwrap().linear_id.is_none());

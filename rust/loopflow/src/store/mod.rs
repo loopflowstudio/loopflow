@@ -1767,10 +1767,6 @@ mod tests {
             let wave_plan = store.sqlite.planning_wave(wave.id()).unwrap();
             assert_eq!(wave_plan.items, vec![record.item]);
             assert_eq!(wave_plan.projects, snapshot.snapshot.projects);
-            assert_eq!(
-                store.sqlite.planning_projects(wave.id()).unwrap(),
-                snapshot.snapshot.projects
-            );
         }
     }
 
@@ -1793,15 +1789,16 @@ mod tests {
                 .sqlite
                 .update_project_content(&project.id, "saved-workflow", &krs, &[])
                 .unwrap();
-            let mut expected = snapshot.snapshot.projects[0].clone();
-            expected.workflow = "saved-workflow".into();
-            expected.krs = krs;
+            let mut expected = store.get_project(&project.id).await.unwrap().unwrap();
+            assert_eq!(expected.workflow, "saved-workflow");
+            assert_eq!(expected.krs, krs);
             // The provider body still contains the previous content.
             assert_eq!(
                 crate::ops::project::current_project(&store, &wave).unwrap(),
                 expected
             );
             let conn = rusqlite::Connection::open(directory.path().join("registry.db")).unwrap();
+            conn.execute("DELETE FROM pm_wave_projects", []).unwrap();
             conn.execute("DELETE FROM pm_projects", []).unwrap();
             if !mapped {
                 conn.execute(
@@ -1809,7 +1806,7 @@ mod tests {
                     [project.id.as_str()],
                 )
                 .unwrap();
-                expected.id = project.id.to_string();
+                expected.linear_id = None;
             }
             for (status, readiness) in [
                 (
@@ -1832,7 +1829,7 @@ mod tests {
                 .unwrap();
                 expected.status = status;
                 assert_eq!(
-                    store.sqlite.selected_planning_project(wave.id()).unwrap(),
+                    store.sqlite.selected_project(wave.id()).unwrap(),
                     Some(expected.clone())
                 );
                 let observed = store.sqlite.project_readiness(wave.id()).unwrap();
@@ -1854,7 +1851,6 @@ mod tests {
             "UPDATE pm_projects SET membership_unresolved=1",
             "UPDATE pm_projects SET body='malformed'",
             "UPDATE pm_projects SET observed_at=18",
-            "DELETE FROM pm_wave_projects",
             "UPDATE pm_wave_sync SET initiative='different-initiative'",
         ] {
             let (directory, store, wave) = planning_store().await;
@@ -1864,6 +1860,7 @@ mod tests {
             let task = make_task(&wave, &project);
             let snapshot = task_planning_snapshot(&wave, &project, &task);
             store.put_pm_snapshot(snapshot.clone(), None).await.unwrap();
+            let saved = store.get_project(&project.id).await.unwrap().unwrap();
             rusqlite::Connection::open(directory.path().join("registry.db"))
                 .unwrap()
                 .execute_batch(change)
@@ -1877,10 +1874,7 @@ mod tests {
                 crate::store::sqlite::ProjectReadinessState::Unavailable,
                 "{change}"
             );
-            assert_eq!(
-                store.sqlite.planning_projects(wave.id()).unwrap(),
-                snapshot.snapshot.projects
-            );
+            assert_eq!(store.get_project(&project.id).await.unwrap(), Some(saved));
         }
     }
 

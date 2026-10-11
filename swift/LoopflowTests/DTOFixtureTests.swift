@@ -338,7 +338,7 @@ struct DTOFixtureTests {
 
 
         #expect(detail.currentProject?.workflow == "task-design")
-        #expect(detail.currentProject?.sync?.changes[1].field == "task_order")
+        #expect(detail.currentProject?.sync.changes[1].field == "task_order")
         #expect(detail.unavailableTasks[0].taskIdentifier == "W2-127")
         #expect(detail.unavailableTasks[0].status == .ready)
         #expect(detail.unavailableTasks[0].owner == .wave)

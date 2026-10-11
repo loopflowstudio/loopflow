@@ -146,10 +146,7 @@ fn wave_detail_preserves_flow_and_machine() {
     else {
         panic!("missing Projects")
     };
-    assert_eq!(
-        projects[0].sync.as_ref().unwrap().changes[1].field,
-        "task_order"
-    );
+    assert_eq!(projects[0].sync.changes[1].field, "task_order");
     let Evidence::Ok { items: tasks, .. } = &snapshot.tasks else {
         panic!("missing Tasks")
     };

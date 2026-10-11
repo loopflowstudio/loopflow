@@ -501,10 +501,17 @@ async fn project_workflow_uses_stored_definition_offline() {
                 crate::ops::project::workflow(&repo, "project-1", Some("code"), Some(&source))
                     .await
                     .unwrap();
-            assert_eq!(selected.project.workflow, "code");
-            assert_eq!(selected.project.id, "project-1");
-            assert_eq!(selected.project.initiative_ids, ["initiative-1"]);
-            assert_eq!(selected.project.team_ids, ["team-1"]);
+            assert_eq!(selected.0.workflow, "code");
+            assert_eq!(selected.0.linear_id.as_ref().unwrap().as_str(), "project-1");
+            assert_eq!(
+                selected.0,
+                fixture
+                    .store
+                    .get_project(&selected.0.id)
+                    .await
+                    .unwrap()
+                    .unwrap()
+            );
             std::fs::remove_file(&source).unwrap();
             assert_eq!(
                 crate::ops::project::workflow_source(&repo, "project-1", "code")
@@ -3433,7 +3440,8 @@ fn planning_fields_older_acknowledgement_preserves_and_delivers_newer_save() {
                         fixture
                             .store
                             .sqlite
-                            .planning_project(&task.project_id)
+                            .project(&task.project_id)
+                            .unwrap()
                             .unwrap()
                             .name,
                         "Newer save"
@@ -3718,15 +3726,11 @@ fn planning_fields_deliver_project_activation_and_task_membership_without_execut
                 state.lock().await.project_fields.as_ref().unwrap()["status"]["type"],
                 "started"
             );
-            let mut destination = fixture
-                .store
-                .sqlite
-                .planning_project(&task.project_id)
-                .unwrap();
-            destination.id = "project-2".into();
-            destination.name = "Next chapter".into();
-            destination.slug = "next-chapter".into();
-            destination.revision = Some("2026-09-30T12:00:00Z".into());
+            let destination = serde_json::from_value(json!({
+                "id": "project-2", "slug": "next-chapter", "name": "Next chapter", "summary": "",
+                "revision": "2026-09-30T12:00:00Z", "metric_targets": [], "workflow": "feature",
+                "status": "started", "krs": [], "initiative_ids": ["initiative-1"], "team_ids": ["team-1"]
+            })).unwrap();
             state
                 .lock()
                 .await
@@ -4080,7 +4084,8 @@ fn planning_export_late_readback_preserves_newer_edits_and_inventory_identity() 
             fixture
                 .store
                 .sqlite
-                .planning_project(&task.project_id)
+                .project(&task.project_id)
+                .unwrap()
                 .unwrap()
                 .name,
             "Later chapter"

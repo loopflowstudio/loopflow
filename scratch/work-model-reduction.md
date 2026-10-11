@@ -64,10 +64,13 @@ in-place Markdown preservation are separate proofs, not end-to-end prose acquisi
 
 ## 2. Delete the second local reading stack
 
-**Remove:** `store/sqlite/plan_read.rs`'s reconstruction of `PmProject`, `PmItem`
-and `PmWave`; `ops/project.rs::ProjectPlanning` and its reread of a Project through
-`planning_project`; redundant public list/get methods after callers use canonical
-Work readers. `PmTaskRecord` / `PmTaskObservation` must cease being alternate Task
+**Removed:** `ops/project.rs::ProjectPlanning`, public `planning_project(s)` reads,
+and the Wave/roadmap Project inventory join. Selection, edit/workflow, rotation and
+CLI/Desktop Project summaries use canonical Work and explicit Linear bindings.
+The canonical list preserves shared rank rather than edit-time order.
+
+**Remaining:** `store/sqlite/plan_read.rs` reconstructs `PmProject`/`PmItem` for
+Task observations and `planning_wave`. Delete these with their surviving consumers. `PmTaskRecord` / `PmTaskObservation` must cease being alternate Task
 read results, including the embedded Project clone inside a Task observation.
 
 **Evidence:** `project_in` still rebuilds a PM-shaped Project from typed columns;
@@ -255,12 +258,11 @@ local; there is one configured transport and no fallback transport or resident.
 
 ## 12. Remove dual-identity joins from CLI and Desktop
 
-**Rust:** `lf/commands/waves.rs::{PmTaskSummary,ProjectSummary,project_planning}`,
-`ops/project.rs::ProjectPlanning`, Task status/detail readers, Work frame projections.
-The Wave reader joins registered Projects with observed Projects using either
-local ID or Linear ID; `ProjectSummary` exposes optional `work_id` beside `id`.
-Read canonical Work once and attach delivery/availability information. Remove the
-join and optional second identity once every case has a canonical owner.
+**Rust:** ProjectSummary now reads canonical Projects once, has no optional
+`work_id`, and requires sync evidence. CLI and Swift select local identity with
+an explicit optional `linear_id` binding. Project operations and rotation return
+canonical Work. Remaining: `PmTaskSummary`, Task status/detail readers and Work
+frame Task projections; remove their alternate identity/read paths end to end.
 
 **Swift (under `swift/`):** `Models/WaveWorkMap.swift`'s Project/Task planning
 snapshots and `PlanningKeyResult`; `Models/WavePlan.swift`, `PlanningSync.swift`,

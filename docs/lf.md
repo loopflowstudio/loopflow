@@ -205,7 +205,9 @@ lf wave update-plan --wave parser --plan /tmp/plan.json
 Project names, summaries, Workflow selections and complete plan replacements save
 locally, including during a Linear outage. Connected repositories report pending sync;
 `lf project workflow show <project-id> --json` includes `sync`: pending changes,
-uncertain attempts, errors and retained losing values. Task edits and status use
+uncertain attempts, errors and retained losing values. Project reads keep the local
+`id` in both transports, with an optional `linear_id` binding; adding or removing
+that binding does not change identity. Task edits and status use
 the same receipt-backed presentation as Desktop.
 Inbound refreshes preserve saves against unchanged baselines and adopt conflicting
 Linear edits, retaining losing intentions in delivery history. An active Task Session

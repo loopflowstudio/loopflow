@@ -182,23 +182,38 @@ still refuse. The public edit fixture exposed a raw-SQL selection inconsistent
 with its journal; fixture setup now uses ordinary binding, not a production bypass.
 This is only the Project input boundary, not the full reader cut.
 
-Reconciled against `41378adacf` on October 10: the Project input/persistence cut
-is complete, not the ordinary reader or Linear acquisition cut. `PmProject` still
-has no authored description; `project_accepted_planning` projects its criteria and
-summary but supplies no `ProjectDescription` edit. Boundary-aware Linear Markdown
-replacement preserves provider prose; it does not make that prose locally readable.
-The next Project cut needs canonical reads and explicit acquisition of authored
-prose, with partial responses preserving omissions and pending edits retaining
-baselines. Renaming `PmProject` cannot supply the missing field or delete the
-`plan_read.rs` identity-changing `COALESCE` joins.
+October 10 canonical-reader cut: selection, ensure/bind, Project edit/workflow,
+rotation results and Wave/roadmap summaries now use the canonical Project reader.
+`ProjectPlanning` and the public `planning_project(s)` reads are deleted. The
+CLI/Desktop summary no longer joins two Project inventories or exposes `work_id`;
+`id` is local, `linear_id` is the optional binding, and sync is required evidence.
+Readiness also returns local identity. The surviving reader orders by shared rank,
+creation time and ID rather than edit time. Provider adapters compare explicit
+bindings. Rotation retains original receipt bytes and local execution is unchanged.
 
-The earlier pass still includes Project readers/acquisition, concrete Linear
-bindings, FollowThrough replacement and cron unification. The full deletion audit
-then removes remaining provider hierarchy, whole-model patching, duplicate
-edit/journal vocabularies and CLI/Desktop projections. Each cut includes its
-consumers and preservation proof. Conditional retention needs a named retained
-fact, owner and populated conversion test; it is not an exemption from the audit.
-No partial publication or review-readiness claim follows from this checkpoint.
+Linear description acquisition is still missing: `PmProject` lacks authored
+prose and `project_accepted_planning` emits no `ProjectDescription` edit. Local
+prose reading and boundary-aware provider Markdown replacement prove neither
+inbound prose nor partial-observation handling. The remaining `plan_read.rs`
+projection is internal to Task observations and `planning_wave`; removing it belongs
+to the canonical Task/snapshot cut, not another public Project read wrapper.
+Acquisition must preserve omitted fields and pending baselines through typed edits.
+
+The earlier pass still includes acquisition, concrete Linear bindings, ordinary
+Task/comment follow-ups and cron unification. The full deletion audit then removes
+remaining provider hierarchy, whole-model patching, duplicate edit/journal
+vocabularies and Task projections. Conditional retention requires a concrete fact,
+owner and populated conversion proof. No partial publication or readiness follows.
+
+Review found edit-time ordering would reshuffle the replacement Project list;
+the canonical reader now owns shared order and the passing public Wave/roadmap
+regression covers two Projects whose shared rank disagrees with update time,
+then edits one without reordering either. It also checks local IDs, explicit
+Linear bindings and required sync evidence. The independent static finding is
+resolved here; its original text is retained at `/tmp/loo412-project-reader-review.md`. The old invalidation fixture also treated missing inventory
+membership as deletion, contrary to the surviving reader and omission contract.
+Its coverage now distinguishes missing inventory (retain saved Work) from positive
+archive, invalidation, contradictory relation and observation-age evidence.
 
 Cron conversion must retain the installed owner independently of file location.
 Release's October 5 memory records both jobs installed under Infrastructure,
@@ -229,13 +244,14 @@ Earlier baseline detail: `c8fe4628a:scratch/work-on-another-machine-name.md`.
   cut. Regenerate them after the entire accepted reduction, before review-only
   republication. No readiness or landing follows from this persistence checkpoint.
 
-Checks: `cargo test -p loopflow --lib {project_content,project_markdown_,stored_workflows_use_the_same_owner}` and `--test local_planning {rotation,project_edits_save_offline_in_both_connection_modes}` pass (filters run separately); `cargo fmt --check`, `cargo build -p loopflow --bin lf`, and `cargo clippy --all-targets -- -D warnings` pass. Gate owns affected/materialized/Swift verification; prose-only realignment: `git diff --check` passes, no product suites rerun.
+Checks: `cargo build -p loopflow --bin lf`, focused lib selection/stored-workflow and `local_planning` Project/order/rotation tests, `dto_fixtures wave`, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and headless Swift `--filter 'DTOFixtureTests|WorkModelTests|RegistryQueryTests'` pass (65 Swift tests); gate retains the affected/materialized matrix.
 
-Context: authored memory/scratch fit. `lf context --skill realign` reports the
-generated Task seed and retained steers at approximately 18,887 tokens, 2,887 over its 16,000 limit.
-The complete launch source and manifest were inspected. Trimming authored notes
-cannot reduce that separate source; historical direction is preserved rather than
-rewritten to conceal the overage.
+Context: authored memory/scratch fit. The generated Task seed/steers remain a
+separate over-budget source (19,523 tokens, 3,523 over on the October 10 query).
+Its complete decision text and manifest were inspected at
+`.lf/tmp/context/6b60a500c477acf7b267bec95a8fce724c619d83866109ad12228ce43c8d2ac0.md`.
+Authored-note trimming cannot reduce that generated source; no historical direction
+or configured limit is rewritten to conceal it.
 
 ## Delete — do not maintain
 

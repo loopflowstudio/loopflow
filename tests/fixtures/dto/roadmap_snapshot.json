@@ -908,7 +908,7 @@
             "task": {
               "id": "issue-later",
               "identifier": "W2-141",
-              "name": "Now + Available work views — research",
+              "name": "Now + Available work views \u2014 research",
               "description": "Research delivered in merged PR.",
               "rank": 0,
               "completed": true,
@@ -1001,8 +1001,7 @@
         "state": "ok",
         "items": [
           {
-            "id": "project-1",
-            "work_id": "proj-chapter-current",
+            "id": "proj-chapter-current",
             "slug": "loopflow-api",
             "name": "current",
             "workflow": "feature",
@@ -1023,14 +1022,18 @@
                 "holds": false
               }
             ],
-            "sync": null
+            "sync": {
+              "connected": false,
+              "changes": []
+            },
+            "linear_id": "project-1"
           }
         ],
         "truncated": false
       },
       "project_readiness": {
         "state": "ready",
-        "project_id": "project-1",
+        "project_id": "proj-chapter-current",
         "observed_at": null,
         "pending_successor": null,
         "activation": null

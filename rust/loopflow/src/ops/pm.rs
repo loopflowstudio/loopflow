@@ -2725,7 +2725,11 @@ pub(crate) async fn chapter_sweep_candidates(repo: &Path) -> OpsResult<ChapterSw
                 continue;
             }
             validate_project_ownership(&project, &name, &ctx.initiative, &ctx.team_id)?;
-            if project.id == chapter.id {
+            if chapter
+                .linear_id
+                .as_ref()
+                .is_some_and(|id| id.as_str() == project.id)
+            {
                 continue;
             }
             for item in ctx
@@ -2772,7 +2776,10 @@ pub(crate) async fn require_outside_current_chapter(
         .map_err(|error| OpsError::Message(error.to_string()))?
         .ok_or_else(|| OpsError::Message("current Wave is unavailable".into()))?;
     let chapter = super::project::current_project(&store, &wave)?;
-    if resolved.item.project_id.as_deref() == Some(chapter.id.as_str())
+    if chapter
+        .linear_id
+        .as_ref()
+        .is_some_and(|id| resolved.item.project_id.as_deref() == Some(id.as_str()))
         || resolved.item.completed
         || matches!(
             resolved.item.state.as_deref(),

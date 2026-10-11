@@ -631,11 +631,12 @@ Git. Outages buffer locally without fallback or publisher election. One typed
 writer owns local/imported fields; execution and attempts stay local. Preserve Git
 causality, losers and uncertain effects. Gate/installation remain unproved.
 
-Jack accepted the entire One Work audit: direct fields, Linear boundaries,
-typed criteria/comments, Tasks/comments replacing FollowThrough and one cron list.
-Conditional retention needs evidence; partial reduction is not review-ready. `41378adacf` removes public ProjectContent;
-PM readers/acquisition remain. Stored/Git prose and Linear Markdown preservation do not prove acquisition:
-`PmProject` lacks description.
+Jack accepted the One Work audit: direct fields, Linear boundaries, typed
+criteria/comments, Tasks/comments replacing FollowThrough and one cron list.
+Conditional retention needs evidence; partial reduction is not review-ready.
+Canonical Project operations/rotation and CLI/Desktop retain local IDs, Linear
+bindings and shared rank, not edit-time order. Provider/Task projections remain;
+`PmProject` lacks description acquisition.
 
 Release's memory requires cron conversion to preserve installed ownership and
 operation failure exits, independently of authored location.

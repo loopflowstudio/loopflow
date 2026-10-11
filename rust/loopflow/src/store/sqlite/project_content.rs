@@ -202,7 +202,7 @@ mod tests {
                 "nodes: {}\nedges: [{from: start, to: end}]\n"
             )
             .is_err());
-        let read = store.planning_project(&project).unwrap();
+        let read = store.project(&project).unwrap().unwrap();
         assert_eq!(read.name, "Original");
         assert_eq!(read.summary, "");
         assert_eq!(read.workflow, "");

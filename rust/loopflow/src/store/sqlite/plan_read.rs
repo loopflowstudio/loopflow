@@ -19,19 +19,6 @@ impl SqliteStore {
         Ok(result)
     }
 
-    pub(crate) fn planning_project(&self, id: &ProjectId) -> StoreResult<PmProject> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        project_in(&conn, id)
-    }
-
-    pub(crate) fn planning_projects(&self, wave: &WaveId) -> StoreResult<Vec<PmProject>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.unchecked_transaction()?;
-        let projects = projects_in(&tx, wave)?;
-        tx.commit()?;
-        Ok(projects)
-    }
-
     pub(crate) fn planning_wave(&self, wave: &WaveId) -> StoreResult<PmSnapshot> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.unchecked_transaction()?;

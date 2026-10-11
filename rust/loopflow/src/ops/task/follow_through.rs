@@ -67,12 +67,7 @@ pub fn task_follow_up(repo: &Path, issue: &str, options: &FollowUpOptions) -> Op
                 .await
                 .map_err(task_error)?
                 .ok_or_else(|| task_error("destination Wave is not initialized"))?;
-            let selected = crate::ops::project::current_project(&store, &wave)?;
-            let project = store
-                .get_project_by_project(&selected.id)
-                .await
-                .map_err(task_error)?
-                .ok_or_else(|| task_error("follow-up destination Project is unavailable"))?;
+            let project = crate::ops::project::current_project(&store, &wave)?;
             let (issue_id, title, existing) = if let Some(selector) = &options.existing {
                 let saved = crate::ops::pm::resolve_saved_task(repo, None, selector)
                     .await?

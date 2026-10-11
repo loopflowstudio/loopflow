@@ -18,10 +18,10 @@ public enum ProjectStatus: String, Decodable, Sendable, Hashable {
 }
 
 public struct ProjectPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable {
-    public let sync: PlanningSyncStatus?
+    public let sync: PlanningSyncStatus
     public let current: Bool
     public let id: String
-    public let workId: String?
+    public let linearId: String?
     public let slug: String
     public let name: String
     public let workflow: String
@@ -31,7 +31,7 @@ public struct ProjectPlanningSnapshot: Decodable, Sendable, Identifiable, Hashab
 
     enum CodingKeys: String, CodingKey {
         case id, slug, name, workflow, status, krs, current, sync
-        case workId = "work_id"
+        case linearId = "linear_id"
         case metricTargets = "metric_targets"
     }
 }

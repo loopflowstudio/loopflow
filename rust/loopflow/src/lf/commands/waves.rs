@@ -393,10 +393,10 @@ pub struct WaveRoadmap {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectSummary {
-    pub sync: Option<crate::planning::PlanningSyncStatus>,
+    pub sync: crate::planning::PlanningSyncStatus,
     pub current: bool,
     pub id: String,
-    pub work_id: Option<String>,
+    pub linear_id: Option<String>,
     pub slug: String,
     pub name: String,
     pub workflow: String,
@@ -407,29 +407,25 @@ pub struct ProjectSummary {
 
 async fn project_planning(store: &SharedStore, wave: &Wave) -> Evidence<ProjectSummary> {
     let result = async {
-        let registered = store.list_projects(Some(wave.id())).await?;
-        let observed = store.sqlite.planning_projects(wave.id())?;
+        let projects = store.list_projects(Some(wave.id())).await?;
         let current = crate::store::sqlite::project_selection::read_project_binding(
             &store.sqlite,
             wave.id(),
         )?;
-        let projects = observed
+        let projects = projects
             .into_iter()
             .map(|project| -> Result<ProjectSummary> {
-                let work = registered.iter().find(|work| {
-                    work.id.as_str() == project.id
-                        || work
-                            .linear_id
-                            .as_ref()
-                            .is_some_and(|id| id.as_str() == project.id)
-                });
                 Ok(ProjectSummary {
-                    sync: work
-                        .map(|work| store.sqlite.project_planning_sync(&work.id))
-                        .transpose()?,
-                    current: current.as_deref() == Some(project.id.as_str()),
-                    work_id: work.map(|work| work.id.to_string()),
-                    id: project.id,
+                    sync: store.sqlite.project_planning_sync(&project.id)?,
+                    current: current.as_deref().is_some_and(|id| {
+                        id == project.id.as_str()
+                            || project
+                                .linear_id
+                                .as_ref()
+                                .is_some_and(|linear| linear.as_str() == id)
+                    }),
+                    linear_id: project.linear_id.map(|id| id.as_str().to_owned()),
+                    id: project.id.to_string(),
                     slug: project.slug,
                     name: project.name,
                     workflow: project.workflow,
@@ -454,10 +450,8 @@ fn print_projects(projects: &Evidence<ProjectSummary>) {
                     "  project   {} ({}) · workflow {}",
                     project.name, project.id, project.workflow
                 );
-                if let Some(sync) = &project.sync {
-                    for line in sync.lines() {
-                        println!("    {line}");
-                    }
+                for line in project.sync.lines() {
+                    println!("    {line}");
                 }
                 for kr in &project.krs {
                     println!("  [{}] {}", if kr.holds { "x" } else { " " }, kr.text);
@@ -2876,7 +2870,7 @@ mod tests {
         let before = store.pm_snapshot(wave.id()).await.unwrap().unwrap();
         for _ in 0..2 {
             let current = crate::ops::project::current_project(&store, &wave).unwrap();
-            assert_eq!(current.id, selected);
+            assert_eq!(current.linear_id.as_ref().unwrap().as_str(), selected);
             assert!(current.workflow.is_empty());
             let super::Evidence::Ok {
                 items: projects, ..
@@ -2891,7 +2885,7 @@ mod tests {
                     .filter(|p| p.current)
                     .map(|p| p.id.as_str())
                     .collect::<Vec<_>>(),
-                vec![selected]
+                vec![current.id.as_str()]
             );
             let tasks = super::wave_tasks(
                 &store,

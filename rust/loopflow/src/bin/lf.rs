@@ -867,14 +867,14 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
                 metric_targets: Vec<loopflow::work::wave::metrics::MetricTarget>,
             }
             let input: Input = serde_json::from_slice(&std::fs::read(plan)?)?;
-            let saved = tokio::runtime::Runtime::new()?.block_on(update_plan(
+            let (_, sync) = tokio::runtime::Runtime::new()?.block_on(update_plan(
                 repo,
                 wave.as_deref(),
                 &input.workflow,
                 &input.krs,
                 &input.metric_targets,
             ))?;
-            print_planning_sync(&saved.sync);
+            print_planning_sync(&sync);
             Ok(())
         }
     }
@@ -1899,13 +1899,10 @@ fn execute_command(
         }) => {
             let cwd = std::env::current_dir()?;
             let repo = loopflow::repo::discover_repo_root(&cwd)?.unwrap_or(cwd);
-            let saved = tokio::runtime::Runtime::new()?.block_on(loopflow::ops::project::edit(
-                &repo,
-                project,
-                name.as_deref(),
-                summary.as_deref(),
-            ))?;
-            print_planning_sync(&saved.sync);
+            let (_, sync) = tokio::runtime::Runtime::new()?.block_on(
+                loopflow::ops::project::edit(&repo, project, name.as_deref(), summary.as_deref()),
+            )?;
+            print_planning_sync(&sync);
             Ok(())
         }
         Some(Commands::Project {
@@ -1942,16 +1939,15 @@ fn execute_command(
                     Ok(())
                 }
                 loopflow::lf::ProjectWorkflowCommand::Show { project, json } => {
-                    let selected = tokio::runtime::Runtime::new()?
+                    let (project, sync) = tokio::runtime::Runtime::new()?
                         .block_on(loopflow::ops::project::workflow(&repo, project, None, None))?;
                     if *json {
-                        println!("{}", serde_json::to_string_pretty(&selected)?);
+                        let mut value = serde_json::to_value(project)?;
+                        value["sync"] = serde_json::to_value(sync)?;
+                        println!("{}", serde_json::to_string_pretty(&value)?);
                     } else {
-                        println!(
-                            "{} · Workflow {}",
-                            selected.project.name, selected.project.workflow
-                        );
-                        print_planning_sync(&selected.sync);
+                        println!("{} · Workflow {}", project.name, project.workflow);
+                        print_planning_sync(&sync);
                     }
                     Ok(())
                 }
@@ -1960,7 +1956,7 @@ fn execute_command(
                     name,
                     file,
                 } => with_runtime(&repo, args, || {
-                    let saved = tokio::runtime::Runtime::new()?.block_on(
+                    let (_, sync) = tokio::runtime::Runtime::new()?.block_on(
                         loopflow::ops::project::workflow(
                             &repo,
                             project,
@@ -1969,7 +1965,7 @@ fn execute_command(
                         ),
                     )?;
                     println!("Project {project}: Workflow {name}");
-                    print_planning_sync(&saved.sync);
+                    print_planning_sync(&sync);
                     Ok(())
                 }),
             }

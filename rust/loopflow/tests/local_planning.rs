@@ -1146,11 +1146,13 @@ fn project_creation_binding_and_activation_save_offline() {
             );
             assert_eq!(store.pending_project_changes(&id).unwrap(), changes);
             if mapped {
-                let mut incoming: loopflow::pm::PmProject = serde_json::from_value(active).unwrap();
-                incoming.status = loopflow::work::project::ProjectStatus::Completed;
-                incoming.revision = Some("2026-10-08T11:00:00Z".into());
-                incoming.initiative_ids = vec!["initiative".into()];
-                incoming.team_ids = vec!["fixture-team".into()];
+                let incoming = serde_json::from_value(serde_json::json!({
+                    "id": provider, "slug": active["slug"], "name": "Authored name",
+                    "summary": "Retain summary", "workflow": "feature", "krs": active["krs"],
+                    "metric_targets": [], "status": "completed", "revision": "2026-10-08T11:00:00Z",
+                    "initiative_ids": ["initiative"], "team_ids": ["fixture-team"]
+                }))
+                .unwrap();
                 store
                     .put_pm_project(wave.id(), "linear", "initiative", &incoming, 20)
                     .unwrap();
@@ -1231,6 +1233,115 @@ fn project_creation_binding_and_activation_save_offline() {
 }
 
 #[test]
+fn project_reads_keep_canonical_identity_and_authored_order_after_edits() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let store =
+        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let canonical = loopflow::repository::CanonicalRepo::discover(repo.path()).unwrap();
+    let wave = loopflow::work::wave::Wave::new(
+        loopflow::id::WaveId::new(),
+        "product".into(),
+        canonical.to_string(),
+    );
+    store.create_wave(&wave).unwrap();
+    let projects = ["first", "second"]
+        .into_iter()
+        .map(|name| {
+            serde_json::from_value(serde_json::json!({
+                "id": format!("linear-{name}"), "slug": name, "name": name,
+                "summary": "", "revision": null, "status": "started", "workflow": "",
+                "krs": [], "metric_targets": [], "initiative_ids": ["initiative"],
+                "team_ids": ["team"]
+            }))
+            .unwrap()
+        })
+        .collect();
+    store
+        .put_pm_snapshot(&loopflow::store::PmSnapshotRow {
+            wave_id: wave.id().clone(),
+            provider: "linear".into(),
+            initiative: "initiative".into(),
+            synced_at: 17,
+            snapshot: loopflow::pm::PmSnapshot {
+                projects,
+                items: Vec::new(),
+            },
+        })
+        .unwrap();
+    let projects = store.list_projects(Some(wave.id())).unwrap();
+    assert_eq!(
+        projects.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
+        ["first", "second"]
+    );
+    lf(
+        repo.path(),
+        home.path(),
+        &[
+            "wave",
+            "bind-project",
+            "product",
+            projects[0].id.as_str(),
+            "--json",
+        ],
+    );
+    // Make recency disagree with the shared order before and after an ordinary edit.
+    let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    conn.execute(
+        "UPDATE projects SET updated_at=1 WHERE id=?1",
+        [projects[0].id.as_str()],
+    )
+    .unwrap();
+    for edited in [false, true] {
+        if edited {
+            lf(
+                repo.path(),
+                home.path(),
+                &[
+                    "project",
+                    "edit",
+                    projects[1].id.as_str(),
+                    "--name",
+                    "Edited",
+                ],
+            );
+        }
+        let status = lf(
+            repo.path(),
+            home.path(),
+            &["wave", "status", "product", "--json"],
+        );
+        let roadmap = lf(
+            repo.path(),
+            home.path(),
+            &["roadmap", "--wave", "product", "--json"],
+        );
+        for rows in [
+            &status["projects"]["items"],
+            &roadmap["waves"][0]["projects"]["items"],
+        ] {
+            let rows = rows.as_array().unwrap();
+            assert_eq!(rows.len(), 2);
+            for (row, project) in rows.iter().zip(&projects) {
+                assert_eq!(row["id"], project.id.as_str());
+                assert_eq!(
+                    row["linear_id"],
+                    project.linear_id.as_ref().unwrap().as_str()
+                );
+                assert!(row.get("work_id").is_none());
+                assert!(row["sync"].is_object());
+            }
+            assert_eq!(rows[0]["current"], true);
+            assert_eq!(rows[1]["name"], if edited { "Edited" } else { "second" });
+        }
+        assert_eq!(
+            status["project_readiness"]["project_id"],
+            projects[0].id.as_str()
+        );
+    }
+}
+
+#[test]
 fn project_edits_save_offline_in_both_connection_modes() {
     for (connected, mapped) in [(false, false), (false, true), (true, false), (true, true)] {
         let repo = TestRepo::new();
@@ -1288,6 +1399,10 @@ fn project_edits_save_offline_in_both_connection_modes() {
                 )
                 .unwrap();
         }
+        let mut authored = store.project(&id).unwrap().unwrap();
+        authored.description =
+            "Authored prose — preserved\n\n```yaml\nworkflow: example\n```\n".into();
+        store.insert_project(&authored).unwrap();
         // Exact identities still resolve when another Project's name/slug shadows them.
         let mut shadow = store.project(&id).unwrap().unwrap();
         shadow.id = loopflow::durable::ProjectId::new();
@@ -1349,6 +1464,16 @@ fn project_edits_save_offline_in_both_connection_modes() {
             &["project", "workflow", "show", id.as_str(), "--json"],
         );
         drop(writer);
+        assert_eq!(saved["id"], id.as_str());
+        assert_eq!(
+            saved["linear_id"],
+            if mapped {
+                serde_json::json!(project.id)
+            } else {
+                Value::Null
+            }
+        );
+        assert_eq!(saved["description"], authored.description);
         assert_eq!(saved["name"], "Saved");
         assert_eq!(saved["summary"], "");
         assert_eq!(saved["workflow"], "review");
@@ -1406,7 +1531,16 @@ fn project_edits_save_offline_in_both_connection_modes() {
             assert_eq!(read["name"], "Remote name");
             assert_eq!(read["workflow"], "research");
             assert_eq!(read["krs"][0]["holds"], true);
-            assert_eq!(read["revision"], "2026-10-08T11:00:00Z");
+            assert_eq!(read["pm_snapshot_synced_at"], 18);
+            let revision: String = rusqlite::Connection::open(home.path().join("loopflow.db"))
+                .unwrap()
+                .query_row(
+                    "SELECT planning_provider_revision FROM projects WHERE id=?1",
+                    [id.as_str()],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(revision, "2026-10-08T11:00:00Z");
             let pending = store.pending_project_changes(&id).unwrap();
             assert!(pending
                 .iter()
@@ -1463,6 +1597,16 @@ fn project_edits_save_offline_in_both_connection_modes() {
         );
         assert_eq!(saved["krs"], content["krs"]);
         assert_eq!(saved["workflow"], content["workflow"]);
+        assert_eq!(saved["id"], id.as_str());
+        assert_eq!(
+            saved["linear_id"],
+            if mapped {
+                serde_json::json!(project.id)
+            } else {
+                Value::Null
+            }
+        );
+        assert_eq!(saved["description"], authored.description);
         assert_eq!(saved["name"], "Saved");
         assert_eq!(saved["summary"], "");
         assert_eq!(

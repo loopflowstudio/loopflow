@@ -1001,7 +1001,7 @@ final class WorkModel {
             let result = try? await query.status(wave: wave.wave.name, cwd: wave.wave.repo)
             guard !Task.isCancelled else { return }
             guard let entries = result?.projects.items else { continue }
-            if entries.contains(where: { $0.id == reference || $0.slug == reference || $0.workId == reference }) {
+            if entries.contains(where: { $0.id == reference || $0.slug == reference || $0.linearId == reference }) {
                 select(.wave(id: wave.wave.id))
                 historyReference = reference
                 historyWave = wave.wave
@@ -1367,7 +1367,7 @@ final class WorkModel {
     }
 
     func waveForChapter(projectId: String) -> WaveRoadmap? {
-        roadmap.value?.waves.first { $0.currentProject?.id == projectId || $0.currentProject?.slug == projectId || $0.currentProject?.workId == projectId }
+        roadmap.value?.waves.first { $0.currentProject?.id == projectId || $0.currentProject?.slug == projectId || $0.currentProject?.linearId == projectId }
     }
 
     func task(id: String) -> (wave: WaveRoadmap, task: RoadmapTask)? {

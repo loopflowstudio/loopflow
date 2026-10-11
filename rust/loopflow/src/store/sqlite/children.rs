@@ -904,9 +904,9 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let query = match wave_id {
             Some(_) => {
-                format!("{PROJECT_COLUMNS} WHERE wave_id=?1 ORDER BY updated_at DESC")
+                format!("{PROJECT_COLUMNS} WHERE wave_id=?1 ORDER BY planning_rank,created_at,id")
             }
-            None => format!("{PROJECT_COLUMNS} ORDER BY updated_at DESC"),
+            None => format!("{PROJECT_COLUMNS} ORDER BY wave_id,planning_rank,created_at,id"),
         };
         let mut statement = conn.prepare(&query)?;
         let mut projects = Vec::new();

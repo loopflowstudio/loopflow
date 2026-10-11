@@ -68,7 +68,7 @@ struct WorkModelTests {
         await model.refresh()
         let wave = try #require(fixture.roadmap.waves.first)
         let chapter = try #require(wave.currentProject)
-        for reference in [chapter.id, chapter.slug, chapter.workId].compactMap({ $0 }) {
+        for reference in [chapter.id, chapter.slug, chapter.linearId].compactMap({ $0 }) {
             model.select(.project(id: reference))
             #expect(model.selection == .wave(id: wave.wave.id))
         }
@@ -151,8 +151,9 @@ struct WorkModelTests {
             .deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("tests/fixtures/dto")
         var historical = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: fixtures.appendingPathComponent("wave_detail.json"))) as? [String: Any])
         historical["projects"] = ["state": "ok", "truncated": false, "items": [[
-            "id": "old-plan", "work_id": NSNull(), "slug": "old", "name": "Previous",
-            "workflow": "feature", "status": "completed", "current": false, "metric_targets": [], "krs": []
+            "id": "old-plan", "linear_id": NSNull(), "slug": "old", "name": "Previous",
+            "workflow": "feature", "status": "completed", "current": false, "metric_targets": [], "krs": [],
+            "sync": ["connected": false, "changes": []]
         ]]]
         let reply = try JSONSerialization.data(withJSONObject: historical)
         await deferred.release(try #require(String(data: reply, encoding: .utf8)))

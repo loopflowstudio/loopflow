@@ -12,7 +12,7 @@ use crate::ops::{OpsError, OpsResult};
 use crate::pm::{PmItem, PmProject};
 use crate::store::sqlite::project_selection::read_project_binding;
 use crate::store::Store;
-use crate::work::project::ProjectStatus;
+use crate::work::project::{Project, ProjectStatus};
 use crate::work::wave::{Wave, WaveLocator};
 
 use super::pm::{lock_wave_planning, pm_store, project_is_foreign, PmContext};
@@ -63,8 +63,8 @@ pub struct ChapterRotation {
 pub struct WaveRotation {
     pub wave: String,
     pub successor_id: String,
-    pub predecessor: Option<PmProject>,
-    pub successor: Option<PmProject>,
+    pub predecessor: Option<Project>,
+    pub successor: Option<Project>,
     pub tasks: Vec<ChapterTask>,
 }
 
@@ -222,13 +222,19 @@ pub(crate) async fn rotate(
         .map_err(error)?;
     for (input, result) in &mut prepared {
         let id = crate::durable::ProjectId::parse(&input.successor_id).map_err(error)?;
-        let mut successor = store.sqlite.planning_project(&id).map_err(error)?;
-        successor.id = id.to_string();
-        result.successor = Some(successor);
+        result.successor = Some(
+            store
+                .sqlite
+                .project(&id)
+                .map_err(error)?
+                .ok_or_else(|| error("rotation successor disappeared"))?,
+        );
         if let Some(predecessor) = &mut result.predecessor {
-            let id = crate::durable::ProjectId::parse(&predecessor.id).map_err(error)?;
-            *predecessor = store.sqlite.planning_project(&id).map_err(error)?;
-            predecessor.id = id.to_string();
+            *predecessor = store
+                .sqlite
+                .project(&predecessor.id)
+                .map_err(error)?
+                .ok_or_else(|| error("rotation predecessor disappeared"))?;
         }
         for task in &mut result.tasks {
             let id = crate::durable::TaskId::parse(&task.task.id).map_err(error)?;
@@ -308,23 +314,12 @@ async fn prepare_rotation(
         .map(|r| r.predecessor_id.clone())
         .unwrap_or(binding);
     let projects = store.list_projects(Some(wave.id())).await.map_err(error)?;
-    let project = |id: &str| -> OpsResult<Option<PmProject>> {
-        let Some(saved) = projects.iter().find(|p| p.id.as_str() == id) else {
-            return Ok(None);
-        };
-        let mut projection = store.sqlite.planning_project(&saved.id).map_err(error)?;
-        projection.id = saved.id.to_string();
-        Ok(Some(projection))
-    };
-    let predecessor = predecessor_id
-        .as_deref()
-        .map(project)
-        .transpose()?
-        .flatten();
+    let project = |id: &str| projects.iter().find(|p| p.id.as_str() == id).cloned();
+    let predecessor = predecessor_id.as_deref().and_then(project);
     if predecessor_id.is_some() && predecessor.is_none() {
         return Err(error("selected predecessor is unavailable"));
     }
-    let successor = project(&input.successor_id)?;
+    let successor = project(&input.successor_id);
     if receipt.is_none()
         && (input.create == successor.is_some()
             || predecessor_id.as_deref() == Some(&input.successor_id))

@@ -1326,12 +1326,7 @@ pub fn task_create(
             }
         };
         let acquisition = super::pm::lock_wave_planning(&wave).await?;
-        let creation_project = store
-            .get_project_by_project(&super::project::current_project(&store, &wave)?.id)
-            .await
-            .map_err(task_error)?
-            .ok_or_else(|| task_error("selected Project is missing"))?
-            .id;
+        let creation_project = super::project::current_project(&store, &wave)?.id;
         let task = store
             .create_task(
                 &crate::planning::NewTask {
@@ -4083,12 +4078,7 @@ pub fn task_refile(repo: &Path, issue: &str, wave: &str) -> OpsResult<super::pm:
             super::pm::require_planning_home(&store, wave).await?;
             guards.push(super::pm::lock_wave_planning(wave).await?);
         }
-        let current = super::project::current_project(&store, &destination)?;
-        let project = store
-            .get_project_by_project(&current.id)
-            .await
-            .map_err(task_error)?
-            .ok_or_else(|| task_error("destination Project is unavailable"))?;
+        let project = super::project::current_project(&store, &destination)?;
         store
             .sqlite
             .refile_unplaced_task(&task.id, &task.project_id, &project.id)

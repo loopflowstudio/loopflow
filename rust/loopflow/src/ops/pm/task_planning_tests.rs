@@ -2143,7 +2143,7 @@ fn assert_completion_adopts_reopening(during_delivery: bool) {
             .unwrap();
         assert_eq!(
             retained.state,
-            crate::planning::PlanningSyncState::AdoptedLinear
+            crate::store::planning_sync::PlanningSyncState::AdoptedLinear
         );
         assert_eq!(retained.local_value, json!("completed"));
         assert_eq!(retained.linear_value, Some(json!("unstarted")));
@@ -2526,7 +2526,7 @@ fi
                     .id,
 
                 revision: 0,
-                linear_id: Some(crate::planning::LinearIssueId::new(&item.id).unwrap()),
+                linear_id: Some(crate::pm::LinearIssueId::new(&item.id).unwrap()),
                 identifier: item.identifier.clone(),
                 title: item.name.clone(),
                 description: item.description.clone(),
@@ -2793,7 +2793,7 @@ esac
                     .id,
 
                 revision: 0,
-                linear_id: Some(crate::planning::LinearIssueId::new(&item.id).unwrap()),
+                linear_id: Some(crate::pm::LinearIssueId::new(&item.id).unwrap()),
                 identifier: item.identifier.clone(),
                 title: item.name,
                 description: item.description,
@@ -3555,7 +3555,7 @@ fn field_receipts(
     fixture: &Fixture,
     task: &Task,
     project: bool,
-) -> Vec<crate::planning::PlanningChange> {
+) -> Vec<crate::store::planning_sync::PlanningChange> {
     if project {
         fixture
             .store
@@ -3868,7 +3868,7 @@ fn with_export_plan(
     let task = fixture
         .store
         .sqlite
-        .create_task(&crate::planning::NewTask {
+        .create_task(&crate::work::task::NewTask {
             due_date: None,
             id: crate::durable::TaskId::new(),
             project_id: project,
@@ -3894,7 +3894,7 @@ fn planning_export_foreground_reconnect_keeps_distinct_saved_identities() {
         let second = fixture
             .store
             .sqlite
-            .create_task(&crate::planning::NewTask {
+            .create_task(&crate::work::task::NewTask {
                 due_date: None,
                 id: crate::durable::TaskId::new(),
                 project_id: task.project_id.clone(),
@@ -3987,7 +3987,7 @@ fn planning_export_captures_shared_task_fields_without_local_execution() {
         let child = fixture
             .store
             .sqlite
-            .create_task(&crate::planning::NewTask {
+            .create_task(&crate::work::task::NewTask {
                 id: crate::durable::TaskId::new(),
                 project_id: task.project_id.clone(),
                 title: "Retained creation".into(),
@@ -4312,7 +4312,7 @@ fn planning_export_removal_during_uncertain_creation_retains_identity() {
         let never_exported = fixture
             .store
             .sqlite
-            .create_task(&crate::planning::NewTask {
+            .create_task(&crate::work::task::NewTask {
                 due_date: None,
                 id: crate::durable::TaskId::new(),
                 project_id: task.project_id.clone(),

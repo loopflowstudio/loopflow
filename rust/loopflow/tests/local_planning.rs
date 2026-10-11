@@ -616,7 +616,7 @@ fn public_task_prefixes_resolve_and_report_ambiguity() {
         .unwrap();
     for (id, title) in [(first, "First"), (second, "Second")] {
         store
-            .create_task(&loopflow::planning::NewTask {
+            .create_task(&loopflow::work::task::NewTask {
                 due_date: None,
                 id: loopflow::durable::TaskId::parse(id).unwrap(),
                 project_id: loopflow::durable::ProjectId::parse(&project).unwrap(),
@@ -2001,7 +2001,7 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             let conflict = sync.changes.iter().find(|c| c.field == "name").unwrap();
             assert_eq!(
                 conflict.state,
-                loopflow::planning::PlanningSyncState::AdoptedLinear
+                loopflow::store::planning_sync::PlanningSyncState::AdoptedLinear
             );
             assert_eq!(conflict.local_value, "Saved offline");
             assert_eq!(
@@ -2093,8 +2093,8 @@ fn place_wave_on_remote(
 #[test]
 fn rotation_saves_membership_and_pending_effects_offline() {
     use loopflow::durable::TaskId;
-    use loopflow::planning::NewTask;
     use loopflow::store::PmSnapshotRow;
+    use loopflow::work::task::NewTask;
 
     for (connected, mapped) in [(false, false), (false, true), (true, false), (true, true)] {
         let repo = TestRepo::new();
@@ -2392,7 +2392,7 @@ fn rotation_saves_membership_and_pending_effects_offline() {
         existing.slug = "future".into();
         existing.status = loopflow::work::project::ProjectStatus::Planned;
         existing.linear_id =
-            mapped.then(|| loopflow::planning::LinearProjectId::new("future-provider").unwrap());
+            mapped.then(|| loopflow::pm::LinearProjectId::new("future-provider").unwrap());
         store.insert_project(&existing).unwrap();
         let mut next = plan.clone();
         next["waves"][0]["successor_id"] = serde_json::json!(existing
@@ -2469,7 +2469,7 @@ fn rotation_saves_membership_and_pending_effects_offline() {
 #[test]
 fn refiling_saves_membership_offline_and_retains_inbound_changes() {
     use loopflow::durable::TaskId;
-    use loopflow::planning::NewTask;
+    use loopflow::work::task::NewTask;
 
     for (connected, mapped) in [(false, false), (false, true), (true, false), (true, true)] {
         let repo = TestRepo::new();
@@ -2500,7 +2500,7 @@ fn refiling_saves_membership_offline_and_retains_inbound_changes() {
             if mapped {
                 // Bind through the writer so foreground Git exchange sees the same
                 // identity as SQLite, rather than restoring a pre-binding journal.
-                project.linear_id = Some(loopflow::planning::LinearProjectId::new(name).unwrap());
+                project.linear_id = Some(loopflow::pm::LinearProjectId::new(name).unwrap());
                 store.insert_project(&project).unwrap();
                 let observed = loopflow::pm::linear::LinearProject {
                     id: name.into(),
@@ -3259,7 +3259,7 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
     let store = loopflow::store::sqlite::SqliteStore::new(&path).unwrap();
     let task = store.task(&id).unwrap().unwrap();
     let mut project = store.project(&task.project_id).unwrap().unwrap();
-    project.linear_id = Some(loopflow::planning::LinearProjectId::new("provider-project").unwrap());
+    project.linear_id = Some(loopflow::pm::LinearProjectId::new("provider-project").unwrap());
     store.insert_project(&project).unwrap();
     let observed: loopflow::pm::linear::LinearProject = serde_json::from_value(json!({
         "id":"provider-project", "slug":project.slug, "name":project.name,

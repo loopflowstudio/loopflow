@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use crate::ops::{OpsError, OpsResult};
-use crate::planning::PlanningSyncStatus;
+use crate::store::planning_sync::PlanningSyncStatus;
 use crate::store::{PlanningLocks, Store};
 use crate::work::project::Project;
 use crate::work::project::ProjectStatus;

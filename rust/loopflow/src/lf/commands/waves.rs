@@ -112,7 +112,7 @@ impl<T> Evidence<T> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskSummary {
     pub acquisition: crate::store::TaskAcquisition,
-    pub sync: crate::planning::PlanningSyncStatus,
+    pub sync: crate::store::planning_sync::PlanningSyncStatus,
     pub id: String,
     pub linear_id: Option<String>,
     pub identifier: String,
@@ -394,7 +394,7 @@ pub struct WaveRoadmap {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectSummary {
-    pub sync: crate::planning::PlanningSyncStatus,
+    pub sync: crate::store::planning_sync::PlanningSyncStatus,
     pub current: bool,
     pub id: String,
     pub linear_id: Option<String>,
@@ -1581,7 +1581,7 @@ async fn current_direction(
 fn task_summary(
     task: &Task,
     sources: &HashMap<String, Vec<crate::work::task::follow_through::FollowThroughSource>>,
-    sync: crate::planning::PlanningSyncStatus,
+    sync: crate::store::planning_sync::PlanningSyncStatus,
     acquisition: crate::store::TaskAcquisition,
 ) -> TaskSummary {
     TaskSummary {

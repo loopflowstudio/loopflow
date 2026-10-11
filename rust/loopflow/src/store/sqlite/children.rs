@@ -17,10 +17,11 @@ use time::OffsetDateTime;
 use crate::child::AbandonIntent;
 use crate::durable::{Author, TaskState};
 use crate::id::WaveId;
-use crate::planning::{LinearIssueId, LinearProjectId, NewTask};
+use crate::pm::{LinearIssueId, LinearProjectId};
 use crate::store::rows::now_unix;
 use crate::store::{PlanningState, StoreError, StoreResult};
 use crate::work::project::{Project, ProjectEvent, ProjectEventKind, ProjectId};
+use crate::work::task::NewTask;
 use crate::work::task::{
     CiObservation, GithubObservation, GithubPr, LinearObservationOutcome, LinearWritebackState,
     PrMergeRequest, PrPhase, PrPresentation, PrPublication, Task, TaskEvent, TaskEventKind, TaskId,
@@ -2017,9 +2018,9 @@ mod local_planning_tests {
 
     use crate::durable::{ProjectId, TaskId};
     use crate::id::WaveId;
-    use crate::planning::NewTask;
     use crate::pm::PmItemUpdate;
     use crate::store::sqlite::SqliteStore;
+    use crate::work::task::NewTask;
 
     fn local_project(store: &SqliteStore) -> ProjectId {
         let repo = store.home_dir().unwrap();

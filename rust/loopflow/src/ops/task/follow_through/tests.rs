@@ -9,7 +9,7 @@ use crate::durable::TaskState;
 use crate::id::WaveId;
 use crate::ops::pm::{PmTestContext, PM_TEST_CONTEXT};
 use crate::ops::task::task_completion_gate;
-use crate::planning::{LinearIssueId, LinearProjectId};
+use crate::pm::{LinearIssueId, LinearProjectId};
 use crate::store::{open_ephemeral_store, CredentialType, ProviderToken, StorageConfig};
 use crate::work::project::{Project, ProjectId};
 use crate::work::task::{
@@ -638,7 +638,7 @@ fn filing_is_atomic_and_reserved_recovery_keeps_the_original_chapter() {
         .is_err());
     assert!(store
         .sqlite
-        .create_task(&crate::planning::NewTask {
+        .create_task(&crate::work::task::NewTask {
             id: TaskId::new(),
             project_id: task.project_id,
             title: "Old backlog".into(),

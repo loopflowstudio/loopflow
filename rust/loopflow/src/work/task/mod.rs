@@ -15,9 +15,19 @@ use time::OffsetDateTime;
 use crate::child::{prefixed_uuid_id, AbandonIntent};
 pub use crate::durable::TaskId;
 use crate::id::WaveId;
-use crate::planning::{LinearIssueId, PlanningError};
+use crate::pm::{LinearBindingError, LinearIssueId};
 use crate::pr_landing::PrLandingId;
 use crate::work::project::ProjectId;
+
+/// The caller retains this identity across a retry; a separate create mints another.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewTask {
+    pub due_date: Option<String>,
+    pub id: crate::durable::TaskId,
+    pub project_id: crate::durable::ProjectId,
+    pub title: String,
+    pub description: String,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum TaskDataError {
@@ -596,10 +606,10 @@ pub struct Task {
 }
 
 impl Task {
-    pub fn linear_id(&self) -> Result<&LinearIssueId, PlanningError> {
+    pub fn linear_id(&self) -> Result<&LinearIssueId, LinearBindingError> {
         self.linear_id
             .as_ref()
-            .ok_or(PlanningError::NoLinearMapping)
+            .ok_or(LinearBindingError::NoLinearMapping)
     }
 
     pub fn worktree(&self) -> Result<&PathBuf, TaskDataError> {
@@ -792,7 +802,7 @@ mod tests {
         GithubPr, LinearWritebackOperation, LinearWritebackState, PrPhase, PrPublication, Task,
         TaskId, TaskPr, TaskPrId,
     };
-    use crate::planning::LinearIssueId;
+    use crate::pm::LinearIssueId;
 
     fn task() -> Task {
         let now = time::OffsetDateTime::now_utc();

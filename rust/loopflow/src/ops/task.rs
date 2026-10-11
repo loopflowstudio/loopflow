@@ -1320,7 +1320,7 @@ pub fn task_create(
         let creation_project = super::project::current_project(&store, &wave)?.id;
         let task = store
             .create_task(
-                &crate::planning::NewTask {
+                &crate::work::task::NewTask {
                     due_date: None,
                     id: crate::durable::TaskId::new(),
                     project_id: creation_project,
@@ -2935,7 +2935,7 @@ async fn reconcile_task_pr_observation(
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TaskStatus {
-    pub sync: Option<crate::planning::PlanningSyncStatus>,
+    pub sync: Option<crate::store::planning_sync::PlanningSyncStatus>,
     pub task: Option<Task>,
     pub project: Option<crate::work::project::Project>,
     pub observed_at: Option<i64>,
@@ -4025,7 +4025,7 @@ fn git_output_bytes(worktree: &Path, args: &[&str]) -> OpsResult<Vec<u8>> {
 pub struct TaskEdit {
     pub wave: String,
     pub id: String,
-    pub sync: crate::planning::PlanningSyncStatus,
+    pub sync: crate::store::planning_sync::PlanningSyncStatus,
 }
 
 pub fn task_edit(
@@ -4249,7 +4249,7 @@ mod tests {
     };
     use crate::child::ChildRef;
     use crate::durable::{TaskState, WorkRef, WorkStatus};
-    use crate::planning::{LinearIssueId, LinearProjectId};
+    use crate::pm::{LinearIssueId, LinearProjectId};
     use crate::store::{SharedStore, StorageConfig};
     use crate::work::project::{Project, ProjectId};
     use crate::work::task::{

@@ -42,7 +42,8 @@ ProjectPlan, TaskPlan, live Project iteration and public ProjectContent are remo
 ProjectKR, MetricTarget and domain TaskComment are implemented.
 
 **Locations:** `work/project.rs`, `work/task/mod.rs`, `work/task/comment.rs`,
-`pm/mod.rs`, `planning.rs`, and their SQL serialization in `store/sqlite/`.
+`pm/mod.rs` and their SQL serialization in `store/sqlite/`. The root
+`planning.rs` module is deleted; §11 records its surviving owners.
 
 Project persists description, workflow, KRs and targets directly; Task persists
 rank, assignee, due date, state and completion. ProjectStatus belongs to the domain.
@@ -71,11 +72,12 @@ dependencies. Task delivery reads accepted revision evidence directly from Work,
 not observed provider revision. Canonical status and summaries retain separate
 acquisition state/age. No local/provider-ID substitution remains in that reader.
 
-**Remaining:** `sqlite/children.rs::{task_acquisition,require_task_planning_identity}`
-still call `pm_task_observation_in`, decoding a full issue and embedded Project
-for status and admission. Replace that reconstruction with the specific retained
-membership, Team, invalidation, removal and age evidence each uses. The public
-snapshot inventory reader is deleted; these internal readers are not yet reduced.
+**Removed:** `sqlite/children.rs` status/admission reconstruction through
+`pm_task_observation_in`. One narrow SQL read uses retained membership, Team,
+invalidation, removal and age evidence; pending local membership affects display,
+never admission. Unrelated provider content is not decoded. Remaining:
+`ops/pm.rs::inspect_task_planning_async` and `pm_task_observation_in` reconstruct
+provider records; confinement and persistent reduction remain.
 
 **Keep:** explicit missing, invalid, removed and unavailable evidence. A failed
 provider read must not erase cached Work or convert unknown state into absence.
@@ -158,8 +160,12 @@ also pass `PlanningObject {kind,id}`. `PlanningMutation` repeats the field addre
 and untyped JSON payload. The writer validates combinations the representation
 itself could exclude. Use one typed Work edit payload with its target; derive
 transport conflict addresses/encoding from it. Delete the second kind/field schema,
-repeated string-field switches, and needless JSON-inside-JSON values for Team IDs,
-Initiative IDs and comment authors. The exact enum grouping is implementation's job.
+repeated string-field switches. Team/Initiative edits now carry `Vec<String>`;
+comment edits carry `TaskCommentAuthor`. Persistence and Git use native JSON values;
+retained Git documents decode the earlier string encoding at acquisition without
+replacing mutation IDs, clocks, parents or competing values. `ensure_record` consumes
+typed edits directly instead of reconstructing a field-addressed JSON object.
+The target-bearing enum/journal redesign remains required.
 
 Task/Project saves and Task refiling now derive Linear receipts from the same typed
 edit slice as the writer; Task saves no longer read `plan_read::task_in`. The
@@ -239,10 +245,10 @@ read_task_planning_async,inspect_task_planning,resolve_owned_issue,
 list_pm_waves,list_local_waves}`,
 `ops/planning_sync.rs::find_task`, `ops/run.rs`, `ops/task/remote.rs`.
 
-Use the store's canonical Task selector for local Task ID, provider ID and issue
-identifier. Perform selected-transport acquisition where needed, then return that
-same Task. Delete overlapping resolution wrappers and PM-context construction
-that only selects another domain reader. Retain bounded refresh/lock behavior;
+Task status, planning lookup and repository routing now use the canonical scoped
+selector, including repository aliases; explicit Task IDs retain their identity.
+Remaining: selected-transport acquisition returns that same Task without overlapping
+resolution wrappers or PM-context construction merely selecting another reader. Retain bounded refresh/lock behavior;
 The unused `pm_show` inventory/DTO and `load_show_snapshot`/`read_pm_snapshot`
 are deleted. Status sync refreshes before its canonical read; acquisition returns
 no inventory. `plan_snapshot_read` still governs Task acquisition.
@@ -266,12 +272,13 @@ and chapter rotation; execution admission and sorted planning locks remain.
 
 ## 11. Keep necessary delivery evidence without a generic hierarchy
 
-**Locations:** `planning.rs`, `ops/planning_delivery.rs`, `ops/planning_export.rs`,
+**Locations:** `store/planning_sync.rs`, `ops/planning_delivery.rs`, `ops/planning_export.rs`,
 `sqlite/planning_sync.rs`, `sqlite/planning_export.rs`, `sqlite/planning_order.rs`,
 `ops/linear_observe.rs::PlanningSync`.
 
-Separate domain inputs such as `NewTask` from concrete Linear delivery/error/status
-types. Remove redundant Project/Task content copies used only for display and
+Root `planning.rs` is removed: `NewTask` belongs to `work/task`, Linear IDs and
+`LinearBindingError` to `pm`, and receipt/status types to `store/planning_sync`.
+No compatibility reexports remain. Remove redundant content copies used for display and
 duplicate field translation. Keep immutable creation inputs where an uncertain
 external effect really needs them. Move the foreground exchange coordinator to
 its actual owner; its current Linear-named module also handles Git.

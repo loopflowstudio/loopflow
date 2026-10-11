@@ -603,6 +603,11 @@ struct DTOFixtureTests {
         #expect(!statuses[1].candidates.contains("title-loser"))
         #expect(statuses[1].changes["title-head"]?.parents == ["title-loser"])
         #expect(statuses[1].changes["comment-head"]?.clock == 4)
+        guard case .object(let content) = statuses[1].changes["comment-head"]?.value else {
+            Issue.record("expected typed comment content")
+            return
+        }
+        #expect(content["author"] == .object(["kind": .string("person"), "name": .string("Maya")]))
         for field in ["conflicts", "changes", "candidates", "pending_local"] {
             var object = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])[1]
             object.removeValue(forKey: field)

@@ -125,3 +125,58 @@ fn conflicting_identity_missing_ancestors_and_execution_fields_are_rejected() {
     };
     assert_eq!(saved.merge(&empty).unwrap(), saved);
 }
+
+#[test]
+fn retained_git_values_convert_without_replacing_causes_or_losing_values() {
+    let bytes = serde_json::to_vec(&json!({"changes": {
+        "teams-before": {
+            "object": {"kind":"project", "id":"project-existing"},
+            "field":"planning_teams", "value":"[\"old-team\"]",
+            "clock":1, "parents":[]
+        },
+        "teams-after": {
+            "object": {"kind":"project", "id":"project-existing"},
+            "field":"planning_teams", "value":"[\"new-team\"]",
+            "clock":2, "parents":["teams-before"]
+        },
+        "initiative": {
+            "object": {"kind":"project", "id":"project-existing"},
+            "field":"planning_initiatives", "value":"[\"initiative\"]",
+            "clock":3, "parents":[]
+        },
+        "comment": {
+            "object": {"kind":"comment", "id":"comment-existing"},
+            "field":"content", "value": {
+                "body":"Retain the author",
+                "author":"{\"kind\":\"person\",\"name\":\"Maya\"}",
+                "created_at":null
+            },
+            "clock":4, "parents":[]
+        }
+    }}))
+    .unwrap();
+    let converted = PlanningSnapshot::from_bytes(&bytes).unwrap();
+    assert_eq!(converted.changes.len(), 4);
+    assert_eq!(converted.changes["teams-before"].value, json!(["old-team"]));
+    assert_eq!(converted.changes["teams-after"].value, json!(["new-team"]));
+    assert_eq!(converted.changes["teams-after"].clock, 2);
+    assert_eq!(
+        converted.changes["teams-after"].parents,
+        BTreeSet::from(["teams-before".into()])
+    );
+    assert_eq!(converted.changes["initiative"].value, json!(["initiative"]));
+    assert_eq!(
+        converted.changes["comment"].value["author"],
+        json!({"kind":"person", "name":"Maya"})
+    );
+    assert_eq!(
+        PlanningSnapshot::from_bytes(&converted.to_bytes().unwrap()).unwrap(),
+        converted
+    );
+    assert_eq!(
+        converted
+            .merge(&PlanningSnapshot::from_bytes(&bytes).unwrap())
+            .unwrap(),
+        converted
+    );
+}

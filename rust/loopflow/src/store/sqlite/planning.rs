@@ -707,8 +707,8 @@ fn project_accepted_planning(
             Edit::Workflow(project.workflow.clone()),
             Edit::Krs(project.krs.clone()),
             Edit::MetricTargets(project.metric_targets.clone()),
-            Edit::ProjectInitiatives(serde_json::to_string(&project.initiative_ids)?),
-            Edit::ProjectTeams(serde_json::to_string(&project.team_ids)?),
+            Edit::ProjectInitiatives(project.initiative_ids.clone()),
+            Edit::ProjectTeams(project.team_ids.clone()),
         ];
         if let Some(description) = &project.description {
             edits.push(Edit::ProjectDescription(Some(description.clone())));

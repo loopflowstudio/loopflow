@@ -161,7 +161,7 @@ retains pending work; reconnect acquires before publishing. No agent turn is rep
 
 TaskPlan/ProjectPlan and live Project iteration are removed. TaskComment is domain
 owned; comment observations are adapter-internal. Public content reads return Work;
-internal acquisition/status and admission still reconstruct provider records.
+acquisition still reconstructs provider records; status/admission read narrow evidence.
 Project now stores description,
 workflow, KRs and metric targets directly. The shared local/import writer and local
 readers no longer parse/render stored Markdown; prompt assembly renders on demand.
@@ -242,15 +242,15 @@ archival, membership removal and confirmed deletion retain their meaning. Malfor
 Wave observations do not hide readable siblings or refresh ages. Scoped roadmap
 reads follow the repaired Wave address. Evidence: `f9f9da7d3a` in this plan.
 
-`e3a3479df7` removed the public `pm_snapshot` reader and its fixture reconstructions.
-Tests read canonical Work and concrete observation/refresh evidence; stale-response
-fixtures retain fetched input. The empty snapshot round-trip test is deleted.
-`sqlite/children.rs::{task_acquisition,require_task_planning_identity}` still
-decode issue/Project bodies through `pm_task_observation_in` for status and
-admission. Narrow retained evidence must replace those reads alongside acquisition's
-`PmSnapshot`/`PmTaskRecord` and duplicate provider content. Populated conversion,
-same-revision archive/membership refusal, bindings, follow-ups, cron and the typed
-journal remain required before review.
+`e3a3479df7` removed the public snapshot reader. October 11's next cut removes
+`children.rs` status/admission reconstruction: narrow SQL reads retained membership,
+Team, invalidation, removal and age. Unrelated malformed content cannot erase those
+facts. Review repaired the canonical Project join: a missing issue cannot hide
+independent archival or unresolved membership. Pending membership only affects display.
+Populated released-frontier and stale-response tests cover this boundary.
+The upstream merge omitted peer planning from Work-watch's clock; it now uses the
+planning cadence. Acquisition's provider-returning API, persistent hierarchy,
+typed journal, bindings, follow-ups and cron still precede gate and review.
 
 ### Released migration frontier — October 10
 
@@ -321,49 +321,27 @@ where that deletes request/field/effect lists, retaining revalidation and effect
 `--explain`. No generic command-plan framework; aligned Desktop multiplexer and
 surface lifetimes are not deletion targets. No second writer or Flow restart.
 
-### Project prose: composed behavior and remaining ownership cut
+### Retained proof and current writer cut
 
-October 10 implementation adds ordinary `lf project edit --description` saves,
-selected Linear delivery and acquired receipt settlement through the typed writer.
-Boundary whitespace is trimmed; prose segments separated by managed Markdown are
-joined with one blank line. Migration still preserves original prose bytes.
-Managed Workflow/KR/target spans and fenced examples survive outbound replacement.
-Full content and explicit null/empty values are observed; omitted full-response
-content fails decoding without settling a receipt or replacing canonical Work.
+Project prose saves/readback preserve field revisions and ages across partial
+observations, pending edits and stale/foreign responses. Managed Markdown ranges
+preserve fenced examples and unknown prose; migration retains original bytes.
+The Task draft retains prose receipts and sequence high-water marks. Exact proof
+and contrary evidence: `f025e9b7ab:scratch/work-on-another-machine-name.md`,
+“Project prose: composed behavior and remaining ownership cut.” These passes do
+not establish acquisition confinement or provider-hierarchy conversion.
 
-Composed save/readback proofs at `075f04a580` in this plan retain newer saves,
-conflict values, stale/foreign rejection, Workflow, unknown Process and placement.
-Offline CLI proof covers both transports and mapping states, not installation or
-real two-machine use.
+Root `planning.rs` is deleted. Task creation inputs, Linear binding identities and
+stored delivery/status evidence have concrete owners. Team/Initiative edits and
+comment authors remain typed through the writer; Git acquisition converts retained
+string-encoded values without new causal identities. Record creation no longer
+reconstructs a generic JSON field map. The target-bearing edit/journal, provider
+hierarchy, bindings configuration, follow-ups and cron cuts remain required.
 
-Review exposed a separate retained-evidence gap: full observation → newer partial
-observation → local save lost the prose baseline. `pm_projects.prose_json` now owns
-its value, original provider revision and acquisition age. Partial Project facts
-advance independently without refreshing that evidence. A later full observation
-at the partial revision can complete the field knowledge. Receipt baselines use the
-field's revision; the attempt fence still uses the current entity revision. The
-single `planning_peers` draft adds that evidence and prose receipts, preserving
-receipt bytes, identities, attempts and sequence high-water marks. Released
-`0.13.11.001_release.sql` remains unchanged; LOO-406 has no draft after `db36f20ba8`.
-
-Private acquisition and retained provider hierarchy conversion remain prerequisites
-for audit sections 1–3. Canonical content/export reads are implemented; internal
-acquisition and admission still reconstruct Linear observations. Tracing: `a849341234` in this plan and
-`f2ca2063b5:scratch/project-acquisition-dependency.md`. Prose proof does not satisfy
-that structural boundary or authorize partial publication.
-
-Compression removes the fabricated Git recovery record/value hierarchy: status and
-CLI/Desktop now inspect retained journal mutations directly, with candidate IDs
-separate from projection failures and publication receipts. Failed journal reads
-use the existing read error and cached WorkReading; successful reads have definite
-pending state. No persistent state or import policy changes. The accepted typed
-edit/journal rewrite and preceding acquisition/cron/follow-up work remain open.
-
-Remaining provider hierarchy and edit/journal cuts require populated preservation proof.
-
-Project ordering and invalidation review evidence remains at
-`7853a22f5c:scratch/work-on-another-machine-name.md`: shared rank wins over edit time;
-missing inventory is not deletion. Positive removal and observation age survive.
+Installed selected-path `lf commit` excludes scratch even when explicitly named;
+its scratch-only checkpoint failed. Pre-existing notes are preserved at
+`/tmp/loo412-pre-compress.patch`; use the ordinary whole-checkout commit for this
+non-persistent Task, keeping coherent source and notes together.
 
 Cron conversion must retain the installed owner independently of file location.
 Release's October 5 memory records both jobs installed under Infrastructure,
@@ -376,8 +354,6 @@ argv hash or schedule ID must not split exclusion. Original activation, dues and
 receipt classifications survive; historical skill receipts never become Flow
 settlements. Clone/read activates nothing. This is a source-derived preservation
 case, not a reproduced failure (`eda4a98097:scratch/cron-conversion-review.md`).
-Read coverage: the sole immediate child, Release, has both
-its GOAL and complete memory inspected; no child-specific history is moved here.
 
 Writer transport/causal proofs: `eda4a98097` in this plan.
 
@@ -395,6 +371,6 @@ Writer transport/causal proofs: `eda4a98097` in this plan.
   cut. Regenerate them after the entire accepted reduction, before review-only
   republication. No readiness or landing follows from this persistence checkpoint.
 
-Checks: `git diff --check` and `lf context` pass (prose reconciliation only); prior build/Clippy and focused results remain at `075f04a580` in this plan, ownership proofs at `f9f9da7d3a`; full gate/HTML/republication remain after the audit.
+Checks: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo build -p loopflow --bin lf`; focused Rust writer (3), released seeding (1), exchange (5), peer DTO (1), offline rotation (1), and `swift test --package-path swift --filter peerPlanningStatus` (2) pass with inherited `LF_*` cleared. Earlier applicable admission/lookup/launch checks: `f025e9b7ab` in this plan. Full audit, gate, HTML and republication remain pending.
 
 Earlier transport evidence: `0181133849` in this plan.

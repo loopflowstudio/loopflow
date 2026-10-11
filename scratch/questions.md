@@ -1,41 +1,52 @@
-# Implementation choices — LOO-412, 2026-10-09
+# Implementation choices — LOO-412
 
-Jack Heart selected repository-wide configuration, personal Git by default, shared
-Git or Linear, and required one typed planning writer. Linear outages buffer locally
-without transport fallback. These decisions supersede manual per-Wave selection,
-callbacks, a designated publisher and mixed Git/Linear receipt replication.
-The [design](work-on-another-machine-name.md) owns current remaining work.
+[Design](work-on-another-machine-name.md). Earlier choices:
+`ae96102580e442fe582dd17ce5e6fef9b8cee69d:scratch/questions.md`; full October 10
+prose/sync evidence: `eab40bad8c:scratch/questions.md`.
 
-- Personal keys are generated once locally and recovered on another fresh Machine.
-  Automatic account-based key discovery/pairing is not implemented or claimed.
-- Configuration selects the repository's entire planning history. Shared-ref
-  permission comes from that setting, not membership inference or a Machine label.
-- Switching an existing Git plan to Linear keeps records and old receipts, but
-  automatic export of peer-imported unmapped records needs an explicit design.
-  Preserve uncertain effects rather than inventing cross-provider settlement.
-- Git causality precedes logical clocks and stable mutation-ID ties. All losing
-  values remain. No initiating host has blanket preference over another writer.
-- Import preserves local execution. Missing placement proves nothing about work
-  on another Machine; this Task builds no distributed first-start authority.
-- `planning_peers.sql` is the only LOO-412 draft; LOO-406/optional-PR schema is
-  released in `0.13.11.001_release.sql`. Main #1523 adds the separate local
-  `process_terminal.sql` draft at `c77e72b6b7`. Experiments use fresh disposable
-  stores; no branch CLI writes the installed Home.
+- Personal keys need recovery on fresh Machines; automatic account pairing is absent.
+  Repository configuration grants shared-ref permission, not Machine membership.
+- Git-to-Linear switching retains records/receipts. Automatic export of unmapped
+  imported Work needs design; uncertain effects stay unresolved.
+- Causality precedes clocks and mutation-ID ties; preserve losers. No host preference.
+- Imports preserve local execution. Missing placement proves no peer absence;
+  distributed first-start authority belongs elsewhere.
+- `planning_peers.sql` is LOO-412's sole draft. LOO-406/optional-PR is released in
+  `0.13.11.001_release.sql`; main's separate `process_terminal.sql` is retained.
+  Use disposable stores, never branch binaries against the installed Home.
+- Prose replacement rejects live managed declarations/unclosed fences; closed fenced
+  examples work. Ordinary saves trim boundaries/join prose with blank lines;
+  migration retains bytes. Partial observations retain field revision/age. These
+  choices have no UX approval.
 
-Earlier choices/evidence remain at
-`ae96102580e442fe582dd17ce5e6fef9b8cee69d:scratch/questions.md` and the design's
-historical references. They do not reinstate superseded mechanisms.
+## Repaired findings — f025e9b7ab
 
-Sync resolution (2026-10-10): retain main’s checkout-owned Wave Markdown and
-new AgentProcess/module paths, while preserving the typed planning writer and
-optional placement. Wave registration now captures through that writer; Workflow
-definitions remain stored separately. No transport or delivery authority changes.
+Admission now retains independent Project disputes when the issue payload is absent;
+populated tests cover disputed/archived parents. Repository-scoped CLI status,
+comments and edits pass the original duplicate-identifier fixture, including aliases.
+Exact IDs route to their retained repository; conflicting explicit Wave scope refuses.
+Evidence: `local_planning.rs`, `/tmp/loo412-selector-repro-result.json` and
+`/tmp/loo412-admission-parent-evidence-proof.txt`. Source/disposable proofs, no install.
+Jack Heart requires removing `planning.rs`, not merely renaming its hierarchy.
 
-Prose boundary (2026-10-10): an outbound prose replacement refuses live managed
-Markdown declarations and unclosed fences rather than changing saved workflow,
-KRs or targets. Closed fenced examples remain supported. This is a reversible
-implementation choice, not Jack Heart's UX approval. Ordinary saves/readback trim boundary whitespace and join prose segments across
-managed spans with a blank line. Migration preserves original bytes. Partial
-observations retain prose value/revision/age separately from newer entity facts;
-this field evidence is not a second Work writer. These are reversible implementation
-choices, not additional UX approval.
+## Remaining review checks
+
+Snapshot-reader deletion must retain rollback proof for canonical Project,
+relationship/observation age and Wave acquisition age, including delayed updates.
+Current assertions cover Task/PR only; check dedicated coverage before final gate.
+This is a coverage concern, not observed data loss.
+
+The stale `pm_show.json` documentation is removed. The Git-miss regression now
+asserts no Linear refresh error as well as Unavailable; its focused rerun passed.
+
+## Git decoding review — October 11
+
+Compression adds a `PlanningSnapshot::from_bytes` decoder accepting old stringified
+Teams/Initiatives/authors alongside typed values. The peer journal exists only in
+this Task's unreleased `planning_peers.sql`; no published Git format or configured
+retained-data requirement has been established. Jack Heart excludes older-version
+support; AGENTS rejects compatibility for internal unshipped formats. Remove this
+old-format branch and its compatibility-only fixture unless concrete retained data
+requires conversion. Preserve released SQLite relationships, authors and uncertain
+receipts through the finished draft; preserve causal/losing values in the selected
+format. Those obligations do not by themselves justify a permanent dual decoder.

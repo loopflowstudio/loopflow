@@ -1,4 +1,4 @@
-//! Durable planning facts for Project and Task Work.
+//! Linear delivery evidence for saved Work.
 
 use serde::{Deserialize, Serialize};
 
@@ -65,54 +65,4 @@ impl PlanningSyncStatus {
             })
             .collect()
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum PlanningError {
-    #[error("invalid Linear id: {0}")]
-    InvalidId(String),
-    #[error("planning record has no Linear mapping")]
-    NoLinearMapping,
-}
-
-macro_rules! validated_string_id {
-    ($name:ident, $label:literal) => {
-        #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-        #[serde(transparent)]
-        pub struct $name(String);
-
-        impl $name {
-            pub fn new(value: impl Into<String>) -> Result<Self, PlanningError> {
-                let value = value.into();
-                if value.trim().is_empty() {
-                    return Err(PlanningError::InvalidId(format!(
-                        "{} cannot be empty",
-                        $label
-                    )));
-                }
-                Ok(Self(value))
-            }
-
-            pub fn as_str(&self) -> &str {
-                &self.0
-            }
-
-            pub(crate) fn from_raw(value: impl Into<String>) -> Self {
-                Self(value.into())
-            }
-        }
-    };
-}
-
-validated_string_id!(LinearIssueId, "Linear issue id");
-validated_string_id!(LinearProjectId, "Linear project id");
-
-/// The caller retains this identity across a retry; a separate create mints another.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NewTask {
-    pub due_date: Option<String>,
-    pub id: crate::durable::TaskId,
-    pub project_id: crate::durable::ProjectId,
-    pub title: String,
-    pub description: String,
 }

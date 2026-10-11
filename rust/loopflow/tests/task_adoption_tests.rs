@@ -6,7 +6,7 @@ use std::path::Path;
 use std::process::Command;
 
 use loopflow::id::WaveId;
-use loopflow::planning::LinearProjectId;
+use loopflow::pm::LinearProjectId;
 use loopflow::store::{open_ephemeral_store, PmSnapshotRow, StorageConfig};
 use loopflow::work::project::{Project, ProjectId};
 use loopflow::work::wave::Wave;

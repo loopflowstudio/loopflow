@@ -9,7 +9,7 @@ use time::OffsetDateTime;
 use crate::child::AbandonIntent;
 pub use crate::durable::ProjectId;
 use crate::id::WaveId;
-use crate::planning::{LinearProjectId, PlanningError};
+use crate::pm::{LinearBindingError, LinearProjectId};
 use crate::work::task::{TaskEventKind, TaskId};
 
 /// Shared Project status, independent of a provider’s display label.
@@ -143,10 +143,10 @@ impl HistoricalFailure {
 }
 
 impl Project {
-    pub fn linear_id(&self) -> Result<&LinearProjectId, PlanningError> {
+    pub fn linear_id(&self) -> Result<&LinearProjectId, LinearBindingError> {
         self.linear_id
             .as_ref()
-            .ok_or(PlanningError::NoLinearMapping)
+            .ok_or(LinearBindingError::NoLinearMapping)
     }
 }
 

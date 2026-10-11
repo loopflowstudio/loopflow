@@ -1,11 +1,8 @@
 # Work model — reviewed direction
 
-2026-10-10 · LOO-412 · Jack Heart accepted the structural reduction in
-[One Work model](work-sync-redesign.html). The [deletion audit](work-model-reduction.md)
-supplies the exhaustive implementation map alongside
-[the pursuit design](work-on-another-machine-name.md). Both belong to this delivery
-before the next review; completed cuts remain deleted.
-Implementation owns the exact `WorkEdit` shape; no further shape approval is needed.
+2026-10-10 · LOO-412 · Jack Heart accepted [One Work model](work-sync-redesign.html).
+The [audit](work-model-reduction.md) and [design](work-on-another-machine-name.md)
+are one delivery scope before review; implementation owns the exact `WorkEdit` shape.
 
 ## One model, explicit boundaries
 
@@ -62,15 +59,11 @@ prove a provider exited or authorize cleanup. Local absence cannot prove peer ab
 
 ## Current source and evidence
 
-The [pursuit design](work-on-another-machine-name.md) owns implementation status
-and focused evidence; the [audit](work-model-reduction.md) owns remaining deletion.
-Canonical persistence, summaries and Task status are implemented, not the full
-acquisition, journal or provider-cache cut. The detailed October 10
-checkpoint survives at `fc7f5cac81:scratch/work-model.md`. Conditional deletions
-still require retained-evidence ownership and populated conversion proof.
+The [design](work-on-another-machine-name.md) owns status/proof; the
+[audit](work-model-reduction.md) owns remaining deletion. Conditional persistence
+cuts require populated conversion proof. October 10 detail:
+`fc7f5cac81:scratch/work-model.md`.
 
-The original full inventory and review sequence remain in
-[work-model.html](work-model.html), pinned to `c8fe4628affc13ac0553c14cd5bec5e5896369a1`.
-Its earlier “proposal” labels and TaskBrief suggestion are superseded by the
-accepted direction above. This concise account replaces duplicated historical
-inventory in launch context; the HTML retains the original detailed type map.
+[work-model.html](work-model.html) retains the original type inventory at
+`c8fe4628affc13ac0553c14cd5bec5e5896369a1`; its proposal labels and TaskBrief
+suggestion are superseded above.

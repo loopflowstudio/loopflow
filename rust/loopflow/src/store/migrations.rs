@@ -1491,6 +1491,69 @@ mod tests {
     }
 
     #[test]
+    fn typed_journal_seeding_preserves_released_relationships_authors_and_receipts() {
+        let conn = open();
+        apply_before_current_draft(&conn, "planning_peers");
+        conn.execute_batch(include_str!(
+            "../../tests/fixtures/migrations/planning_relationships.sql"
+        ))
+        .unwrap();
+        let receipt = |conn: &rusqlite::Connection| {
+            conn.query_row(
+                "SELECT json_array(comment_id,comment_json,acknowledged,error,conflicting_comment_json)
+                 FROM task_comment_deliveries WHERE comment_id='comment-proof'",
+                [], |row| row.get::<_, String>(0),
+            ).unwrap()
+        };
+        let before = receipt(&conn);
+        let sql = current_draft_sql("planning_peers");
+        conn.execute_batch(&sql).unwrap();
+        super::seed_peer_planning(&conn, &sql).unwrap();
+        for (id, field, expected) in [
+            (
+                "project-proof",
+                "planning_teams",
+                serde_json::json!(["team-a", "team-b"]),
+            ),
+            (
+                "project-proof",
+                "planning_initiatives",
+                serde_json::json!(["initiative-a"]),
+            ),
+            (
+                "comment-proof",
+                "content",
+                serde_json::json!({
+                    "body":"Keep attribution", "author":{"kind":"person","name":"Maya"}, "created_at":null
+                }),
+            ),
+        ] {
+            let value: String = conn
+                .query_row(
+                    "SELECT value FROM planning_peer_changes WHERE object_id=?1 AND field=?2",
+                    [id, field],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(&value).unwrap(),
+                expected
+            );
+        }
+        assert_eq!(receipt(&conn), before);
+        assert_eq!(
+            conn.query_row(
+                "SELECT provider_revision FROM task_comments WHERE id='comment-proof'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+            "revision-before"
+        );
+        validate_foreign_keys(&conn).unwrap();
+    }
+
+    #[test]
     fn structured_project_content_preserves_released_work_and_pending_delivery() {
         let conn = open();
         apply_before_current_draft(&conn, "local_planning");

@@ -8,7 +8,7 @@ use std::sync::{Mutex, OnceLock};
 
 use base64::prelude::*;
 use loopflow::id::WaveId;
-use loopflow::planning::{LinearIssueId, LinearProjectId};
+use loopflow::pm::{LinearIssueId, LinearProjectId};
 use loopflow::store::{PmSnapshotRow, StorageConfig, Store};
 use loopflow::work::project::{Project, ProjectId};
 use loopflow::work::task::{LinearWritebackState, Task, TaskId, TaskPr, TaskPrId};

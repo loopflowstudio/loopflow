@@ -60,7 +60,23 @@ pub struct PlanningSnapshot {
 
 impl PlanningSnapshot {
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, PlanningExchangeError> {
-        let snapshot: Self = serde_json::from_slice(bytes)?;
+        let mut snapshot: Self = serde_json::from_slice(bytes)?;
+        // Retained Git history predates typed relationship and author values.
+        // Decode those values at acquisition without minting new causal identities.
+        for change in snapshot.changes.values_mut() {
+            let value = match (change.object.kind, change.field.as_str()) {
+                (PlanningKind::Project, "planning_initiatives" | "planning_teams") => {
+                    Some(&mut change.value)
+                }
+                (PlanningKind::Comment, "content") => change.value.get_mut("author"),
+                _ => None,
+            };
+            if let Some(value) = value {
+                if let Some(encoded) = value.as_str() {
+                    *value = serde_json::from_str(encoded)?;
+                }
+            }
+        }
         snapshot.validate()?;
         Ok(snapshot)
     }
@@ -115,11 +131,7 @@ impl PlanningSnapshot {
 
     pub fn validate(&self) -> Result<(), PlanningExchangeError> {
         for (id, change) in &self.changes {
-            if id.is_empty()
-                || change.object.id.is_empty()
-                || change.clock < 0
-                || !change.object.kind.fields().contains(&change.field.as_str())
-            {
+            if id.is_empty() || change.object.id.is_empty() || change.clock < 0 {
                 return Err(PlanningExchangeError::Invalid("invalid planning mutation"));
             }
             validate_value(change)?;

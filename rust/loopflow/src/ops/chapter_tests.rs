@@ -9,8 +9,8 @@ use super::{classify_task, TaskDisposition, TaskStartEvidence};
 use crate::ops::pm::test_fixture::PlanningEnvironment;
 use crate::ops::pm::{pm_sync, resolve_context, PmSyncOptions, PmTestContext, PM_TEST_CONTEXT};
 use crate::ops::NullProgress;
-use crate::planning::LinearIssueId;
 use crate::pm::linear::LinearProject;
+use crate::pm::LinearIssueId;
 use crate::store::{open_ephemeral_store, CredentialType, ProviderToken, StorageConfig};
 use crate::work::project::ProjectStatus;
 use crate::work::task::{LinearWritebackState, Observation, Task, TaskId, TaskPr, TaskPrId};
@@ -273,7 +273,7 @@ async fn seed_project(
         wave_id: wave.id().clone(),
 
         summary: String::new(),
-        linear_id: Some(crate::planning::LinearProjectId::new(plan.id.clone()).unwrap()),
+        linear_id: Some(crate::pm::LinearProjectId::new(plan.id.clone()).unwrap()),
         slug: plan.slug.clone(),
         name: plan.name.clone(),
         description: String::new(),

@@ -8,7 +8,7 @@ use std::sync::{Mutex, OnceLock};
 
 use base64::prelude::*;
 use loopflow::id::WaveId;
-use loopflow::planning::{LinearIssueId, LinearProjectId};
+use loopflow::pm::{LinearIssueId, LinearProjectId};
 use loopflow::store::{PmSnapshotRow, StorageConfig, Store};
 use loopflow::work::project::{Project, ProjectId};
 use loopflow::work::task::{LinearWritebackState, Task, TaskId, TaskPr, TaskPrId};
@@ -117,6 +117,7 @@ read -r turn_start
 echo '{"jsonrpc":"2.0","id":3,"result":{"turn":{"id":"turn-test"}}}'
 echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thread-test","turn":{"id":"turn-test","status":"inProgress"}}}'
 printf '%s\n' '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"thread-test","turnId":"turn-test","itemId":"message-test","delta":__OUTPUT__}}'
+printf '%s\n' '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thread-test","turnId":"turn-test","item":{"type":"agentMessage","id":"message-test","text":__OUTPUT__,"phase":"final_answer"}}}'
 echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-test","turn":{"id":"turn-test","status":"completed"}}}'
 if [ -n "$LF_TEST_CODEX_STDIO" ]; then exit 0; fi
 while read -r line; do :; done

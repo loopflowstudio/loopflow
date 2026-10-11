@@ -7,8 +7,9 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-// A connected lf invocation holds its writer until OS exit, including SIGKILL.
-static HELD_LIFELINES: Mutex<Vec<File>> = Mutex::new(Vec::new());
+// A connected lf invocation holds its writer until OS exit, including SIGKILL,
+// or explicit settlement of its own naturally exited spawn.
+static HELD_LIFELINES: Mutex<Vec<(Option<u32>, File)>> = Mutex::new(Vec::new());
 
 // stdout acknowledges watchdog startup, not provider output. Ignoring TERM
 // lets the watchdog and its sleep survive the group signal to deliver KILL.
@@ -44,7 +45,10 @@ pub(crate) fn spawn_agent_process(
         drop(command);
         spawned
     })?;
-    retain_lifeline(writer);
+    retain_lifeline(
+        Some(child.id().expect("newly spawned child has a PID")),
+        writer,
+    );
     Ok(child)
 }
 
@@ -191,11 +195,20 @@ fn open_lifeline(path: Option<&Path>) -> std::io::Result<(File, File)> {
     }
 }
 
-fn retain_lifeline(writer: File) {
+fn retain_lifeline(group: Option<u32>, writer: File) {
     HELD_LIFELINES
         .lock()
         .expect("lifeline list poisoned")
-        .push(writer);
+        .push((group, writer));
+}
+
+/// Release only this process's retained spawn writer. The already-owned watchdog
+/// performs shutdown; no signal authority is inferred from a dead leader.
+pub(crate) fn release_agent_lifeline(group: u32) -> bool {
+    let mut held = HELD_LIFELINES.lock().expect("lifeline list poisoned");
+    let before = held.len();
+    held.retain(|(owner, _)| *owner != Some(group));
+    held.len() != before
 }
 
 // Command installs native stdio before pre_exec. An invocation with a closed
@@ -291,7 +304,7 @@ pub(crate) fn hold_agent_process_lifeline(path: &Path) -> std::io::Result<bool> 
         .open(path)
     {
         Ok(writer) => {
-            retain_lifeline(writer);
+            retain_lifeline(None, writer);
             Ok(true)
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
@@ -561,6 +574,21 @@ mod tests {
             }),
             "failed spawn kept its watchdog alive"
         );
+    }
+
+    #[tokio::test]
+    async fn natural_provider_exit_releases_only_its_owned_lifeline() {
+        let mut command = tokio::process::Command::new("/bin/sh");
+        command.args(["-c", "sleep 60 & exit 7"]);
+        let mut child = spawn_agent_process(command, None, |_| Ok(())).unwrap();
+        let group = child.id().unwrap();
+        assert_eq!(child.wait().await.unwrap().code(), Some(7));
+        assert!(group_alive(group), "watchdog and helper survive the leader");
+        assert!(super::release_agent_lifeline(group));
+        assert!(!super::release_agent_lifeline(group));
+        let died = wait_until(|| !group_alive(group));
+        kill_process_group(group);
+        assert!(died, "the owned watchdog must settle its entire group");
     }
 
     #[tokio::test]

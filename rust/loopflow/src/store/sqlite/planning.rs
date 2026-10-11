@@ -707,8 +707,8 @@ fn project_accepted_planning(
             Edit::Workflow(project.workflow.clone()),
             Edit::Krs(project.krs.clone()),
             Edit::MetricTargets(project.metric_targets.clone()),
-            Edit::ProjectInitiatives(serde_json::to_string(&project.initiative_ids)?),
-            Edit::ProjectTeams(serde_json::to_string(&project.team_ids)?),
+            Edit::ProjectInitiatives(project.initiative_ids.clone()),
+            Edit::ProjectTeams(project.team_ids.clone()),
         ];
         if let Some(description) = &project.description {
             edits.push(Edit::ProjectDescription(Some(description.clone())));
@@ -1125,6 +1125,98 @@ mod tests {
     use crate::store::{FrontierAdvance, PlanningState, Store};
 
     #[test]
+    fn task_admission_reads_released_evidence_without_reconstructing_provider_content() {
+        use crate::store::migrations::{
+            apply_before_current_draft, current_draft_sql, seed_peer_planning,
+        };
+        use crate::work::project::ProjectId;
+        use crate::work::task::TaskId;
+        use std::sync::{Arc, Mutex};
+
+        let cases = [
+            ("", PlanningState::Available),
+            ("UPDATE pm_items SET needs_refresh=1 WHERE id='issue'", PlanningState::Invalid),
+            ("UPDATE pm_projects SET membership_unresolved=1 WHERE id='project'", PlanningState::Invalid),
+            ("UPDATE pm_projects SET archived=1 WHERE id='project'", PlanningState::Invalid),
+            ("UPDATE pm_items SET project_id='unmapped' WHERE id='issue'", PlanningState::Invalid),
+            ("UPDATE pm_items SET body=json_set(body,'$.project_id','unmapped') WHERE id='issue'", PlanningState::Invalid),
+            ("UPDATE pm_items SET body=json_set(body,'$.team_id','foreign') WHERE id='issue'", PlanningState::Invalid),
+            ("UPDATE pm_items SET body=json_remove(body,'$.team_id') WHERE id='issue'", PlanningState::Invalid),
+            ("UPDATE pm_projects SET body=json_set(body,'$.team_ids',json('[\"foreign\"]')) WHERE id='project'", PlanningState::Invalid),
+            ("INSERT INTO pm_issue_changes(issue_id,removed) VALUES('issue',1)", PlanningState::Removed),
+            ("INSERT INTO task_deletions(wave_id,issue_id,identifier,confirmed_at) SELECT id,'issue','TEAM-1',55 FROM waves", PlanningState::Removed),
+            ("DELETE FROM pm_items WHERE id='issue'", PlanningState::Unavailable),
+            ("DELETE FROM pm_items WHERE id='issue'; UPDATE pm_projects SET membership_unresolved=1 WHERE id='project'", PlanningState::Invalid),
+            ("DELETE FROM pm_items WHERE id='issue'; UPDATE pm_projects SET archived=1 WHERE id='project'", PlanningState::Invalid),
+            ("DELETE FROM pm_items WHERE id='issue'; INSERT INTO pm_issue_changes(issue_id,removed) VALUES('issue',0)", PlanningState::Invalid),
+            ("DELETE FROM pm_items WHERE id='issue'; INSERT INTO pm_issue_changes(issue_id,removed) VALUES('issue',1)", PlanningState::Removed),
+        ];
+        for (sql, expected) in cases {
+            let conn = Connection::open_in_memory().unwrap();
+            apply_before_current_draft(&conn, "planning_peers");
+            let wave = WaveId::new();
+            let project = ProjectId::new();
+            let task = TaskId::new();
+            conn.execute_batch(
+                &include_str!("../../../tests/fixtures/migrations/planning_task_evidence.sql")
+                    .replace("{wave}", wave.as_str())
+                    .replace("{project}", project.as_str())
+                    .replace("{task}", task.as_str()),
+            )
+            .unwrap();
+            conn.execute_batch(sql).unwrap();
+            let retained: Vec<(String, String, i64)> = conn
+                .prepare("SELECT 'issue:'||id,body,observed_at FROM pm_items UNION ALL SELECT 'project:'||id,body,observed_at FROM pm_projects ORDER BY 1")
+                .unwrap()
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            let draft = current_draft_sql("planning_peers");
+            conn.execute_batch(&draft).unwrap();
+            seed_peer_planning(&conn, &draft).unwrap();
+            let store = SqliteStore {
+                conn: Arc::new(Mutex::new(conn)),
+            };
+            let saved = store.task(&task).unwrap().unwrap();
+            assert_eq!(saved.title, "Saved Task");
+            assert_eq!(saved.description, "Saved brief");
+            assert_eq!(
+                store.project(&project).unwrap().unwrap().description,
+                "Preserved prose"
+            );
+            assert_eq!(
+                saved.worktree.as_deref(),
+                Some(std::path::Path::new("/retained/checkout"))
+            );
+            assert!(store.task_by_issue("OTHER-2").unwrap().is_none());
+            let acquisition = store.task_acquisition(&task).unwrap();
+            assert_eq!(acquisition.state, expected, "{sql}");
+            assert_eq!(
+                acquisition.observed_at,
+                (!sql.contains("DELETE FROM pm_items")).then_some(42),
+                "{sql}"
+            );
+            assert_eq!(
+                store.validate_task_planning(&saved).is_err(),
+                matches!(expected, PlanningState::Invalid | PlanningState::Removed),
+                "{sql}"
+            );
+            assert_eq!(store.task(&task).unwrap().unwrap(), saved);
+            let conn = store.conn.lock().unwrap();
+            let after: Vec<(String, String, i64)> = conn
+                .prepare("SELECT 'issue:'||id,body,observed_at FROM pm_items UNION ALL SELECT 'project:'||id,body,observed_at FROM pm_projects ORDER BY 1")
+                .unwrap()
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            assert_eq!(after, retained);
+            drop(conn);
+        }
+    }
+
+    #[test]
     fn ownership_reads_retained_claims_without_changing_work_or_observation_age() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
@@ -1285,6 +1377,23 @@ mod tests {
         // Replaying the older list cannot roll content back or duplicate the Task.
         store.put_pm_snapshot(&row).unwrap();
         assert_eq!(store.task(&task.id).unwrap().unwrap().title, detail.name);
+        assert_eq!(
+            store.task_acquisition(&task.id).unwrap().observed_at,
+            Some(44)
+        );
+        store
+            .observe_pm_issue_change(&detail.id, Some("2099-01-03T00:00:00Z"), false)
+            .unwrap();
+        store.put_pm_snapshot(&row).unwrap();
+        assert_eq!(
+            store.task_acquisition(&task.id).unwrap(),
+            crate::store::TaskAcquisition {
+                state: PlanningState::Invalid,
+                observed_at: Some(44),
+            }
+        );
+        assert!(store.validate_task_planning(&refreshed).is_err());
+        assert_eq!(store.task(&task.id).unwrap().unwrap(), refreshed);
         store
             .observe_pm_issue_change(&row.snapshot.items[0].id, None, true)
             .unwrap();

@@ -19,6 +19,7 @@ mod migration_catalog;
 mod migration_schema;
 pub mod migrations;
 mod planning_peers;
+pub mod planning_sync;
 mod pr_landings;
 mod processes;
 pub(crate) mod project_transitions;
@@ -85,7 +86,7 @@ pub(crate) struct WaveLocatorUpdate {
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
     #[error(transparent)]
-    Planning(#[from] crate::planning::PlanningError),
+    Planning(#[from] crate::pm::LinearBindingError),
     #[error(transparent)]
     TaskData(#[from] crate::work::task::TaskDataError),
     #[error("sqlite error: {0}")]
@@ -1290,7 +1291,7 @@ mod tests {
     use crate::child::ChildRef;
     use crate::durable::{Author, WorkRef};
     use crate::id::WaveId;
-    use crate::planning::{LinearIssueId, LinearProjectId};
+    use crate::pm::{LinearIssueId, LinearProjectId};
     use crate::profile::EmailAddress;
     use crate::work::project::{Project, ProjectId};
     use crate::work::task::{
@@ -2045,7 +2046,7 @@ mod tests {
                     .unwrap();
                 store
                     .sqlite
-                    .create_task(&crate::planning::NewTask {
+                    .create_task(&crate::work::task::NewTask {
                         due_date: None,
                         id: TaskId::new(),
                         project_id: project.id,
@@ -2372,7 +2373,7 @@ mod tests {
         let other = Wave::new(crate::id::WaveId::new(), "other".into(), "/repo".into());
         store.create_wave(&other).await.unwrap();
         let mut foreign = make_project(&other);
-        foreign.linear_id = Some(crate::planning::LinearProjectId::new("foreign-project").unwrap());
+        foreign.linear_id = Some(crate::pm::LinearProjectId::new("foreign-project").unwrap());
         store.create_project(&foreign).await.unwrap();
         let mut response = snapshot.clone();
         response.synced_at = 2;
@@ -2688,8 +2689,7 @@ mod tests {
         store.create_project(&predecessor).await.unwrap();
         select_project(&store, &predecessor);
         let mut successor = make_project(&wave);
-        successor.linear_id =
-            Some(crate::planning::LinearProjectId::new("successor-project").unwrap());
+        successor.linear_id = Some(crate::pm::LinearProjectId::new("successor-project").unwrap());
         let task = make_task(&wave, &predecessor);
         let pr = make_task_pr(&task);
         store.seed_task(&task, &pr).await.unwrap();

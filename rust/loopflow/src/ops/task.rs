@@ -1405,7 +1405,7 @@ pub fn task_create(
         let creation_project = super::project::current_project(&store, &wave)?.id;
         let task = store
             .create_task(
-                &crate::planning::NewTask {
+                &crate::work::task::NewTask {
                     due_date: None,
                     id: crate::durable::TaskId::new(),
                     project_id: creation_project,
@@ -3038,7 +3038,7 @@ async fn reconcile_task_pr_observation(
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TaskStatus {
-    pub sync: Option<crate::planning::PlanningSyncStatus>,
+    pub sync: Option<crate::store::planning_sync::PlanningSyncStatus>,
     pub task: Option<Task>,
     pub project: Option<crate::work::project::Project>,
     pub observed_at: Option<i64>,
@@ -3052,8 +3052,14 @@ pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
     block_on_task(async {
         let store = task_store().await?;
         let mut task = match issue {
-            Some(issue) => store.get_task_by_issue(issue).await.map_err(task_error)?,
-            None => task_for_checkout(&store, repo).await?,
+            Some(issue) => {
+                super::planning_sync::find_task(&store, &repo.to_string_lossy(), issue).await?
+            }
+            None => Some(
+                task_for_checkout(&store, repo)
+                    .await?
+                    .ok_or_else(|| task_error("this checkout has no Task"))?,
+            ),
         };
         if issue.is_none() {
             if let Some(task) = &task {
@@ -3062,15 +3068,15 @@ pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
                 }
             }
         }
-        let inspection = if task.is_none() {
+        let inspection = if task.is_none()
+            && super::linear_observe::connected(&repo.to_string_lossy())
+        {
             let selector = issue.ok_or_else(|| task_error("this checkout has no Task"))?;
             let read =
                 super::pm::inspect_task_planning_async(repo, selector, super::pm::PmRefresh::Auto)
                     .await?;
-            task = store
-                .get_task_by_issue(selector)
-                .await
-                .map_err(task_error)?;
+            task =
+                super::planning_sync::find_task(&store, &repo.to_string_lossy(), selector).await?;
             Some(read)
         } else {
             None
@@ -4105,7 +4111,7 @@ fn git_output_bytes(worktree: &Path, args: &[&str]) -> OpsResult<Vec<u8>> {
 pub struct TaskEdit {
     pub wave: String,
     pub id: String,
-    pub sync: crate::planning::PlanningSyncStatus,
+    pub sync: crate::store::planning_sync::PlanningSyncStatus,
 }
 
 pub(crate) fn validate_task_edit_input(update: &crate::pm::PmItemUpdate) -> OpsResult<()> {
@@ -4346,7 +4352,7 @@ mod tests {
     };
     use crate::child::ChildRef;
     use crate::durable::{TaskState, WorkRef, WorkStatus};
-    use crate::planning::{LinearIssueId, LinearProjectId};
+    use crate::pm::{LinearIssueId, LinearProjectId};
     use crate::store::{SharedStore, StorageConfig};
     use crate::work::project::{Project, ProjectId};
     use crate::work::task::{

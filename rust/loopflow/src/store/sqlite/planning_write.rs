@@ -19,7 +19,7 @@ pub(crate) struct Disposition {
 #[serde(deny_unknown_fields)]
 pub(crate) struct CommentContent {
     pub body: String,
-    pub author: String,
+    pub author: crate::work::task::comment::TaskCommentAuthor,
     pub created_at: Option<String>,
 }
 
@@ -114,8 +114,8 @@ planning_fields! {
     (Project, ProjectDescription, "description", Option<String>),
     (Project, ProjectStatus, "status", crate::work::project::ProjectStatus),
     (Project, ProjectRank, "planning_rank", u32),
-    (Project, ProjectInitiatives, "planning_initiatives", String),
-    (Project, ProjectTeams, "planning_teams", String),
+    (Project, ProjectInitiatives, "planning_initiatives", Vec<String>),
+    (Project, ProjectTeams, "planning_teams", Vec<String>),
     (Task, TaskProject, "project_id", String),
     (Task, TaskAdmissionAuthority, "admission_authority", Option<crate::durable::TaskAdmissionAuthority>),
     (Task, TaskLinearId, "external_issue_id", Option<String>),
@@ -148,12 +148,6 @@ impl PlanningEdit {
             }
             Self::Disposition(v) if !matches!(v.planning_completed, 0 | 1) => {
                 return Err(StoreError::InvalidData("invalid completion value".into()))
-            }
-            Self::CommentContent(v) => {
-                serde_json::from_str::<crate::work::task::comment::TaskCommentAuthor>(&v.author)?;
-            }
-            Self::ProjectInitiatives(v) | Self::ProjectTeams(v) => {
-                serde_json::from_str::<Vec<String>>(v)?;
             }
             Self::MetricTargets(v) => {
                 crate::work::project::validate_metric_targets(v).map_err(StoreError::InvalidData)?
@@ -202,9 +196,9 @@ pub(crate) fn read(conn: &Connection, object: &PlanningObject) -> StoreResult<Ve
     let expressions: Vec<_> = fields.iter().map(|field| match *field {
         "delegation" => format!("COALESCE((SELECT json_object('machine_id',machine_id,'placed_at',placed_at,'provenance',provenance) FROM work_placements WHERE {}_id={}.id),'null')", object.kind.as_str(), table(object.kind)),
         "admission_authority" => "COALESCE(admission_authority,'null')".into(),
-        "krs" | "metric_targets" => field.to_string(),
+        "krs" | "metric_targets" | "planning_initiatives" | "planning_teams" => field.to_string(),
         "disposition" => "json_object('planning_state',planning_state,'planning_completed',planning_completed,'planning_completed_at',planning_completed_at)".into(),
-        "content" => "json_object('body',body,'author',author,'created_at',created_at)".into(),
+        "content" => "json_object('body',body,'author',json(author),'created_at',created_at)".into(),
         field => format!("json_quote({field})"),
     }).collect();
     let sql = format!(
@@ -238,7 +232,6 @@ pub(crate) fn write(
         .map(|edit| Ok((edit.field(), edit.value()?)))
         .collect::<StoreResult<_>>()?;
     let mut columns = BTreeMap::new();
-    let mut changed = Vec::new();
     for edit in edits {
         edit.validate()?;
         if edit.kind() != object.kind {
@@ -283,27 +276,16 @@ pub(crate) fn write(
                     )?;
                 }
             }
-            PlanningEdit::Disposition(v) => {
-                if !matches!(v.planning_completed, 0 | 1) {
-                    return Err(StoreError::InvalidData("invalid completion value".into()));
-                }
-                for (key, value) in value.as_object().expect("typed disposition").iter() {
-                    columns.insert(key.clone(), value.clone());
-                }
-            }
-            PlanningEdit::CommentContent(v) => {
-                serde_json::from_str::<crate::work::task::comment::TaskCommentAuthor>(&v.author)?;
-                for (key, value) in value.as_object().expect("typed comment").iter() {
-                    columns.insert(key.clone(), value.clone());
-                }
+            PlanningEdit::Disposition(_) | PlanningEdit::CommentContent(_) => {
+                columns.extend(value.as_object().expect("typed fields").clone());
             }
             _ => {
                 columns.insert(edit.field().into(), value.clone());
             }
         }
-        changed.push(edit);
     }
-    if !columns.is_empty() {
+    let changed = !columns.is_empty();
+    if changed {
         let assignments = columns
             .keys()
             .map(|key| format!("{key}=json_extract(?2,'$.{key}')"))
@@ -326,7 +308,7 @@ pub(crate) fn write(
         // Initial rows and every subsequent write use this same typed snapshot.
         capture(conn, object)?;
     }
-    Ok(!changed.is_empty())
+    Ok(changed)
 }
 
 pub(crate) fn capture(conn: &Connection, object: &PlanningObject) -> StoreResult<()> {
@@ -421,34 +403,80 @@ pub(crate) fn ensure_record(
     if exists {
         return Ok(());
     }
-    let fields = edits
-        .iter()
-        .map(|e| Ok((e.field(), e.value()?)))
-        .collect::<StoreResult<BTreeMap<_, _>>>()?;
-    let required = |field: &str| {
-        fields
-            .get(field)
-            .and_then(Value::as_str)
-            .ok_or_else(|| StoreError::InvalidData("required planning identity is missing".into()))
-    };
+    let missing = || StoreError::InvalidData("required planning identity is missing".into());
     match object.kind {
         PlanningKind::Wave => {
             crate::id::WaveId::parse(&object.id)
                 .map_err(|e| StoreError::InvalidData(e.to_string()))?;
-            conn.execute("INSERT INTO waves(id,name,repo,created_at,parent_wave_id) VALUES(?1,?2,?3,unixepoch(),?4)",params![object.id,required("name")?,repo,fields.get("parent_wave_id").and_then(Value::as_str)])?;
+            let name = edits
+                .iter()
+                .rev()
+                .find_map(|edit| match edit {
+                    PlanningEdit::WaveName(name) => Some(name),
+                    _ => None,
+                })
+                .ok_or_else(missing)?;
+            let parent = edits
+                .iter()
+                .rev()
+                .find_map(|edit| match edit {
+                    PlanningEdit::WaveParent(parent) => Some(parent),
+                    _ => None,
+                })
+                .and_then(Option::as_deref);
+            conn.execute("INSERT INTO waves(id,name,repo,created_at,parent_wave_id) VALUES(?1,?2,?3,unixepoch(),?4)",params![object.id,name,repo,parent])?;
         }
         PlanningKind::Project => {
+            let wave = edits
+                .iter()
+                .rev()
+                .find_map(|edit| match edit {
+                    PlanningEdit::ProjectWave(wave) => Some(wave),
+                    _ => None,
+                })
+                .ok_or_else(missing)?;
             conn.execute(
                 "INSERT INTO projects(id,wave_id,created_at,updated_at,description) VALUES(?1,?2,unixepoch(),unixepoch(),'')",
-                params![object.id, required("wave_id")?],
+                params![object.id, wave],
             )?;
         }
         PlanningKind::Task => {
-            conn.execute("INSERT INTO tasks(id,project_id,issue_identifier,created_at,updated_at,workspace_slug) VALUES(?1,?2,?3,unixepoch(),unixepoch(),'')",params![object.id,required("project_id")?,required("issue_identifier")?])?;
+            let project = edits
+                .iter()
+                .rev()
+                .find_map(|edit| match edit {
+                    PlanningEdit::TaskProject(project) => Some(project),
+                    _ => None,
+                })
+                .ok_or_else(missing)?;
+            let identifier = edits
+                .iter()
+                .rev()
+                .find_map(|edit| match edit {
+                    PlanningEdit::TaskIdentifier(identifier) => Some(identifier),
+                    _ => None,
+                })
+                .ok_or_else(missing)?;
+            conn.execute("INSERT INTO tasks(id,project_id,issue_identifier,created_at,updated_at,workspace_slug) VALUES(?1,?2,?3,unixepoch(),unixepoch(),'')",params![object.id,project,identifier])?;
         }
         PlanningKind::Comment => {
-            let c: &Value = &fields["content"];
-            conn.execute("INSERT INTO task_comments(id,task_id,body,author,created_at) VALUES(?1,?2,?3,?4,?5)",params![object.id,required("task_id")?,c["body"].as_str(),c["author"].as_str(),c["created_at"].as_str()])?;
+            let task = edits
+                .iter()
+                .rev()
+                .find_map(|edit| match edit {
+                    PlanningEdit::CommentTask(task) => Some(task),
+                    _ => None,
+                })
+                .ok_or_else(missing)?;
+            let content = edits
+                .iter()
+                .rev()
+                .find_map(|edit| match edit {
+                    PlanningEdit::CommentContent(content) => Some(content),
+                    _ => None,
+                })
+                .ok_or_else(missing)?;
+            conn.execute("INSERT INTO task_comments(id,task_id,body,author,created_at) VALUES(?1,?2,?3,?4,?5)",params![object.id,task,content.body,serde_json::to_string(&content.author)?,content.created_at])?;
         }
     }
     Ok(())
@@ -513,12 +541,12 @@ mod tests {
     use super::{create, local, PlanningEdit as Edit};
     use crate::durable::{ProjectId, TaskId};
     use crate::id::WaveId;
-    use crate::planning::NewTask;
     use crate::planning_exchange::PlanningKind;
     use crate::planning_git::PlanningDestination;
     use crate::pm::PmItemUpdate;
     use crate::store::sqlite::SqliteStore;
     use crate::work::task::comment::{TaskComment, TaskCommentAuthor};
+    use crate::work::task::NewTask;
     use crate::work::wave::Wave;
 
     fn plan(store: &SqliteStore) -> TaskId {
@@ -594,6 +622,19 @@ mod tests {
             store.bind_peer_planning("/repo", &route).unwrap();
             store.use_peer_planning("/repo", Some(&route.id())).unwrap();
         }
+        {
+            let conn = a.conn.lock().unwrap();
+            local(
+                &conn,
+                PlanningKind::Project,
+                project.as_str(),
+                &[
+                    Edit::ProjectTeams(vec!["team-1".into(), "team-2".into()]),
+                    Edit::ProjectInitiatives(vec!["initiative-1".into()]),
+                ],
+            )
+            .unwrap();
+        }
         let journal = a.export_peer_planning("/repo", &route.id()).unwrap();
         b.import_peer_planning("/repo", &route.id(), "revision", &journal)
             .unwrap();
@@ -602,6 +643,23 @@ mod tests {
         assert_eq!(received.krs, saved.krs);
         assert_eq!(received.metric_targets, saved.metric_targets);
         assert_eq!(received.workflow, saved.workflow);
+        let conn = b.conn.lock().unwrap();
+        let (teams, initiatives): (String, String) = conn
+            .query_row(
+                "SELECT planning_teams,planning_initiatives FROM projects WHERE id=?1",
+                [project.as_str()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<Vec<String>>(&teams).unwrap(),
+            ["team-1", "team-2"]
+        );
+        assert_eq!(
+            serde_json::from_str::<Vec<String>>(&initiatives).unwrap(),
+            ["initiative-1"]
+        );
+        drop(conn);
         let current = a.project(&project).unwrap().unwrap();
         let pending = a.pending_project_changes(&project).unwrap();
         a.conn.lock().unwrap().execute_batch("CREATE TRIGGER fail_project_capture BEFORE INSERT ON planning_peer_changes BEGIN SELECT RAISE(ABORT,'injected failure'); END;").unwrap();
@@ -708,12 +766,21 @@ mod tests {
             .unwrap());
         assert_eq!(
             conn.query_row(
-                "SELECT body FROM task_comments WHERE id='comment-proof'",
+                "SELECT body,author FROM task_comments WHERE id='comment-proof'",
                 [],
-                |r| r.get::<_, String>(0)
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
             )
+            .map(|(body, author)| (
+                body,
+                serde_json::from_str::<TaskCommentAuthor>(&author).unwrap()
+            ))
             .unwrap(),
-            "Keep this finding"
+            (
+                "Keep this finding".into(),
+                TaskCommentAuthor::Person {
+                    name: Some("Maya".into())
+                }
+            )
         );
         assert_eq!(
             conn.query_row("SELECT count(*) FROM task_state_deliveries", [], |r| r

@@ -211,6 +211,10 @@ add digits to select one. Full IDs and exact Linear ticket aliases still work.
 Displayed local selectors start at seven digits and extend when needed; retain
 full IDs in automation.
 
+Task status, edits and comments resolve ticket aliases within the current repository,
+including its worktrees and path aliases. An explicit full Task ID selects its
+recorded repository; outside a repository, ticket aliases must be globally unique.
+
 ```bash
 lf task edit <id> --rank 0 --assignee <person-id>
 lf task edit <id> --unassign

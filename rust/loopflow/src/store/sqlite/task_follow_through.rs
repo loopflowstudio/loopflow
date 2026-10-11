@@ -314,7 +314,7 @@ fn create_reserved_task_in(conn: &Connection, intent: &FollowThroughIntent) -> S
     )?;
     let task = super::children::create_task_in(
         conn,
-        &crate::planning::NewTask {
+        &crate::work::task::NewTask {
             id,
             project_id: crate::durable::ProjectId::from_raw(project_id),
             title: intent.title.clone(),

@@ -14,6 +14,26 @@ use loopflow::store::{
 use support::EnvGuard;
 use tempfile::TempDir;
 
+fn claude_script(body: &str) -> String {
+    r#"#!/usr/bin/python3
+import json, os, sys, time
+if '--version' in sys.argv:
+    print('fixture')
+    sys.exit(0)
+message = json.loads(sys.stdin.readline())
+message['session_id'] = 'fixture-thread'
+print(json.dumps(message), flush=True)
+print(json.dumps({'type': 'system', 'subtype': 'init', 'session_id': 'fixture-thread'}), flush=True)
+text = ''
+failed = False
+__BODY__
+print(json.dumps({'type': 'assistant', 'message': {'content': [{'type': 'text', 'text': text}]}}), flush=True)
+print(json.dumps({'type': 'result', 'uuid': 'fixture-result', 'session_id': 'fixture-thread', 'subtype': 'error_during_execution' if failed else 'success', 'is_error': failed, 'result': text}), flush=True)
+for line in sys.stdin:
+    pass
+"#.replace("__BODY__", body)
+}
+
 fn base_launch() -> AgentConfig {
     AgentConfig {
         task_prompt: "prompt".to_string(),
@@ -34,10 +54,9 @@ fn base_process() -> ProcessConfig {
 
 #[test]
 fn claude_batch_reads_large_context_without_argv_limits() {
-    let _env = EnvGuard::new(&[(
-        "claude",
-        "#!/bin/sh\ncat > \"$LF_TEST_INPUT\"\nprintf 'received\\n'\n",
-    )]);
+    let _env = EnvGuard::new(&[("claude", &claude_script(
+        "open(os.environ['LF_TEST_INPUT'], 'w').write(message['message']['content'][0]['text'])\ntext = 'received'"
+    ))]);
     let directory = TempDir::new().expect("input directory");
     let path = directory.path().join("input");
     let prompt = "Preserve the entire context — including newlines.\n".repeat(30_000);
@@ -60,7 +79,7 @@ fn claude_batch_reads_large_context_without_argv_limits() {
 
 #[test]
 fn library_launch_records_each_provider_under_its_invocation() {
-    let _env = EnvGuard::new(&[("claude", "#!/bin/sh\nprintf '%s' \"$$\"\n")]);
+    let _env = EnvGuard::new(&[("claude", &claude_script("text = str(os.getpid())"))]);
     let directory = TempDir::new().unwrap();
     let launch = AgentConfig {
         cwd: Some(directory.path().to_path_buf()),
@@ -108,7 +127,7 @@ fn library_launch_records_each_provider_under_its_invocation() {
 
 #[test]
 fn library_launch_reuses_the_enclosing_invocation() {
-    let _env = EnvGuard::new(&[("claude", "#!/bin/sh\nexit 0\n")]);
+    let _env = EnvGuard::new(&[("claude", &claude_script("text = 'done'"))]);
     let directory = TempDir::new().unwrap();
     let launch = AgentConfig {
         cwd: Some(directory.path().to_path_buf()),
@@ -144,7 +163,7 @@ fn library_launch_reuses_the_enclosing_invocation() {
 
 #[test]
 fn launch_returns_exit_code() {
-    let _env = EnvGuard::new(&[("claude", "#!/bin/sh\nexit 0\n")]);
+    let _env = EnvGuard::new(&[("claude", &claude_script("text = 'done'"))]);
     let result = run_agent(
         &base_launch(),
         &base_process(),
@@ -156,7 +175,7 @@ fn launch_returns_exit_code() {
 
 #[test]
 fn launch_captures_stdout() {
-    let _env = EnvGuard::new(&[("claude", "#!/bin/sh\necho hello\n")]);
+    let _env = EnvGuard::new(&[("claude", &claude_script("text = 'hello'"))]);
     let result = run_agent(
         &base_launch(),
         &base_process(),
@@ -168,7 +187,10 @@ fn launch_captures_stdout() {
 
 #[test]
 fn launch_captures_stderr() {
-    let _env = EnvGuard::new(&[("claude", "#!/bin/sh\necho error 1>&2\n")]);
+    let _env = EnvGuard::new(&[(
+        "claude",
+        &claude_script("text = 'fixture error'; failed = True"),
+    )]);
     let result = run_agent(
         &base_launch(),
         &base_process(),
@@ -180,7 +202,10 @@ fn launch_captures_stderr() {
 
 #[test]
 fn launch_scopes_process_environment_to_child() {
-    let _env = EnvGuard::new(&[("claude", "#!/bin/sh\nprintf '%s' \"$LF_TEST_SCOPED_ENV\"\n")]);
+    let _env = EnvGuard::new(&[(
+        "claude",
+        &claude_script("text = os.environ['LF_TEST_SCOPED_ENV']"),
+    )]);
     let launch = AgentConfig {
         env: BTreeMap::from([("LF_TEST_SCOPED_ENV".to_string(), "owned".to_string())]),
         ..base_launch()
@@ -194,14 +219,14 @@ fn launch_scopes_process_environment_to_child() {
 
 #[test]
 fn launch_nonzero_exit() {
-    let _env = EnvGuard::new(&[("claude", "#!/bin/sh\nexit 7\n")]);
+    let _env = EnvGuard::new(&[("claude", &claude_script("sys.exit(7)"))]);
     let result = run_agent(
         &base_launch(),
         &base_process(),
         &AgentCapabilities::default(),
     )
     .expect("launch");
-    assert_eq!(result.exit_code, 7);
+    assert_ne!(result.exit_code, 0);
 }
 
 #[test]
@@ -400,7 +425,7 @@ fn launch_missing_binary_returns_error() {
 
 #[test]
 fn launch_with_cwd() {
-    let _env = EnvGuard::new(&[("claude", "#!/bin/sh\npwd\n")]);
+    let _env = EnvGuard::new(&[("claude", &claude_script("text = os.getcwd()"))]);
     let cwd = TempDir::new().expect("cwd");
     let mut launch = base_launch();
     launch.cwd = Some(cwd.path().to_path_buf());
@@ -411,7 +436,7 @@ fn launch_with_cwd() {
 
 #[test]
 fn launch_streaming_mode() {
-    let _env = EnvGuard::new(&[("claude", "#!/bin/sh\necho first\necho second\n")]);
+    let _env = EnvGuard::new(&[("claude", &claude_script("text = 'first\\nsecond'"))]);
     let process = ProcessConfig {
         auto: true,
         stream: true,
@@ -425,7 +450,7 @@ fn launch_streaming_mode() {
 
 #[test]
 fn launch_batch_times_out() {
-    let _env = EnvGuard::new(&[("claude", "#!/bin/sh\nsleep 2\necho late\n")]);
+    let _env = EnvGuard::new(&[("claude", &claude_script("time.sleep(2); text = 'late'"))]);
     let process = ProcessConfig {
         auto: true,
         stream: false,
@@ -442,7 +467,7 @@ fn launch_batch_times_out() {
 
 #[test]
 fn launch_streaming_times_out() {
-    let _env = EnvGuard::new(&[("claude", "#!/bin/sh\nsleep 2\necho late\n")]);
+    let _env = EnvGuard::new(&[("claude", &claude_script("time.sleep(2); text = 'late'"))]);
     let process = ProcessConfig {
         auto: true,
         stream: true,

@@ -11,7 +11,7 @@ use std::process::Command;
 
 use loopflow::child::ChildRef;
 use loopflow::id::WaveId;
-use loopflow::planning::{LinearIssueId, LinearProjectId};
+use loopflow::pm::{LinearIssueId, LinearProjectId};
 use loopflow::store::migrations;
 use loopflow::store::sqlite::SqliteStore;
 use loopflow::store::{PmSnapshotRow, StorageConfig};

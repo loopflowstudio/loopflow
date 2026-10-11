@@ -137,7 +137,8 @@ fn lf(repo: &Path, home: &Path, args: &[&str]) -> Value {
     let output = command(repo, home, args).output().unwrap();
     assert!(
         output.status.success(),
-        "{}",
+        "{args:?} in {}: {}",
+        repo.display(),
         String::from_utf8_lossy(&output.stderr)
     );
     if output.stdout.is_empty() {
@@ -616,7 +617,7 @@ fn public_task_prefixes_resolve_and_report_ambiguity() {
         .unwrap();
     for (id, title) in [(first, "First"), (second, "Second")] {
         store
-            .create_task(&loopflow::planning::NewTask {
+            .create_task(&loopflow::work::task::NewTask {
                 due_date: None,
                 id: loopflow::durable::TaskId::parse(id).unwrap(),
                 project_id: loopflow::durable::ProjectId::parse(&project).unwrap(),
@@ -2067,7 +2068,7 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             let conflict = sync.changes.iter().find(|c| c.field == "name").unwrap();
             assert_eq!(
                 conflict.state,
-                loopflow::planning::PlanningSyncState::AdoptedLinear
+                loopflow::store::planning_sync::PlanningSyncState::AdoptedLinear
             );
             assert_eq!(conflict.local_value, "Saved offline");
             assert_eq!(
@@ -2158,8 +2159,8 @@ fn place_wave_on_remote(
 #[test]
 fn rotation_saves_membership_and_pending_effects_offline() {
     use loopflow::durable::TaskId;
-    use loopflow::planning::NewTask;
     use loopflow::store::PmSnapshotRow;
+    use loopflow::work::task::NewTask;
 
     for (connected, mapped) in [(false, false), (false, true), (true, false), (true, true)] {
         let repo = TestRepo::new();
@@ -2457,7 +2458,7 @@ fn rotation_saves_membership_and_pending_effects_offline() {
         existing.slug = "future".into();
         existing.status = loopflow::work::project::ProjectStatus::Planned;
         existing.linear_id =
-            mapped.then(|| loopflow::planning::LinearProjectId::new("future-provider").unwrap());
+            mapped.then(|| loopflow::pm::LinearProjectId::new("future-provider").unwrap());
         store.insert_project(&existing).unwrap();
         let mut next = plan.clone();
         next["waves"][0]["successor_id"] = serde_json::json!(existing
@@ -2534,7 +2535,7 @@ fn rotation_saves_membership_and_pending_effects_offline() {
 #[test]
 fn refiling_saves_membership_offline_and_retains_inbound_changes() {
     use loopflow::durable::TaskId;
-    use loopflow::planning::NewTask;
+    use loopflow::work::task::NewTask;
 
     for (connected, mapped) in [(false, false), (false, true), (true, false), (true, true)] {
         let repo = TestRepo::new();
@@ -2565,7 +2566,7 @@ fn refiling_saves_membership_offline_and_retains_inbound_changes() {
             if mapped {
                 // Bind through the writer so foreground Git exchange sees the same
                 // identity as SQLite, rather than restoring a pre-binding journal.
-                project.linear_id = Some(loopflow::planning::LinearProjectId::new(name).unwrap());
+                project.linear_id = Some(loopflow::pm::LinearProjectId::new(name).unwrap());
                 store.insert_project(&project).unwrap();
                 let observed = loopflow::pm::linear::LinearProject {
                     id: name.into(),
@@ -2968,6 +2969,100 @@ fn deletion_saves_offline_and_retains_execution_and_retry_identity() {
             loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
         assert_eq!(reopened.pending_task_changes(&task_id).unwrap(), changes);
     }
+}
+
+#[test]
+fn task_selectors_use_repository_scope_and_preserve_exact_identity_through_aliases() {
+    let first = TestRepo::new();
+    let second = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let tasks: Vec<_> = [&first, &second]
+        .into_iter()
+        .map(|repo| {
+            lf(
+                repo.path(),
+                home.path(),
+                &["task", "create", "--title", "Original", "--json"],
+            )
+        })
+        .collect();
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    db.execute("UPDATE tasks SET issue_identifier='DUP-1'", [])
+        .unwrap();
+    let alias = home.path().join("first-alias");
+    std::os::unix::fs::symlink(first.path(), &alias).unwrap();
+    db.execute(
+        "UPDATE waves SET repo=?1 WHERE id=?2",
+        rusqlite::params![
+            alias.to_string_lossy(),
+            tasks[0]["wave_id"].as_str().unwrap()
+        ],
+    )
+    .unwrap();
+    for (repo, task) in [
+        (first.path(), &tasks[0]),
+        (alias.as_path(), &tasks[0]),
+        (second.path(), &tasks[1]),
+    ] {
+        let status = lf(repo, home.path(), &["task", "status", "DUP-1", "--json"]);
+        assert_eq!(status["task"]["id"], task["id"]);
+    }
+    // Exact identity still permits inspection across repository scope.
+    let foreign = tasks[1]["id"].as_str().unwrap();
+    let status = lf(
+        first.path(),
+        home.path(),
+        &["task", "status", foreign, "--json"],
+    );
+    assert_eq!(status["task"]["id"], foreign);
+    let rejected = command(
+        first.path(),
+        home.path(),
+        &[
+            "task",
+            "edit",
+            foreign,
+            "--wave",
+            tasks[0]["wave_id"].as_str().unwrap(),
+            "--title",
+            "Wrong owner",
+        ],
+    )
+    .output()
+    .unwrap();
+    assert!(!rejected.status.success());
+    assert!(
+        String::from_utf8_lossy(&rejected.stderr)
+            .to_lowercase()
+            .contains("wave"),
+        "{}",
+        String::from_utf8_lossy(&rejected.stderr)
+    );
+    lf(
+        &alias,
+        home.path(),
+        &["task", "edit", "DUP-1", "--title", "First only"],
+    );
+    let status = lf(
+        second.path(),
+        home.path(),
+        &["task", "status", "DUP-1", "--json"],
+    );
+    assert_eq!(status["task"]["title"], "Original");
+    let status = lf(
+        first.path(),
+        home.path(),
+        &["task", "status", "DUP-1", "--json"],
+    );
+    assert_eq!(status["task"]["title"], "First only");
+    let missing = lf(
+        first.path(),
+        home.path(),
+        &["task", "status", "MISSING-1", "--json"],
+    );
+    assert!(missing["task"].is_null());
+    assert_eq!(missing["planning_state"], "unavailable");
+    assert!(missing["planning_error"].is_null());
 }
 
 #[test]
@@ -3456,7 +3551,7 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
     let store = loopflow::store::sqlite::SqliteStore::new(&path).unwrap();
     let task = store.task(&id).unwrap().unwrap();
     let mut project = store.project(&task.project_id).unwrap().unwrap();
-    project.linear_id = Some(loopflow::planning::LinearProjectId::new("provider-project").unwrap());
+    project.linear_id = Some(loopflow::pm::LinearProjectId::new("provider-project").unwrap());
     store.insert_project(&project).unwrap();
     let observed: loopflow::pm::linear::LinearProject = serde_json::from_value(json!({
         "id":"provider-project", "slug":project.slug, "name":project.name,
@@ -3525,7 +3620,7 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
         ("available", "UPDATE pm_items SET needs_refresh=0"),
         (
             "invalid",
-            "UPDATE pm_items SET body=json_set(body,'$.project_id','another-project')",
+            "UPDATE pm_items SET project_id='another-project',body=json_set(body,'$.project_id','another-project')",
         ),
     ] {
         db.execute_batch(statement).unwrap();

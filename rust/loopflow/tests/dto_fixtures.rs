@@ -782,12 +782,12 @@ fn planning_sync_preserves_delivery_and_losing_values() {
         "../../../tests/fixtures/dto/planning_sync.json"
     ))
     .unwrap();
-    let sync: loopflow::planning::PlanningSyncStatus =
+    let sync: loopflow::store::planning_sync::PlanningSyncStatus =
         serde_json::from_value(value.clone()).unwrap();
     assert!(sync.connected);
     assert_eq!(
         sync.changes[1].state,
-        loopflow::planning::PlanningSyncState::Uncertain
+        loopflow::store::planning_sync::PlanningSyncState::Uncertain
     );
     assert_eq!(sync.changes[2].local_value, "Local title");
     assert_eq!(
@@ -990,6 +990,10 @@ fn peer_planning_status_keeps_journal_and_independent_receipts() {
     );
     assert_eq!(statuses[0].conflicts.len(), 1);
     assert!(statuses[1].pending_local);
+    assert_eq!(
+        statuses[1].changes["comment-head"].value["author"],
+        serde_json::json!({"kind": "person", "name": "Maya"})
+    );
     assert_eq!(statuses[1].changes["title-loser"].value, "Retained title");
     assert!(!statuses[1].candidates.contains("title-loser"));
     assert!(statuses[1].changes["title-head"]

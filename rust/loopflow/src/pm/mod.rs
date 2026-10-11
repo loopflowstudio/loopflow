@@ -7,6 +7,46 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum LinearBindingError {
+    #[error("invalid Linear id: {0}")]
+    InvalidId(String),
+    #[error("planning record has no Linear mapping")]
+    NoLinearMapping,
+}
+
+macro_rules! validated_string_id {
+    ($name:ident, $label:literal) => {
+        #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+        #[serde(transparent)]
+        pub struct $name(String);
+
+        impl $name {
+            pub fn new(value: impl Into<String>) -> Result<Self, LinearBindingError> {
+                let value = value.into();
+                if value.trim().is_empty() {
+                    return Err(LinearBindingError::InvalidId(format!(
+                        "{} cannot be empty",
+                        $label
+                    )));
+                }
+                Ok(Self(value))
+            }
+
+            pub fn as_str(&self) -> &str {
+                &self.0
+            }
+
+            pub(crate) fn from_raw(value: impl Into<String>) -> Self {
+                Self(value.into())
+            }
+        }
+    };
+}
+
+validated_string_id!(LinearIssueId, "Linear issue id");
+validated_string_id!(LinearProjectId, "Linear project id");
+
 /// The result of adopting or creating a provider team for a repository. The stable
 /// `id` owns identity; `key` is mutable presentation (the Task prefix).
 #[derive(Debug, Clone, PartialEq, Eq)]

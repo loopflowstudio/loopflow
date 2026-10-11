@@ -17,10 +17,11 @@ use time::OffsetDateTime;
 use crate::child::AbandonIntent;
 use crate::durable::{Author, TaskState, WorkRef};
 use crate::id::WaveId;
-use crate::planning::{LinearIssueId, LinearProjectId, NewTask};
+use crate::pm::{LinearIssueId, LinearProjectId};
 use crate::store::rows::now_unix;
-use crate::store::{PlanningState, PmTaskObservation, StoreError, StoreResult};
+use crate::store::{PlanningState, StoreError, StoreResult};
 use crate::work::project::{Project, ProjectEvent, ProjectEventKind, ProjectId};
+use crate::work::task::NewTask;
 use crate::work::task::{
     CiObservation, GithubObservation, GithubPr, LinearObservationOutcome, LinearWritebackState,
     PrMergeRequest, PrPhase, PrPresentation, PrPublication, Task, TaskEvent, TaskEventKind, TaskId,
@@ -389,52 +390,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.unchecked_transaction()?;
         let task = task_on(&tx, id)?.ok_or(StoreError::NotFound)?;
-        let (repo, project, teams, deleted): (String, Option<String>, String, bool) = tx
-            .query_row(
-            "SELECT w.repo,p.external_project_id,p.planning_teams,t.planning_deleted_at IS NOT NULL
-             FROM tasks t JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id
-             WHERE t.id=?1",
-            [id.as_str()],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-        )?;
-        let mut result = crate::store::TaskAcquisition {
-            state: PlanningState::Available,
-            observed_at: None,
-        };
-        if let Some(issue) = &task.linear_id {
-            let observation =
-                match super::planning::pm_task_observation_in(&tx, &repo, "linear", issue.as_str())
-                {
-                    Ok(observation) => observation,
-                    Err(StoreError::Serde(_)) => PmTaskObservation {
-                        record: None,
-                        state: PlanningState::Invalid,
-                    },
-                    Err(error) => return Err(error),
-                };
-            result.state = observation.state;
-            if let Some(record) = observation.record {
-                result.observed_at = Some(record.observed_at);
-                let teams: Vec<String> = serde_json::from_str(&teams)?;
-                let pending_membership = super::planning_changes::PlanningChanges::Task(id)
-                    .pending(&tx)?
-                    .iter()
-                    .any(|change| change.field == "project_id");
-                if result.state != PlanningState::Removed
-                    && ((record.item.project_id != project && !pending_membership)
-                        || record
-                            .item
-                            .team_id
-                            .as_ref()
-                            .is_some_and(|team| !teams.contains(team)))
-                {
-                    result.state = PlanningState::Invalid;
-                }
-            }
-        }
-        if deleted {
-            result.state = PlanningState::Removed;
-        }
+        let result = task_acquisition_in(&tx, &task, true)?;
         tx.commit()?;
         Ok(result)
     }
@@ -1132,47 +1088,78 @@ pub(super) fn require_task_planning(conn: &Connection, task: &Task) -> StoreResu
 /// Planning ownership remains relevant when finishing already completed work.
 pub(super) fn require_task_planning_identity(conn: &Connection, task: &Task) -> StoreResult<()> {
     require_task_not_deleted(conn, task)?;
-    let Some(issue) = &task.linear_id else {
-        return Ok(());
-    };
-    let (repo, project): (String, Option<String>) = conn.query_row(
-        "SELECT w.repo,p.external_project_id FROM projects p
-         JOIN waves w ON w.id=p.wave_id WHERE p.id=?1",
-        [task.project_id.as_str()],
-        |row| Ok((row.get(0)?, row.get(1)?)),
-    )?;
-    let observation =
-        super::planning::pm_task_observation_in(conn, &repo, "linear", issue.as_str())?;
+    let acquisition = task_acquisition_in(conn, task, false)?;
     if matches!(
-        observation.state,
-        crate::store::PlanningState::Invalid | crate::store::PlanningState::Removed
+        acquisition.state,
+        PlanningState::Invalid | PlanningState::Removed
     ) {
         return Err(StoreError::InvalidAuthority(
-            "Task planning has invalidation or removal evidence; refresh its planning".into(),
+            "Task planning has invalid ownership, invalidation or removal evidence; refresh its planning".into(),
         ));
     }
-    if let Some(record) = observation.record {
-        if record.item.project_id != project {
-            return Err(StoreError::InvalidAuthority(
-                "Task planning no longer matches its owning Project; its history is preserved"
-                    .into(),
-            ));
-        }
-        if let Some(project) = record.project {
-            if !record
-                .item
-                .team_id
-                .as_ref()
-                .is_some_and(|team| project.team_ids.contains(team))
-            {
-                return Err(StoreError::InvalidAuthority(
-                    "Task planning no longer matches its Project's Team; its history is preserved"
-                        .into(),
-                ));
-            }
-        }
-    }
     Ok(())
+}
+
+// Read only the retained facts that affect admission. Content belongs to Work;
+// an unrelated malformed provider content field cannot erase membership or age.
+fn task_acquisition_in(
+    conn: &Connection,
+    task: &Task,
+    allow_pending_membership: bool,
+) -> StoreResult<crate::store::TaskAcquisition> {
+    let (observed_at, invalid, removed, changed): (Option<i64>, bool, bool, bool) = conn
+        .query_row(
+            "SELECT i.observed_at,
+         COALESCE(i.needs_refresh,0) OR COALESCE(observed.membership_unresolved,0)
+         OR COALESCE(observed.archived,0)
+         OR COALESCE(parent.membership_unresolved,0) OR COALESCE(parent.archived,0)
+         OR CASE WHEN i.id IS NULL THEN 0 ELSE
+             (i.project_id IS NOT p.external_project_id AND NOT (?2 AND EXISTS(
+                 SELECT 1 FROM task_changes c WHERE c.task_id=t.id AND c.field='project_id'
+                 AND c.acknowledged=0 AND c.conflict_json IS NULL
+                 AND c.seq=(SELECT max(seq) FROM task_changes WHERE task_id=t.id AND field=c.field))))
+             OR CASE WHEN NOT json_valid(i.body) THEN 1
+                WHEN json_type(i.body,'$.project_id') IS NOT NULL
+                     AND json_extract(i.body,'$.project_id') IS NOT i.project_id THEN 1
+                WHEN json_type(i.body,'$.team_id') NOT IN ('text','null') THEN 1
+                WHEN json_extract(i.body,'$.team_id') IS NOT NULL THEN
+                    NOT EXISTS(SELECT 1 FROM json_each(p.planning_teams)
+                               WHERE value=json_extract(i.body,'$.team_id'))
+                ELSE 0 END
+             OR CASE WHEN observed.id IS NULL THEN 0
+                WHEN NOT json_valid(observed.body) OR NOT json_valid(i.body) THEN 1
+                WHEN json_type(observed.body,'$.team_ids') IS NOT 'array' THEN 1
+                ELSE NOT EXISTS(SELECT 1 FROM json_each(observed.body,'$.team_ids')
+                                WHERE value=json_extract(i.body,'$.team_id')) END
+             END,
+         t.planning_deleted_at IS NOT NULL
+         OR EXISTS(SELECT 1 FROM task_deletions d JOIN waves dw ON dw.id=d.wave_id
+                   WHERE dw.repo=w.repo AND d.issue_id=t.external_issue_id)
+         OR COALESCE(changes.removed,0),
+         changes.issue_id IS NOT NULL
+         FROM tasks t JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id
+         LEFT JOIN pm_items i ON i.repo=w.repo AND i.provider='linear' AND i.id=t.external_issue_id
+         LEFT JOIN pm_projects parent ON parent.repo=w.repo AND parent.provider='linear'
+                                     AND parent.id=p.external_project_id
+         LEFT JOIN pm_projects observed ON observed.repo=i.repo AND observed.provider=i.provider
+                                       AND observed.id=i.project_id
+         LEFT JOIN pm_issue_changes changes ON changes.issue_id=t.external_issue_id
+         WHERE t.id=?1",
+            params![task.id.as_str(), allow_pending_membership],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )?;
+    Ok(crate::store::TaskAcquisition {
+        state: if removed {
+            PlanningState::Removed
+        } else if invalid || (observed_at.is_none() && changed) {
+            PlanningState::Invalid
+        } else if observed_at.is_some() || task.linear_id.is_none() {
+            PlanningState::Available
+        } else {
+            PlanningState::Unavailable
+        },
+        observed_at,
+    })
 }
 
 fn task_deleted_on(conn: &Connection, task: &Task) -> StoreResult<bool> {
@@ -1508,34 +1495,45 @@ pub(super) fn resolve_task_id_in(
         && prefix.bytes().all(|byte| byte.is_ascii_hexdigit()))
     .then(|| prefix.to_ascii_lowercase());
     let mut statement = conn.prepare(
-        "SELECT t.id, COALESCE(t.issue_title, t.issue_identifier, t.id) FROM tasks t
+        "SELECT t.id, COALESCE(t.issue_title, t.issue_identifier, t.id), w.repo FROM tasks t
          LEFT JOIN projects p ON p.id=t.project_id LEFT JOIN waves w ON w.id=p.wave_id
          WHERE (t.id=?1 OR t.external_issue_id=?1 OR t.issue_identifier=?1
             OR substr(lower(t.id), 6, length(?2))=?2
             OR EXISTS(SELECT 1 FROM task_creation_intents c WHERE c.task_id=t.id
                 AND json_extract(c.export_json,'$.id')=?1))
-            AND (?3 IS NULL OR w.repo=?3)
          ORDER BY t.id",
     )?;
     let mut tasks = statement
-        .query_map(params![issue, local_prefix, repo], |row| {
+        .query_map(params![issue, local_prefix], |row| {
             Ok((
                 TaskId::from_raw(row.get::<_, String>(0)?),
                 row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
+    if let Some(repo) = repo {
+        let canonical = crate::repository::CanonicalRepo::discover(std::path::Path::new(repo)).ok();
+        tasks.retain(|(_, _, owner)| {
+            owner.as_deref() == Some(repo)
+                || owner.as_ref().is_some_and(|owner| {
+                    canonical.as_ref().is_some_and(|canonical| {
+                        canonical.contains(std::path::Path::new(owner))
+                    })
+                })
+        });
+    }
     if tasks.len() > 1 {
         let candidates = tasks
             .iter()
-            .map(|(id, title)| format!("  {id} ({title})"))
+            .map(|(id, title, _)| format!("  {id} ({title})"))
             .collect::<Vec<_>>()
             .join("\n");
         return Err(StoreError::InvalidData(format!(
             "multiple stable Tasks resolve to {issue:?}; use a longer Task ID:\n{candidates}"
         )));
     }
-    if let Some((id, _)) = tasks.pop() {
+    if let Some((id, _, _)) = tasks.pop() {
         return Ok(Some(id));
     }
     Ok(None)
@@ -2080,9 +2078,9 @@ mod local_planning_tests {
 
     use crate::durable::{ProjectId, TaskId};
     use crate::id::WaveId;
-    use crate::planning::NewTask;
     use crate::pm::PmItemUpdate;
     use crate::store::sqlite::SqliteStore;
+    use crate::work::task::NewTask;
 
     fn local_project(store: &SqliteStore) -> ProjectId {
         let repo = store.home_dir().unwrap();

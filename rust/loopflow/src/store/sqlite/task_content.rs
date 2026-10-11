@@ -5,8 +5,8 @@ use crate::planning_exchange::PlanningKind;
 use rusqlite::TransactionBehavior;
 
 use crate::durable::{ProjectId, TaskId};
-use crate::planning::PlanningChange;
 use crate::pm::PmItemUpdate;
+use crate::store::planning_sync::PlanningChange;
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
 use crate::work::task::Task;

@@ -2624,7 +2624,7 @@ fn finish_command(result: anyhow::Result<()>) -> anyhow::Result<()> {
     result
 }
 
-fn print_planning_sync(sync: &loopflow::planning::PlanningSyncStatus) {
+fn print_planning_sync(sync: &loopflow::store::planning_sync::PlanningSyncStatus) {
     for line in sync.lines() {
         eprintln!("{line}");
     }

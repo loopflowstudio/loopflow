@@ -6,7 +6,7 @@ use std::path::Path;
 use std::process::Command;
 
 use loopflow::id::WaveId;
-use loopflow::planning::LinearProjectId;
+use loopflow::pm::LinearProjectId;
 use loopflow::store::{open_ephemeral_store, PmSnapshotRow, StorageConfig};
 use loopflow::work::project::{Project, ProjectId};
 use loopflow::work::wave::Wave;
@@ -322,7 +322,7 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
             let pr_before = runtime.block_on(store.active_task_pr(&task.id)).unwrap();
             for (index, (condition, expected)) in [
                 ("canceled", "terminal"),
-                ("moved", "no longer matches"),
+                ("moved", "invalid ownership"),
                 ("team", "Team"),
                 ("removed", "deleted"),
             ]

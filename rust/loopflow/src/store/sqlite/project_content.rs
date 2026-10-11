@@ -5,7 +5,7 @@ use rusqlite::{params, OptionalExtension, TransactionBehavior};
 
 use crate::durable::ProjectId;
 use crate::id::WaveId;
-use crate::planning::PlanningChange;
+use crate::store::planning_sync::PlanningChange;
 use crate::store::{StoreError, StoreResult};
 use crate::work::project::ProjectKR;
 use crate::work::wave::metrics::MetricTarget;

@@ -21,13 +21,22 @@ pub(crate) async fn find_task(
     repo: &str,
     selector: &str,
 ) -> OpsResult<Option<crate::work::task::Task>> {
-    if let Some(task) = store.get_task_by_issue(selector).await.map_err(message)? {
+    let scope = crate::repository::CanonicalRepo::discover(Path::new(repo)).map_err(message)?;
+    let read = || {
+        store
+            .sqlite
+            .resolve_task_id(selector, Some(&scope.to_string()))?
+            .map(|id| store.sqlite.task(&id))
+            .transpose()
+            .map(Option::flatten)
+    };
+    if let Some(task) = read().map_err(message)? {
         return Ok(Some(task));
     }
     if let Err(error) = acquire_repository(store, repo).await {
         tracing::warn!(%error, "planning acquisition pending; resolving retained Task");
     }
-    store.get_task_by_issue(selector).await.map_err(message)
+    read().map_err(message)
 }
 
 /// One acquisition per destination, also used before resolving a cold Task.

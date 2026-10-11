@@ -339,9 +339,9 @@ mod tests {
     use super::{resolve_work_binding, resolve_work_selection, WorkSelection};
     use crate::durable::{ProjectId, TaskId, WorkRef};
     use crate::id::WaveId;
-    use crate::planning::{LinearIssueId, LinearProjectId};
     use crate::pm::linear::LinearProject;
     use crate::pm::PmSnapshot;
+    use crate::pm::{LinearIssueId, LinearProjectId};
     use crate::store::SharedStore;
     use crate::store::{PmSnapshotRow, StorageConfig};
     use crate::work::project::Project;

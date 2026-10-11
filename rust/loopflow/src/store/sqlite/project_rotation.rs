@@ -91,8 +91,8 @@ impl SqliteStore {
                         Edit::Workflow(input.workflow.clone()),
                         Edit::Krs(input.krs.clone()),
                         Edit::MetricTargets(input.metric_targets.clone()),
-                        Edit::ProjectTeams(teams),
-                        Edit::ProjectInitiatives(initiatives),
+                        Edit::ProjectTeams(serde_json::from_str(&teams)?),
+                        Edit::ProjectInitiatives(serde_json::from_str(&initiatives)?),
                     ],
                 )?;
             } else {

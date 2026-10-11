@@ -7,8 +7,8 @@ use std::time::Duration;
 use serde_json::{json, Value};
 
 use crate::durable::WorkRef;
-use crate::planning::PlanningChange;
 use crate::pm::linear::LinearClient;
+use crate::store::planning_sync::PlanningChange;
 use crate::store::sqlite::planning_changes::PlanningChanges;
 use crate::store::{PmTaskRecord, Store};
 

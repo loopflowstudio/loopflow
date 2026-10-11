@@ -15,7 +15,7 @@ use super::{run_planning_write, run_sqlite, Store, StoreResult};
 impl Store {
     pub(crate) async fn create_task(
         &self,
-        input: &crate::planning::NewTask,
+        input: &crate::work::task::NewTask,
         acquisition: Arc<super::PlanningLocks>,
     ) -> StoreResult<Task> {
         let input = input.clone();

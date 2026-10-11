@@ -7,7 +7,7 @@ use std::process::Command;
 
 use loopflow::durable::{MachineId, WorkRef, WorkStatus};
 use loopflow::id::WaveId;
-use loopflow::planning::{LinearIssueId, LinearProjectId};
+use loopflow::pm::{LinearIssueId, LinearProjectId};
 use loopflow::store::{PmSnapshotRow, StorageConfig};
 use loopflow::work::project::{Project, ProjectId};
 use loopflow::work::task::{LinearWritebackState, Observation, Task, TaskId, TaskPr, TaskPrId};

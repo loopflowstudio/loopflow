@@ -4,7 +4,7 @@ use serde_json::Value;
 
 use super::SqliteStore;
 use crate::durable::{ProjectId, TaskId};
-use crate::planning::{PlanningSyncChange, PlanningSyncState, PlanningSyncStatus};
+use crate::store::planning_sync::{PlanningSyncChange, PlanningSyncState, PlanningSyncStatus};
 use crate::store::StoreResult;
 
 impl SqliteStore {

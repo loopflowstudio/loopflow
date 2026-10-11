@@ -110,9 +110,13 @@ cannot discard an admitted child before the harness receives it. Failed recordin
 a failed exec retains any recorded identity without claiming provider execution.
 No post-spawn bind is needed. Codex reconnect holds the endpoint's FIFO;
 Claude and OpenCode currently use anonymous lifelines without that handoff path.
-Writers remain held until OS exit, even after attachment transfer;
-only the last holder's exit closes the lifeline and stops the group, including
-after SIGKILL. The lifeline does not itself enforce current attachment authority.
+The launcher records terminal versus headless mode on each AgentProcess; the
+Session’s historical interactive flag does not select its cleanup policy.
+Writers remain held across attachment transfer. Closing the last holder stops
+the group, including when OS exit or SIGKILL closes it. Under the attachment fence, a launcher settling its naturally exited provider
+releases its own retained writer and waits for the watchdog to finish the group.
+Without that owned writer, leader death grants no permission to stop survivors.
+The lifeline does not itself enforce current attachment authority.
 Headless launch requires the invocation's attachment: Claude, Codex and OpenCode
 refuse to start a provider without one, and their writes and signals have no
 unfenced path. Owned native launches use the same pre-exec recording channel under
@@ -199,6 +203,16 @@ correlation carry that snapshot. Broadcast-only starts retain unknown attributio
 late correlated replies can fill it, but cannot borrow a newer capture or bind.
 The snapshot supplies history only and never authorizes dispatch.
 
+Headless Claude uses the same stream-input harness and correlated turn history as
+chat. Deciding Flow steps pass their JSON schema to Claude, including correction
+turns. Headless Claude, Codex and OpenCode all use their harness; unknown provider
+names fail instead of selecting Claude. Flow decisions and final-answer reads use
+only correlated native `started`/`output`/successful `completed` rows. Capture
+prose remains history, never an answer fallback. Terminal launches retain native
+terminal behavior. Headless human-readable output prints assistant text without
+the former tool summaries or cost/time footer. Failed Claude results retain their
+error messages for retry classification.
+
 The continuing AgentProcess retains its identity while each attachment
 receives a fresh opaque token, including reattachment of the same lf Process.
 Release revokes that token as well. The token is a compare-and-swap witness,
@@ -257,8 +271,8 @@ start/assignment evidence; uncertainty never becomes an invented token split.
 
 Conversation, Flow and command summaries filter and page in SQL before opening
 payloads. Exact detail can load the selected captured input, transcript or final
-answer. A provider-neutral exact final-answer receipt and recovered streamed
-prose remain distinguishable; incomplete extraction is labeled.
+answer. Without correlated native output from a completed turn, the final answer
+is absent; retained transcript prose never substitutes for it.
 
 Session inventory reads the selected rows, Work labels and indexed Flow metadata;
 it does not decode captures or Session history. Readiness text remains the exact

@@ -250,6 +250,11 @@ checkpoint CI skipped tests; Linux/installed acceptance remains unproved.
 Prior live-takeover evidence: `5e95ce9a4:wave/infrastructure/MEMORY.md`, this heading.
 Plan: `scratch/stop-and-take-over-claude.md`.
 
+LOO-450: Jack selected ClaudeHarness, native schemas and predecessor deletion,
+approving landing with quieter output. Fenced native answers, replay/schema and
+fake-Flow proofs pass, not configured Task-to-publication or installation.
+Harness errors retain failed-result text for retries. CI owns the full matrix.
+
 ## Process-owned liveness (LOO-451, 2026-10-10)
 
 Jack Heart removed client-file compatibility (`5228ab69`); launches record an
@@ -626,27 +631,27 @@ execution and retains conservative cleanup. Proofs and unresolved Desktop
 acceptance remain at
 `e50dbd749e3207599f9937ce45653f4c6f33a5cd:wave/infrastructure/MEMORY.md`.
 
-## Tasks across machines (LOO-412, 2026-10-10)
+## Tasks across machines (LOO-412, 2026-10-11)
 
 Jack Heart selected Linear, shared or default user-keyed Git per repository.
 One typed writer owns local/imported Work; outages buffer without fallback/election.
 Execution/attempts stay local; retain causal losers and uncertainty. Before review:
-finish Work, private observations, typed journal, bindings, ordinary follow-ups
-and one cron list. Installation unproved.
+finish private observations, typed journal, bindings, ordinary follow-ups and cron.
 
-`94cb65b569` deletes `pm_show`; `1d97aa98b2` removes refiling/rotation's
-local-placement restriction, preserving execution admission. Portfolio reads check
-retained ownership claims in SQLite, without provider inventories. Snapshot APIs
-and acquisition hierarchy still need deletion and preservation proof. Delivery
-needs accepted revision plus archive/membership
-eligibility; foreign facts grant no ownership. Installation remains unproved.
+`e3a3479df7` removes public snapshot reads; portfolio ownership reads use
+SQLite claims. Task status/admission now read narrow evidence;
+acquisition still reconstructs provider records. Delivery needs
+accepted revision plus archive/membership eligibility; foreign facts grant no ownership.
 
-Jack's `19116a1b`: prepare 427 on committed 412; land 427 after 412.
-No 412 landing. Preserve admission/tabs and released frontier.
+Jack's `19116a1b`: stack 427 on 412; land afterward. No 412 landing authority.
+Default-Git enrollment conflicts with 427's conservative first-start
+admission; LOO-414's authority decision remains open. Missing local placement proves
+no peer absence. Main #1523's Process terminal draft stays separate from 412's
+planning draft; shared Work conversion preserves local liveness/placement.
 [Plan](../../scratch/work-on-another-machine-name.md) owns remaining work.
-Release's inspected memory requires cron conversion to preserve installed owner,
-lock/child-descriptor identity, dues and nonzero operation failures—not infer
-authority from files. No activation/export. Prior: `41378adacf:wave/infrastructure/MEMORY.md`.
+Release requires cron conversion to preserve installed owner, child-held locks,
+dues and nonzero operation failures. Files grant no activation/export authority.
+Prior: `41378adacf:wave/infrastructure/MEMORY.md`.
 
 ## Planning and launch preservation (curated 2026-10-02)
 
@@ -793,11 +798,11 @@ proofs establish no final-frontier conversion.
   Chapter creation requires KRs, and backlog survives until explicit disposition.
   No Chapter table, second deployed client or distributed transaction is implied.
 
-LOO-298's gate/diff and unaudited credential-launch counterexample:
-`c41895363:wave/infrastructure/MEMORY.md`.
-Full gate, configured continuity and conversion remain unproved. Preserve Session
-ID order, dedicated PR stacking and shared Work-bound checkpoints; contain all
-conflict-agent launches in fixtures.
+LOO-298's gate, diff and unaudited real-provider fixture escape:
+`0f1858c647:wave/infrastructure/MEMORY.md`, this heading.
+Full gate, configured continuity and installed conversion remain unproved.
+Preserve Session ID ordering, dedicated PR stacking writes and Work-bound
+checkpoints. Provider stubs must contain conflict-agent launches.
 
 Jack Heart retired numeric targets, soak and deeper optimization October 7.
 LOO-291/300's evidence limits are historical, not open acceptance:
@@ -887,30 +892,36 @@ LOO-287's open proof and Intelligence ownership of assembly remain at
 `7b28ab1ca:wave/infrastructure/MEMORY.md`, this heading. Identity, eligibility
 and consumed launch evidence stay separate.
 
-## Installation and command scope (curated 2026-10-02)
+## Installation and command scope (curated 2026-10-11)
 
-LOO-292's installation acceptance closed below; LOO-287 retains command-scope
-reduction. Earlier installation evidence:
-`24db5d4d68b1e4a5efe11781712a321b564e01ca:wave/infrastructure/MEMORY.md`, this heading.
-
-Pinned artifacts activate only through promotion. Candidate-owned recovery and
-exact-store preflight precede startup authorization. Verify matching macOS app bytes;
-preserve launchd labels/logs/custom directories without source WorkingDirectory,
-source maintenance or recursive Python refresh.
-OS-account Home bypasses HOME/LF_HOME: use disposable accounts/containers and verify
-first-activation failure/recovery. Simulated launchctl proves no timing; asynchronous
-copy caused mismatched bytes/segfault. Ubuntu 24.04 passed where Debian lacked GLIBC.
-
-Distinguish non-Git folders from Git errors; never invent repositories or change
-routes. LOO-287's ordinary-folder/provider-completion and target-first resolution
-remain unproved across consumers. Repository setup and receipt redesign remain
-unselected; a phase alone is not durable advancement evidence.
-
-## Installation and checkout closure (LOO-292, 2026-10-04)
-
-Jack Heart closed LOO-292 on machine evidence; remaining cadence/app checks and
-recovery lessons: `7b28ab1ca:wave/infrastructure/MEMORY.md`, this heading.
+Jack Heart closed LOO-292 on machine evidence October 4. History and remaining
+cadence/app checks:
+`243ed91a36:wave/infrastructure/MEMORY.md`, Installation and command scope/closure.
 Install owns artifacts; sync owns checkouts. Reinstall cannot heal a truncated gate.
+Pinned artifacts activate through promotion; candidate recovery and exact-store
+preflight precede authorization. Verify matching macOS bytes and preserve launchd
+labels/logs/custom directories without source maintenance. OS-account Home bypasses
+HOME/LF_HOME: verify activation failure/recovery in disposable accounts. Simulated
+launchctl proves no timing; asynchronous copy caused mismatched bytes/segfault.
+Ubuntu 24.04 passed where Debian lacked GLIBC.
+
+LOO-287 retains command-scope reduction and unproved ordinary-folder/provider
+completion and target-first resolution. Distinguish non-Git folders from Git errors;
+never invent repositories/routes. Setup and receipt redesign remain unselected;
+a phase alone proves no advancement.
+
+October 11: installation job 114410351377 failed pulling from ECR Public with
+`toomanyrequests: Rate exceeded`; exact quota unknown. `243ed91a36` adds local image
+reuse and bounded throttling retries, preserving Release's separate download/startup
+deadlines. Mutable local tags require explicit refresh. Six simulated tests and
+both local disposable installation paths pass with cached Rust 1.99.0; hosted
+throttling recovery remains unproved. Gate's Python suite had 394 passes, 19 skips
+and one nested-sandbox refusal; that test passed through its own macOS sandbox.
+Persistent throttling fails as infrastructure, never skips verification.
+Jack Heart subsequently approved
+PR #1529 for landing (`ff9c03dd-7587-4c14-afd8-447d99252aaf`).
+[Release memory](release/MEMORY.md) retains cold-download
+and operation-entry evidence; successful reporting alone proves no operation success.
 
 ## Shipped history
 

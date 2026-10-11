@@ -94,7 +94,7 @@ fn write_comment(conn: &Connection, task: &TaskId, comment: &TaskComment) -> Sto
             Edit::CommentTask(task.to_string()),
             Edit::CommentContent(super::planning_write::CommentContent {
                 body: comment.body.clone(),
-                author: serde_json::to_string(&comment.author)?,
+                author: comment.author.clone(),
                 created_at: comment.created_at.clone(),
             }),
         ],

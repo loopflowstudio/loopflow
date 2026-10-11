@@ -578,7 +578,7 @@ impl RunningFlow<'_> {
             .captured(step)?
             .with_context(|| format!("{label} captured no Session input"))?;
         let answer = self.store.sqlite.input_final_answer(&input)?;
-        Ok((session, answer.map(|answer| answer.text)))
+        Ok((session, answer))
     }
 }
 
@@ -631,6 +631,7 @@ impl SkillExecutor for &RunningFlow<'_> {
         let mut step_cli = self.launcher.process_options();
         // spawn carries verbosity for skills, operations, and correction turns.
         step_cli.verbose = false;
+        step_cli.output_schema = output.as_ref().map(FlowOutput::schema);
         step_cli.account.clear();
         step_cli.only_account.clear();
         step_cli.isolate = false;
@@ -692,6 +693,8 @@ impl SkillExecutor for &RunningFlow<'_> {
             );
             args = vec![
                 "--batch".to_owned(),
+                "--output-schema".to_owned(),
+                output.schema().to_string(),
                 "session".to_owned(),
                 "resume".to_owned(),
                 conversation,

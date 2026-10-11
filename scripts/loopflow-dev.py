@@ -307,6 +307,8 @@ def cmd_run() -> int:
 
     _stop_loopflow_app(DEV_APP)
     _install_dev_app()
+    if not _check_repository_opening(REPO_ROOT):
+        return 1
     # Tell the app which checkout initiated the launch. Repository discovery
     # collapses linked worktrees to their authoritative main checkout.
     command = ["open", "-n"]
@@ -315,6 +317,40 @@ def cmd_run() -> int:
     command.extend([str(DEV_APP), "--args", "--repo", str(REPO_ROOT)])
     run(command)
     return 0
+
+
+def _check_repository_opening(repo: Path) -> bool:
+    cli = DEV_APP / "Contents" / "MacOS" / "lf"
+    # Match an app launch, not the enclosing agent's Task or process context.
+    env = {key: value for key, value in os.environ.items() if not key.startswith("LF_")}
+    env.update(_app_environment(repo))
+    print(f"Checking repository opening through {cli}...", flush=True)
+    try:
+        result = subprocess.run(
+            [str(cli), "repo", "identity", "--json"],
+            cwd=repo,
+            env=env,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        detail = str(error)
+    else:
+        if result.returncode == 0:
+            return True
+        detail = result.stderr.strip() or f"lf exited with status {result.returncode}"
+
+    print(f"Loopflow Dev cannot open this repository:\n{detail}", file=sys.stderr)
+    print(
+        "The bundled helper forwards main-Machine commands to the installed CLI. "
+        "If it does not recognize 'repo identity', the real-repository demo needs "
+        "a compatible published release. An explicitly selected private LF_HOME "
+        "uses the branch CLI on separate data; it does not validate the real repository demo.",
+        file=sys.stderr,
+    )
+    return False
 
 
 def _print_run_debug_checklist() -> None:
@@ -334,12 +370,14 @@ def cmd_run_debug(repo: Path = REPO_ROOT) -> int:
 
     _stop_loopflow_app(DEV_APP)
     _install_dev_app()
+    if not _check_repository_opening(repo):
+        return 1
     print("Logs: ~/Library/Logs/Loopflow/")
     print(f"Stream log: {LOOPFLOW_STREAM_LOG}")
-    # The app resolves `lf` from its own bundle before PATH, so the dashboard
-    # reads this branch's ledger surfaces (`lf session list/trace/doctor --json`) rather
-    # than whatever `lf` happens to be installed.
     print(f"Bundled lf: {DEV_APP}/Contents/MacOS/lf")
+    print(
+        "Main-Machine commands use the installed CLI; explicit private LF_HOME uses the branch CLI."
+    )
     print("Telemetry dashboard: Go → Telemetry (⌘1)")
     _print_run_debug_checklist()
     print("Press Ctrl+C to quit")

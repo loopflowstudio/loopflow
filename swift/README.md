@@ -429,6 +429,12 @@ The dev app uses the installed CLI and main `~/.lf` Machine. Its bundled source
 CLI forwards ordinary commands to that installation. Explicit `LF_HOME`
 experiments remain disposable and never become the app's default.
 
+`run` and `run-debug` check `repo identity --json` through that helper before
+launching. This uses the same repository registration as opening Work; source
+`--help` alone cannot establish installed support. A missing command reports the
+release dependency and stops the launch. It checks repository registration only;
+other Desktop commands and native conversation usability still need validation.
+
 For a branch UI demo, select a private `LF_HOME` explicitly so the bundled CLI
 and UI use this checkout’s wire protocol. Its recorded checkout paths still
 refer to real files. A copied Machine does not prove live provider continuation.

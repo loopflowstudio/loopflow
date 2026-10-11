@@ -3,8 +3,9 @@
 Task `lf-9c03797`, 2026-10-11. Jack Heart accepted the Session-only primitive and
 wrappers for pursuit (“ok, pursue”). After the stopped Flow reported the Codex
 handoff and OpenCode boundary gaps, Jack Heart renewed pursuit (“pursuse!”).
-Production cutover has not started. The implementation choices below resolve those
-gaps within the accepted scope; provider proofs remain required.
+Production cutover is not active. An October 11 implementation draft was withdrawn
+after the configured Claude startup probe exposed a lock cycle. The accepted
+outcome is unchanged; the startup authority revision below remains draft.
 
 ## Current implementation — reconciled 2026-10-11
 
@@ -22,6 +23,52 @@ stop and resume native history. Neither change resolves callback authority.
 Release child memory's operation-entry lesson applies here: helper tests cannot
 establish public launch/hook dispatch or configured provider acceptance. Its
 GOAL.md and complete MEMORY.md were reviewed; no deeper child scope was present.
+
+## Startup fence counterexample — 2026-10-11
+
+The proposed synchronous startup emitter cannot acquire the existing **exclusive**
+Session attachment lock while the launching client holds it to send the first input.
+Claude 2.1.296 runs `SessionStart` before consuming stream-json stdin. Under that
+legal ordering, the hook waits for the client, the client waits for stdin drainage,
+and `harness/dispatch.rs::write_fenced` reaches its two-second deadline.
+`harness/claude.rs::send_input` then treats the partial seed as failed and tears down
+the provider. Extending the timeout does not remove the cycle.
+
+The [reproducer](claude-startup-fence.py) starts the installed Claude executable with
+a disposable Home/config, synthetic fixture authentication and a loopback model
+endpoint. Its startup hook takes the same OS `flock` exclusion as the proposed
+emitter; the parent holds that exclusion while writing the first stream-json input.
+The 131,133-byte input wrote only 512 bytes before two seconds elapsed. A separate
+4,194,365-byte probe also wrote only 512 bytes. The hook marker appeared before any
+stdin was sent. This proves the configured provider ordering and the proposed
+lock cycle; it does not claim an existing production regression, successful model
+delivery, or a complete public `lf` launch test.
+
+**Draft authority revision:** attachment mutation keeps exclusive exclusion;
+provider context output and native input dispatch need compatible read-side
+exclusion, or an explicit startup protocol that completes before fenced input.
+The read-side option needs an audit that each transport already serializes its own
+writes, and proofs that takeover cannot cross either write. No choice is established
+by the receipt tests. Simply emitting after dropping the fence is invalid: a
+replacement could take authority before the output is exposed. Startup identity
+activation also needs its own proof: Claude can replace the AgentProcess inside
+`ensure_process`, after harness configuration was built; an adapter installed only
+before `Harness::start` becomes stale on that path.
+
+Dependent cutover stopped. Production Rust and tests were restored to `a839b8fad2`;
+all old delivery paths remain together. The complete experimental diff is preserved
+in [the compressed patch](session-steer-subscriptions.patch.gz), based on that commit.
+It is unfinished evidence, not a shippable slice: Work publication wrappers,
+source revision keys, native bootstrap, OpenCode adapter integration, prepared-crash
+recovery, complete migration preservation and public adapter proofs are missing.
+Four draft receipt tests passed (idle pending/one emission, uncertain write/explicit
+retry, render failure, and provider handoff/replacement); they do not establish the
+provider cutover. No migration touched the installed store.
+
+The first slice now includes the startup exclusion/identity proof before old-path
+removal. Its public fixture must force startup to overlap a first input larger than
+the pipe buffer, preserve the complete seed, and test takeover during each side of
+that exchange. The complete one-PR replacement remains required.
 
 ## What to build
 
@@ -64,7 +111,8 @@ and is explicitly excluded by Infrastructure's AgentProcess direction.
 
 Implementation choice: distinguish provider-originated context emission from
 attached-client input. Save the existing AgentProcess ID and provider conversation
-identity with the adapter. Under the existing Session attachment lock, verify that
+identity with the adapter. Under the Session attachment fence (whose startup exclusion mode remains unresolved
+above), verify that
 the same provider still belongs to the Session, capture the current claim, and
 hold that lock through the bounded output write. Receipts retain both provider
 identity and the claim observed for that attempt. Provider replacement rejects
@@ -301,6 +349,12 @@ same cut as the replacement; do not refactor these predecessors separately.
   `store/sqlite/{task_comments,children}.rs` and readers in
   `lf/commands/{activity,waves}.rs` over to the publication projection.
   Preserve progress exclusion, ordering, author/history and conflict tests.
+- The inline author predicate in `store/sqlite/ci_incidents.rs::ci_incidents_since`
+  also reads steer event bodies. Its human-assistance projection must join the
+  publication after migration; `store/mod.rs::ci_incident_reports_find_human_help_in_task_comments`
+  retains that behavior. Nested `ProjectEventKind::TaskObserved` copies of Task
+  steer events need publication references too; changing only top-level events
+  leaves duplicate bodies and incompatible historical JSON.
 - Re-injection through saved Task summary references in `context_block.rs`;
   split the launch steer batch from the refreshed brief. Retain file refresh,
   compact-only skill context and native history.
@@ -315,7 +369,7 @@ claiming remote exchange or already-open coverage from local fixture success.
 
 ## Internal slices
 
-1. **This slice:** establish and test provider-bound emission and OpenCode adapter
+1. **This slice:** resolve the startup fence counterexample and establish/test provider-bound emission and OpenCode adapter
    invocation identity alongside the publication/receipt transaction and released-frontier
    migration; cut launch seeding over and delete old Flow/live-injection ownership
    together. Include minimal provider consumers so removal does not strand delivery.
@@ -349,4 +403,4 @@ if the status shape crosses that boundary. Configured provider probes use isolat
 homes and headless fake endpoints; unavailable probes are explicitly deferred to
 capable CI, never recorded as passes.
 
-Check: `git diff --check` and `lf context`, 2026-10-11 — clean; memory and scratch within both targets; prose-only reconciliation, no test rerun; provider acceptance remains for implementation/gate.
+Check: `uv run python scratch/claude-startup-fence.py`, 2026-10-11 — Claude 2.1.296 reproduced the startup lock cycle (512/131,133 bytes in two seconds); four archived receipt tests passed, production cutover withdrawn; `git diff --check` and `lf context` pass, provider acceptance remains unresolved.

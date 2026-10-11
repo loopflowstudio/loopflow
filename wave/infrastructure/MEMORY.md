@@ -254,22 +254,21 @@ Plan: `scratch/stop-and-take-over-claude.md`.
 
 ## Session steer subscriptions (lf-9c03797, 2026-10-11)
 
-Jack Heart accepted Session-only delivery with repository/Work wrappers and downward
-propagation, independent receipts, launch seeding, bounded context and idle staying
-idle. Replace Flow cursors, live Task injection and summary replay together; planning
-publication receipts cannot establish provider acceptance. Implementation is unstarted;
-`scratch/session-steer-subscriptions.md` owns the design and remaining work.
+Jack Heart accepted Session-only delivery, repository/Work wrappers, downward
+propagation, independent receipts, bounded launch seeding and idle staying idle;
+he renewed pursuit after the provider gaps. Replace old paths together in one PR.
+The design selects a private provider-bound capability across Codex handoff and
+local OpenCode invocation IDs, never fabricated provider request IDs. Child
+callbacks and replaced providers retain no authority; emission is not confirmation.
 
-Codex attachment handoff preserves the provider and its hook declaration but changes
-the claim; reconnect strips configuration overrides. A launch-bound hook can become
-permanently stale; reading the current claim alone cannot authorize it. Provider-origin
-emission versus explicit fenced rebinding remains unapproved. Preserve A → B → A
-rejection, child-conversation separation and replacement fences. Pinned Codex/OpenCode
-source findings are design evidence, not configured delivery: parent Session IDs may
-appear in child hooks, and OpenCode transform callbacks supply no provider request ID.
-OpenCode boundary/retry identity remains unresolved. Local emission is not durable
-context confirmation. Release's operation-entry lesson requires public adapter proofs,
-not only receipt/helper tests.
+Implementation exposed a startup lock cycle: Claude 2.1.296 invokes SessionStart
+before draining stdin. With exclusive hook and input fencing, only 512 of 131,133
+bytes wrote within dispatch's two seconds. The configured isolated probe establishes
+ordering, not a public lf launch or delivery pass. Production source was restored;
+the experimental diff and repeatable probe remain under scratch. Startup exclusion,
+identity activation and provider acceptance are unresolved. Four draft receipt tests
+prove no cutover. `scratch/session-steer-subscriptions.md` owns remaining work and
+the unselected read-side-fence/startup-protocol revision.
 
 ## Process-owned liveness (LOO-451, 2026-10-10)
 

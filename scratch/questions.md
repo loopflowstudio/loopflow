@@ -13,3 +13,10 @@ provider evidence and acceptance requirements.
   transform and retries the transformed input internally. Use an adapter invocation
   ID and Session/publication receipts; pin retry/error behavior without treating
   that local ID as a provider request or an ephemeral transform as confirmation.
+
+- **Startup exclusion (new counterexample):** configured Claude 2.1.296 runs
+  `SessionStart` before draining stdin. Exclusive hook emission and exclusive first
+  input dispatch form a cycle; the retained probe writes only 512/131,133 bytes
+  within the dispatch deadline. The design records the draft read-side-fence or
+  explicit startup-protocol alternatives. This is an architectural proof gap,
+  not missing product authorization; dependent cutover was withdrawn.

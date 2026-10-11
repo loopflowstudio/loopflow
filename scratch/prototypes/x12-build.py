@@ -62,8 +62,8 @@ edges:
   - { from: demo,   to: end,    flow: ship }"""
 main = f'''
 <section class="home-hero">
-  <h1 aria-label="Loopflow is how you scale, design, implement, demo, release and study software with agents.">
-  <span aria-hidden="true">Loopflow is how you <span class="rotating"><span>scale</span><span>design</span><span>implement</span><span>demo</span><span>release</span><span>study</span></span> software with agents.</span></h1>
+  <h1 aria-label="Loopflow is how you scale yourself and design, implement, demo, release and study software with agents.">
+  <span aria-hidden="true">Loopflow is how you scale yourself <br class="wide">and <span class="rotating"><span>design</span><span>implement</span><span>demo</span><span>release</span><span>study</span></span> software with agents.</span></h1>
   <p class="either">Conduct an orchestra of coding agents and hear every part clearly.</p>
   <div class="get"><a class="button solid" href="/download">Download for Mac</a><span class="or">or the CLI</span><div class="install-row"><pre tabindex="0" aria-label="Install the lf command line" class="term"><span class="p">$</span> curl -fsSL https://loopflow.studio/install.sh | sh</pre><button type="button" data-copy="curl -fsSL https://loopflow.studio/install.sh | sh" aria-live="polite" class="copy">Copy</button></div></div>
   <p class="cost">Free and open source (MIT)</p>
@@ -172,7 +172,7 @@ extra = '''
 .home-page .pair h2{max-width:900px}.home-page .pair .halves .more{margin:0;border:0;padding:0}
 .home-page .works .under{margin:22px 0 0;font:500 14px var(--font-mono)}.home-page .works .under a{color:var(--text);text-decoration:underline;text-decoration-color:#b9b1a6;text-underline-offset:4px}.home-page .works .under a:hover{color:var(--wine)}
 .home-page .reading.closing{padding-top:8px}
-.home-page .rotating span{animation:rotate-six 12s cubic-bezier(.3,.7,.2,1) infinite}.home-page .rotating span:nth-child(5){animation-delay:8s}.home-page .rotating span:nth-child(6){animation-delay:10s}@keyframes rotate-six{0%{opacity:0;transform:translateY(.45em)}3.3%,14%{opacity:1;transform:none}16.7%,100%{opacity:0;transform:translateY(-.45em)}}
+.home-page .rotating span{animation:rotate-five 10s cubic-bezier(.3,.7,.2,1) infinite}.home-page .rotating span:nth-child(5){animation-delay:8s}@keyframes rotate-five{0%{opacity:0;transform:translateY(.45em)}4%,17%{opacity:1;transform:none}20%,100%{opacity:0;transform:translateY(-.45em)}}.home-page .home-hero h1:has(.rotating){line-height:1.18}@media (max-width:700px){.home-page .home-hero h1 br.wide{display:none}}
 .home-page .trio h2{grid-column:1/-1;font-size:clamp(30px,3.2vw,42px);margin:0}
 .home-page .works{padding-bottom:0}.home-page .belief{padding:84px 0 96px}.home-page .belief p{font:400 clamp(34px,4vw,54px)/1.08 var(--font-serif);letter-spacing:-.02em;color:var(--burgundy);margin:0;max-width:900px}.home-page .belief .get{margin-top:28px}
 .home-page .trio{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:40px 44px;padding-top:72px}

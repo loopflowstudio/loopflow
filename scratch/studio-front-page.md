@@ -739,3 +739,5 @@ strip links to its own site in a new tab.
 - Jack Heart: "make scale the first word in the word list?" → the `x12` header cycles scale, study, design, implement, demo, release.
 
 - Jack Heart: "move study to last" → the `x12` header cycles scale, design, implement, demo, release, study.
+
+- Jack Heart: "Loopflow is how you scale yourself and [   ] ? (no scale)" → the `x12` header is "Loopflow is how you scale yourself and [design | implement | demo | release | study] software with agents.", on two lines at desktop width. "Scale" is no longer a cycling word.

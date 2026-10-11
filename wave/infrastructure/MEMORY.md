@@ -360,23 +360,15 @@ under this heading.
 
 ## Review replacement (2026-10-04)
 
-Jack Heart authorized LOO-377's autonomous repair; PR #1429 merged as c5dc238b0afb
-with hosted CI passing. Restart serializes review launch, fences writers and
-retains exact stop evidence for retry. Independent reviews remain protected.
-LOO-370's replacement Flow finished after recovery; its Task completed October 6
-under the opaque-root decision above.
-Installed acceptance remains unproved;
-LOO-373 owns the retained landing-placement reconciliation error.
+Jack Heart authorized LOO-377; #1429 merged as `c5dc238b0afb`, hosted CI passing.
+LOO-370 recovered and completed October 6 under the opaque-root decision.
+Installed acceptance is unproved; LOO-373 owns landing-placement reconciliation.
 
-A review's service, attached lf and provider are distinct process owners.
-Record the service's exact Exec before child launch. Acquire the existing launch
-lock before the attachment fence: reservation/spawn must settle before collecting
-owners, and reobserve the same Flow afterward. Retirement must fence review
-writers and retain captures/native history without recording successful review.
-Save exact process identities before signaling: native stop removes client receipts,
-so an interruption before replacement otherwise destroys retry evidence. The
-public restart fixture reproduces that boundary with no Session provider PID;
-retry uses saved identities. Unknown ownership and independent reviews still block.
+Save service, attached lf and provider identities before stop removes receipts.
+Lock launch before attachment fencing; settle spawn, then reobserve the Flow.
+Retain native history without inventing review success; protect unknown owners
+and independent reviews. Evidence:
+`c28b7d0197:wave/infrastructure/MEMORY.md`, this heading.
 
 ## Transient recovery (LOO-326, curated 2026-10-09)
 
@@ -927,6 +919,13 @@ runs prove no firing, and old gaps do not keep later telemetry red.
 
 ## Gotchas
 
+- **Commit failures need both Git streams** (2026-10-11). Jack Heart requested
+  repair and publication without landing. Selected scratch failed because staging
+  excluded it in ordinary checkouts and stderr-only conversion hid Git's stdout.
+  Shared diagnostics retain both streams or a silent failure's exit status;
+  scratch exclusion belongs only to persistent workspaces. Separate-index proofs
+  preserve staged and working bytes. Disposable CLI and tests
+  pass; broader Git verification and installed acceptance remain unproved.
 - **Desktop gates are headless** (rechecked at `bc6d11661`). `--swift` runs app/model/view checks; `--loopflow` builds app/UI runners. `scripts/test.py --all` excludes the explicit-only `--ui-host` diagnostic. The historical runner hang remains at `bc6d11661:wave/infrastructure/MEMORY.md` under Gotchas; changing the gate proves no repair of that hang. Compile-only and skipped checks prove no interaction behavior.
 - **Wait for `cargo test` to finish:** lib failures skip later targets.
 - **Rust compilation does not validate SQLite column names.** Runtime SQL whose shape depends on a released schema must be shared with a behavior test that prepares and executes it against the materialized migration head. Epoch Work ownership is three exclusive foreign keys (`wave_id`, `project_id`, `task_id`); generic kind/id belongs to explicit routes such as synchronous cross-Work questions, not to Epochs.

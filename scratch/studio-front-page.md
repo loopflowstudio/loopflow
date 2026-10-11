@@ -635,3 +635,5 @@ strip links to its own site in a new tab.
 
 - Jack Heart: "the fact that we missed --machine suggests we might have missed other important reasons things that you want to have in the \"join\" of \"i want my laucnher to be able to configure this kind of thing for me\"" → Claude listed the launcher's options from `rust/loopflow/src/lf/mod.rs` and rebuilt the `x11` terminal card as one launch command with a line per option (machine, account, agent and model, Task, docs, headless or interactive, what to run), then `resume`, `usage`, `land`. The combined command is assembled from the flag definitions and was not run.
 - Jack Heart: "Skills in sequence: a Graph" → the `run pursue` line is annotated "a Flow: Skills in a graph". Claude's reading; unconfirmed.
+
+- Jack Heart: "and just call it lf graph pursue" → the last line of the launch command in the `x11` card is `graph pursue  # Skills in sequence: a Graph`. No `lf graph` command exists in the code today (the command is `lf run`, the noun is Flow); the card shows a rename that has not been made. The rest of the page still says Flow.

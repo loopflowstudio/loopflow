@@ -142,7 +142,7 @@ main = f'''
      --task EXP-12 \\          <span class="c"># which work, in its checkout</span>
      --docs docs/api.md \\     <span class="c"># what it reads first</span>
      -b \\                     <span class="c"># headless, or -i to talk</span>
-     run pursue               <span class="c"># a Flow: Skills in a graph</span>
+     graph pursue             <span class="c"># Skills in sequence: a Graph</span>
 
 <span class="p">$</span> <b>lf</b> resume                   <span class="c"># back to the last Session</span>
 <span class="p">$</span> <b>lf</b> usage --task EXP-12      <span class="c"># what that Task cost</span>

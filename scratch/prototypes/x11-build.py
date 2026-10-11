@@ -122,7 +122,39 @@ main = f'''
       </ul></div>
     </article>
   </div>
-  <div class="shot-slot"><span>Screenshot goes here</span><p>A task session, or a wave session, open in cmux</p></div>
+  <div class="mux">
+    <p class="slot"><span>Screenshot goes here</span><span>A sketch of task and wave sessions in cmux stands in</span></p>
+    <div class="muxwin">
+      <aside>
+        <h5>Exports <small>wave</small></h5>
+        <ul>
+          <li class="on"><i class="w"></i>EXP-12 Add CSV export<small>demo · waiting on you</small></li>
+          <li><i class="w"></i>EXP-15 Schedule a weekly export<small>design · waiting on you</small></li>
+          <li><i class="r"></i>EXP-14 Filter exports by date<small>pursue · implement</small></li>
+        </ul>
+        <h5>Onboarding <small>wave</small></h5>
+        <ul><li><i></i>ONB-4 Invite a teammate<small>start</small></li></ul>
+      </aside>
+      <div class="panes">
+        <div class="pane">
+          <p class="bar"><b>EXP-12</b> Add CSV export<span>task session · claude</span></p>
+          <p class="a">Pull request #84 is open. Try it: open any table and press Export.</p>
+          <p class="u">tried it. dates come out in UTC, should be the account’s timezone</p>
+          <p class="a">Fixed and rebuilt. Dates now use the account’s timezone. Ready to try again.</p>
+          <p class="u cur">works. ship it</p>
+          <p class="foot">start → design → pursue → <b>demo</b> → ship → end</p>
+        </div>
+        <div class="pane">
+          <p class="bar"><b>Exports</b><span>wave session · codex</span></p>
+          <p class="u">people keep asking for google sheets too</p>
+          <p class="a">Filed EXP-16, Export to Google Sheets, under Exports. It starts at design.</p>
+          <p class="u">what’s waiting on me</p>
+          <p class="a">Two tasks: EXP-12 at demo, EXP-15 at design.</p>
+          <p class="foot">4 open tasks · 2 waiting on you</p>
+        </div>
+      </div>
+    </div>
+  </div>
 </section>
 <section class="pair clihero">
   <h2><code>lf</code>: the CLI for agent workflows.</h2>
@@ -166,6 +198,20 @@ extra = '''
 .home-page .pair h2{max-width:900px}.home-page .pair .halves .more{margin:0;border:0;padding:0}
 .home-page .works .under{margin:22px 0 0;font:500 14px var(--font-mono)}.home-page .works .under a{color:var(--text);text-decoration:underline;text-decoration-color:#b9b1a6;text-underline-offset:4px}.home-page .works .under a:hover{color:var(--wine)}
 .home-page .reading.closing{padding-top:8px}
+.home-page .mux{margin-top:36px}.home-page .mux .slot{display:flex;justify-content:space-between;gap:6px 24px;flex-wrap:wrap;margin:0;padding:10px 16px;font:500 11px/1.6 var(--font-mono);text-transform:uppercase;letter-spacing:.1em;color:var(--burgundy);background:#f4f0ea;border:1px solid #d9d4cc;border-bottom:0;border-radius:12px 12px 0 0}.home-page .mux .slot span+span{color:var(--text-secondary)}
+.home-page .muxwin{display:grid;grid-template-columns:250px minmax(0,1fr);background:#1c1919;border-radius:0 0 12px 12px;overflow:hidden;font:12.5px/1.6 var(--font-mono);color:#d8d2cb}
+.home-page .muxwin aside{background:#151313;border-right:1px solid #322d2d;padding:16px 14px}
+.home-page .muxwin h5{margin:0 0 6px;font:500 12px var(--font-mono);color:#f1ece6}.home-page .muxwin h5 small{margin-left:8px;font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:#8f8780}
+.home-page .muxwin aside ul{list-style:none;margin:0 0 16px;padding:0}.home-page .muxwin aside li{list-style:none;margin:0;padding:6px 8px 6px 22px;position:relative;border-radius:6px;color:#bdb6ae}
+.home-page .muxwin aside li.on{background:#2a2526;color:#fff}.home-page .muxwin aside li small{display:block;font-size:10.5px;color:#8f8780}
+.home-page .muxwin aside li i{position:absolute;left:8px;top:12px;width:7px;height:7px;border-radius:50%;background:#4a4444}.home-page .muxwin aside li i.w{background:#e06c8b}.home-page .muxwin aside li i.r{background:#7fb38a}
+.home-page .muxwin .panes{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr)}
+.home-page .muxwin .pane{padding:0 18px 14px;border-right:1px solid #322d2d;display:flex;flex-direction:column;gap:10px;min-width:0}.home-page .muxwin .pane:last-child{border-right:0}
+.home-page .muxwin .pane p{margin:0}.home-page .muxwin .bar{margin:0 -18px 4px!important;padding:9px 18px;background:#231f20;border-bottom:1px solid #322d2d;color:#bdb6ae;display:flex;gap:8px;flex-wrap:wrap}.home-page .muxwin .bar b{color:#fff;font-weight:500}.home-page .muxwin .bar span{margin-left:auto;color:#8f8780;font-size:11px}
+.home-page .muxwin .a{padding-left:16px;position:relative}.home-page .muxwin .a::before{content:"●";position:absolute;left:0;color:#e06c8b;font-size:9px;top:3px}
+.home-page .muxwin .u{padding:6px 10px;background:#2a2526;border-radius:6px;color:#fff}.home-page .muxwin .u::before{content:"> ";color:#8f8780}.home-page .muxwin .u.cur::after{content:"▍";color:#e06c8b;margin-left:2px}
+.home-page .muxwin .foot{margin-top:auto!important;padding-top:10px;border-top:1px solid #322d2d;font-size:11px;color:#8f8780}.home-page .muxwin .foot b{color:#e06c8b;font-weight:500}
+@media (max-width:820px){.home-page .muxwin{grid-template-columns:1fr}.home-page .muxwin aside{border-right:0;border-bottom:1px solid #322d2d}.home-page .muxwin .panes{grid-template-columns:1fr}.home-page .muxwin .pane{border-right:0;border-bottom:1px solid #322d2d;padding-top:0}}
 .home-page .system>.shot-slot{aspect-ratio:16/7;margin-top:36px}.home-page .shot-slot{display:grid;place-content:center;gap:8px;text-align:center;aspect-ratio:16/10;border:1px dashed #b9b1a6;border-radius:10px;background:#f4f0ea}.home-page .shot-slot span{font:500 11px var(--font-mono);text-transform:uppercase;letter-spacing:.1em;color:var(--burgundy)}.home-page .shot-slot p{margin:0;font-size:14px;color:var(--text-secondary)}
 .home-page .system h2{max-width:980px}
 .home-page .works{padding-bottom:88px}

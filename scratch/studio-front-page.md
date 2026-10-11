@@ -666,3 +666,5 @@ strip links to its own site in a new tab.
 - Jack Heart, on the waves-and-tasks section: "Here, we maybe replace the grph of a screenshot of someone in cmux task or wave session" → in `x11` the three-flows card is replaced by a labelled slot for that screenshot. The screenshot is not taken. The flows card is no longer on the page.
 
 - Jack Heart: "or we can have both visuals" → in `x11` the three-flows card is back beside the paragraphs, and the cmux screenshot slot runs full width under them.
+
+- Jack Heart, on the cmux screenshot slot: "Can you just sketch the basic shape of if like you did with the landing screenshot" → `x11` has a drawn sketch in the slot: a sidebar of waves and their task sessions, a task session at its demo stop, and a wave session beside it. It is a generic terminal layout, not a copy of cmux's interface, and is labelled as a stand-in. What it shows (a sidebar listing sessions by wave and task, a footer with the workflow position) is not checked against what `lf` shows inside cmux.

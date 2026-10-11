@@ -64,7 +64,23 @@ Work-keyed path, not by restoring checkout-keyed compatibility. The earlier oute
 layout, Session-row, location and input-budget cuts, failed attempts and check
 commands remain at `2feed22e1109:scratch/findings.md`, under their original headings.
 
-Check: `scripts/test_desktop.sh --filter 'WorktreeWorkspaceTests|DesktopPaneControlTests|workTabsRetainSelection|DTOFixtureTests|WorkDestinationTests|contentRoutedFlowLog|taskWorkFollowsTheStream' -Xswiftc -gnone --no-parallel` — PASS (build, 124 tests); `cargo test -p loopflow --lib lf::commands::desktop::tests` / `cargo test -p loopflow --test dto_fixtures desktop` (LF variables cleared, closed stdin) — PASS (7/6); fmt, Clippy all-targets and diff check — PASS. Full affected coverage: gate/CI; rendered usability, provider drafts and configured peers: demo/review.
+Location lookup now lives on `PaneContent`, replacing separate shell/Session/file
+accessors and repeated Split/inspection branches. A table test covers captured
+terminals, recorded file/log owners and unavailable owners without path fallback.
+The broader Files check exposed a pre-existing header fixture lacking repository
+identity; the fixture now supplies it through the production view input.
+
+Earlier Work-tab Rust/Swift, fmt and Clippy results remain at
+`39698225f3:scratch/findings.md`, **Work-tab cutover**; unchanged Rust checks apply.
+Check: `scripts/test_desktop.sh --filter 'MultiplexerLayoutTests|MultiplexerStoreTests|DesktopPaneControlTests|WorktreeWorkspaceTests|TaskFilesTests|DTOFixtureTests' -Xswiftc -gnone --no-parallel` — PASS (build, 132 tests); diff check — PASS. Full affected coverage: gate/CI; native usability/provider drafts/configured peers: demo/review.
+
+Reconciliation inspected the Work-keyed registry, navigation, content-routed logs,
+DTO targets and same-path/hide-reopen tests against `39698225f3`/`37fa81df13`.
+The old same-checkout move wording was stale: arrangement preserves content
+locations within one Work. No code repair or test rerun was needed. Product has no
+child directories/memories in this checkout; relevant Infrastructure planning and
+exchange memory retains the same execution boundary. Other sibling sections were
+not exhaustively reviewed.
 
 No native rendering, live Session manipulation, installation, publication or merge.
 Shared first-start admission still refuses; mixed-provider/running-Flow exchange,

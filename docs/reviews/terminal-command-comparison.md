@@ -1,5 +1,26 @@
 # cmux, lf / Loopflow for Mac, herdr, and Rex
 
+## Follow-up ownership after review
+
+Jack Heart accepted LOO-427 for queue and shipping on October 10, 2026, with
+unestablished behavior assigned to existing Tasks. This accepts the current
+implementation, not native or multi-Machine proof.
+
+| Remaining outcome | Owner |
+|---|---|
+| Broader invocation explanations; installed CLI vs running app discovery | [LOO-397](https://linear.app/loopflow/issue/LOO-397) |
+| Native Work-tab/draft/focus/input proof, configured remote panes, planning exchange during a Flow | [LOO-391](https://linear.app/loopflow/issue/LOO-391) |
+| Exclusive first start of delegated shared Tasks; detached retry-safe execution | [LOO-414](https://linear.app/loopflow/issue/LOO-414) |
+| Restore Work tabs and pane locations after app exit | [LOO-416](https://linear.app/loopflow/issue/LOO-416) |
+| Keyboard customization and richer terminal chords | [LOO-452](https://linear.app/loopflow/issue/LOO-452) |
+| Exact-view readiness, bounded waits and change observation | [LOO-453](https://linear.app/loopflow/issue/LOO-453) |
+
+LOO-412's current direction selects one configured planning transport per
+repository; mixed Linear/Git exchange and manual per-Wave enrollment are superseded.
+`lf planning status` remains. Shared first-start refusal remains until LOO-414
+establishes admission; no missing checkout or negative peer read authorizes start.
+
+
 Inline `# lf-doc: ambiguous` comments annotate retired spellings for today's
 command checker; they were not part of the recorded trial commands.
 

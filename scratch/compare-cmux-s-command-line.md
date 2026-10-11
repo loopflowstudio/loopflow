@@ -13,10 +13,46 @@ LOO-418/#1499 is integrated; completion/checkout previews and creation receipts 
 LOO-406/#1503 and LOO-412 through `96f714bd6` are composed locally;
 `1ece5cc52` reconciles transitive ancestry. Section 2 retains remaining composition.
 Completion/reopening, delegation exchange and remote companions are composed locally.
-Work-centered tabs are implemented locally (THIS SLICE below); native review remains. Exclusive admission, mixed-provider exchange, broader explanation and configured/native proof remain. Mixed Linear/Git
+Work-centered tabs are implemented locally (Work tabs below); native review remains. Exclusive admission, mixed-provider exchange, broader explanation and configured/native proof remain. Mixed Linear/Git
 stays disabled; native proof includes request-scoped Task/Session-plus-Changes opening.
 [Findings](findings.md), [questions](questions.md) and the
 [comparison](../docs/reviews/terminal-command-comparison.md) retain evidence and open choices.
+
+
+## Shipping scope — Jack Heart, October 10
+
+Jack Heart reviewed the complete diff, said it was good enough for now, and
+requested ownership of every unestablished item followed by queue then ship.
+This supersedes the demo-only/no-publication boundary above. It accepts delivery
+with the following explicit follow-ups, not claims that their behavior is proved:
+
+- LOO-397 (Infrastructure), broadened: remaining effect-free invocation explanations
+  and CLI-schema/running-app/current-eligibility discovery. Existing command-map work
+  here is the baseline, not another implementation request.
+- LOO-391 (Product), broadened: native Work-tab/draft/focus retention, targeted input
+  and bounded reads, configured remote Session/Files/log/shell behavior, and planning
+  exchange while a Flow runs with disconnect/reconnect and execution preserved.
+- LOO-414 (Infrastructure), broadened: exclusive shared first-start admission alongside
+  retry-safe detached remote launch. Current no-owner refusal remains until an explicit
+  admission authority and unavailable-owner recovery are implemented. No started-Task transfer.
+- LOO-416 (Infrastructure), broadened: saved repository/Wave/Task workspaces and
+  content-owned Machine locations across relaunch, distinct from in-window retention.
+- LOO-452 (Product), already sufficient: shortcut customization and terminal chords,
+  including Ctrl-C; literal text stays separate.
+- LOO-453 (Product), already sufficient: exact-view readiness/waits/events, failures,
+  stale target and reconnect behavior; receipts alone never promise usability.
+
+LOO-412's current source/design retains `lf planning status` and key recovery,
+but replaces connect/use/select and per-Wave enrollment with one configured
+transport per repository (Linear or personal/shared Git). Mixed Linear/Git exchange
+is superseded, not an unfinished feature to file. This checkout contains an earlier
+412 integration; queue must reconcile that dependency and prevent superseded setup
+from being advertised as the target design. No live planning migration, installation,
+provider login or real-data publication is authorized by this shipping request.
+
+Recorded proof limits remain honest. Headless gate runs once for the final tree;
+shipping requests Task-completing landing after queue. Native/configured proof is
+owned above and does not reimpose a demo hold Jack Heart has released.
 
 ## Accepted outcome
 
@@ -129,6 +165,10 @@ Deleted: outer `WorktreeLayout`/store/view and inspection, checkout picker,
 Session sidebar rows, checkout-keyed registry, path-based membership pruning,
 path-only pane targeting and enclosing-checkout location equality. Work details
 remain available inside each tab; there is no alternate all-terminals tree.
+`PaneContent.location` also replaces the separate shell/Session/file location
+accessors and repeated inspection/Split fallback chains. Terminals keep their
+captured location; Files/logs keep recorded-owner precedence, including unavailable
+owners. No wire fields or retained content are removed.
 The previous implementation proposal and its historical review references survive
 at `2feed22e1109:scratch/compare-cmux-s-command-line.md`, **Work tabs**.
 
@@ -140,8 +180,13 @@ rendered demo below remain review obligations, not proved by fixture checks.
 
 ### Checks and demo acceptance
 
-Extend `WorkNavigationTests`, `WorktreeWorkspaceTests`, `WorkDestinationTests`,
-`DesktopPaneControlTests` and DTO fixtures to prove:
+The cutover is checkpointed in `39698225f3`; `37fa81df13` consolidates content
+location reads. These supersede the earlier feedback that the registry still keys
+by checkout. Recorded focused checks cover the implementation; full affected
+coverage remains with gate/CI and rendered acceptance with demo/review.
+
+Acceptance across `WorkNavigationTests`, `WorktreeWorkspaceTests`,
+`WorkDestinationTests`, `DesktopPaneControlTests` and DTO fixtures remains:
 
 - Repo, Wave and two Tasks open separate Work tabs even when paths match;
   repeated/concurrent opens and aliases converge, renames do not duplicate.
@@ -468,7 +513,8 @@ never retarget by later focus. Unique/ambiguous/explicit selectors and retained 
 refusals have headless proof. Typed Apple events retain synchronous MainActor validation.
 CLI arrangement preserves selection; focus is explicit. Split creates a shell
 through the existing execution-location owner; UI splits focus the new shell.
-Move stays within one Machine/checkout. Native proof remains.
+Move stays within one Work workspace and preserves each leaf’s content location;
+it does not transfer execution. Native proof remains.
 
 Lost replies leave uncertain outcomes. Hide/restore are idempotent; split and Shell
 can allocate again, so inspection must precede any deliberate retry. Close/Undo

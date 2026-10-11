@@ -46,8 +46,8 @@ dispatch; an unscoped ambiguous prefix still fails.
 
 ## Context budget
 
-Installed `lf context --skill implement --json` still uses the retired per-file
-JSON inventory: the pre-note recheck reports 35,443 goal tokens, 19,443 over 16,000.
+Installed `lf context --skill realign --json` still uses the retired per-file
+JSON inventory: the reconciliation read reports 35,459 goal tokens, 19,459 over 16,000.
 The complete launch source is `.lf/tmp/context/addbc0c0a36830a100f56442edeecba4d77fa8dd07159263a397cbaf0187a29d.md`;
 its omitted middle is inventory, not additional direction. The local renderer
 already emits quoted paths and change states without redundant hashes/sizes.

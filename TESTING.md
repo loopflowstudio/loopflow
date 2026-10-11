@@ -831,6 +831,12 @@ fix, verify the installation harness uses the same toolchain policy; a host lint
 pass does not verify the container build. Use `--image` to reproduce an older
 toolchain explicitly.
 
+Locally available images are reused, including between the two CI proof steps;
+run `docker pull public.ecr.aws/docker/library/rust:trixie` to refresh the default
+on a development machine. Cold pulls retry registry throttling with bounded
+backoff within a five-minute download budget. Exhausted acquisition reports an
+infrastructure failure before any installation tests run.
+
 CLI owner-tree changes must include `cargo test -p loopflow --lib flow::graph::tests`
 to verify builtin operation labels, plus the affected proofs above. The regular
 Rust suite skips those installation proofs; a skipped case is not verification.

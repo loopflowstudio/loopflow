@@ -565,3 +565,6 @@ definition and the three "your mark" figures are off the page; they remain in
 `x8` and in git.
 Jack Heart: "works with should be links". Each name in the `x9` Works with
 strip links to its own site in a new tab.
+
+- Jack Heart: "can we try adding (most) of the CLI page after works with?" → `x10-with-cli.html` (built by `x10-build.py`): the `/cli` command block and both lists sit after Works with, under the CLI page's headline as an h2. Its install block is left out.
+- Jack Heart: "How involved you are is a setting / Kill that, and in general lets just use fewer double titles and restating the same thing twice" → eyebrow removed; "Install" label over the download button removed; from the embedded CLI lists, the Linear and Workflows items and the second "free, open-source" / "MIT licensed" are dropped because the page already says them.

@@ -236,11 +236,11 @@ impl super::SqliteStore {
     pub(crate) fn landing_repair_processes(
         &self,
         landing_id: &PrLandingId,
-    ) -> StoreResult<Vec<crate::id::ProcessLfid>> {
+    ) -> StoreResult<Vec<crate::id::LfProcessId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(
-            "SELECT repair_process_lfid FROM ci_incidents
-             WHERE landing_id=?1 AND repair_process_lfid IS NOT NULL AND repair_finished_at IS NULL
+            "SELECT repair_lf_process_id FROM ci_incidents
+             WHERE landing_id=?1 AND repair_lf_process_id IS NOT NULL AND repair_finished_at IS NULL
              ORDER BY updated_at DESC",
         )?;
         let rows = statement.query_map([landing_id.as_str()], |row| row.get(0))?;

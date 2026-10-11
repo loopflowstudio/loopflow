@@ -127,7 +127,7 @@ fn closed_release_history_records_repair_without_settling_or_transferring_work()
     let home = tempfile::tempdir().unwrap();
     let _env = EnvGuard::with_lf_home(&[], home.path());
     let repo = TestRepo::new();
-    let task = support::register_task(
+    let task = support::register_task_with_pr(
         home.path(),
         repo.path(),
         &git(repo.path(), &["branch", "--show-current"]),
@@ -990,7 +990,7 @@ exit 0
                 loopflow::ops::release_tag(&repo_path, "0.9.2", None),
                 Err(loopflow::ops::OpsError::ReleaseDeferred { .. })
             ));
-            assert!(loopflow::engine::git::worktree_remove(&repo_path, &checkout).is_err());
+            assert!(loopflow::git::worktree_remove(&repo_path, &checkout).is_err());
             assert_eq!(git(&checkout, &["rev-parse", "HEAD"]), rejected_commit);
             assert_eq!(caller_state(), before);
             let pending = release_history(

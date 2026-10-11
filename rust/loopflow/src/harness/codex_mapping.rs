@@ -2,6 +2,7 @@
 //! conversation events. Shapes verified against a live session and the
 //! bundle from `codex app-server generate-json-schema` (v2).
 
+use crate::id::AgentSessionId;
 use serde_json::Value;
 
 use crate::chat::types::{ConversationItem, FileEdit, ItemDelta, Lifecycle, TurnUsage};
@@ -30,12 +31,12 @@ pub(super) fn extract_turn_id(params: &Value) -> Option<String> {
 
 /// Vendor thread id from a `thread/started` notification's params or a
 /// `thread/start` response's result — both nest it as `thread.id`.
-pub(super) fn extract_thread_id(value: &Value) -> Option<String> {
+pub(super) fn extract_thread_id(value: &Value) -> Option<AgentSessionId> {
     value
         .get("thread")
         .and_then(|t| t.get("id"))
         .and_then(Value::as_str)
-        .map(ToString::to_string)
+        .map(AgentSessionId::from)
 }
 
 /// TurnStatus from turn/completed params: completed | interrupted | failed.

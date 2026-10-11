@@ -43,8 +43,7 @@ public enum WorkStatus: Codable, Sendable, Hashable {
     }
 }
 
-/// A Task's state, read from where it stands on its Workflow. Abandoned is
-/// the Task's own mark and outranks its position.
+/// Durable completion and abandonment, with Workflow readiness for unfinished Tasks.
 public enum TaskState: String, Codable, Sendable, Hashable {
     /// The Task has taken up no Workflow.
     case notReady = "not_ready"

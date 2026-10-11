@@ -35,19 +35,15 @@ pub(crate) async fn read_seed(
     let interrupt = store
         .latest_interrupt_id(&WorkRef::Task(task.id.clone()))
         .await?;
-    let pr = store
-        .task_prs(&task.id)
-        .await?
-        .pop()
-        .ok_or_else(|| anyhow!("Task {} has no recorded PR", task.id))?;
+    let pr = store.active_task_pr(&task.id).await?;
     let project = store
         .get_project(&task.project_id)
         .await?
         .ok_or_else(|| anyhow!("Task Project is missing"))?;
     let message = format!(
         "{}\n\n{}",
-        task_seed(task, &project.plan, &pr, wave, &steers),
-        crate::ops::task::task_workspace_context(task, &pr)?
+        task_seed(task, &project.plan, pr.as_ref(), wave, &steers),
+        crate::ops::task::task_workspace_context(task)?
     );
     Ok(TaskSeed {
         task: task.clone(),
@@ -60,7 +56,11 @@ pub(crate) async fn read_seed(
 
 /// A command's live Task input survives its provider's transient retries.
 #[derive(Clone)]
-pub struct TaskInput(Arc<tokio::sync::Mutex<Controls>>);
+pub struct TaskInput {
+    controls: Arc<tokio::sync::Mutex<Controls>>,
+    store: SharedStore,
+    task: Task,
+}
 
 impl std::fmt::Debug for TaskInput {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -69,8 +69,6 @@ impl std::fmt::Debug for TaskInput {
 }
 
 struct Controls {
-    store: SharedStore,
-    task: Task,
     steer: i64,
     interrupt: i64,
     receiver: Option<tokio::sync::mpsc::UnboundedReceiver<String>>,
@@ -79,36 +77,35 @@ struct Controls {
 
 impl TaskInput {
     pub(crate) fn new(store: SharedStore, seed: TaskSeed) -> Self {
-        Self(Arc::new(tokio::sync::Mutex::new(Controls {
+        Self {
             store,
             task: seed.task,
-            steer: seed.steer,
-            interrupt: seed.interrupt,
-            receiver: None,
-            next_steer: Instant::now(),
-        })))
+            controls: Arc::new(tokio::sync::Mutex::new(Controls {
+                steer: seed.steer,
+                interrupt: seed.interrupt,
+                receiver: None,
+                next_steer: Instant::now(),
+            })),
+        }
     }
 
     pub(crate) async fn record_seed(&self, capture: &crate::session_record::CaptureHandle) {
-        capture.record_input("steer_seed_through", &self.0.lock().await.steer.to_string());
+        capture.record_input(
+            "steer_seed_through",
+            &self.controls.lock().await.steer.to_string(),
+        );
     }
 
-    pub(crate) fn refresh(&self) -> CommentRefresh {
-        let input = self.clone();
-        CommentRefresh(tokio::spawn(async move {
-            let (store, task) = {
-                let controls = input.0.lock().await;
-                (controls.store.clone(), controls.task.clone())
-            };
-            loop {
-                tokio::time::sleep(Duration::from_secs(15)).await;
-                if let Err(error) =
-                    crate::ops::linear_observe::refresh_task_comments(&store, &task).await
-                {
-                    tracing::warn!(%error, "Linear comment refresh failed; retaining confirmed Task direction");
-                }
-            }
-        }))
+    pub(crate) fn start_planning_sync(&self) -> Result<crate::ops::linear_observe::PlanningSync> {
+        let wave = self
+            .store
+            .sqlite
+            .get_wave(&self.task.wave_id)?
+            .ok_or_else(|| anyhow!("Task Wave is missing"))?;
+        Ok(crate::ops::linear_observe::PlanningSync::start(
+            self.store.clone(),
+            wave.repo().to_owned(),
+        )?)
     }
 
     pub(crate) async fn poll(
@@ -116,10 +113,10 @@ impl TaskInput {
         harness: &mut dyn Harness,
         capture: Option<&crate::session_record::CaptureHandle>,
     ) -> Result<()> {
-        let mut controls = self.0.lock().await;
+        let mut controls = self.controls.lock().await;
+        let store = &self.store;
+        let task = &self.task;
         let Controls {
-            store,
-            task,
             steer,
             interrupt,
             receiver,
@@ -168,13 +165,6 @@ impl TaskInput {
     }
 }
 
-pub(crate) struct CommentRefresh(tokio::task::JoinHandle<()>);
-impl Drop for CommentRefresh {
-    fn drop(&mut self) {
-        self.0.abort();
-    }
-}
-
 async fn handle_attachment(
     store: &SharedStore,
     task: &Task,
@@ -206,8 +196,8 @@ async fn handle_attachment(
         harness.interrupt().await?;
         println!("interrupted active provider turn");
     } else {
-        let comment_id = crate::ops::linear_observe::publish_task_steer(store, task, line).await?;
-        println!("posted to Linear {comment_id}");
+        let comment_id = crate::ops::task::append_task_comment(store, task, line, true)?;
+        println!("saved comment {comment_id}");
     }
     Ok(())
 }
@@ -215,12 +205,12 @@ async fn handle_attachment(
 pub(crate) fn task_seed(
     task: &Task,
     project: &ProjectPlan,
-    pr: &crate::work::task::TaskPr,
+    pr: Option<&crate::work::task::TaskPr>,
     wave_name: &str,
     steers: &[Steer],
 ) -> String {
     let context = crate::ops::render_task_context(task, project, pr, wave_name, steers);
     format!(
-        "{context}\n\nTyped PR and Task operations own publication, landing, rotation, and completion. `lf pr abandon` discards only this PR. If this PR already merged out of band and follow-up work remains, `lf pr next [slug]` rotates to the next serial PR, carrying committed and uncommitted follow-up forward."
+        "{context}\n\nA Task has zero or one pull request. After merge, file accepted follow-ups or record none needed, then complete the Task. Dependent pull requests belong to separate stacked Tasks."
     )
 }

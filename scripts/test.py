@@ -623,7 +623,7 @@ SUITES: list[Suite] = [
         match=lambda c: _touches(
             c,
             "rust/loopflow/src/store",
-            "rust/loopflow/src/engine/worktrees",
+            "rust/loopflow/src/git/worktrees",
             "tests/e2e/",
         ),
         build=_e2e_commands,

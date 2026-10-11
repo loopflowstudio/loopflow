@@ -1,14 +1,19 @@
+mod support;
+
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 
-use loopflow::engine::{
-    format_prompt, gather_context, DocumentSource, GatherContextOpts, PromptComponents, Surface,
-};
-use loopflow::id::WaveId;
+use loopflow::context_block::{ContextDelivery, ContextMoment};
 use loopflow::ops::resolve_work_binding;
+use loopflow::prompt::format_prompt;
+use loopflow::prompt::gather_context;
+use loopflow::prompt::DocumentSource;
+use loopflow::prompt::GatherContextOpts;
+use loopflow::prompt::PromptComponents;
+use loopflow::prompt::Surface;
+use loopflow::prompt::{gather_documents, GatherSpec};
 use loopflow::store::{open_ephemeral_store, StorageConfig};
-use loopflow::work::wave::Wave;
 use tempfile::TempDir;
 
 fn init_repo(dir: &Path) {
@@ -58,6 +63,7 @@ fn render_prompt(components: PromptComponents) -> String {
 
 #[test]
 fn gather_context_with_skill() {
+    let _env = support::EnvGuard::new(&[]);
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
     init_repo(repo);
@@ -85,6 +91,7 @@ fn gather_context_with_skill() {
 
 #[test]
 fn gather_context_with_inline_prompt() {
+    let _env = support::EnvGuard::new(&[]);
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
     init_repo(repo);
@@ -114,6 +121,7 @@ fn gather_context_with_inline_prompt() {
 
 #[test]
 fn gather_context_includes_explicit_readme_docs_target() {
+    let _env = support::EnvGuard::new(&[]);
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
     init_repo(repo);
@@ -147,6 +155,7 @@ fn gather_context_includes_explicit_readme_docs_target() {
 
 #[test]
 fn gather_context_includes_scratch_docs() {
+    let _env = support::EnvGuard::new(&[]);
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
     init_repo(repo);
@@ -189,6 +198,7 @@ fn gather_context_includes_scratch_docs() {
 
 #[test]
 fn gather_context_with_wave() {
+    let _env = support::EnvGuard::new(&[]);
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
     init_repo(repo);
@@ -221,6 +231,7 @@ fn gather_context_with_wave() {
 
 #[test]
 fn gather_context_preserves_surface() {
+    let _env = support::EnvGuard::new(&[]);
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
     init_repo(repo);
@@ -265,6 +276,7 @@ fn gather_context_preserves_surface() {
 
 #[test]
 fn format_prompt_includes_skill_content() {
+    let _env = support::EnvGuard::new(&[]);
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
     init_repo(repo);
@@ -292,6 +304,7 @@ fn format_prompt_includes_skill_content() {
 
 #[test]
 fn format_prompt_includes_auto_mode_header() {
+    let _env = support::EnvGuard::new(&[]);
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
     init_repo(repo);
@@ -319,6 +332,7 @@ fn format_prompt_includes_auto_mode_header() {
 
 #[test]
 fn format_prompt_includes_wave_context() {
+    let _env = support::EnvGuard::new(&[]);
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
     init_repo(repo);
@@ -354,254 +368,95 @@ fn format_prompt_includes_wave_context() {
 // Wave filtering (fixture-based tests)
 // =============================================================================
 
-/// Setup multiple wave directories for isolation tests
 fn setup_multi_wave_repo(repo: &Path) {
-    // Create auth wave
-    fs::create_dir_all(repo.join("wave/auth")).unwrap();
-    fs::write(
-        repo.join("wave/auth/README.md"),
-        "# Auth Wave\nAuthentication system.",
-    )
-    .unwrap();
-    fs::write(
-        repo.join("wave/auth/oauth.md"),
-        "# OAuth\nOAuth provider setup.",
-    )
-    .unwrap();
-
-    // Create payments wave
-    fs::create_dir_all(repo.join("wave/payments")).unwrap();
-    fs::write(
-        repo.join("wave/payments/README.md"),
-        "# Payments Wave\nPayment processing.",
-    )
-    .unwrap();
-    fs::write(
-        repo.join("wave/payments/stripe.md"),
-        "# Stripe\nStripe integration guide.",
-    )
-    .unwrap();
-
-    // Create search wave
-    fs::create_dir_all(repo.join("wave/search")).unwrap();
-    fs::write(
-        repo.join("wave/search/README.md"),
-        "# Search Wave\nElastic search setup.",
-    )
-    .unwrap();
+    for (path, text) in [
+        ("auth/README.md", "Authentication system."),
+        ("auth/oauth.md", "OAuth provider setup."),
+        ("payments/README.md", "Payment processing."),
+        ("payments/stripe.md", "Stripe integration guide."),
+        ("search/README.md", "Elastic search setup."),
+    ] {
+        let path = repo.join("wave").join(path);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, text).unwrap();
+    }
 }
 
 #[test]
 fn wave_filtering_includes_only_specified_wave() {
-    let temp = TempDir::new().unwrap();
-    let repo = temp.path();
-    init_repo(repo);
-    setup_multi_wave_repo(repo);
-    write_skill(repo, "implement", "Do work.");
-    make_commit(repo, "initial");
-
-    let components = gather_context(&GatherContextOpts {
-        repo_root: repo.to_path_buf(),
-        skill: Some("implement".to_string()),
-        message: None,
-        operate: false,
-        surface: Surface::Headless,
-        files: vec![],
-        docs: vec![],
-        wave: Some("auth".to_string()),
-        related_repos: Vec::new(),
+    let repo = TempDir::new().unwrap();
+    setup_multi_wave_repo(repo.path());
+    let docs = gather_documents(&GatherSpec {
+        repo_root: repo.path().to_owned(),
+        wave: Some("auth".into()),
         ..Default::default()
     })
     .unwrap();
-
-    let docs_content: String = components
-        .docs
-        .iter()
-        .map(|d| d.content.as_str())
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    // Should include auth wave content
-    assert!(
-        docs_content.contains("Authentication system"),
-        "Should include auth wave README"
-    );
-    assert!(
-        docs_content.contains("OAuth provider setup"),
-        "Should include auth wave oauth.md"
-    );
-
-    // Should NOT include other waves
-    assert!(
-        !docs_content.contains("Payment processing"),
-        "Should NOT include payments wave"
-    );
-    assert!(
-        !docs_content.contains("Stripe integration"),
-        "Should NOT include stripe.md"
-    );
-    assert!(
-        !docs_content.contains("Elastic search"),
-        "Should NOT include search wave"
-    );
-}
-
-#[test]
-fn wave_filtering_excludes_all_waves_when_no_wave() {
-    let temp = TempDir::new().unwrap();
-    let repo = temp.path();
-    init_repo(repo);
-    setup_multi_wave_repo(repo);
-    write_skill(repo, "implement", "Do work.");
-    make_commit(repo, "initial");
-
-    let components = gather_context(&GatherContextOpts {
-        repo_root: repo.to_path_buf(),
-        skill: Some("implement".to_string()),
-        message: None,
-        operate: false,
-        surface: Surface::Headless,
-        files: vec![],
-        docs: vec![],
-        wave: None, // No wave specified
-        related_repos: Vec::new(),
-        ..Default::default()
-    })
-    .unwrap();
-
-    let docs_content: String = components
-        .docs
-        .iter()
-        .map(|d| d.content.as_str())
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    // Should NOT include ANY wave content
-    assert!(
-        !docs_content.contains("Authentication system"),
-        "Should NOT include auth wave"
-    );
-    assert!(
-        !docs_content.contains("Payment processing"),
-        "Should NOT include payments wave"
-    );
-    assert!(
-        !docs_content.contains("Elastic search"),
-        "Should NOT include search wave"
-    );
-}
-
-#[test]
-fn wave_filtering_handles_nonexistent_wave() {
-    let temp = TempDir::new().unwrap();
-    let repo = temp.path();
-    init_repo(repo);
-    setup_multi_wave_repo(repo);
-    write_skill(repo, "implement", "Do work.");
-    make_commit(repo, "initial");
-
-    // Specifying a wave that doesn't exist should not fail
-    let components = gather_context(&GatherContextOpts {
-        repo_root: repo.to_path_buf(),
-        skill: Some("implement".to_string()),
-        message: None,
-        operate: false,
-        surface: Surface::Headless,
-        files: vec![],
-        docs: vec![],
-        wave: Some("nonexistent".to_string()),
-        related_repos: Vec::new(),
-        ..Default::default()
-    })
-    .unwrap();
-
-    let docs_content: String = components
-        .docs
-        .iter()
-        .map(|d| d.content.as_str())
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    // Should NOT include ANY wave content (nonexistent wave)
-    assert!(
-        !docs_content.contains("Authentication system"),
-        "Should NOT include auth wave"
-    );
-    assert!(
-        !docs_content.contains("Payment processing"),
-        "Should NOT include payments wave"
-    );
-}
-
-#[test]
-fn wave_filtering_includes_all_files_in_wave_directory() {
-    let temp = TempDir::new().unwrap();
-    let repo = temp.path();
-    init_repo(repo);
-
-    // Create wave with multiple files
-    fs::create_dir_all(repo.join("wave/features")).unwrap();
-    fs::write(
-        repo.join("wave/features/README.md"),
-        "# Features Overview\nMain features doc.",
-    )
-    .unwrap();
-    fs::write(
-        repo.join("wave/features/01-core.md"),
-        "# Core Features\nCore feature list.",
-    )
-    .unwrap();
-    fs::write(
-        repo.join("wave/features/02-advanced.md"),
-        "# Advanced Features\nAdvanced feature list.",
-    )
-    .unwrap();
-    fs::write(
-        repo.join("wave/features/03-experimental.md"),
-        "# Experimental\nExperimental features.",
-    )
-    .unwrap();
-
-    write_skill(repo, "implement", "Do work.");
-    make_commit(repo, "initial");
-
-    let components = gather_context(&GatherContextOpts {
-        repo_root: repo.to_path_buf(),
-        skill: Some("implement".to_string()),
-        message: None,
-        operate: false,
-        surface: Surface::Headless,
-        files: vec![],
-        docs: vec![],
-        wave: Some("features".to_string()),
-        related_repos: Vec::new(),
-        ..Default::default()
-    })
-    .unwrap();
-
-    // Count wave docs
-    let wave_docs: Vec<_> = components
-        .docs
-        .iter()
-        .filter(|d| d.source == DocumentSource::Wave)
-        .collect();
-
     assert_eq!(
-        wave_docs.len(),
-        4,
-        "Should include all 4 files from features wave"
+        docs.iter()
+            .map(|doc| (doc.path.as_str(), doc.content.as_str(), doc.source))
+            .collect::<Vec<_>>(),
+        [
+            (
+                "wave/auth/README.md",
+                "Authentication system.",
+                DocumentSource::Wave
+            ),
+            (
+                "wave/auth/oauth.md",
+                "OAuth provider setup.",
+                DocumentSource::Wave
+            ),
+        ]
     );
-
-    let docs_content: String = wave_docs.iter().map(|d| d.content.as_str()).collect();
-    assert!(docs_content.contains("Main features doc"));
-    assert!(docs_content.contains("Core feature list"));
-    assert!(docs_content.contains("Advanced feature list"));
-    assert!(docs_content.contains("Experimental features"));
 }
 
 #[test]
-fn nested_wave_reads_all_ancestor_markdown_in_checkout_order() {
-    // No registry or git history is needed, including in a fresh checkout.
+fn wave_filtering_excludes_waves_without_a_matching_selection() {
+    let repo = TempDir::new().unwrap();
+    setup_multi_wave_repo(repo.path());
+    for wave in [None, Some("nonexistent".into())] {
+        let docs = gather_documents(&GatherSpec {
+            repo_root: repo.path().to_owned(),
+            wave,
+            ..Default::default()
+        })
+        .unwrap();
+        assert!(docs.is_empty());
+    }
+}
+
+#[test]
+fn wave_filtering_includes_all_markdown_in_path_order() {
+    let repo = TempDir::new().unwrap();
+    let directory = repo.path().join("wave/features");
+    fs::create_dir_all(&directory).unwrap();
+    let files = [
+        "01-core.md",
+        "02-advanced.md",
+        "03-experimental.md",
+        "README.md",
+    ];
+    for file in files {
+        fs::write(directory.join(file), file).unwrap();
+    }
+    let docs = gather_documents(&GatherSpec {
+        repo_root: repo.path().to_owned(),
+        wave: Some("features".into()),
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(docs.len(), files.len());
+    for (doc, file) in docs.iter().zip(files) {
+        assert_eq!(doc.path, format!("wave/features/{file}"));
+        assert_eq!(doc.content, file);
+        assert_eq!(doc.source, DocumentSource::Wave);
+    }
+}
+
+#[test]
+fn nested_wave_reads_checkout_ancestor_markdown_in_order() {
+    let _env = support::EnvGuard::new(&[]);
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
     for (path, content) in [
@@ -632,7 +487,7 @@ fn nested_wave_reads_all_ancestor_markdown_in_checkout_order() {
         ..Default::default()
     })
     .unwrap();
-    loopflow::engine::drop_duplicate_docs(&mut components, repo);
+    loopflow::prompt::drop_duplicate_docs(&mut components, repo);
     let paths: Vec<_> = components
         .docs
         .iter()
@@ -648,15 +503,20 @@ fn nested_wave_reads_all_ancestor_markdown_in_checkout_order() {
         paths,
         [
             "MEMORY.md",
-            "wave/infrastructure/README.md",
             "wave/infrastructure/GOAL.md",
             "wave/infrastructure/MEMORY.md",
+            "wave/infrastructure/README.md",
             "wave/infrastructure/release/GOAL.md",
             "wave/infrastructure/release/MEMORY.md",
             "wave/infrastructure/release/notes.md",
         ]
     );
-    let prompt = render_prompt(components);
+    let prompt = components
+        .docs
+        .iter()
+        .map(|doc| doc.content.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
     assert!(prompt.contains("Recursive scratch"));
     for content in [
         "Repository decisions",
@@ -683,6 +543,7 @@ fn nested_wave_reads_all_ancestor_markdown_in_checkout_order() {
 
 #[test]
 fn context_delivery_repository_memory_is_included_once_without_a_wave() {
+    let _env = support::EnvGuard::new(&[]);
     let temp = TempDir::new().unwrap();
     fs::write(temp.path().join("MEMORY.md"), "Repository decisions.").unwrap();
     let mut components = gather_context(&GatherContextOpts {
@@ -691,20 +552,26 @@ fn context_delivery_repository_memory_is_included_once_without_a_wave() {
         ..Default::default()
     })
     .unwrap();
-    let decisions = loopflow::engine::drop_duplicate_docs(&mut components, temp.path());
+    let decisions = loopflow::prompt::drop_duplicate_docs(&mut components, temp.path());
     assert_eq!(components.docs.len(), 1);
     assert_eq!(components.docs[0].source, DocumentSource::RepoMemory);
     assert!(decisions.iter().any(|decision| {
         decision.source_path.as_deref() == Some("MEMORY.md")
             && decision.decision == loopflow::trace::ContextDecisionKind::Deduplicated
     }));
-    let prompt = render_prompt(components);
+    let delivery = ContextDelivery::prepare(&components).unwrap();
+    assert!(
+        delivery.references.is_empty(),
+        "repository memory is a live source, not a second reference"
+    );
+    let prompt = delivery.block(ContextMoment::Start).unwrap().text;
     assert_eq!(prompt.matches("Repository decisions.").count(), 1);
     assert!(!prompt.contains("<lf:wave name="));
 }
 
 #[test]
 fn run_outside_any_wave_assembles_no_memory_section() {
+    let _env = support::EnvGuard::new(&[]);
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
     init_repo(repo);
@@ -723,7 +590,8 @@ fn run_outside_any_wave_assembles_no_memory_section() {
 }
 
 #[tokio::test]
-async fn worktree_reads_its_own_wave_memory() {
+async fn worktree_reads_its_checkout_wave_memory() {
+    let _env = support::EnvGuard::new(&[]);
     let temp = TempDir::new().unwrap();
     let origin = temp.path().join("repo");
     fs::create_dir_all(&origin).unwrap();
@@ -750,7 +618,7 @@ async fn worktree_reads_its_own_wave_memory() {
         .current_dir(&origin)
         .output()
         .expect("git worktree add");
-    // Uncommitted memory in the executing checkout wins over the origin.
+    // Checkout edits are the next launch context, independent of main.
     fs::write(
         worktree.join("wave/goals/MEMORY.md"),
         "- checkout-local decisions",
@@ -758,13 +626,17 @@ async fn worktree_reads_its_own_wave_memory() {
     .unwrap();
 
     fs::write(worktree.join("wave/goals/GOAL.md"), "Checkout goal.").unwrap();
+    loopflow::store::sqlite::SqliteStore::new(&loopflow::store::database_path_from_env().unwrap())
+        .unwrap()
+        .ensure_wave(origin.canonicalize().unwrap().to_str().unwrap(), "goals")
+        .unwrap();
     let store = Arc::new(
-        open_ephemeral_store(&StorageConfig::sqlite(temp.path().join("registry.db")))
-            .await
-            .unwrap(),
+        open_ephemeral_store(&StorageConfig::sqlite(
+            loopflow::store::database_path_from_env().unwrap(),
+        ))
+        .await
+        .unwrap(),
     );
-    let wave = Wave::new(WaveId::new(), "goals".into(), origin.display().to_string());
-    store.create_wave(&wave).await.unwrap();
     let binding = resolve_work_binding(&store, &worktree, "wave:goals")
         .await
         .unwrap();
@@ -781,11 +653,14 @@ async fn worktree_reads_its_own_wave_memory() {
     })
     .unwrap();
 
-    let prompt = render_prompt(components);
+    let prompt = components
+        .docs
+        .iter()
+        .map(|doc| doc.content.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
     assert_eq!(prompt.matches("checkout-local decisions").count(), 1);
     assert_eq!(prompt.matches("Checkout goal.").count(), 1);
-    assert_eq!(prompt.matches("<lf:loopflow>").count(), 1);
-    assert!(prompt.contains("Curate wave/goals/MEMORY.md in this checkout."));
     assert!(!prompt.contains("previous committed memory"));
     assert!(!prompt.contains("Origin goal."));
 }

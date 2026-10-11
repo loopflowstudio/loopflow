@@ -186,13 +186,13 @@ struct WaveLensTests {
 
     private func makeTask(state: String, reason: String) throws -> WaveTaskWork {
         let json = """
-        {"task":{"id":"\(reason)","identifier":"W2-1","name":"n","description":"","rank":1,"completed":false,"state":"unstarted","completed_at":null,"assignee":null},
+        {"task":{"id":"\(reason)","identifier":"W2-1","name":"n","description":"","rank":1,"completed":false,"state":"unstarted","completed_at":null, "due_date": null, "follow_up_sources": [],"assignee":null},
         "reference":{"issue_url":null,"workspace":null},"runtime":null,"directive":null,
-        "workflow_name":"feature","latest_flow_process":null,"execution":null,"run_control":{"unavailable":null},
+        "workflow_name":"feature","latest_flow_process":null,"execution":null,"run_control":{"unavailable":null}, "follow_through": {"intents":[],"links":[],"reason":null,"needs_conversion":false,"scope_notes":[]},
         "next_move":{"owner":"task","reason":"\(reason)"},
         "condition":{"state":"\(state)","reason":"\(reason)","observed_at":"2026-07-15T00:00:00Z","evidence_age_secs":null,"local_progress":{"state":"not_applicable","unsettled":false,"dirty":null,"authored_commits":null,"recovery_required":null,"reason":null},"unresolved_execution":false},
         "actions":{"recommended":null,"reason":"Task is ready to start"},
-        "prs":[],"active_pr":null}
+        "pr":null}
         """
         return try JSONDecoder().decode(WaveTaskWork.self, from: Data(json.utf8))
     }

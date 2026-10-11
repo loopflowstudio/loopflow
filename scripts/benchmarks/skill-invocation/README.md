@@ -112,3 +112,55 @@ translated YAML frontmatter had been parsed as an option. Captured-source remova
 native model/declaration mapping, native-home continuity and Codex reconnect with
 stale-client rejection also pass. Print/exec substitutes still do not prove terminal
 rendering or live model compliance.
+
+## Context delivery prerequisites
+
+```sh
+uv run python scripts/test_network.py uv run --no-sync python \
+  scripts/benchmarks/skill-invocation/context_delivery.py \
+  --provider claude --output /tmp/lf-context-proof
+# Repeat with --provider codex.
+uv run pytest scripts/benchmarks/skill-invocation/test_context_delivery.py -q
+```
+
+Checks native model-request channels across manual compaction. Disposable Homes,
+loopback fake APIs and fixture-only hook trust keep real accounts untouched.
+Request bodies, hook receipts and results remain under the output directory.
+Claude excludes resume hooks so they cannot impersonate compact refresh. Codex
+checks both that PostCompact ran and that only SessionStart supplied fresh context.
+These probes do not launch Loopflow or prove automatic compaction, terminal UI,
+large-input transport, OpenCode behavior or the completed LOO-444 cutover.
+
+On October 9, Claude 2.1.295 delivered startup/compact context as user content,
+contrary to the 2.1.294 observation above. Codex 0.161.0 delivered SessionStart
+context as developer conversation content and ignored PostCompact context;
+additive developer instructions and its native base survived manual compaction.
+The app-server probe uses exact per-thread fixture hook hashes: the TUI bypass
+flag did not authorize app-server hooks. Never substitute global trust changes.
+
+### Hook-size boundary
+
+```sh
+uv run python scripts/test_network.py uv run --no-sync python \
+  scripts/benchmarks/skill-invocation/context_delivery.py \
+  --provider codex --context-chars 10000 --output /tmp/lf-hook-size-proof
+# Repeat with --provider claude, and with --unicode on both (expected failures).
+```
+
+Claude 2.1.295 and Codex 0.161.0 preserve 10,000 ASCII characters at start and
+manual compaction. Both spill and truncate 10,000 Unicode scalars / 39,901 UTF-8
+bytes. Codex retains the boundary markers around a cut in the middle; compare
+whole strings. A 2,500-scalar / 9,901-byte Codex block passes. Count provider units
+before selecting whole files, not just Unicode scalars; a native spill preview
+is still truncation. These samples prove no Loopflow integration or automatic
+compaction.
+
+### Rejected first-turn transports
+
+Jack Heart selected terminal argv on October 9, with a size/cap error only for
+an oversized first turn. No editor, paste, stdin or envelope path remains.
+Archived probe and tests: `d81f12c42:scripts/benchmarks/skill-invocation/`.
+Codex 0.161.0 rejected terminal stdin; paste changed CRLF and consumed literal
+paste terminators; the editor preserved 285 KB Unicode/CRLF/terminators but
+trimmed trailing whitespace. Exact-copy receipts and clean exits did not prove
+exact submission. These observations establish no lf, resume or cmux acceptance.

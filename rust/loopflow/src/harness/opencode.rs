@@ -1,44 +1,25 @@
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use reqwest::Method;
 use serde_json::{json, Value};
 use tokio::process::{Child, Command};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
+use crate::agent::{opencode_worktree_config, AgentConfig, AgentWriteScope};
 use crate::chat::types::{ConversationEvent, FailureEvidence};
-use crate::engine::agent::{
-    opencode_worktree_config, register_interrupt_cleanup, AgentConfig, AgentWriteScope,
-};
-use crate::engine::config::parse_agent;
+use crate::config::parse_agent;
 use crate::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
 use crate::harness::{
-    opencode_history, opencode_mapping, opencode_runtime, ApprovalPolicy, Harness, HarnessError,
-    RawProviderEvent, SendCurrentOutcome,
+    opencode_history, opencode_mapping, ApprovalPolicy, Harness, HarnessError, RawProviderEvent,
+    SendCurrentOutcome,
 };
+use crate::id::AgentSessionId;
 
 pub(crate) const OPENCODE_DISCONNECTED_CODE: &str = "opencode_disconnected";
-
-/// SIGKILL an entire process group. `opencode serve` spawns descendants
-/// (MCP servers, model proxies, npm-shim grandchildren) that a bare
-/// `start_kill` of the direct child leaves running as orphans. The harness
-/// spawns the server in its own group (`process_group(0)`), so the group id is
-/// the child pid and this reaches the whole tree. Shared by `stop()` and the
-/// interrupt-cleanup hook.
-fn kill_process_group(pid: u32) {
-    #[cfg(unix)]
-    // SAFETY: a negative pid targets the process group we created for the
-    // child at spawn (process_group(0)); plain syscall, no pointers.
-    unsafe {
-        libc::kill(-(pid as i32), libc::SIGKILL)
-    };
-    #[cfg(not(unix))]
-    let _ = pid;
-}
 
 pub struct OpenCodeHarness {
     events: mpsc::UnboundedSender<ConversationEvent>,
@@ -50,14 +31,10 @@ pub struct OpenCodeHarness {
     turn_in_progress: Arc<AtomicBool>,
     shutdown_requested: Arc<AtomicBool>,
     child: Option<Child>,
-    /// The spawned server's process-group id (== its pid under
-    /// `process_group(0)`). 0 while no server is running.
-    child_group: Arc<AtomicU32>,
-    interrupt_hook_registered: bool,
     stderr_task: Option<JoinHandle<()>>,
     sse_task: Option<JoinHandle<()>>,
     server_base_url: Option<String>,
-    provider_session_id: Option<String>,
+    agent_session: Option<AgentSessionId>,
 }
 
 impl std::fmt::Debug for OpenCodeHarness {
@@ -81,30 +58,18 @@ impl OpenCodeHarness {
             turn_in_progress: Arc::new(AtomicBool::new(false)),
             shutdown_requested: Arc::new(AtomicBool::new(false)),
             child: None,
-            child_group: Arc::new(AtomicU32::new(0)),
-            interrupt_hook_registered: false,
             stderr_task: None,
             sse_task: None,
             server_base_url: None,
-            provider_session_id: None,
+            agent_session: None,
         }
     }
 
     async fn start_inner(&mut self, config: &AgentConfig) -> Result<()> {
-        let owner = config
-            .session_driver
-            .as_ref()
-            .map(|(session, driver)| {
-                Ok::<_, anyhow::Error>((
-                    crate::store::sqlite::SqliteStore::new(
-                        &crate::store::database_path_from_env()?
-                    )?,
-                    session.clone(),
-                    driver.clone(),
-                ))
-            })
-            .transpose()?;
-        self.history = Arc::new(Mutex::new(opencode_history::History::new(owner)));
+        let owner = super::agent_process::open_owner(config.session_attachment.as_ref())?;
+        self.history = Arc::new(Mutex::new(opencode_history::History::new(Some(
+            owner.clone(),
+        ))));
         let port = allocate_port()?;
         let mut command = Command::new("opencode");
         command
@@ -114,11 +79,8 @@ impl OpenCodeHarness {
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::piped())
-            // Dropping the harness (e.g. a run task is aborted) must not leak a
-            // live server. The direct-child kill this fires is a backstop; the
-            // group kill in `stop()` and the interrupt hook are what reach the
-            // descendants.
-            .kill_on_drop(true);
+            // The common lifeline owns cleanup; dropping a stale handle must not signal.
+            .kill_on_drop(false);
         if let Some(cwd) = &config.cwd {
             command.current_dir(cwd);
         }
@@ -126,21 +88,15 @@ impl OpenCodeHarness {
         if config.write_scope == AgentWriteScope::Worktree {
             command.env("OPENCODE_CONFIG_CONTENT", opencode_worktree_config());
         }
-        // Own process group so `stop()` and the interrupt hook can kill the
-        // whole tree — `opencode serve` spawns descendants (MCP servers, model
-        // proxies, npm-shim grandchildren) that a direct-child kill orphans.
-        #[cfg(unix)]
-        command.process_group(0);
-        super::configure_vendor_std_env(command.as_std_mut())?;
-        {
-            let history = self.history.lock().expect("OpenCode history lock poisoned");
-            if let Some((store, session, driver)) = &history.owner {
-                store.record_session_provider_launch(session, driver, true)?;
-            }
+        if let Some(context) = &config.conversation_context {
+            super::context::configure_opencode(
+                command.as_std_mut(),
+                context,
+                &crate::agent::system_prompt_with_structured_replies(config),
+            )?;
         }
-        let mut child = command
-            .spawn()
-            .map_err(|err| anyhow!("failed to spawn opencode serve: {err}"))?;
+        super::configure_vendor_std_env(command.as_std_mut())?;
+        let mut child = super::agent_process::spawn(command, None, &owner)?;
         let stderr = child
             .stderr
             .take()
@@ -148,64 +104,31 @@ impl OpenCodeHarness {
 
         let base_url = format!("http://127.0.0.1:{port}");
         if let Err(err) = wait_for_server(&self.client, &base_url, &mut child).await {
-            shutdown_child(&mut child).await;
+            super::agent_process::stop(&owner)?;
             return Err(err);
         }
 
-        let provider_session_id = match resume_provider_session(
-            &self.client,
-            &base_url,
-            self.provider_session_id.as_deref(),
-        )
-        .await
-        {
-            Ok(Some(id)) => id,
-            Ok(None) => match create_provider_session(&self.client, &base_url).await {
-                Ok(id) => id,
-                Err(error) => {
-                    shutdown_child(&mut child).await;
-                    return Err(error);
-                }
-            },
-            Err(error) => {
-                shutdown_child(&mut child).await;
-                return Err(error);
-            }
-        };
-        // The dedicated server answers each native permission once, after the
-        // originating user message has been selected under the Session owner.
         let mut permissions = vec![json!({"permission":"*","pattern":"*","action":"ask"})];
         if config.write_scope == AgentWriteScope::Worktree {
             permissions
                 .push(json!({"permission":"external_directory","pattern":"*","action":"deny"}));
         }
-        if let Err(error) = self
-            .client
-            .patch(format!("{base_url}/session/{provider_session_id}"))
-            .json(&json!({"permission":permissions}))
-            .send()
-            .await?
-            .error_for_status()
+        let agent_session = match open_agent_session(
+            &self.client,
+            &base_url,
+            self.agent_session.as_ref(),
+            &permissions,
+        )
+        .await
         {
-            shutdown_child(&mut child).await;
-            return Err(error.into());
-        }
-        {
-            let history = self.history.lock().expect("OpenCode history lock poisoned");
-            if let Some((store, session, driver)) = &history.owner {
-                if let Some(pid) = child.id() {
-                    if let Some(start) = crate::journal::process_started_at(pid)? {
-                        store.record_session_provider_process(session, driver, pid, start)?;
-                    }
-                }
-                store.record_session_connection(
-                    session,
-                    driver,
-                    &base_url,
-                    &provider_session_id,
-                )?;
+            Ok(id) => id,
+            Err(error) => {
+                super::agent_process::stop(&owner)?;
+                return Err(error);
             }
-        }
+        };
+        let (store, session, attachment) = &owner;
+        store.record_session_connection(session, attachment, &base_url, &agent_session)?;
 
         let event_tx = self.events.clone();
         let raw_provider = self.raw_provider.clone();
@@ -215,7 +138,7 @@ impl OpenCodeHarness {
         let history = self.history.clone();
         let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
         let reader_base_url = base_url.clone();
-        let reader_session_id = provider_session_id.clone();
+        let reader_session_id = agent_session.clone();
         let reader_model = opencode_model(config)
             .map(|(provider_id, model_id)| format!("{provider_id}/{model_id}"))
             .or_else(|| config.agent.clone());
@@ -355,7 +278,7 @@ impl OpenCodeHarness {
                                 if !history.lock().expect("OpenCode history lock poisoned").admitted(request) {
                                     return Err(anyhow!("OpenCode permission belongs to an unselected request"));
                                 }
-                                let owner = history.lock().expect("OpenCode history lock poisoned").owner.clone();
+                                let owner = history.lock().expect("OpenCode history lock poisoned").owner()?;
                                 opencode_history::post(owner, format!("{reader_base_url}/permission/{request_id}/reply"), json!({"reply":"once"})).await?;
                             }
                             Ok::<_, anyhow::Error>(())
@@ -406,39 +329,11 @@ impl OpenCodeHarness {
 
         let stderr_task = spawn_stderr_logger(stderr, "harness::opencode");
 
-        let opencode_pid = child.id();
-        if let Some(pid) = opencode_pid {
-            self.child_group.store(pid, Ordering::Release);
-            if let Err(err) = opencode_runtime::register_opencode_server(pid) {
-                tracing::warn!(
-                    opencode_pid = pid,
-                    error = %err,
-                    "failed to register OpenCode server runtime metadata"
-                );
-            }
-        }
-
-        // The signal handler (SIGINT/SIGTERM/SIGHUP — see bin/lf.rs) exits the
-        // process before destructors run, so `kill_on_drop` never fires on
-        // that path. This hook is what keeps `tmux kill-session` (SIGHUP) and a
-        // Ctrl+C from orphaning the server's descendant tree. Registered once
-        // per harness; restarts just update the atomic.
-        if !self.interrupt_hook_registered {
-            self.interrupt_hook_registered = true;
-            let group = Arc::clone(&self.child_group);
-            register_interrupt_cleanup(move || {
-                let pid = group.swap(0, Ordering::AcqRel);
-                if pid != 0 {
-                    kill_process_group(pid);
-                }
-            });
-        }
-
         self.child = Some(child);
         self.stderr_task = Some(stderr_task);
         self.sse_task = Some(sse_task);
         self.server_base_url = Some(base_url);
-        self.provider_session_id = Some(provider_session_id);
+        self.agent_session = Some(agent_session);
         ready_rx
             .await
             .map_err(|_| anyhow!("OpenCode event stream did not connect"))?;
@@ -448,7 +343,7 @@ impl OpenCodeHarness {
 
 #[async_trait]
 impl Harness for OpenCodeHarness {
-    fn process_id(&self) -> Option<u32> {
+    fn pid(&self) -> Option<u32> {
         self.child.as_ref().and_then(Child::id)
     }
 
@@ -501,15 +396,15 @@ impl Harness for OpenCodeHarness {
             .server_base_url
             .clone()
             .ok_or_else(|| anyhow!("opencode server not started"))?;
-        let provider_session_id = self
-            .provider_session_id
+        let agent_session = self
+            .agent_session
             .clone()
             .ok_or_else(|| anyhow!("opencode provider session id is not available"))?;
 
-        let mut payload = build_turn_payload(&turn_content, config, first_turn);
+        let mut payload = build_turn_payload(&turn_content, config);
         let (request, owner) = {
             let mut history = self.history.lock().expect("OpenCode history lock poisoned");
-            (history.request(), history.owner.clone())
+            (history.request()?, history.owner()?)
         };
         payload["messageID"] = json!(request);
 
@@ -519,7 +414,7 @@ impl Harness for OpenCodeHarness {
         // whole turn finishes, which would keep `send_input` (and its `&mut
         // self` borrow) from returning — leaving no window to call
         // `send_current` mid-turn.
-        let message_url = format!("{base_url}/session/{provider_session_id}/prompt_async");
+        let message_url = format!("{base_url}/session/{agent_session}/prompt_async");
         opencode_history::post(owner, message_url, payload).await?;
 
         self.should_seed_prompt = false;
@@ -539,21 +434,28 @@ impl Harness for OpenCodeHarness {
         if !self.turn_in_progress.load(Ordering::SeqCst) {
             return SendCurrentOutcome::NotSteerable;
         }
-        let (Some(base_url), Some(provider_session_id), Some(config)) = (
+        let (Some(base_url), Some(agent_session), Some(config)) = (
             self.server_base_url.clone(),
-            self.provider_session_id.clone(),
+            self.agent_session.clone(),
             self.config.clone(),
         ) else {
             return SendCurrentOutcome::NotSteerable;
         };
 
-        let mut payload = build_turn_payload(text, &config, false);
+        let mut payload = build_turn_payload(text, &config);
         let (provider_turn_id, owner) = {
             let mut history = self.history.lock().expect("OpenCode history lock poisoned");
-            (history.request(), history.owner.clone())
+            match (history.request(), history.owner()) {
+                (Ok(request), Ok(owner)) => (request, owner),
+                (Err(error), _) | (_, Err(error)) => {
+                    return SendCurrentOutcome::Failed {
+                        error: error.to_string(),
+                    }
+                }
+            }
         };
         payload["messageID"] = json!(provider_turn_id);
-        let steer_url = format!("{base_url}/session/{provider_session_id}/prompt_async");
+        let steer_url = format!("{base_url}/session/{agent_session}/prompt_async");
         match opencode_history::post(owner, steer_url, payload).await {
             Ok(()) => SendCurrentOutcome::Sent { provider_turn_id },
             Err(error) => SendCurrentOutcome::Failed {
@@ -571,53 +473,33 @@ impl Harness for OpenCodeHarness {
             .server_base_url
             .clone()
             .ok_or_else(|| anyhow!("opencode server not started"))?;
-        let provider_session_id = self
-            .provider_session_id
+        let agent_session = self
+            .agent_session
             .clone()
             .ok_or_else(|| anyhow!("opencode provider session id is not available"))?;
 
-        let abort_url = format!("{base_url}/session/{provider_session_id}/abort");
-        send_request_with_retry(&self.client, Method::POST, &abort_url, Some(json!({}))).await?;
+        let abort_url = format!("{base_url}/session/{agent_session}/abort");
+        let owner = self
+            .history
+            .lock()
+            .expect("OpenCode history lock poisoned")
+            .owner()?;
+        opencode_history::post(owner, abort_url, json!({})).await?;
         Ok(())
     }
 
     async fn stop(&mut self) -> Result<()> {
         self.shutdown_requested.store(true, Ordering::SeqCst);
 
-        if let (Some(base_url), Some(provider_session_id)) =
-            (&self.server_base_url, &self.provider_session_id)
-        {
-            // Abort any in-flight turn but leave the session in opencode's
-            // storage — the persisted id lets the next launch resume the
-            // conversation (and its provider-side prompt cache) instead of
-            // starting cold, matching the claude/codex harnesses.
-            let abort_url = format!("{base_url}/session/{provider_session_id}/abort");
-            let _ =
-                send_request_with_retry(&self.client, Method::POST, &abort_url, Some(json!({})))
-                    .await;
-        }
-
-        let opencode_pid = self.child.as_ref().and_then(|child| child.id());
-        if let Some(pid) = opencode_pid {
-            // Kill the whole process group before awaiting the direct child,
-            // so descendants (MCP servers, model proxies, npm-shim
-            // grandchildren) come down with the server instead of orphaning.
-            kill_process_group(pid);
-        }
-        if let Some(child) = self.child.as_mut() {
-            shutdown_child(child).await;
+        if self.child.is_some() {
+            let owner = self
+                .history
+                .lock()
+                .expect("OpenCode history lock poisoned")
+                .owner()?;
+            super::agent_process::stop(&owner)?;
         }
         self.child = None;
-        self.child_group.store(0, Ordering::Release);
-        if let Some(pid) = opencode_pid {
-            if let Err(err) = opencode_runtime::unregister_opencode_server(pid) {
-                tracing::warn!(
-                    opencode_pid = pid,
-                    error = %err,
-                    "failed to unregister OpenCode server runtime metadata"
-                );
-            }
-        }
 
         if let Some(task) = self.sse_task.take() {
             task.abort();
@@ -629,64 +511,57 @@ impl Harness for OpenCodeHarness {
         }
 
         self.turn_in_progress.store(false, Ordering::SeqCst);
-        // Keep `provider_session_id`: the runner persists it after stop so the
-        // next launch can resume the session (see `resume_provider_session`).
+        // Keep `agent_session`: the runner persists it after stop so the
+        // next launch can resume the session (see `open_agent_session`).
         self.server_base_url = None;
 
         Ok(())
     }
 
-    fn provider_session_id(&self) -> Option<String> {
-        self.provider_session_id.clone()
+    fn agent_session(&self) -> Option<AgentSessionId> {
+        self.agent_session.clone()
     }
 
     fn process_group_id(&self) -> Option<u32> {
-        let group = self.child_group.load(Ordering::Acquire);
-        (group > 1).then_some(group)
+        // Admission makes this child the leader of its own group.
+        self.pid().filter(|pid| *pid > 1)
     }
 
-    fn set_provider_session_id(&mut self, provider_session_id: Option<String>) {
-        self.provider_session_id = provider_session_id;
+    fn set_agent_session(&mut self, agent_session: Option<AgentSessionId>) {
+        self.agent_session = agent_session;
     }
-}
-
-async fn shutdown_child(child: &mut Child) {
-    let _ = child.start_kill();
-    let _ = child.wait().await;
 }
 
 /// A saved conversation must remain the same conversation after a retry.
-async fn resume_provider_session(
+async fn open_agent_session(
     client: &reqwest::Client,
     base_url: &str,
-    stored: Option<&str>,
-) -> Result<Option<String>> {
-    let Some(session_id) = stored else {
-        return Ok(None);
-    };
-    client
-        .get(format!("{base_url}/session/{session_id}"))
+    stored: Option<&AgentSessionId>,
+    permissions: &[Value],
+) -> Result<AgentSessionId> {
+    if let Some(session_id) = stored {
+        client
+            .get(format!("{base_url}/session/{session_id}"))
+            .send()
+            .await?
+            .error_for_status()?;
+        return Ok(session_id.clone());
+    }
+
+    let session_url = format!("{base_url}/session");
+    let response = client
+        .post(&session_url)
+        .json(&json!({"permission":permissions}))
         .send()
         .await?
         .error_for_status()?;
-    Ok(Some(session_id.into()))
-}
-
-async fn create_provider_session(client: &reqwest::Client, base_url: &str) -> Result<String> {
-    let session_url = format!("{base_url}/session");
-    let response =
-        send_request_with_retry(client, Method::POST, &session_url, Some(json!({}))).await?;
     let body: Value = response
         .json()
         .await
         .map_err(|err| anyhow!("failed to parse opencode session response: {err}"))?;
 
-    parse_session_id(&body).ok_or_else(|| {
-        anyhow!(
-            "opencode session response did not include session id: {}",
-            body
-        )
-    })
+    parse_session_id(&body)
+        .ok_or_else(|| anyhow!("opencode session response did not include session id: {body}"))
 }
 
 fn send_disconnect_error(
@@ -812,46 +687,11 @@ async fn wait_for_server(
     }
 }
 
-async fn send_request_with_retry(
-    client: &reqwest::Client,
-    method: Method,
-    url: &str,
-    payload: Option<Value>,
-) -> Result<reqwest::Response> {
-    let mut attempt = 0;
-
-    loop {
-        let mut request = client.request(method.clone(), url);
-        if let Some(body) = payload.clone() {
-            request = request.json(&body);
-        }
-
-        match request.send().await {
-            Ok(response) if response.status().is_server_error() && attempt == 0 => {
-                attempt += 1;
-                tokio::time::sleep(Duration::from_millis(200)).await;
-            }
-            Ok(response) => {
-                return response
-                    .error_for_status()
-                    .map_err(|err| anyhow!("OpenCode request failed ({method} {url}): {err}"));
-            }
-            Err(err) if attempt == 0 && (err.is_timeout() || err.is_connect()) => {
-                attempt += 1;
-                tokio::time::sleep(Duration::from_millis(200)).await;
-            }
-            Err(err) => {
-                return Err(anyhow!("OpenCode request failed ({method} {url}): {err}"));
-            }
-        }
-    }
-}
-
-fn parse_session_id(value: &Value) -> Option<String> {
+fn parse_session_id(value: &Value) -> Option<AgentSessionId> {
     value
         .get("id")
         .and_then(Value::as_str)
-        .map(ToString::to_string)
+        .map(AgentSessionId::from)
 }
 
 fn build_turn_content(content: &str, config: &AgentConfig, first_turn: bool) -> Option<String> {
@@ -878,14 +718,14 @@ fn build_turn_content(content: &str, config: &AgentConfig, first_turn: bool) -> 
     }
 }
 
-fn build_turn_payload(content: &str, config: &AgentConfig, first_turn: bool) -> Value {
+fn build_turn_payload(content: &str, config: &AgentConfig) -> Value {
     let mut payload = json!({
         "parts": [
             { "type": "text", "text": content }
         ]
     });
 
-    if first_turn && !config.system_prompt.trim().is_empty() {
+    if !config.system_prompt.trim().is_empty() {
         payload["system"] = Value::String(config.system_prompt.trim().to_string());
     }
 
@@ -956,6 +796,56 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    #[tokio::test]
+    async fn stop_clears_the_child_and_its_group() {
+        let home = tempfile::tempdir().unwrap();
+        let database = home.path().join("store.db");
+        let store = crate::store::sqlite::SqliteStore::open_ephemeral(&database).unwrap();
+        store.test_session("stop", &crate::session_record::new_artifact_key());
+        let process = crate::id::LfProcessId::new();
+        let conn = rusqlite::Connection::open(&database).unwrap();
+        conn.execute(
+            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?1,1)",
+            [&process],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE agent_sessions SET provider='opencode',interactive=0 WHERE id='stop'",
+            [],
+        )
+        .unwrap();
+        let first = store
+            .claim_session_attachment("stop", None, &process, true)
+            .unwrap();
+        let owner = (store.clone(), "stop".to_string(), first.clone());
+        let mut command = Command::new("/bin/sleep");
+        command.env_clear().arg("60");
+        let child = super::super::agent_process::spawn(command, None, &owner).unwrap();
+        let pid = child.id().unwrap();
+        let birth = crate::journal::process_started_at(pid).unwrap().unwrap();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mut harness = OpenCodeHarness::new(tx, ApprovalPolicy::AutoApprove);
+        harness.child = Some(child);
+        harness.history = Arc::new(Mutex::new(opencode_history::History::new(Some(owner))));
+        assert_eq!(harness.process_group_id(), Some(pid));
+        let current = store
+            .claim_session_attachment("stop", Some(&first), &process, false)
+            .unwrap();
+        assert!(harness.stop().await.is_err());
+        assert!(crate::journal::OsProcess::group_is_alive(pid).unwrap());
+        harness.history = Arc::new(Mutex::new(opencode_history::History::new(Some((
+            store,
+            "stop".into(),
+            current,
+        )))));
+        harness.stop().await.unwrap();
+        assert_eq!(harness.pid(), None);
+        assert_eq!(harness.process_group_id(), None);
+        assert_eq!(
+            crate::journal::process_identity_evidence(pid, birth),
+            crate::journal::ProcessIdentityEvidence::Dead
+        );
+    }
     #[test]
     fn sanitize_error_message_redacts_credentials() {
         let input = "request to https://api.example.com/v1/chat?api_key=sk-secret123 failed: \
@@ -1018,13 +908,26 @@ mod tests {
     fn parse_session_id_requires_canonical_top_level_id() {
         assert_eq!(
             parse_session_id(&json!({"id": "session_1"})),
-            Some("session_1".to_string())
+            Some("session_1".into())
         );
         assert_eq!(
             parse_session_id(&json!({"session": {"id": "session_2"}})),
             None
         );
         assert_eq!(parse_session_id(&json!({"sessionID": "session_3"})), None);
+    }
+
+    #[test]
+    fn every_owned_turn_keeps_the_same_additive_instructions() {
+        let config = AgentConfig {
+            system_prompt: "Fixed additions.".into(),
+            ..Default::default()
+        };
+        let first = build_turn_payload("initial request", &config);
+        let next = build_turn_payload("follow-up after compaction", &config);
+        assert_eq!(first["system"], "Fixed additions.");
+        assert_eq!(next["system"], first["system"]);
+        assert_eq!(next["parts"][0]["text"], "follow-up after compaction");
     }
 
     #[test]
@@ -1035,7 +938,6 @@ mod tests {
                 agent: Some("opencode:moonshotai/kimi-k2".to_string()),
                 ..Default::default()
             },
-            false,
         );
         assert_eq!(
             payload.get("model"),
@@ -1054,7 +956,6 @@ mod tests {
                 agent: Some("claude:sonnet".to_string()),
                 ..Default::default()
             },
-            false,
         );
         assert!(payload.get("model").is_none());
     }
@@ -1067,87 +968,8 @@ mod tests {
                 agent: Some("opencode".to_string()),
                 ..Default::default()
             },
-            false,
         );
         assert!(payload.get("model").is_none());
-    }
-
-    // The orphaned-leader shape (the reaper's Dead + group-alive arm at the
-    // harness level): the direct child backgrounds a grandchild (same process
-    // group) and exits. The grandchild touches a flag file after a short sleep;
-    // the group kill `stop()` fires must take it down before the sleep
-    // finishes, so the flag never appears. This is the same kill the interrupt
-    // hook fires on SIGINT/SIGTERM/SIGHUP.
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn kill_process_group_reaches_the_grandchild() {
-        let tmp = tempfile::tempdir().unwrap();
-        let flag = tmp.path().join("survived");
-        let mut command = Command::new("sh");
-        command
-            .arg("-c")
-            .arg(format!("(sleep 1 && touch {}) &", flag.display()));
-        command.process_group(0);
-        let mut child = command.spawn().unwrap();
-        let pid = child.id().unwrap();
-        // Let the shell fork the grandchild and exit.
-        let _ = child.wait().await;
-
-        kill_process_group(pid);
-
-        // Past the grandchild's sleep: if it leaked, the flag would exist.
-        tokio::time::sleep(Duration::from_millis(1500)).await;
-        assert!(!flag.exists(), "grandchild outlived the group kill");
-    }
-
-    // The W2-225 interrupt shape: the leader (`opencode serve`) is still alive
-    // when the signal handler fires the group kill, with a descendant (MCP
-    // server / model proxy / npm-shim grandchild) running in the same group.
-    // Both must come down — the parent leader AND the provider-child — not just
-    // the orphaned grandchild. This is the kill `stop()` and the
-    // interrupt-cleanup hook fire on SIGINT/SIGTERM/SIGHUP.
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn kill_process_group_reaps_live_parent_and_provider_child() {
-        let tmp = tempfile::tempdir().unwrap();
-        let parent_flag = tmp.path().join("parent_alive");
-        let child_flag = tmp.path().join("descendant_survived");
-        let mut command = Command::new("sh");
-        command.arg("-c").arg(format!(
-            "touch {parent} && (sleep 2 && touch {child}) & sleep 30",
-            parent = parent_flag.display(),
-            child = child_flag.display(),
-        ));
-        command.process_group(0);
-        let mut child = command.spawn().unwrap();
-        let pid = child.id().unwrap();
-
-        // Wait for the leader to prove it is alive before we kill the group.
-        let deadline = Instant::now() + Duration::from_secs(2);
-        loop {
-            if parent_flag.exists() {
-                break;
-            }
-            if Instant::now() >= deadline {
-                panic!("parent leader never started");
-            }
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-
-        kill_process_group(pid);
-
-        // The parent leader must be dead: the direct child exited (killed).
-        let leader_dead = tokio::time::timeout(Duration::from_secs(2), child.wait())
-            .await
-            .is_ok();
-        assert!(leader_dead, "live parent leader outlived the group kill");
-
-        // Past the descendant's sleep: if it leaked, the flag would exist.
-        tokio::time::sleep(Duration::from_millis(2500)).await;
-        assert!(
-            !child_flag.exists(),
-            "provider-child descendant outlived the group kill"
-        );
     }
 
     // -- Fake-SSE disconnect matrix --
@@ -1156,10 +978,8 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
-    /// A stored session id is reused when the serve instance still has it and
-    /// dropped when it's gone — resume is an optimization, never a failure.
     #[tokio::test]
-    async fn resume_probe_preserves_saved_identity_on_failure() {
+    async fn open_agent_session_creates_only_without_saved_identity() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         let base_url = format!("http://127.0.0.1:{port}");
@@ -1174,6 +994,8 @@ mod tests {
                 let request = String::from_utf8_lossy(&buf[..n]).to_string();
                 let response = if request.starts_with("GET /session/live") {
                     "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}"
+                } else if request.starts_with("POST /session ") {
+                    "HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\n{\"id\":\"new\"}"
                 } else {
                     "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n"
                 };
@@ -1183,19 +1005,21 @@ mod tests {
 
         let client = reqwest::Client::new();
         assert_eq!(
-            resume_provider_session(&client, &base_url, Some("live"))
+            open_agent_session(&client, &base_url, Some(&"live".into()), &[])
                 .await
                 .unwrap(),
-            Some("live".to_string())
+            "live".into()
         );
-        assert!(resume_provider_session(&client, &base_url, Some("gone"))
-            .await
-            .is_err());
+        assert!(
+            open_agent_session(&client, &base_url, Some(&"gone".into()), &[])
+                .await
+                .is_err()
+        );
         assert_eq!(
-            resume_provider_session(&client, &base_url, None)
+            open_agent_session(&client, &base_url, None, &[])
                 .await
                 .unwrap(),
-            None
+            "new".into()
         );
     }
 
@@ -1209,8 +1033,9 @@ mod tests {
     fn live_config() -> AgentConfig {
         AgentConfig {
             chrome: false,
-            session_driver: None,
+            session_attachment: None,
             system_prompt: String::new(),
+            conversation_context: None,
             task_prompt: String::new(),
             skill_invocation: None,
             agent: Some("opencode".to_string()),
@@ -1268,7 +1093,9 @@ mod tests {
     async fn live_basic_turn_completes() {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mut harness = OpenCodeHarness::new(tx, ApprovalPolicy::AutoApprove);
-        harness.start(&live_config()).await.expect("start");
+        let mut config = live_config();
+        let _ledger = super::super::admit_for_test(&mut config);
+        harness.start(&config).await.expect("start");
 
         harness
             .send_input("Reply with exactly: ALPHA")
@@ -1286,7 +1113,9 @@ mod tests {
     async fn live_send_current_coalesces_into_one_boundary() {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mut harness = OpenCodeHarness::new(tx, ApprovalPolicy::AutoApprove);
-        harness.start(&live_config()).await.expect("start");
+        let mut config = live_config();
+        let _ledger = super::super::admit_for_test(&mut config);
+        harness.start(&config).await.expect("start");
 
         harness
             .send_input(

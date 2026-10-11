@@ -324,14 +324,14 @@ enum MockWaveFixture {
                   "name": "Surface nightly failures",
                   "description": "Surface one focused failure.",
                   "rank": 1,
-                  "completed": false, "state": "unstarted", "completed_at": null,
+                  "completed": false, "state": "unstarted", "completed_at": null, "due_date": null, "follow_up_sources": [],
                   "assignee": "user-1"
                 },
                 "reference": {
                   "issue_url": "https://linear.app/loopflow/issue/INF-123/surface-nightly-failures",
                   "workspace": {
                     "slug": "infrastructure-task",
-                    "branch": "jack/infrastructure.task.20260713_1200",
+                    "branch": "jack/infrastructure.task.20260713_1200", "base_commit": "fixture-base",
                     "worktree": "/src/loopflow.infrastructure.task"
                   }
                 },
@@ -343,7 +343,7 @@ enum MockWaveFixture {
                   "provider": "codex",
                   "started": true
                 },
-                "workflow_name":"feature","latest_flow_process":null,"execution":null,"run_control":{"unavailable":null},
+                "workflow_name":"feature","latest_flow_process":null,"execution":null,"run_control":{"unavailable":null}, "follow_through": {"intents":[],"links":[],"reason":null,"needs_conversion":false,"scope_notes":[]},
                 "directive": {
                   "version": 2,
                   "kind": "replacement",
@@ -375,8 +375,7 @@ enum MockWaveFixture {
                   "recommended": "open_pr",
                   "reason": "merge head 333333333333 on GitHub"
                 },
-                "prs": [
-                  {
+                "pr": {
                     "id": "pr_33333333333333333333333333333333",
                     "sequence": 1,
                     "slug": "infrastructure-task",
@@ -406,8 +405,6 @@ enum MockWaveFixture {
                     "merge_commit": null,
                     "abandoned_at": null
                   }
-                ],
-                "active_pr": "pr_33333333333333333333333333333333"
               },
               {
                 "task": {
@@ -416,7 +413,7 @@ enum MockWaveFixture {
                   "name": "Classify publish failures",
                   "description": "",
                   "rank": 2,
-                  "completed": false, "state": "unstarted", "completed_at": null,
+                  "completed": false, "state": "unstarted", "completed_at": null, "due_date": null, "follow_up_sources": [],
                   "assignee": null
                 },
                 "reference": {
@@ -424,7 +421,7 @@ enum MockWaveFixture {
                   "workspace": null
                 },
                 "runtime": null,
-                "workflow_name":"feature","latest_flow_process":null,"execution":null,"run_control":{"unavailable":null},
+                "workflow_name":"feature","latest_flow_process":null,"execution":null,"run_control":{"unavailable":null}, "follow_through": {"intents":[],"links":[],"reason":null,"needs_conversion":false,"scope_notes":[]},
                 "directive": null,
                 "next_move": {
                   "owner": "wave",
@@ -449,8 +446,7 @@ enum MockWaveFixture {
                   "recommended": null,
                   "reason": "Task is ready to start"
                 },
-                "prs": [],
-                "active_pr": null
+                "pr": null
               }
             ],
             "truncated": false

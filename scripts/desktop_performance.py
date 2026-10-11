@@ -713,8 +713,8 @@ def _seed_native_task(home: Path, checkout: Path, repo: Path, session: str) -> t
         )
         db.execute(
             """INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,created_at,
-            issue_title,issue_description,pm_snapshot_synced_at,pm_writeback_json,worktree,workspace_slug,updated_at)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+            issue_title,issue_description,pm_snapshot_synced_at,worktree,workspace_slug,updated_at)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 task,
                 project,
@@ -724,7 +724,6 @@ def _seed_native_task(home: Path, checkout: Path, repo: Path, session: str) -> t
                 item["name"],
                 item["description"],
                 now,
-                '{"state":"current"}',
                 str(checkout),
                 "desktop-performance",
                 now,

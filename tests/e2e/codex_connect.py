@@ -2,7 +2,7 @@
 # requires-python = ">=3.10"
 # dependencies = ["websockets>=15,<16"]
 # ///
-"""Exercise a real Codex engine with credential-free local Responses and private Machines."""
+"""Exercise a real Codex app-server with credential-free local Responses and private Machines."""
 
 import argparse
 import base64
@@ -31,6 +31,15 @@ ANSWER_CONTRACT = "Return the final answer as the declared JSON value"
 
 def _database(env: dict[str, str]) -> str:
     return str(Path(env["LF_HOME"]) / "loopflow.db")
+
+
+def _agent_process(database: sqlite3.Connection, session: str, columns: str) -> tuple:
+    """Read the Session's current AgentProcess (p) beside the Session (s)."""
+    return database.execute(
+        f"SELECT {columns} FROM agent_sessions s "
+        "LEFT JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?",
+        (session,),
+    ).fetchone()
 
 
 class Responses(ThreadingHTTPServer):
@@ -102,7 +111,7 @@ class Handler(BaseHTTPRequestHandler):
             }
         else:
             text = "Fixture complete."
-            # A Flow's driver writes the answer contract into the message.
+            # A Flow process writes the answer contract into the message.
             if ANSWER_CONTRACT in json.dumps(request["input"]):
                 text = json.dumps(
                     self.server.decision_outputs.pop(0)
@@ -269,8 +278,8 @@ enabled = false
                 binary = root / "bin" / "lf"
                 binary.parent.mkdir()
                 shutil.copy2(args.lf, binary)
-                engines = root / "engines"
-                engines.mkdir()
+                agent_processes = root / "agent-processes"
+                agent_processes.mkdir()
                 shim = binary.parent / "codex"
                 shim.write_text(
                     f"#!{sys.executable}\nimport runpy\n"
@@ -282,7 +291,7 @@ enabled = false
                     LF_BIN=str(binary),
                     PATH=f"{binary.parent}:{args.codex.parent}:{env['PATH']}",
                     LF_PROBE_CODEX=str(args.codex),
-                    LF_PROBE_ENGINES=str(engines),
+                    LF_PROBE_AGENT_PROCESSES=str(agent_processes),
                 )
                 results["binary_sha256"] = hashlib.sha256(binary.read_bytes()).hexdigest()
                 server.command = (
@@ -299,11 +308,11 @@ enabled = false
                         )
                         return
                     if args.public_connect:
-                        results["public_connect"] = _live_driver_contract(
-                            binary, work, env, server, shared_engine=True
+                        results["public_connect"] = _live_attachment_contract(
+                            binary, work, env, server, shared_agent_process=True
                         )
-                        results["owner_exit"] = _live_driver_contract(
-                            binary, work, env, server, shared_engine=False
+                        results["owner_exit"] = _live_attachment_contract(
+                            binary, work, env, server, shared_agent_process=False
                         )
                         return
                     if args.flow_decision_retry:
@@ -318,11 +327,11 @@ enabled = false
                         return
                     parser.error("--launch requires a Flow proof mode")
                 finally:
-                    _stop_fixture_engines(engines)
+                    _stop_fixture_agent_processes(agent_processes)
                 return
-            endpoint = root / "engine.sock"
-            with (args.output / "engine.log").open("w") as log:
-                engine = subprocess.Popen(
+            endpoint = root / "agent.sock"
+            with (args.output / "agent.log").open("w") as log:
+                agent_process = subprocess.Popen(
                     [str(args.codex), "app-server", "--listen", f"unix://{endpoint}"],
                     cwd=work,
                     env=env,
@@ -335,7 +344,7 @@ enabled = false
                     deadline = time.monotonic() + 10
                     while (
                         not endpoint.exists()
-                        and engine.poll() is None
+                        and agent_process.poll() is None
                         and time.monotonic() < deadline
                     ):
                         time.sleep(0.05)
@@ -367,11 +376,11 @@ enabled = false
                         results.update(
                             _gated(args.control, endpoint, first, thread, params, server, clients)
                         )
-                        results["engine_alive"] = engine.poll() is None
+                        results["agent_process_alive"] = agent_process.poll() is None
                         return
                     _boundary(args.control, "before", "handoff")
                     active_turn = first.start_turn(thread, "Run the held fixture command.")
-                    assert server.held.wait(10), "engine did not request held response"
+                    assert server.held.wait(10), "provider did not request held response"
                     second = Client(endpoint)
                     clients.append(second)
                     resumed = second.call("thread/resume", {"threadId": thread})
@@ -383,18 +392,18 @@ enabled = false
                     second.wait_turn(second.start_turn(thread))
                     results["replaced_provider_command_completed"] = True
                     results["active_turn_survived_disconnect"] = active_turn
-                    results.update(thread=thread, engine_alive=engine.poll() is None)
+                    results.update(thread=thread, agent_process_alive=agent_process.poll() is None)
                     return
                 finally:
                     for client in clients:
                         client.close()
-                    if engine.poll() is None:
-                        os.killpg(engine.pid, signal.SIGTERM)
+                    if agent_process.poll() is None:
+                        os.killpg(agent_process.pid, signal.SIGTERM)
                         try:
-                            engine.wait(timeout=5)
+                            agent_process.wait(timeout=5)
                         except subprocess.TimeoutExpired:
-                            os.killpg(engine.pid, signal.SIGKILL)
-                            engine.wait(timeout=5)
+                            os.killpg(agent_process.pid, signal.SIGKILL)
+                            agent_process.wait(timeout=5)
     finally:
         server.release.set()
         server.shutdown()
@@ -427,11 +436,13 @@ def _provider_entry() -> None:
     if "app-server" in sys.argv:
         pid = os.getpid()
         stamp = subprocess.check_output(["ps", "-p", str(pid), "-o", "lstart="], text=True).strip()
-        (Path(os.environ["LF_PROBE_ENGINES"]) / f"{pid}.json").write_text(json.dumps([pid, stamp]))
+        (Path(os.environ["LF_PROBE_AGENT_PROCESSES"]) / f"{pid}.json").write_text(
+            json.dumps([pid, stamp])
+        )
         os.execv(os.environ["LF_PROBE_CODEX"], [os.environ["LF_PROBE_CODEX"], *sys.argv[1:]])
     if "--remote" not in sys.argv:
         if "resume" in sys.argv and os.environ.get("LF_PROBE_CLIENT"):
-            raise RuntimeError("public connect bypassed the retained engine relay")
+            raise RuntimeError("public connect bypassed the retained provider relay")
         os.execv(os.environ["LF_PROBE_CODEX"], [os.environ["LF_PROBE_CODEX"], *sys.argv[1:]])
     # A controlled native-protocol client exercises public lf connect. This is
     # deliberately not evidence of the rendered Codex TUI or Desktop.
@@ -462,14 +473,14 @@ def _provider_entry() -> None:
         client.close()
 
 
-def _stop_fixture_engines(directory: Path) -> None:
+def _stop_fixture_agent_processes(directory: Path) -> None:
     for record in directory.glob("*.json"):
         pid, stamp = json.loads(record.read_text())
         observed = subprocess.run(
             ["ps", "-p", str(pid), "-o", "lstart="], capture_output=True, text=True
         )
         if observed.returncode == 0 and observed.stdout.strip() == stamp:
-            assert os.getpgid(pid) == pid, "fixture engine must own its process group"
+            assert os.getpgid(pid) == pid, "fixture agent process must own its process group"
             os.killpg(pid, signal.SIGTERM)
             deadline = time.monotonic() + 5
             while time.monotonic() < deadline:
@@ -488,7 +499,7 @@ def _stop_fixture_engines(directory: Path) -> None:
             else:
                 assert os.getpgid(pid) == pid
                 os.killpg(pid, signal.SIGKILL)
-                raise AssertionError(f"fixture engine {pid} required force termination")
+                raise AssertionError(f"fixture agent process {pid} required force termination")
 
 
 def _public_connection_contract(
@@ -498,7 +509,7 @@ def _public_connection_contract(
     server: Responses,
     results: dict,
     headless: subprocess.Popen,
-    shared_engine: bool,
+    shared_agent_process: bool,
 ) -> None:
     session = results["session_id"]
     processes = []
@@ -547,20 +558,18 @@ def _public_connection_contract(
 
     try:
         with sqlite3.connect(_database(env)) as database:
-            endpoint, thread, generation = database.execute(
-                "SELECT provider_endpoint,provider_thread,provider_generation "
-                "FROM agent_sessions WHERE id=?",
-                (session,),
-            ).fetchone()
-        engine = Client(Path(endpoint))
-        inspectors.append(engine)
-        engine.call("thread/resume", {"threadId": thread})
+            endpoint, thread, agent_process = _agent_process(
+                database, session, "p.endpoint,s.provider_thread,p.id"
+            )
+        provider = Client(Path(endpoint))
+        inspectors.append(provider)
+        provider.call("thread/resume", {"threadId": thread})
         sibling = None
-        if shared_engine:
-            sibling = engine.call("thread/start", {"cwd": str(work), "approvalPolicy": "never"})[
+        if shared_agent_process:
+            sibling = provider.call("thread/start", {"cwd": str(work), "approvalPolicy": "never"})[
                 "thread"
             ]["id"]
-            engine.start_turn(sibling, "held sibling")
+            provider.start_turn(sibling, "held sibling")
         assert server.held.wait(10)
         for label in ["first", "second"]:
             _connect(label)
@@ -578,13 +587,15 @@ def _public_connection_contract(
         with sqlite3.connect(_database(env)) as database:
             outcome = database.execute(
                 "SELECT outcome FROM processes "
-                "WHERE lfid=(SELECT provider_process_lfid FROM agent_sessions WHERE id=?)",
+                "WHERE id=(SELECT p.parent_lf_process_id FROM agent_sessions s "
+                "JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?)",
                 (session,),
             ).fetchone()[0]
         assert outcome == "interrupted", outcome
-        results["old_headless_driver"] = dict(exit_code=130, outcome=outcome)
+        results["old_headless_attachment"] = dict(exit_code=130, outcome=outcome)
         assert (
-            engine.call("thread/read", {"threadId": thread})["thread"]["status"]["type"] == "active"
+            provider.call("thread/read", {"threadId": thread})["thread"]["status"]["type"]
+            == "active"
         )
         call(0, 1, "turn/interrupt", {"threadId": thread, "turnId": active}, rejected=True)
         call(
@@ -606,21 +617,22 @@ def _public_connection_contract(
             rejected=True,
         )
         assert (
-            engine.call("thread/read", {"threadId": thread})["thread"]["status"]["type"] == "active"
+            provider.call("thread/read", {"threadId": thread})["thread"]["status"]["type"]
+            == "active"
         )
         if sibling:
             assert (
-                engine.call("thread/read", {"threadId": sibling})["thread"]["status"]["type"]
+                provider.call("thread/read", {"threadId": sibling})["thread"]["status"]["type"]
                 == "active"
             )
-        # Explicit client replacement must use the same live-engine path as
+        # Explicit client replacement must use the same live-provider path as
         # ordinary connect, with the current turn and shared sibling untouched.
         with sqlite3.connect(_database(env)) as database:
-            before_prepare = database.execute(
-                "SELECT driver_process_lfid,driver_generation,provider_endpoint,provider_thread,"
-                "provider_generation FROM agent_sessions WHERE id=?",
-                (session,),
-            ).fetchone()
+            before_prepare = _agent_process(
+                database,
+                session,
+                "p.attached_lf_process_id,p.attachment_token,p.endpoint,s.provider_thread,p.id",
+            )
         prepared = _command(
             [str(binary), "session", "connect", session, "--replace", "--json"],
             work,
@@ -631,52 +643,51 @@ def _public_connection_contract(
         assert "--replace" in json.loads(prepared.stdout)["open_argv"]
         assert all(previous.poll() is None for previous in processes)
         with sqlite3.connect(_database(env)) as database:
-            after_prepare = database.execute(
-                "SELECT driver_process_lfid,driver_generation,provider_endpoint,provider_thread,"
-                "provider_generation FROM agent_sessions WHERE id=?",
-                (session,),
-            ).fetchone()
+            after_prepare = _agent_process(
+                database,
+                session,
+                "p.attached_lf_process_id,p.attachment_token,p.endpoint,s.provider_thread,p.id",
+            )
         assert after_prepare == before_prepare
         replaced.extend(processes)
         _connect("replacement", replace=True)
         for previous in replaced:
             previous.communicate(timeout=10)
         assert (
-            engine.call("thread/read", {"threadId": thread})["thread"]["status"]["type"] == "active"
+            provider.call("thread/read", {"threadId": thread})["thread"]["status"]["type"]
+            == "active"
         )
         if sibling:
             assert (
-                engine.call("thread/read", {"threadId": sibling})["thread"]["status"]["type"]
+                provider.call("thread/read", {"threadId": sibling})["thread"]["status"]["type"]
                 == "active"
             )
         with sqlite3.connect(_database(env)) as database:
-            retained_connection = database.execute(
-                "SELECT provider_endpoint,provider_thread,provider_generation "
-                "FROM agent_sessions WHERE id=?",
-                (session,),
-            ).fetchone()
-            driver, observed_generation, interactive = database.execute(
-                "SELECT driver_process_lfid,provider_generation,interactive "
-                "FROM agent_sessions WHERE id=?",
-                (session,),
-            ).fetchone()
-            before = {row[0] for row in database.execute("SELECT lfid FROM processes")}
-        assert observed_generation == generation and interactive == 1
-        assert retained_connection == (endpoint, thread, generation)
-        assert driver != before_prepare[0]
+            retained_connection = _agent_process(
+                database, session, "p.endpoint,s.provider_thread,p.id"
+            )
+            attached, observed_agent_process, interactive = _agent_process(
+                database, session, "p.attached_lf_process_id,p.id,s.interactive"
+            )
+            before = {row[0] for row in database.execute("SELECT id FROM processes")}
+        assert observed_agent_process == agent_process and interactive == 1
+        assert retained_connection == (endpoint, thread, agent_process)
+        assert attached != before_prepare[0]
         server.release.set()
-        engine.wait_turn(active)
+        provider.wait_turn(active)
         with sqlite3.connect(_database(env)) as database:
             after = database.execute(
-                "SELECT lfid,parent_process_lfid,caller_session_id,caller_provider_generation "
+                "SELECT id,parent_lf_process_id,caller_session_id,caller_agent_process_id "
                 "FROM processes WHERE via_agent=1"
             ).fetchall()
         children = [row for row in after if row[0] not in before]
         assert len(children) == 1, children
-        child_id, child_parent, child_session, child_generation = children[0]
-        assert (child_parent, child_session, child_generation) == (driver, session, generation), (
-            children
-        )
+        child_id, child_parent, child_session, child_agent_process = children[0]
+        assert (child_parent, child_session, child_agent_process) == (
+            attached,
+            session,
+            agent_process,
+        ), children
         call(2, 0, "thread/read", {"threadId": thread, "includeTurns": True})
         history_command = [str(binary), "session", "history", session, "--json", "--limit", "0"]
         recorded = _command(history_command, work, env, timeout=15)
@@ -695,25 +706,25 @@ def _public_connection_contract(
         call(2, 1, "thread/read", {"threadId": thread, "includeTurns": True})
         replay = _command(history_command, work, env, timeout=15)
         assert replay.returncode == 0 and json.loads(replay.stdout) == history, replay
-        if not shared_engine:
-            # Closing the current native UI releases the engine; obsolete UIs
-            # and the original headless driver's exit could not release it.
+        if not shared_agent_process:
+            # Closing the current native UI releases the provider process; obsolete UIs
+            # and the original headless attachment's exit could not release it.
             (controls[2] / "2.request").write_text(json.dumps({"method": "exit"}))
             _, error = processes[2].communicate(timeout=15)
             assert processes[2].returncode == 0, error.decode()
             with sqlite3.connect(_database(env)) as database:
-                closed = database.execute(
-                    "SELECT provider_endpoint,provider_thread,driver_process_lfid "
-                    "FROM agent_sessions WHERE id=?",
-                    (session,),
-                ).fetchone()
-            assert closed == (None, thread, None), closed
-            assert not Path(endpoint).exists() or not engine.reader.is_alive()
-            results["owner_exit_closed_engine"] = True
+                closed = _agent_process(
+                    database,
+                    session,
+                    "s.provider_thread,p.attached_lf_process_id,p.completed_at IS NOT NULL",
+                )
+            assert closed == (thread, None, 1), closed
+            assert not Path(endpoint).exists() or not provider.reader.is_alive()
+            results["owner_exit_closed_agent_process"] = True
         results["history"] = history
         results["public_connect"] = dict(
-            provider_generation=generation,
-            driver=driver,
+            agent_process=agent_process,
+            attached=attached,
             retained_client_rejected=True,
             active_turn_and_sibling_survived=True,
             replaced_clients_exited=True,
@@ -736,8 +747,8 @@ def _public_connection_contract(
                     child.wait(timeout=5)
 
 
-def _live_driver_contract(
-    binary: Path, work: Path, env: dict[str, str], server: Responses, shared_engine: bool
+def _live_attachment_contract(
+    binary: Path, work: Path, env: dict[str, str], server: Responses, shared_agent_process: bool
 ) -> dict:
     _init_repo(work, env)
     _command([str(binary), "session", "list", "--json"], work, env, timeout=15)
@@ -772,7 +783,13 @@ def _live_driver_contract(
         assert len(sessions) == 1, sessions
         result = {"session_id": sessions[0]}
         _public_connection_contract(
-            binary, work, env, server, result, headless=child, shared_engine=shared_engine
+            binary,
+            work,
+            env,
+            server,
+            result,
+            headless=child,
+            shared_agent_process=shared_agent_process,
         )
         return result
     finally:
@@ -851,17 +868,19 @@ def _shared_provider_home_contract(
         return any(home.glob(f"sessions/*/*/*/rollout-*-{conversation}.jsonl"))
 
     def converse(*flags: str, prompt: str = "say hi") -> tuple[str, list[dict]]:
-        """Run one headless conversation; its provider id and engine launches."""
+        """Run one headless conversation; its provider id and provider launches."""
         known, before = conversations(), len(launches())
         lf(*flags, "--batch", "--agent", "codex", ":", prompt)
         started = [id for id in conversations() if id not in known]
         assert len(started) == 1, started
-        engines = [launch for launch in launches()[before:] if "app-server" in launch["argv"]]
-        assert engines, "the conversation launched no provider engine"
-        return started[0], engines
+        agent_processes = [
+            launch for launch in launches()[before:] if "app-server" in launch["argv"]
+        ]
+        assert agent_processes, "the conversation launched no provider process"
+        return started[0], agent_processes
 
-    def shared(engines: list[dict]) -> bool:
-        return all(launch[name] is None for launch in engines for name in PROVIDER_ENV)
+    def shared(agent_processes: list[dict]) -> bool:
+        return all(launch[name] is None for launch in agent_processes for name in PROVIDER_ENV)
 
     def switches() -> int:
         return rows("SELECT COUNT(*) FROM provider_account_switches")[0][0]
@@ -896,10 +915,10 @@ def _shared_provider_home_contract(
     # A launch naming no account, or the active one, changes nothing; neither
     # hands the provider a home or a credential.
     credential, switched = (native / "auth.json").read_bytes(), switches()
-    ours, engines = converse()
-    assert shared(engines), engines
-    _, engines = converse("--account", "codex=first@example.com")
-    assert shared(engines), engines
+    ours, agent_processes = converse()
+    assert shared(agent_processes), agent_processes
+    _, agent_processes = converse("--account", "codex=first@example.com")
+    assert shared(agent_processes), agent_processes
     assert (native / "auth.json").read_bytes() == credential and switches() == switched
     assert rollout(native, ours), "the conversation is not in the provider's own home"
     results["shared_conversation"] = ours
@@ -921,7 +940,7 @@ def _shared_provider_home_contract(
             plain["CODEX_HOME"] = str(home)
         endpoint = root / f"plain-{len(list(root.glob('plain-*.log')))}.sock"
         with endpoint.with_suffix(".log").open("w") as log:
-            engine = subprocess.Popen(
+            agent_process = subprocess.Popen(
                 [str(codex), "app-server", "--listen", f"unix://{endpoint}"],
                 cwd=work,
                 env=plain,
@@ -934,7 +953,9 @@ def _shared_provider_home_contract(
             try:
                 deadline = time.monotonic() + 10
                 while (
-                    not endpoint.exists() and engine.poll() is None and time.monotonic() < deadline
+                    not endpoint.exists()
+                    and agent_process.poll() is None
+                    and time.monotonic() < deadline
                 ):
                     time.sleep(0.05)
                 client = Client(endpoint)
@@ -942,8 +963,8 @@ def _shared_provider_home_contract(
             finally:
                 if client:
                     client.close()
-                os.killpg(engine.pid, signal.SIGTERM)
-                engine.wait(timeout=10)
+                os.killpg(agent_process.pid, signal.SIGTERM)
+                agent_process.wait(timeout=10)
 
     def start(client: Client) -> str:
         thread = client.call(
@@ -959,7 +980,7 @@ def _shared_provider_home_contract(
         client.wait_turn(client.start_turn(thread))
         return thread
 
-    # Batch exit closes its engine: plain Codex can immediately list and
+    # Batch exit closes its provider process: plain Codex can immediately list and
     # resume the saved conversation without fixture cleanup.
     with plain_codex() as client:
         assert ours in json.dumps(client.call("thread/list", {}))
@@ -996,13 +1017,13 @@ def _shared_provider_home_contract(
     use("second")
     assert login(native) == "second@example.com"
     assert (profiles / "first" / "auth.json").read_text() == rotated
-    moved, engines = converse()
-    assert shared(engines) and rollout(native, moved)
+    moved, agent_processes = converse()
+    assert shared(agent_processes) and rollout(native, moved)
     use("first")
     assert (native / "auth.json").read_text() == rotated
     results["rotated_login_survived"] = True
 
-    # A switch leaves a running shared agent's engine alone, and Codex holds a
+    # A switch leaves a running shared agent's process alone, and Codex holds a
     # login for the life of the process. Codex may still fail the turn in
     # flight; the headless run resumes it.
     server.held.clear()
@@ -1030,7 +1051,7 @@ def _shared_provider_home_contract(
         def alive() -> set[int]:
             pids = {
                 json.loads(record.read_text())[0]
-                for record in Path(env["LF_PROBE_ENGINES"]).glob("*.json")
+                for record in Path(env["LF_PROBE_AGENT_PROCESSES"]).glob("*.json")
             }
             return {
                 pid
@@ -1038,13 +1059,13 @@ def _shared_provider_home_contract(
                 if subprocess.run(["ps", "-p", str(pid)], capture_output=True).returncode == 0
             }
 
-        engines = alive()
-        assert engines, "the running agent has no engine"
+        agent_processes = alive()
+        assert agent_processes, "the running agent has no provider process"
         live = [id for id in conversations() if id not in known]
         assert len(live) == 1 and session(live[0])["id"] == conversations()[live[0]], live
         use("second")
         assert login(native) == "second@example.com"
-        assert alive() == engines, "an engine did not survive the switch"
+        assert alive() == agent_processes, "a provider process did not survive the switch"
         server.release.set()
         stdout, stderr = running.communicate(timeout=60)
         log.seek(0)
@@ -1062,19 +1083,19 @@ def _shared_provider_home_contract(
     # there across a switch, whether isolation came from the flag or config.
     use("first")
     home = str(profiles / "second")
-    pinned, engines = converse("--account", "codex=second@example.com", "--isolate")
-    assert {launch["CODEX_HOME"] for launch in engines} == {home}, engines
+    pinned, agent_processes = converse("--account", "codex=second@example.com", "--isolate")
+    assert {launch["CODEX_HOME"] for launch in agent_processes} == {home}, agent_processes
     assert rollout(profiles / "second", pinned) and not rollout(native, pinned)
     assert login(native) == "first@example.com"
     config = work / ".lf" / "config.yaml"
     config.parent.mkdir(exist_ok=True)
     config.write_text("isolate: true\n")
-    standing, engines = converse("--account", "codex=second@example.com")
-    assert {launch["CODEX_HOME"] for launch in engines} == {home}, engines
+    standing, agent_processes = converse("--account", "codex=second@example.com")
+    assert {launch["CODEX_HOME"] for launch in agent_processes} == {home}, agent_processes
     assert rollout(profiles / "second", standing) and not rollout(native, standing)
     # `--shared` overrides the standing default for one launch.
-    override, engines = converse("--shared")
-    assert shared(engines) and rollout(native, override)
+    override, agent_processes = converse("--shared")
+    assert shared(agent_processes) and rollout(native, override)
     config.unlink()
 
     def isolated(conversation: str) -> bool:
@@ -1165,16 +1186,16 @@ def _flow_decision_retry_contract(
     )
     results.update(command_exit=command.returncode, command_stderr=command.stderr)
     with sqlite3.connect(_database(env)) as db:
-        # A Flow is its driver Process and the step Processes that driver recorded.
+        # A Flow is its Flow process and the step Processes that process recorded.
         results["flow"] = db.execute(
-            "SELECT d.outcome FROM flow_processes f JOIN processes d ON d.lfid=f.process_lfid"
+            "SELECT d.outcome FROM flow_processes f JOIN processes d ON d.id=f.lf_process_id"
         ).fetchone()
         results["history"] = db.execute(
             "SELECT seq,kind,provider_turn,payload FROM session_events ORDER BY seq"
         ).fetchall()
         results["steps"] = db.execute(
             "SELECT e.command FROM flow_process_steps s "
-            "JOIN processes e ON e.lfid=s.process_lfid ORDER BY s.seq"
+            "JOIN processes e ON e.id=s.lf_process_id ORDER BY s.seq"
         ).fetchall()
     outputs = [
         item["output"]
@@ -1231,7 +1252,9 @@ def _gated(
     active = fixture.start_turn(thread, "Run the held fixture command.")
     sibling_turn = fixture.start_turn(sibling, "Run the held sibling command.")
     assert server.held.wait(10)
-    (control / "engine.json").write_text(json.dumps({"endpoint": str(endpoint), "thread": thread}))
+    (control / "agent_process.json").write_text(
+        json.dumps({"endpoint": str(endpoint), "thread": thread})
+    )
     _boundary(control, "native", "sockets")
     old = Client(control / "old.sock")
     observer = Client(control / "observer.sock")
@@ -1247,7 +1270,9 @@ def _gated(
         {
             "threadId": thread,
             "expectedTurnId": active,
-            "input": [{"type": "text", "text": "Continue original driver.", "text_elements": []}],
+            "input": [
+                {"type": "text", "text": "Continue original attachment.", "text_elements": []}
+            ],
         },
     )
     _boundary(control, "attached", "transfer")
@@ -1297,7 +1322,7 @@ def _gated(
         "rejected_old_client_writes": [method for method, _ in writes],
         "passive_client_rejected": True,
         "old_client_still_receives_completion": True,
-        "current_driver_continued": True,
+        "current_attachment_continued": True,
         "active_turn": active,
         "sibling_turn": sibling_turn,
     }

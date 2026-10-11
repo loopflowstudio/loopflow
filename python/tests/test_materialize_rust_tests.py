@@ -11,6 +11,8 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/materialize_rust_tests.py"
 AMBIENT_WORK_AUTHORITY = (
+    "LF_AS",
+    "LF_BIN",
     "LF_RUN_ID",
     "LF_CAPTURE_KEY",
     "LF_AGENT_CALLER",

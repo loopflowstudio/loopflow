@@ -77,6 +77,25 @@ Run the affected controller progression and CLI behavior tests as well as graph
 checks; use authored fixture Flows when a test needs a fixed sequence independent
 of product defaults.
 
+Changes to interactive/headless selection also run `default_conversation_tests`
+and `context_launch_tests` alongside `flow_tests`: bare `lf`, explicit `-b`, and a
+Flow invoking the `default` skill must preserve their distinct launch modes.
+Prompt fixtures read the harness's actual inputs, including context files and
+stdin, rather than assuming everything remains in argv.
+
+Context byte-budget fixtures must reach their boundary with short temporary
+paths too. Run `TMPDIR=/tmp cargo test -p loopflow --lib context_block` when
+changing them; macOS's longer default paths can hide an undersized fixture.
+
+The composed delivery fixture runs a real CLI/Flow against an isolated Home and
+simulated provider observations, local follow-up filing and independent completion,
+then checks its captured CLI and monitor population in Rust
+and Swift. It builds the CLI with Cargo so a unit-test binary cannot accidentally
+launch an installed version. Regenerate its wire capture with
+`LOOPFLOW_UPDATE_LIFECYCLE_FIXTURE=1 cargo test -p loopflow --lib merged_follow_up_completion_and_arrival`,
+then run `cargo test -p loopflow --test dto_fixtures composed_lifecycle` and
+`swift test --package-path swift --filter 'composedTaskLifecycle|composedLifecycleDelivery'`.
+
 Provider fixtures must read the launch's actual context channel. When a final
 sync adds fixtures that inspect a changed transport, run those focused tests
 before arming; the earlier gate did not cover the newly combined behavior.
@@ -103,6 +122,25 @@ boundary. CI and release own the full matrix. Run `scripts/test.py --all` only
 to reproduce a matrix failure or when release guidance requires it.
 
 ## External network isolation
+
+`tests/e2e/native_titles.py` exercises real Claude/Codex TUIs against a local fake
+API with fresh provider and Loopflow homes. Pass `--lf`, `--native`, `--provider`
+and `--output`; prepare its inline dependencies with `uv run ... --help`, then run
+it through `scripts/test_network.py` with `uv run --offline`. It checks first-request
+OSC titles and native manual rename. `--headless` checks new `claude -p` and
+`codex exec` conversations, saving naming readback beside stdout/stderr. Claude
+saves the name; Codex currently records the missing embedded naming endpoint.
+Old conversations and resume repair are out of scope. No installed
+accounts, host shims, or cmux windows participate.
+The probe uses native terminal-title defaults and checks the latest OSC title,
+so an earlier correct title cannot hide a later overwrite. The TUI probe does not
+cover embedded Codex or the configured shim; `--headless` records `codex exec` separately.
+
+`uv run python scripts/test_task_installation.py --native-titles` builds a
+release-shaped candidate only inside Docker and exercises published promotion
+under a disposable OS account. It checks preview, existing settings and symlinks,
+failed hook installation, same-candidate retry and repeated installation. CI's
+installation job runs this proof; it never touches the host installation.
 
 ```bash
 uv sync
@@ -138,6 +176,13 @@ to the CI jobs below, and runs just those—fast suites first. `--reuse-passing`
 uses a prior pass only when tracked and untracked file content, the worktree,
 and the selected command plan are identical. Full and optional hosted runs never
 reuse evidence.
+
+Do not run source-tree Cargo builds alongside the materialized Rust phase.
+The materializer reuses this checkout's `target/`; rebuilding `target/debug/lf`
+from source mid-suite replaces the candidate with a different migration frontier.
+Wait for gate to finish, then run focused repairs serially (or use a separate
+`CARGO_TARGET_DIR`). Version/schema mismatches after such overlap are invalid
+verification evidence, not permission to alter a fixture or installed database.
 
 Slow suites (`loopflow`, `e2e`) stay off in changed-mode even when
 their paths change—the run prints why and how to force them:
@@ -457,27 +502,17 @@ cargo +stable fmt --all -- --check
 cargo +stable clippy --all-targets -- -D warnings
 ```
 
-The installation harness pulls `rust:bookworm` on each run to follow stable
-alongside CI's Rust jobs, and logs its compiler version. After adopting a newer
+The installation harness pulls `public.ecr.aws/docker/library/rust:trixie`
+from Docker's ECR Public mirror to avoid Docker Hub's shared-runner pull limits.
+It follows stable alongside CI's Rust jobs and logs its compiler version. Trixie also supplies
+Git with `merge-tree --merge-base`; Bookworm's Git 2.39 cannot run stacked replay
+checks. After adopting a newer
 standard-library API, run `uv run python scripts/test_task_installation.py` too;
 a local lint pass does not prove that the disposable installation builds.
 
 CI installs stable on each run. An older local compiler can miss new Clippy
 lints and standard-library deprecations. Put rustup's proxies first on `PATH`
 so Cargo subcommands cannot select an older Homebrew Clippy or rustfmt.
-
-Task cancellation uses a real child CLI with a disposable scorecard effect.
-Build the sibling CLI before running this library-only proof:
-
-```bash
-cargo build -p loopflow --bin lf
-cargo test -p loopflow --lib task_stop_waits_for_selected_step_after_driver_death
-```
-
-The proof covers retained and released driver claims, child exit, interrupted
-Process history, and an unresolved mechanical outcome. Linux also holds interrupt
-cleanup after the effect exits to exercise settlement ordering. It uses no
-configured provider or installed Machine.
 
 For shared repository discovery or CLI dispatch changes, include the PM and
 Wave consumers in the focused check:
@@ -503,7 +538,7 @@ directory without Git metadata; Work operations still enforce repository ownersh
 cargo nextest run -p loopflow --test status_tests --test wave_repository_ownership --no-fail-fast
 ```
 
-Task decision feedback has a focused store-and-driver check:
+Task decision feedback has a focused store-and-Flow-runner check:
 
 ```bash
 cargo test -p loopflow --lib task_decision_live_unblock_returns_feedback_without_navigation -- --test-threads=1
@@ -560,10 +595,18 @@ Loopflow installed, a shared launch gets no account home or credential
 variable, and an isolated launch stays in its account's home. On macOS it
 writes and removes one Keychain item scoped to its temporary config directory.
 The fixture copies the candidate, uses private Machines and stops only its identified
-engine children. Native execution uses synthetic Responses, not configured
+provider process children. Native execution uses synthetic Responses, not configured
 accounts or installed data. Ordinary retry, usage, binding and review behavior
 belong in `session_lifecycle_tests`; Chapter convergence belongs in
 `ops::chapter::tests`, including interrupted rotation and second-Machine sync.
+
+`planning_reconnect_tests` runs the public work-watch and Flow reconnect fixtures
+on Linux, using disposable TLS trust and synthetic Linear state. They exercise
+repository/Wave scope without Task selection, selection changes, stdin close/reopen,
+lost replies and independent propagation during rejected field delivery. The
+portable `work_watch` offline-completion test requires a foreground delivery error
+with no Task selected; local frame propagation alone cannot establish sync lifetime.
+Run these through the same external-network denial wrapper as other CLI fixtures.
 
 Task-planning fixtures also need an explicit `LF_BIN`: Task status validates
 launch authority before reconciling a user merge. Pin the test executable when
@@ -572,6 +615,19 @@ no child is launched; an installed `lf` on PATH can hide this missing fixture.
 After Project ownership or uniqueness changes, run the Task-planning consumers
 against CI's materialized schema. Planning sync already creates the local Project;
 registered-Task fixtures must reuse it rather than insert a second owner.
+
+Planning-owner changes must cover context/catalog reads, Wave relocation, Task
+initialization, Workflow completion/reopening and PR delivery fixtures alongside
+the new planning APIs. Write Wave goal/memory fixtures directly in their checkout. Seed stored Workflow
+definitions explicitly; writing a Workflow file is not a planning mutation.
+An existing checkout fixture must settle initialization before testing delivery.
+Prompt fixtures nested in the source tree must fence Git discovery so the enclosing
+checkout cannot become their stored Wave owner. Verify them inside a Git checkout;
+a source archive alone does not exercise that boundary.
+Include the shared DTO fixtures and Desktop planning states in the affected gate.
+Repository-wide Linear fixtures must return comments only for their owning issue;
+exercise acquisition in a different order from Task creation. Process-sensitive
+cleanup fixtures must observe child readiness before inspecting live executables.
 
 ```bash
 uv run python scripts/materialize_rust_tests.py -- cargo nextest run -p loopflow --lib -E 'test(ops::pm::task_planning_tests::)' --no-fail-fast
@@ -605,6 +661,11 @@ cargo build -p loopflow --bin lf
 LOOPFLOW_TEST_LF="$PWD/target/debug/lf" uv run pytest python/tests/test_checkout_refresh.py
 ```
 
+Checkout pruning also reads OS-account installation authority. `LF_HOME` alone
+does not isolate that read: an unreleased CLI can reject the installed Home's
+older schema. Run these proofs in a disposable OS account or leave them to the
+Rust CI job; never migrate the installed Home to make a fixture pass.
+
 The background-push regression holds Git until the CLI exits, then verifies
 upstream tracking and a subsequent sync. Immediate local pushes can hide
 broken pipes that interrupt Git after the remote ref moves; background children
@@ -616,7 +677,7 @@ not cover the prompts that generate their input. Update obsolete assertions to
 match the intended contract instead of restoring retired commands in the prose.
 
 ```bash
-cargo test -p loopflow --lib engine::builtins::tests
+cargo test -p loopflow --lib builtins::tests
 ```
 
 When changing the builtin catalog or Flow composition, also exercise discovery.
@@ -629,18 +690,18 @@ cargo test -p loopflow --test cli_discovery list_preserves_kinds_overrides_sourc
 
 Catalog retirement also affects historical migration tests. Keep their persisted
 names and data-preservation assertions at the migration boundary; current catalog
-resolution belongs in engine tests. Include the legacy Flow repair check:
+resolution belongs in skill catalog tests. Include the legacy Flow repair check:
 
 ```bash
 cargo test -p loopflow --lib legacy_task_flow_repair
 ```
 
 Skill export tests use isolated homes and cover builtin/global definitions,
-personal agent directories and pruning. Repository `.lf/skills` are local
-execution overrides; they are not exported by `sync-skills`.
+personal agent directories and pruning. `sync-skills --repo` exports repository
+skills and Flow recipes into the checkout; default sync exports globally.
 
 ```bash
-cargo test -p loopflow --lib engine::skills::tests
+cargo test -p loopflow --lib skills::tests
 ```
 
 After editing embedded skills, directions, surfaces, or prompt assembly, run
@@ -649,6 +710,13 @@ reflects the intended prompt change, regenerate the snapshots, review their
 diff, and rerun the check before gate.
 Terminology-only replacements count as prompt changes; include the golden
 check in their focused verification even when no prompt assembly code changed.
+Skill/Flow naming changes also update architecture command examples: check both
+the prompt goldens and portable architecture HTML before arming, even when the
+focused discovery and export suites pass.
+
+```bash
+uv run --project website python scripts/render_architecture_html.py --check
+```
 
 ```bash
 cargo test -p loopflow --test golden_prompt
@@ -699,6 +767,8 @@ After adding, renaming or removing a public command owner or concept, run
 retained tables and subprocesses still need their actual owners in the map.
 For architecture/README documentation changes, run
 `cd website && uv run python dev.py test -k 'portable_architecture or readme_index_sync'`.
+Model renames also require this focused website check; generating matching HTML
+does not catch stale vocabulary in the website assertions.
 For Markdown changes under `docs/`, builtins or skills, and changes to README or
 AGENTS, also run `cargo test -p loopflow --test documented_commands`. Its command
 scanner covers prose and headings as well as fenced examples; a focused runtime
@@ -738,22 +808,26 @@ Prove explicit experimental Machine continuity with `global_commands` and
 without an explicit experiment forward to the installed CLI and main Machine.
 Never run candidate mutation checks against the main Machine.
 
-Run the real CLI resume regressions with isolated installation authority:
+Run the Task CLI proofs with isolated installation authority:
 
 ```bash
 uv run python scripts/test_task_installation.py
-# One changed managed operation proof:
-uv run python scripts/test_task_installation.py --test task_operation_starts_with_durable_history_after_claim_only_failure
+# One changed Task adoption proof:
+uv run python scripts/test_task_installation.py --test task_adopts_linear_checkout_and_preserves_flow_history
 ```
 
 Pass several names after `--test` to share one disposable build across related proofs.
+Every ordinary installation run first upgrades populated released planning and
+Task/PR fixtures through the combined drafts. Those checks retain zero/one/multiple
+historical PRs, pending completion delivery, a running Process and its Workflow,
+and an associated Session; they never open an installed Home.
 The default container tracks stable Rust, matching the other CI Rust jobs, and
 logs its compiler version. When adopting a newer standard-library API or Clippy
 fix, verify the installation harness uses the same toolchain policy; a host lint
 pass does not verify the container build. Use `--image` to reproduce an older
 toolchain explicitly.
 
-CLI owner-tree changes must include `cargo test -p loopflow --lib engine::flow_graph::tests`
+CLI owner-tree changes must include `cargo test -p loopflow --lib flow::graph::tests`
 to verify builtin operation labels, plus the affected proofs above. The regular
 Rust suite skips those installation proofs; a skipped case is not verification.
 Task status reads a Flow from recorded command outcomes and OS liveness. Run
@@ -763,8 +837,9 @@ Managed Task fixtures must bind the checkout's Team and Initiative before
 creating Task worktrees; reuse `support::bind_task_planning` for the shared fixture.
 
 When changing Task planning lookup or provider response shapes, run the affected
-installation proofs and the Linux `task_deletion_tests` binary test. macOS skips
-the deletion test, and the regular Rust suite skips installation proofs. Keep
+installation proofs and the paired `local_planning` deletion proof. The portable `task_abandonment`
+fixture retains unresolved Sessions, Processes, published PRs and files in both
+connection modes. The regular Rust suite skips installation proofs. Keep
 simulated provider revisions and checkout Team/Initiative bindings consistent
 with the planning records those workflows resolve. Exercise unfinished work
 before confirmed removal; do not resurrect deleted Tasks by resetting only
@@ -786,7 +861,7 @@ Task adoption uses an explicit experimental Machine. No host Machine, credential
 is mounted. Default executable routing uses two real source CLI processes and
 a simulated installed executable. It runs in this disposable account because
 `HOME` and `LF_HOME` cannot isolate installation records. The ordinary
-`pr_tests` suite covers Task continuation's auto-merge revocation and review
+`pr_tests` suite covers changed-head auto-merge revocation and review
 continuity in an explicit experimental Machine.
 
 The separate planning CLI proof (`cargo test -p loopflow --test planning_lookup_tests`) runs planning-only `task status` by identifier and UUID against
@@ -798,7 +873,7 @@ responses, absence, and provider failure. Neither is configured live-provider pr
 The mechanical Flow proof uses that disposable account without an installation
 selection. A claim followed by admission failure/release leaves Started absent;
 the real worker records operation history and Started together. It retains the
-captured Flow after the template disappears and records an ordinary child Process without creating an AgentSession.
+captured Flow after the template disappears and records an ordinary child Process without creating an LfSession.
 The default-Machine proof sends two nested source CLI processes through a simulated
 installed executable and checks that both select the main Machine despite stale
 control pins. The explicit-Machine Flow proof runs locally in `one_machine_tests`. The declaration proof starts Task Y
@@ -840,19 +915,18 @@ tests/e2e/test_full_cycle.sh
 tests/e2e/test_sync_safety.sh
 ```
 
-Exercise Task deletion through the real CLI on Linux:
+Exercise repository planning reconnect through real work-watch and Flow commands on Linux:
 
 ```bash
-cargo test -p loopflow --test task_deletion_tests
+cargo test -p loopflow --test planning_reconnect_tests
 ```
 
-Requires `uv`, Python and OpenSSL. The test creates an isolated Machine/store and a
+Requires `uv`, Python and OpenSSL. The fixture uses an isolated Machine/store and
 local HTTPS proxy with synthetic Linear state and credentials. Its CA is trusted
 only by CLI children through `SSL_CERT_FILE`; macOS platform TLS ignores that
-setting, so this test is Linux-only. It verifies native removal, local retirement,
-completed history, retained PRs/files, retries, planning sync, diagnostics and
-rejection of the removed `pm`/`work` groups. No installation or live provider is
-used.
+setting, so reconnect is Linux-only. `task_abandonment` and `local_planning` cover
+portable local decisions and deletion, retry identity and retained execution in
+both connection modes without provider access. No installation or live provider is used.
 
 Exercise Linear expiry and rejection through an explicit experimental CLI:
 
@@ -895,6 +969,34 @@ It exercises the real CLI, verified shell installer, store creation, repeat
 installation, missing-CLI repair, checkout preservation, and recovery after
 a forced activation failure. Transport is simulated; this does not replace a
 public release-channel demo. Discard the container afterward.
+
+### Codex daemon account switching
+
+```bash
+cargo test -p loopflow --lib lf::commands::account::daemon_tests
+cargo test -p loopflow --lib expired_grace_restarts_even_when_activity_becomes_unreadable -- --ignored
+```
+
+Run the second check explicitly at gate when changing daemon login reconciliation.
+It takes the real five-minute grace period, bounded by a 315-second test timeout.
+Both checks use disposable Unix sockets and a stand-in restart executable, without
+credentials or a live provider. They cover busy-to-idle, unreadable probes, expiry,
+and adoption after restart; configured Codex behavior remains demo/review evidence.
+
+### Native Codex terminal capture
+
+```bash
+uv run python scripts/test_network.py uv run python tests/e2e/codex_terminal.py \
+  --lf target/debug/lf --codex /path/to/native/codex
+```
+
+Use a native Codex binary supporting profile files. This headless PTY fixture
+uses disposable provider and Loopflow homes, a loopback model endpoint, and an
+independently authored wrapper supplying trust plus SessionStart/Stop hooks.
+It verifies completed turns, exact native capture, both launch hooks, reconnect,
+unchanged configuration and temporary-profile cleanup. It uses no account or
+login. Native 0.160.1 resume emits neither fresh hook in this fixture, even
+without lf. This proves launch composition, not cmux's actual tab tracking.
 
 ### Released capture-history preservation
 
@@ -960,7 +1062,7 @@ Machine or prove configured-provider resumption.
 
 When changing how a Flow step is described or read back, include the step
 argument and Process inventory tests and the public Session lifecycle proofs. A
-Flow is its driver Process and step Processes; assert on those Processes and on the Session
+Flow is its Flow process and step Processes; assert on those Processes and on the Session
 turn a step Process captured.
 
 ```bash
@@ -978,11 +1080,17 @@ cargo nextest run -p loopflow --test task_github_cache_tests --no-fail-fast
 ```
 
 When changing Linear response shapes, run the client tests and PM-operation
-consumers together. Team migration also reads issue comments; its fixtures must
-include the requested pagination metadata.
+consumers together, including `planning_reconnect_tests` on Linux (a disposable
+container works on macOS). That suite is compiled out on macOS, so a local Rust
+pass there does not cover its HTTPS fixtures. Keep nullable requested fields,
+including `dueDate`, present in fixture responses. Team migration also reads issue
+comments; its fixtures must include the requested pagination metadata.
+Run the same Linux suite when changing Linear mutation inputs or acknowledgements:
+the reconnect peer must accept partial Initiative updates and return `success`.
 
 ```bash
 cargo nextest run -p loopflow --lib -E 'test(pm::linear::) | test(ops::pm::) | test(ops::linear_observe::)' --no-fail-fast
+cargo nextest run -p loopflow --test planning_reconnect_tests --no-fail-fast
 ```
 
 ### Test without an installed Loopflow
@@ -993,7 +1101,7 @@ fixture, restore it afterward, and serialize environment changes with
 in conversation tests; keep Session spawning mocked. Listing waiting Sessions
 also resolves the executable for their open command, even with spawning mocked.
 Enter `journal::with_runtime` after selecting the fixture Machine so its Process and
-the Session driver references share the same database. Simulated finite-provider
+the Session attachment references share the same database. Simulated finite-provider
 harnesses must record their owned child exit; an absent endpoint is not exit
 evidence.
 
@@ -1030,12 +1138,18 @@ guide must retain the current invocation, laptop account selection, and target-r
 
 For gate runs launched inside managed execution, clear inherited `LF_*` authority and
 pin `LF_BIN` to the checkout's compiled `target/debug/lf` before invoking the test
-runner. The materialization wrapper clears only its listed variables; it does not
+runner. On macOS, also set `TMPDIR=/private/tmp`: Wave/Task fixtures that
+register raw `/var/folders` paths otherwise disagree with canonical repository
+readers. This affects cron lookup, authored-goal context and exact-Task roadmap
+checks, not just orphan Session proofs. The materialization wrapper clears only its listed variables; it does not
 clear every inherited pin. The provider harness prepends the selected CLI's parent
 to PATH, so an inherited CLI directory containing `claude` can outrank a fixture's
 fake provider and launch the real one. A temporary `LF_HOME` alone does not prevent
 this. Keep the failed evidence if this occurs, stop the test group, and verify the
 fixture under the corrected executable context before completing the suite.
+`test_network.py` clears `LF_*` before exec; provider fixtures must pin `LF_BIN`
+inside that boundary. Integration `EnvGuard` uses `CARGO_BIN_EXE_lf`, not the
+installed CLI directory, so its provider stand-ins remain first on PATH.
 
 Default-runtime selection reads the OS account's installation records. Use the
 installation harness for default-runtime proofs; never replace the machine's
@@ -1055,6 +1169,9 @@ Loopflow can hide the CI failure.
 Include direct provider-harness startup tests in this check: even an expected
 spawn failure first resolves the conversation's `lf`. Pin a fixture executable
 under the environment lock and restore the pin afterward.
+Attachment-rejection fixtures must also supply provider version probes and restrict
+PATH to their stand-ins: Claude checks `--version` before launching on first input.
+A locally installed provider must not make an otherwise incomplete fixture pass.
 
 Changes to terminal provider probes or spawning must run both `session_cli_tests`
 and `agent_startup_tests`. An executable that exits with an error still started
@@ -1084,8 +1201,8 @@ must retain Wave placement before projecting accepted Projects.
 ### Shared identity fixtures
 
 When changing Session activity or Waiting, run `session_cli_tests` and
-`work_watch` together. Direct SQL fixtures must carry both driver and provider
-generations, matching the production activity writer. Rebuild both SwiftPM and
+`work_watch` together. Direct SQL fixtures must carry both the attachment
+token and the AgentProcess id, matching the production activity writer. Rebuild both SwiftPM and
 the Xcode test targets after shared model renames; Foundation types such as
 `Foundation.Process` need explicit qualification where names overlap.
 

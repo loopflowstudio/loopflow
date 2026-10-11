@@ -219,7 +219,7 @@ private actor HistorySource {
         case ("session", "list"): return #"{"entries":\#(session),"next":null}"#
         case ("flow", "list"): return "[]"
         case ("task", "comment"):
-            return #"{"identifier":"fixture","comments":[]}"#
+            return #"{"identifier":"fixture","comments":[],"pending_sync":[],"conflicts":{},"refresh_error":null}"#
         case ("usage", "--days"):
             reads.append(args)
             let task = args[4]

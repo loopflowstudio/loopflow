@@ -148,7 +148,7 @@ before anything is cut. Same script, both paths.
 ## What a database can be told
 
 The build generates the canonical schema reference from the registered SQL using
-the bundled SQLite engine, then embeds its schema values in the binary. Canonical
+the bundled SQLite library, then embeds its schema values in the binary. Canonical
 and development validation share the existing per-process cache keyed by exact
 ordered migration SQL; the generated reference seeds its canonical entry. Drafts
 and historical prefixes construct their reference on first use. Each validation still reads the

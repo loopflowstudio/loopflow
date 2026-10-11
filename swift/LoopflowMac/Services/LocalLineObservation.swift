@@ -8,7 +8,7 @@ import Loopflow
 final class LocalLineObservation<Frame: Sendable>: @unchecked Sendable {
     private let queue: DispatchQueue
     private let name: String
-    private let process: Foundation.Process
+    private let process: Process
     private let input = Pipe()
     private let output = Pipe()
     private let diagnostics = Pipe()
@@ -42,7 +42,7 @@ final class LocalLineObservation<Frame: Sendable>: @unchecked Sendable {
     /// `name` labels failures ("Workspace"). Every frame is kept.
     static func start(
         name: String,
-        process: Foundation.Process,
+        process: Process,
         frameLimit: Int,
         configurationChanged: @escaping @Sendable () throws -> Bool,
         decode: @escaping (Data) throws -> Frame
@@ -69,7 +69,7 @@ final class LocalLineObservation<Frame: Sendable>: @unchecked Sendable {
 
     private init(
         _ name: String,
-        _ process: Foundation.Process,
+        _ process: Process,
         _ frameLimit: Int,
         _ continuation: AsyncThrowingStream<Frame, any Error>.Continuation,
         _ configurationChanged: @escaping @Sendable () throws -> Bool,
@@ -255,7 +255,7 @@ final class LocalLineObservation<Frame: Sendable>: @unchecked Sendable {
 enum LocalWorkObservation {
     /// Every frame is kept: the reader already holds at most one per part.
     static func start(
-        process: Foundation.Process,
+        process: Process,
         configurationChanged: @escaping @Sendable () throws -> Bool
     ) throws -> WorkObservation {
         let reader = try LocalLineObservation<WorkFrame>.start(

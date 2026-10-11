@@ -5,6 +5,7 @@ use tokio::sync::mpsc;
 
 use crate::chat::types::{ConversationEvent, ConversationItem, FileEdit, Lifecycle, TurnUsage};
 use crate::harness::lf_tag::LfTagParser;
+use crate::id::AgentSessionId;
 use crate::provider_account::RateLimitSignal;
 
 /// Reader-local state for tracking in-flight content blocks.
@@ -18,7 +19,7 @@ pub(super) struct ReaderState {
     tag_parser: LfTagParser,
     /// Vendor session id from the turn's `system` event; the harness drains
     /// it for `--resume` and persistence.
-    provider_session_id: Option<String>,
+    agent_session: Option<AgentSessionId>,
     /// Largest effective input observed for each model in this turn. Assistant
     /// events repeat usage snapshots, so retaining maxima also deduplicates them.
     peak_input_by_model: HashMap<String, u64>,
@@ -101,8 +102,8 @@ impl ReaderState {
             .collect()
     }
 
-    pub(super) fn take_provider_session_id(&mut self) -> Option<String> {
-        self.provider_session_id.take()
+    pub(super) fn take_agent_session(&mut self) -> Option<AgentSessionId> {
+        self.agent_session.take()
     }
 
     fn observe_assistant_pressure(&mut self, value: &Value) {
@@ -317,7 +318,7 @@ pub(super) fn process_line(
                 .or_else(|| value.get("session_id"))
                 .and_then(Value::as_str)
             {
-                state.provider_session_id = Some(session_id.to_string());
+                state.agent_session = Some(session_id.into());
             }
         }
 
@@ -797,11 +798,8 @@ mod tests {
         let result = process_line(line, "turn_1", &tx, &mut state);
         assert!(result.is_none());
         assert!(rx.is_empty(), "system event should not emit events");
-        assert_eq!(
-            state.take_provider_session_id().as_deref(),
-            Some("sess_abc123")
-        );
-        assert!(state.take_provider_session_id().is_none(), "take drains");
+        assert_eq!(state.take_agent_session(), Some("sess_abc123".into()));
+        assert!(state.take_agent_session().is_none(), "take drains");
     }
 
     #[test]
@@ -813,10 +811,7 @@ mod tests {
         let result = process_line(line, "turn_1", &tx, &mut state);
         assert!(result.is_none());
         assert!(rx.is_empty(), "system event should not emit events");
-        assert_eq!(
-            state.take_provider_session_id().as_deref(),
-            Some("sess_wrapped")
-        );
+        assert_eq!(state.take_agent_session(), Some("sess_wrapped".into()));
     }
 
     #[test]

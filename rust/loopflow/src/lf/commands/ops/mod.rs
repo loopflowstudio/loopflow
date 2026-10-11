@@ -1,22 +1,19 @@
-use crate::engine::agent::{run_agent, AgentCapabilities, ProcessConfig};
-use crate::engine::config::{load_config_or_default, Config};
-use crate::engine::git::{current_branch, get_default_branch};
-use crate::engine::identity::WorktreeName;
-use crate::engine::naming::git_user;
-use crate::engine::target::{resolve_definition, Target};
-use crate::engine::worktrees::{
+use crate::agent::{run_agent, AgentCapabilities, ProcessConfig};
+use crate::config::{load_config_or_default, Config};
+use crate::definition::{resolve_definition, Target};
+use crate::flow::load_skill;
+use crate::git::worktree_name::WorktreeName;
+use crate::git::worktrees::{
     create_from_placement_plan, diff_shortstats, list_worktrees, list_worktrees_timed,
     main_repo_root, plan_placement, prune_worktrees, sibling_worktree_name,
     sibling_worktree_name_with_main, PlacementStrategy, PullRequestState, WorktreePrunePolicy,
     WorktreeSegment,
 };
-use crate::engine::{
-    load_skill, prepare_process_prompt, sync_skills, ContextSourceOverrides, ProcessPromptInput,
-    SkillSyncOptions, Surface,
-};
+use crate::git::{current_branch, get_default_branch};
 use crate::lf::commands::util::find_repo_root;
 use crate::lf::output::{column_width, Colors};
 use crate::lf::{CronCommand, PrCommand, ReleaseCommand, RepoCommand, WtCommand};
+use crate::naming::git_user;
 use crate::ops::OpsError;
 use crate::ops::{
     abandon_branch, abort_sync_after_authorization, abort_sync_for_resolution, arm,
@@ -28,6 +25,12 @@ use crate::ops::{
     CronSource, CronSpec, CronTargetKind, LandOptions, PrOptions, Progress, SyncOptions,
     SystemLaunchctl,
 };
+use crate::prompt::process::prepare_process_prompt;
+use crate::prompt::process::ContextSourceOverrides;
+use crate::prompt::process::ProcessPromptInput;
+use crate::prompt::Surface;
+use crate::skills::sync_skills;
+use crate::skills::SkillSyncOptions;
 use crate::store::RegistryUnavailable;
 use anyhow::{anyhow, Result};
 use std::collections::HashSet;
@@ -38,6 +41,13 @@ use std::time::Instant;
 
 pub fn run_pr(cmd: Option<&PrCommand>, cli_agent: Option<&str>) -> Result<()> {
     let progress = CliProgress;
+    let wait_and_fix = matches!(
+        cmd,
+        Some(PrCommand::Land {
+            wait_and_fix: true,
+            ..
+        })
+    );
     match cmd {
         None => pr_status(),
         Some(PrCommand::Reconcile) => {
@@ -60,8 +70,6 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_agent: Option<&str>) -> Result<()> {
         Some(PrCommand::Submit {
             strict,
             create_pr,
-            complete,
-            next,
             worktree,
             message,
             title,
@@ -71,8 +79,7 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_agent: Option<&str>) -> Result<()> {
                 strict: *strict,
                 local: false,
                 create_pr: *create_pr,
-                complete: *complete,
-                next_slug: next.clone(),
+                wait_and_fix: false,
                 worktree: worktree.clone(),
                 commit_message: message.clone(),
                 pr_title: title.clone(),
@@ -84,18 +91,15 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_agent: Option<&str>) -> Result<()> {
         Some(PrCommand::Arm {
             strict,
             local,
-            complete,
-            next,
             worktree,
             message,
             title,
             body,
         })
         | Some(PrCommand::Land {
+            wait_and_fix: _,
             strict,
             local,
-            complete,
-            next,
             worktree,
             message,
             title,
@@ -105,8 +109,7 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_agent: Option<&str>) -> Result<()> {
                 strict: *strict,
                 local: *local,
                 create_pr: true,
-                complete: *complete,
-                next_slug: next.clone(),
+                wait_and_fix,
                 worktree: worktree.clone(),
                 commit_message: message.clone(),
                 pr_title: title.clone(),
@@ -118,28 +121,14 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_agent: Option<&str>) -> Result<()> {
         Some(PrCommand::Abandon { force, branch }) => {
             abandon_current(branch.as_deref(), *force, &progress)
         }
-        Some(PrCommand::Next { slug }) => pr_next(slug.as_deref()),
     }
-}
-
-fn pr_next(slug: Option<&str>) -> Result<()> {
-    let repo_root = find_repo_root()?;
-    let pr = crate::ops::task::pr_next(&repo_root, slug)?;
-    println!(
-        "Rotated to PR {} on {} (base {}).",
-        pr.sequence,
-        pr.branch,
-        &pr.base_commit[..pr.base_commit.len().min(12)]
-    );
-    println!("Push your follow-up edits, then `lf pr open` when ready.");
-    Ok(())
 }
 
 pub fn run_release(cmd: &ReleaseCommand) -> Result<()> {
     let progress = CliProgress;
     match cmd {
         ReleaseCommand::History { wave, days, json } => {
-            let repo = crate::engine::worktrees::main_repo_root(&find_repo_root()?)?;
+            let repo = crate::git::worktrees::main_repo_root(&find_repo_root()?)?;
             let now = chrono::Utc::now().timestamp();
             let history = crate::ops::cron::history::release_history(
                 &crate::store::lf_home_dir(),
@@ -612,7 +601,28 @@ pub(crate) fn land_repo(
     options: &LandOptions,
     progress: &impl Progress,
 ) -> Result<()> {
-    // The wave home stays put on land — no rotation, no cd.
+    let (checkout, _) = crate::ops::land::resolve_repos(repo_root, options.worktree.as_deref())?;
+    if !options.local {
+        if let Some((task, pr, state)) = crate::ops::task::reconcile_checkout_pr(&checkout)? {
+            if pr.phase() == crate::work::task::PrPhase::Merged {
+                let next = match state {
+                    crate::durable::TaskState::Done => {
+                        format!("Task {} is complete.", task.plan.identifier)
+                    }
+                    crate::durable::TaskState::Abandoned => {
+                        format!("Task {} is abandoned.", task.plan.identifier)
+                    }
+                    _ => format!(
+                        "Finish follow-through, then run lf task complete {}.",
+                        task.plan.identifier
+                    ),
+                };
+                progress.status(&format!("Pull request already merged. {next}"));
+                return Ok(());
+            }
+        }
+    }
+    // The wave home stays put on land.
     let pr = with_sync_retry(repo_root, "land", progress, |repo, integrated| {
         if integrated {
             finish_arm_after_sync(repo, options, progress, &|_| {})
@@ -621,6 +631,24 @@ pub(crate) fn land_repo(
         }
     })?;
     if let Some(pr) = pr {
+        if options.wait_and_fix {
+            crate::agent::register_interrupt_cleanup(|| {
+                eprintln!("Landing wait interrupted; merge intent retained.");
+            });
+            crate::ops::pr_landing::wait_for_merge(repo_root, options, &pr).map_err(|error| {
+                match error {
+                    OpsError::DeliveryHeld(reason) => {
+                        anyhow::Error::new(crate::process::FlowHeld(reason))
+                    }
+                    error @ OpsError::CheckoutBusy(_) => {
+                        anyhow::Error::new(crate::process::FlowHeld(error.to_string()))
+                    }
+                    error => anyhow::Error::new(error),
+                }
+            })?;
+            progress.status("Pull request merged; follow-through can proceed.");
+            return Ok(());
+        }
         progress.status(&format!(
             "PR #{} handed off; lf pr reconcile checks delivery.",
             pr.number
@@ -718,8 +746,8 @@ fn pr_status() -> Result<()> {
     Ok(())
 }
 
-pub fn run_sync_skills(yes: bool, no_prune: bool) -> Result<()> {
-    if !yes {
+pub fn run_sync_skills(yes: bool, no_prune: bool, repo: bool) -> Result<()> {
+    if !yes && !repo {
         if !std::io::stdin().is_terminal() {
             return Err(anyhow!(
                 "skill sync writes under ~/.claude and ~/.agents; rerun with --yes to confirm"
@@ -736,11 +764,13 @@ pub fn run_sync_skills(yes: bool, no_prune: bool) -> Result<()> {
     let report = sync_skills(&SkillSyncOptions {
         prune: !no_prune,
         global_home: None,
+        repo: repo.then(find_repo_root).transpose()?,
     })?;
     println!(
-        "synced skills ({} written, {} pruned)",
+        "synced skills ({} written, {} pruned, {} skipped)",
         report.written.len(),
-        report.pruned.len()
+        report.pruned.len(),
+        report.skipped.len()
     );
     Ok(())
 }
@@ -1592,6 +1622,8 @@ mod cron_catalog_tests {
 
     #[test]
     fn declared_cron_flow_cannot_fall_back_to_builtin_skill() {
+        let _lock = crate::journal::test_env_lock();
+        let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
         let repo = tempfile::tempdir().unwrap();
         fs::create_dir_all(repo.path().join("wave/infrastructure")).unwrap();
         fs::create_dir_all(repo.path().join(".lf/flows")).unwrap();
@@ -1611,8 +1643,16 @@ mod cron_catalog_tests {
             },
             local_machine: home.clone(),
             placed_machine: home,
-            repo: repo.path().to_path_buf(),
+            repo: repo.path().canonicalize().unwrap(),
         };
+        std::env::set_var("LF_HOME", &authority.host.lf_home);
+        let store = crate::store::sqlite::SqliteStore::open_ephemeral(
+            &authority.host.lf_home.join("loopflow.db"),
+        )
+        .unwrap();
+        store
+            .ensure_wave(authority.repo.to_str().unwrap(), "infrastructure")
+            .unwrap();
         let specs = cron_specs(&authority, "infrastructure").unwrap();
         assert_eq!(specs.len(), 1);
         assert_eq!(specs[0].target_kind, CronTargetKind::Flow);
@@ -1867,7 +1907,7 @@ pub fn run_wt(cmd: &WtCommand) -> Result<()> {
         } => {
             if *persistent && !*plan {
                 let repo = find_repo_root()?;
-                let workspace = crate::engine::worktrees::ensure_agent_worktree(
+                let workspace = crate::git::worktrees::ensure_agent_worktree(
                     &repo,
                     WorktreeSegment::parse(name)?,
                 )?;
@@ -1935,7 +1975,7 @@ fn wt_create(name: &str, dry_run: bool) -> Result<()> {
     Ok(())
 }
 
-fn print_placement_plan(plan: &crate::engine::worktrees::PlacementPlan) {
+fn print_placement_plan(plan: &crate::git::worktrees::PlacementPlan) {
     println!("branch: {}", plan.branch);
     println!("base: {}", plan.base_ref);
     println!("worktree: {}", plan.worktree_path.display());
@@ -2323,7 +2363,7 @@ fn protected_worktree_paths() -> Result<HashSet<PathBuf>> {
                     status,
                     crate::durable::WorkStatus::Done | crate::durable::WorkStatus::Abandoned
                 ) {
-                    protected.insert(task.worktree);
+                    protected.extend(task.worktree);
                 }
             }
         }
@@ -2560,14 +2600,14 @@ fn process_skill_agent(
     )?;
 
     let agent = prepared.config.agent();
-    let (provider, model) = crate::engine::parse_agent(agent);
+    let (provider, model) = crate::config::parse_agent(agent);
     let cwd = prepared
         .config
         .cwd
         .clone()
         .unwrap_or_else(|| repo_root.to_path_buf());
     let context = crate::trace::PreparedTurnContext::from_prompts(
-        &crate::engine::agent::system_prompt_with_structured_replies(&prepared.config),
+        &crate::agent::system_prompt_with_structured_replies(&prepared.config),
         &prepared.config.task_prompt,
     );
     let capture = crate::session_record::CaptureHandle::begin_with_context(

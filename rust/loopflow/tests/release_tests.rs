@@ -2029,7 +2029,7 @@ exec '{}' "$@"
     let head = git_output(&repo, &["rev-parse", "HEAD"]);
     let branch = format!(
         "{}/release-default-v0-9-2",
-        loopflow::engine::naming::git_user(repo.path()).unwrap()
+        loopflow::naming::git_user(repo.path()).unwrap()
     );
     git(
         &repo,

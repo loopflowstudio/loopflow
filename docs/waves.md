@@ -10,7 +10,7 @@ run `lf wave bind-project product <project-uuid>` first. Ensure activates Backlo
 or Planned status without changing its name, content, Tasks or optional Flow.
 
 ```bash
-lf --wave shipper wave/operate "invoices first"
+lf --wave shipper wave-operate "invoices first"
 lf wave status shipper
 ```
 
@@ -25,7 +25,7 @@ Flow execution; each Machine retains command and conversation history.
 | `wave/<name>/metrics/*.md` | Metric meaning, window and freshness |
 
 In Loopflow on macOS, select a Wave to read its plan, Tasks and execution history. Start a
-Session for a conversation, or invoke `wave/operate` for one finite pass. The
+Session for a conversation, or invoke `wave-operate` for one finite pass. The
 Wave's ongoing conversation (`lf session ensure -w <name>`) applies that same
 pass each time you return.
 
@@ -66,12 +66,12 @@ post-landing operations.
 ## Operate manually
 
 ```bash
-lf --wave shipper wave/operate "Review delivery and the checkout dependency"
+lf --wave shipper wave-operate "Review delivery and the checkout dependency"
 lf vsm-operate
 lf --wave shipper s2 : "Investigate the repeated checkout conflict"
 ```
 
-`wave/operate` considers delivery, coordination, present capacity, adaptation
+`wave-operate` considers delivery, coordination, present capacity, adaptation
 and identity (S1–S5) within the selected Wave. `vsm-operate` applies those same
 questions across the current repository's Waves, including from a linked
 worktree or a Task-bound session. Its Flow runs `s1 → s2 → s3 → s4 → s5`,
@@ -79,7 +79,7 @@ with each skill reading earlier findings from one shared working note. Each is
 also directly invokable for a focused question, with no scan/assess split.
 An explicit scope request can narrow VSM to a Wave; otherwise it uses the repository.
 Neither pass requires Discord or a schedule. VSM makes five sequential skill
-invocations, without requiring five reports or five actions. `wave/operate`
+invocations, without requiring five reports or five actions. `wave-operate`
 remains a single skill; whether it should use the VSM Flow is still undecided.
 
 Each pass reads dated evidence and replies in the invoking conversation. It
@@ -128,7 +128,8 @@ Author and retain a [chapter plan](architecture/planning.md#rotate-the-plan-pres
 with exact Wave/destination IDs and nonempty KRs. Select `create: false` for an
 existing Project or allocate one UUID for creation. The repository operation
 rotates the listed Waves; `lf wave new-chapter` consumes one entry. Ordinary
-Project ensure needs neither a chapter nor KRs.
+Project ensure needs neither a chapter nor KRs. Creation and activation save locally
+in both connection modes, retaining identity and pending delivery during outages.
 
 The preview lists each successor and Task disposition. Started unfinished Tasks
 keep identity, checkout, PR and captured execution when moved. Unreviewed backlog
@@ -201,7 +202,7 @@ radius crosses storage, auth, or public APIs.
 ```
 
 Work placement records the owning Machine. Use `lf cron`
-for scheduled commands and `lf --wave <name> wave/operate` for an immediate pass.
+for scheduled commands and `lf --wave <name> wave-operate` for an immediate pass.
 
 Builtin goals resolve by name, including the five Viable System Model charters
 `s1`…`s5`. Goal authoring is covered in [Authoring → Goals](authoring.md#goals).
@@ -318,7 +319,7 @@ lf id
 lf machine add jack@mini.local --label mini
 lf machine list --json
 lf wave place <wave-id> <machine-id>
-lf --machine <machine-id> --wave shipper wave/operate
+lf --machine <machine-id> --wave shipper wave-operate
 lf --machine <machine-id> wave status shipper --json
 ```
 
@@ -347,7 +348,8 @@ See [Machines and processes](architecture/machines.md) and
 lf wave status infra --json
 lf update-plan --wave infra --plan plan.json
 lf project workflow set PROJECT research    # only the workflow
-lf project workflow customize research                     # .lf/workflows/research.yaml, written from the builtin
+lf project workflow source PROJECT research > /tmp/research.yaml
+lf project workflow set PROJECT research --file /tmp/research.yaml
 ```
 
 `plan.json` contains the complete current plan:
@@ -398,22 +400,24 @@ lf task run INF-124 --stack-on INF-123 # dependent work before the parent merges
 lf task run INF-125 incident
 ```
 
-Task Work advances through one active remote branch and PR to `main`. Its
+Task Work owns one checkout and zero or one PR. Its
 Project's `workflow:` (`feature`, `code`, `research`, or a file in
 `.lf/workflows/`) is the one it takes up. The Task moves through its
 nodes: each `lf task run` takes one edge leaving the current node and runs
 that edge's Flow, and at a node the Task waits on you in its conversation.
 See [workflows](authoring.md#workflows).
-Each launch starts a fresh Flow: one driver process holding the expanded graph
+Each launch starts a fresh Flow: one Flow process holding the expanded graph
 and the step processes it starts. Every Flow remains history and none is privileged. A finished Flow
 leaves Task Work open until an explicit completion or delivery operation
 settles it.
 
 Task context includes the Wave's `GOAL.md` and `MEMORY.md` plus its Project's
-KRs and targets. Explicit PR rotation selects the next serial branch while
-preserving the Task's worktree directory.
+KRs and targets. Separate dependent Tasks stack on a published parent PR and
+can publish before it merges. `lf sync` preserves child code and design through
+parent updates and squash merge. Use `lf checkout CHILD --stack-on PARENT
+--design PATH` to transfer a child-specific design before launch.
 
-AgentSessions and Processes own typed nullable Task/Wave ancestry.
+LfSessions and Processes own typed nullable Task/Wave ancestry.
 Historical work events retain their original attribution. Launching `lf` in a registered Task checkout binds automatically unless
 an explicit selector overrides it. A later bind can attach a conversation to
 a done or landed Task without reopening Work. Assignment is permanent and
@@ -430,29 +434,35 @@ steering and recovery use the same commands for people and agents:
 [The Agent API → Steer](agent-api.md#steer).
 
 ```bash
-lf land --next parser-proof   # after verified merge, rotate to the next
-lf land -c                    # after verified merge, complete the Task
-lf task move INF-124 end --reason "investigation recorded"   # no PR needed
+lf land --wait-and-fix
+lf task follow-up INF-124 --none 'No accepted obligations remain'
+lf task complete INF-124
 ```
 
+Task completion is independent of Workflow position. `task complete` changes
+status; `task move end` records the move and requests completion. If completion
+fails, retry it alone without replaying the Flow. Linear completion and reopening
+leave execution intact; reopening supersedes old requests. A Task with a PR needs
+authoritative merge and a durable disposition: linked follow-ups filed, or none
+needed with a reason. A PR-less Task may finish with research files and commits;
+unsafe or occupied checkouts are retained. Completion does not settle Session
+turns or process exits. Repeat completion to retry pending planning writeback.
 
-A Task's state is where it stands on its workflow: ready at `start`, active
-between, done at `end`. Reaching `end`, by an edge or by `task move`, completes
-the Task; no other command does. It is refused over uncommitted changes, an
-unsettled PR or unresolved execution, and retires a PR whose branch never moved.
-An edge that runs nothing lands nothing: it accepts uncommitted changes and
-keeps the checkout.
-`task move ISSUE end` also finishes planning-only Tasks without creating a
-checkout, recording the reason once in Linear. If completion reports pending PM
-writeback, repeat the command to reconcile Linear. Canceled and duplicate
-issues cannot be changed to completed.
+`ship` waits for merge, then performs follow-through. A manual merge or stopped
+finishing Flow stays visibly pending until the next Task/Wave operation recovers
+it with `finish-delivery`, after inspecting live Flow processes. No fresh gate or landing
+is required. The source completes after filing, without waiting for the children.
 
-Linear completing a Task that is active here is shown on the Task as an error.
-Its work goes on; `end` then takes `--force`. Linear completing a Task that
-never left `start` withdraws it from what is offered.
+A due follow-up returns on its owning Wave's next operation, even if unstarted.
+Surface it for selection unless its brief already authorizes a concrete unattended
+check. Filing installs no schedule; an open conversation schedules no next turn.
+Without an installed Wave schedule, report no automatic check scheduled. Missing
+installation or provider evidence stays unknown, and time is never proof of success.
 
-Keep each PR reviewable — roughly 1000 LOC. A Task may need several serial
-PRs, but it still needs one concrete finish line.
+An early Linear completion cannot supply local merge or follow-through evidence.
+Canceled and duplicate issues cannot become successful completion. Each additional
+PR belongs to another Task, stacked where dependent; a reopened Task keeps its
+same PR.
 
 ## Independent evidence
 

@@ -125,9 +125,10 @@ public struct WorkFrame: Decodable, Sendable {
         public let task: String
         public let work: TaskWork
         public let flowProcesses: [FlowProcessDetail]
+        public let comments: TaskComments
 
         enum CodingKeys: String, CodingKey {
-            case task, work
+            case task, work, comments
             case flowProcesses = "flow_processes"
         }
     }

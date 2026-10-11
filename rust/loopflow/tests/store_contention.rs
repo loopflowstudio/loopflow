@@ -8,7 +8,7 @@
 //! file locks and the WAL's shared memory, not per process, so threads here
 //! contend exactly as separate processes do.
 
-use loopflow::process::Process;
+use loopflow::process::LfProcess;
 use loopflow::store::sqlite::SqliteStore;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -18,16 +18,19 @@ use std::sync::{Arc, Barrier};
 const FLEET: usize = 51;
 const EVENTS_PER_WRITER: usize = 20;
 
-fn process() -> Process {
+fn process() -> LfProcess {
     let ts = 1_700_000_000;
-    Process {
-        lfid: loopflow::id::ProcessLfid::new(),
+    LfProcess {
+        kind: loopflow::process::ProcessKind::Lf,
+        agent_session_id: None,
+        os_started_at: None,
+        id: loopflow::id::LfProcessId::new(),
         pid: None,
         trace_id: loopflow::id::TraceId::new(),
-        parent_process_lfid: None,
+        parent_lf_process_id: None,
         via_agent: Some(false),
         caller_session_id: None,
-        caller_provider_generation: None,
+        caller_agent_process_id: None,
         command: Some(r#"["lf","flow","telemetry-daily"]"#.into()),
         repo: Some("/src/loopflow".into()),
         cwd: None,
@@ -91,7 +94,7 @@ fn every_receipt_at_fleet_fanout_is_recorded_exactly_once() {
         "the ledger must hold exactly the receipts the fleet requested"
     );
     assert_eq!(
-        count(&path, "SELECT COUNT(DISTINCT lfid) FROM processes"),
+        count(&path, "SELECT COUNT(DISTINCT id) FROM processes"),
         expected,
         "no receipt may be recorded twice"
     );

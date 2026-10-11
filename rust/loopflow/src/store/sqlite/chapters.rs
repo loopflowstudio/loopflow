@@ -47,23 +47,23 @@ impl SqliteStore {
                  OR EXISTS(SELECT 1 FROM task_events WHERE task_id=?1
                     AND json_extract(kind_json,'$.kind')='started')
                  OR EXISTS({})
-                 OR EXISTS(SELECT 1 FROM flow_process_steps WHERE flow_process_lfid IN ({}))",
+                 OR EXISTS(SELECT 1 FROM flow_process_steps WHERE flow_lf_process_id IN ({}))",
                 super::task_work::session_ids("?1"),
-                super::task_work::process_lfids("?1"),
+                super::task_work::lf_process_ids("?1"),
             ),
             [task.as_str()],
             |row| row.get(0),
         )?;
-        let (abandoned, completed): (bool, bool) = conn.query_row(
+        let (abandoned, completed, active): (bool, bool, bool) = conn.query_row(
             &format!(
-                "SELECT state='abandoned',state='done' FROM (SELECT {} AS state FROM tasks t WHERE t.id=?1)",
+                "SELECT state='abandoned',state='done',state='active' FROM (SELECT {} AS state FROM tasks t WHERE t.id=?1)",
                 super::durable::task_state_sql("t")
             ),
             [task.as_str()],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )?;
         Ok(TaskStartEvidence {
-            begun,
+            begun: begun || active,
             authored: None,
             published: false,
             abandoned,

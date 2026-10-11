@@ -7,7 +7,7 @@ use axum::http::StatusCode;
 use serde_json::json;
 use tokio::sync::Barrier;
 
-use super::test_fixture::{now, token, Fixture};
+use super::test_fixture::{now, token, Fixture, PlanningEnvironment};
 use super::{
     linear_refresh_lock, pm_show_async, resolve_pm_token, PmRefresh, PmShowOptions, PmTestContext,
     PM_TEST_CONTEXT,
@@ -17,7 +17,7 @@ use crate::ops::error::OpsResult;
 use crate::ops::NullProgress;
 use crate::planning::{LinearProjectId, ProjectPlan};
 use crate::pm::test_server::{self, json_response, QueuedResponse};
-use crate::pm::{PmProviderKind, PmSnapshot};
+use crate::pm::PmSnapshot;
 use crate::provider_auth::{LinearRefreshError, LINEAR_REFRESH_CONFIG, LINEAR_REFRESH_URL};
 use crate::store::{open_ephemeral_store, PmSnapshotRow, ProviderToken, StorageConfig};
 use crate::work::project::{Project, ProjectId};
@@ -25,12 +25,7 @@ use crate::work::wave::Wave;
 
 impl Fixture {
     async fn resolve(&self, url: &str) -> OpsResult<String> {
-        scoped(
-            self.context(""),
-            url,
-            resolve_pm_token(PmProviderKind::Linear),
-        )
-        .await
+        scoped(self.context(""), url, resolve_pm_token()).await
     }
 
     async fn assert_token(&self, expected: &ProviderToken) {
@@ -105,8 +100,12 @@ async fn forced_read(repo: &Path) -> OpsResult<super::PmShowResult> {
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)] // Serialize process-wide Machine selection.
 async fn pm_read_linear_oauth_recovers() {
+    let _lock = crate::journal::test_env_lock();
+    let _restore = PlanningEnvironment::isolate();
     let fixture = Fixture::new().await;
+    std::env::set_var("LF_HOME", fixture.directory.path());
     let (repo, wave) = fixture.planning_repo().await;
     let stored_wave =
         serde_json::to_value(fixture.store.get_wave(wave.id()).await.unwrap()).unwrap();
@@ -114,13 +113,14 @@ async fn pm_read_linear_oauth_recovers() {
     let project = Project {
         id: ProjectId::new(),
         plan: ProjectPlan {
+            summary: String::new(),
             workflow: "feature".into(),
             status: crate::pm::ProjectStatus::Started,
-            id: LinearProjectId::new("project-1").unwrap(),
+            linear_id: Some(LinearProjectId::new("project-1").unwrap()),
             slug: "reliability".into(),
             name: "Reliability".into(),
             prompt_context: "Retain this planning history.".into(),
-            pm_snapshot_synced_at: 1,
+            pm_snapshot_synced_at: Some(1),
         },
         wave_id: wave.id().clone(),
         iteration: 3,
@@ -191,7 +191,7 @@ async fn pm_read_linear_oauth_recovers() {
     assert_eq!(refreshed.abandon_intent, project.abandon_intent);
     assert_eq!(refreshed.created_at, project.created_at);
     assert!(refreshed.updated_at >= project.updated_at);
-    assert_eq!(refreshed.plan.id, project.plan.id);
+    assert_eq!(refreshed.plan.linear_id, project.plan.linear_id);
     assert_eq!(refreshed.plan.status, crate::pm::ProjectStatus::Started);
     assert_eq!(refreshed.plan.workflow, "feature");
     assert!(refreshed.plan.prompt_context.contains("Fresh proof"));
@@ -230,9 +230,13 @@ async fn pm_read_linear_oauth_recovers() {
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)] // Serialize process-wide Machine selection.
 async fn pm_read_linear_oauth_invalid_grant() {
     for cached in [true, false] {
+        let _lock = crate::journal::test_env_lock();
+        let _restore = PlanningEnvironment::isolate();
         let fixture = Fixture::new().await;
+        std::env::set_var("LF_HOME", fixture.directory.path());
         let (repo, wave) = fixture.planning_repo().await;
         let previous = if cached {
             Some(fixture.seed_snapshot(&wave).await)
@@ -377,21 +381,15 @@ async fn linear_oauth_concurrent_alias_readers_share_one_rotation() {
     let (url, requests) = test_server::spawn(vec![response]).await;
     let first_ctx = fixture.context("");
     let first_url = url.clone();
-    let first = tokio::spawn(async move {
-        scoped(
-            first_ctx,
-            &first_url,
-            resolve_pm_token(PmProviderKind::Linear),
-        )
-        .await
-    });
+    let first =
+        tokio::spawn(async move { scoped(first_ctx, &first_url, resolve_pm_token()).await });
     entered.wait().await;
     let second_ctx = PmTestContext {
         path: alias,
         store: other,
         graphql_url: String::new(),
     };
-    let second = scoped(second_ctx, &url, resolve_pm_token(PmProviderKind::Linear));
+    let second = scoped(second_ctx, &url, resolve_pm_token());
     let (second, _) = tokio::join!(second, release.wait());
     assert!(first.await.unwrap().unwrap() == "A2");
     assert!(second.unwrap() == "A2");
@@ -410,9 +408,7 @@ async fn linear_oauth_interactive_connection_and_deletion_win_inflight_exchange(
         let (response, entered, release) = gated(response);
         let (url, requests) = test_server::spawn(vec![response]).await;
         let ctx = fixture.context("");
-        let resolver = tokio::spawn(async move {
-            scoped(ctx, &url, resolve_pm_token(PmProviderKind::Linear)).await
-        });
+        let resolver = tokio::spawn(async move { scoped(ctx, &url, resolve_pm_token()).await });
         entered.wait().await;
         let winner = token("interactive", "interactive-refresh", now() + 86400);
         if delete {
@@ -521,9 +517,7 @@ async fn linear_oauth_failed_refresh_checks_expiry_at_return() {
         let (response, entered, release) = gated(rejected("unknown"));
         let (url, _) = test_server::spawn(vec![response]).await;
         let ctx = fixture.context("");
-        let resolver = tokio::spawn(async move {
-            scoped(ctx, &url, resolve_pm_token(PmProviderKind::Linear)).await
-        });
+        let resolver = tokio::spawn(async move { scoped(ctx, &url, resolve_pm_token()).await });
         entered.wait().await;
         if expires_during_request {
             let remaining = (expires as i128 * 1_000_000_000
@@ -561,8 +555,12 @@ async fn linear_oauth_transport_failure_preserves_grant() {
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)] // Serialize process-wide Machine selection.
 async fn pm_read_linear_oauth_sqlite_contention_has_bounded_failure_and_recovers() {
+    let _lock = crate::journal::test_env_lock();
+    let _restore = PlanningEnvironment::isolate();
     let fixture = Fixture::new().await;
+    std::env::set_var("LF_HOME", fixture.directory.path());
     let (repo, wave) = fixture.planning_repo().await;
     let previous = fixture.seed_snapshot(&wave).await;
     let original = fixture.seed(now() - 1).await;
@@ -660,10 +658,7 @@ async fn linear_oauth_stalled_first_attempt_leaves_time_for_one_replay() {
     let (url, requests) = test_server::spawn(vec![response, rotated()]).await;
     let ctx = fixture.context("");
     let start = Instant::now();
-    let resolver =
-        tokio::spawn(
-            async move { scoped(ctx, &url, resolve_pm_token(PmProviderKind::Linear)).await },
-        );
+    let resolver = tokio::spawn(async move { scoped(ctx, &url, resolve_pm_token()).await });
     entered.wait().await;
     let value = resolver.await.unwrap().unwrap();
     assert!(value == "A2");
@@ -678,10 +673,7 @@ async fn linear_oauth_stale_rejection_does_not_condemn_expired_winner() {
     let (response, entered, release) = gated(rejected("invalid_grant"));
     let (url, _) = test_server::spawn(vec![response]).await;
     let ctx = fixture.context("");
-    let resolver =
-        tokio::spawn(
-            async move { scoped(ctx, &url, resolve_pm_token(PmProviderKind::Linear)).await },
-        );
+    let resolver = tokio::spawn(async move { scoped(ctx, &url, resolve_pm_token()).await });
     entered.wait().await;
     let winner = token("newer-access", "newer-refresh", now() - 1);
     fixture.store.upsert_provider_token(&winner).await.unwrap();

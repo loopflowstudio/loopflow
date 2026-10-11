@@ -1,12 +1,10 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::engine::git::{
-    current_branch, get_default_branch, is_clean, land as git_land, LandStrategy,
-};
-use crate::engine::worktrees::{main_repo_root, worktree_path};
+use crate::git::worktrees::{main_repo_root, worktree_path};
+use crate::git::{current_branch, get_default_branch, is_clean, land as git_land, LandStrategy};
 
-use crate::engine::command::run_command;
+use crate::command::run_command;
 use crate::ops::commit::{commit_workflow, CommitOptions};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::pr::{
@@ -15,15 +13,13 @@ use crate::ops::pr::{
 };
 
 use crate::ops::progress::Progress;
-use crate::work::task::AfterMerge;
 
 #[derive(Debug, Clone)]
 pub struct LandOptions {
     pub strict: bool,
     pub local: bool,
     pub create_pr: bool,
-    pub complete: bool,
-    pub next_slug: Option<String>,
+    pub wait_and_fix: bool,
     pub worktree: Option<String>,
     pub commit_message: Option<String>,
     pub pr_title: Option<String>,
@@ -51,8 +47,7 @@ enum Integration {
 /// Prepare one PR: commit, sync onto main, clear scratch, mark it ready, and
 /// finalize per `finalize`. `arm` requests auto-merge; `submit` assigns the PR
 /// for the reviewer to merge. Neither rotates the worktree. Returns the resulting PR,
-/// or `None` for a local merge or direct Task completion over an already-merged
-/// PR.
+/// or `None` for a local merge.
 fn prepare_pr(
     repo: &Path,
     options: &LandOptions,
@@ -61,41 +56,16 @@ fn prepare_pr(
     progress: &impl Progress,
     inherit_pr: &impl Fn(&mut Command),
 ) -> OpsResult<Option<PrInfo>> {
-    if options.complete && options.next_slug.is_some() {
-        return Err(OpsError::Message(
-            "--complete and --next cannot be used together".to_string(),
-        ));
-    }
-    if options.local && (options.complete || options.next_slug.is_some()) {
-        return Err(OpsError::Message(
-            "Task disposition flags require a pull request merge and cannot be used with --local"
-                .to_string(),
-        ));
-    }
-    let after_merge = if options.next_slug.is_some() {
-        AfterMerge::ContinueTask
-    } else {
-        AfterMerge::CompleteTask
-    };
     let (repo_root, main_repo) = resolve_repos(repo, options.worktree.as_deref())?;
+    // Establish the Task's commit range before delivery availability checks.
+    crate::ops::task::verify_task_pr_range(&repo_root)?;
+    if !options.local && !crate::git::has_origin(&repo_root)? {
+        return Err(OpsError::Message(
+            "hosted delivery requires an origin remote".to_string(),
+        ));
+    }
     crate::ops::pr::reject_control_plane_pr(&repo_root)?;
     crate::ops::commit::prepare_persistent_publication(&repo_root)?;
-    if after_merge == AfterMerge::CompleteTask && (!options.strict || is_clean(&repo_root)?) {
-        if let Some(issue) = crate::ops::task::find_discardable_task_successor(&repo_root)? {
-            // Rotation left one unpublished branch at its recorded base after
-            // earlier Task work merged. Default completion settles the Task
-            // without manufacturing an empty GitHub PR.
-            clear_scratch(&repo_root, progress)?;
-            crate::ops::task::task_end(
-                &repo_root,
-                &issue,
-                Some("Completed over its merged pull request"),
-                &Default::default(),
-            )?;
-            progress.status("Completed Task over its merged pull request.");
-            return Ok(None);
-        }
-    }
     if !options.local && !crate::ops::pr::gh_available() {
         return Err(OpsError::Message("gh CLI not found".to_string()));
     }
@@ -104,25 +74,14 @@ fn prepare_pr(
     } else {
         crate::ops::task::task_pr_context(&repo_root)?
     };
-    let copy_lifecycle = match after_merge {
-        AfterMerge::CompleteTask => TaskPrCopyLifecycle::Completes,
-        AfterMerge::ContinueTask => TaskPrCopyLifecycle::Continues {
-            next_slug: options.next_slug.clone(),
-        },
-    };
     let feature_branch = current_branch(&repo_root)?
         .ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
-    // Prove the Task PR range before preparing the exact local tree. Submit and
-    // land make no remote mutation until the owned integration pushes once.
-    crate::ops::task::verify_task_pr_range(&repo_root)?;
     {
         let _mutation = crate::ops::task::lock_task_pr_mutation(&repo_root)?;
         if matches!(finalize, Finalize::AutoMerge) && matches!(integration, Integration::Required) {
             if let Some((number, head)) = crate::ops::task::matching_task_pr_merge_request(
                 &repo_root,
                 crate::work::task::PrMergeMode::Auto,
-                after_merge,
-                options.next_slug.as_deref(),
             )? {
                 if let Some(pr) = crate::ops::pr::current_pr(&repo_root)? {
                     if pr.number == u64::from(number)
@@ -133,13 +92,8 @@ fn prepare_pr(
                         return Ok(Some(pr));
                     }
                 }
-            } else if task_context.is_none()
-                && !options.local
-                && !options.complete
-                && options.next_slug.is_none()
-                && is_clean(&repo_root)?
-            {
-                let head = crate::engine::git::rev_parse(&repo_root, "HEAD")?;
+            } else if task_context.is_none() && !options.local && is_clean(&repo_root)? {
+                let head = crate::git::rev_parse(&repo_root, "HEAD")?;
                 if let Some(pr) = crate::ops::pr::current_pr(&repo_root)? {
                     if pr.head_sha.as_deref() == Some(head.as_str())
                         && crate::ops::pr::auto_merge_enabled(&repo_root, pr.number)?
@@ -198,14 +152,14 @@ fn prepare_pr(
             "no open PR found for branch '{feature_branch}'; run lf pr open or use --create-pr"
         )));
     }
-    let copy_head = crate::engine::git::rev_parse(&repo_root, "HEAD")?;
+    let copy_head = crate::git::rev_parse(&repo_root, "HEAD")?;
     let copy_state = read_worktree_state(&repo_root)?;
     let copy = normalize_task_pr_copy(
         resolve_pr_copy(&repo_root, &copy_head, options, progress)?,
         task_context.as_ref(),
-        &copy_lifecycle,
+        &TaskPrCopyLifecycle::Completes,
     )?;
-    let current_head = crate::engine::git::rev_parse(&repo_root, "HEAD")?;
+    let current_head = crate::git::rev_parse(&repo_root, "HEAD")?;
     if current_head != copy_head || read_worktree_state(&repo_root)? != copy_state {
         return Err(OpsError::Message(
             "PR copy generation changed the worktree; refusing to integrate or finalize unreviewed provider mutations"
@@ -250,6 +204,7 @@ fn prepare_pr(
         None => crate::ops::pr::current_pr(&repo_root)?,
     };
     crate::ops::task::attach_task_github_pr(&repo_root, pr.as_ref(), inherit_pr)?;
+    crate::ops::task::record_task_pr_presentation(&repo_root, &copy.title, &copy.body)?;
     crate::ops::task::request_task_pr_merge(
         &repo_root,
         match finalize {
@@ -257,8 +212,6 @@ fn prepare_pr(
             Finalize::UserMerge => crate::work::task::PrMergeMode::User,
         },
         pr.as_ref().and_then(|pr| pr.head_sha.as_deref()),
-        after_merge,
-        options.next_slug.as_deref(),
         inherit_pr,
     )?;
     if let Err(finalize_error) = finalize_remote(
@@ -405,7 +358,7 @@ fn prepare_land(
         ));
     }
 
-    if !options.strict && !crate::engine::worktrees::is_persistent_worktree(repo_root)? {
+    if !options.strict && !crate::git::worktrees::is_persistent_worktree(repo_root)? {
         let message = options
             .commit_message
             .clone()
@@ -450,7 +403,7 @@ fn accept_completed_integration(repo_root: &Path, main_repo: &Path) -> OpsResult
     let main_branch = get_default_branch(main_repo)?;
     if let Some(stacked) = crate::ops::task::stack_for_landing(repo_root)? {
         // The merge's second parent is the immutable integration target.
-        let new_base = crate::engine::git::rev_parse(repo_root, "HEAD^2")?;
+        let new_base = crate::git::rev_parse(repo_root, "HEAD^2")?;
         crate::ops::task::record_stack_sync(&stacked, &new_base, true)?;
     }
     Ok(main_branch)
@@ -563,7 +516,7 @@ fn assign_to_me(repo: &Path) -> OpsResult<()> {
     Ok(())
 }
 
-fn resolve_repos(repo: &Path, worktree: Option<&str>) -> OpsResult<(PathBuf, PathBuf)> {
+pub(crate) fn resolve_repos(repo: &Path, worktree: Option<&str>) -> OpsResult<(PathBuf, PathBuf)> {
     let main_repo = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
     let repo_root = if let Some(worktree) = worktree {
         let candidate = Path::new(worktree);
@@ -594,7 +547,7 @@ fn resolve_repos(repo: &Path, worktree: Option<&str>) -> OpsResult<(PathBuf, Pat
 /// see [`crate::work::task::CiCheck::land_time_precondition`], which keeps the landing
 /// supervisor from launching `ci-fix` against work only this function can do.
 fn clear_scratch(repo: &Path, progress: &impl Progress) -> OpsResult<()> {
-    if crate::engine::worktrees::is_persistent_worktree(repo)? {
+    if crate::git::worktrees::is_persistent_worktree(repo)? {
         return Ok(());
     }
     let scratch = repo.join("scratch");
@@ -632,9 +585,9 @@ fn clear_scratch(repo: &Path, progress: &impl Progress) -> OpsResult<()> {
     }
 
     progress.status("Clearing scratch/...");
-    crate::engine::git::stage_all(repo, &|_| {})?;
+    crate::git::stage_all(repo, &|_| {})?;
     if has_staged_changes(repo)? {
-        crate::engine::git::commit(repo, "lf land: clear scratch/", &|_| {})?;
+        crate::git::commit(repo, "lf land: clear scratch/", &|_| {})?;
     }
 
     Ok(())

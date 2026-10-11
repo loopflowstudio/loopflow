@@ -1,13 +1,14 @@
-//! Native dispatch holds the Session fence — the store mutex and SQLite's
-//! write lock — while one transport write completes. Whatever holds that fence
-//! must finish without help from a thread that may be waiting for it.
+//! Native dispatch holds the per-Session OS lock while one transport write
+//! completes. Attachment validation releases SQLite before transport I/O, so
+//! history and unrelated database writes remain independent of that fence.
 //!
 //! Two rules keep the fence from joining a cycle with the runtime:
 //!
 //! - The write is driven and timed on the dispatching thread. A stalled
 //!   runtime cannot postpone the deadline, so the fence is always released.
-//! - Store work reached from an async task leaves the runtime's worker first,
-//!   so waiting for the fence never stops the runtime that the write needs.
+//! - Async transport writes run on blocking workers. Synchronous store work
+//!   yields a multithreaded runtime's worker; on a current-thread runtime it
+//!   runs inline, so it must not depend on that runtime making progress.
 
 use std::fmt::Display;
 use std::future::Future;
@@ -18,6 +19,7 @@ use std::thread::{self, Thread};
 use std::time::{Duration, Instant};
 
 use futures_util::{Sink, SinkExt};
+use tokio::io::{AsyncWrite, AsyncWriteExt};
 use tokio::runtime::{Handle, RuntimeFlavor};
 
 use crate::store::{StoreError, StoreResult};
@@ -65,8 +67,19 @@ where
         .map_err(|error| StoreError::InvalidData(format!("Native dispatch failed: {error}")))
 }
 
-/// Run blocking store work from an async task without occupying the runtime
-/// worker that drives I/O and timers.
+/// Pipe writes obey the same real-time fence deadline as socket dispatch.
+pub(super) fn write_fenced<W: AsyncWrite + Unpin>(writer: &mut W, bytes: &[u8]) -> StoreResult<()> {
+    within(DISPATCH_LIMIT, async {
+        writer.write_all(bytes).await?;
+        writer.flush().await
+    })
+    .ok_or_else(|| StoreError::InvalidData("Native dispatch timed out; outcome is unknown".into()))?
+    .map_err(|error| StoreError::InvalidData(format!("Native dispatch failed: {error}")))
+}
+
+/// Yield a multithreaded runtime's worker during synchronous store work.
+/// Current-thread and non-runtime callers run inline; work must not require
+/// their reactor to make progress.
 pub(super) fn off_reactor<T>(work: impl FnOnce() -> T) -> T {
     match Handle::try_current().map(|handle| handle.runtime_flavor()) {
         Ok(RuntimeFlavor::MultiThread) => tokio::task::block_in_place(work),
@@ -77,8 +90,8 @@ pub(super) fn off_reactor<T>(work: impl FnOnce() -> T) -> T {
 #[cfg(test)]
 mod tests {
     use super::{off_reactor, within};
-    use crate::id::ProcessLfid;
-    use crate::process::SessionDriver;
+    use crate::id::LfProcessId;
+    use crate::process::SessionAttachment;
     use crate::store::sqlite::SqliteStore;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{mpsc, Arc};
@@ -86,22 +99,22 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::UnixStream;
 
-    fn fenced_session(home: &tempfile::TempDir) -> (SqliteStore, SessionDriver) {
+    fn fenced_session(home: &tempfile::TempDir) -> (SqliteStore, SessionAttachment) {
         let path = home.path().join("dispatch.db");
         let store = SqliteStore::open_ephemeral(&path).unwrap();
         store.test_session("conversation", "run_00000000000000000000000000000001");
-        let process = ProcessLfid::new();
+        let process = LfProcessId::new();
         rusqlite::Connection::open(&path)
             .unwrap()
             .execute(
-                "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
                 [process.as_str()],
             )
             .unwrap();
-        let driver = store
-            .claim_session_driver("conversation", None, &process, false)
+        let attachment = store
+            .claim_session_attachment("conversation", None, &process, false)
             .unwrap();
-        (store, driver)
+        (store, attachment)
     }
 
     /// One worker is the smallest runtime in which a waiting reader can stop
@@ -129,21 +142,21 @@ mod tests {
     #[test]
     fn reader_waiting_for_the_fence_leaves_the_runtime_running() {
         let home = tempfile::tempdir().unwrap();
-        let (store, driver) = fenced_session(&home);
+        let (store, attachment) = fenced_session(&home);
         let (written, read, ticked) = on_one_worker(async move {
-            let (mut engine, mut peer) = UnixStream::pair().unwrap();
+            let (mut provider, mut peer) = UnixStream::pair().unwrap();
             let (held, holding) = tokio::sync::oneshot::channel();
             let ticked = Arc::new(AtomicBool::new(false));
             let writer_store = store.clone();
             let writer = tokio::task::spawn_blocking(move || {
-                writer_store.with_session_driver("conversation", &driver, || {
+                writer_store.with_session_attachment("conversation", &attachment, || {
                     held.send(()).unwrap();
                     // Let the reader reach the fence before the write needs
                     // the runtime.
                     std::thread::sleep(Duration::from_millis(100));
                     Ok(within(
                         Duration::from_secs(10),
-                        engine.write_all(&vec![0; UNBUFFERED]),
+                        provider.write_all(&vec![0; UNBUFFERED]),
                     )
                     .map(|written| written.is_ok()))
                 })
@@ -178,17 +191,17 @@ mod tests {
     #[test]
     fn stalled_runtime_cannot_hold_the_fence_past_its_limit() {
         let home = tempfile::tempdir().unwrap();
-        let (store, driver) = fenced_session(&home);
+        let (store, attachment) = fenced_session(&home);
         let (written, read) = on_one_worker(async move {
-            let (mut engine, _unread_peer) = UnixStream::pair().unwrap();
+            let (mut provider, _unread_peer) = UnixStream::pair().unwrap();
             let (held, holding) = tokio::sync::oneshot::channel();
             let writer_store = store.clone();
             let writer = tokio::task::spawn_blocking(move || {
-                writer_store.with_session_driver("conversation", &driver, || {
+                writer_store.with_session_attachment("conversation", &attachment, || {
                     held.send(()).unwrap();
                     Ok(within(
                         Duration::from_millis(300),
-                        engine.write_all(&vec![0; UNBUFFERED]),
+                        provider.write_all(&vec![0; UNBUFFERED]),
                     )
                     .is_some())
                 })

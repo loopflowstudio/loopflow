@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 use crate::child::prefixed_uuid_id;
-use crate::work::task::{AfterMerge, TaskId};
+use crate::work::task::TaskId;
 
 pub(crate) const SUPERVISOR_STALE_AFTER: time::Duration = time::Duration::minutes(2);
 
@@ -98,8 +98,6 @@ pub struct PrLanding {
     pub requested_head_sha: String,
     pub observed_head_sha: String,
     pub merge_commit: Option<String>,
-    pub after_merge: Option<AfterMerge>,
-    pub next_slug: Option<String>,
     pub state: PrLandingState,
     pub generation: u64,
     pub supervisor: Option<LandingSupervisor>,
@@ -116,8 +114,6 @@ pub struct NewPrLanding {
     pub branch: String,
     pub task_id: Option<TaskId>,
     pub requested_head_sha: String,
-    pub after_merge: Option<AfterMerge>,
-    pub next_slug: Option<String>,
 }
 
 impl PrLanding {
@@ -132,8 +128,6 @@ impl PrLanding {
             observed_head_sha: input.requested_head_sha.clone(),
             requested_head_sha: input.requested_head_sha,
             merge_commit: None,
-            after_merge: input.after_merge,
-            next_slug: input.next_slug,
             state: PrLandingState::Watching,
             generation: 1,
             supervisor: None,
@@ -155,16 +149,6 @@ impl PrLanding {
         {
             return Err(PrLandingDataError::InvalidInvariant(
                 "landing requires repository, PR, branch, heads, and generation".to_string(),
-            ));
-        }
-        if self.after_merge == Some(AfterMerge::CompleteTask) && self.next_slug.is_some() {
-            return Err(PrLandingDataError::InvalidInvariant(
-                "a completing landing cannot name a next branch".to_string(),
-            ));
-        }
-        if self.task_id.is_none() && (self.after_merge.is_some() || self.next_slug.is_some()) {
-            return Err(PrLandingDataError::InvalidInvariant(
-                "direct landing cannot carry Task disposition".to_string(),
             ));
         }
         if self.state == PrLandingState::Merged && self.merge_commit.is_none() {

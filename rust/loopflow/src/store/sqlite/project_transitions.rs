@@ -2,7 +2,7 @@ use rusqlite::{params, OptionalExtension};
 
 use crate::id::WaveId;
 use crate::store::project_transitions::ProjectTransition;
-use crate::store::{StoreError, StoreResult};
+use crate::store::StoreResult;
 
 use super::SqliteStore;
 
@@ -38,103 +38,6 @@ impl SqliteStore {
             .query_map(params![wave.as_str(), successor], |row| row.get(0))?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(items)
-    }
-
-    pub(crate) fn select_project_transition_item(
-        &self,
-        wave: &WaveId,
-        successor: &str,
-        issue: &str,
-    ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let pending: bool = conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM project_transitions
-            WHERE wave_id=?1 AND successor_id=?2 AND settled_at IS NULL)",
-            params![wave.as_str(), successor],
-            |row| row.get(0),
-        )?;
-        if !pending {
-            return Err(StoreError::InvalidData(
-                "Project transition is not pending".into(),
-            ));
-        }
-        conn.execute(
-            "INSERT OR IGNORE INTO project_transition_items(wave_id,successor_id,issue_id)
-            VALUES(?1,?2,?3)",
-            params![wave.as_str(), successor, issue],
-        )?;
-        Ok(())
-    }
-
-    pub(crate) fn pending_project_transition(
-        &self,
-        wave: &WaveId,
-    ) -> StoreResult<Option<ProjectTransition>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn
-            .query_row(
-                "SELECT successor_id, predecessor_id, reset_name, created_at, settled_at, create_successor
-             FROM project_transitions WHERE wave_id=?1 AND settled_at IS NULL",
-                [wave.as_str()],
-                |row| {
-                    Ok(ProjectTransition {
-                        wave_id: wave.clone(),
-                        successor_id: row.get(0)?,
-                        predecessor_id: row.get(1)?,
-                        reset_name: row.get(2)?,
-                        created_at: row.get(3)?,
-                        settled_at: row.get(4)?,
-                        create_successor: row.get(5)?,
-                    })
-                },
-            )
-            .optional()?)
-    }
-
-    pub(crate) fn reserve_project_transition(
-        &self,
-        transition: &ProjectTransition,
-    ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "INSERT INTO project_transitions
-             (wave_id, successor_id, predecessor_id, reset_name, created_at, settled_at, create_successor)
-             VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6)",
-            params![
-                transition.wave_id.as_str(),
-                transition.successor_id,
-                transition.predecessor_id,
-                transition.reset_name,
-                transition.created_at,
-                transition.create_successor
-            ],
-        )?;
-        Ok(())
-    }
-
-    pub(crate) fn settle_project_transition(
-        &self,
-        wave: &WaveId,
-        successor: &str,
-    ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let updated = conn.execute(
-            "UPDATE project_transitions SET settled_at=COALESCE(settled_at, ?3)
-             WHERE wave_id=?1 AND successor_id=?2
-               AND EXISTS(SELECT 1 FROM waves w JOIN projects p ON p.id=w.current_project_id
-                          WHERE w.id=?1 AND p.external_project_id=?2)",
-            params![
-                wave.as_str(),
-                successor,
-                time::OffsetDateTime::now_utc().unix_timestamp()
-            ],
-        )?;
-        if updated != 1 {
-            return Err(StoreError::InvalidData(
-                "Project binding changed before settlement or transition is missing; preserve the intervening decision".into(),
-            ));
-        }
-        Ok(())
     }
 }
 

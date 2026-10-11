@@ -7,7 +7,7 @@ use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::engine::git::{absolute_git_dir, current_branch, intervention_state, rev_parse};
+use crate::git::{absolute_git_dir, current_branch, intervention_state, rev_parse};
 use crate::ops::error::{OpsError, OpsResult};
 
 pub(crate) const LF_GIT_OPERATION_ID_ENV: &str = "LF_GIT_OPERATION_ID";
@@ -49,7 +49,7 @@ pub(crate) struct GitOperationOwner {
     #[serde(rename = "run_id")]
     trace_id: Option<String>,
     #[serde(rename = "process_id")]
-    process_lfid: Option<String>,
+    lf_process_id: Option<String>,
     pub(crate) worktree: PathBuf,
     pub(crate) branch: String,
     pub(crate) head: String,
@@ -227,7 +227,7 @@ fn adopt_operation(
     owner.id = GitOperationId::new();
     owner.root_pid = std::process::id();
     owner.trace_id = std::env::var(crate::journal::LF_TRACE_ID_ENV).ok();
-    owner.process_lfid = std::env::var(crate::journal::LF_PROCESS_LFID_ENV).ok();
+    owner.lf_process_id = std::env::var(crate::journal::LF_PROCESS_ID_ENV).ok();
     write_json(&mut file, &owner)?;
     Ok(OperationAuthorization::Adopted(SyncOperation {
         file,
@@ -241,7 +241,7 @@ fn new_owner(worktree: &Path, target_ref: &str) -> OpsResult<GitOperationOwner> 
         id: GitOperationId::new(),
         root_pid: std::process::id(),
         trace_id: std::env::var(crate::journal::LF_TRACE_ID_ENV).ok(),
-        process_lfid: std::env::var(crate::journal::LF_PROCESS_LFID_ENV).ok(),
+        lf_process_id: std::env::var(crate::journal::LF_PROCESS_ID_ENV).ok(),
         worktree: canonical(worktree),
         branch: current_branch(worktree)?.unwrap_or_else(|| "HEAD".to_string()),
         head: rev_parse(worktree, "HEAD")?,
@@ -412,7 +412,7 @@ mod tests {
             "target_sha": null,
         });
         let owner: GitOperationOwner = serde_json::from_value(receipt.clone()).unwrap();
-        assert_eq!(owner.process_lfid.as_deref(), Some("retained-process"));
+        assert_eq!(owner.lf_process_id.as_deref(), Some("retained-process"));
         assert_eq!(serde_json::to_value(owner).unwrap(), receipt);
     }
 }

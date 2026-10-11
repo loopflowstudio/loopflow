@@ -36,7 +36,7 @@
           "tokens": 1200,
           "count": 1,
           "authors": [],
-          "budget_tokens": 16000,
+          "budget_tokens": null,
           "over_budget": false
         },
         {
@@ -46,8 +46,8 @@
           "authors": [
             "user"
           ],
-          "budget_tokens": 16000,
-          "over_budget": true
+          "budget_tokens": null,
+          "over_budget": false
         },
         {
           "source": "other",
@@ -83,8 +83,6 @@
         }
       ],
       "assembled_tokens": 224800,
-      "assembled_budget_tokens": 64000,
-      "over_assembled_budget": true,
       "first_request_tokens": 268800,
       "peak_request_tokens": 301000,
       "gaps": []
@@ -170,8 +168,6 @@
         }
       ],
       "assembled_tokens": null,
-      "assembled_budget_tokens": null,
-      "over_assembled_budget": false,
       "first_request_tokens": null,
       "peak_request_tokens": null,
       "gaps": [
@@ -220,7 +216,7 @@
         "user"
       ],
       "budget_tokens": null,
-      "over_budget": true
+      "over_budget": false
     },
     {
       "source": "other",

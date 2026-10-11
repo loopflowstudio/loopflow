@@ -1,7 +1,7 @@
 use aes_gcm::aead::rand_core::RngCore;
 use aes_gcm::aead::{Aead, OsRng};
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
-use base64::Engine;
+use base64::prelude::*;
 use once_cell::sync::OnceCell;
 use std::io::Write;
 use std::path::PathBuf;
@@ -46,11 +46,11 @@ pub fn encrypt_token(plaintext: &str) -> Result<String, TokenCryptoError> {
     let mut payload = Vec::with_capacity(NONCE_BYTES + ciphertext.len());
     payload.extend_from_slice(&nonce);
     payload.extend_from_slice(&ciphertext);
-    Ok(base64::engine::general_purpose::STANDARD_NO_PAD.encode(payload))
+    Ok(BASE64_STANDARD_NO_PAD.encode(payload))
 }
 
 pub fn decrypt_token(ciphertext_b64: &str) -> Result<String, TokenCryptoError> {
-    let payload = base64::engine::general_purpose::STANDARD_NO_PAD.decode(ciphertext_b64)?;
+    let payload = BASE64_STANDARD_NO_PAD.decode(ciphertext_b64)?;
     if payload.len() <= NONCE_BYTES {
         return Err(TokenCryptoError::MalformedCiphertext);
     }
@@ -110,7 +110,7 @@ fn load_or_create_key() -> Result<[u8; KEY_BYTES], TokenCryptoError> {
             key
         }
     };
-    let encoded = base64::engine::general_purpose::STANDARD_NO_PAD.encode(key);
+    let encoded = BASE64_STANDARD_NO_PAD.encode(key);
     let parent = path
         .parent()
         .ok_or_else(|| TokenCryptoError::KeyRetrieval("key path has no parent".into()))?;
@@ -270,7 +270,7 @@ fn env_key_path_override() -> Option<PathBuf> {
 }
 
 fn parse_key(encoded: &str) -> Result<[u8; KEY_BYTES], TokenCryptoError> {
-    let bytes = base64::engine::general_purpose::STANDARD_NO_PAD.decode(encoded.trim())?;
+    let bytes = BASE64_STANDARD_NO_PAD.decode(encoded.trim())?;
     if bytes.len() != KEY_BYTES {
         return Err(TokenCryptoError::InvalidKey(format!(
             "expected {KEY_BYTES} bytes, got {}",
@@ -285,7 +285,7 @@ fn parse_key(encoded: &str) -> Result<[u8; KEY_BYTES], TokenCryptoError> {
 #[cfg(test)]
 mod tests {
     use super::{decrypt_token, encrypt_token, load_or_create_key, parse_key, KEY_BYTES};
-    use base64::Engine;
+    use base64::prelude::*;
 
     #[test]
     fn encrypt_then_decrypt_round_trip() {
@@ -298,7 +298,7 @@ mod tests {
 
     #[test]
     fn parse_key_rejects_wrong_length() {
-        let encoded = base64::engine::general_purpose::STANDARD_NO_PAD.encode(vec![1u8; 8]);
+        let encoded = BASE64_STANDARD_NO_PAD.encode(vec![1u8; 8]);
         let err = parse_key(&encoded).expect_err("should fail");
         assert!(err
             .to_string()

@@ -10,8 +10,8 @@ import Testing
 @Suite("CI watchers")
 @MainActor
 struct CIWatchersTests {
-    private static func sleeper(_: String) -> Foundation.Process? {
-        let process = Foundation.Process()
+    private static func sleeper(_: String) -> Process? {
+        let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sleep")
         process.arguments = ["60"]
         try? process.run()
@@ -27,7 +27,7 @@ struct CIWatchersTests {
 
     @Test("one watcher per repository lasts until its last window closes")
     func oneWatcherPerRepository() {
-        var launched: [Foundation.Process] = []
+        var launched: [Process] = []
         let watchers = CIWatchers { repo in
             let process = Self.sleeper(repo)
             if let process { launched.append(process) }

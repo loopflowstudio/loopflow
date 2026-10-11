@@ -5,7 +5,7 @@ use std::time::Duration;
 use rusqlite::{params, Connection, OptionalExtension, ToSql, TransactionBehavior};
 
 use crate::durable::{ProjectId, TaskId, WorkRef};
-use crate::id::WaveId;
+use crate::id::{AgentSessionId, WaveId};
 use crate::profile::{
     AccessProfile, AuthBrowserBinding, EmailAddress, ProfileId, ProviderRoute, RouteScope,
 };
@@ -26,19 +26,29 @@ mod ci_incidents;
 mod durable;
 mod flow_inventory;
 mod metrics;
+mod plan_read;
 mod planning;
+pub(crate) mod planning_changes;
+pub(crate) mod planning_export;
+pub(crate) mod planning_order;
+mod planning_sync;
 mod pr_landings;
 mod processes;
 mod program_status;
+mod project_content;
+mod project_rotation;
 pub(crate) mod project_selection;
 mod project_transitions;
 mod revisions;
 mod session_events;
 pub(crate) mod sessions;
+mod task_comments;
+mod task_content;
+mod task_follow_through;
+pub(crate) mod task_state_delivery;
 mod task_work;
+pub(crate) mod wave_definitions;
 
-#[cfg(test)]
-pub(crate) use durable::task_state_sql;
 pub use project_selection::{ProjectActivation, ProjectReadiness, ProjectReadinessState};
 pub use revisions::StoreRevisions;
 pub(crate) use task_work::EndMove;
@@ -94,7 +104,6 @@ fn home_dir_in(conn: &Connection) -> StoreResult<PathBuf> {
 #[derive(Debug, Clone)]
 pub(crate) struct TaskCheckout {
     pub task_id: TaskId,
-    pub issue_id: String,
     pub issue_identifier: String,
     pub worktree: PathBuf,
     pub machine_id: Option<crate::durable::MachineId>,
@@ -117,20 +126,6 @@ fn deleted_task_issues_in(
     let mut statement = conn.prepare("SELECT issue_id FROM task_deletions WHERE wave_id=?1")?;
     let rows = statement.query_map([wave_id.as_str()], |row| row.get::<_, String>(0))?;
     rows.map(|row| row.map_err(StoreError::from)).collect()
-}
-
-fn record_task_deletion_in(
-    conn: &Connection,
-    wave_id: &WaveId,
-    issue_id: &str,
-    identifier: &str,
-) -> StoreResult<()> {
-    conn.execute(
-        "INSERT INTO task_deletions(wave_id,issue_id,identifier,confirmed_at)
-         VALUES(?1,?2,?3,?4) ON CONFLICT(wave_id,issue_id) DO NOTHING",
-        params![wave_id.as_str(), issue_id, identifier, now_unix()],
-    )?;
-    Ok(())
 }
 
 pub(crate) fn read_nonterminal_task_worktrees(path: &Path) -> StoreResult<Vec<PathBuf>> {
@@ -578,7 +573,7 @@ impl SqliteStore {
         // An older ledger without the current process owner is not a writable
         // observation destination. Leave upgrade decisions to ordinary admission.
         conn.prepare(
-            "SELECT lfid, trace_id, started_at, completed_at, outcome, exit_code, pid FROM processes LIMIT 0",
+            "SELECT id, trace_id, started_at, completed_at, outcome, exit_code, pid FROM processes LIMIT 0",
         )?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
@@ -634,38 +629,6 @@ impl SqliteStore {
         rows.map(|row| row.map_err(StoreError::from)).collect()
     }
 
-    /// Run several ledger queries against one SQLite read snapshot.
-    ///
-    /// The store must not be cloned into the closure: each query briefly takes
-    /// the same connection lock while the connection-level transaction stays
-    /// open. Observability callers create a private read-only store for this
-    /// operation, so no unrelated reader can join the transaction.
-    pub(crate) fn read_process_snapshot<T>(
-        &self,
-        read: impl FnOnce(&Self) -> StoreResult<T>,
-    ) -> StoreResult<T> {
-        {
-            let conn = self.conn.lock().expect("store mutex poisoned");
-            conn.execute_batch("BEGIN DEFERRED TRANSACTION")?;
-        }
-        let result = read(self);
-        let finish = {
-            let conn = self.conn.lock().expect("store mutex poisoned");
-            if result.is_ok() {
-                conn.execute_batch("COMMIT")
-            } else {
-                conn.execute_batch("ROLLBACK")
-            }
-        };
-        match result {
-            Ok(value) => {
-                finish?;
-                Ok(value)
-            }
-            Err(error) => Err(error),
-        }
-    }
-
     #[cfg(test)]
     pub(crate) fn apply_migration_for_test(&self, name: &str) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -673,75 +636,6 @@ impl SqliteStore {
             return Ok(());
         }
         conn.execute_batch(&crate::store::migrations::migration_sql_for_test(name))?;
-        Ok(())
-    }
-
-    pub(crate) fn retain_task_issue_identity(
-        &self,
-        wave_id: &WaveId,
-        issue_id: &str,
-        identifier: &str,
-    ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "INSERT INTO task_issue_identities (wave_id,issue_id,identifier) VALUES (?1,?2,?3)
-             ON CONFLICT(issue_id) DO UPDATE SET
-               wave_id=excluded.wave_id, identifier=excluded.identifier",
-            params![wave_id.as_str(), issue_id, identifier],
-        )?;
-        Ok(())
-    }
-
-    pub(crate) fn task_issue_identity(
-        &self,
-        wave_id: &WaveId,
-        issue: &str,
-    ) -> StoreResult<Option<(String, String)>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn
-            .query_row(
-                "SELECT issue_id,identifier FROM task_issue_identities
-                 WHERE wave_id=?1 AND (issue_id=?2 OR identifier=?2)",
-                params![wave_id.as_str(), issue],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional()?)
-    }
-
-    pub(crate) fn task_deletion(
-        &self,
-        wave_id: &WaveId,
-        issue: &str,
-    ) -> StoreResult<Option<(String, String)>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn
-            .query_row(
-                "SELECT issue_id,identifier FROM task_deletions
-             WHERE wave_id=?1 AND (issue_id=?2 OR identifier=?2)",
-                params![wave_id.as_str(), issue],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional()?)
-    }
-
-    /// Reconcile native removal while retaining terminal outcomes and delivery history.
-    pub(crate) fn confirm_task_deletion(
-        &self,
-        wave_id: &WaveId,
-        issue_id: &str,
-        identifier: &str,
-    ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        tx.execute(
-            &format!(
-                "UPDATE tasks AS t SET abandoned_at=?2 WHERE t.external_issue_id=?1 AND {}",
-                durable::task_open_sql("t")
-            ),
-            params![issue_id, now_unix()],
-        )?;
-        record_task_deletion_in(&tx, wave_id, issue_id, identifier)?;
-        tx.commit()?;
         Ok(())
     }
 
@@ -819,6 +713,7 @@ impl SqliteStore {
             ],
         )?;
         durable::create_wave_work(&tx, wave.id(), created_at)?;
+        wave_definitions::import_workflows_on(&tx, wave.id().as_str(), Path::new(wave.repo()))?;
         tx.commit()?;
         Ok(())
     }
@@ -868,7 +763,7 @@ fn validate_wave_parent(
 
 fn validate_process_schema(conn: &Connection) -> StoreResult<()> {
     conn.prepare(
-        "SELECT lfid,trace_id,parent_process_lfid,started_at,completed_at,outcome,pid FROM processes LIMIT 0",
+        "SELECT id,trace_id,parent_lf_process_id,started_at,completed_at,outcome,pid FROM processes LIMIT 0",
     )?;
     Ok(())
 }
@@ -1579,7 +1474,7 @@ impl SqliteStore {
     pub fn pin_provider_session_route(
         &self,
         provider: Provider,
-        provider_session_id: &str,
+        agent_session: &AgentSessionId,
         account_id: &ProviderAccountId,
         isolated: bool,
     ) -> StoreResult<()> {
@@ -1594,7 +1489,7 @@ impl SqliteStore {
                 isolated = excluded.isolated",
             params![
                 provider.as_str(),
-                provider_session_id,
+                agent_session,
                 account_id.as_str(),
                 now_unix(),
                 isolated,
@@ -1608,14 +1503,14 @@ impl SqliteStore {
     pub fn provider_session_isolated(
         &self,
         provider: Provider,
-        provider_session_id: &str,
+        agent_session: &AgentSessionId,
     ) -> StoreResult<Option<bool>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
             .query_row(
                 "SELECT isolated FROM provider_session_accounts
                  WHERE provider = ?1 AND provider_session_id = ?2",
-                params![provider.as_str(), provider_session_id],
+                params![provider.as_str(), agent_session],
                 |row| row.get(0),
             )
             .optional()?)
@@ -1662,13 +1557,13 @@ impl SqliteStore {
     pub fn provider_session_account(
         &self,
         provider: Provider,
-        provider_session_id: &str,
+        agent_session: &AgentSessionId,
     ) -> StoreResult<Option<ProviderAccountId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row(
             "SELECT account_id FROM provider_session_accounts
              WHERE provider = ?1 AND provider_session_id = ?2 AND isolated = 1",
-            params![provider.as_str(), provider_session_id],
+            params![provider.as_str(), agent_session],
             |row| row.get::<_, String>(0),
         )
         .optional()?
@@ -1682,7 +1577,7 @@ impl SqliteStore {
         &self,
         provider: Provider,
         candidates: &[ProviderAccountId],
-        provider_session_id: Option<&str>,
+        agent_session: Option<&AgentSessionId>,
     ) -> StoreResult<Option<ProviderAccountSelection>> {
         if candidates.is_empty() {
             return Ok(None);
@@ -1697,7 +1592,7 @@ impl SqliteStore {
             |row| row.get::<_, i64>(0),
         )?;
         let selection_time = now.max(newest_selection + 1);
-        let requested = match provider_session_id {
+        let requested = match agent_session {
             Some(session_id) => transaction
                 .query_row(
                     "SELECT account_id FROM provider_session_accounts
@@ -1907,28 +1802,6 @@ impl SqliteStore {
         Ok(waves)
     }
 
-    pub(crate) fn reconcile_wave_directory(
-        &self,
-        id: &WaveId,
-        name: &str,
-        parent: Option<&WaveId>,
-    ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let repo: String =
-            tx.query_row("SELECT repo FROM waves WHERE id=?1", params![id], |row| {
-                row.get(0)
-            })?;
-        validate_wave_parent(&tx, id, name, &repo, parent)?;
-        tx.execute(
-            "UPDATE waves SET name = ?2, parent_wave_id = ?3
-             WHERE id = ?1 AND (name != ?2 OR parent_wave_id IS NOT ?3)",
-            params![id, name, parent],
-        )?;
-        tx.commit()?;
-        Ok(())
-    }
-
     pub fn create_wave(&self, wave: &Wave) -> StoreResult<()> {
         self.upsert_wave(wave)
     }
@@ -1984,7 +1857,7 @@ impl SqliteStore {
                 )));
             }
             if let Some(collision) = &update.retire_collision {
-                let blockers = Self::wave_retirement_blockers_in(&tx, collision)?;
+                let blockers = Self::wave_retirement_blockers_in(&tx, collision, &update.wave_id)?;
                 if !blockers.is_empty() {
                     return Err(StoreError::InvalidData(format!(
                         "cannot retire destination Wave {collision}: {}",
@@ -2041,16 +1914,31 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub(crate) fn wave_retirement_blockers(&self, wave_id: &WaveId) -> StoreResult<Vec<String>> {
+    pub(crate) fn wave_retirement_blockers(
+        &self,
+        wave_id: &WaveId,
+        replacement: &WaveId,
+    ) -> StoreResult<Vec<String>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        Self::wave_retirement_blockers_in(&conn, wave_id)
+        Self::wave_retirement_blockers_in(&conn, wave_id, replacement)
     }
 
     fn wave_retirement_blockers_in(
         conn: &Connection,
         wave_id: &WaveId,
+        replacement: &WaveId,
     ) -> StoreResult<Vec<String>> {
         let mut blockers = Vec::new();
+        // Independent stored Workflow edits survive retirement.
+        let differs: bool = conn.query_row(
+            "SELECT EXISTS(SELECT name,content FROM wave_workflows WHERE wave_id=?1
+                EXCEPT SELECT name,content FROM wave_workflows WHERE wave_id=?2)",
+            params![wave_id, replacement],
+            |row| row.get(0),
+        )?;
+        if differs {
+            blockers.push("stored definitions".to_string());
+        }
         let projects: i64 = conn.query_row(
             "SELECT COUNT(*) FROM projects WHERE wave_id = ?1",
             params![wave_id],
@@ -2138,17 +2026,17 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn record_process(&self, process: &crate::process::Process) -> StoreResult<()> {
+    pub fn record_process(&self, process: &crate::process::LfProcess) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "INSERT INTO processes(lfid,trace_id,parent_process_lfid,command,repo,cwd,started_at,
-                via_agent,caller_session_id,caller_provider_generation,completed_at,outcome,exit_code,signal,error,pid)
+            "INSERT INTO processes(id,trace_id,parent_lf_process_id,command,repo,cwd,started_at,
+                via_agent,caller_session_id,caller_agent_process_id,completed_at,outcome,exit_code,signal,error,pid)
              VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)
-             ON CONFLICT(lfid) DO UPDATE SET completed_at=excluded.completed_at,
+             ON CONFLICT(id) DO UPDATE SET completed_at=excluded.completed_at,
                 outcome=excluded.outcome,exit_code=excluded.exit_code,signal=excluded.signal,error=excluded.error
              WHERE processes.completed_at IS NULL AND excluded.completed_at IS NOT NULL",
-            params![process.lfid,process.trace_id,process.parent_process_lfid,process.command,process.repo,process.cwd,
-                process.started_at,process.via_agent,process.caller_session_id,process.caller_provider_generation,
+            params![process.id,process.trace_id,process.parent_lf_process_id,process.command,process.repo,process.cwd,
+                process.started_at,process.via_agent,process.caller_session_id,process.caller_agent_process_id,
                 process.completed_at,process.outcome,process.exit_code,process.signal,process.error,process.pid],
         )?;
         Ok(())
@@ -2158,7 +2046,7 @@ impl SqliteStore {
     /// is one attempt.
     pub(crate) fn record_process_within(
         &self,
-        process: &crate::process::Process,
+        process: &crate::process::LfProcess,
         wait: Duration,
     ) -> StoreResult<()> {
         let previous: u32 = {
@@ -2175,10 +2063,10 @@ impl SqliteStore {
         result
     }
 
-    pub fn process_is_recorded(&self, process_lfid: &str) -> StoreResult<bool> {
+    pub fn process_is_recorded(&self, lf_process_id: &str) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare("SELECT 1 FROM processes WHERE lfid=?1")?;
-        Ok(query.exists([process_lfid])?)
+        let mut query = conn.prepare("SELECT 1 FROM processes WHERE id=?1")?;
+        Ok(query.exists([lf_process_id])?)
     }
 }
 

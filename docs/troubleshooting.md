@@ -42,7 +42,7 @@ or inspect its cron schedule:
 
 ```bash
 lf wave status <wave> --json
-lf --wave <wave> wave/operate
+lf --wave <wave> wave-operate
 lf cron list
 ```
 
@@ -120,7 +120,7 @@ After repairing provider access, launch the Task or Project operation again:
 lf task run INF-123 --reason "provider credentials repaired"
 ```
 
-Wave planning uses finite conversations. Invoke `lf --wave <wave> wave/operate`
+Wave planning uses finite conversations. Invoke `lf --wave <wave> wave-operate`
 for another planning pass; there is no long-running Project process to resume.
 
 Other options:

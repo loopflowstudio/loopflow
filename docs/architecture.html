@@ -1371,7 +1371,7 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
 .home-page h1 { font-size: clamp(44px, 5.4vw, 80px); line-height: 1.02; letter-spacing: -.04em; }
 .home-page h2 { font-size: clamp(34px, 4vw, 54px); line-height: 1.08; letter-spacing: -.025em; }
 .home-page h3 { font-size: 18px; margin: 0 0 1em; }
-.home-page code, .home-page .eyebrow, .home-page .folio { font-family: var(--font-mono); }
+.home-page code, .home-page .eyebrow { font-family: var(--font-mono); }
 .home-page .eyebrow { font-size: 11px; line-height: 1.6; text-transform: uppercase; letter-spacing: .12em; }
 .home-page header { height: 90px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); }
 .home-page nav { display: flex; gap: 28px; align-items: center; font-size: 13px; position: static; padding: 0; border: 0; background: none; backdrop-filter: none; }
@@ -1385,10 +1385,63 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
 .home-page .button.solid:hover { background: var(--wine-hover); border-color: var(--wine-hover); }
 .home-page .actions { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
 
-.home-hero { padding: 75px 0 50px; display: grid; grid-template-columns: 1.05fr .95fr; gap: 56px; align-items: center; }
-.home-hero h1 { max-width: 820px; margin-bottom: 26px; }
-.home-hero .intro { max-width: 620px; font-size: 21px; line-height: 1.45; margin-bottom: 28px; }
-.home-hero .kicker { color: var(--burgundy); margin-bottom: 18px; }
+/* Hero: kicker, headline, one paragraph, the install command. */
+.home-hero { padding: 84px 0 20px; }
+.home-hero h1 { max-width: 980px; margin-bottom: 26px; }
+.home-hero .actions { font-size: 13px; }
+.home-hero .actions a:not(.button) { text-decoration: underline; text-underline-offset: 4px; }
+/* The engineers' page: a narrow column of plain lists. */
+.home-page .home-hero:has(.rotating) { padding-bottom: 0; }
+.home-page .reading.closing { padding: 56px 0 80px; }
+.home-page .reading.closing .eyebrow { color: var(--burgundy); margin-bottom: 14px; }
+.home-page .reading.closing .install-links { margin-top: 18px; }
+.home-page .reading { max-width: 900px; padding-top: 36px; }
+.home-page .reading h2 { font-size: clamp(30px, 3.2vw, 42px); margin: 30px 0 12px; }
+.home-page .plain { list-style: none; margin: 26px 0 0; padding: 22px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); font: 13.5px/1.7 var(--font-mono); color: #333; }
+.home-page .plain li { list-style: none; margin: 0 0 9px; padding-left: 2ch; text-indent: -2ch; }
+.home-page .plain li:last-child { margin-bottom: 0; }
+.home-page .plain li::before { content: "- "; color: var(--text-secondary); }
+.home-page .plain b { color: var(--text); font-weight: 500; }
+.home-page .plain code { display: inline; text-indent: 0; color: var(--text); }
+.home-page .plain b::after { content: ":"; }
+.home-page .more { font: 12px/1.6 var(--font-mono); color: var(--text-secondary); display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 14px 0 0; }
+.home-page .more a { text-decoration: underline; text-underline-offset: 4px; }
+.home-hero h1 + .install-row { margin-top: 34px; }
+/* One word of the headline cycles in a tinted chip; each holds a quarter of the loop. */
+.home-hero h1:has(.rotating) { font-size: clamp(30px, 4.3vw, 60px); white-space: nowrap; }
+.home-page .rotating { display: inline-grid; justify-items: center; vertical-align: baseline; overflow: hidden; padding: .04em .22em .1em; margin: 0 .04em; border-radius: .2em; background: linear-gradient(180deg, #fbf2f4, #f1dce2); box-shadow: inset 0 0 0 1px #722f371f, 0 14px 30px -18px #722f3766; }
+.home-page .rotating span { grid-area: 1 / 1; opacity: 0; animation: rotate-word 8s cubic-bezier(.3, .7, .2, 1) infinite; }
+.home-page .rotating span:nth-child(2) { animation-delay: 2s; }
+.home-page .rotating span:nth-child(3) { animation-delay: 4s; }
+.home-page .rotating span:nth-child(4) { animation-delay: 6s; }
+@keyframes rotate-word {
+    0% { opacity: 0; transform: translateY(.45em); }
+    5%, 21% { opacity: 1; transform: none; }
+    25%, 100% { opacity: 0; transform: translateY(-.45em); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .home-page .rotating span { animation: none; }
+    .home-page .rotating span:first-child { opacity: 1; }
+}
+@media (max-width: 700px) {
+    .home-hero h1:has(.rotating) { white-space: normal; font-size: 34px; }
+}
+@media (max-width: 480px) {
+    .home-page nav { gap: 11px; font-size: 12px; }
+    .home-page nav .button { padding: 13px 12px; }
+    .home-page .brand { font-size: 16px; gap: 7px; }
+    .home-page .brand img { width: 24px; }
+}
+.home-page .install-row { display: flex; align-items: stretch; max-width: 680px; background: #1c1718; border-radius: 8px; overflow: hidden; }
+.home-page .install-row .term { flex: 1; min-width: 0; border-radius: 0; padding: 14px 18px; }
+.home-page .copy { flex: none; width: auto; min-width: 84px; min-height: 44px; margin: 0; padding: 0 18px; border: 0; border-left: 1px solid #3a3233; border-radius: 0; background: none; color: #efe9e6; font: 500 12px var(--font-mono); cursor: pointer; box-shadow: none; }
+.home-page .copy:hover { background: #2a2224; }
+.home-page .copy:focus-visible { outline: 3px solid #f2a7bd; outline-offset: -4px; }
+.home-page .cost { font-size: 13px; color: var(--text-secondary); margin: 14px 0 0; max-width: 680px; }
+.home-page .cost a { text-decoration: underline; text-underline-offset: 4px; }
+
+
+
 .home-page .term { background: #1c1718; color: #efe9e6; border-radius: 8px; padding: 22px 24px; font: 13.5px/1.9 var(--font-mono); overflow-x: auto; white-space: pre; margin: 0; }
 .home-page .term .p, .home-page .term .c { color: #8f8582; }
 .home-page .term b { color: #f2a7bd; font-weight: 500; }
@@ -1400,29 +1453,7 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
 .home-page .block > .eyebrow { color: var(--burgundy); margin-bottom: 14px; }
 .home-page .block h2 { max-width: 780px; margin-bottom: 18px; }
 .home-page .block .lede { max-width: 660px; font-size: 18px; color: #333; margin-bottom: 34px; }
-.home-page .window { border: 1px solid #d9d4cc; border-radius: 10px; overflow: hidden; box-shadow: 0 30px 70px -30px #722f3755, 0 2px 6px #0001; background: #f4f0ea; }
-.home-page .window img { display: block; width: 100%; height: auto; }
 .home-page .capture-label { font: 12px/1.6 var(--font-mono); margin: 10px 0; color: var(--text-secondary); }
-.home-page .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 50px; align-items: start; margin-top: 44px; }
-.home-page .pair p { font-size: 15px; color: #333; max-width: 480px; }
-.home-page .pair .eyebrow { font-size: 11px; }
-.home-page .folio { font-size: 12px; color: var(--text-secondary); }
-.home-loopflow { display: block; width: 100%; max-width: 300px; margin: 18px 0 22px; overflow: visible; }
-.home-loopflow .rail { stroke: #c9c9c9; }
-.home-loopflow .dot { fill: white; stroke: var(--burgundy); stroke-width: 1.5; }
-.home-loopflow .dot.you { fill: var(--wine); stroke: var(--wine); }
-.home-loopflow .name { font: 500 13px var(--font-mono); fill: var(--text); }
-.home-loopflow .name.you { fill: var(--burgundy); }
-.home-loopflow .detail { font: 12px var(--font-sans); fill: var(--text-secondary); }
-.home-loopflow .edge { fill: none; stroke: var(--wine); stroke-width: 1.5; }
-.home-loopflow marker path { fill: var(--wine); }
-.home-loopflow .edge-label { font: 10px var(--font-mono); fill: var(--wine); text-transform: uppercase; letter-spacing: .08em; }
-.home-loopflow .end { fill: var(--burgundy); }
-.home-page .parts { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid var(--border); margin-top: 36px; }
-.home-page .parts article { padding: 24px 24px 6px 0; }
-.home-page .parts h3 { font-size: 16px; margin-bottom: 8px; }
-.home-page .parts p { font-size: 14px; color: var(--text-secondary); max-width: 330px; }
-.home-page .parts a { font-size: 12px; text-decoration: underline; text-underline-offset: 4px; }
 
 .home-page .work-rows { border-top: 1px solid var(--border); }
 .home-page .work-row { display: grid; grid-template-columns: 150px 1fr 1.1fr; gap: 34px; padding: 30px 0; border-bottom: 1px solid var(--border); align-items: start; }
@@ -1432,33 +1463,163 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
 .home-page .work-row .needs { font: 12px var(--font-mono); color: var(--text-secondary); }
 .home-page .needs a, .home-page .install-links a { text-decoration: underline; }
 .home-page .work-row .term { font-size: 12.5px; padding: 16px 18px; }
-.home-page .essay { max-width: 720px; }
-.home-page .essay .claim { font: 400 clamp(30px, 3.2vw, 44px)/1.15 var(--font-serif); color: var(--burgundy); letter-spacing: -.015em; margin-bottom: 28px; }
-.home-page .essay p { font-size: 18px; line-height: 1.6; margin-bottom: 20px; color: #333; }
-.home-page .start { display: grid; grid-template-columns: 1fr 1.2fr; gap: 60px; padding: 70px 0; border-top: 1px solid var(--border); margin-top: 70px; align-items: center; }
-.home-page .start h2 { margin: 8px 0 0; }
+.home-page .work-row > * { min-width: 0; }
+.home-page nav details { position: relative; }
+.home-page nav summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; min-height: 32px; }
+.home-page nav summary::-webkit-details-marker { display: none; }
+.home-page nav details { margin: 0; padding: 0; border: 0; }
+.home-page nav summary { margin: 0; color: inherit; line-height: inherit; }
+.home-page nav summary::after { content: "▾"; float: none; width: auto; height: auto; margin-inline-start: 6px; background: none; transform: none; font-size: 10px; color: var(--text-secondary); }
+.home-page nav summary:focus-visible { outline: 3px solid var(--wine); outline-offset: 5px; }
+.home-page nav .menu { position: absolute; right: 0; top: 100%; z-index: 10; min-width: 190px; display: flex; flex-direction: column; padding: 8px 16px; background: var(--bg, #fff); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 18px 40px -22px #722f3755; }
+.home-page nav .menu a { min-height: 40px; }
+.home-page nav a[aria-current] { color: var(--burgundy); }
+.home-page nav .button { min-height: 44px; padding: 13px 18px; }
+.studio-hero { padding: 86px 0 56px; }
+.studio-hero .kicker { color: var(--burgundy); margin-bottom: 18px; }
+.studio-hero h1 { max-width: 900px; margin-bottom: 26px; }
+.studio-hero .intro { max-width: 680px; font-size: 21px; line-height: 1.45; margin: 0; }
+.home-page .strip.points { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.home-page .strip.points div { font-size: 15px; padding: 24px 28px 24px 0; }
+.home-page .studio-status { padding: 26px 0 80px; }
+.home-page .efforts .work-row { grid-template-columns: 230px 1fr 1.1fr; padding: 40px 0; }
+.home-page .efforts .work-row > p:not(.tag) { font-size: 17px; }
+.home-page .efforts .work-row .eyebrow { font-size: 11px; color: var(--burgundy); }
+.home-page .efforts .work-row .needs { font-size: 12px; margin-top: 12px; }
 .home-page .install-links { display: flex; gap: 14px; flex-wrap: wrap; }
 .home-page footer { border-top: 1px solid var(--border); padding: 30px 0; display: flex; justify-content: space-between; gap: 20px; font-size: 12px; background: none; margin: 0; }
 .home-page footer a + a { margin-left: 14px; }
-/* Wide command blocks scroll inside their grid cell, never the page. */
-.home-hero > *, .home-page .pair > *, .home-page .work-row > *, .home-page .start > * { min-width: 0; }
 
 @media (max-width: 860px) {
     .home-page { padding: 0 16px; }
     .home-page header { height: 70px; }
     .home-page nav .optional { display: none; }
-    .home-hero { padding: 44px 0 34px; }
-    .home-hero, .home-page .pair, .home-page .start { grid-template-columns: 1fr; gap: 30px; }
-    .home-hero .intro { font-size: 18px; }
-    .home-page .strip { grid-template-columns: 1fr 1fr; }
-    .home-page .work-row { grid-template-columns: 1fr; gap: 14px; }
+    .home-page nav { gap: 16px; }
+    .home-hero { padding: 44px 0 36px; }
+        .home-page .install-row .term { font-size: 12px; padding: 14px; }
+    .home-page .copy { min-width: 72px; padding: 0 12px; }
+    .home-page .plain { font-size: 12.5px; }
+        .home-page .strip { grid-template-columns: 1fr 1fr; }
+    .home-page .work-row, .home-page .efforts .work-row { grid-template-columns: 1fr; gap: 14px; }
+    .studio-hero { padding: 44px 0 34px; }
+    .studio-hero .intro { font-size: 18px; }
     .home-page .block { padding: 48px 0 6px; }
-    .home-page .parts { grid-template-columns: 1fr; }
     .home-page footer { flex-wrap: wrap; }
 }
 @media (prefers-reduced-motion: reduce) {
     html { scroll-behavior: auto; }
 }
+
+/* Homepage: the app mock, the workflows card, the command card, Works with. */
+.appmock{padding-top:56px}
+.appmock .win{background:#fdfbf7;border:1px solid #d9d4cc;border-radius:12px;box-shadow:0 30px 70px -30px #722f3755,0 2px 6px #0001;display:grid;grid-template-columns:230px minmax(0,1fr);overflow:hidden}
+.appmock .side{background:#f1ece4;padding:24px 20px;border-right:1px solid #e2dcd2;font-size:13px}
+.appmock .side h4{font:400 21px var(--font-serif);color:var(--burgundy);margin:0 0 16px}
+.appmock .side p{margin:0 0 4px;color:var(--text-secondary);font-size:13px}
+.appmock .side .on{color:var(--text);font-weight:600;border-left:2px solid var(--wine);padding-left:8px;margin-left:-10px}
+.appmock .side ul{list-style:none;margin:0 0 16px;padding:0 0 0 12px}
+.appmock .side li{list-style:none;padding:3px 0;margin:0;color:var(--text-secondary);font-size:13px}
+.appmock .pane{padding:36px 40px 40px}
+.appmock .lab{font:500 11px/1.6 var(--font-mono);text-transform:uppercase;letter-spacing:.1em;color:var(--text-secondary);margin:0 0 6px}
+.appmock .obj{font:18px/1.55 var(--font-serif);color:#3a3532;max-width:62ch;margin:0 0 26px}
+.appmock .tasks{border:1px solid var(--border);border-radius:8px;background:#fff;margin:6px 0 0;padding:0;counter-reset:t}
+.appmock .tasks li{list-style:none;margin:0;counter-increment:t;display:grid;grid-template-columns:26px minmax(0,1fr);gap:10px;align-items:baseline;padding:12px 16px;border-bottom:1px solid var(--border);font-size:14.5px}
+.appmock .tasks li:last-child{border-bottom:0}
+.appmock .tasks li::before{content:counter(t);font:12px var(--font-mono);color:var(--text-secondary)}
+.appmock .tasks b{font-weight:600}
+@media (max-width:760px){.appmock .win{grid-template-columns:1fr}.appmock .side{display:none}.appmock .pane{padding:24px 18px}}
+.appmock .lab code{font:inherit;text-transform:none;letter-spacing:0;color:var(--text);background:none;padding:0}
+.appmock .wf{list-style:none;display:flex;align-items:center;gap:10px;margin:10px 0 12px;padding:22px 18px;background:#fff;border:1px solid var(--border);border-radius:8px}
+.appmock .wf li{list-style:none;margin:0;text-align:center}
+.appmock .wf .cap{font:500 11px var(--font-mono);text-transform:uppercase;letter-spacing:.1em;color:var(--text-secondary)}
+.appmock .wf .edge{flex:1 1 0;min-width:0;display:grid;gap:7px}
+.appmock .wf .edge b{font:500 13px var(--font-mono);color:var(--text)}
+.appmock .wf .edge i{display:block;height:2px;background:#b9b1a6;position:relative}
+.appmock .wf .edge i::after{content:"";position:absolute;right:-1px;top:-4px;border-left:8px solid #b9b1a6;border-top:5px solid transparent;border-bottom:5px solid transparent}
+.appmock .wf .node{flex:0 0 150px;background:linear-gradient(180deg,#fbf2f4,#f1dce2);box-shadow:inset 0 0 0 1px #722f371f;border-radius:10px;padding:12px 10px 11px;display:grid;gap:2px}
+.appmock .wf .node span{font:500 10px var(--font-mono);text-transform:uppercase;letter-spacing:.1em;color:var(--wine)}
+.appmock .wf .node b{font:400 26px/1.1 var(--font-serif);color:var(--burgundy)}
+.appmock .wf .node small{font-size:12.5px;color:#333}
+@media (max-width:900px){.appmock .wf{flex-direction:column;align-items:stretch;gap:12px}.appmock .wf .node{flex:none}.appmock .wf .edge i{width:2px;height:22px;margin:0 auto}.appmock .wf .edge i::after{right:-4px;top:auto;bottom:-1px;border-top:8px solid #b9b1a6;border-left:5px solid transparent;border-right:5px solid transparent;border-bottom:0}}
+.home-page .pair h2{max-width:900px}
+.home-page .pair .halves .more{margin:0;border:0;padding:0}
+.home-page .clihero .term .bar{display:inline-block;width:120px;height:8px;border-radius:4px;background:#3a3434;vertical-align:middle;overflow:hidden}
+.home-page .clihero .term .bar i{display:block;height:100%;background:#e06c8b;border-radius:4px}
+.home-page .home-hero .rotating{background:linear-gradient(180deg,#fdf9fa,#f8eef1);box-shadow:inset 0 0 0 1px #722f3714,0 10px 24px -20px #722f3740}
+/* A heading with five cycling words runs a ten-second cycle. */
+@media (prefers-reduced-motion: no-preference) {
+    .home-page .rotating:has(span:nth-child(5)) span { animation-name: rotate-five; animation-duration: 10s; }
+    .home-page .rotating span:nth-child(5) { animation-delay: 8s; }
+}
+@keyframes rotate-five{0%{opacity:0;transform:translateY(.45em)}4%,17%{opacity:1;transform:none}20%,100%{opacity:0;transform:translateY(-.45em)}}
+.home-page .works{padding-bottom:0}
+.home-page .belief{padding:84px 0 96px}
+.home-page .belief p{font:400 clamp(34px,4vw,54px)/1.08 var(--font-serif);letter-spacing:-.02em;color:var(--burgundy);margin:0;max-width:900px}
+.home-page .belief .get{margin-top:28px}
+.home-page .win .side h4 small{margin-left:8px;font:500 10px var(--font-mono);text-transform:uppercase;letter-spacing:.1em;color:var(--text-secondary);vertical-align:middle}
+.home-page .pair article>p.cap{font-size:13px;line-height:1.5;color:var(--text-secondary);margin:12px 4px 0}
+.home-page .home-hero .either{font-size:19px;line-height:1.5;color:#333;margin:18px 0 0;max-width:760px}
+.home-page .home-hero .get{margin-top:20px}
+.home-page .system h2{max-width:980px}
+.home-page .works{padding-bottom:88px}
+.home-page .clihero h2 code{font-size:.9em}
+.home-page .clihero article{min-width:0}
+.home-page .clihero .term{margin:0;font-size:12px;overflow-x:auto;max-width:100%}
+.home-page .pair .halves{margin-top:22px!important;align-items:start}
+.home-page .get{display:flex;flex-wrap:wrap;align-items:center;gap:12px 16px;margin-top:26px}
+.home-page .get .or{font:500 11px var(--font-mono);text-transform:uppercase;letter-spacing:.1em;color:var(--text-secondary)}
+.home-page .get .install-row{margin:0;flex:0 1 auto}
+.home-page .get .term{margin:0}
+.home-page .home-hero .cost{margin:12px 0 6px}
+.home-page .pair .halves article{padding:0!important;margin:0!important}
+.pair .halves{border-top:0!important;padding-top:0!important;margin-top:44px!important;align-items:center}
+.pair{padding-top:64px}
+.pair h2{font-size:clamp(30px,3.2vw,42px);margin:0 0 14px}
+.pair .halves{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:36px 56px;margin:34px 0 22px;padding-top:30px;border-top:1px solid var(--border)}
+.pair article>p:not(.eyebrow){font-size:16px;line-height:1.6;color:#333;margin:0 0 20px}
+.pair .card{background:#fdfbf7;border:1px solid #d9d4cc;border-radius:10px;padding:18px 20px;box-shadow:0 18px 40px -26px #722f3766}
+.pair .card p{margin:0}
+.pair .wfs{list-style:none;margin:0;padding:0}
+.pair .wfs li{list-style:none;margin:0;padding:12px 0;border-bottom:1px solid var(--border)}
+.pair .wfs li:first-child{padding-top:0}
+.pair .wfs li:last-child{border-bottom:0;padding-bottom:0}
+.pair .wfs code{font:500 13px var(--font-mono);color:var(--text);background:none;padding:0}
+.pair .wfs .line{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:8px 0 6px;font:11.5px var(--font-mono);color:var(--text-secondary)}
+.pair .wfs .line i{font-style:normal;text-transform:uppercase;letter-spacing:.08em;font-size:10.5px}
+.pair .wfs .line b{font:500 11.5px var(--font-mono);padding:3px 9px;border-radius:6px;background:linear-gradient(180deg,#fbf2f4,#f1dce2);box-shadow:inset 0 0 0 1px #722f371f;color:var(--burgundy)}
+.pair .wfs .line b::after{content:" →";color:var(--text-secondary);font-weight:400}
+.pair .wfs small{font-size:13.5px;color:#444}
+@media (max-width:820px){.pair .halves{grid-template-columns:1fr}}
+.works{padding-top:56px}
+.home-page .works .eyebrow{color:var(--burgundy);margin-bottom:14px}
+.works ul{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:0;border-top:1px solid var(--border);border-bottom:1px solid var(--border)}
+.works li{list-style:none;margin:0;padding:18px 18px 18px 0;display:grid;gap:4px}
+.works b{font:500 15px var(--font-sans)}
+.works b a{color:var(--text);text-decoration:underline;text-decoration-color:#b9b1a6;text-underline-offset:4px}
+.works b a::after{content:" ↗";font-size:.8em;color:var(--text-secondary)}
+.works b a:hover{color:var(--wine);text-decoration-color:var(--wine)}
+.works span{font-size:13px;line-height:1.5;color:var(--text-secondary)}
+.appmock{padding-top:36px}
+.appmock .slot{display:flex;justify-content:space-between;gap:6px 24px;flex-wrap:wrap;margin:0;padding:10px 16px;font:500 11px/1.6 var(--font-mono);text-transform:uppercase;letter-spacing:.1em;color:var(--burgundy);background:#f4f0ea;border:1px solid #d9d4cc;border-bottom:0;border-radius:12px 12px 0 0}
+.appmock .slot span+span{color:var(--text-secondary)}
+.appmock .win{border-radius:0 0 12px 12px}
+.appmock .pane h2{font:400 34px/1.1 var(--font-serif);color:var(--text);margin:0 0 8px}
+.appmock .side .wait::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:#c0264f;margin:0 7px 1px -13px}
+.appmock .wf{align-items:flex-start;padding:22px 18px}
+.appmock .wf .cap{padding-top:24px;display:grid;gap:10px;justify-items:center}
+.appmock .wf .edge{gap:0;justify-items:center}
+.appmock .wf .edge b{line-height:24px}
+.appmock .wf .edge i{width:100%;margin:8px 0 14px}
+.appmock .wf .edge pre{margin:0;padding:0;background:none;text-align:left;font:11.5px/1.65 var(--font-mono);color:#444;white-space:pre;overflow:visible}
+.appmock .wf .node{background:none;box-shadow:none;padding:0;gap:6px;justify-items:center}
+.appmock .wf .node div{width:100%;height:68px;display:grid;align-content:center;gap:1px;background:linear-gradient(180deg,#fbf2f4,#f1dce2);box-shadow:inset 0 0 0 1px #722f371f;border-radius:10px}
+.appmock .t6 li{grid-template-columns:26px minmax(0,1fr) auto auto;align-items:center}
+.appmock .t6 .pos{font:500 11px var(--font-mono);padding:3px 9px;border-radius:20px;background:#ece8e0;color:#5a524a;white-space:nowrap}
+.appmock .t6 .pos.w{background:#f6dfe7;color:var(--wine)}
+.appmock .t6 .pos.ok{background:#dcefe0;color:#1f6b36}
+.appmock .t6 .id{font:12px var(--font-mono);color:var(--text-secondary)}
+.appmock .t6 .done b{font-weight:400;color:var(--text-secondary)}
+@media (max-width:900px){.appmock .wf{align-items:stretch}.appmock .wf .cap{padding-top:0}.appmock .wf .edge i{width:2px;margin:8px auto}.appmock .t6 li{grid-template-columns:22px minmax(0,1fr)}.appmock .t6 .pos{grid-column:2;justify-self:start}.appmock .t6 .id{display:none}}
 
 /* Portable-only additions. The shared docs system lives in website/static/style.css. */
 
@@ -1508,7 +1669,7 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
 <a href="https://loopflow.studio/" class="nav-logo"><img src="https://loopflow.studio/static/logo.svg" alt="Loopflow"></a><a href="https://loopflow.studio/" class="nav-title">Loopflow</a>    </div>
     <ul class="nav-links">
       <li>
-<a href="https://loopflow.studio/#flows">Flows</a>      </li>
+<a href="https://loopflow.studio/cli#flows">Flows</a>      </li>
       <li>
 <a href="https://loopflow.studio/docs">Docs</a>      </li>
       <li>
@@ -1556,7 +1717,7 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
           <p class="docs-deck">A developer's path through the whole system</p>
         </header>
 <p>Loopflow records commands, preserves agent conversations, and drives Flows.
-Process records an lf command and its outcome; AgentSession records a conversation; a Flow is one lf process
+Process records an lf command and its outcome; LfSession records a conversation; a Flow is one lf process
 and the step processes it starts.</p>
 <p>This guide specifies the accepted model. The reference owns
 <a href="https://loopflow.studio/architecture/reference#cutover-status">cutover status</a>, the remaining work
@@ -1569,25 +1730,25 @@ lives in <a href="https://loopflow.studio/architecture/reference">Architecture R
 <pre tabindex="0"><code class="language-bash">lf implement
 </code></pre>
 <p>That command discovers <code>implement</code>, assembles its context, chooses a provider,
-records its Process, reserves an AgentSession, captures the input, then launches the
+records its Process, reserves an LfSession, captures the input, then launches the
 provider. It needs no Wave, Project, Task, or daemon. The conversation persists
-after that command exits; a later command can connect to the same AgentSession.</p>
+after that command exits; a later command can connect to the same LfSession.</p>
 <pre tabindex="0"><code class="language-text">request
   |
   v
 lf CLI --&gt; Skill discovery --&gt; prompt --&gt; provider route --&gt; harness
                                                           |
                                                           v
-                                               AgentSession history
+                                               LfSession history
                                                + immutable input/output artifacts
 </code></pre>
 <p>Before the provider starts, the current Machine has the conversation reservation
-and its immutable input. SQLite owns identity, attribution, driver authority and
+and its immutable input. SQLite owns identity, attribution, attachment authority and
 history references; payload files retain large captured inputs and output.
 Admission failure stops before provider launch. General command logging has a
 different boundary: unavailable/bootstrap stores leave explicitly unrecorded
 Processes rather than bypassing installation authority to create a receipt.</p>
-<p>AgentSession history records provider outcomes, retries and usage. Process records
+<p>LfSession history records provider outcomes, retries and usage. Process records
 the command's outcome. A provider can finish successfully before a later command
 operation fails; neither result overwrites the other. Missing telemetry stays
 missing. The <a href="https://loopflow.studio/architecture/reference#core-models-and-apis">execution contract</a>
@@ -1609,12 +1770,12 @@ defines these ownership boundaries.</p>
 </tr>
 <tr>
 <td>Find the Skill</td>
-<td><a href="https://github.com/loopflowstudio/loopflow/blob/main/rust/loopflow/src/engine/skill_catalog.rs"><code>engine/skill_catalog.rs</code></a></td>
+<td><a href="https://github.com/loopflowstudio/loopflow/blob/main/rust/loopflow/src/skills/catalog.rs"><code>skills/catalog.rs</code></a></td>
 <td>One selected Skill source</td>
 </tr>
 <tr>
 <td>Assemble context</td>
-<td><a href="https://github.com/loopflowstudio/loopflow/blob/main/rust/loopflow/src/engine/prompt.rs"><code>engine/prompt.rs</code></a></td>
+<td><a href="https://github.com/loopflowstudio/loopflow/blob/main/rust/loopflow/src/prompt/mod.rs"><code>prompt/mod.rs</code></a></td>
 <td>System and task prompts</td>
 </tr>
 <tr>
@@ -1630,7 +1791,7 @@ defines these ownership boundaries.</p>
 <tr>
 <td>Record command and conversation evidence</td>
 <td><a href="https://github.com/loopflowstudio/loopflow/blob/main/rust/loopflow/src/journal"><code>journal/</code></a> and the store</td>
-<td>Process completion, AgentSession history and immutable payloads</td>
+<td>Process completion, LfSession history and immutable payloads</td>
 </tr>
 </tbody>
 </table>
@@ -1704,12 +1865,12 @@ task
 
 ops/chapter.rs                deterministic chapter rotation
 ops/task.rs                   Task launch: a fresh Flow in the Task checkout
-lf/commands/flow.rs           Flow driver: one process per Flow
+lf/commands/flow.rs           Flow process: one process per Flow
 
-execution kernel: engine/ + harness/ + command and conversation history
+execution kernel: flow/ + agent/ + prompt/ + harness/ + command and conversation history
 composition surfaces: lf/ + bin/
 </code></pre>
-<p><code>work</code> never imports the Flow driver. The execution kernel works without either
+<p><code>work</code> never imports the Flow runner. The execution kernel works without either
 layer and never loads Work. CLI callers resolve Work identity and Wave memory,
 then pass ordinary launch inputs into the kernel.</p>
 <p>Release delivery also separates proof from authority:</p>
@@ -1753,7 +1914,7 @@ user / agent --&gt; lf CLI --------+----------+-----------+
               discovery / prompt / route / harness
                               |
                               v
-                        Process / AgentSession
+                        Process / LfSession
                               |
                               v
                   status / roadmap / usage / app
@@ -1772,10 +1933,10 @@ ledger.</p>
               `-- Task        identity, worktree, PR and every Flow process for it
 
 Process                          one actual lf process; immutable causal parent
-AgentSession                  one conversation; nullable current driver Process
+LfSession                  one conversation; nullable attached LfProcess
   `-- history                 provider starts, outcomes, retries and usage
 Flow                          one lf process; cursor in its memory, graph in FlowProcess
-  `-- step processes              plain commands; the driver records each one's node
+  `-- step processes              plain commands; the Flow process records each one's node
 </code></pre>
 <table tabindex="0">
 <thead>
@@ -1802,14 +1963,14 @@ Flow                          one lf process; cursor in its memory, graph in Flo
 <td><code>processes</code></td>
 </tr>
 <tr>
-<td>AgentSession</td>
-<td>An interactive or headless conversation across drivers and native reconnection</td>
+<td>LfSession</td>
+<td>An interactive or headless conversation across attachments and native reconnection</td>
 <td><code>agent_sessions</code>, subordinate history and provider-native conversation</td>
 </tr>
 <tr>
 <td>Running Flow</td>
-<td>One driver process and the steps it starts, including taskless execution</td>
-<td>The driver Process and its child step processes in <code>processes</code></td>
+<td>One Flow process and the steps it starts, including taskless execution</td>
+<td>The Flow process and its child step processes in <code>processes</code></td>
 </tr>
 <tr>
 <td>Wave</td>
@@ -1848,31 +2009,31 @@ Flow                          one lf process; cursor in its memory, graph in Flo
 </tr>
 </tbody>
 </table>
-<p>An AgentSession keeps its ID, name, feedback and native conversation when its
+<p>An LfSession keeps its ID, name, feedback and native conversation when its
 command process changes. Its <code>interactive</code> field is independent of purpose,
 Flow membership and completion. Default conversation views show interactive
 Sessions; explicit filters expose headless and completed history. Large captured
 payloads remain files, but readers select and page rows before opening them.</p>
-<p>Connect uses the live engine when possible. Passive display acquires no claim.
-Transferring the conversation driver revokes the old client's ability to start
+<p>Connect uses the live AgentProcess when possible. Passive display acquires no claim.
+Transferring the attachment revokes the old client's ability to start
 or steer turns and mutate Session state, including queued writes. It does not
-replace the provider generation or interrupt an existing turn. Client replacement
-leaves the engine alive and never authorizes killing a shared engine
-for one thread. Engine PID, client PID and conversation driver are distinct.</p>
+replace the AgentProcess or interrupt an existing turn. Client replacement
+leaves the AgentProcess alive and never authorizes killing a shared one
+for one thread. AgentProcess PID, client PID and attached LfProcess are distinct.</p>
 <p>Process ancestry records the actual lf caller. A direct child names its parent's
-Process; an agent-issued child also records <code>via_agent</code> and AgentSession provenance.
-The provider's generation resolves to the current driver at child admission.
+Process; an agent-issued child also records <code>via_agent</code> and LfSession provenance.
+The provider's AgentProcess resolves to its attached LfProcess at child admission.
 A delayed command from a replaced provider retains historical provenance; old
 Process parents are never rewritten. Causal ancestry grants no control authority.</p>
 <p>Every Flow naming a Task, or run in its checkout, is equally its work;
 none is privileged. <code>task run</code> always runs a fresh one.
-Taskless and Task-owned Flows use the same driver. It holds the compiled graph
+Taskless and Task-owned Flows use the same Flow runner. The Flow process holds the compiled graph
 and cursor in memory; template composition compiles into the graph, and loop
 passes are positions in it. Each step is a real child Process whose argv carries
 the Flow name, launch sequence and position. A step's result is how its process
 exited; a deciding or routing step also answers through the Session turn its
 Process captured. Mechanical work creates no agent conversation. A Session reaches
-its Flow through the step Process that captured its input. A killed driver leaves
+its Flow through the step Process that captured its input. A killed Flow process leaves
 its Processes as history; nothing resumes it, and its caller launches fresh work.</p>
 <p>Task implies Wave. Constructors fill omitted ancestors and reject mismatches.
 Bind fills an unassigned conversation's Task once. CLI states the permanent
@@ -1887,7 +2048,7 @@ prove untouched backlog. Rotation converges from fresh Linear facts using the
 explicit target name and stable Project identities. A partially rotated repository
 must be retryable; unrelated competing plans remain unresolved.</p>
 <p>The <a href="https://loopflow.studio/architecture/reference#core-models-and-apis">reference</a> owns the field and
-write contracts and the current-state conversion boundary. Process and AgentSession
+write contracts and the current-state conversion boundary. Process and LfSession
 are the execution owners; Run has no separate lifecycle.</p>
 <h2 id="follow-the-common-paths">Follow the common paths<a class="anchor-link" href="#follow-the-common-paths" title="Link to this section">#</a></h2>
 <h3 id="direct-work">Direct work<a class="anchor-link" href="#direct-work" title="Link to this section">#</a></h3>
@@ -1905,28 +2066,28 @@ lf pr publish
 lf submit
 lf task status INF-123 --json
 </code></pre>
-<p><code>prepare</code> creates or reuses tracked Task Work, its one worktree, and the active
-serial PR identity. It starts no Task execution. Each <code>--task</code> command
-starts an independent AgentSession in that worktree; several may overlap and write distinct
+<p><code>checkout</code> creates or reuses tracked Task Work and its checkout placement
+without starting execution. Publication creates its optional, sole PR. Each <code>--task</code> command
+starts an independent LfSession in that worktree; several may overlap and write distinct
 scratch paths. Any caller may then use the ordinary Work and delivery commands.
 Those commands act on delivery facts, not on Flow-driving authority. <code>submit</code> and <code>land</code> therefore work the same whether the Task was pursued by a
-Task Flow, piecemeal helper AgentSessions, or another system.</p>
+Task Flow, piecemeal helper LfSessions, or another system.</p>
 <h3 id="task-flows">Task Flows<a class="anchor-link" href="#task-flows" title="Link to this section">#</a></h3>
-<pre tabindex="0"><code class="language-bash">lf --wave product wave/operate        # one finite planning pass
+<pre tabindex="0"><code class="language-bash">lf --wave product wave-operate        # one finite planning pass
 lf task run INF-123
-lf --wave &lt;wave&gt; wave/operate &quot;ship invoices first&quot;
+lf --wave &lt;wave&gt; wave-operate &quot;ship invoices first&quot;
 lf wave status product
 </code></pre>
 <p><code>task run</code> places the Task, then runs a fresh Flow in its checkout exactly as
 <code>lf --task ISSUE run FLOW</code> does, returning when the Flow ends; it never
 continues an earlier one. Repository rotation converges every Wave on the
 requested Project name, preserving active Task identity and execution. Direct
-questions and helpers use attributed AgentSessions without gaining Flow
+questions and helpers use attributed LfSessions without gaining Flow
 authority. Flows hold autonomous steps only; review happens in the Task
 conversation.</p>
 <h3 id="another-machine">Another machine<a class="anchor-link" href="#another-machine" title="Link to this section">#</a></h3>
 <pre tabindex="0"><code class="language-bash">lf --machine build-home session list --json
-lf --machine build-home --wave product wave/operate
+lf --machine build-home --wave product wave-operate
 </code></pre>
 <p>The origin transports one command. The target resolves its own Machine state and
 runs the same <code>lf</code>. Reads are local unless this hop is explicit.</p>

@@ -4,6 +4,7 @@ pub mod activation;
 pub(crate) mod identity;
 pub mod selection;
 
+use crate::id::AgentSessionId;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -400,14 +401,14 @@ impl ProviderAccountRoute {
 
     pub(crate) async fn pin_session(
         &self,
-        provider_session_id: &str,
+        agent_session: &AgentSessionId,
     ) -> Result<(), ProviderAccountError> {
         match &self.login {
             AccountLogin::Stored { store, .. } => {
                 store
                     .pin_provider_session_route(
                         self.provider,
-                        provider_session_id,
+                        agent_session,
                         &self.account_id,
                         matches!(self.home, RouteHome::Isolated),
                     )
@@ -434,10 +435,10 @@ impl ProviderAccountRoute {
 
     pub(crate) fn record_process_blocking(
         &self,
-        provider_session_id: Option<String>,
+        agent_session: Option<AgentSessionId>,
         signal: Option<RateLimitSignal>,
     ) -> Result<(), ProviderAccountError> {
-        if provider_session_id.is_none() && signal.is_none() {
+        if agent_session.is_none() && signal.is_none() {
             return Ok(());
         }
         _run_blocking_account(self.provider, "record", move |runtime| {
@@ -445,8 +446,8 @@ impl ProviderAccountRoute {
                 if let Some(signal) = signal {
                     self.record_rate_limit(&signal).await?;
                 }
-                if let Some(provider_session_id) = provider_session_id {
-                    if let Err(error) = self.pin_session(&provider_session_id).await {
+                if let Some(agent_session) = agent_session {
+                    if let Err(error) = self.pin_session(&agent_session).await {
                         tracing::warn!(%error, "failed to pin provider session account");
                     }
                 }
@@ -704,21 +705,21 @@ fn link_shared_path(_source: &Path, _target: &Path) -> Result<(), ProviderAccoun
 #[cfg(test)]
 pub(crate) async fn resolve_provider_account(
     provider: Provider,
-    provider_session_id: Option<&str>,
+    agent_session: Option<&AgentSessionId>,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
-    resolve_provider_account_exact(provider, provider_session_id, None).await
+    resolve_provider_account_exact(provider, agent_session, None).await
 }
 
 pub(crate) async fn resolve_provider_account_exact(
     provider: Provider,
-    provider_session_id: Option<&str>,
+    agent_session: Option<&AgentSessionId>,
     exact_account_id: Option<&ProviderAccountId>,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
     ensure_supported(provider)?;
     let store = route_store().await?;
     // A conversation resumes in the home it started in; a new one follows the
     // launch's mode.
-    let recorded = match (&store, provider_session_id) {
+    let recorded = match (&store, agent_session) {
         (Some(store), Some(session_id)) => {
             store
                 .provider_session_isolated(provider, session_id)
@@ -733,7 +734,7 @@ pub(crate) async fn resolve_provider_account_exact(
     if !selection::AccountSelection::from_env()?.is_default() {
         return resolve_selected_provider_account(
             provider,
-            provider_session_id,
+            agent_session,
             exact_account_id,
             store,
             isolated,
@@ -807,7 +808,7 @@ pub(crate) async fn resolve_provider_account_exact(
     }
     let selection = if isolated {
         store
-            .select_provider_account(provider, &eligible, provider_session_id)
+            .select_provider_account(provider, &eligible, agent_session)
             .await?
     } else {
         select_shared_account(&store, provider, &eligible).await?
@@ -897,7 +898,7 @@ async fn select_shared_account(
 
 async fn resolve_selected_provider_account(
     provider: Provider,
-    provider_session_id: Option<&str>,
+    agent_session: Option<&AgentSessionId>,
     exact_account_id: Option<&ProviderAccountId>,
     local_store: Option<SharedStore>,
     isolated: bool,
@@ -905,7 +906,7 @@ async fn resolve_selected_provider_account(
     let repo_id = current_repo_id()?;
     let Some(mut candidates) = ordered_selected_candidates(
         provider,
-        provider_session_id,
+        agent_session,
         exact_account_id,
         repo_id.as_ref(),
         local_store.as_ref(),
@@ -933,7 +934,7 @@ async fn resolve_selected_provider_account(
                 .select_provider_account(
                     provider,
                     std::slice::from_ref(&candidate.account.account_id),
-                    provider_session_id,
+                    agent_session,
                 )
                 .await?
                 .is_none()
@@ -942,7 +943,7 @@ async fn resolve_selected_provider_account(
         }
         let operator_home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
         ensure_account_home_at(&operator_home, home, provider)?;
-        let resumed = match provider_session_id {
+        let resumed = match agent_session {
             Some(session_id) => store
                 .provider_session_account(provider, session_id)
                 .await?
@@ -993,7 +994,7 @@ fn active_candidate(
 
 async fn ordered_selected_candidates(
     provider: Provider,
-    provider_session_id: Option<&str>,
+    agent_session: Option<&AgentSessionId>,
     exact_account_id: Option<&ProviderAccountId>,
     repo_id: Option<&RepoId>,
     local_store: Option<&SharedStore>,
@@ -1100,7 +1101,7 @@ async fn ordered_selected_candidates(
         });
     }
 
-    if let Some(session_id) = provider_session_id {
+    if let Some(session_id) = agent_session {
         let local_pin = match &local_store {
             Some(store) => store.provider_session_account(provider, session_id).await?,
             None => None,
@@ -1308,13 +1309,13 @@ pub(crate) async fn provider_route_account_ids(
 
 pub(crate) fn resolve_provider_account_exact_blocking(
     provider: Provider,
-    provider_session_id: Option<String>,
+    agent_session: Option<AgentSessionId>,
     exact_account_id: Option<ProviderAccountId>,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
     _run_blocking_account(provider, "route", move |runtime| {
         runtime.block_on(resolve_provider_account_exact(
             provider,
-            provider_session_id.as_deref(),
+            agent_session.as_ref(),
             exact_account_id.as_ref(),
         ))
     })
@@ -1811,7 +1812,7 @@ mod account_first_tests {
     use std::ffi::OsString;
     use std::sync::Arc;
 
-    use base64::Engine;
+    use base64::prelude::*;
     use tempfile::tempdir;
 
     use super::*;
@@ -1846,7 +1847,7 @@ mod account_first_tests {
         if provider == Provider::Codex {
             let account_home = home.join(account_id);
             fs::create_dir_all(&account_home).unwrap();
-            let claims = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(
+            let claims = BASE64_URL_SAFE_NO_PAD.encode(
                 serde_json::json!({"email":format!("{account_id}@example.com"), "sub":account_id})
                     .to_string(),
             );
@@ -1891,7 +1892,7 @@ mod account_first_tests {
         let write = |account: &ProviderAccount, email: &str| {
             let home = account.home.as_ref().unwrap();
             fs::create_dir_all(home).unwrap();
-            let claims = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            let claims = BASE64_URL_SAFE_NO_PAD
                 .encode(serde_json::json!({"email":email, "sub":email}).to_string());
             fs::write(home.join("auth.json"), serde_json::json!({"tokens":{"access_token":"fixture", "id_token":format!("h.{claims}.s")}}).to_string()).unwrap();
         };
@@ -2145,19 +2146,19 @@ mod account_first_tests {
             .await
             .unwrap();
 
-        let mut dynamic = crate::engine::AgentConfig {
+        let mut dynamic = crate::agent::AgentConfig {
             agent: Some("codex".to_string()),
-            ..crate::engine::AgentConfig::default()
+            ..crate::agent::AgentConfig::default()
         };
-        crate::engine::agent::pin_provider_account_id_blocking(&mut dynamic).unwrap();
+        crate::agent::pin_provider_account_id_blocking(&mut dynamic).unwrap();
         assert_eq!(dynamic.provider_account_id, Some(first.account_id));
 
-        let mut exact = crate::engine::AgentConfig {
+        let mut exact = crate::agent::AgentConfig {
             agent: Some("codex".to_string()),
             provider_account_id: Some(requested.account_id.clone()),
-            ..crate::engine::AgentConfig::default()
+            ..crate::agent::AgentConfig::default()
         };
-        crate::engine::agent::pin_provider_account_id_blocking(&mut exact).unwrap();
+        crate::agent::pin_provider_account_id_blocking(&mut exact).unwrap();
         assert_eq!(exact.provider_account_id, Some(requested.account_id));
     }
 
@@ -2294,7 +2295,12 @@ mod account_first_tests {
             .await
             .unwrap();
         store
-            .pin_provider_session_route(Provider::Codex, "session", &second.account_id, true)
+            .pin_provider_session_route(
+                Provider::Codex,
+                &"session".into(),
+                &second.account_id,
+                true,
+            )
             .await
             .unwrap();
 
@@ -2302,7 +2308,7 @@ mod account_first_tests {
             .select_provider_account(
                 Provider::Codex,
                 &[first.account_id, second.account_id.clone()],
-                Some("session"),
+                Some(&"session".into()),
             )
             .await
             .unwrap()
@@ -2840,7 +2846,7 @@ mod account_first_tests {
             .unwrap();
         let mut command = Command::new("codex");
         let switched = route.launch_as(&mut command).await.unwrap();
-        route.pin_session("conversation").await.unwrap();
+        route.pin_session(&"conversation".into()).await.unwrap();
 
         assert!(switched.is_none());
         assert_eq!(launch_home(&command), Some(Some(temp.path().join("first"))));
@@ -2848,7 +2854,7 @@ mod account_first_tests {
 
         // Resumed from a shared launch, it returns to the home it started in.
         set_isolation(false);
-        let resumed = resolve_provider_account(Provider::Codex, Some("conversation"))
+        let resumed = resolve_provider_account(Provider::Codex, Some(&"conversation".into()))
             .await
             .unwrap()
             .unwrap();
@@ -2868,11 +2874,11 @@ mod account_first_tests {
             .await
             .unwrap()
             .unwrap();
-        route.pin_session("conversation").await.unwrap();
+        route.pin_session(&"conversation".into()).await.unwrap();
         assert!(activate(&store, Provider::Codex, "second", &native).await);
 
         set_isolation(true);
-        let resumed = resolve_provider_account(Provider::Codex, Some("conversation"))
+        let resumed = resolve_provider_account(Provider::Codex, Some(&"conversation".into()))
             .await
             .unwrap()
             .unwrap();
@@ -2883,11 +2889,14 @@ mod account_first_tests {
 
         // The account it began under is history: resuming does not switch back.
         let began = parse_account_id("first").unwrap();
-        let resumed =
-            resolve_provider_account_exact(Provider::Codex, Some("conversation"), Some(&began))
-                .await
-                .unwrap()
-                .unwrap();
+        let resumed = resolve_provider_account_exact(
+            Provider::Codex,
+            Some(&"conversation".into()),
+            Some(&began),
+        )
+        .await
+        .unwrap()
+        .unwrap();
         assert_eq!(resumed.account_id().as_str(), "second");
     }
 
@@ -3011,7 +3020,7 @@ mod inspection_tests {
     use std::fs;
     use std::sync::Arc;
 
-    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+    use base64::prelude::*;
 
     use crate::profile::{EmailAddress, ProviderRoute, RouteScope};
     use crate::provider_account::{inspect_provider_route, new_account};
@@ -3043,7 +3052,7 @@ mod inspection_tests {
         for id in ["strained", "healthy", "cooling"] {
             let home = temp.path().join(id);
             fs::create_dir_all(&home).unwrap();
-            let claims = URL_SAFE_NO_PAD.encode(
+            let claims = BASE64_URL_SAFE_NO_PAD.encode(
                 serde_json::json!({"email": format!("{id}@example.com"), "sub": id}).to_string(),
             );
             fs::write(

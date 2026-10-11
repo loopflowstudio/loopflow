@@ -7,14 +7,6 @@ use crate::durable::{
 use super::{run_sqlite, Store, StoreResult};
 
 impl Store {
-    pub async fn begin_task_abandon(&self, task_id: &TaskId) -> StoreResult<()> {
-        let task_id = task_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.begin_task_abandon(&task_id)
-        })
-        .await
-    }
-
     pub(crate) async fn task_issue_identifier(
         &self,
         external_issue_id: &str,

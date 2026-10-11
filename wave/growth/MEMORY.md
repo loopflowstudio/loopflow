@@ -89,7 +89,7 @@ canonical ownership stays in reference/help. Keep `wt`, `top` and `ps`; `mon`
 is a derived prefix. The newest selectors are `--task` / `--wt` for location
 and `--wave` for context and identity, with no `--as` alias.
 
-LOO-338 now integrates the landed Exec/AgentSession/FlowSession and Account
+LOO-338 now integrates the landed Exec/LfSession/FlowSession and Account
 models. Monitor separates live processes, recorded outcomes and missing
 observations; active conversation streaming, raw/final Session evidence, usage
 and historical Work queries retain distinct readers. Account and route each
@@ -221,6 +221,54 @@ Linux despite passing on macOS. An explicit 44px minimum and fallback-font
 coverage preserve the touch target across platforms; run the website suite
 after the final layout edit.
 
+## Studio pages and hero (2026-10-08, LOO-438)
+
+Jack Heart replaced the homepage headline with "A software engineering CLI for
+your agents", superseding "A command line for great software engineering." The
+label and subline above and below it are unchanged. He kept the product page
+at the root ("loopflow.studio should basically implicitly mean /loopflow") and
+added a studio bar, a company page and short pages for Etude and Fantasia, in
+the order Loopflow, Etude, Fantasia. The company page says Etude is what is
+sold, Loopflow is the tool for building it, and Fantasia is the research that
+drives both; this supersedes "The site does not state this plan" below.
+Loopflow stays free. Etude's page says only that it is being built. Copy on
+those pages beyond Jack's quoted lines is draft until he approves it.
+
+Later the same day Jack reshaped the homepage into two sections named by their
+user: "For your agents" (the terminal; "Give your agents the tools to do things
+the right way.") and "For you" (the Mac app, or cmux or herdr; "Stay in flow
+while you work with agents."). The subline gained a first sentence saying what
+the CLI does for agents. He removed the "Why it exists" section and the second
+header: one top bar carries a Company menu (Loopflow Studio, Etude, Fantasia,
+About). The organizing system is described plainly and not sold: "Our
+organization system is not special and shoudlnt be sold as such." This
+supersedes the October 7 section order above.
+
+Still October 8, Jack chose a structure borrowed from herdr's and cmux's pages
+(numbered one-sentence claims, an FAQ, a closing install) and then reversed the
+order: "lets go back to leading with the desktop app. when sellign the vision
+of loopflow, we should show the app in its fullness. then we can lean into the
+terminal stuff later on." The page opens with the Mac capture at full width,
+then For you, then For your agents. He cut a "Where it sits" section that
+stacked Loopflow over the coding agent and the terminal. The headline "Build
+software by conducting agents in harmony." is his candidate, asked as a
+question and not yet confirmed; "A software engineering CLI for your agents."
+heads the terminal section.
+
+Later still he split the audience across two pages. The main page speaks to
+anyone: "Loopflow lets anyone craft software," what you need (a coding agent
+and GitHub), and guided workflows that produce "high quality software, not
+slop." `/cli` speaks to engineers: "Loopflow is the CLI for software
+engineering," argued through the data model and commands. There Loopflow does
+not compete on the Mac app: "we work wherever you work. Use as much as you
+want. Change whatever you want." This supersedes both headline candidates above.
+
+On October 9 he rewrote `/cli` for people who already use a terminal such as
+cmux: plain lists, sessions first ("an agent launcher and session manager"),
+then project manager, then Flows; no Mac app on that page. Its headline became
+"lf is the CLI for [writing, running, sharing, studying] agent workflows," with
+the one word cycling, replacing "the CLI for software engineering."
+
 ## Earlier copy decisions (2026-09-26)
 
 Word for word: "AI can build a lot of software fast. It can also spend all
@@ -301,3 +349,36 @@ list; which item each one carries is read from its title, not confirmed.
   what each is shown.
 - "Instrument" also names a measurement in the product ("metric
   instruments").
+
+## Homepage shipped 2026-10-10 (LOO-438)
+
+Jack Heart approved this page after twelve prototypes in one session and asked
+for it to ship. It supersedes the October 7 and 8 homepage where they differ.
+Wording in quotes is his.
+
+- The reader already runs a coding agent. "Im not I really want to compete
+  with Replit."
+- The first line names Loopflow and coding agents in plain software words;
+  the musical image comes second. Header: "Loopflow is how you [design,
+  implement, demo, release, study] software with agents." Under it: "Conduct
+  an orchestra of coding agents and hear every part clearly." The cycling
+  words "have to be the software words".
+- The idea underneath is "scaling with the person still at the center". The
+  page speaks to individuals, including those inside large companies:
+  adoption is "from the bottom up". "Scale yourself." closes the page.
+- "Waves" is a musical word. Section heading: "Arrange your coding sessions
+  around sustaining waves and resolving tasks." "task" is lower case, "a
+  common place word, not Our Word".
+- His three paragraphs under that heading stay as he wrote them.
+- `lf` gets its own section: "the workflow CLI for shipping software with
+  coding agents", shown without Task commands ("old school… lf wt create").
+- The page writes ahead of the product: "Just write to the future. Be the
+  light that pulls us forward." It shows `lf graph`, `lf usage --wt` and
+  account, usage and monitor output that `lf` does not print yet. The
+  pictures are drawn; "im not worried about the fake screenshots".
+- Rejected along the way: "Build something you can actually ship to users.",
+  a feature list on this page ("more the cli page"), extended instrument
+  and orchestra metaphors, a Scale / Play / Craft section, "Play at scale",
+  and cycling words drawn from music.
+- Open: a real capture or video on a legible Kata copy in place of the drawn
+  app; whether Flow is renamed Graph in `lf`.

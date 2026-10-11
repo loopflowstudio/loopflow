@@ -109,7 +109,7 @@ main = f'''
   </div>
 </section>
 <section class="pair system">
-  <h2>Loopflow: a system for arranging coding sessions around long-lived waves and short-lived tasks.</h2>
+  <h2>Loopflow: Arrange coding sessions around long-lived waves and short-lived tasks</h2>
   <div class="halves">
     <article>
       <p>Coding agents can do amazing things for you, but they ask a lot of focus from you. How can you, a human with a single locus of attention, stay in sync with an entire parallel agent swarm? Shipping tens of thousands of lines is the easy part. Making them lines worth keeping — lines you don’t revert next month — is the hard part.</p>

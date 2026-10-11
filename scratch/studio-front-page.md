@@ -660,3 +660,5 @@ strip links to its own site in a new tab.
 - Jack Heart, on the heading's "all levels of abstraction": "ok, prefer just objectives and outcomes?" → the `x11` section heading is "Loopflow: a system for arranging coding sessions around long-lived objectives and concrete outcomes." The paragraph's opening sentence, which said the same thing, is removed.
 
 - Jack Heart set the section heading: "Loopflow: a system for arranging coding sessions around long-lived waves and short-lived tasks." Set in `x11` as written, with "waves" lower case.
+
+- Jack Heart revised the heading: "Loopflow: Arrange coding sessions around long-lived waves and short-lived tasks". Set in `x11` as written, with no full stop.

@@ -280,13 +280,6 @@ public struct RegistryQuery: Sendable {
         return result
     }
 
-    public func sessionSkills(cwd: String) async throws -> [DiscoveryEntry] {
-        let stdout = try await run(["list", "--json"], cwd)
-        return try Self.decode([DiscoveryEntry].self, from: stdout)
-            .filter { $0.kind == "skill" }
-            .sorted { $0.name < $1.name }
-    }
-
     /// Every selectable Flow with the topology it would capture, via the shared loader.
     public func flowCatalog(cwd: String?) async throws -> [FlowCatalogEntry] {
         let stdout = try await run(["flow", "list", "--json"], cwd)
@@ -417,6 +410,16 @@ public struct RegistryQuery: Sendable {
         if let after { args += ["--after", after] }
         let stdout = try await run(args, cwd)
         return try Self.decode(SessionPage.self, from: stdout)
+    }
+
+    /// Include historical Waves for the deliberate first-use entry check.
+    public func repositoryWaves(cwd: String) async throws -> [WaveSnapshot] {
+        try Self.decode([WaveSnapshot].self, from: await run(["wave", "list", "--json"], cwd))
+    }
+
+    /// The repository's configured, retained conversation; explicit opening only.
+    public func ensureRepositorySession(cwd: String) async throws -> SessionRecord {
+        try Self.decode(SessionRecord.self, from: await run(["session", "ensure", "--json"], cwd))
     }
 
     /// The Task's one ongoing conversation: the one already chosen, else its

@@ -36,11 +36,6 @@ extension WorkModel {
                 rows.append(recent)
             }
         }
-        for session in visibleSessions {
-            rows.append(.init(id: .session(session.id), title: session.title,
-                              detail: ["Session", session.workPath, session.provider].compactMap { $0 }.joined(separator: " · "),
-                              key: session.title))
-        }
         for flow in flowCatalog.value ?? [] {
             rows.append(.init(id: .flow(flow.name), title: flow.name,
                               detail: "Flow definition", key: flow.name))
@@ -303,7 +298,7 @@ private struct PaletteSearchField: NSViewRepresentable {
         field.isBordered = false
         field.drawsBackground = false
         field.font = NSFont(name: "Lato-Regular", size: 13) ?? .systemFont(ofSize: 13)
-        field.placeholderString = "Go to a Wave, Task, Session or Flow"
+        field.placeholderString = "Go to a Wave, Task or Flow"
         field.setAccessibilityIdentifier("work-palette-search")
         field.delegate = context.coordinator
         return field

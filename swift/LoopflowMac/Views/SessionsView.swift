@@ -33,6 +33,29 @@ extension PaneState {
 @Observable
 final class SessionsWorkspace {
     var showsDetails = false
+    var openingConversation = false
+    var conversationError: String?
+    var didConsiderRepositoryEntry = false
+
+    /// Populate this retained Work even if navigation changes while lf prepares it.
+    func openRepositoryConversation(store: SessionsStore, registry: SessionsWorkspaceRegistry, onlyIfEmpty: Bool = false) async {
+        guard !openingConversation else { return }
+        openingConversation = true
+        conversationError = nil
+        defer { openingConversation = false }
+        do {
+            if onlyIfEmpty {
+                guard try await store.query.repositoryWaves(cwd: store.repoPath).isEmpty,
+                      registry.selectedWork == key else { return }
+            }
+            let record = try await store.query.ensureRepositorySession(cwd: store.repoPath)
+            store.reconcile([record])
+            registry.revealSession(record, in: self)
+            presentation.content = .terminals
+            presentation.selectedSessionId = record.id
+            await store.select(record.id)
+        } catch { conversationError = error.localizedDescription }
+    }
 
     func toggleFocus(_ paneId: String) {
         Perf.begin(Perf.retainedWorkspaceAction, multiplexer.zoomedPaneId == nil ? "focus" : "restore", id: "workspace")
@@ -766,7 +789,7 @@ struct SessionsContentView: View {
                 }, onNewShell: {
                     newShell(in: workspace)
                     navigation.content = .terminals
-                }, onShowTerminals: { navigation.content = .terminals }, onOpenTask: openTask, onNewSession: launchSessionSkill)
+                }, onShowTerminals: { navigation.content = .terminals }, onOpenTask: openTask, onOpenRepository: openRepositoryConversation)
                     .frame(width: 320)
                 Rectangle().fill(palette.border).frame(width: 1)
                 HSplitView {
@@ -810,6 +833,13 @@ struct SessionsContentView: View {
                                     }
                                 }
                             if taskPath != nil { missingCheckout }
+                        }
+                        if workspace.openingConversation { ProgressView("Opening conversation…").padding(8) }
+                        if let error = workspace.conversationError {
+                            HStack {
+                                Text(error).textSelection(.enabled)
+                                Button("Retry") { openRepositoryConversation() }
+                            }.foregroundStyle(Color.statusWarning).padding(8)
                         }
                         ZStack {
                             Group {
@@ -891,6 +921,14 @@ struct SessionsContentView: View {
             if !focusedPaneSessions.contains(where: { $0.id == navigation.selectedSessionId }) {
                 navigation.selectedSessionId = focusedPaneSessions.first?.id
             }
+        }
+        .onChange(of: model.repositoryEntryReady, initial: true) { _, ready in
+            guard model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath else { return }
+            let root = workspaces.workspace(for: key(for: nil), title: title(for: key(for: nil)), location: rootIdentity)
+            guard ready, !root.didConsiderRepositoryEntry else { return }
+            root.didConsiderRepositoryEntry = true
+            guard model.isEmptyRepositoryCandidate, workspaces.selectedWork == root.key, model.selection == nil else { return }
+            Task { await root.openRepositoryConversation(store: store, registry: workspaces, onlyIfEmpty: true) }
         }
         .onChange(of: model.sessions.value, initial: true) { _, records in
             guard model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath,
@@ -1026,9 +1064,6 @@ struct SessionsContentView: View {
         case .task(let id):
             Task { await model.openPaletteTask(id) }
             return
-        case .session(let id):
-            guard let record = store.sessions.first(where: { $0.id == id })?.record else { return }
-            openSession(record)
         case .flow(let name): navigation.palette = .flow(name)
         case .workflow(let name): navigation.palette = .workflow(name)
         case .rename(let id):
@@ -1039,7 +1074,8 @@ struct SessionsContentView: View {
             guard let record = store.sessions.first(where: { $0.id == id })?.record else { return }
             model.beginSessionBinding(record)
         case .flowLog(let id):
-            openTask(.task(id: id))
+            model.select(.task(id: id))
+            navigation.content = .terminals
             multiplexer.show(.flowLog(taskId: id, location: taskIdentity, execution: multiplexer.focusedPane.executionLocation))
         }
         model.remember(destination)
@@ -1105,19 +1141,15 @@ struct SessionsContentView: View {
     }
 
     private func openTask(_ work: WorkReference) {
-        model.select(work)
-        navigation.content = .terminals
-        navigation.selectedSessionId = focusedPaneSessions.first?.id
+        Task { await model.openTaskConversation(work.id) }
     }
 
-    private func launchSessionSkill(_ launch: SessionSkillLaunch) {
-        do {
-            let lf = try LocalWaveAgentLauncher.controlLfPath()
-            let identity = WorkspaceIdentity(machineId: machineId, worktree: launch.repoPath)
-            model.select(nil)
-            navigation.content = .terminals
-            workspace.multiplexer.newShell(command: launch.arguments(lf: lf), location: identity)
-        } catch { launchError = error.localizedDescription }
+    private func openRepositoryConversation() {
+        guard model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath else { return }
+        model.select(nil)
+        navigation.content = .terminals
+        let entry = workspace
+        Task { await entry.openRepositoryConversation(store: store, registry: workspaces) }
     }
 
     private func startConversation() {

@@ -445,7 +445,6 @@ struct WorkNavigationProofTests {
             for index in terminals.indices { #expect(terminals[index].surface == surfaces[index]) }
             if reading != roadmap {
                 #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "breadcrumb-task").text().string() == "Task \(task.id)")
-                #expect(model.projection.orphanSessions(search: "").isEmpty)
             } else {
                 #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "breadcrumb-task").button().labelView().text().string()
                     == "Show the all-wave roadmap and launch or attach")

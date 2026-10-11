@@ -8,6 +8,75 @@ import ViewInspector
 @Suite("Unified Work and Session navigation")
 @MainActor
 struct WorkNavigationTests {
+    @Test("Only fresh empty current planning permits a first-use check")
+    func emptyRepositoryEntry() throws {
+        let empty = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data("{\"generated_at\":\"2026-10-10T00:00:00Z\",\"waves\":[]}".utf8))
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("No acquisition during reads") }, repoPath: "/src/loopflow")
+        #expect(!model.isEmptyRepositoryCandidate)
+        model.applyFixture(roadmap: .available(empty), waves: .available([]), workActivity: .loading, repos: [], fixed: true)
+        #expect(model.isEmptyRepositoryCandidate)
+        model.applyFixture(roadmap: .unavailable(lastGood: empty, reason: "Offline"), waves: .available([]), workActivity: .loading, repos: [])
+        #expect(!model.isEmptyRepositoryCandidate)
+        model.applyFixture(roadmap: .available(try roadmap()), waves: .available([]), workActivity: .loading, repos: [])
+        #expect(!model.isEmptyRepositoryCandidate)
+    }
+
+    @Test("Historical or unavailable planning never acquires an empty-repo conversation", arguments: [false, true])
+    func historicalRepositoryEntry(unavailable: Bool) async throws {
+        let snapshot = try #require(JSONSerialization.jsonObject(with: Data(roadmapJSON().utf8)) as? [String: Any])
+        let waves = try #require(snapshot["waves"] as? [[String: Any]])
+        let history = try JSONSerialization.data(withJSONObject: waves.compactMap { $0["wave"] })
+        let registry = SessionsWorkspaceRegistry(localMachineId: "local")
+        let key = WorkWorkspaceKey(repository: "repo", kind: .repository, id: "repo")
+        let entry = registry.open(key, title: "Repository", location: nil)
+        let store = entry.sessionStore(repoPath: "/src/loopflow", query: RegistryQuery { args, _ in
+            guard args == ["wave", "list", "--json"] else { throw RegistryQueryError("Unexpected acquisition") }
+            if unavailable { throw RegistryQueryError("History unavailable") }
+            return String(decoding: history, as: UTF8.self)
+        })
+        let layout = entry.multiplexer.layout
+        await entry.openRepositoryConversation(store: store, registry: registry, onlyIfEmpty: true)
+        #expect(entry.multiplexer.layout == layout)
+        #expect(entry.presentation.selectedSessionId == nil)
+        #expect(entry.conversationError == (unavailable ? "History unavailable" : nil))
+    }
+
+    @Test("Repository conversation reuses its exact pane without selecting another Work")
+    func retainedRepositoryConversation() async throws {
+        let record = try session("repo-primary", work: nil)
+        let json = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
+        let gate = PlanningGate()
+        let registry = SessionsWorkspaceRegistry(localMachineId: "local")
+        let key = WorkWorkspaceKey(repository: "repo", kind: .repository, id: "repo")
+        let entry = registry.open(key, title: "Repository", location: record.workspace?.identity)
+        let store = entry.sessionStore(repoPath: "/src/loopflow", query: RegistryQuery { args, _ in
+            if args.contains("ensure") { await gate.wait() }
+            return json
+        })
+        let first = Task { await entry.openRepositoryConversation(store: store, registry: registry) }
+        await gate.started()
+        let otherKey = WorkWorkspaceKey(repository: "repo", kind: .task, id: "other")
+        let other = registry.open(otherKey, title: "Other", location: record.workspace?.identity)
+        let otherLayout = other.multiplexer.layout
+        await entry.openRepositoryConversation(store: store, registry: registry)
+        await gate.release()
+        await first.value
+        let pane = try #require(entry.multiplexer.pane(forSessionId: record.id))
+        #expect(registry.selectedWork == otherKey)
+        #expect(other.multiplexer.layout == otherLayout)
+        #expect(entry.presentation.selectedSessionId == record.id)
+        let second = Task { await entry.openRepositoryConversation(store: store, registry: registry) }
+        await gate.started()
+        await gate.release()
+        await second.value
+        #expect(entry.multiplexer.pane(forSessionId: record.id)?.id == pane.id)
+        #expect(entry.conversationError == nil)
+        let model = WorkModel(query: store.query, repoPath: "/src/loopflow")
+        let view = WorkNavigator(model: model, onOpenSession: { _ in })
+        #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "work-create-task") }
+        #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "work-headless-sessions") }
+    }
+
     @Test("Work tabs retain their own conversation and details choice across aliases and close/reopen")
     func workTabsRetainSelection() throws {
         let snapshot = try roadmap()
@@ -130,7 +199,7 @@ struct WorkNavigationTests {
         let outline = model.visibleWork.outline(presentation: .full, collapsed: [], search: "", planningReadable: true)
         let taskRow = try #require(outline.first { $0.id.work.id == "issue-review" })
         #expect(taskRow.inlineSessions.count == 3)
-        #expect(model.paletteRows.filter { if case .session = $0.id { true } else { false } }.count == 3)
+        #expect(!model.paletteRows.contains { $0.title == "idle" })
         model.navigation.showsHeadlessSessions = true
         #expect(model.visibleSessions.map(\.id) == ["idle", "active", "review", "background"])
         #expect(model.sessions.value?.count == 5)
@@ -186,12 +255,12 @@ struct WorkNavigationTests {
         #expect(folded.contains { $0.inlineSessions.contains { $0.id == "human" } })
         #expect(rows(.compact, readable: false).map(\.id) == full.map(\.id))
         let searched = projection.outline(presentation: .compact, collapsed: [project], search: "human", planningReadable: true)
-        #expect(searched.contains { $0.inlineSessions.contains { $0.id == "human" } })
+        #expect(searched.isEmpty)
         let identifierSearch = projection.outline(presentation: .compact, collapsed: [], search: "W2-131", planningReadable: true)
         #expect(identifierSearch.filter { $0.id.work.kind == .task }.flatMap { $0.inlineSessions.map(\.id) } == ["human"])
     }
 
-    @Test("Wave conversations stay reachable in Compact and when searched by name")
+    @Test("Wave conversations stay reachable through Work names, not Session search")
     func waveConversationMenu() async throws {
         let conversation = try session("wave-conversation", work: .wave(id: "wave-1"))
         var snapshot = try #require(JSONSerialization.jsonObject(with: Data(roadmapJSON().utf8)) as? [String: Any])
@@ -201,7 +270,7 @@ struct WorkNavigationTests {
         let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
         await model.refresh()
         var opened: [String] = []
-        for search in ["", conversation.title] {
+        for search in ["", try #require(model.visibleRoadmaps.first).wave.displayName] {
             model.navigation.search = search
             let rows = model.visibleWork.outline(presentation: .compact, collapsed: [], search: search, planningReadable: true)
             #expect(rows.first { $0.id.work == .wave(id: "wave-1") }?.inlineSessions.map(\.id) == [conversation.id])
@@ -254,7 +323,7 @@ struct WorkNavigationTests {
         #expect(kinds.filter { $0 == .wave }.count == (evidence == "multiple" ? 2 : 1))
     }
 
-    @Test("Orphan Sessions are reachable only through the diagnostic menu")
+    @Test("Unscoped Sessions remain in history without navigation entries")
     func orphansStayOutOfTheTree() async throws {
         let attached = try session("human", work: .task(id: "ts_review00000000000000000000000000"))
         let orphan = try session("demo", work: nil)
@@ -265,8 +334,6 @@ struct WorkNavigationTests {
             #expect(!rows.contains { $0.inlineSessions.contains { $0.id == "demo" } })
             #expect(!rows.flatMap(\.inlineSessions).contains { $0.id == "stray" })
         }
-        #expect(projection.orphanSessions(search: "").map(\.id) == ["demo"])
-        #expect(projection.orphanSessions(search: "DEMO").map(\.id) == ["demo"])
         #expect(projection.subject(for: "stray") == .task(id: "absent"))
         #expect(projection.breadcrumb(selection: nil, sessionId: "stray")?.waveWork == nil)
 
@@ -279,12 +346,13 @@ struct WorkNavigationTests {
         let view = WorkNavigator(model: model, onOpenSession: { opened.append($0.id) })
         #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "work-orphans-open") }
         #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "session-row-demo") }
-        try view.inspect().find(viewWithAccessibilityIdentifier: "debug-orphan-session-demo").button().tap()
-        try view.inspect().find(viewWithAccessibilityIdentifier: "debug-session-stray").button().tap()
-        #expect(opened == ["demo", "stray"])
+        #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "debug-orphan-session-demo") }
+        #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "debug-session-stray") }
+        #expect(opened.isEmpty)
+        #expect(Set(model.projection.unmatchedSessions.map(\.id)) == ["demo", "stray"])
         #expect(throws: (any Error).self) { try view.inspect().find(text: "Repository or unavailable ancestry") }
 
-        // Zero orphans hides the section entirely.
+        // Session inventory still reconciles without providing navigation.
         await source.replaceSessions(String(decoding: try JSONEncoder().encode([attached]), as: UTF8.self))
         await model.refreshSessions()
         #expect(model.projection.unmatchedSessions.isEmpty)
@@ -731,7 +799,6 @@ struct WorkNavigationTests {
         #expect(crumb.waveWork == .wave(id: "wave-1"))
         #expect(crumb.siblings.map(\.id) == ["first", "second"])
         #expect(model.projection.subject(for: "first") == work)
-        #expect(model.projection.orphanSessions(search: "").isEmpty)
         let bar = WorkBreadcrumbBar(model: model, crumb: crumb, onOpenSession: { _ in })
         #expect(try bar.inspect().find(viewWithAccessibilityIdentifier: "breadcrumb-task").text().string() == "Task \(work.id)")
         for presentation in WorkPresentation.allCases {
@@ -739,8 +806,8 @@ struct WorkNavigationTests {
             #expect(rows.flatMap(\.inlineSessions).isEmpty)
             #expect(Set(model.visibleWork.unmatchedSessions.map(\.id)) == ["first", "second"])
             let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
-            _ = try navigator.inspect().find(viewWithAccessibilityIdentifier: "debug-session-first")
-            _ = try navigator.inspect().find(viewWithAccessibilityIdentifier: "debug-session-second")
+            #expect(throws: (any Error).self) { try navigator.inspect().find(viewWithAccessibilityIdentifier: "debug-session-first") }
+            #expect(throws: (any Error).self) { try navigator.inspect().find(viewWithAccessibilityIdentifier: "debug-session-second") }
         }
 
         // Fresh discovery cannot depend on cached planning names or selection.
@@ -776,7 +843,6 @@ struct WorkNavigationTests {
         #expect(crumb.waveWork == nil)
         #expect(crumb.taskWork == nil)
         #expect(crumb.siblings == [unbound])
-        #expect(projection.orphanSessions(search: "") == [unbound])
     }
 
     @Test("New conversation follows the visible subject and repository scope")

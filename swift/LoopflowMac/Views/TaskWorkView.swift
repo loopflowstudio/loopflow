@@ -13,6 +13,8 @@ struct TaskWorkflowHeader: View {
     let work: WorkReading<TaskWork>
     @Environment(\.palette) private var palette
 
+    @State private var expandedTasks: Set<String> = []
+
     private var draft: TaskRunDraft? { model.navigation.taskRunDrafts[task.id] }
     private var acting: Bool { draft?.acting == true }
 
@@ -63,6 +65,16 @@ struct TaskWorkflowHeader: View {
                 }
                 if acting { ProgressView().controlSize(.small) }
             }
+            DisclosureGroup("Overview", isExpanded: Binding(
+                get: { expandedTasks.contains(task.id) },
+                set: { if $0 { expandedTasks.insert(task.id) } else { expandedTasks.remove(task.id) } }
+            )) {
+                Text(task.task.description)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 6)
+            }
+            .accessibilityIdentifier("task-overview")
             TaskDeliveryView(task: task)
             // Completion may fail after the Workflow has already arrived.
             if let conflict = task.runtime?.completionPending {

@@ -390,17 +390,18 @@ homepage at `af48fd81db:website/home.html` as the Work-first design anchor,
 Repo/Wave/Task navigation, and direct configured repo conversation entry when
 there are no Waves or Tasks. Begin with what to work on, not organizational setup.
 Shell-launched unscoped Sessions stay possible but never enter the sidebar;
-power-user Session search is deferred. Reuse LOO-427 owners. Task composition,
-provider onboarding and cleanup policy remain open; kickoff grants no implementation
-or deletion approval. Old/interrupted/unknown records are not disposable evidence.
-Cleanup needs reviewed candidates and a restorable backup.
+power-user Session search is deferred. Reuse LOO-427 owners. Jack subsequently
+selected conversation-first Task entry, repository-name access to its retained
+conversation, and repo/session ownership, then authorized implementation through
+publication for demo review, not landing. No cleanup approval follows.
 
-Source reconciliation: LOO-427 already removed Session rows; the remaining Debug
-Session menu and generic composer still expose that model. `unmatchedSessions`
-includes missing-planning Work, and no Task association includes repo/Wave scopes:
-neither identifies unscoped debris. Primary repo ensure already owns continuity;
-its skill starts an operating pass, a mismatch with accepted no-work entry.
-Proposed prompt/entry changes remain with LOO-462; no native or adoption proof.
+LOO-462 removes the generic picker/composer and Debug/Orphan/palette inventory,
+not Session history or missing-Work evidence. Primary owners supply repo/Task
+conversations without Workflow launch or takeover. **Current is not empty:** the
+Work stream and roster exclude historical Waves; first-use entry must also read
+full repository Wave history. Errors preserve uncertainty. Native/provider and
+persisted-primary composition remain unproved. Cleanup still needs exact reviewed
+candidates and a restorable backup; unknown/interrupted records are not debris.
 
 ## Session working set and Waiting (2026-10-03, revised 2026-10-06)
 

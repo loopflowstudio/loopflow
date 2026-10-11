@@ -23,6 +23,38 @@ struct WorkDestinationTests {
             == TaskLink(issue: "LOO-427", repo: nil))
     }
 
+    @Test func taskEntryOpensConversationThenRetainsWorkspace() async throws {
+        let data = try fixture()
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
+        let wave = try #require(snapshot.waves.first)
+        let task = try #require(wave.tasks.items.first)
+        let record = try renameFixtureRecord("primary", title: "Task conversation", work: .task(id: #require(task.runtime?.workId)))
+        let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
+        let query = RegistryQuery { args, _ in
+            if args.starts(with: ["session", "ensure"]) { return encoded }
+            if args.starts(with: ["session", "list"]) { return #"{"entries":[\#(encoded)],"next":null}"# }
+            if args.starts(with: ["wave", "show"]) { return data }
+            throw RegistryQueryError("Task entry cannot launch a Workflow or take over a client")
+        }
+        let model = WorkModel(query: query, repoPath: wave.wave.repo)
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        let registry = SessionsWorkspaceRegistry(localMachineId: "local")
+        model.bindWorkspaces(registry, repository: "repo")
+        await model.openTaskConversation(task.id)
+        #expect(model.linkedSession?.record.id == record.id)
+        #expect(model.linkedSession?.showsChanges == false)
+        #expect(model.selection == .task(id: task.id))
+        let entry = try #require(registry.retained(model.workspaceKey(for: model.selection, repository: "repo")))
+        registry.revealSession(record, in: entry)
+        entry.multiplexer.newShell(command: ["retained-shell"], location: record.workspace?.identity)
+        let layout = entry.multiplexer.layout
+        model.select(.wave(id: wave.wave.id))
+        await model.openTaskConversation(task.id)
+        #expect(model.linkedSession == nil)
+        #expect(entry.multiplexer.layout == layout)
+        #expect(model.navigation.content == .terminals)
+    }
+
     @Test(arguments: [false, true])
     func bareTaskOpeningDoesNotAcquireASession(remote: Bool) async throws {
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(try fixture().utf8))
@@ -587,7 +619,7 @@ struct WorkDestinationTests {
         return (model, record, try #require(TaskLink(issue: task.task.identifier, repo: wave.wave.repo, session: record.id, diff: true).url), query)
     }
 
-    @Test func delayedPrimarySessionPreparationDoesNotOpenChangesInAnotherTask() async throws {
+    @Test(arguments: [false, true]) func delayedPrimarySessionPreparationDoesNotOpenChangesInAnotherTask(conversation: Bool) async throws {
         let data = try fixture()
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
         let wave = try #require(snapshot.waves.first)
@@ -602,7 +634,10 @@ struct WorkDestinationTests {
         }, repoPath: wave.wave.repo)
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
         let url = try #require(TaskLink(issue: task.task.identifier, repo: wave.wave.repo, diff: true).url)
-        let opening = Task { await model.openTaskLink(url) }
+        let opening = Task {
+            if conversation { await model.openTaskConversation(task.id) }
+            else { await model.openTaskLink(url) }
+        }
         while !(await barrier.contains("ensure")) { await Task.yield() }
         model.select(.wave(id: wave.wave.id))
         await barrier.release("ensure")
@@ -730,13 +765,16 @@ struct WorkDestinationTests {
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
         let wave = try #require(snapshot.waves.first)
         let task = try #require(wave.tasks.items.first)
+        let record = try renameFixtureRecord("historical-primary", title: "Retained Task", work: .task(id: #require(task.runtime?.workId)))
+        let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let exact = try oneTask(data, taskId: task.id)
         // Keep the Wave, but remove the historical Task from the current plan.
         let current = try oneTask(data, taskId: "absent")
         let model = WorkModel(query: RegistryQuery { args, _ in
+            if args.starts(with: ["session", "ensure"]) { return encoded }
             if args.contains("--task") { return exact }
             if args.prefix(2) == ["wave", "show"] { return current }
-            if args.first == "session" { return #"{"entries":[],"next":null}"# }
+            if args.first == "session" { return #"{"entries":[\#(encoded)],"next":null}"# }
             if args.first == "wave" { return "[]" }
             throw RegistryQueryError("No mutation permitted")
         }, repoPath: wave.wave.repo)
@@ -809,13 +847,10 @@ struct WorkDestinationTests {
         let task = try #require(tasks.first)
         #expect(model.searchDestinations(task.task.identifier).first?.id == .task(task.id))
         #expect(model.paletteRows.filter { if case .task = $0.id { true } else { false } }.count == tasks.count)
-        let matchingSessions = ([1] + Array(10...19)).map { WorkDestination.session(String($0)) }
-        model.remember(.session("19"))
-        #expect(model.searchDestinations(" session 1 ").map(\.id) == matchingSessions)
+        #expect(model.searchDestinations(" session 1 ").isEmpty)
         model.remember(.task(task.id))
         #expect(model.searchDestinations("").first?.id == .task(task.id))
-        for index in 0..<30 { model.remember(.session("\(index)")) }
-        #expect(model.navigation.recentDestinations.count == 20)
+
     }
 
     @Test func historicalTaskWithoutPlanningHasNoDeadEndFlowAction() async throws {

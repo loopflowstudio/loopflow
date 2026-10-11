@@ -8,7 +8,7 @@ import SwiftUI
 struct WorkSurfaceView: View {
     @Bindable var model: WorkModel
     var onOpenSession: (SessionRecord) -> Void = { _ in }
-    /// Opens a Task the way the sidebar does: its one Session, else its overview.
+    /// Opens the retained Task conversation and workspace, as the sidebar does.
     var onOpenTask: ((WorkReference) -> Void)?
     /// Starts an independent Task-context conversation in the Task's checkout.
     var onNewSession: ((String) async throws -> Void)?
@@ -79,7 +79,7 @@ struct WorkSurfaceView: View {
             ContentUnavailableView(
                 model.repoPath == nil ? "No planned Work yet" : "No planned Work in this repository",
                 systemImage: "map",
-                description: Text("Author a Wave to put work on the surface.")
+                description: Text("Open the repository conversation to decide what to work on.")
             )
             .accessibilityIdentifier("loopflow-work-empty")
         } else {
@@ -549,7 +549,7 @@ struct WorkSurfaceView: View {
         ContentUnavailableView(
             "Selected Work is unavailable",
             systemImage: "questionmark.circle",
-            description: Text("This planning read cannot resolve the selection. Its Sessions remain accessible in the work list.")
+            description: Text("This planning read cannot resolve the selection. Its retained Work tabs and conversations remain available.")
         )
     }
 

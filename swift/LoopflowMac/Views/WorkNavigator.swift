@@ -4,26 +4,25 @@ import SwiftUI
 struct WorkNavigator: View {
     @Bindable var model: WorkModel
     let onOpenSession: (SessionRecord) -> Void
+    let onOpenRepository: (() -> Void)?
     let onOpenTask: ((WorkReference) -> Void)?
     let onConversation: ((WorkReference?) -> Void)?
-    let onNewSession: ((SessionSkillLaunch) -> Void)?
     let onNewShell: (() -> Void)?
     let onShowTerminals: (() -> Void)?
     @Environment(\.palette) private var palette
     @State private var scrollPosition: ScrollPosition
     @State private var hoveringPresentation = false
-    @State private var choosingSessionSkill = false
 
     init(model: WorkModel, onOpenSession: @escaping (SessionRecord) -> Void,
          onConversation: ((WorkReference?) -> Void)? = nil,
          onNewShell: (() -> Void)? = nil, onShowTerminals: (() -> Void)? = nil,
          onOpenTask: ((WorkReference) -> Void)? = nil,
-         onNewSession: ((SessionSkillLaunch) -> Void)? = nil) {
+         onOpenRepository: (() -> Void)? = nil) {
         self.model = model
         self.onOpenSession = onOpenSession
+        self.onOpenRepository = onOpenRepository
         self.onOpenTask = onOpenTask
         self.onConversation = onConversation
-        self.onNewSession = onNewSession
         self.onNewShell = onNewShell
         self.onShowTerminals = onShowTerminals
         _scrollPosition = State(initialValue: ScrollPosition(y: model.navigation.listScrollOffset))
@@ -42,62 +41,17 @@ struct WorkNavigator: View {
             + [model.repoPath].compactMap { $0 }).map { model.repoIdentity($0) }).sorted()
     }
 
-    @ViewBuilder
-    private var sessionComposer: some View {
-        if let onNewSession, let launch = model.sessionSkillLaunch {
-            HStack(spacing: 0) {
-                Button { onNewSession(launch) } label: {
-                    Label("New Session", systemImage: "square.and.pencil")
-                        .fixedSize()
-                        .padding(.horizontal, 10)
-                        .frame(height: 34)
-                        .contentShape(Rectangle())
-                }
-                .accessibilityIdentifier("work-create-task")
-                Rectangle().fill(palette.textTertiary.opacity(0.25)).frame(width: 1)
-                Button { choosingSessionSkill.toggle() } label: {
-                    HStack(spacing: 7) {
-                        Text(launch.skill).lineLimit(1).truncationMode(.tail)
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 12, weight: .medium))
-                            .offset(y: -0.5)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 12)
-                    .frame(height: 34)
-                    .contentShape(Rectangle())
-                }
-                .accessibilityLabel("Choose skill, currently \(launch.skill)")
-                .accessibilityIdentifier("work-session-skill")
-                .popover(isPresented: $choosingSessionSkill, arrowEdge: .bottom) {
-                    SessionSkillPicker(model: model, repo: launch.repoPath) {
-                        choosingSessionSkill = false
-                    }
-                    .id(launch.repoPath)
-                }
-            }
-            .font(Font(NSFont.systemFont(ofSize: 13, weight: NSFont.Weight(rawValue: 0.265))))
-            .frame(height: 34)
-            .background(palette.surface, in: RoundedRectangle(cornerRadius: 5))
-            .overlay(RoundedRectangle(cornerRadius: 5).stroke(palette.textTertiary.opacity(0.25)))
-            .padding(.horizontal, 10)
-            .padding(.bottom, 8)
-        }
-    }
-
     var body: some View {
         @Bindable var navigation = model.navigation
         // One projection per render: rows and every row's menu share it.
         let workspace = model.visibleWork
         let rows = rows(workspace)
-        let orphans = workspace.orphanSessions(search: model.navigation.search)
         VStack(spacing: 0) {
-            header(orphans)
-            sessionComposer
+            header()
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
                     forReadErrors
-                    ForEach(rows) { row in outlineRow(row, orphans) }
+                    ForEach(rows) { row in outlineRow(row) }
                     if model.repoPath != nil, rows.isEmpty, model.workStatus == .current {
                         Text("No matching Work.")
                             .foregroundStyle(palette.textSecondary).padding(8)
@@ -113,7 +67,7 @@ struct WorkNavigator: View {
             // Search sits below the data so the repository heads its outline.
             HStack(spacing: Spacing.sm) {
                 Image(systemName: "magnifyingglass").foregroundStyle(palette.textTertiary)
-                TextField("Find work or Sessions", text: Binding(
+                TextField("Find Work", text: Binding(
                     get: { navigation.search },
                     set: { Perf.begin(Perf.hierarchyInteraction, "filter", id: "outline"); navigation.search = $0 }))
                     .textFieldStyle(.plain)
@@ -132,9 +86,8 @@ struct WorkNavigator: View {
         .tint(palette.text)
         .buttonStyle(.plain)
         .background(palette.surfaceMuted)
-        .contextMenu { repositoryActions(orphans) }
+        .contextMenu { repositoryActions() }
         .accessibilityIdentifier("work-navigator")
-        .onChange(of: model.repoPath) { _, _ in choosingSessionSkill = false }
         .onChange(of: rows.isEmpty, initial: true) { _, empty in
             guard !empty else { return }
             Perf.endAfterCommit(Perf.coldStart, id: "launch")
@@ -147,32 +100,34 @@ struct WorkNavigator: View {
     }
 
     /// The repository heads its own outline: one scope, switched in place.
-    private func header(_ orphans: [SessionRecord]) -> some View {
+    private func header() -> some View {
         @Bindable var navigation = model.navigation
         return HStack(spacing: Spacing.sm) {
+            Button {
+                onOpenRepository?()
+            } label: {
+                Text(model.repoPath.map { URL(fileURLWithPath: model.repoIdentity($0)).lastPathComponent }
+                    ?? "Choose repository")
+                    .font(Typography.sectionTitle(25))
+                    .foregroundStyle(palette.accentInk)
+                    .lineLimit(1)
+            }
+            .disabled(model.repoPath == nil)
+            .accessibilityIdentifier("work-open-repository")
             Menu {
                 ForEach(repositories, id: \.self) { repo in
                     Button(URL(fileURLWithPath: repo).lastPathComponent) { selectRepository(repo) }
                         .accessibilityIdentifier("work-repository-\(repo)")
                 }
                 Divider()
-                repositoryActions(orphans)
+                repositoryActions()
             } label: {
-                HStack(spacing: Spacing.xs) {
-                    Text(model.repoPath.map { URL(fileURLWithPath: model.repoIdentity($0)).lastPathComponent }
-                        ?? "Choose repository")
-                        .font(Typography.sectionTitle(25))
-                        .foregroundStyle(palette.accentInk)
-                        .lineLimit(1)
-                    Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(palette.textTertiary)
-                }
+                Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
-            .help(model.repoPath ?? "Choose a repository")
-            .accessibilityLabel("Repository")
+            .accessibilityLabel("Choose repository")
             .accessibilityIdentifier("work-repository")
             Spacer(minLength: 0)
             Menu {
@@ -183,13 +138,6 @@ struct WorkNavigator: View {
                         Text(presentation.rawValue).tag(presentation)
                     }
                 }
-                Toggle("Show headless Sessions", isOn: Binding(
-                    get: { navigation.showsHeadlessSessions },
-                    set: {
-                        navigation.showsHeadlessSessions = $0
-                        Task { await model.refreshSessions() }
-                    }))
-                    .accessibilityIdentifier("work-headless-sessions")
                 if let onShowTerminals {
                     Divider()
                     Button("Show retained terminals", action: onShowTerminals)
@@ -238,7 +186,7 @@ struct WorkNavigator: View {
     /// One row component at two levels. A Wave is a sans section head with a
     /// chevron and nothing else; a Task carries a dot only while it needs eyes
     /// (running, blocked, waiting on you) and a count only while Sessions exist.
-    private func outlineRow(_ row: WorkOutlineRow, _ orphans: [SessionRecord]) -> some View {
+    private func outlineRow(_ row: WorkOutlineRow) -> some View {
         let isWave = row.id.work.kind == .wave
         return HStack(spacing: 6) {
             if row.hasChildren {
@@ -304,7 +252,7 @@ struct WorkNavigator: View {
                 subjectActions(ancestor.key.work, title: ancestor.title)
             }
             Divider()
-            repositoryActions(orphans)
+            repositoryActions()
         }
     }
 
@@ -327,33 +275,12 @@ struct WorkNavigator: View {
     }
 
     @ViewBuilder private func subjectActions(_ work: WorkReference, title: String) -> some View {
-        if work.kind == .wave, let onNewSession, let launch = model.sessionSkillLaunch(for: work) {
-            Button("New Session · \(title)") { onNewSession(launch) }
-                .accessibilityIdentifier("work-capture-wave-\(work.id)")
-        }
         Button("Inspect \(title)") { model.select(work) }
         if let onConversation { Button("New conversation · \(title)") { onConversation(work) } }
     }
 
-    @ViewBuilder private func repositoryActions(_ orphans: [SessionRecord]) -> some View {
-        Menu("Debug") {
-            Menu("Sessions") {
-                // Partial planning must not strand conversations whose Work is
-                // missing. This menu reads the existing projection, not a new inventory.
-                ForEach(model.visibleWork.unmatchedSessions) { session in
-                    Button(session.title) { onOpenSession(session) }
-                        .accessibilityIdentifier("debug-session-\(session.id)")
-                }
-                Menu("Orphan Sessions") {
-                    ForEach(orphans) { session in
-                        Button(session.title) { onOpenSession(session) }
-                            .accessibilityIdentifier("debug-orphan-session-\(session.id)")
-                    }
-                    if orphans.isEmpty { Text("No Sessions without a Task association") }
-                }
-            }
-        }
-        if let onConversation { Button("New repository conversation") { onConversation(nil) } }
+    @ViewBuilder private func repositoryActions() -> some View {
+        if let onOpenRepository { Button("Repository conversation", action: onOpenRepository) }
         if let onNewShell { Button("New shell", action: onNewShell).accessibilityIdentifier("sessions-new-shell") }
         if let onShowTerminals { Button("Show retained terminals", action: onShowTerminals) }
     }

@@ -164,8 +164,9 @@ final class WorkModel {
     @ObservationIgnored private var destinationGeneration = 0
 
     @ObservationIgnored private var taskLinkExpectedID: String?
+    @ObservationIgnored private var taskLinkConversation = false
 
-    func openTaskLink(_ url: URL, expectedTaskID: String? = nil) async {
+    func openTaskLink(_ url: URL, expectedTaskID: String? = nil, conversation: Bool = false) async {
         guard !Task.isCancelled else { return }
         dismissTaskLink()
         let generation = destinationGeneration
@@ -177,6 +178,7 @@ final class WorkModel {
         // what is already open must not redraw the window.
         if taskLinkURL != url { taskLinkURL = url }
         taskLinkExpectedID = expectedTaskID
+        taskLinkConversation = conversation
         if showsTaskLink { showsTaskLink = false }
         do {
             let link = try TaskLink(url: url)
@@ -280,7 +282,7 @@ final class WorkModel {
             executionTask = remoteTask
             executionIdentity = WorkspaceIdentity(machineId: machine, worktree: checkout)
         }
-        guard link.session != nil || link.diff else {
+        guard link.session != nil || link.diff || taskLinkConversation else {
             if location != nil, let executionIdentity {
                 navigation.preparedTaskWorktrees[task.id] = executionIdentity
             }
@@ -471,20 +473,39 @@ final class WorkModel {
         if navigation.recentDestinations != recent { navigation.recentDestinations = recent }
     }
 
+    func openTaskConversation(_ id: String) async {
+        guard let found = task(id: id),
+              let url = TaskLink(issue: found.task.task.identifier, repo: found.wave.wave.repo).url else { return }
+        let key = workspaceKey(for: .task(id: id), repository: workspaceRepository ?? "")
+        let retainedConversation = workspaceRegistry?.retained(key)?.multiplexer.layout.allPanes.contains {
+            if case .session = $0.content { return true }
+            return false
+        } ?? false
+        if retainedConversation {
+            openTaskDestination(wave: found.wave, task: found.task)
+            navigation.content = .terminals
+            return
+        }
+        if taskOpening?.status == .opening, taskLinkExpectedID == found.task.id, taskLinkConversation { return }
+        openTaskDestination(wave: found.wave, task: found.task)
+        navigation.content = .terminals
+        await openTaskLink(url, expectedTaskID: found.task.id, conversation: true)
+    }
+
     func openPaletteTask(_ id: String) async {
         if let found = task(id: id) {
-            openTaskDestination(wave: found.wave, task: found.task)
+            await openTaskConversation(found.task.id)
             return
         }
         guard let recent = navigation.recentDestinations.first(where: { $0.id == .task(id) }),
               let repoPath else { return }
         guard let url = TaskLink(issue: recent.key, repo: repoPath).url else { return }
-        await openTaskLink(url, expectedTaskID: id)
+        await openTaskLink(url, expectedTaskID: id, conversation: true)
     }
 
     func retryTaskLink() async {
         guard let taskLinkURL else { return }
-        await openTaskLink(taskLinkURL, expectedTaskID: taskLinkExpectedID)
+        await openTaskLink(taskLinkURL, expectedTaskID: taskLinkExpectedID, conversation: taskLinkConversation)
     }
 
     func inspectDesktop(repository: String, window: UUID, workspaces: SessionsWorkspaceRegistry) -> DesktopWindowInspection {
@@ -657,24 +678,6 @@ final class WorkModel {
     private(set) var authoredWavesByRepo: [String: [String]] = [:]
     private(set) var isRefreshing = false
 
-    private var sessionSkillSelections = UserDefaults.standard.dictionary(forKey: "sessionSkillsByRepository") as? [String: String] ?? [:]
-
-    var selectedSessionSkill: String {
-        guard let repoPath else { return "capture-tasks" }
-        return sessionSkillSelections[repoIdentity(repoPath)] ?? "capture-tasks"
-    }
-
-    func selectSessionSkill(_ name: String, repo: String) {
-        var saved = UserDefaults.standard.dictionary(forKey: "sessionSkillsByRepository") as? [String: String] ?? [:]
-        saved[repoIdentity(repo)] = name
-        sessionSkillSelections = saved
-        UserDefaults.standard.set(saved, forKey: "sessionSkillsByRepository")
-    }
-
-    func sessionSkills(repo: String) async throws -> [DiscoveryEntry] {
-        try await query.sessionSkills(cwd: repo)
-    }
-
     private let query: RegistryQuery
     @ObservationIgnored private let cache: WorkCache?
     /// The Machine the saved workspace was read from, until `confirmMachine` checks it.
@@ -761,6 +764,18 @@ final class WorkModel {
         }
         if roadmap.isLoading || (repoPath != nil && sessions.isLoading) { return .loading }
         return showsSavedWork ? .updating : .current
+    }
+
+    /// Current planning is only an entry candidate. Acquisition checks the full
+    /// historical Wave inventory before treating this repository as empty.
+    var repositoryEntryReady: Bool {
+        guard repoPath != nil, workStatus == .current, case .available = waves else { return false }
+        return true
+    }
+
+    var isEmptyRepositoryCandidate: Bool {
+        guard repositoryEntryReady, visibleWaves.isEmpty, visibleRoadmaps.isEmpty else { return false }
+        return !(sessions.value ?? []).contains { $0.work != nil || !$0.taskIds.isEmpty || $0.workspace?.taskId != nil }
     }
 
     /// Whether any part shown is saved text instead of a read from this launch.

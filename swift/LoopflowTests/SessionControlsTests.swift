@@ -32,9 +32,9 @@ import Testing
         await model.refreshSessions()
         #expect(model.sessions.value?.count == 2)
         model.navigation.showsHeadlessSessions = false
-        #expect(model.visibleWork.orphanSessions(search: "").map(\.id) == ["interactive"])
+        #expect(model.visibleSessions.map(\.id) == ["interactive"])
         model.navigation.showsHeadlessSessions = true
-        #expect(Set(model.visibleWork.orphanSessions(search: "").map(\.id)) == ["interactive", "headless"])
+        #expect(Set(model.visibleSessions.map(\.id)) == ["interactive", "headless"])
         model.navigation.selectedSessionId = "headless"
         model.beginSessionRename(try #require(model.sessions.value?.first { $0.id == "headless" }))
         model.navigation.renaming?.text = "Retained draft"
@@ -43,7 +43,6 @@ import Testing
         #expect(model.navigation.selectedSessionId == "headless")
         #expect(model.navigation.renaming?.text == "Retained draft")
         #expect(model.sessions.value?.map(\.id) == ["interactive"])
-        #expect(model.visibleWork.orphanSessions(search: "").map(\.id) == ["interactive"])
     }
 
 

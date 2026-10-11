@@ -219,29 +219,17 @@ extension WorkProjection {
                     let taskSubject = WorkOutlineSubject(key: task.id, title: task.task.task.name)
                     let taskMatches = matches(taskSubject.title) || matches(task.task.task.identifier)
                         || matches(waveSubject.title)
-                        || task.sessions.contains(where: { matches($0.title) || matches($0.detail) })
                     guard taskMatches else { continue }
                     // Open Sessions ride the Task row as a count and names.
                     appendWork(taskSubject, depth: waveDepth, ancestors: ancestors,
                                hasChildren: false, sessions: task.sessions)
                 }
             }
-            if !query.isEmpty, !omitWave, rows.count == waveStart + 1, !matches(waveSubject.title),
-               !wave.sessions.contains(where: { matches($0.title) || matches($0.detail) }) { rows.removeLast() }
+            if !query.isEmpty, !omitWave, rows.count == waveStart + 1, !matches(waveSubject.title) { rows.removeLast() }
         }
         return rows
     }
 
-    /// Diagnostic inventory: no Task association, regardless of attention state.
-    func orphanSessions(search: String) -> [SessionRecord] {
-        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
-        let records = waves.flatMap { $0.sessions } + unmatchedSessions
-        return records.filter { session in
-            guard session.workspace?.taskId == nil, session.taskIds.isEmpty else { return false }
-            return query.isEmpty || [session.title, session.detail, session.workPath ?? ""]
-                .contains { $0.localizedCaseInsensitiveContains(query) }
-        }
-    }
 
 }
 

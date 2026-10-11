@@ -3,11 +3,10 @@ import Foundation
 import Loopflow
 import SwiftUI
 
-/// Inspection destinations never confer launch or process-control authority.
+/// Work destinations and scoped actions; Task entry opens its conversation, not its Workflow.
 enum WorkDestination: Hashable {
     case wave(String)
     case task(String)
-    case session(String)
     case flow(String)
     case workflow(String)
     case rename(String)

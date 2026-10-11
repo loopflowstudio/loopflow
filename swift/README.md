@@ -137,25 +137,28 @@ area; **Restore** brings back the panes and files. **Terminate** ends a shell.
 New conversations arrive in the list without taking focus.
 
 Task rows and their counts show unfinished interactive Sessions in the Task checkout,
-including independent conversations and authored Flow reviews. **Show headless Sessions**
-includes background conversations; `lf session list --interactive all --history`
-inspects the full history. Filtering preserves retained terminals and drafts.
+including independent conversations and authored Flow reviews.
+`lf session list --interactive all --history` inspects the full history.
+Filtering preserves retained terminals and drafts.
 Repo and Wave Sessions retain their own scopes. Wave rows include their conversations and roll up Task
 Sessions; choose a name to open it directly.
 **Available** means the conversation can be joined. Historical feedback remains
 readable without granting completion authority. Failed provider starts offer recovery.
 
-Use the outline menu for **Compact** or **Full hierarchy**. Open a Task conversation
-from its Session-count menu; Task rows always open Work.
-Repository conversations and Sessions with unavailable planning stay reachable
-under **Debug → Sessions**, without inventing sidebar ancestry. Sessions without a Task association are also available under
-**Debug → Sessions → Orphan Sessions** in the repository menu, or `lf session list --orphan`.
-There is no creation opt-out from checkout association. **Task details** opens the description, comments and Run history.
+Use the outline menu for **Compact** or **Full hierarchy**. Search Work names and
+identifiers, not Session titles. Click the repository name to return to its retained,
+configured conversation. An empty repository opens that conversation directly:
+begin with what to work on, without creating a Wave or Task first.
+Unscoped Sessions remain available through `lf session list --orphan`, not a
+sidebar group or search inventory. Missing planning never deletes retained tabs.
+**Task details** opens the description, comments and Run history.
 
-A Task's workspace is its Workflow in the header and a multiplexer below.
-Opening a Task shows its retained panes without creating or connecting a Session.
-Use **New conversation** or an explicit Session link to connect; an unplaced Task
-keeps its explicit **Prepare workspace** action. The header draws the Workflow as a graph scaled to the window:
+Opening a Task enters its conversation and retained panes. First opening reuses
+or prepares its primary conversation through `lf`; it never starts the Workflow
+or takes over another client. Returning preserves the workspace. Explicit bare
+CLI Task links still support inspection without conversation acquisition.
+The workspace keeps its Workflow in the header and a multiplexer below.
+The header draws the Workflow as a graph scaled to the window:
 `start` and `end` as circles, each node a box saying what you do there, one
 labelled arrow per edge, a loop back as an arc over its node. The current node
 or running edge is marked. The labels of the edges leaving the current node

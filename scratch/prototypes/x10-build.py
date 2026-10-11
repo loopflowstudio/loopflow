@@ -6,7 +6,7 @@ a = h.index("<main"); a = h.index(">", a) + 1; b = h.index("</main>")
 _m = h[a:b]
 CLI = _m[_m.index('<section id="flows"'):_m.index('<section id="start"')].replace(
     '<section id="flows" class="reading">',
-    '<section id="flows" class="reading cli-part">\n<h2><code>lf</code> is the CLI for writing, running, sharing and studying agent workflows.</h2>', 1)
+    '<section id="flows" class="reading cli-part">\n<h2><code>lf</code>: the CLI for software engineering</h2>', 1)
 def _drop(html, name):
     i = html.index("<b>" + name + "</b>"); a0 = html.rindex("<li>", 0, i); b0 = html.index("</li>", i) + 5
     return html[:a0] + html[b0:]

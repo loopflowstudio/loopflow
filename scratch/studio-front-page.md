@@ -594,3 +594,5 @@ strip links to its own site in a new tab.
 - Jack Heart, on the thesis: "sans-serif" → the three paragraphs at the top of `x10` are set in the site's sans face.
 
 - Jack Heart: "Turning ideas and requirements into an concrete design." → added as the first item under "What agents automate" in `x10`. Placement is Claude's guess; Jack did not say which column or where.
+
+- Jack Heart, on the CLI section heading in `x10`: "can just be lf: the CLI for software engineering" → set. The `/cli` page's own headline is unchanged.

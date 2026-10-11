@@ -174,10 +174,9 @@ Work-keyed cutover remains. Passive Task navigation/bare remote links
 no longer acquire Sessions; explicit Session/Changes survives. `ff61b6bc` selects
 shell-default Split, no empty option. `d6640b8c68` retains shell Machine/path through
 layout/Undo; unknown refuses.
-`94d5195497`: content owns terminal identity; Session moves fence targets/Undo.
-Shells use content's owner; same-path/Undo checks exclude
-launch replay. Registry/membership remain checkout-keyed. Tabs, Files/log readers
-and DTO cutover remain; no native acceptance or admission decision.
+`94d5195497`/`cf77ee325a`: content owns terminals/shell routing; Undo never
+replays launch. Files/log readers still ignore content location. Registry, membership and targets remain checkout-keyed;
+Work tabs/DTO cutover remain. No native acceptance or admission decision.
 
 **Confirmation cannot elect execution.** `4c43550c2`: divergent revisions and
 independent refs both confirm, not Task allocation. `42990dea3` shares membership

@@ -63,7 +63,7 @@ edges:
 main = f'''
 <section class="home-hero">
   <h1>Scale yourself.</h1>
-  <p class="either">Conduct an orchestra of coding agents. With Loopflow you can use more agents more effectively, and still hear every part.</p>
+  <p class="either">Conduct an orchestra of coding agents and hear every part clearly.</p>
   <div class="get"><a class="button solid" href="/download">Download for Mac</a><span class="or">or the CLI</span><div class="install-row"><pre tabindex="0" aria-label="Install the lf command line" class="term"><span class="p">$</span> curl -fsSL https://loopflow.studio/install.sh | sh</pre><button type="button" data-copy="curl -fsSL https://loopflow.studio/install.sh | sh" aria-live="polite" class="copy">Copy</button></div></div>
   <p class="cost">Free and open source (MIT)</p>
 </section>

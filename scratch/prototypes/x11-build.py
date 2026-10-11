@@ -117,9 +117,7 @@ main = f'''
       <p class="more"><a href="/docs/waves">Tasks and Waves ↗</a><a href="/docs/authoring#workflows">Write a workflow ↗</a></p>
     </article>
     <article>
-      <div class="card"><ul class="wfs">
-{WFS}
-      </ul></div>
+      <div class="shot-slot"><span>Screenshot goes here</span><p>A task session, or a wave session, open in cmux</p></div>
     </article>
   </div>
 </section>
@@ -165,6 +163,7 @@ extra = '''
 .home-page .pair h2{max-width:900px}.home-page .pair .halves .more{margin:0;border:0;padding:0}
 .home-page .works .under{margin:22px 0 0;font:500 14px var(--font-mono)}.home-page .works .under a{color:var(--text);text-decoration:underline;text-decoration-color:#b9b1a6;text-underline-offset:4px}.home-page .works .under a:hover{color:var(--wine)}
 .home-page .reading.closing{padding-top:8px}
+.home-page .shot-slot{display:grid;place-content:center;gap:8px;text-align:center;aspect-ratio:16/10;border:1px dashed #b9b1a6;border-radius:10px;background:#f4f0ea}.home-page .shot-slot span{font:500 11px var(--font-mono);text-transform:uppercase;letter-spacing:.1em;color:var(--burgundy)}.home-page .shot-slot p{margin:0;font-size:14px;color:var(--text-secondary)}
 .home-page .system h2{max-width:980px}
 .home-page .works{padding-bottom:88px}
 .home-page .clihero h2 code{font-size:.9em}.home-page .clihero article{min-width:0}.home-page .clihero .term{margin:0;font-size:12px;overflow-x:auto;max-width:100%}

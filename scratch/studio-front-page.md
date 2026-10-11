@@ -652,3 +652,5 @@ strip links to its own site in a new tab.
 - Still open: the card's `graph pursue` is not a command `lf` accepts.
 
 - Jack Heart: "remove (Waves) and (Tasks). Lowercase task everywhere just use it as a common place word, not Our Word" → in `x11`, the two parentheticals are gone from the thesis and "task" is lower case across the page copy, the mock and the flows card. The docs link label "Tasks and Waves" keeps its capital as the start of a label.
+
+- Jack Heart: "ok switch order back. Now: pair flow list with the paragraph for Coding Agents... Drop all this: [the 'Stay engaged and scale the swarm.' heading and its two paragraphs] Move Tasks and Waves ↗ Write a workflow ↗ to the new Tasks section. Call it Loopflow: a system for arranging coding sessions around clearly defined goals at all levels of abstraction" → in `x11`, one section under that heading holds the two thesis paragraphs on the left with the two links, and the three-flows card on the right. The swarm section is gone. The CLI section follows it.

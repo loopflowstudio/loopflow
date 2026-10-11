@@ -53,6 +53,7 @@
 .home-page .pair h2{max-width:900px}.home-page .pair .halves .more{margin:0;border:0;padding:0}
 .home-page .works .under{margin:22px 0 0;font:500 14px var(--font-mono)}.home-page .works .under a{color:var(--text);text-decoration:underline;text-decoration-color:#b9b1a6;text-underline-offset:4px}.home-page .works .under a:hover{color:var(--wine)}
 .home-page .reading.closing{padding-top:8px}
+.home-page .system h2{max-width:980px}
 .home-page .works{padding-bottom:88px}
 .home-page .clihero h2 code{font-size:.9em}.home-page .clihero article{min-width:0}.home-page .clihero .term{margin:0;font-size:12px;overflow-x:auto;max-width:100%}
 .home-page #yours .say.req{margin-bottom:4px}.home-page #yours .reqs{margin:0 0 14px;padding-left:1.2em;font-size:18px;line-height:1.6;color:#333}.home-page #yours .reqs li{margin:0}.home-page #yours .reqs code{font-size:.88em}
@@ -224,9 +225,22 @@
     </div>
   </div>
 </section>
-<section class="thesis">
-  <p>Coding agents can do amazing things for you, but they ask a lot of focus from you. How can you, a human with a single locus of attention, stay in sync with an entire parallel agent swarm? Shipping tens of thousands of lines is the easy part. Making them lines worth keeping — lines you don’t revert next month — is the hard part.</p>
-  <p>Loopflow arranges your agent sessions around the work: long-lived objectives and concrete outcomes. You don’t have to keep every session window open for fear of it disappearing, or remember why you wanted this massive change in the first place. Each task follows a workflow you choose, and each session you come to is one where your input really matters. Every task ends shipped.</p>
+<section class="pair system">
+  <h2>Loopflow: a system for arranging coding sessions around clearly defined goals at all levels of abstraction.</h2>
+  <div class="halves">
+    <article>
+      <p>Coding agents can do amazing things for you, but they ask a lot of focus from you. How can you, a human with a single locus of attention, stay in sync with an entire parallel agent swarm? Shipping tens of thousands of lines is the easy part. Making them lines worth keeping — lines you don’t revert next month — is the hard part.</p>
+      <p>Loopflow arranges your agent sessions around the work: long-lived objectives and concrete outcomes. You don’t have to keep every session window open for fear of it disappearing, or remember why you wanted this massive change in the first place. Each task follows a workflow you choose, and each session you come to is one where your input really matters. Every task ends shipped.</p>
+      <p class="more"><a href="http://localhost:5001/docs/waves">Tasks and Waves ↗</a><a href="http://localhost:5001/docs/authoring#workflows">Write a workflow ↗</a></p>
+    </article>
+    <article>
+      <div class="card"><ul class="wfs">
+<li><code>feature</code><p class="line"><i>start</i><span>task-design →</span><b>design</b><span>pursue →</span><b>demo</b><span>ship →</span><i>end</i></p><small>The default. You jam on the design, and you try every change before it ships.</small></li>
+<li><code>code</code><p class="line"><i>start</i><span>pursue →</span><b>demo</b><span>ship →</span><i>end</i></p><small>One stop. Your agent builds straight from the task, and you try the change.</small></li>
+<li><code>research</code><p class="line"><i>start</i><span>research →</span><b>findings</b><i>end</i></p><small>No pull request. Your agent investigates, and the task ends when you accept the findings.</small></li>
+      </ul></div>
+    </article>
+  </div>
 </section>
 <section class="pair clihero">
   <h2><code>lf</code>: the CLI for agent workflows.</h2>
@@ -250,23 +264,6 @@
 
 <span class="p">$</span> <b>lf</b> pr open                  <span class="c"># a draft PR, opened for you</span>
 <span class="p">$</span> <b>lf</b> land --watch             <span class="c"># merge when checks pass; fix if not</span></pre>
-    </article>
-  </div>
-</section>
-<section class="pair">
-  <h2>Stay engaged <em>and</em> scale the swarm.</h2>
-  <div class="halves">
-    <article>
-      <p>A workflow says how a task gets from an idea to shipped, and where you come in: early on in the design, later on to try the change, both, or neither. Stay close while the work is new, and drop a stop once you trust how it goes. You can zoom in and you can zoom out.</p>
-      <p>Workflows are files in your repository. Use these three, change them, or write your own, and each project picks the one its tasks follow, so hands-on work and hands-off work run side by side.</p>
-      <p class="more"><a href="http://localhost:5001/docs/waves">Tasks and Waves ↗</a><a href="http://localhost:5001/docs/authoring#workflows">Write a workflow ↗</a></p>
-    </article>
-    <article>
-      <div class="card"><ul class="wfs">
-<li><code>feature</code><p class="line"><i>start</i><span>task-design →</span><b>design</b><span>pursue →</span><b>demo</b><span>ship →</span><i>end</i></p><small>The default. You jam on the design, and you try every change before it ships.</small></li>
-<li><code>code</code><p class="line"><i>start</i><span>pursue →</span><b>demo</b><span>ship →</span><i>end</i></p><small>One stop. Your agent builds straight from the task, and you try the change.</small></li>
-<li><code>research</code><p class="line"><i>start</i><span>research →</span><b>findings</b><i>end</i></p><small>No pull request. Your agent investigates, and the task ends when you accept the findings.</small></li>
-      </ul></div>
     </article>
   </div>
 </section>

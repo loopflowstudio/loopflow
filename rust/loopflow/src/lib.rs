@@ -21,6 +21,7 @@ pub(crate) mod machine_route;
 pub mod naming;
 pub(crate) mod os_process;
 pub mod platform;
+pub mod portfolio;
 pub mod process;
 pub mod prompt;
 pub mod skills;

@@ -1,44 +1,14 @@
 import Foundation
+import Loopflow
 
 enum PortfolioDiscovery {
     nonisolated static func resolveLaunchRepo(_ initialPath: String) -> String? {
-        let scanner = RepoScanner()
+        let scanner = RepositoryPath()
         let dev = ProcessInfo.processInfo.environment["LOOPFLOW_DEV_WAVE_REPO"]
         let devOverride = dev?.isEmpty == false ? dev : nil
         let candidate = URL(fileURLWithPath: devOverride ?? initialPath)
         guard let mainURL = scanner.mainRepository(candidate) else { return nil }
         return mainURL.normalizedFilePath
-    }
-
-    static func repos(
-        initialRepoPath: String?,
-        persistedRepos: [PortfolioRepo] = []
-    ) async -> [PortfolioRepo] {
-        await Task.detached {
-            let scanner = RepoScanner()
-            var seen = Set<String>()
-            var result: [PortfolioRepo] = []
-            for url in scanner.scanDefaultRoot() {
-                let path = url.normalizedFilePath
-                guard seen.insert(path).inserted else { continue }
-                result.append(PortfolioRepo(path: path, lastOpened: Date()))
-            }
-            for repo in persistedRepos {
-                guard let main = scanner.mainRepository(repo.url) else { continue }
-                let path = main.normalizedFilePath
-                guard seen.insert(path).inserted else { continue }
-                result.append(PortfolioRepo(path: path, lastOpened: repo.lastOpened))
-            }
-            if let initialRepoPath,
-               let launch = resolveLaunchRepo(initialRepoPath),
-               seen.insert(launch).inserted {
-                result.append(PortfolioRepo(
-                    path: launch,
-                    lastOpened: Date()
-                ))
-            }
-            return result
-        }.value
     }
 
     static func authoredWaves(in repos: [PortfolioRepo]) async -> [String: [String]] {

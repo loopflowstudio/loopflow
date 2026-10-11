@@ -57,6 +57,10 @@ struct RepoView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .foregroundStyle(palette.text)
+            if let error = model.portfolioError {
+                Text(error).font(.caption).foregroundStyle(palette.textSecondary)
+                    .textSelection(.enabled).padding(Spacing.sm)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(palette.background)
@@ -90,12 +94,16 @@ struct RepoView: View {
             model.rescanWork()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            Task { await model.rereadDefinitions() }
+            Task {
+                await portfolioService.refresh()
+                await model.refreshPortfolio(initialRepoPath: initialRepoPath)
+                await model.rereadDefinitions()
+            }
         }
         .task {
+            await portfolioService.refresh()
             await model.refreshPortfolio(
-                initialRepoPath: initialRepoPath,
-                persistedRepos: portfolioService.repos
+                initialRepoPath: initialRepoPath
             )
         }
         .task { await model.keepWorkCurrent() }
@@ -112,8 +120,7 @@ struct RepoView: View {
         .onChange(of: portfolioService.repos.map(\.path)) { _, _ in
             Task {
                 await model.refreshPortfolio(
-                    initialRepoPath: initialRepoPath,
-                    persistedRepos: portfolioService.repos
+                    initialRepoPath: initialRepoPath
                 )
             }
         }

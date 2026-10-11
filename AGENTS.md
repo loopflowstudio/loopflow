@@ -158,6 +158,7 @@ When editing `*.rs` files:
 - If code is intentionally unused (e.g., for FFI/PyO3), use `#[allow(dead_code)]` with a comment explaining why
 - Avoid `use super::*` in submodules; use explicit imports so dependencies between modules are visible
 - Derive `Debug` on all public types; add `Clone`, `PartialEq`, `Default` where sensible
+- Give nested global Clap flags a distinct argument `id` when a root flag shares their name; otherwise their values can propagate into the root command.
 - Use `thiserror` for library error types callers need to match on
 - Use `expect("why this is safe")` over `unwrap()` outside tests
 - Conversion methods: `as_` (cheap/borrowed), `to_` (allocates), `into_` (consumes self)

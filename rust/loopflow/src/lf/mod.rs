@@ -409,6 +409,13 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: SelfCommand,
     },
+    /// Select repositories for the Machine-local portfolio
+    Portfolio {
+        #[command(subcommand)]
+        cmd: Option<crate::portfolio::PortfolioCommand>,
+        #[arg(long, global = true, id = "portfolio_json")]
+        json: bool,
+    },
     /// Read Loopflow configuration
     Config {
         #[command(subcommand)]

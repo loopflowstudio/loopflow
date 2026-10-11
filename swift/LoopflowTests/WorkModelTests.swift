@@ -38,7 +38,7 @@ struct WorkModelTests {
             roadmap: .available(fixture.roadmap),
             waves: .available([staleWorktree]),
             workActivity: .available(fixture.workActivity),
-            repos: [PortfolioRepo(path: "/src/loopflow", lastOpened: .distantPast)]
+            repos: [PortfolioRepo(path: "/src/loopflow", error: nil)]
         )
 
         #expect(model.allRepos.map(\.path) == ["/src/loopflow"])
@@ -213,7 +213,13 @@ struct WorkModelTests {
         }
         try git(["init", "-q"], at: repo)
 
-        let model = WorkModel(query: fixture.query)
+        let portfolioQuery = RegistryQuery { args, _ in
+            if args.first == "portfolio" {
+                return "{\"configured\":true,\"mode\":\"manual\",\"root\":\"/src\",\"repos\":[{\"path\":\"\(repo.resolvingSymlinksInPath().path)\",\"error\":null}],\"error\":null}"
+            }
+            throw RegistryQueryError("unexpected read")
+        }
+        let model = WorkModel(query: portfolioQuery)
         model.applyFixture(
             roadmap: .available(fixture.roadmap),
             waves: .available([]),
@@ -221,9 +227,10 @@ struct WorkModelTests {
             repos: []
         )
         await model.refreshPortfolio(
-            initialRepoPath: nil,
-            persistedRepos: [PortfolioRepo(path: repo.path, lastOpened: .distantPast)]
+            initialRepoPath: nil
         )
+        #expect(model.portfolioError == nil)
+        #expect(model.repos.count == 1)
         model.setRepoPath(repo.path)
 
         #expect(model.visibleWaves.map(\.displayName) == [
@@ -251,68 +258,6 @@ struct WorkModelTests {
         #expect(model.repoIdentity(worktree.path) != model.repoIdentity(origin.path))
         _ = WaveOrigin.resolve(worktree.path)
         #expect(model.repoIdentity(worktree.path) == model.repoIdentity(origin.path))
-    }
-
-    @Test("A development worktree becomes one main-repository choice")
-    func developmentWorktreeBecomesMainRepositoryChoice() async throws {
-        let fixture = try WorkTestFixture.load()
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("loopflow-worktree-\(UUID().uuidString)", isDirectory: true)
-        let origin = root.appendingPathComponent("repo", isDirectory: true)
-        let worktree = root.appendingPathComponent("repo.wt", isDirectory: true)
-        try FileManager.default.createDirectory(
-            at: origin.appendingPathComponent("wave/product", isDirectory: true),
-            withIntermediateDirectories: true
-        )
-        try Data("# product\n".utf8).write(
-            to: origin.appendingPathComponent("wave/product/GOAL.md")
-        )
-        defer { try? FileManager.default.removeItem(at: root) }
-
-        try git(["init", "-q"], at: origin)
-        try git(["add", "wave/product/GOAL.md"], at: origin)
-        try git(
-            ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "init"],
-            at: origin
-        )
-        try git(["worktree", "add", "-q", worktree.path], at: origin)
-
-        let registered = Wave(
-            id: "product",
-            name: "product",
-            repo: origin.path,
-            status: .ready
-        )
-        let model = WorkModel(query: fixture.query, repoPath: worktree.path)
-        model.applyFixture(
-            roadmap: .available(fixture.roadmap),
-            waves: .available([registered]),
-            workActivity: .available(fixture.workActivity),
-            repos: []
-        )
-
-        await model.refreshPortfolio(
-            initialRepoPath: worktree.path,
-            persistedRepos: [
-                PortfolioRepo(path: origin.path, lastOpened: .distantPast),
-                PortfolioRepo(path: worktree.path, lastOpened: .distantPast),
-            ]
-        )
-
-        #expect(model.visibleRepos.count == 1)
-        #expect(model.repoPath?.normalizedFilePath == origin.path.normalizedFilePath)
-        #expect(model.visibleRepos[0].path.normalizedFilePath == origin.path.normalizedFilePath)
-        #expect(model.visibleRepos[0].displayName == "repo")
-        #expect(model.repoIdentity(model.visibleRepos[0].path) == model.repoIdentity(worktree.path))
-        #expect(model.visibleWaves.map(\.displayName) == ["Product"])
-        #expect(model.visibleWaves.map(\.isRegistered) == [true])
-
-        let restored = WorkModel(query: fixture.query, repoPath: worktree.path)
-        await restored.refreshPortfolio(initialRepoPath: nil)
-        #expect(restored.repoPath?.normalizedFilePath == origin.path.normalizedFilePath)
-        #expect(restored.allRepos.contains {
-            $0.path.normalizedFilePath == origin.path.normalizedFilePath
-        })
     }
 
     @Test("Work selection becomes one server-side Activity filter")

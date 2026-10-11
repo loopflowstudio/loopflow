@@ -220,13 +220,13 @@ changeable discovery folder, or manual selection across folders/subfolders. Jack
 explicitly included the existing Portfolio UI: build on or replace it in this
 same cut. Jack selected the Portfolio view as the primary configuration surface:
 choose a discovery folder or individual repositories there without requiring CLI
-setup. The view must CALL the lf API for reads and mutations through RegistryQuery;
+setup. The view calls the lf API for reads and mutations through RegistryQuery;
 it must not scan folders or write configuration itself. lf owns persistence and
 discovery, not a competing Swift list. Jack considered multiple discovery roots
 and said they are probably unnecessary; defer them in this slice.
 This extends LOO-462's Work-first experience through publication/demo, not landing.
 
-**Proposed concrete contract (reversible implementation choices):** one
+**Implemented contract (reversible implementation choices):** one
 Machine-local portfolio selection, with folder and manual modes. Folder mode
 uses the existing `repo_root` (default `~/src`) and discovers immediate main Git
 checkouts, excluding linked worktrees. Manual mode uses explicit main-repository
@@ -235,7 +235,7 @@ scan results or the last opened repo. Preserve the inactive mode's settings when
 switching modes. Recursive folder scanning and per-repo folder exclusions are
 not required by the current request. No GitHub remote, Wave or Task is required.
 
-Use `lf portfolio` as the proposed owner: list/read JSON, select folder/manual
+Use `lf portfolio` as the owner: list/read JSON, select folder/manual
 mode, set the root, and add/remove explicit repositories. Final subcommand syntax
 comes from the existing CLI conventions, not a parallel Desktop API. Changing
 the folder reuses `repo_root`, never a second root preference. Portfolio membership
@@ -274,9 +274,27 @@ manual membership; never discard it, auto-publish it or re-import on every refre
 Offer import only when shared selection is absent; CLI-authored selection wins.
 Remove obsolete exclusive tests; migrate behavior tests to the shared owner.
 
-**Order:** shared Rust selection/CLI and fixtures; cut all Desktop membership
-consumers and existing Portfolio controls over together; remove superseded owners;
-prove cross-surface round trips. Preserve the existing conversation-first work.
+**Implementation, October 11:** `portfolio.rs` owns the selection and reading;
+`lf portfolio [folder [PATH]|manual|add PATH…|remove PATH|import PATH…] --json`
+exposes it outside repositories. The Machine's `config.yaml` stores selection beside
+`repo_root`, preserving other keys with a locked atomic write. No existing general
+Machine-config writer was present; the atomic writer now lives in `config.rs`.
+No database migration or repository registration is needed.
+
+PortfolioService now retains shared readings and errors; it writes no preferences.
+WavesView configures both modes with native path pickers and calls RegistryQuery.
+Repo windows and menus read the same owner, refreshing on app activation. Import
+reads old `portfolioRepos` without changing it; Rust refuses import after any shared
+selection exists. The service serializes mutations after pending reads.
+`PortfolioDiscovery.repos`, its scan/launch union, Swift membership persistence,
+old PortfolioRepo and scan-only tests are removed. `RepositoryPath` retains only
+explicit-open validation from RepoScanner; authored-Wave discovery remains.
+
+Review fixed a global Clap `--json` identity collision and a rewritten-path mismatch
+between shared membership and authored Waves. Failed folder reads retain the last
+usable membership and expose the authoritative mode/root plus an error. Opening
+and removing membership do not touch retained Work. No acceptance is inferred from
+native path-picker code; both modes still require demo review.
 
 **Proof:** isolated roots with two repos, a linked worktree and a nested repo;
 default/root-change selection excludes the worktree, manual mode selects across
@@ -318,23 +336,19 @@ provider acceptance, installation, or three-day adoption credit. Chapter KRs rem
 historically readable; October 7 retired numeric/soak acceptance, not retention or
 usefulness. No external-product progress credit follows from Loopflow UI work alone.
 
-Supplied compression evidence for `8f95d9e4e6`: passing Swift build and 101 navigation,
-destination, controls and cache tests under denied network/WindowServer access;
-earlier Rust fixture/fmt/clippy results remain applicable. Initial failures from
-retired fixture commands and helper framework lookup were repaired. These are
-focused checks, not gate completion or native acceptance. Product has no immediate
-child memory directories in this checkout; the complete selected memory was read.
-Uncommitted pre-reconciliation notes are preserved at
-`/tmp/loo462-realign-8f95d9e4e6/`.
+Earlier navigation, launcher, parent-integration and gate evidence is preserved in
+`20298cddcb:scratch/get-me-using-lf.md` (the portfolio-scope checkpoint before this cut).
+The failed configured demo remains in `work-first-demo.md`. Earlier isolated
+provider and headless passes do not establish native usability or installed
+runtime support.
 
-Prior gate evidence (`8efc1234a1`): documented commands 3, DTOs 43, isolated
-Session lifecycle 21 (one Linux-only ignored), Desktop 92 passed. The first
-lifecycle attempt failed with ambient TMPDIR/readonly SQLite; canonical TMPDIR
-repaired the fixture context. Parent sync `c040d9fa03` passed both exact
-WorkCache Session-read conflict tests. These results remain applicable; native
-usability remains with demo/review. Pre-continuation notes are preserved at
-`/tmp/loo462-implement-c040d9fa03/`.
+The portfolio pass also regenerated `work_first_entry.json` through its isolated
+Rust lifecycle producer: the parent had added Task acquisition metadata absent
+from the older capture. Swift round-trip assertions compare shared readings;
+Foundation's `/var` spelling differs from Rust's canonical `/private/var` path.
+The retained-Work test removes a nonempty membership while preserving the exact
+conversation, pane layout and unsaved document.
+A generation check prevents a delayed portfolio read from restoring membership
+after a newer reading removed it; the focused regression passes.
 
-Latest focused evidence (October 11 compression, `df40c477ef`): `uv run pytest python/tests/test_loopflow_dev.py python/tests/test_ghostty_artifact.py -q` passed 9; Ruff and `git diff --check` pass; `scripts/test_desktop.sh --filter 'WorkDestinationTests/taskEntryOpensConversationThenRetainsWorkspace|WorkDestinationTests/delayedPrimarySessionPreparationDoesNotOpenChangesInAnotherTask' -Xswiftc -gnone` built and passed 2 tests (3 cases) headlessly; `lf context` is within both budgets; configured native demo remains release-dependent.
-
-Check (October 11 realign): `git diff --check` and `lf context` pass; prose-only changes reuse focused evidence above; configured native acceptance remains with demo/review after compatible release.
+Check (October 11 portfolio): `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo test -p loopflow --lib portfolio::tests` (3), `cargo test -p loopflow --test portfolio_cli_tests` (1), isolated `session_lifecycle_tests work_first_repository_entry_preserves_primary_and_mixed_inventory` (1), and headless `scripts/test_desktop.sh` filtered to PortfolioServiceTests/authored-Wave/composed-entry cases (7 distinct tests, including the real CLI round trip via LOOPFLOW_PORTFOLIO_TEST_BIN) pass; `git diff --check` and `lf context` pass; broader suites belong to gate and configured native review still requires a compatible installed release.

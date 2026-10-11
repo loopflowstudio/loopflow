@@ -1,32 +1,9 @@
-// Scan local directories for git repositories.
+// Validate and normalize explicit repository opening paths.
 
 import Foundation
 
-struct RepoScanner {
+struct RepositoryPath {
     var fileManager: FileManager = .default
-
-    func scanMainWorktrees(in root: URL) -> [URL] {
-        guard let children = try? fileManager.contentsOfDirectory(
-            at: root,
-            includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsHiddenFiles]
-        ) else {
-            return []
-        }
-
-        return children
-            .filter { isDirectory($0) }
-            .filter(isMainGitWorktree)
-            .map(\.standardizedFileURL)
-            .sorted { lhs, rhs in
-                lhs.lastPathComponent.localizedCaseInsensitiveCompare(rhs.lastPathComponent) == .orderedAscending
-            }
-    }
-
-    func scanDefaultRoot() -> [URL] {
-        let root = fileManager.homeDirectoryForCurrentUser.appendingPathComponent("src", isDirectory: true)
-        return scanMainWorktrees(in: root)
-    }
 
     /// Collapse a Git working-tree root to its main worktree.
     ///
@@ -53,11 +30,6 @@ struct RepoScanner {
             return nil
         }
         return main
-    }
-
-    /// Preserve the previous forgiving caller contract outside discovery.
-    func resolveMainWorktree(_ url: URL) -> URL {
-        mainRepository(url) ?? url.standardizedFileURL
     }
 
     private func git(_ args: [String], at url: URL) -> String? {
@@ -94,8 +66,4 @@ struct RepoScanner {
         (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
     }
 
-    private func isMainGitWorktree(_ url: URL) -> Bool {
-        guard let main = mainRepository(url) else { return false }
-        return canonical(main.normalizedFilePath) == canonical(url.normalizedFilePath)
-    }
 }

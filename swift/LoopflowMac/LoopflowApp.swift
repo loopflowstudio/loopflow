@@ -112,6 +112,8 @@ struct LoopflowApp: App {
                             Button(repo.displayName) {
                                 requestRepository(repo.path, nil)
                             }
+                            .disabled(repo.error != nil)
+                            .help(repo.error ?? repo.path)
                         }
                     }
                 }
@@ -241,7 +243,6 @@ struct LoopflowApp: App {
         let workspace = try await taskLinks.openRepository(path: path, link: link, query: query) { workspace in
             openWindow(id: "workspace", value: workspace)
         }
-        portfolioService.addRepo(URL(fileURLWithPath: workspace.path))
         try? saveLoopflowState(LoopflowState(selectedRepoPath: workspace.path))
     }
 

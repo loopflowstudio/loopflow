@@ -1,5 +1,6 @@
 // Portfolio's repository rail and Wave inspectors. Tasks open in their repository window.
 
+import AppKit
 import SwiftUI
 import Loopflow
 
@@ -26,8 +27,7 @@ struct WavesView: View {
 
     @State private var repoStates: [String: PortfolioRepoState] = [:]
 
-    /// Repos shown in the rail: a live `~/src` scan of main (non-worktree) repos.
-    /// Derived off the main thread in `refreshRepos`.
+    /// Membership from the Machine-local lf portfolio.
     @State private var repos: [PortfolioRepo] = []
 
     /// Authored waves discovered on disk per repo path: `<repo>/wave/<name>/GOAL.md`.
@@ -121,6 +121,9 @@ struct WavesView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(palette.background)
         .task { await model.keepWorkCurrent() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await refreshRepos() }
+        }
         .onChange(of: model.workScope) { _, _ in model.syncWorkScope() }
         .onChange(of: selectedWave?.id, initial: true) { _, _ in
             model.detailWaveId = selectedWave.flatMap { $0.isRegistered ? $0.id : nil }
@@ -152,8 +155,8 @@ struct WavesView: View {
             await syncRepoStates()
         }
         .onChange(of: portfolioService.repos.map(\.path)) { _, _ in
+            repos = portfolioService.repos
             Task {
-                await refreshRepos()
                 await refreshAuthoredWaves()
                 ensureRepoStates()
                 await syncRepoStates()
@@ -175,6 +178,7 @@ struct WavesView: View {
     private var waveListColumn: some View {
         VStack(alignment: .leading, spacing: 0) {
             waveListHeader
+            portfolioControls
 
             if filteredWaves.isEmpty {
                 emptyWaveState
@@ -229,6 +233,81 @@ struct WavesView: View {
         }
         .padding(.horizontal, Spacing.lg)
         .padding(.vertical, Spacing.md)
+    }
+
+    private var portfolioControls: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            if let selected = portfolioService.selection {
+                Picker("Repositories", selection: Binding(
+                    get: { selected.mode },
+                    set: { mode in Task { await portfolioService.perform([mode.rawValue]) } }
+                )) {
+                    Text("Folder").tag(PortfolioMode.folder)
+                    Text("Manual").tag(PortfolioMode.manual)
+                }
+                .pickerStyle(.segmented)
+                .accessibilityIdentifier("portfolio-mode")
+
+                if selected.mode == .folder {
+                    Text(selected.root).font(.caption).textSelection(.enabled)
+                    Button("Choose Folder…") { choosePortfolioPaths(folder: true) }
+                        .accessibilityIdentifier("portfolio-folder")
+                    ForEach(selected.repos.filter { $0.error != nil }) { repo in
+                        Text("\(repo.displayName): \(repo.error ?? "")").font(.caption)
+                    }
+                } else {
+                    Button("Add Repositories…") { choosePortfolioPaths(folder: false) }
+                        .accessibilityIdentifier("portfolio-add")
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: Spacing.sm) {
+                            ForEach(selected.repos) { repo in
+                                HStack {
+                                    VStack(alignment: .leading) {
+                                        Text(repo.displayName)
+                                        Text(repo.error ?? repo.path).font(.caption).textSelection(.enabled)
+                                    }
+                                    Spacer()
+                                    Button("Remove", systemImage: "minus.circle") {
+                                        Task { await portfolioService.perform(["remove", repo.path]) }
+                                    }.labelStyle(.iconOnly)
+                                }
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 200)
+                }
+                if !portfolioService.legacyPaths.isEmpty {
+                    Button("Import Saved Desktop Repositories") {
+                        Task { await portfolioService.importLegacy() }
+                    }
+                    .accessibilityIdentifier("portfolio-import")
+                }
+            }
+            if let error = portfolioService.error {
+                Text(error).font(.caption).textSelection(.enabled)
+            }
+            HStack {
+                Button("Refresh") { Task { await refreshRepos() } }
+                if portfolioService.isPending { ProgressView().controlSize(.small) }
+            }
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, Spacing.lg)
+        .padding(.bottom, Spacing.md)
+        .disabled(portfolioService.isPending)
+    }
+
+    private func choosePortfolioPaths(folder: Bool) {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = !folder
+        panel.prompt = folder ? "Choose Folder" : "Add Repositories"
+        panel.begin { response in
+            guard response == .OK else { return }
+            let paths = panel.urls.map(\.path)
+            Task { await portfolioService.perform([folder ? "folder" : "add"] + paths) }
+        }
     }
 
     private var repoDropdown: some View {
@@ -377,10 +456,8 @@ struct WavesView: View {
             return
         }
 
-        repos = await PortfolioDiscovery.repos(
-            initialRepoPath: nil,
-            persistedRepos: portfolioService.repos
-        )
+        await portfolioService.refresh()
+        repos = portfolioService.repos
     }
 
     /// Enumerate each rail repo's authored waves — `<repo>/wave/<name>/GOAL.md`
@@ -440,13 +517,10 @@ struct WavesView: View {
     /// registry, so the `mock-waves` UI-test mode renders the stable list lenses
     /// and auto-selects a Wave into its full detail hierarchy. Idempotent.
     private func seedMockWaves() {
-        let repo = PortfolioRepo(path: MockWaveFixture.repoPath, lastOpened: Date())
+        let repo = PortfolioRepo(path: MockWaveFixture.repoPath, error: nil)
         // A persisted production repo filter must not hide the deterministic
         // fixture list while leaving its selected detail onscreen.
         selection = .all
-        if !portfolioService.repos.contains(where: { $0.path == repo.path }) {
-            portfolioService.addRepo(repo.url)
-        }
         repos = [repo]
         let state = repoStates[repo.path]
             ?? PortfolioRepoState(repo: repo, registryQuery: RegistryQueryLocal.shared)

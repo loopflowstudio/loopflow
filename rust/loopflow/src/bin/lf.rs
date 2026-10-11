@@ -2373,6 +2373,7 @@ fn execute_command(
         Some(Commands::Desktop { .. }) => {
             unreachable!("Desktop dispatch precedes Work preparation")
         }
+        Some(Commands::Portfolio { cmd, json }) => loopflow::portfolio::run(cmd.as_ref(), *json),
         Some(Commands::Config {
             cmd: loopflow::lf::ConfigCommand::User { json },
         }) => loopflow::lf::commands::config::print_user(*json),

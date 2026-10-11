@@ -403,10 +403,10 @@ Machine dispatch forwards to installed lf. The launcher now checks the actual
 operation before opening; it may register the repository. A private fixture cannot replace Jack's real-repository
 review; no runtime bypass, live migration or native acceptance follows.
 
-Jack's configurable-root/manual-portfolio discussion remains research, not approved
-implementation. Swift discovery still unions immediate `~/src` main checkouts,
-saved membership and launch repo; CLI `repo_root` does not configure that scanner.
-Shared repository identity/opening remain the reuse boundary; command spelling remains open.
+October 11: Jack Heart included portfolio management in LOO-462. Portfolio configures
+lf-owned folder/manual membership through RegistryQuery: one `repo_root`, default
+`~/src`, or manual paths across directories. Opening never enrolls; explicit legacy
+import preserves CLI selection. Multiple roots are deferred. Publication/demo only.
 
 ## Session working set and Waiting (2026-10-03, revised 2026-10-06)
 

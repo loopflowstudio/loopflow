@@ -1411,7 +1411,7 @@ struct WorkDestinationTests {
         let repository = URL(fileURLWithPath: path)
         try FileManager.default.createSymbolicLink(at: parent, withDestinationURL: repository.deletingLastPathComponent())
         let alias = parent.appendingPathComponent(repository.lastPathComponent)
-        try #require(RepoScanner().mainRepository(alias) != nil)
+        try #require(RepositoryPath().mainRepository(alias) != nil)
         let window = UUID()
         var received: [URL] = []
         let register: (RepositoryWorkspace) -> Void = { scene in

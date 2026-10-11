@@ -355,6 +355,18 @@ agent readings fail independently. A failed refresh keeps the last useful
 evidence visible with its failure reason rather than painting a healthy empty
 state.
 
+Open **Portfolio** (⌘0) to choose **Folder** or **Manual** repository selection.
+**Choose Folder…** changes the shared discovery folder (initially `~/src`).
+**Add Repositories…** and **Remove** edit manual membership across directories.
+Switching modes preserves both settings. **Refresh** reads CLI changes; returning
+to the app refreshes them too. Missing paths show errors and remain removable.
+**Import Saved Desktop Repositories** explicitly adopts old membership when no
+shared selection exists. Opening a repository does not add it; removing membership
+keeps its open conversations and files.
+
+`lf portfolio --json` reads this same Machine-local selection. RegistryQuery carries
+all reads and mutations; Swift owns no membership writer or folder scanner.
+
 Portfolio retains the Wave inspectors. Opening a Task there routes to its
 repository window rather than creating another Task workspace in a sheet.
 Wave Chat loads the active backing's bounded history before SSE, keeps it visible

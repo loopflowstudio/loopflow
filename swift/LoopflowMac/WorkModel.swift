@@ -893,7 +893,7 @@ final class WorkModel {
         for repo in orderedRepos {
             let identity = repoIdentity(repo.path)
             guard seen.insert(identity).inserted else { continue }
-            result.append(PortfolioRepo(path: identity, lastOpened: repo.lastOpened))
+            result.append(repo)
         }
         return result.sorted {
             $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
@@ -1199,24 +1199,36 @@ final class WorkModel {
         await refreshWorkActivity()
     }
 
+    private(set) var portfolioError: String?
+    private var portfolioGeneration = 0
+
     func refreshPortfolio(
-        initialRepoPath: String?,
-        persistedRepos: [PortfolioRepo] = []
+        initialRepoPath: String?
     ) async {
         guard !usesFixedFixture else { return }
-        let discoveryRepoPath = initialRepoPath ?? repoPath
-        let discovered = await PortfolioDiscovery.repos(
-            initialRepoPath: discoveryRepoPath,
-            persistedRepos: persistedRepos
-        )
+        portfolioGeneration &+= 1
+        let generation = portfolioGeneration
+        let discovered: [PortfolioRepo]
+        do {
+            let portfolio = try await query.portfolio()
+            if let error = portfolio.error { throw RegistryQueryError(error) }
+            discovered = portfolio.repos
+        } catch {
+            if generation == portfolioGeneration { portfolioError = error.localizedDescription }
+            return
+        }
         await Self.resolveRepoOrigins(discovered.map(\.path))
+        let authored = await PortfolioDiscovery.authoredWaves(in: discovered)
+        guard generation == portfolioGeneration else { return }
         if let trusted = unverifiedRepoPath {
             unverifiedRepoPath = nil
             let checked = await Task.detached { PortfolioDiscovery.resolveLaunchRepo(trusted) }.value
             if repoPath == trusted, checked != trusted { setRepoPath(checked) }
         }
+        guard generation == portfolioGeneration else { return }
+        portfolioError = nil
         repos = discovered
-        authoredWavesByRepo = await PortfolioDiscovery.authoredWaves(in: discovered)
+        authoredWavesByRepo = authored
         if repoPath == nil, let initialRepoPath {
             repoPath = PortfolioDiscovery.resolveLaunchRepo(initialRepoPath)
         }

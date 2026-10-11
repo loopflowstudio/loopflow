@@ -48,3 +48,10 @@ explicitly calling the lf API for reads and mutations. No Swift configuration
 writer or independent scanner. Jack raised multiple roots as optional/probably
 unnecessary; defer them. Manual selection of repos across directories remains
 in scope and does not require multiple discovery roots.
+
+October 11 implementation: `lf portfolio` uses folder/manual/add/remove/import;
+add edits the inactive manual list without switching mode. A locked atomic write
+preserves other Machine config keys. No existing generic global writer was found.
+RepoScanner's discovery is removed; its explicit-opening validation survives as
+RepositoryPath. CLI-authored selection blocks legacy import at the Rust write,
+including a race after the Desktop offer. These are reversible implementation choices.

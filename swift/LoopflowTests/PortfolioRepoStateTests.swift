@@ -9,7 +9,7 @@ struct PortfolioRepoStateTests {
     @Test("connected waves keep only this repo's rows")
     func connectedWavesScopedToRepo() {
         let repoURL = URL(fileURLWithPath: "/tmp/portfolio-scope")
-        let repo = PortfolioRepo(path: repoURL.normalizedFilePath, lastOpened: Date())
+        let repo = PortfolioRepo(path: repoURL.normalizedFilePath, error: nil)
         let state = PortfolioRepoState(repo: repo)
 
         let mine = makeWave(
@@ -30,7 +30,7 @@ struct PortfolioRepoStateTests {
     @Test("waves hold one stable alphabetical order, not a status regrouping")
     func wavesSortStableAlphabetical() {
         let repoURL = URL(fileURLWithPath: "/tmp/portfolio-priority")
-        let repo = PortfolioRepo(path: repoURL.normalizedFilePath, lastOpened: Date())
+        let repo = PortfolioRepo(path: repoURL.normalizedFilePath, error: nil)
         let state = PortfolioRepoState(repo: repo)
 
         // Status varies, but the row's lens carries state — so the list stays in
@@ -73,7 +73,7 @@ struct PortfolioRepoStateTests {
         )
         try git(["worktree", "add", "-q", worktree.path], at: origin)
 
-        let repo = PortfolioRepo(path: worktree.path.normalizedFilePath, lastOpened: Date())
+        let repo = PortfolioRepo(path: worktree.path.normalizedFilePath, error: nil)
         let originPath = origin.path.normalizedFilePath
         let json = """
         [{
@@ -139,7 +139,7 @@ struct PortfolioRepoStateTests {
         )
         try git(["worktree", "add", "-q", worktree.path], at: origin)
 
-        let repo = PortfolioRepo(path: worktree.path.normalizedFilePath, lastOpened: Date())
+        let repo = PortfolioRepo(path: worktree.path.normalizedFilePath, error: nil)
         let state = PortfolioRepoState(repo: repo)
         try await state.createWave(name: "goals")
 

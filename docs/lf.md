@@ -96,6 +96,23 @@ can set `repo_root: ~/projects` instead of the default `~/src`. Absolute paths,
 keeps the current directory. Linked worktrees retain their checkout and share
 canonical repository identity. Missing/non-Git paths fail without creating work.
 Repository selection does not register a plan, join peers, or change saved defaults.
+
+```bash
+lf portfolio --json                    # immediate main checkouts under ~/src
+lf portfolio folder ~/projects         # change discovery and named-repo lookup root
+lf portfolio manual                    # use only saved individual repositories
+lf portfolio add ~/src/loopflow ~/other/nested/repo
+lf portfolio remove ~/other/nested/repo # remove membership, keep files and Work
+```
+
+Portfolio is Machine-local. Folder discovery excludes linked worktrees; manual
+additions normalize them to their main checkout. Switching modes keeps the inactive
+selection. Missing repositories remain listed with an error and can be removed.
+Opening a repository does not enroll it. Desktop's Portfolio window edits the same
+selection, including an explicit import of old Desktop membership before shared
+configuration exists. `lf portfolio import PATH…` performs that one-time import;
+an existing shared selection takes precedence.
+
 Read `lf repo identity` on one Machine, then use
 `lf repo identity --bind repo_ID` on the peer, even when both already have Work.
 Binding selects the shared repository identity and retains prior IDs as local

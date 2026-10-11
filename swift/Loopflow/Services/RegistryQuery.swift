@@ -51,6 +51,10 @@ public struct RegistryQuery: Sendable {
         self.observeWork = watchWork
     }
 
+    public func portfolio(_ arguments: [String] = []) async throws -> Portfolio {
+        try Self.decode(Portfolio.self, from: await run(["portfolio"] + arguments + ["--json"], nil))
+    }
+
     /// Keep execution selectors off local filesystem paths. The existing CLI owns
     /// connection identity, repository lookup and every operation on that Machine.
     public func onMachine(_ machine: String, repository: String) -> RegistryQuery {

@@ -6,6 +6,16 @@ gaps (“pursuse!”). One indivisible PR replaces publication, launch seeding a
 live injection together. The replacement is implemented locally; authored review
 and gate/CI acceptance remain. No product approval is missing.
 
+Reconciled October 11 against `cd2c38184f74`: the iteration feedback describes
+the withdrawn cut at `0ffdb9c04a`, before replacement `0d04805ab3` and compression
+`27ce387bdc`. Current source contains the public `session_steers` fixtures and
+shared dispatch; the old injection paths remain deleted. This supersedes the
+feedback's source inventory, not its acceptance obligations. `f96a7d2378` corrects
+capability status; `cd2c38184f` removes publication-time Session scans and reuses
+reconciled applicability. Source review also corrected README's obsolete claim
+that independent Task conversations receive no direction. No runtime repair was
+needed in this reconciliation.
+
 ## Remaining work
 
 - Gate runs affected suites and automated acceptance once. Configured
@@ -68,9 +78,12 @@ is not identity. A correction supersedes pending older revisions of its source;
 already emitted revisions remain history and the correction is new direction.
 
 `session_steers` owns the idempotent Session/publication association and explicit
-retry attempt. Reconciliation derives applicable publications directly from
-existing Work membership. A set-based insert implements the Session-only primitive;
-publication wrappers and callbacks share it. No editable membership list exists.
+retry attempt. Receipt reads and callbacks reconcile their Session from existing
+Work membership; publication only saves immutable direction. Repository, Wave
+and direct Session wrappers share one save path, without scanning every Session.
+Reconciliation refreshes applicability before cancelling prepared batches and
+removing undelivered obsolete rows; those operations reuse the refreshed flags.
+No editable membership list exists.
 The unused public `steer_session` wrapper and write-only
 `session_steer_subscriptions` table are removed: its association JSON and activation
 time had no readers, while native activation already belongs to `steer_adapters`.
@@ -86,6 +99,10 @@ steer events and nested TaskObserved copies to publication references, including
 orphaned copies, while retaining complete text and planning receipts. Historical
 Project direction stays readable; new Project publication is outside scope.
 Released migrations remain immutable. No installed store was migrated for this work.
+Main's v0.13.12 merge materialized `process_terminal` as
+`0.13.12.001_release.sql`; the sole `session_steers` draft now follows that released
+frontier. Release's operation-entry lesson applies: store migration and receipt
+proofs do not establish public launch or configured provider acceptance.
 
 ## Provider authority and startup exclusion
 
@@ -101,7 +118,9 @@ This includes Claude's `ensure_process` replacement and native OpenCode startup.
 A root startup callback may activate an unbound native identity; later callbacks
 must match the recorded identity. Child callbacks with `agent_id` are excluded
 before activation. Capability reservation is not installation or acceptance;
-`activated_at` means an authenticated callback was observed.
+`activated_at` means an authenticated callback was observed. Public receipt
+status says “capability reserved” until that observation, replacing the
+unsupported “installed” claim found during reconciliation.
 
 Provider input dispatch and context output hold shared Session exclusion through
 bounded writes. Spawn, stop, replacement and attachment mutation stay exclusive.
@@ -210,8 +229,13 @@ Completed in this branch; no known production deletion target remains:
   remains independent of publication receipts.
 - Write-only `session_steer_subscriptions` and unused `steer_session` entry point.
   The draft is edited in place; no intermediate-schema migration is added.
+- Publication-time all-Session reconciliation and the duplicate direct Session
+  save transaction. Reads and callbacks already resolve current membership;
+  the mixed-batch correction fixture preserves unaffected pending direction.
 - Scratch startup reproducer after the public replacement fixture passed;
   precise historical source and counterexample are retained above.
+- `scratch/questions.md`: resolved engineering decisions duplicate this design;
+  no unresolved product question remains.
 
 ## Acceptance experience
 
@@ -229,4 +253,4 @@ Headless fixtures use disposable stores, cleared inherited `LF_*` and fixture
 routing, unavailable/untrusted/open-provider cases and configured acceptance;
 review owns the real experience. Never report unavailable checks as passes.
 
-Check: `uv run python scripts/test_network.py cargo test -p loopflow --lib store::sqlite::steers::tests < /dev/null` (8) and `--test session_steers < /dev/null` (3), `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `lf context` pass; full Swift/configured-provider/broader acceptance remains with gate/CI.
+Check (October 11): `git diff --check` and `lf context` pass; prose-only reconciliation reuses the prior `uv run python scripts/test_network.py cargo test -p loopflow --lib store::sqlite::steers < /dev/null` (8), `--test session_steers < /dev/null` (3), `cargo fmt --all -- --check` and `cargo clippy --all-targets -- -D warnings` passes; gate/CI retains full Swift, broader suites and configured-provider acceptance.

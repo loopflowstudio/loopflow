@@ -39,14 +39,11 @@ This is a coverage concern, not observed data loss.
 The stale `pm_show.json` documentation is removed. The Git-miss regression now
 asserts no Linear refresh error as well as Unavailable; its focused rerun passed.
 
-## Git decoding review — October 11
+## Git decoding repair — October 11
 
-Compression adds a `PlanningSnapshot::from_bytes` decoder accepting old stringified
-Teams/Initiatives/authors alongside typed values. The peer journal exists only in
-this Task's unreleased `planning_peers.sql`; no published Git format or configured
-retained-data requirement has been established. Jack Heart excludes older-version
-support; AGENTS rejects compatibility for internal unshipped formats. Remove this
-old-format branch and its compatibility-only fixture unless concrete retained data
-requires conversion. Preserve released SQLite relationships, authors and uncertain
-receipts through the finished draft; preserve causal/losing values in the selected
-format. Those obligations do not by themselves justify a permanent dual decoder.
+Removed the unshipped stringified Teams/Initiatives/authors decoder and its
+compatibility-only fixture. Jack Heart excludes older-version support; no published
+Git format or configured retained-data conversion need was established. Native JSON
+values and causal/losing history remain; released SQLite relationships, authors and
+uncertain receipts keep their existing conversion proof. This closes the mismatch,
+not the target-bearing typed journal reduction.

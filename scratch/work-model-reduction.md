@@ -20,7 +20,7 @@ is preserved at `c516c61b4f` here. The later pursuit
 its 0.13.10 driver could not settle. Session
 `session_f2bff40d981b4fa0b689dac72c4358ae` retains native completion at event 1790980
 and the iterate decision, not an lf exit. Installed 0.13.11 reads the store again.
-Continue remaining work; preserve stopped history and older provider uncertainty.
+Stopped history and older provider uncertainty remain intact.
 
 The result should be one ordinary local reader and typed writer for Wave, Project,
 Task and subordinate Task comments. Linear and Git translate changes into those
@@ -161,9 +161,11 @@ and untyped JSON payload. The writer validates combinations the representation
 itself could exclude. Use one typed Work edit payload with its target; derive
 transport conflict addresses/encoding from it. Delete the second kind/field schema,
 repeated string-field switches. Team/Initiative edits now carry `Vec<String>`;
-comment edits carry `TaskCommentAuthor`. Persistence and Git use native JSON values;
-retained Git documents decode the earlier string encoding at acquisition without
-replacing mutation IDs, clocks, parents or competing values. `ensure_record` consumes
+comment edits carry `TaskCommentAuthor`. Persistence and Git use native JSON values.
+The unshipped string-format decoder and its compatibility-only fixture are removed: Jack Heart excluded old-version
+support. Released SQLite conversion still preserves relationships, authors and
+uncertain receipts; selected-format history retains mutation IDs, clocks, parents
+and competing values. `ensure_record` consumes
 typed edits directly instead of reconstructing a field-addressed JSON object.
 The target-bearing enum/journal redesign remains required.
 

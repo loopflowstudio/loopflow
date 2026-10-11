@@ -242,7 +242,7 @@ archival, membership removal and confirmed deletion retain their meaning. Malfor
 Wave observations do not hide readable siblings or refresh ages. Scoped roadmap
 reads follow the repaired Wave address. Evidence: `f9f9da7d3a` in this plan.
 
-`e3a3479df7` removed the public snapshot reader. October 11's next cut removes
+`e3a3479df7` removed the public snapshot reader. `f025e9b7ab` removes
 `children.rs` status/admission reconstruction: narrow SQL reads retained membership,
 Team, invalidation, removal and age. Unrelated malformed content cannot erase those
 facts. Review repaired the canonical Project join: a missing issue cannot hide
@@ -251,6 +251,10 @@ Populated released-frontier and stale-response tests cover this boundary.
 The upstream merge omitted peer planning from Work-watch's clock; it now uses the
 planning cadence. Acquisition's provider-returning API, persistent hierarchy,
 typed journal, bindings, follow-ups and cron still precede gate and review.
+
+Main #1522 entered at `7d9bf0a4d8`, adding Claude recorded-answer Flow settlement.
+That merge establishes no fresh planning gate acceptance and grants no replay of
+the stopped Flow.
 
 ### Released migration frontier — October 10
 
@@ -333,15 +337,12 @@ not establish acquisition confinement or provider-hierarchy conversion.
 
 Root `planning.rs` is deleted. Task creation inputs, Linear binding identities and
 stored delivery/status evidence have concrete owners. Team/Initiative edits and
-comment authors remain typed through the writer; Git acquisition converts retained
-string-encoded values without new causal identities. Record creation no longer
+comment authors remain typed through the writer. Git reads the selected native JSON
+format; realign removed the unshipped string-format compatibility decoder and its
+fixture under Jack Heart's no-old-version constraint. Released SQLite conversion
+and causal/losing values remain required. Record creation no longer
 reconstructs a generic JSON field map. The target-bearing edit/journal, provider
 hierarchy, bindings configuration, follow-ups and cron cuts remain required.
-
-Installed selected-path `lf commit` excludes scratch even when explicitly named;
-its scratch-only checkpoint failed. Pre-existing notes are preserved at
-`/tmp/loo412-pre-compress.patch`; use the ordinary whole-checkout commit for this
-non-persistent Task, keeping coherent source and notes together.
 
 Cron conversion must retain the installed owner independently of file location.
 Release's October 5 memory records both jobs installed under Infrastructure,
@@ -371,6 +372,10 @@ Writer transport/causal proofs: `eda4a98097` in this plan.
   cut. Regenerate them after the entire accepted reduction, before review-only
   republication. No readiness or landing follows from this persistence checkpoint.
 
-Checks: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo build -p loopflow --bin lf`; focused Rust writer (3), released seeding (1), exchange (5), peer DTO (1), offline rotation (1), and `swift test --package-path swift --filter peerPlanningStatus` (2) pass with inherited `LF_*` cleared. Earlier applicable admission/lookup/launch checks: `f025e9b7ab` in this plan. Full audit, gate, HTML and republication remain pending.
+Prior applicable writer, released-seeding, DTO, rotation and Swift checks remain at
+`9dbd6fc2d8` in this plan; admission/lookup/launch checks at `f025e9b7ab`.
+Full audit, affected gate, fresh HTML and republication remain pending.
+
+Checks: `cargo test -p loopflow --test planning_exchange_tests` (4 passed), `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `cargo build -p loopflow --bin lf` passed with inherited `LF_*` cleared and stdin closed; `lf context` reports both scopes within limits.
 
 Earlier transport evidence: `0181133849` in this plan.

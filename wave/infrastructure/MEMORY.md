@@ -423,10 +423,8 @@ linked receipts. They preserve due ownership, candidate, uncertain publication,
 caller edits and child-held leases; simulated passes establish neither public
 container/macOS acceptance nor configured automatic settlement.
 
-October 6 telemetry's retired metric producer failed; the repaired checkout passed
-35 rows and twelve tests, not automatic settlement. Jack Heart authorized
-publication; the operator owns recovery after LOO-382. Original receipts, repair
-ownership and exact evidence: `85490d96ec:wave/infrastructure/MEMORY.md`, this heading.
+Telemetry repair/publication authorization: `85490d96ec:wave/infrastructure/MEMORY.md`.
+Isolated passes prove no automatic settlement; receipts retain repair ownership.
 
 Release's September 28 incident proves entry points need operation-level recovery:
 an agent reported failure successfully, producing a misleading green cron receipt.
@@ -531,28 +529,13 @@ unproved. Desktop activation
 must preserve #1447's cached plans and independent Session reads, outside polling.
 #1446's ongoing procedures retain started-Task follow-through; reads never provision.
 
-October 5 admission, registration and rotation evidence is preserved at
-`fc0bb97f7e8e0ad3f9520daf12e7e76b2e4f2ee1:wave/infrastructure/MEMORY.md`
-under this heading. LOO-406 deleted the obsolete registration writers; their
-historical proofs are not the common-writer acceptance. Retain stored workspace
-membership, Task/PR identity, unset Started and issue-reported ownership. Ordered
-Wave and checkout locks survive queued writes and caller cancellation; Git leases
-remain separate. Unreviewed backlog is never automatically canceled.
-CI-repair entry, public crash/retry and configured readiness remain unproved.
-
-Jack Heart's October 5 comment `e4dafef5-2a87-4359-818a-3770356ba850` authorizes
-Intelligence repair of Project `999bdbdd-c045-41a6-8ffc-a97c4a40b0b3`, preserving
-KRs, Tasks and identity without competing creation or repository rotation. That
-exact ID supplies selection; active-Project adoption proves no Backlog activation
-or installed repair.
-
-The archived file-binding design is superseded by SQLite selection below.
-Its output-handle leak remains unresolved; seeded ensure recovery proves no crash
-recovery. Exact evidence remains in the preserved October 5 notes above.
-
-October 5 rotation preserves exact input, unfinished KRs, later starts and external
-moves. Public crash/Desktop acceptance remains open; detailed source proofs and
-counterexamples: `bb51446f4:wave/infrastructure/MEMORY.md`, this heading.
+October 5 registration/rotation proofs and exact Intelligence repair authorization:
+`7d9bf0a4d8:wave/infrastructure/MEMORY.md`, this heading. Preserve workspace
+membership, Task/PR identity, unset Started, frozen input, unfinished KRs, later
+starts and external moves. LOO-406's writer supersedes registration writers;
+ordered Wave/checkout locks remain distinct from Git leases. The archived
+file-binding design and output-handle leak prove no crash recovery. Public
+crash/retry, configured Intelligence repair and installed acceptance remain open.
 
 October 6: Jack Heart authorized SQLite selection and LOO-382's stream, deleting
 the YAML selector and `ProjectPreparation`. Dependency `e887a21c1` entered through
@@ -642,6 +625,12 @@ finish private observations, typed journal, bindings, ordinary follow-ups and cr
 SQLite claims. Task status/admission now read narrow evidence;
 acquisition still reconstructs provider records. Delivery needs
 accepted revision plus archive/membership eligibility; foreign facts grant no ownership.
+Missing issue content cannot hide a canonical parent's archive or membership
+dispute. Independent observations keep their original ages. Typed values alone
+are not a typed journal: field-addressed mutations still require reduction.
+Jack Heart excludes old-version support; an unshipped Git encoding needs no dual
+decoder. Released SQLite preservation and selected-format causal history remain
+separate obligations. No configured old-ref conversion need was established.
 
 Jack's `19116a1b`: stack 427 on 412; land afterward. No 412 landing authority.
 Default-Git enrollment conflicts with 427's conservative first-start

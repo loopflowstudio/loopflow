@@ -19,7 +19,7 @@ private enum SessionFixtureKind: String {
             : #"{"kind":"independent"}"#
         let actions: String
         switch self {
-        case .interactive: actions = #"[{"kind":"open","label":"Open here","help":"Open this Session in a terminal","unavailable_reason":"This Session is active in another terminal; use Move here to transfer it"},{"kind":"move_here","label":"Move here","help":"Stop the other client and resume here; unsent text there is lost","unavailable_reason":null}]"#
+        case .interactive: actions = #"[{"kind":"open","label":"Open here","help":"Open this Session in a terminal","unavailable_reason":"This Session is active in another terminal; use Move here to transfer it"},{"kind":"move_here","label":"Move here","help":"Transfer control here; unsent text in the previous terminal is not transferred","unavailable_reason":null}]"#
         case .flow: actions = #"[{"kind":"open","label":"Open here","help":"Open this Session in a terminal","unavailable_reason":null}]"#
         }
         return """

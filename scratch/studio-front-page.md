@@ -641,3 +641,5 @@ strip links to its own site in a new tab.
 - Jack Heart: "$ lf task run EXP-12 # its worktree, then its Flow maybe should be first? actually first is task create?" → the `x11` card opens with `lf task create --wave exports --title "Add CSV export"`, then `lf task run EXP-12`, then the launch command, then `resume`, `usage`, `land`.
 
 - Jack Heart: "account is a good one. Along with remote jobs mention multi-subscription balancing" → the `x11` CLI section gains a third line under the ssh line: "Multi-subscription balancing: `lf` manages your logins, and moves to the next one when one runs out." The second half is from the `/cli` page's Accounts item.
+
+- Jack Heart: "$ lf task run EXP-12 # its worktree, then its Flow can probably kill that now" → removed from the `x11` card; it opens with `task create`, then the launch command.

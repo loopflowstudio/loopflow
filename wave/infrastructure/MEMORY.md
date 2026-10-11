@@ -250,6 +250,16 @@ checkpoint CI skipped tests; Linux/installed acceptance remains unproved.
 Prior live-takeover evidence: `5e95ce9a4:wave/infrastructure/MEMORY.md`, this heading.
 Plan: `scratch/stop-and-take-over-claude.md`.
 
+## Process-owned liveness (LOO-451, 2026-10-10)
+
+Jack Heart removed client-file compatibility (`5228ab69`); launches record an
+AgentProcess before exec. Unknown grants no Waiting or cleanup. Terminals follow
+attachment; completion outranks sockets. Inputs follow the latest turn's LfProcess,
+not an ended creator; native outcomes remain history. Jack approved #1523 and
+shipping (`5df94b2c`). Materialized Rust/Swift proofs include
+Work-watch detecting OS death without writes, not configured kill/reconnect or
+installed acceptance.
+
 ## Execution vocabulary (LOO-441/442/446, 2026-10-10)
 
 Jack Heart selected LfSession/LfProcess (#1516) and AgentSession (#1517), both
@@ -408,14 +418,10 @@ linked receipts. They preserve due ownership, candidate, uncertain publication,
 caller edits and child-held leases; simulated passes establish neither public
 container/macOS acceptance nor configured automatic settlement.
 
-October 6 scheduled receipt cron_a4b8b11b2a534bf99d183e677f2a6871 failed after
-recovery cron_5d930c31c7ae4a118f6b93774496991c passed continuity but the scorecard
-emitted retired product/task-loop-trust. Accepted chapter commit 42451654e removed
-that contract; remove its hardcoded producer output, preserving strict metric
-validation and lifecycle rows. Installed CLI with the repaired checkout reports
-35 rows; twelve focused tests pass. Original failed receipts and repair ownership
-remain unchanged. Jack Heart authorized publication; the operator owns subsequent
-release recovery after LOO-382. This manual proof supplies no automatic settlement.
+October 6 telemetry's retired metric producer failed; the repaired checkout passed
+35 rows and twelve tests, not automatic settlement. Jack Heart authorized
+publication; the operator owns recovery after LOO-382. Original receipts, repair
+ownership and exact evidence: `85490d96ec:wave/infrastructure/MEMORY.md`, this heading.
 
 Release's September 28 incident proves entry points need operation-level recovery:
 an agent reported failure successfully, producing a misleading green cron receipt.
@@ -691,18 +697,15 @@ Main #1511 (`e69d5103f`): Codex terminals use `--no-daemon` (0.161.0-verified).
 Explicit account selection, not launch-time switching, reconciles the shared daemon
 with five-minute turn grace. Configured acceptance remains open.
 
-## Account auth consolidation (LOO-320, curated 2026-10-08)
+## Account auth consolidation (LOO-320, curated 2026-10-10)
 
 Jack Heart approved delivery, excluding cross-account continuation, native refresh
-coordination and headroom ranking. Native OAuth/callback ownership, side-effect-free
-cached inspection and usage-window provenance: [subscriptions](../../docs/subscriptions.md).
-Selected account precedes native Session discovery. Missing windows or reset success
-prove no capacity; printed URLs and cached login prove no current OAuth success.
-Browser login without pasted code, first connection, remembered Linear profile and
-live Claude/Codex windows remain unproved; Claude returned `invalid_grant`.
-No branch binary may migrate the installed Home; fixtures prove no installed outcome.
-Exact constraints and archived evidence: `b2228bce8:wave/infrastructure/MEMORY.md`
-under this heading, retaining the October 4 source and original caveat references.
+coordination and headroom ranking. Selected account precedes native history;
+usage proves no login or capacity. Browser login, first connection, remembered
+Linear profile and live usage windows remain unproved; Claude returned
+`invalid_grant`. Branch binaries never migrate the installed Home.
+[Mechanics](../../docs/subscriptions.md); constraints and proof limits: `be4a2b2af:wave/infrastructure/MEMORY.md`, this heading and its
+`b2228bce8` archive.
 
 ## Task deletion and command ownership (LOO-305, curated 2026-10-10)
 

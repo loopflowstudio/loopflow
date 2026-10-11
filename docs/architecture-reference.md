@@ -243,6 +243,19 @@ reviews, interactive and headless work. Default views select interactive
 conversations. `lf session list --waiting` selects conversations Waiting on a
 person, using the same Rust projection as Desktop. `session_activity` holds both
 the attached LfProcess's latest stream reading and an optional terminal-reported snapshot.
+A recorded AgentProcess alone decides whether its Session is active: completed
+means closed; otherwise exact PID/birth evidence is live, dead or unknown. Unknown
+is never Waiting and never ages into replacement or checkout-cleanup authority.
+Every owned launch records an AgentProcess before exec, including native terminals.
+Sessions without one remain unknown; client files are not read. Terminal placement
+belongs to the attached LfProcess, fenced by its attachment.
+Saved sockets are offered only for live records; a live endpoint's connection
+failure is an error, not permission to start another agent. Input completion uses
+its latest turn's LfProcess completion (the capture owner before any turn), not
+attachment exit events. Events retain
+turn outcomes and history, not process liveness.
+
+Waiting requires positive live evidence before pagination.
 The current AgentProcess's reports take precedence: any blocked record, or
 idle for an interactive Session, means Waiting. Other reports and explicit clear
 suppress inference. Without reports, an unanswered question, interactive hand-back

@@ -788,11 +788,6 @@ mod tests {
             let error = resumed.unwrap_err().to_string();
             assert!(error.contains("was deleted"), "{error}");
             assert!(
-                crate::session_record::read_provider_clients(&capture.artifact_dir())
-                    .unwrap()
-                    .is_empty()
-            );
-            assert!(
                 crate::session_record::read_provider_session(&capture.artifact_dir())
                     .unwrap()
                     .is_some()

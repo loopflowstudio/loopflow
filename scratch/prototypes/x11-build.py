@@ -123,6 +123,7 @@ main = f'''
       <div class="card"><ul class="wfs">
 {WFS}
       </ul></div>
+      <p class="cap">Three workflows that ship with Loopflow. The highlighted stops are where you come in; everything between them runs on its own.</p>
     </article>
   </div>
   <div class="mux">
@@ -201,6 +202,7 @@ extra = '''
 .home-page .pair h2{max-width:900px}.home-page .pair .halves .more{margin:0;border:0;padding:0}
 .home-page .works .under{margin:22px 0 0;font:500 14px var(--font-mono)}.home-page .works .under a{color:var(--text);text-decoration:underline;text-decoration-color:#b9b1a6;text-underline-offset:4px}.home-page .works .under a:hover{color:var(--wine)}
 .home-page .reading.closing{padding-top:8px}
+.home-page .pair article>p.cap{font-size:13px;line-height:1.5;color:var(--text-secondary);margin:12px 4px 0}
 .home-page .home-hero .either{font-size:19px;line-height:1.5;color:#333;margin:18px 0 0;max-width:760px}.home-page .home-hero .get{margin-top:20px}
 .home-page .mux{margin-top:36px}.home-page .mux .slot{display:flex;justify-content:space-between;gap:6px 24px;flex-wrap:wrap;margin:0;padding:10px 16px;font:500 11px/1.6 var(--font-mono);text-transform:uppercase;letter-spacing:.1em;color:var(--burgundy);background:#f4f0ea;border:1px solid #d9d4cc;border-bottom:0;border-radius:12px 12px 0 0}.home-page .mux .slot span+span{color:var(--text-secondary)}
 .home-page .muxwin{display:grid;grid-template-columns:250px minmax(0,1fr);background:#1c1919;border-radius:0 0 12px 12px;overflow:hidden;font:12.5px/1.6 var(--font-mono);color:#d8d2cb}

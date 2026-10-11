@@ -686,3 +686,5 @@ strip links to its own site in a new tab.
 - Jack Heart, for the second picture's label: "LOOPFLOW IN YOUR TERMINAL" → set in `x11`. The first picture's label is changed to match, "Loopflow for Mac" (Claude's choice).
 
 - Jack Heart: "Maybe we need a simple sentece above saying Loopflow can be run as a Desktop experience or embedded inside a terminal." → `x11` has "Loopflow can be run as a desktop experience or embedded inside a terminal." directly under the header, above Download and the install line. The line under the buttons is back to "Free and open source (MIT)".
+
+- Jack Heart, on the three-flows card: "this needs a caption" → `x11` has under it: "Three workflows that ship with Loopflow. The highlighted stops are where you come in; everything between them runs on its own."

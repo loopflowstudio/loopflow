@@ -637,7 +637,6 @@ preservation assertion. Website, Swift/UI and migration checks passed. CI repair
 updates disposable-Home isolation, canonical reconnect SQL, outage setup and
 post-acquisition preservation assertions. All four repaired cases plus migration
 checks pass in isolated Linux; fmt/Clippy/Ruff pass. New head still needs CI.
-Checks: `/tmp/loo412-ci-*`; earlier evidence: `6fabcd0734:scratch/`.
 Git pending/unconfirmed publication can return without a short-command warning;
 status retains the uncertainty. Jack approved landing after this disclosure.
 Real SSH, live Linear, installation and schedule activation remain unproved.

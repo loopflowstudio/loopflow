@@ -694,3 +694,5 @@ strip links to its own site in a new tab.
 - Jack Heart: "Your App should say Repo" → the Mac mock's sidebar title in `x11` is "Kata" with a small "repo" label beside it. Claude's reading; he may have meant the word "Repo" alone.
 
 - Jack Heart: "i think kill the the loopflow in your terminal screenshot" → the terminal sketch is removed from `x11`. The first picture keeps its "Loopflow for Mac" label.
+
+- Jack Heart asked to see earlier, shorter versions of the CLI section text, then: "ok go back to version 2. Underneath Loopflow's task-centered API is a launcher CLI, LF" → the `x11` CLI section is version 2 again (one command says where, whose login, which model, which work; the ssh line; multi-subscription balancing), opening with his sentence in place of "Everything above is lf underneath." "Flow" in it reads "Graph", per his write-to-the-future direction.

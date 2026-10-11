@@ -131,9 +131,9 @@ main = f'''
   <h2><code>lf</code>: the CLI for agent workflows.</h2>
   <div class="halves">
     <article>
-      <p>To keep every session tied to its goal, Loopflow has to start each agent the same way: on the right machine, on the right login, with the right model, in the right worktree. <code>lf</code> is the command that does it.</p>
-      <p>You don’t have to buy into tasks to use it. On its own, <code>lf</code> is a launcher for Claude Code, Codex, and OpenCode: use it anywhere you would start one of them.</p>
-      <p>Private, secure remote jobs and telemetry made easy through <code>ssh</code>. Multi-subscription balancing: <code>lf</code> manages your logins, and moves to the next one when one runs out.</p>
+      <p>Underneath Loopflow’s task-centered API is a launcher CLI, <code>lf</code>. One command says where an agent runs, on whose login, with which model, on which piece of work, and what it does. Set it once in a Graph and every launch is the same.</p>
+      <p>Private, secure remote jobs and telemetry made easy through <code>ssh</code>.</p>
+      <p>Multi-subscription balancing: <code>lf</code> manages your logins, and moves to the next one when one runs out.</p>
       <p class="more"><a href="/cli">The CLI ↗</a><a href="/docs/authoring#flows">Skills and Graphs ↗</a></p>
     </article>
     <article>

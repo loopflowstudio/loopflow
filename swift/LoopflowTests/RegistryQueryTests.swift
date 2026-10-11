@@ -7,6 +7,27 @@ import Testing
 
 @Suite("RegistryQuery")
 struct RegistryQueryTests {
+    @Test("Flow logs read captured execution from the content Machine, never a peer path locally")
+    func contentRoutedFlowLog() async throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let detail = try String(contentsOf: root.appendingPathComponent("tests/fixtures/dto/flow_detail.json"), encoding: .utf8)
+        let expected = try JSONDecoder().decode(FlowProcessDetail.self, from: Data(detail.utf8))
+        let entry = String(decoding: try JSONEncoder().encode(expected.entry), as: UTF8.self)
+        let query = RegistryQuery { args, cwd in
+            guard args.starts(with: ["--machine", "peer", "--repository", "plan"]), cwd == nil else {
+                throw RegistryQueryError("A peer Flow log must never use local execution")
+            }
+            let command = Array(args.dropFirst(4))
+            if command.starts(with: ["flow", "list"]) {
+                return "{\"entries\":[\(entry)],\"next\":null}"
+            }
+            if command == ["flow", "show", expected.entry.id, "--processes", "--json"] { return detail }
+            throw RegistryQueryError("Unexpected execution")
+        }
+        let flows = try await query.onMachine("peer", repository: "plan").taskFlowProcesses(task: "task", cwd: "/peer/checkout")
+        #expect(flows == [expected])
+    }
+
     @Test("Recording a remote reading preserves its Machine and transport", arguments: [false, true])
     func recordingRemoteQuery(recordFirst: Bool) async throws {
         let json = #"{"id":"peer"}"#

@@ -185,7 +185,7 @@ struct DesktopHeadlessTests {
         }
         func frame(_ part: String, sequence: Int, answers: Int, body: [String: Any]) throws -> WorkFrame {
             let line: [String: Any] = [
-                "part": part, "sequence": sequence, "answers": answers, "home": "/home",
+                "part": part, "sequence": sequence, "answers": answers, "home": fixtureMachineId,
                 "revisions": NSNull(), "unavailable": NSNull(), "body": body,
             ]
             return try WorkFrame.decode(line: JSONSerialization.data(withJSONObject: line))
@@ -239,7 +239,7 @@ struct DesktopHeadlessTests {
 
         // Any Flow process is one line that opens to its id, its launched graph,
         // where it stands and every step it started.
-        let log = FlowProcessLog(model: model, taskId: task.id)
+        let log = FlowProcessLog(model: model, taskId: task.id, location: task.reference.workspace?.identity)
         let flow = try #require(shown.flowProcesses.first)
         #expect(throws: (any Error).self) {
             try log.inspect().find(viewWithAccessibilityIdentifier: "flow-process-status-\(flow.id)")

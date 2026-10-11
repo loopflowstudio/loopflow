@@ -3,10 +3,13 @@
     "target": {
       "repository": "repo_22222222222222222222222222222222",
       "window": "55555555-5555-5555-5555-555555555555",
-      "machine_id": "home_11111111111111111111111111111111",
-      "worktree": "/repo.task",
       "pane": "session-pane",
-      "incarnation": "occurrence-session-pane"
+      "incarnation": "occurrence-session-pane",
+      "work": {
+        "repository": "repo_22222222222222222222222222222222",
+        "kind": "task",
+        "id": "task_44444444444444444444444444444444"
+      }
     },
     "action": {
       "kind": "hide"
@@ -16,10 +19,13 @@
     "target": {
       "repository": "repo_22222222222222222222222222222222",
       "window": "55555555-5555-5555-5555-555555555555",
-      "machine_id": "home_11111111111111111111111111111111",
-      "worktree": "/repo.task",
       "pane": "session-pane",
-      "incarnation": "occurrence-session-pane"
+      "incarnation": "occurrence-session-pane",
+      "work": {
+        "repository": "repo_22222222222222222222222222222222",
+        "kind": "task",
+        "id": "task_44444444444444444444444444444444"
+      }
     },
     "action": {
       "kind": "restore"
@@ -29,10 +35,13 @@
     "target": {
       "repository": "repo_22222222222222222222222222222222",
       "window": "55555555-5555-5555-5555-555555555555",
-      "machine_id": "home_11111111111111111111111111111111",
-      "worktree": "/repo.task",
       "pane": "session-pane",
-      "incarnation": "occurrence-session-pane"
+      "incarnation": "occurrence-session-pane",
+      "work": {
+        "repository": "repo_22222222222222222222222222222222",
+        "kind": "task",
+        "id": "task_44444444444444444444444444444444"
+      }
     },
     "action": {
       "kind": "focus"
@@ -42,10 +51,13 @@
     "target": {
       "repository": "repo_22222222222222222222222222222222",
       "window": "55555555-5555-5555-5555-555555555555",
-      "machine_id": "home_11111111111111111111111111111111",
-      "worktree": "/repo.task",
       "pane": "session-pane",
-      "incarnation": "occurrence-session-pane"
+      "incarnation": "occurrence-session-pane",
+      "work": {
+        "repository": "repo_22222222222222222222222222222222",
+        "kind": "task",
+        "id": "task_44444444444444444444444444444444"
+      }
     },
     "action": {
       "kind": "split",
@@ -56,20 +68,26 @@
     "target": {
       "repository": "repo_22222222222222222222222222222222",
       "window": "55555555-5555-5555-5555-555555555555",
-      "machine_id": "home_11111111111111111111111111111111",
-      "worktree": "/repo.task",
       "pane": "session-pane",
-      "incarnation": "occurrence-session-pane"
+      "incarnation": "occurrence-session-pane",
+      "work": {
+        "repository": "repo_22222222222222222222222222222222",
+        "kind": "task",
+        "id": "task_44444444444444444444444444444444"
+      }
     },
     "action": {
       "kind": "move",
       "destination": {
         "repository": "repo_22222222222222222222222222222222",
         "window": "55555555-5555-5555-5555-555555555555",
-        "machine_id": "home_11111111111111111111111111111111",
-        "worktree": "/repo.task",
         "pane": "files-pane",
-        "incarnation": "occurrence-files-pane"
+        "incarnation": "occurrence-files-pane",
+        "work": {
+          "repository": "repo_22222222222222222222222222222222",
+          "kind": "task",
+          "id": "task_44444444444444444444444444444444"
+        }
       },
       "axis": "vertical"
     }
@@ -78,20 +96,26 @@
     "target": {
       "repository": "repo_22222222222222222222222222222222",
       "window": "55555555-5555-5555-5555-555555555555",
-      "machine_id": "home_11111111111111111111111111111111",
-      "worktree": "/repo.task",
       "pane": "session-pane",
-      "incarnation": "occurrence-session-pane"
+      "incarnation": "occurrence-session-pane",
+      "work": {
+        "repository": "repo_22222222222222222222222222222222",
+        "kind": "task",
+        "id": "task_44444444444444444444444444444444"
+      }
     },
     "action": {
       "kind": "resize",
       "toward": {
         "repository": "repo_22222222222222222222222222222222",
         "window": "55555555-5555-5555-5555-555555555555",
-        "machine_id": "home_11111111111111111111111111111111",
-        "worktree": "/repo.task",
         "pane": "files-pane",
-        "incarnation": "occurrence-files-pane"
+        "incarnation": "occurrence-files-pane",
+        "work": {
+          "repository": "repo_22222222222222222222222222222222",
+          "kind": "task",
+          "id": "task_44444444444444444444444444444444"
+        }
       },
       "ratio": 0.6
     }
@@ -100,10 +124,13 @@
     "target": {
       "repository": "repo_22222222222222222222222222222222",
       "window": "55555555-5555-5555-5555-555555555555",
-      "machine_id": "home_11111111111111111111111111111111",
-      "worktree": "/repo.task",
       "pane": "session-pane",
-      "incarnation": "occurrence-session-pane"
+      "incarnation": "occurrence-session-pane",
+      "work": {
+        "repository": "repo_22222222222222222222222222222222",
+        "kind": "task",
+        "id": "task_44444444444444444444444444444444"
+      }
     },
     "action": {
       "kind": "zoom",
@@ -114,10 +141,13 @@
     "target": {
       "repository": "repo_22222222222222222222222222222222",
       "window": "55555555-5555-5555-5555-555555555555",
-      "machine_id": "home_11111111111111111111111111111111",
-      "worktree": "/repo.task",
       "pane": "session-pane",
-      "incarnation": "occurrence-session-pane"
+      "incarnation": "occurrence-session-pane",
+      "work": {
+        "repository": "repo_22222222222222222222222222222222",
+        "kind": "task",
+        "id": "task_44444444444444444444444444444444"
+      }
     },
     "action": {
       "kind": "shell"
@@ -127,10 +157,13 @@
     "target": {
       "repository": "repo_22222222222222222222222222222222",
       "window": "55555555-5555-5555-5555-555555555555",
-      "machine_id": "home_11111111111111111111111111111111",
-      "worktree": "/repo.task",
       "pane": "session-pane",
-      "incarnation": "occurrence-session-pane"
+      "incarnation": "occurrence-session-pane",
+      "work": {
+        "repository": "repo_22222222222222222222222222222222",
+        "kind": "task",
+        "id": "task_44444444444444444444444444444444"
+      }
     },
     "action": {
       "kind": "files",
@@ -141,10 +174,13 @@
     "target": {
       "repository": "repo_22222222222222222222222222222222",
       "window": "55555555-5555-5555-5555-555555555555",
-      "machine_id": "home_11111111111111111111111111111111",
-      "worktree": "/repo.task",
       "pane": "session-pane",
-      "incarnation": "occurrence-session-pane"
+      "incarnation": "occurrence-session-pane",
+      "work": {
+        "repository": "repo_22222222222222222222222222222222",
+        "kind": "task",
+        "id": "task_44444444444444444444444444444444"
+      }
     },
     "action": {
       "kind": "flow_log",
@@ -155,25 +191,31 @@
     "target": {
       "repository": "repo_22222222222222222222222222222222",
       "window": "55555555-5555-5555-5555-555555555555",
-      "machine_id": "home_11111111111111111111111111111111",
-      "worktree": "/repo.task",
       "pane": "session-pane",
-      "incarnation": "occurrence-session-pane"
+      "incarnation": "occurrence-session-pane",
+      "work": {
+        "repository": "repo_22222222222222222222222222222222",
+        "kind": "task",
+        "id": "task_44444444444444444444444444444444"
+      }
     },
     "action": {
       "kind": "text",
       "surface": "surface-session-pane",
-      "text": "héλ🙂 é \"$(literal)\"; \\n"
+      "text": "h\u00e9\u03bb\ud83d\ude42 e\u0301 \"$(literal)\"; \\n"
     }
   },
   {
     "target": {
       "repository": "repo_22222222222222222222222222222222",
       "window": "55555555-5555-5555-5555-555555555555",
-      "machine_id": "home_11111111111111111111111111111111",
-      "worktree": "/repo.task",
       "pane": "session-pane",
-      "incarnation": "occurrence-session-pane"
+      "incarnation": "occurrence-session-pane",
+      "work": {
+        "repository": "repo_22222222222222222222222222222222",
+        "kind": "task",
+        "id": "task_44444444444444444444444444444444"
+      }
     },
     "action": {
       "kind": "key",
@@ -185,10 +227,13 @@
     "target": {
       "repository": "repo_22222222222222222222222222222222",
       "window": "55555555-5555-5555-5555-555555555555",
-      "machine_id": "home_11111111111111111111111111111111",
-      "worktree": "/repo.task",
       "pane": "session-pane",
-      "incarnation": "occurrence-session-pane"
+      "incarnation": "occurrence-session-pane",
+      "work": {
+        "repository": "repo_22222222222222222222222222222222",
+        "kind": "task",
+        "id": "task_44444444444444444444444444444444"
+      }
     },
     "action": {
       "kind": "key",
@@ -200,10 +245,13 @@
     "target": {
       "repository": "repo_22222222222222222222222222222222",
       "window": "55555555-5555-5555-5555-555555555555",
-      "machine_id": "home_11111111111111111111111111111111",
-      "worktree": "/repo.task",
       "pane": "session-pane",
-      "incarnation": "occurrence-session-pane"
+      "incarnation": "occurrence-session-pane",
+      "work": {
+        "repository": "repo_22222222222222222222222222222222",
+        "kind": "task",
+        "id": "task_44444444444444444444444444444444"
+      }
     },
     "action": {
       "kind": "key",
@@ -215,10 +263,13 @@
     "target": {
       "repository": "repo_22222222222222222222222222222222",
       "window": "55555555-5555-5555-5555-555555555555",
-      "machine_id": "home_11111111111111111111111111111111",
-      "worktree": "/repo.task",
       "pane": "session-pane",
-      "incarnation": "occurrence-session-pane"
+      "incarnation": "occurrence-session-pane",
+      "work": {
+        "repository": "repo_22222222222222222222222222222222",
+        "kind": "task",
+        "id": "task_44444444444444444444444444444444"
+      }
     },
     "action": {
       "kind": "key",
@@ -230,10 +281,13 @@
     "target": {
       "repository": "repo_22222222222222222222222222222222",
       "window": "55555555-5555-5555-5555-555555555555",
-      "machine_id": "home_11111111111111111111111111111111",
-      "worktree": "/repo.task",
       "pane": "session-pane",
-      "incarnation": "occurrence-session-pane"
+      "incarnation": "occurrence-session-pane",
+      "work": {
+        "repository": "repo_22222222222222222222222222222222",
+        "kind": "task",
+        "id": "task_44444444444444444444444444444444"
+      }
     },
     "action": {
       "kind": "key",
@@ -245,10 +299,13 @@
     "target": {
       "repository": "repo_22222222222222222222222222222222",
       "window": "55555555-5555-5555-5555-555555555555",
-      "machine_id": "home_11111111111111111111111111111111",
-      "worktree": "/repo.task",
       "pane": "session-pane",
-      "incarnation": "occurrence-session-pane"
+      "incarnation": "occurrence-session-pane",
+      "work": {
+        "repository": "repo_22222222222222222222222222222222",
+        "kind": "task",
+        "id": "task_44444444444444444444444444444444"
+      }
     },
     "action": {
       "kind": "key",
@@ -260,10 +317,13 @@
     "target": {
       "repository": "repo_22222222222222222222222222222222",
       "window": "55555555-5555-5555-5555-555555555555",
-      "machine_id": "home_11111111111111111111111111111111",
-      "worktree": "/repo.task",
       "pane": "session-pane",
-      "incarnation": "occurrence-session-pane"
+      "incarnation": "occurrence-session-pane",
+      "work": {
+        "repository": "repo_22222222222222222222222222222222",
+        "kind": "task",
+        "id": "task_44444444444444444444444444444444"
+      }
     },
     "action": {
       "kind": "key",
@@ -275,10 +335,13 @@
     "target": {
       "repository": "repo_22222222222222222222222222222222",
       "window": "55555555-5555-5555-5555-555555555555",
-      "machine_id": "home_11111111111111111111111111111111",
-      "worktree": "/repo.task",
       "pane": "session-pane",
-      "incarnation": "occurrence-session-pane"
+      "incarnation": "occurrence-session-pane",
+      "work": {
+        "repository": "repo_22222222222222222222222222222222",
+        "kind": "task",
+        "id": "task_44444444444444444444444444444444"
+      }
     },
     "action": {
       "kind": "key",
@@ -290,10 +353,13 @@
     "target": {
       "repository": "repo_22222222222222222222222222222222",
       "window": "55555555-5555-5555-5555-555555555555",
-      "machine_id": "home_11111111111111111111111111111111",
-      "worktree": "/repo.task",
       "pane": "session-pane",
-      "incarnation": "occurrence-session-pane"
+      "incarnation": "occurrence-session-pane",
+      "work": {
+        "repository": "repo_22222222222222222222222222222222",
+        "kind": "task",
+        "id": "task_44444444444444444444444444444444"
+      }
     },
     "action": {
       "kind": "key",
@@ -305,10 +371,13 @@
     "target": {
       "repository": "repo_22222222222222222222222222222222",
       "window": "55555555-5555-5555-5555-555555555555",
-      "machine_id": "home_11111111111111111111111111111111",
-      "worktree": "/repo.task",
       "pane": "session-pane",
-      "incarnation": "occurrence-session-pane"
+      "incarnation": "occurrence-session-pane",
+      "work": {
+        "repository": "repo_22222222222222222222222222222222",
+        "kind": "task",
+        "id": "task_44444444444444444444444444444444"
+      }
     },
     "action": {
       "kind": "key",
@@ -320,10 +389,13 @@
     "target": {
       "repository": "repo_22222222222222222222222222222222",
       "window": "55555555-5555-5555-5555-555555555555",
-      "machine_id": "home_11111111111111111111111111111111",
-      "worktree": "/repo.task",
       "pane": "session-pane",
-      "incarnation": "occurrence-session-pane"
+      "incarnation": "occurrence-session-pane",
+      "work": {
+        "repository": "repo_22222222222222222222222222222222",
+        "kind": "task",
+        "id": "task_44444444444444444444444444444444"
+      }
     },
     "action": {
       "kind": "key",

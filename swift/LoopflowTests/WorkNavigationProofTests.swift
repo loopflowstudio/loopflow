@@ -241,10 +241,10 @@ struct WorkNavigationProofTests {
         GhosttyManager.shared.initialize()
         let repo = "/src/loopflow"
         let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
-        let workspace = registry.workspace(for: fixtureWorkspace(repo))
+        let workspace = fixtureWork(registry, fixtureWorkspace(repo))
         var terminals: [GhosttyMetalView] = []
         for _ in 0..<3 {
-            workspace.multiplexer.newShell(location: workspace.identity)
+            workspace.multiplexer.newShell(location: workspace.location)
             let pane = workspace.multiplexer.focusedPaneId
             let terminal = registry.surfaces.view(for: .shell(pane, machineId: fixtureMachineId))
             terminal.frame = CGRect(x: 0, y: 0, width: 400, height: 350)
@@ -561,9 +561,9 @@ struct WorkNavigationProofTests {
         var terminals: [GhosttyMetalView] = []
         var records: [[String: Any]] = []
         for (index, path) in paths.enumerated() {
-            let workspace = registry.workspace(for: fixtureWorkspace(path))
+            let workspace = fixtureWork(registry, fixtureWorkspace(path))
             for _ in 0..<2 {
-                workspace.multiplexer.newShell(location: workspace.identity)
+                workspace.multiplexer.newShell(location: workspace.location)
                 let pane = workspace.multiplexer.focusedPaneId
                 let terminal = registry.surfaces.view(for: .shell(pane, machineId: fixtureMachineId))
                 terminal.frame = CGRect(x: 0, y: 0, width: 500, height: 350)
@@ -583,7 +583,7 @@ struct WorkNavigationProofTests {
         }
         defer { for terminal in terminals { registry.surfaces.release(terminal.terminal) } }
         let surfaces = try terminals.map { try #require($0.surface) }
-        let layouts = paths.map { registry.workspace(for: fixtureWorkspace($0)).multiplexer.layout }
+        let layouts = paths.map { fixtureWork(registry, fixtureWorkspace($0)).multiplexer.layout }
         let sessionJSON = String(decoding: try JSONSerialization.data(withJSONObject: records), as: UTF8.self)
         let query = RegistryQuery { args, _ in
             switch args.first {
@@ -611,10 +611,10 @@ struct WorkNavigationProofTests {
             #expect(window.firstResponder === terminals[index * 2])
             #expect(terminals[index * 2].window === window)
             #expect(terminals[(1 - index) * 2].window == nil)
-            #expect(paths.map { registry.workspace(for: fixtureWorkspace($0)).multiplexer.layout } == layouts)
+            #expect(paths.map { fixtureWork(registry, fixtureWorkspace($0)).multiplexer.layout } == layouts)
         }
 
-        let store = registry.workspace(for: fixtureWorkspace(repo)).sessionStore(repoPath: repo, query: query)
+        let store = fixtureWork(registry, fixtureWorkspace(repo)).sessionStore(repoPath: repo, query: query)
         #expect(store.sessions.allSatisfy { $0.state == .live })
         for (index, surface) in surfaces.enumerated() {
             #expect(terminals[index].surface == surface)
@@ -747,11 +747,11 @@ struct WorkNavigationProofTests {
         let model = WorkModel(query: query, repoPath: "/src/loopflow")
         await model.refresh()
         let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
-        let workspace = registry.workspace(for: fixtureWorkspace("/src/loopflow"))
+        let workspace = fixtureWork(registry, fixtureWorkspace("/src/loopflow"))
         workspace.multiplexer.load(sessionId: "navigation-split", location: model.sessions.value?.first { $0.id == "navigation-split" }?.workspace?.identity)
         let sessionPane = workspace.multiplexer.focusedPaneId
         _ = workspace.multiplexer.split(sessionPane, axis: .vertical)
-        workspace.multiplexer.newShell(location: workspace.identity)
+        workspace.multiplexer.newShell(location: workspace.location)
         let shellPane = workspace.multiplexer.focusedPaneId
         workspace.multiplexer.load(sessionId: "navigation-split", location: model.sessions.value?.first { $0.id == "navigation-split" }?.workspace?.identity)
         let layout = workspace.multiplexer.layout

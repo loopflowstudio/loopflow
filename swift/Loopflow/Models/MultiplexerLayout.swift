@@ -16,12 +16,18 @@ public enum PaneContent: Codable, Sendable, Equatable {
     /// Unknown locations remain unavailable, never a local-shell fallback.
     case shell(location: WorkspaceIdentity?, execution: TaskLocationObservation? = nil)
     /// Every Flow process of a Task.
-    case flowLog(taskId: String, execution: TaskLocationObservation? = nil)
+    case flowLog(taskId: String, location: WorkspaceIdentity? = nil, execution: TaskLocationObservation? = nil)
     /// A Task's worktree files.
     case files(taskId: String, location: WorkspaceIdentity? = nil, execution: TaskLocationObservation? = nil)
 
     public var fileLocation: WorkspaceIdentity? {
-        guard case .files(_, let location, let execution) = self else { return nil }
+        let location: WorkspaceIdentity?
+        let execution: TaskLocationObservation?
+        switch self {
+        case .files(_, let value, let owner), .flowLog(_, let value, let owner):
+            location = value; execution = owner
+        default: return nil
+        }
         if let execution {
             guard case .recorded(_, let checkout?) = execution.location else { return nil }
             return WorkspaceIdentity(machineId: execution.machineID, worktree: checkout)
@@ -33,7 +39,7 @@ public enum PaneContent: Codable, Sendable, Equatable {
     public var executionLocation: TaskLocationObservation? {
         switch self {
         case .session(_, _, let execution), .shell(_, let execution),
-             .files(_, _, let execution), .flowLog(_, let execution): execution
+             .files(_, _, let execution), .flowLog(_, _, let execution): execution
         case .empty: nil
         }
     }

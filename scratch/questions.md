@@ -46,14 +46,14 @@ dispatch; an unscoped ambiguous prefix still fails.
 
 ## Context budget
 
-Installed `lf context --skill realign` still assembles the old per-file JSON
-inventory: the October 10 recheck is 35,335 goal tokens, 19,335 over 16,000.
-The local input owner now emits every quoted path and present change state without
-per-file hashes, sizes or false fields. Applying that rendering to the complete
-captured goal yields 11,637 tokens / 52,254 bytes, preserving all steers. This is
-an offline measurement, not installed adoption. The development preview refused
-the production database; that boundary was not bypassed. Authored scratch/memory
-fit; no limits changed. Installation remains outside this Task's authorization.
+Installed `lf context --skill implement --json` still uses the retired per-file
+JSON inventory: the pre-note recheck reports 35,443 goal tokens, 19,443 over 16,000.
+The complete launch source is `.lf/tmp/context/addbc0c0a36830a100f56442edeecba4d77fa8dd07159263a397cbaf0187a29d.md`;
+its omitted middle is inventory, not additional direction. The local renderer
+already emits quoted paths and change states without redundant hashes/sizes.
+Earlier offline measurement: `2feed22e1109:scratch/questions.md`, **Context budget**.
+This is an installed generated-input conflict, not authored scratch overflow;
+installation and production schema bypass remain unauthorized. Limits are unchanged.
 
 ## Admission authority — October 9, unresolved
 
@@ -148,10 +148,10 @@ choices, not native acceptance or a change to first-start admission.
 
 Jack Heart accepted one retained workspace per Work initially, Work-named tabs,
 sidebar organization, conversation-named panes and hide/reopen without ending
-execution. Work tabs remain unimplemented. Jack Heart’s October 10 correction selects a shell
+execution. Work tabs are implemented locally; native acceptance remains. Jack Heart’s October 10 correction selects a shell
 in each new split, without an empty-pane option; that correction is implemented
 locally, not natively accepted.
-The plan's **Work tabs** section owns the cutover and checks.
+The plan's **Work tabs** section owns the implementation and remaining checks.
 
 Reversible implementation choices: tab selection restores that Work's last pane;
 closing the selected tab selects its left neighbor (otherwise the next), and the

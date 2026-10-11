@@ -706,8 +706,9 @@ a local checkout or transfer execution. Bare `open` is ambiguous with `pr open`;
 Sessions use `session connect`.
 
 Desktop inspection reports registered repository/window identities, selection,
-reading availability and retained Machine/checkout pane trees with focus, zoom
-and hidden panes. `task` forwards Rust's recommendation and `run_control`;
+reading availability and retained Work pane trees with focus, zoom
+and hidden panes. Each workspace reports its repository/Wave/Task key, title, open
+state and selection; Machine/checkout locations belong to its pane contents. `task` forwards Rust's recommendation and `run_control`;
 `session` forwards its actions, including unavailable reasons and takeover warnings.
 Each has its own reading state: a Session failure cannot invalidate current Task
 evidence, or vice versa. Saved, failed and absent subjects supply no actions.
@@ -720,6 +721,10 @@ child. Neither token authorizes terminal input.
 It requires macOS and a running app with automation access; failure leaves
 `lf task status <task>` available in the terminal.
 The outer checkout-slot `layouts` field is removed; `workspaces` retains pane trees.
+Opening Work selects its named tab without starting a conversation or preparing a
+checkout. Closing a tab hides its workspace; reopening restores panes, drafts and
+zoom. Closing the last tab starts nothing. This retention lasts for the window,
+not across app quit. Mutation receipts identify `work` and `pane`, not readiness.
 
 Select Work and use pane IDs from the retained layout:
 
@@ -737,11 +742,11 @@ Otherwise one eligible pane is selected; ambiguity lists choices and changes
 nothing. Redirected stdin, agent tool subprocesses without that PTY, and markers
 inherited across SSH do not establish caller identity: use `--pane` when needed.
 Selection never follows current focus. Text/key/read require an existing terminal surface. Restore without a pane
-selects a unique hidden pane. A Task scope uses its recorded Machine/checkout;
+selects a unique hidden pane. Wave and Task scope select their Work workspace;
 a repository without Task scope considers its retained workspaces. Unavailable Work
 or no matching pane produces an error without opening a window or preparing Work.
 
-Window, checkout, content and native-surface lifetimes are resolved internally
+Window, Work workspace, content and native-surface lifetimes are resolved internally
 from one Desktop reading. Replacements before dispatch refuse the request instead
 of following new focus. There is no public JSON target or surface-token argument.
 

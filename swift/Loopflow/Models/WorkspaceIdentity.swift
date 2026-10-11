@@ -13,3 +13,25 @@ public struct WorkspaceIdentity: Codable, Hashable, Sendable {
         self.worktree = worktree
     }
 }
+
+/// Presentation identity. Execution locations belong to pane contents.
+public struct WorkWorkspaceKey: Codable, Hashable, Sendable {
+    public enum Kind: String, Codable, Sendable { case repository, wave, task }
+    public let repository: String
+    public let kind: Kind
+    public let id: String
+
+    public init(repository: String, kind: Kind, id: String) {
+        self.repository = repository
+        self.kind = kind
+        self.id = id
+    }
+
+    public var reference: WorkReference? {
+        switch kind {
+        case .repository: nil
+        case .wave: .wave(id: id)
+        case .task: .task(id: id)
+        }
+    }
+}

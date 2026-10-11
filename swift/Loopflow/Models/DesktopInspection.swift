@@ -101,21 +101,23 @@ public struct DesktopSessionInspection: Codable, Sendable, Equatable {
 }
 
 public struct DesktopWorkspaceInspection: Codable, Sendable, Equatable {
-    public let machineId: String
-    public let worktree: String
+    public let work: WorkWorkspaceKey
+    public let title: String
+    public let isOpen: Bool
+    public let selected: Bool
     public let layout: DesktopLayoutInspection
     public let focusedPane: String
     public let zoomedPane: String?
     public let hiddenPanes: [String]
 
-    public init(machineId: String, worktree: String, layout: DesktopLayoutInspection, focusedPane: String,
-                zoomedPane: String?, hiddenPanes: [String]) {
-        self.machineId = machineId; self.worktree = worktree; self.layout = layout
+    public init(work: WorkWorkspaceKey, title: String, isOpen: Bool, selected: Bool,
+                layout: DesktopLayoutInspection, focusedPane: String, zoomedPane: String?, hiddenPanes: [String]) {
+        self.work = work; self.title = title; self.isOpen = isOpen; self.selected = selected; self.layout = layout
         self.focusedPane = focusedPane; self.zoomedPane = zoomedPane; self.hiddenPanes = hiddenPanes
     }
     enum CodingKeys: String, CodingKey {
-        case worktree, layout
-        case machineId = "machine_id", focusedPane = "focused_pane", zoomedPane = "zoomed_pane", hiddenPanes = "hidden_panes"
+        case work, title, selected, layout
+        case isOpen = "is_open", focusedPane = "focused_pane", zoomedPane = "zoomed_pane", hiddenPanes = "hidden_panes"
     }
 }
 
@@ -130,19 +132,22 @@ public struct DesktopLayoutInspection: Codable, Sendable, Equatable {
     public let axis: String?
     public let ratio: Double?
     public let children: [DesktopLayoutInspection]
+    public let location: WorkspaceIdentity?
 
     public init(_ layout: LayoutNode, surface: (PaneState) -> String?) {
         switch layout {
         case .leaf(let state):
+            location = state.shellLocation ?? state.sessionLocation ?? state.content.fileLocation
             pane = state.id; incarnation = state.incarnation; self.surface = surface(state); axis = nil; ratio = nil; children = []
             switch state.content {
             case .empty: content = "empty"; subject = nil
             case .shell: content = "shell"; subject = nil
             case .session(let id, _, _): content = "session"; subject = id
             case .files(let id, _, _): content = "files"; subject = id
-            case .flowLog(let id, _): content = "flow_log"; subject = id
+            case .flowLog(let id, _, _): content = "flow_log"; subject = id
             }
         case .split(let splitAxis, let first, let second, let splitRatio):
+            location = nil
             pane = nil; incarnation = nil; self.surface = nil; content = nil; subject = nil; axis = splitAxis.rawValue; ratio = splitRatio
             children = [Self(first, surface: surface), Self(second, surface: surface)]
         }
@@ -154,19 +159,16 @@ public struct DesktopLayoutInspection: Codable, Sendable, Equatable {
 public struct DesktopPaneTarget: Codable, Sendable, Equatable {
     public let repository: String
     public let window: String
-    public let machineId: String
-    public let worktree: String
+    public let work: WorkWorkspaceKey
     public let pane: String
     public let incarnation: String
 
-    public init(repository: String, window: String, machineId: String, worktree: String,
+    public init(repository: String, window: String, work: WorkWorkspaceKey,
                 pane: String, incarnation: String) {
-        self.repository = repository; self.window = window; self.machineId = machineId
-        self.worktree = worktree; self.pane = pane; self.incarnation = incarnation
+        self.repository = repository; self.window = window; self.work = work; self.pane = pane; self.incarnation = incarnation
     }
     enum CodingKeys: String, CodingKey {
-        case repository, window, worktree, pane, incarnation
-        case machineId = "machine_id"
+        case repository, window, work, pane, incarnation
     }
 }
 
@@ -175,19 +177,18 @@ public struct DesktopPaneTarget: Codable, Sendable, Equatable {
 public struct DesktopPaneReceipt: Codable, Sendable, Equatable {
     public let repository: String
     public let window: String
-    public let machineId: String
-    public let worktree: String
+    public let work: WorkWorkspaceKey
     public let pane: String
     public let observedAt: Int64
 
     public init(target: DesktopPaneTarget, pane: String, observedAt: Int64) {
         repository = target.repository; window = target.window
-        machineId = target.machineId; worktree = target.worktree
+        work = target.work
         self.pane = pane; self.observedAt = observedAt
     }
     enum CodingKeys: String, CodingKey {
-        case repository, window, worktree, pane
-        case machineId = "machine_id", observedAt = "observed_at"
+        case repository, window, work, pane
+        case observedAt = "observed_at"
     }
 }
 

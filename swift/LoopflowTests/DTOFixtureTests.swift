@@ -201,7 +201,7 @@ struct DTOFixtureTests {
         #expect(request.target.incarnation == "occurrence-session-pane")
         #expect(try JSONDecoder().decode(DesktopPaneCommand.self, from: JSONEncoder().encode(request)) == request)
         let wire = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any])
-        for field in ["repository", "window", "machine_id", "worktree", "pane", "incarnation"] {
+        for field in ["repository", "window", "work", "pane", "incarnation"] {
             var missing = wire
             var target = try #require(missing["target"] as? [String: Any])
             target.removeValue(forKey: field)
@@ -216,7 +216,7 @@ struct DTOFixtureTests {
         let data = try loadFixtureData("desktop_pane_receipt.json")
         let receipt = try JSONDecoder().decode(DesktopPaneReceipt.self, from: data)
         #expect(receipt.pane == "created-pane")
-        #expect(receipt.machineId == "machine-a")
+        #expect(receipt.work.kind == .task)
         #expect(try JSONDecoder().decode(DesktopPaneReceipt.self, from: JSONEncoder().encode(receipt)) == receipt)
     }
 

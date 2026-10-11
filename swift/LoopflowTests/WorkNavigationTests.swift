@@ -8,6 +8,39 @@ import ViewInspector
 @Suite("Unified Work and Session navigation")
 @MainActor
 struct WorkNavigationTests {
+    @Test("Work tabs retain their own conversation and details choice across aliases and close/reopen")
+    func workTabsRetainSelection() throws {
+        let snapshot = try roadmap()
+        let wave = try #require(snapshot.waves.first)
+        let task = try #require(wave.tasks.items.first)
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Navigation must not launch or read") }, repoPath: wave.wave.repo)
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        let registry = SessionsWorkspaceRegistry(localMachineId: "local")
+        model.bindWorkspaces(registry, repository: "repo")
+        let root = try #require(registry.selectedWork)
+        model.select(.task(id: task.id))
+        let taskKey = try #require(registry.selectedWork)
+        let workspace = try #require(registry.retained(taskKey))
+        model.navigation.content = .terminals
+        model.navigation.selectedSessionId = "retained-conversation"
+        workspace.multiplexer.reveal(sessionId: "retained-conversation")
+        let pane = workspace.multiplexer.focusedPane
+        model.select(.wave(id: wave.wave.id))
+        #expect(model.navigation.selectedSessionId == nil)
+        model.select(.task(id: task.runtime?.workId ?? task.id))
+        #expect(registry.selectedWork == taskKey)
+        #expect(registry.retained(taskKey) === workspace)
+        #expect(model.navigation.selectedSessionId == "retained-conversation")
+        #expect(model.navigation.content == .terminals)
+        #expect(workspace.multiplexer.focusedPane == pane)
+        registry.hide(taskKey)
+        model.select(nil)
+        #expect(registry.selectedWork == root)
+        model.select(.task(id: task.id))
+        #expect(model.navigation.selectedSessionId == "retained-conversation")
+        #expect(registry.openWork.filter { $0 == taskKey }.count == 1)
+    }
+
     @Test("A collapsed Wave exposes every Task Session, including idle conversations")
     func collapsedWaveParticipation() throws {
         let snapshot = try roadmap()
@@ -396,11 +429,11 @@ struct WorkNavigationTests {
         let model = try model()
         await model.refresh()
         let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
-        let workspace = registry.workspace(for: fixtureWorkspace("/src/loopflow"))
+        let workspace = fixtureWork(registry, fixtureWorkspace("/src/loopflow"))
         workspace.multiplexer.load(sessionId: "human")
         let sessionPane = workspace.multiplexer.focusedPaneId
         _ = workspace.multiplexer.split(sessionPane, axis: .vertical)
-        workspace.multiplexer.newShell(location: workspace.identity)
+        workspace.multiplexer.newShell(location: workspace.location)
         let layout = workspace.multiplexer.layout
         let focused = workspace.multiplexer.focusedPaneId
         model.select(.task(id: "issue-review"))
@@ -425,7 +458,7 @@ struct WorkNavigationTests {
         #expect(model.navigation.content == .terminals)
         #expect(model.navigation.selectedSessionId == "human")
         #expect(!model.navigation.isExpanded(group))
-        #expect(registry.workspace(for: fixtureWorkspace("/src/loopflow")) === workspace)
+        #expect(fixtureWork(registry, fixtureWorkspace("/src/loopflow")) === workspace)
         #expect(workspace.multiplexer.layout == layout)
         #expect(workspace.multiplexer.focusedPaneId == focused)
         workspace.multiplexer.load(sessionId: "human")
@@ -682,7 +715,7 @@ struct WorkNavigationTests {
         model.navigation.renaming?.text = "Retained draft"
         let selection = model.selection
         let registry = SessionsWorkspaceRegistry()
-        let workspace = registry.workspace(for: WorkspaceIdentity(machineId: "local", worktree: "/src/loopflow"))
+        let workspace = fixtureWork(registry, WorkspaceIdentity(machineId: "local", worktree: "/src/loopflow"))
         workspace.multiplexer.load(sessionId: "first")
         let pane = workspace.multiplexer.focusedPaneId
         _ = workspace.multiplexer.split(pane, axis: .vertical)

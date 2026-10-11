@@ -295,6 +295,10 @@ final class GhosttySurfacePool {
         views.removeValue(forKey: id)?.destroySurface()
     }
 
+    func clearFocus() {
+        for view in views.values { view.updateFocus(isFocused: false, isEnabled: false) }
+    }
+
     func focus(_ id: TerminalIdentity) {
         guard let view = views[id] else { return }
         view.window?.makeFirstResponder(view)
@@ -1418,6 +1422,7 @@ final class GhosttySurfacePool {
     func associateProgramStatus(_ records: [SessionRecord]) {}
     func title(for id: TerminalIdentity) -> String? { nil }
     func release(_ id: TerminalIdentity) {}
+    func clearFocus() {}
     func focus(_ id: TerminalIdentity) {}
 }
 

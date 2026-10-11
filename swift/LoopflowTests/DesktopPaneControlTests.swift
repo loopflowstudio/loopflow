@@ -14,6 +14,8 @@ struct DesktopPaneControlTests {
     private let repository = "selected-plan"
     private let identity = WorkspaceIdentity(machineId: "machine-a", worktree: "/same/path")
 
+    private var workKey: WorkWorkspaceKey { WorkWorkspaceKey(repository: repository, kind: .task, id: "task") }
+
     private func register(_ router: WorkLinkRouter, window: UUID, registry: SessionsWorkspaceRegistry, model: WorkModel = WorkModel(query: RegistryQuery { _, _ in
         throw RegistryQueryError("Pane controls must not launch Work")
     })) {
@@ -27,14 +29,13 @@ struct DesktopPaneControlTests {
     }
 
     private func target(_ pane: PaneState, window: UUID, machine: String = "machine-a") -> DesktopPaneTarget {
-        DesktopPaneTarget(repository: repository, window: window.uuidString, machineId: machine,
-            worktree: identity.worktree, pane: pane.id, incarnation: pane.incarnation)
+        DesktopPaneTarget(repository: repository, window: window.uuidString, work: WorkWorkspaceKey(repository: repository, kind: .task, id: machine == identity.machineId ? "task" : "other"), pane: pane.id, incarnation: pane.incarnation)
     }
 
     @Test("Session targets use captured location, never the enclosing workspace")
     func sessionLocationOwnsTargetingAndSplit() throws {
         let registry = SessionsWorkspaceRegistry(localMachineId: identity.machineId)
-        let workspace = registry.workspace(for: identity)
+        let workspace = registry.open(workKey, title: "Task", location: identity)
         let peer = WorkspaceIdentity(machineId: "peer", worktree: identity.worktree)
         workspace.multiplexer.load(sessionId: "conversation", location: peer)
         let pane = workspace.multiplexer.focusedPane
@@ -47,9 +48,7 @@ struct DesktopPaneControlTests {
         let router = WorkLinkRouter(), window = UUID()
         register(router, window: window, registry: registry)
         let stale = target(pane, window: window)
-        #expect(throws: RegistryQueryError.self) {
-            try router.controlPane(.init(target: stale, action: .hide))
-        }
+        _ = try router.controlPane(.init(target: stale, action: .hide))
         workspace.multiplexer.updateSessionLocation("conversation", location: identity)
         #expect(throws: RegistryQueryError.self) {
             try router.controlPane(.init(target: stale, action: .hide))
@@ -73,7 +72,7 @@ struct DesktopPaneControlTests {
     @Test func inputRequiresAnExistingTerminalAndNeverAllocatesOrFollowsFocus() throws {
         let registry = SessionsWorkspaceRegistry(localMachineId: identity.machineId)
         let router = WorkLinkRouter(), window = UUID()
-        let store = registry.workspace(for: identity).multiplexer
+        let store = registry.open(workKey, title: "Task", location: identity).multiplexer
         store.show(.files(taskId: "fixture"))
         let companion = target(store.focusedPane, window: window)
         store.newShell(command: ["retained-command"], location: identity)
@@ -99,7 +98,7 @@ struct DesktopPaneControlTests {
 
     @Test("Split follows the addressed shell's location and refuses an unobserved remote location")
     func splitUsesShellLocation() throws {
-        let workspace = SessionsWorkspace(identity: fixtureWorkspace("/repository"))
+        let workspace = fixtureWork(fixtureWorkspace("/repository"))
         let location = fixtureWorkspace("/task")
         let source = try #require(workspace.multiplexer.newShell(location: location))
         let split = try #require(try workspace.split(source.id, axis: .vertical))
@@ -114,7 +113,7 @@ struct DesktopPaneControlTests {
 
     @Test("Shell observation and exit use the pane's location, not the workspace path")
     func shellOwnsExecutionLocation() throws {
-        let workspace = SessionsWorkspace(identity: fixtureWorkspace("/repository"))
+        let workspace = fixtureWork(fixtureWorkspace("/repository"))
         let location = WorkspaceIdentity(machineId: "peer", worktree: "/remote/task")
         let shell = try #require(workspace.multiplexer.newShell(command: ["peer-shell"], location: location))
         let terminal = TerminalIdentity.shell(shell.id, machineId: "peer")
@@ -132,7 +131,7 @@ struct DesktopPaneControlTests {
     func passiveReadKeepsMissingSurfaceDistinctAndDoesNotFollowFocus(region: DesktopTextRegion) throws {
         let registry = SessionsWorkspaceRegistry(localMachineId: identity.machineId)
         let router = WorkLinkRouter(), window = UUID()
-        let workspace = registry.workspace(for: identity), store = workspace.multiplexer
+        let workspace = registry.open(workKey, title: "Task", location: identity), store = workspace.multiplexer
         store.newShell(command: ["retained-command"], location: identity)
         let shell = store.focusedPane
         let request = DesktopTextRequest(target: target(shell, window: window), surface: "old-surface",
@@ -155,13 +154,13 @@ struct DesktopPaneControlTests {
         #expect(store.focusedPane == focus)
         #expect(store.shellCommands[shell.id] == ["retained-command"])
         #expect(registry.surfaces.programStatus(for: .shell(shell.id, machineId: identity.machineId)) == nil)
-        #expect(registry.paths == [identity])
+        #expect(registry.keys == [workKey])
     }
 
     @Test func readRejectsStaleWindowContentAndByteLimitsWithoutChangingWorkspace() throws {
         let registry = SessionsWorkspaceRegistry(localMachineId: identity.machineId)
         let router = WorkLinkRouter(), window = UUID()
-        let store = registry.workspace(for: identity).multiplexer
+        let store = registry.open(workKey, title: "Task", location: identity).multiplexer
         let empty = store.focusedPane
         let request = DesktopTextRequest(target: target(empty, window: window), surface: "surface", region: .screen, maxBytes: 16)
         register(router, window: window, registry: registry)
@@ -192,7 +191,7 @@ struct DesktopPaneControlTests {
         func quote(_ value: String) -> String { "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'" }
         let registry = SessionsWorkspaceRegistry(localMachineId: identity.machineId)
         let router = WorkLinkRouter(), windowID = UUID()
-        let workspace = registry.workspace(for: identity), store = workspace.multiplexer
+        let workspace = registry.open(workKey, title: "Task", location: identity), store = workspace.multiplexer
         store.newShell(location: identity)
         let pane = store.focusedPane
         store.newShell(location: identity)
@@ -277,7 +276,7 @@ struct DesktopPaneControlTests {
         manager.initialize()
         let registry = SessionsWorkspaceRegistry(localMachineId: identity.machineId)
         let router = WorkLinkRouter(), window = UUID()
-        let store = registry.workspace(for: identity).multiplexer
+        let store = registry.open(workKey, title: "Task", location: identity).multiplexer
         store.newShell(location: identity)
         let pane = store.focusedPane
         let terminal = TerminalIdentity.shell(pane.id, machineId: identity.machineId)
@@ -388,10 +387,11 @@ struct DesktopPaneControlTests {
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
         model.navigation.preparedTaskWorktrees[task.id] = identity
         let registry = SessionsWorkspaceRegistry(localMachineId: identity.machineId), router = WorkLinkRouter(), window = UUID()
-        let workspace = registry.workspace(for: identity), store = workspace.multiplexer
+        let workKey = WorkWorkspaceKey(repository: repository, kind: .task, id: task.runtime?.workId ?? task.id)
+        let workspace = registry.open(workKey, title: "Task", location: identity), store = workspace.multiplexer
         store.load(sessionId: "retained-session", location: identity)
         let session = store.focusedPane
-        let source = target(session, window: window)
+        let source = DesktopPaneTarget(repository: repository, window: window.uuidString, work: workKey, pane: session.id, incarnation: session.incarnation)
         store.newShell(command: ["retained-shell-command"], location: identity)
         let selected = store.focusedPane
         store.setZoom(selected.id, enabled: true)
@@ -432,7 +432,7 @@ struct DesktopPaneControlTests {
 
     @Test func remoteShellRefusalPreservesTheWorkspace() throws {
         let registry = SessionsWorkspaceRegistry(localMachineId: "other"), router = WorkLinkRouter(), window = UUID()
-        let store = registry.workspace(for: identity).multiplexer
+        let store = registry.open(workKey, title: "Task", location: identity).multiplexer
         let before = store.layout
         register(router, window: window, registry: registry)
         for action in [DesktopPaneAction.shell, .split(axis: .horizontal), .split(axis: .vertical)] {
@@ -446,7 +446,7 @@ struct DesktopPaneControlTests {
 
     @Test func hideRestoreRetainsContentAndIgnoresLaterFocus() throws {
         let router = WorkLinkRouter(), registry = SessionsWorkspaceRegistry(), window = UUID()
-        let workspace = registry.workspace(for: identity), store = workspace.multiplexer
+        let workspace = registry.open(workKey, title: "Task", location: identity), store = workspace.multiplexer
         store.newShell(command: ["fixture-shell"], location: identity)
         let shell = store.focusedPane
         store.load(sessionId: "retained-draft", location: identity)
@@ -467,14 +467,14 @@ struct DesktopPaneControlTests {
         #expect(store.layout == layout)
         #expect(store.focusedPane == session)
         #expect(store.shellCommands[shell.id] == ["fixture-shell"])
-        #expect(registry.workspace(for: identity) === workspace)
+        #expect(registry.open(workKey, title: "Task", location: identity) === workspace)
         #expect(workspace.surfaces === registry.surfaces)
         #expect(!store.canUndoClose)
     }
 
     @Test func arrangementRetainsDocumentsSurfacesSelectionAndContentOccurrences() throws {
         let router = WorkLinkRouter(), registry = SessionsWorkspaceRegistry(localMachineId: identity.machineId), window = UUID()
-        let workspace = registry.workspace(for: identity), store = workspace.multiplexer
+        let workspace = registry.open(workKey, title: "Task", location: identity), store = workspace.multiplexer
         store.newShell(command: ["fixture-shell"], location: identity)
         let shell = store.focusedPane
         store.load(sessionId: "retained-session", location: identity)
@@ -497,8 +497,8 @@ struct DesktopPaneControlTests {
         #expect(store.layout.pane(for: split.pane)?.content == .shell(location: identity))
         #expect(store.shellCommands[split.pane] == [])
         #expect(split.repository == repository)
-        #expect(split.machineId == identity.machineId)
-        #expect(split.worktree == identity.worktree)
+        #expect(split.work == workKey)
+        #expect(split.work.kind == .task)
         #expect(store.layout.allPanes.count == 4)
         #expect(store.focusedPane == filesPane)
         let splitShell = try #require(store.layout.pane(for: split.pane))
@@ -524,7 +524,7 @@ struct DesktopPaneControlTests {
         #expect(store.shellCommands[shell.id] == ["fixture-shell"])
         #expect(document.editor.string == "unfinished draft")
         #expect(document.editor.selectedRange() == NSRange(location: 3, length: 5))
-        #expect(registry.workspace(for: identity) === workspace)
+        #expect(registry.open(workKey, title: "Task", location: identity) === workspace)
         #expect(workspace.surfaces === registry.surfaces)
         #if GHOSTTY_ENABLED
         #expect(registry.surfaces.view(for: .shell(shell.id, machineId: identity.machineId)) === shellView)
@@ -536,7 +536,7 @@ struct DesktopPaneControlTests {
 
     @Test func staleSourceRejectsEveryActionWithoutChangingTheCurrentFocus() throws {
         let router = WorkLinkRouter(), registry = SessionsWorkspaceRegistry(), window = UUID()
-        let store = registry.workspace(for: identity).multiplexer
+        let store = registry.open(workKey, title: "Task", location: identity).multiplexer
         store.load(sessionId: "old", location: identity)
         let old = target(store.focusedPane, window: window)
         store.load(sessionId: "replacement", location: identity)
@@ -558,7 +558,7 @@ struct DesktopPaneControlTests {
 
     @Test func invalidSecondTargetsAndRatiosLeaveBothPanesUntouched() throws {
         let router = WorkLinkRouter(), registry = SessionsWorkspaceRegistry(), window = UUID()
-        let store = registry.workspace(for: identity).multiplexer
+        let store = registry.open(workKey, title: "Task", location: identity).multiplexer
         store.newShell(location: identity)
         let shell = target(store.focusedPane, window: window)
         store.load(sessionId: "old", location: identity)
@@ -568,7 +568,7 @@ struct DesktopPaneControlTests {
         register(router, window: window, registry: registry)
         let before = store.layout
         let outside = DesktopPaneTarget(repository: "different-plan", window: window.uuidString,
-            machineId: identity.machineId, worktree: identity.worktree, pane: peer.pane, incarnation: peer.incarnation)
+            work: workKey, pane: peer.pane, incarnation: peer.incarnation)
         for destination in [stale, shell, outside, target(store.focusedPane, window: UUID()),
                             target(store.focusedPane, window: window, machine: "peer")] {
             for action in [DesktopPaneAction.move(destination: destination, axis: .vertical),
@@ -584,12 +584,12 @@ struct DesktopPaneControlTests {
             }
             #expect(store.layout == before)
         }
-        #expect(registry.paths == [identity])
+        #expect(registry.keys == [workKey])
     }
 
     @Test func focusingTheOnlyHiddenPaneRevealsItWithoutChangingItsContent() throws {
         let router = WorkLinkRouter(), registry = SessionsWorkspaceRegistry(), window = UUID()
-        let store = registry.workspace(for: identity).multiplexer
+        let store = registry.open(workKey, title: "Task", location: identity).multiplexer
         store.newShell(location: identity)
         let pane = store.focusedPane, request = target(pane, window: window)
         register(router, window: window, registry: registry)
@@ -602,7 +602,7 @@ struct DesktopPaneControlTests {
 
     @Test func samePaneAndSessionAfterReplacementDoesNotReviveOldTarget() throws {
         let router = WorkLinkRouter(), registry = SessionsWorkspaceRegistry(), window = UUID()
-        let store = registry.workspace(for: identity).multiplexer
+        let store = registry.open(workKey, title: "Task", location: identity).multiplexer
         store.load(sessionId: "a", location: identity)
         let old = target(store.focusedPane, window: window)
         register(router, window: window, registry: registry)
@@ -618,7 +618,7 @@ struct DesktopPaneControlTests {
 
     @Test func undoCloseKeepsContentsButInvalidatesTheRemovedOccurrence() throws {
         let router = WorkLinkRouter(), registry = SessionsWorkspaceRegistry(), window = UUID()
-        let store = registry.workspace(for: identity).multiplexer
+        let store = registry.open(workKey, title: "Task", location: identity).multiplexer
         store.newShell(location: identity)
         let shell = store.focusedPane
         register(router, window: window, registry: registry)
@@ -633,14 +633,14 @@ struct DesktopPaneControlTests {
 
     @Test func wrongMachineAndReplacedWindowNeverChangeOrAllocateWorkspaces() throws {
         let router = WorkLinkRouter(), registry = SessionsWorkspaceRegistry(), old = UUID(), replacement = UUID()
-        let store = registry.workspace(for: identity).multiplexer
+        let store = registry.open(workKey, title: "Task", location: identity).multiplexer
         store.newShell(location: identity)
         let pane = store.focusedPane
         register(router, window: old, registry: registry)
         #expect(throws: RegistryQueryError.self) {
             try router.controlPane(DesktopPaneCommand(target: target(pane, window: old, machine: "machine-b"), action: .hide))
         }
-        #expect(registry.paths == [identity])
+        #expect(registry.keys == [workKey])
         register(router, window: replacement, registry: registry)
         router.remove(old, repository: repository)
         #expect(throws: RegistryQueryError.self) {

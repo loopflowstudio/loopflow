@@ -39,86 +39,35 @@ Historical assignment provenance stays unknown. Admission's transport
 counterexamples and unreviewed binding proposal remain in the plan; the accepted
 October 10 UI work does not resolve them.
 
-## Work-tab design review — October 10
+## Work-tab cutover — October 10
 
-Inspection at `e4a324636` found checkout-keyed workspaces plus an outer layout:
-tabs alone would merge distinct Work sharing a path. The plan replaces that tree,
-rekeys the retained registry and moves location to contents. A multiply associated
-Session still has one native presentation occurrence; relocation changes neither
-client nor membership. Closing a tab hides it. These are design findings, not
-implemented tabs or native proof.
+The existing registry now retains Work, not checkouts. Model selection shares each
+entry's presentation state rather than synchronizing a second selected-Session
+field. Tabs hide without deleting entries, documents, layout/Undo, zoom or native
+surfaces. The last close has no launch side effect. Content locations own shell,
+Files and log operations; Rust and Swift targets/receipts name the same Work key.
+Local Flow logs keep the matching Work stream; other locations use owner-pinned
+captured reads with explicit Refresh, without another planning reader or poller.
 
-## Split and passive-entry deletions — October 10
+Review found two concrete issues and changed the implementation: location-derived
+membership could evict a peer's locally associated Session, and late conversation
+preparation could change the newly selected Work. Foreign physical IDs now cannot
+disprove retained correspondence, and preparation captures the destination entry
+before awaiting checkout. Repository association changes keys without replacing
+the retained owner. Window input is revoked when selecting/hiding Work.
 
-Shell-by-default split remains implemented. Earlier failed fixture assumptions and
-passing reruns: `270e29bdc:scratch/findings.md`, **Split correction**. Merge checks:
-`7a36df4ea2:scratch/findings.md`, same heading.
+Early builds exposed stale location-only constructors/DTO expectations and a
+misnamed planning title. Early focused checks also exposed retired checkout-pruning
+assertions, missing open-tab setup, a fixture Machine mismatch and target Work
+mismatches in association/remote-opening fixtures. Those were corrected on the
+Work-keyed path, not by restoring checkout-keyed compatibility. The earlier outer
+layout, Session-row, location and input-budget cuts, failed attempts and check
+commands remain at `2feed22e1109:scratch/findings.md`, under their original headings.
 
-The Task view's selection/refresh hooks still ensured or connected a primary Session,
-and a remote bare Task link entered the Session-opening branch solely because it
-had an execution location. Both implicit paths are deleted. Explicit Session and
-Changes requests still connect through the existing owner. Model fixtures prove
-local/remote bare links await page readiness without Session acquisition; they do
-not prove rendered navigation or tabs. The Work-keyed registry and exact-target DTO cutover remain unfinished;
-the outer tree is now deleted.
+Check: `scripts/test_desktop.sh --filter 'WorktreeWorkspaceTests|DesktopPaneControlTests|workTabsRetainSelection|DTOFixtureTests|WorkDestinationTests|contentRoutedFlowLog|taskWorkFollowsTheStream' -Xswiftc -gnone --no-parallel` — PASS (build, 124 tests); `cargo test -p loopflow --lib lf::commands::desktop::tests` / `cargo test -p loopflow --test dto_fixtures desktop` (LF variables cleared, closed stdin) — PASS (7/6); fmt, Clippy all-targets and diff check — PASS. Full affected coverage: gate/CI; rendered usability, provider drafts and configured peers: demo/review.
 
-Inventory simplification and its 49-test passing result remain at
-`a81245920:scratch/findings.md`, this heading.
-
-## Content-location cuts — October 10
-
-`92cd05cbf3:scratch/findings.md`, this heading, retains the detailed sequence,
-failed builds and prior commands. Current guarantees:
-
-- Session/shell location belongs to content, not its enclosing checkout. Changed
-  locations renew occurrences and discard old owners without changing focus,
-  zoom or collapse. Missing inventory retains evidence; observed unknown refuses.
-  Undo retains location without replaying launch. Earlier shell failures and
-  97-test result: `a82ffc1131:scratch/findings.md`, **Shell-location cut**.
-- Files opens through its recorded owner without Session-link priming. Local
-  Files captures placement at opening, survives missing planning and supplies
-  the location for Split. Changed owners refuse without redirecting drafts.
-  Same-owner nonce/time refreshes reuse the store and transport. Changes readiness
-  matches Task identity and captures the exact occurrence, not locationless content.
-- `TaskFilesStore` owns remote observation and one awaited cleanup path for
-  disconnect, stale frames and owner loss. Release cancels observation; hiding
-  must retain the store. The release/three-ending fixtures passed (2 tests).
-- Task-owned CLI placement still resolves local filesystem operations; retained
-  pane location is not filesystem CAS. No configured peer or native proof.
-
-Earlier Files/shell fixture failures and owned-helper corrections remain at
-`92cd05cbf3:scratch/findings.md`, **Content-location cuts**.
-
-Check: `scripts/test_desktop.sh --filter 'TaskFilesTests/localFilesKeepTheirContentLocationAndDraftWithoutPlanning|MultiplexerStoreTests/fileLocationSurvivesLayoutChanges|DesktopPaneControlTests' -Xswiftc -gnone --no-parallel` — PASS (build, 22 tests; reused unchanged); full cutover: implement; native: demo.
-
-The earlier empty-error checkpoint failures are retained in `92cd05cbf3`; the
-subsequent `lf commit` succeeded as that revision. Pre-checkpoint bytes also survive
-in `/tmp/loo427-compress-ka0wKM/working.patch` and its `scratch/` copy.
-
-**Remaining cut:** Work-keyed registry, content-routed Flow logs, tabs/navigation
-and exact-target DTOs. `retainedPane` and
-`reconcileMembership` still encode checkout identity. Admission remains independent
-and unresolved. Infrastructure’s planning memory retains the execution boundary.
-
-Task-input compression removes the duplicate `ContextFile` projection and its
-per-file disk reads/hashes. Quoted paths and all present change states remain;
-patch bounds and durable capture hashes are unchanged. The fixture covers mixed
-states, 301 binary paths and a quoted/newline name. Budget measurements and the
-production-database preview refusal remain in [questions](questions.md#context-budget).
-This does not implement Work tabs or alter their deletion targets.
-
-Check: `cargo test -p loopflow --lib task_workspace_context_covers_committed_staged_unstaged_and_untracked_bytes` (LF variables cleared, closed stdin), `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo build -p loopflow --bin lf`, `git diff --check` — PASS (1 test); installed input adoption and native UI remain unproved.
-
-## Navigation deletions — October 10
-
-Outer checkout layout/DTO deletion and its 78 Swift/6 Rust checks:
-`8cdf44da93:scratch/findings.md`, **Outer-layout deletion**.
-Session-only presentation and Session hierarchy rows are now deleted. Work rows
-retain conversation menus; Compact keeps Waves with conversations. Missing
-planning stays reachable through Debug → Sessions, without fabricated ancestry.
-Deleted flat-row benchmarks/disambiguation; native retention fixtures use
-diagnostics. Benchmark population versions distinguish the changed endpoints.
-The initial search assertion included ancestor roll-up; the repair checks the Task menu. Work tabs, Flow-log routing and exact-target DTOs remain unfinished; no native
-acceptance or admission decision.
-
-Check: `scripts/test_desktop.sh --filter WorkNavigationTests -Xswiftc -gnone --no-parallel` — PASS (29 tests, unchanged evidence reused); native: demo; Work cutover: implement.
+No native rendering, live Session manipulation, installation, publication or merge.
+Shared first-start admission still refuses; mixed-provider/running-Flow exchange,
+broader explanation and the other plan obligations remain. Installed context still
+uses the old generated inventory; [questions](questions.md#context-budget) records
+the measured overage without changing budgets or production schema boundaries.

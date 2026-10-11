@@ -33,7 +33,7 @@ struct TaskFilesTests {
 
     @Test func localFilesKeepTheirContentLocationAndDraftWithoutPlanning() async throws {
         let location = WorkspaceIdentity(machineId: "local", worktree: "/task/checkout")
-        let workspace = SessionsWorkspace(identity: .init(machineId: "local", worktree: "/other/work"))
+        let workspace = fixtureWork(.init(machineId: "local", worktree: "/other/work"))
         let query = RegistryQuery { _, _ in throw RegistryQueryError("Offline") }
         let content = PaneContent.files(taskId: "task-files", location: location)
         let pane = try #require(workspace.multiplexer.show(content))
@@ -74,7 +74,7 @@ struct TaskFilesTests {
         let location = TaskLocationObservation(request: "opened", repositoryID: "plan", taskID: "portable",
             machineID: "peer", observedAt: 1, location: .recorded(taskID: "remote-task", checkout: "/peer/checkout"))
         // The enclosing checkout is deliberately unrelated to the pane's content.
-        let workspace = SessionsWorkspace(identity: .init(machineId: "local", worktree: "/local/other"))
+        let workspace = fixtureWork(.init(machineId: "local", worktree: "/local/other"))
         let content = PaneContent.files(taskId: "portable", execution: location)
         #expect(throws: RegistryQueryError.self) {
             try workspace.files(for: .files(taskId: "another-task", execution: location), task: nil, query: query)
@@ -138,7 +138,7 @@ struct TaskFilesTests {
             try await peer.watch(args, cwd: cwd)
         }, run: { args, cwd in
             try await peer.read(args, cwd: cwd)
-        }).onMachine("peer", repository: "plan").pinFiles(to: location)
+        }).onMachine("peer", repository: "plan").pinTaskLocation(to: location)
         let store = TaskFilesStore(issue: "remote-task", cwd: "/peer/checkout", query: query)
         store.autosave = false
         store.selection = "note.txt"
@@ -608,8 +608,8 @@ struct TaskFilesTests {
         _ = NSApplication.shared
         GhosttyManager.shared.initialize()
         let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
-        let workspace = registry.workspace(for: fixtureWorkspace(NSTemporaryDirectory()))
-        workspace.multiplexer.newShell(location: workspace.identity)
+        let workspace = fixtureWork(registry, fixtureWorkspace(NSTemporaryDirectory()))
+        workspace.multiplexer.newShell(location: workspace.location)
         let identity = TerminalIdentity.shell(workspace.multiplexer.focusedPaneId, machineId: fixtureMachineId)
         let terminal = registry.surfaces.view(for: identity)
         terminal.frame = CGRect(x: 0, y: 0, width: 400, height: 350)

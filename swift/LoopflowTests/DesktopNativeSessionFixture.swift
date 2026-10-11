@@ -208,10 +208,10 @@ struct DesktopNativeSessionTests {
         #expect(try JSONDecoder().decode([SessionRecord].self, from: Data(history.utf8)).count == copiedRecords.count + 1)
         let owned = try #require(try await fixture.records().first)
         let registry = SessionsWorkspaceRegistry(localMachineId: try await query.localMachineId())
-        let workspace = registry.workspace(for: try #require(owned.workspace).identity)
+        let workspace = fixtureWork(registry, try #require(owned.workspace).identity)
         let store = workspace.sessionStore(repoPath: fixture.repo, query: query)
         workspace.multiplexer.load(sessionId: fixture.sessionId, location: owned.workspace?.identity)
-        workspace.multiplexer.newShell(location: workspace.identity)
+        workspace.multiplexer.newShell(location: workspace.location)
         let layout = workspace.multiplexer.layout
         let files = workspace.files(taskId: fixture.taskId, issue: fixture.issue, cwd: fixture.checkout, query: query)
         files.autosave = false

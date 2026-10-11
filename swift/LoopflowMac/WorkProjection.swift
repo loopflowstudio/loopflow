@@ -281,7 +281,16 @@ final class WorkNavigation {
         case flow(String)
         case workflow(String)
     }
-    var content: Content = .overview
+    @MainActor @Observable
+    final class WorkspacePresentation {
+        var content: Content = .details
+        var selectedSessionId: String?
+    }
+    var workspacePresentation = WorkspacePresentation()
+    var content: Content {
+        get { workspacePresentation.content }
+        set { workspacePresentation.content = newValue }
+    }
     var palette: Palette?
     var recentDestinations: [WorkPaletteRow] = []
     /// Source revisions isolate disclosure from changed definitions and repositories.
@@ -289,7 +298,9 @@ final class WorkNavigation {
     var showsActivity = false
     var presentation: WorkPresentation = .compact
     var selectedSessionId: String? {
-        didSet {
+        get { workspacePresentation.selectedSessionId }
+        set {
+            workspacePresentation.selectedSessionId = newValue
             // Leaving a Session abandons an unsubmitted edit; a submitted one
             // still settles against its own Session.
             if let renaming, renaming.sessionId != selectedSessionId, !renaming.submitting {

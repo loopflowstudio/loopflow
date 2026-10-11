@@ -151,11 +151,11 @@ struct TaskCaptureTests {
         let repoIdentity = WorkspaceIdentity(machineId: machineId, worktree: repo)
         let taskIdentity = WorkspaceIdentity(machineId: machineId, worktree: taskPath)
         let registry = SessionsWorkspaceRegistry(localMachineId: machineId)
-        let repoPanes = registry.workspace(for: repoIdentity).multiplexer
+        let repoPanes = fixtureWork(registry, repoIdentity).multiplexer
         repoPanes.newShell(command: ["retained-shell"])
         repoPanes.load(sessionId: "existing-conversation")
         let retained = repoPanes.layout.allPanes
-        let taskPanes = registry.workspace(for: taskIdentity).multiplexer
+        let taskPanes = fixtureWork(registry, taskIdentity).multiplexer
         taskPanes.newShell(command: ["task-shell"])
         let taskLayout = taskPanes.layout
         let view = SessionsView(model: model, repoPath: repo, workspaces: registry,

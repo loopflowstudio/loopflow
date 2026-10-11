@@ -168,14 +168,16 @@ and LOO-453 (readiness/events); research:
 [the comparison](../../docs/reviews/terminal-command-comparison.md#rex-composition-and-discoverability-2026-10-10).
 
 Jack Heart (October 10) accepted Work-named repository/Wave/Task tabs; close hides.
-`ff61b6bc` selects shell-default Split, no empty option. Bare Task navigation
-acquires no Session; explicit Session/Changes survives. Content owns location and Undo never replays launch (`cf77ee325a`). Files reuses
-same-owner transports, refusing changed owners without redirecting drafts
-(`d10d5e9a69`/`d86e32d466`). Hide retains observation (`b295ffba2f`); missing
-planning retains local Files/Split location. CLI reads still resolve placement.
-`5727532b1d`/`5af9451cf8` delete outer layout/inspection and Session rows,
-retaining conversation menus/diagnostics. Tabs remain unbuilt; targets are checkout-keyed; logs ignore location.
-No native acceptance.
+The local cutover rekeys the retained registry and exact-target DTOs by Work,
+with locations on contents. Navigation shares each entry's conversation state;
+hide/reopen retains panes, drafts and zoom. Shell-default Split and no-acquisition
+bare navigation survive. Logs use matching local stream or owner-pinned reads.
+Foreign physical Task IDs cannot disprove local correspondence. Late preparation
+captures its Work entry, never the new selection. Files retains same-owner
+transports and refuses changed owners without redirecting drafts. No native
+acceptance or admission authority follows. Earlier cuts and failures:
+`2feed22e1109:wave/product/MEMORY.md`, this paragraph; current findings:
+`scratch/findings.md`, **Work-tab cutover**.
 
 **Confirmation cannot elect execution.** `4c43550c2`: divergent revisions and
 independent refs both confirm, not Task allocation. `42990dea3` shares membership

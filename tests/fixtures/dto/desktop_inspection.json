@@ -28,8 +28,6 @@
       ],
       "workspaces": [
         {
-          "machine_id": "home_11111111111111111111111111111111",
-          "worktree": "/repo.task",
           "focused_pane": "session-pane",
           "zoomed_pane": null,
           "hidden_panes": [
@@ -50,7 +48,11 @@
                 "ratio": null,
                 "children": [],
                 "incarnation": "occurrence-session-pane",
-                "surface": "native-surface-incarnation"
+                "surface": "native-surface-incarnation",
+                "location": {
+                  "machine_id": "home_11111111111111111111111111111111",
+                  "worktree": "/repo.task"
+                }
               },
               {
                 "pane": "files-pane",
@@ -60,12 +62,25 @@
                 "ratio": null,
                 "children": [],
                 "incarnation": "occurrence-files-pane",
-                "surface": null
+                "surface": null,
+                "location": {
+                  "machine_id": "home_11111111111111111111111111111111",
+                  "worktree": "/repo.task"
+                }
               }
             ],
             "incarnation": null,
-            "surface": null
-          }
+            "surface": null,
+            "location": null
+          },
+          "work": {
+            "repository": "repo_22222222222222222222222222222222",
+            "kind": "task",
+            "id": "task_44444444444444444444444444444444"
+          },
+          "title": "Fixture Task",
+          "is_open": true,
+          "selected": true
         }
       ],
       "task": {

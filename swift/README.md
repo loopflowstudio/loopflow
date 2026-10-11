@@ -561,8 +561,18 @@ lf task run LOO-427 --explain --json
 
 Inspection reads the open repository windows through macOS automation without
 launching the app, changing focus or acquiring a Session. Window incarnations,
-pane layouts and hidden panes come from the retained workspace owners;
-there is no outer checkout-slot layout or checkout-split menu.
+Work tabs, pane layouts and hidden panes come from the retained workspace owners.
+Repository, Wave and Task tabs remain distinct even at the same checkout. Closing a
+tab hides its workspace without releasing terminals or file drafts; reopening
+restores focus and zoom. Bare Work navigation starts no Session or checkout.
+The last tab can close without starting a repository conversation. Window close
+and app quit still end embedded clients; this is not draft recovery after quit.
+
+Inspection reports each workspace's `work`, title, open state and selection.
+Execution locations live on contents, not workspace keys or pane receipts.
+There is no outer checkout-slot layout or checkout-split menu. Flow logs use their
+content location: the matching local Work stream, or an owner-pinned read with
+explicit Refresh for other retained locations. They never read a peer path locally.
 Task recommendations/run legality and Session actions retain their separate
 source availability. Saved or failed readings supply no actions. Inspection
 preserves Task source dates; Session observation time remains unavailable rather

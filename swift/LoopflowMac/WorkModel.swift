@@ -107,6 +107,52 @@ struct LinkedTaskPage: Equatable {
 @MainActor
 @Observable
 final class WorkModel {
+    @ObservationIgnored private var workspaceRegistry: SessionsWorkspaceRegistry?
+    @ObservationIgnored private var workspaceRepository: String?
+
+    func workspaceKey(for reference: WorkReference?, repository requestedRepository: String) -> WorkWorkspaceKey {
+        let repository = workspaceRepository ?? requestedRepository
+        guard let reference else { return WorkWorkspaceKey(repository: repository, kind: .repository, id: repository) }
+        if reference.kind == .task {
+            let task = task(id: reference.id)?.task
+            let key = WorkWorkspaceKey(repository: repository, kind: .task, id: task?.runtime?.workId ?? task?.id ?? reference.id)
+            if let task {
+                workspaceRegistry?.canonicalize(WorkWorkspaceKey(repository: repository, kind: .task, id: task.id), as: key)
+            }
+            return key
+        }
+        return WorkWorkspaceKey(repository: repository, kind: .wave, id: reference.id)
+    }
+
+    func workspaceTitle(_ key: WorkWorkspaceKey) -> String {
+        switch key.kind {
+        case .repository: return repoPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Repository unavailable"
+        case .wave: return visibleRoadmaps.first { $0.wave.id == key.id }?.wave.name ?? workspaceRegistry?.retained(key)?.title ?? "Wave unavailable"
+        case .task: return task(id: key.id)?.task.task.name ?? workspaceRegistry?.retained(key)?.title ?? "Task unavailable"
+        }
+    }
+
+    func bindWorkspaces(_ registry: SessionsWorkspaceRegistry, repository: String) {
+        guard workspaceRegistry !== registry else { return }
+        workspaceRegistry = registry
+        workspaceRepository = repository
+        openSelectedWorkspace()
+    }
+
+    func openSelectedWorkspace() {
+        guard let registry = workspaceRegistry, let repository = workspaceRepository else { return }
+        let key = workspaceKey(for: selection, repository: repository)
+        let location: WorkspaceIdentity?
+        if key.kind == .task, let task = task(id: key.id)?.task {
+            location = navigation.preparedTaskWorktrees[task.id] ?? task.reference.workspace?.identity
+        } else if key.kind != .task, let machine = registry.localMachineId, let repoPath {
+            location = WorkspaceIdentity(machineId: machine, worktree: repoPath)
+        } else { location = nil }
+        let workspace = registry.open(key, title: workspaceTitle(key), location: location)
+        navigation.workspacePresentation = workspace.presentation
+        navigation.selectedSessionId = workspace.presentation.selectedSessionId
+    }
+
     @ObservationIgnored var openRepository: ((String, URL?) -> Void)?
 
     private(set) var taskLinkURL: URL?
@@ -370,7 +416,8 @@ final class WorkModel {
               let opening = taskOpening, opening.status == .opening else { return }
         // Observe the panes even before the Session reading arrives. Its absence
         // cannot hide a definitive close, replacement or visibility change.
-        guard panes.allSatisfy(workspace.multiplexer.isVisible) else {
+        guard (workspaceRegistry == nil || workspaceRegistry?.selectedWork == workspace.key),
+              panes.allSatisfy(workspace.multiplexer.isVisible) else {
             taskOpening = DesktopOpening(url: opening.url, status: .failed, reason: "Opening panes were hidden, closed or replaced.")
             return
         }
@@ -414,6 +461,7 @@ final class WorkModel {
         let isSelected = selection?.kind == .task
             && (selection?.id == task.id || selection?.id == task.runtime?.workId)
         if !isSelected { select(.task(id: task.id), preservingOpening: preservingOpening) }
+        else { openSelectedWorkspace() }
         remember(.task(task.id))
     }
 
@@ -440,6 +488,10 @@ final class WorkModel {
     }
 
     func inspectDesktop(repository: String, window: UUID, workspaces: SessionsWorkspaceRegistry) -> DesktopWindowInspection {
+        if let previous = workspaceRepository, previous != repository {
+            workspaces.reassociateRepository(from: previous, to: repository)
+            workspaceRepository = repository
+        }
         let reading: String
         switch workStatus {
         case .loading: reading = "loading"
@@ -448,7 +500,7 @@ final class WorkModel {
         case .failed: reading = "unavailable"
         }
         return DesktopWindowInspection(repository: repository, window: window.uuidString,
-            path: repoPath, selectionKind: selection?.kind.rawValue, selectionId: selection?.id,
+            path: repoPath, selectionKind: workspaces.selectedWork?.kind.rawValue, selectionId: workspaces.selectedWork?.id,
             reading: reading, reason: workStatus.message,
             task: inspectSelectedTask(), session: inspectSelectedSession(),
             supportedOperations: ["list", "hide", "restore", "focus", "split", "move", "resize", "zoom", "shell", "files", "flow-log", "read", "text", "key"], workspaces: workspaces.inspect(), opening: taskOpening)
@@ -627,6 +679,7 @@ final class WorkModel {
     @ObservationIgnored private let cache: WorkCache?
     /// The Machine the saved workspace was read from, until `confirmMachine` checks it.
     @ObservationIgnored private(set) var savedMachineId: String?
+    var observingMachineId: String? { workMachine ?? savedMachineId }
     /// Parts still showing saved text instead of a read from this launch.
     private var showsSavedPlanning = false
     private var savedSessionRepos: Set<RepositoryReadingKey> = []
@@ -1260,10 +1313,13 @@ final class WorkModel {
                 return
             }
         } else { selection = requested }
-        navigation.selectedSessionId = nil
-        navigation.content = selection == nil ? .overview : .details
+        if workspaceRegistry == nil {
+            navigation.selectedSessionId = nil
+            navigation.content = selection == nil ? .overview : .details
+        }
         setSelection(selection)
         clearSelectionIfOutsideScope()
+        openSelectedWorkspace()
     }
 
     private func openHistoricalReference(_ reference: String) async {
@@ -1642,7 +1698,7 @@ final class WorkModel {
     /// Current repository inventory only; retained navigation evidence is display-only.
     private func currentTask(id: String) -> (wave: WaveRoadmap, task: RoadmapTask)? {
         for wave in visibleRoadmaps {
-            if let task = wave.tasks.items.first(where: { $0.id == id || $0.runtime?.workId == id }) {
+            if let task = wave.tasks.items.first(where: { $0.id == id || $0.runtime?.workId == id || $0.task.identifier == id }) {
                 return (wave, task)
             }
         }
@@ -1651,7 +1707,7 @@ final class WorkModel {
 
     func task(id: String) -> (wave: WaveRoadmap, task: RoadmapTask)? {
         if let current = currentTask(id: id) { return current }
-        if let retained = navigation.selectedTaskEvidence, retained.task.id == id {
+        if let retained = navigation.selectedTaskEvidence, (retained.task.id == id || retained.task.runtime?.workId == id) {
             if let current = wave(id: retained.wave.wave.id) {
                 return (current, retained.task)
             }
@@ -1673,6 +1729,8 @@ final class WorkModel {
 
     func clearSelectionIfOutsideScope() {
         guard let selection else { return }
+        if let repository = workspaceRepository,
+           workspaceRegistry?.retained(workspaceKey(for: selection, repository: repository)) != nil { return }
         if selection.kind == .task, navigation.selectedTaskEvidence?.task.id == selection.id { return }
         // The repository's Session reading retains Work even when current
         // planning no longer contains it. Keep that conversation's selection.

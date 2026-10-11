@@ -340,13 +340,13 @@ struct GhosttyTerminalInputTests {
         let manager = GhosttyManager.shared
         manager.initialize()
         let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
-        let workspace = registry.workspace(for: fixtureWorkspace(NSTemporaryDirectory()))
+        let workspace = fixtureWork(registry, fixtureWorkspace(NSTemporaryDirectory()))
         let store = SessionsStore(repoPath: NSTemporaryDirectory(), surfaces: registry.surfaces)
         var views: [GhosttyMetalView] = []
         defer { for view in views { view.handleSurfaceClose() } }
         var records: [SessionRecord] = []
         for id in ["one", "two"] {
-            workspace.multiplexer.newShell(location: workspace.identity)
+            workspace.multiplexer.newShell(location: workspace.location)
             let pane = workspace.multiplexer.focusedPaneId
             let view = registry.surfaces.view(for: .shell(pane, machineId: fixtureMachineId))
             view.frame = CGRect(x: 0, y: 0, width: 600, height: 300)

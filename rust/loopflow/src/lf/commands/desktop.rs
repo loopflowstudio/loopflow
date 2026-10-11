@@ -52,9 +52,32 @@ pub struct DesktopSessionInspection {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct DesktopWorkspaceInspection {
+#[serde(rename_all = "snake_case")]
+pub enum WorkWorkspaceKind {
+    Repository,
+    Wave,
+    Task,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct WorkWorkspaceKey {
+    pub repository: String,
+    pub kind: WorkWorkspaceKind,
+    pub id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct DesktopContentLocation {
     pub machine_id: String,
     pub worktree: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct DesktopWorkspaceInspection {
+    pub work: WorkWorkspaceKey,
+    pub title: String,
+    pub is_open: bool,
+    pub selected: bool,
     pub layout: DesktopLayoutInspection,
     pub focused_pane: String,
     pub zoomed_pane: Option<String>,
@@ -71,14 +94,14 @@ pub struct DesktopLayoutInspection {
     pub axis: Option<String>,
     pub ratio: Option<f64>,
     pub children: Vec<DesktopLayoutInspection>,
+    pub location: Option<DesktopContentLocation>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DesktopPaneTarget {
     pub repository: String,
     pub window: String,
-    pub machine_id: String,
-    pub worktree: String,
+    pub work: WorkWorkspaceKey,
     pub pane: String,
     pub incarnation: String,
 }
@@ -88,8 +111,7 @@ pub struct DesktopPaneTarget {
 pub struct DesktopPaneReceipt {
     pub repository: String,
     pub window: String,
-    pub machine_id: String,
-    pub worktree: String,
+    pub work: WorkWorkspaceKey,
     pub pane: String,
     pub observed_at: i64,
 }
@@ -714,21 +736,21 @@ impl DesktopInspection {
             windows.len()
         );
         let window = windows[0];
-        let checkout = match &work.task {
-            ContextFact::Unbound => None,
-            _ => {
-                bound(&work.task, "Task")?;
-                Some((
-                    bound(&work.execution_machine, "Execution Machine")?,
-                    bound(&work.checkout, "Task checkout")?,
-                ))
+        let subject = match (&work.task, &work.wave) {
+            (ContextFact::Bound { value, .. }, _) => Some((WorkWorkspaceKind::Task, value)),
+            (ContextFact::Unbound, ContextFact::Bound { value, .. }) => {
+                Some((WorkWorkspaceKind::Wave, value))
             }
+            (ContextFact::Unbound, ContextFact::Unbound) => None,
+            _ => bail!("Work identity is unavailable; no pane was changed"),
         };
         let mut candidates = Vec::new();
         for workspace in &window.workspaces {
-            if checkout.is_some_and(|(machine, path)| {
-                workspace.machine_id != machine || workspace.worktree != path
-            }) {
+            if workspace.work.repository != repository
+                || subject.as_ref().is_some_and(|(kind, id)| {
+                    &workspace.work.kind != kind || &workspace.work.id != *id
+                })
+            {
                 continue;
             }
             for leaf in workspace.layout.leaves() {
@@ -764,8 +786,8 @@ impl DesktopInspection {
         // Explicit Work still bounds the candidate set; an explicit pane wins.
         if pane.is_none() {
             if let Some(caller) = caller {
-                let own = candidates.iter().filter(|(workspace, leaf)| {
-                    matches!(&work.machine, ContextFact::Bound { value, .. } if value == &workspace.machine_id)
+                let own = candidates.iter().filter(|(_, leaf)| {
+                    matches!((&work.machine, &leaf.location), (ContextFact::Bound { value, .. }, Some(location)) if value == &location.machine_id)
                         && match leaf.content.as_deref() {
                             Some("shell") => leaf.pane.as_deref() == Some(caller),
                             Some("session") => leaf.surface.as_deref() == Some(caller),
@@ -849,8 +871,7 @@ impl ResolvedPane<'_> {
         Ok(DesktopPaneTarget {
             repository: self.window.repository.clone(),
             window: self.window.window.clone(),
-            machine_id: self.workspace.machine_id.clone(),
-            worktree: self.workspace.worktree.clone(),
+            work: self.workspace.work.clone(),
             pane: self
                 .leaf
                 .pane
@@ -1046,9 +1067,9 @@ impl DesktopInspection {
             ));
             for workspace in &window.workspaces {
                 lines.push(format!(
-                    "  {}:{} · focused {} · zoom {} · hidden [{}]",
-                    workspace.machine_id,
-                    workspace.worktree,
+                    "  {:?}:{} · focused {} · zoom {} · hidden [{}]",
+                    workspace.work.kind,
+                    workspace.title,
                     workspace.focused_pane,
                     workspace.zoomed_pane.as_deref().unwrap_or("none"),
                     workspace.hidden_panes.join(", ")
@@ -1109,7 +1130,6 @@ mod tests {
         ))
         .unwrap();
         let window = &inspection.windows[0];
-        let workspace = &window.workspaces[0];
         let fact = |value: &str| ContextFact::Bound {
             value: value.into(),
             source: "selected_work".into(),
@@ -1117,8 +1137,14 @@ mod tests {
         let mut work = ContextExplanation::empty();
         work.repository = fact(&window.repository);
         work.task = fact(window.task.as_ref().unwrap().id.as_str());
-        work.checkout = fact(&workspace.worktree);
-        work.execution_machine = fact(&workspace.machine_id);
+        work.checkout = fact("/repo/task");
+        work.execution_machine = fact(
+            &window.workspaces[0].layout.children[0]
+                .location
+                .as_ref()
+                .unwrap()
+                .machine_id,
+        );
         (inspection, work)
     }
 
@@ -1267,27 +1293,23 @@ mod tests {
                 .pane,
             "files-pane"
         );
-        work.checkout = ContextFact::Bound {
-            value: "/other-task".into(),
-            source: "recorded".into(),
-        };
-        assert!(inspection.resolve_pane(&work, &restore, None).is_err());
+        // Retained Work is addressable with no current execution-location reading.
         work.checkout = ContextFact::Unavailable {
             reason: "owner offline".into(),
         };
-        assert!(inspection
-            .resolve_pane(&work, &restore, None)
-            .unwrap_err()
-            .to_string()
-            .contains("owner offline"));
+        assert!(inspection.resolve_pane(&work, &restore, None).is_ok());
+        work.task = ContextFact::Unavailable {
+            reason: "Task identity unavailable".into(),
+        };
+        assert!(inspection.resolve_pane(&work, &restore, None).is_err());
     }
 
     #[test]
-    fn pane_destinations_are_plain_selectors_in_the_same_worktree() {
+    fn pane_destinations_are_plain_selectors_in_the_same_work() {
         use crate::lf::DesktopCommand;
         let (mut inspection, work) = pane_fixture();
         let mut other = inspection.windows[0].workspaces[0].clone();
-        other.machine_id = "other-machine".into();
+        other.work.id = "other-task".into();
         other.layout.children[1].pane = Some("other-workspace".into());
         inspection.windows[0].workspaces.push(other);
         let command = DesktopCommand::Move {
@@ -1302,8 +1324,7 @@ mod tests {
         let destination = selected.peer("files-pane").unwrap().target().unwrap();
         assert_eq!(destination.incarnation, "occurrence-files-pane");
         assert_eq!(destination.window, target.window);
-        assert_eq!(destination.machine_id, target.machine_id);
-        assert_eq!(destination.worktree, target.worktree);
+        assert_eq!(destination.work, target.work);
         assert!(selected.peer("session-pane").is_err());
         assert!(selected.peer("other-workspace").is_err());
     }

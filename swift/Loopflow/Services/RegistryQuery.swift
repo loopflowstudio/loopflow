@@ -87,7 +87,7 @@ public struct RegistryQuery: Sendable {
 
     /// Reject delayed reads after a recorded owner changes. Neither observation
     /// prepares a checkout or falls back to a path on the displaying Machine.
-    public func pinFiles(to location: TaskLocationObservation) -> RegistryQuery {
+    public func pinTaskLocation(to location: TaskLocationObservation) -> RegistryQuery {
         let original = self
         let validate: @Sendable () async throws -> Void = {
             let current = try await original.taskLocation(task: location.taskID,
@@ -259,6 +259,25 @@ public struct RegistryQuery: Sendable {
     public func taskChanges(issue: String, base: String = "parent", cwd: String?) async throws -> TaskChangesSnapshot {
         let stdout = try await run(["task", "diff", issue, "--files", "--base", base, "--json"], cwd)
         return try Self.decode(TaskChangesSnapshot.self, from: stdout)
+    }
+
+    /// Read a Task's captured Flows through its content-owned transport.
+    public func taskFlowProcesses(task: String, cwd: String?) async throws -> [FlowProcessDetail] {
+        struct Page: Decodable { let entries: [FlowProcessInventoryEntry]; let next: String? }
+        var after: String?
+        var result: [FlowProcessDetail] = []
+        repeat {
+            var args = ["flow", "list", "--processes", "--for-task", task, "--json"]
+            if let after { args += ["--after", after] }
+            let page = try Self.decode(Page.self, from: await run(args, cwd))
+            for entry in page.entries {
+                let detail = try Self.decode(FlowProcessDetail.self,
+                    from: await run(["flow", "show", entry.id, "--processes", "--json"], cwd))
+                result.append(detail)
+            }
+            after = page.next
+        } while after != nil
+        return result
     }
 
     public func sessionSkills(cwd: String) async throws -> [DiscoveryEntry] {

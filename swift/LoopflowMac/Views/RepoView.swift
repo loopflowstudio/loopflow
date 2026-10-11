@@ -48,7 +48,7 @@ struct RepoView: View {
                 if let repoPath = model.repoPath {
                     SessionsView(
                         model: model, repoPath: repoPath,
-                        workspaces: sessionWorkspaces, query: query
+                        workspaces: sessionWorkspaces, repository: repository, query: query
                     )
                     .id(repoPath.normalizedFilePath)
                 } else {

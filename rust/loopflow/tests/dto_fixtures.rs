@@ -895,14 +895,7 @@ fn desktop_pane_command_requires_an_exact_content_occurrence() {
         wire,
         serde_json::from_str::<serde_json::Value>(json).unwrap()[0]
     );
-    for field in [
-        "repository",
-        "window",
-        "machine_id",
-        "worktree",
-        "pane",
-        "incarnation",
-    ] {
+    for field in ["repository", "window", "work", "pane", "incarnation"] {
         let mut missing = wire.clone();
         missing["target"].as_object_mut().unwrap().remove(field);
         assert!(serde_json::from_value::<DesktopPaneCommand>(missing).is_err());
@@ -1251,7 +1244,7 @@ fn desktop_pane_receipt_returns_the_affected_identity() {
     let json = include_str!("../../../tests/fixtures/dto/desktop_pane_receipt.json");
     let receipt: DesktopPaneReceipt = serde_json::from_str(json).unwrap();
     assert_eq!(receipt.pane, "created-pane");
-    assert_eq!(receipt.machine_id, "machine-a");
+    assert_eq!(receipt.work.repository, receipt.repository);
     assert_eq!(
         serde_json::to_value(&receipt).unwrap(),
         serde_json::from_str::<serde_json::Value>(json).unwrap()

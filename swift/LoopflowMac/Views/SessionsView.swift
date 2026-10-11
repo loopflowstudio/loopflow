@@ -27,7 +27,7 @@ extension PaneState {
     }
 }
 
-/// One window's terminal workspace for a checkout: the pane layout and the
+/// One window's retained workspace for Work: the pane layout and the
 /// pool of live surfaces behind it.
 @MainActor
 @Observable
@@ -43,7 +43,10 @@ final class SessionsWorkspace {
         multiplexer.setCollapsed(paneId: paneId, collapsed: collapsed)
     }
 
-    let identity: WorkspaceIdentity
+    var key: WorkWorkspaceKey
+    var title: String
+    var location: WorkspaceIdentity?
+    var presentation = WorkNavigation.WorkspacePresentation()
     let localMachineId: String?
 
     @discardableResult
@@ -76,14 +79,14 @@ final class SessionsWorkspace {
             }
             return (location, pane.executionLocation)
         case .flowLog:
-            if let execution = pane.executionLocation {
-                guard case .recorded(_, let checkout?) = execution.location else {
-                    throw RegistryQueryError("Task location is unavailable; no shell was opened.")
-                }
-                return (WorkspaceIdentity(machineId: execution.machineID, worktree: checkout), execution)
+            guard let location = pane.content.fileLocation else {
+                throw RegistryQueryError("Task log location is unavailable; no shell was opened.")
             }
-            return (identity, nil)
-        case .empty: return (identity, nil)
+            return (location, pane.executionLocation)
+        case .empty: guard let location else {
+                throw RegistryQueryError("Prepare this Work's location before opening a shell.")
+            }
+            return (location, nil)
         }
     }
 
@@ -149,7 +152,7 @@ final class SessionsWorkspace {
         }
         // Retained documents keep their original transport; build it only once.
         let fileQuery = execution.map {
-            query.onMachine($0.machineID, repository: $0.repositoryID).pinFiles(to: $0)
+            query.onMachine($0.machineID, repository: $0.repositoryID).pinTaskLocation(to: $0)
         } ?? query
         return files(taskId: taskId, issue: issue, cwd: checkout, query: fileQuery, execution: execution)
     }
@@ -165,9 +168,11 @@ final class SessionsWorkspace {
         return store
     }
 
-    init(identity: WorkspaceIdentity, isLocal: Bool = true, surfaces: GhosttySurfacePool = GhosttySurfacePool()) {
-        self.identity = identity
-        self.localMachineId = isLocal ? identity.machineId : nil
+    init(key: WorkWorkspaceKey, title: String, location: WorkspaceIdentity?, localMachineId: String?, surfaces: GhosttySurfacePool = GhosttySurfacePool()) {
+        self.key = key
+        self.title = title
+        self.location = location
+        self.localMachineId = localMachineId
         self.surfaces = surfaces
         // The workspace outlives SessionsView, including while a shell exits
         // on the Work screen or while another repository is selected.
@@ -194,7 +199,7 @@ final class SessionsWorkspace {
 @Observable
 final class SessionsWorkspaceRegistry {
     // Observable only for environment delivery; lazy creation must not invalidate views.
-    @ObservationIgnored private var workspaces: [WorkspaceIdentity: SessionsWorkspace] = [:]
+    @ObservationIgnored private var workspaces: [WorkWorkspaceKey: SessionsWorkspace] = [:]
     let surfaces = GhosttySurfacePool()
     private(set) var localMachineId: String?
     private(set) var machineError: String?
@@ -206,12 +211,36 @@ final class SessionsWorkspaceRegistry {
         catch { machineError = error.localizedDescription }
     }
 
-    var paths: [WorkspaceIdentity] { Array(workspaces.keys).sorted { ($0.machineId, $0.worktree) < ($1.machineId, $1.worktree) } }
+    private(set) var openWork: [WorkWorkspaceKey] = []
+    private(set) var selectedWork: WorkWorkspaceKey?
+
+    var keys: [WorkWorkspaceKey] { Array(workspaces.keys) }
+
+    func retained(_ key: WorkWorkspaceKey) -> SessionsWorkspace? { workspaces[key] }
+
+    @discardableResult
+    func open(_ key: WorkWorkspaceKey, title: String, location: WorkspaceIdentity?) -> SessionsWorkspace {
+        let workspace = workspace(for: key, title: title, location: location)
+        if selectedWork != key { surfaces.clearFocus() }
+        if !openWork.contains(key) { openWork.append(key) }
+        selectedWork = key
+        return workspace
+    }
+
+    func hide(_ key: WorkWorkspaceKey) {
+        guard let index = openWork.firstIndex(of: key) else { return }
+        openWork.remove(at: index)
+        if selectedWork == key {
+            surfaces.clearFocus()
+            selectedWork = openWork.isEmpty ? nil : openWork[max(0, index - 1)]
+        }
+    }
 
     func inspect() -> [DesktopWorkspaceInspection] {
-        workspaces.sorted { ($0.key.machineId, $0.key.worktree) < ($1.key.machineId, $1.key.worktree) }.map { identity, workspace in
+        workspaces.values.sorted { ($0.key.repository, $0.key.kind.rawValue, $0.key.id) < ($1.key.repository, $1.key.kind.rawValue, $1.key.id) }.map { workspace in
             let panes = workspace.multiplexer
-            return DesktopWorkspaceInspection(machineId: identity.machineId, worktree: identity.worktree,
+            return DesktopWorkspaceInspection(work: workspace.key, title: workspace.title,
+                isOpen: openWork.contains(workspace.key), selected: selectedWork == workspace.key,
                 layout: DesktopLayoutInspection(panes.layout) { pane in
                     pane.terminal.flatMap { surfaces.surfaceIncarnation(for: $0) }
                 }, focusedPane: panes.focusedPaneId,
@@ -221,9 +250,9 @@ final class SessionsWorkspaceRegistry {
 
     /// Record the Session owner; only explicit Changes opens a Files companion.
     @discardableResult
-    func openLinkedFiles(_ destination: LinkedSession, query: RegistryQuery) throws -> TaskFilesStore? {
+    func openLinkedFiles(_ destination: LinkedSession, in key: WorkWorkspaceKey, query: RegistryQuery) throws -> TaskFilesStore? {
         guard let identity = destination.record.workspace?.identity else { return nil }
-        let workspace = workspace(for: identity)
+        let workspace = workspace(for: key, title: destination.task.task.name, location: identity)
         workspace.multiplexer.updateSessionLocation(destination.record.id, location: identity, execution: destination.location)
         guard destination.showsChanges else { return nil }
         let content = PaneContent.files(taskId: destination.task.id, location: identity, execution: destination.location)
@@ -243,7 +272,7 @@ final class SessionsWorkspaceRegistry {
             result = .unavailable(reason: .notTerminal)
         }
         return DesktopTextReading(request: request, observedAt: Int64(Date().timeIntervalSince1970),
-            hidden: !store.isVisible(pane),
+            hidden: selectedWork != workspace.key || !store.isVisible(pane),
             result: result)
     }
 
@@ -256,7 +285,7 @@ final class SessionsWorkspaceRegistry {
         // reassociating its Work or transferring a client to another checkout.
         func peer(_ other: DesktopPaneTarget) throws {
             guard other.repository == target.repository, other.window == target.window,
-                  other.machineId == target.machineId, other.worktree == target.worktree,
+                  other.work == target.work,
                   other.pane != target.pane else {
                 throw RegistryQueryError("Choose two distinct panes in the same retained workspace; no pane was changed.")
             }
@@ -277,21 +306,26 @@ final class SessionsWorkspaceRegistry {
         case .shell:
             result = try workspace.newShell(beside: target.pane, focus: false)
         case .files(let task), .flowLog(let task):
-            let identity = WorkspaceIdentity(machineId: target.machineId, worktree: target.worktree)
-            guard let projection = model.task(id: task),
+            guard let projection = model.task(id: task), workspace.key.kind == .task,
+                  (workspace.key.id == projection.task.id || workspace.key.id == projection.task.runtime?.workId),
+                  let identity = pane.shellLocation ?? pane.sessionLocation ?? pane.content.fileLocation ?? workspace.location,
                   (model.navigation.preparedTaskWorktrees[projection.task.id]
-                    ?? projection.task.reference.workspace?.identity) == identity else {
+                    ?? projection.task.reference.workspace?.identity ?? identity) == identity else {
                 throw RegistryQueryError("The Task is not associated with this checkout. Inspect its recorded workspace; no pane was changed.")
             }
             let content: PaneContent = if case .files = request.action {
                 .files(taskId: projection.task.id, location: identity, execution: pane.executionLocation)
             } else {
-                .flowLog(taskId: projection.task.id, execution: pane.executionLocation)
+                .flowLog(taskId: projection.task.id, location: identity, execution: pane.executionLocation)
             }
             result = store.show(content, beside: target.pane, focus: false)
         case .hide: workspace.setCollapsed(paneId: target.pane, collapsed: true)
         case .restore: workspace.setCollapsed(paneId: target.pane, collapsed: false)
-        case .focus: store.setFocusedPane(target.pane)
+        case .focus:
+            open(workspace.key, title: workspace.title, location: workspace.location)
+            model.select(workspace.key.reference)
+            store.setFocusedPane(target.pane)
+            if let terminal = pane.terminal { surfaces.focus(terminal) }
         case .split(let axis): result = try workspace.split(target.pane, axis: axis, focus: false)
         case .move(let destination, let axis):
             try peer(destination)
@@ -309,47 +343,84 @@ final class SessionsWorkspaceRegistry {
     }
 
     private func retainedPane(for target: DesktopPaneTarget) throws -> (SessionsWorkspace, PaneState) {
-        let identity = WorkspaceIdentity(machineId: target.machineId, worktree: target.worktree)
-        guard let workspace = workspaces[identity],
+        guard target.repository == target.work.repository,
+              let workspace = workspaces[target.work],
               let pane = workspace.multiplexer.layout.pane(for: target.pane),
-              pane.incarnation == target.incarnation,
-              pane.content != .shell(location: nil),
-              pane.shellLocation == nil || pane.shellLocation == identity,
-              pane.sessionId == nil || pane.sessionLocation == identity else {
+              pane.incarnation == target.incarnation else {
             throw RegistryQueryError("The pane content was removed or replaced. Inspect Desktop again; no pane was changed.")
         }
         return (workspace, pane)
     }
 
-    func path(containingShell id: String, machineId: String) -> WorkspaceIdentity? {
+    func key(containingShell id: String, machineId: String) -> WorkWorkspaceKey? {
         workspaces.first {
             guard let pane = $0.value.multiplexer.layout.pane(for: id) else { return false }
             return pane.terminal == .shell(id, machineId: machineId)
         }?.key
     }
 
-    /// A repository reading establishes moves, not absence from the whole window.
-    /// Removing old placements never releases their native surfaces.
+    /// A partial inventory can update content location, never remove a Work tab.
     func reconcileMembership(_ records: [SessionRecord]) {
-        for (identity, workspace) in workspaces {
+        for workspace in workspaces.values {
             for record in records {
-                workspace.multiplexer.updateSessionLocation(record.id, location: record.workspace?.identity)
+                let belongs: Bool?
+                switch workspace.key.kind {
+                case .task:
+                    let tasks = Set(record.taskIds + [record.workspace?.taskId, record.work?.kind == .task ? record.work?.id : nil].compactMap { $0 })
+                    belongs = tasks.isEmpty ? nil : tasks.contains(workspace.key.id)
+                case .wave: belongs = record.waveId.map { $0 == workspace.key.id }
+                case .repository: belongs = nil
+                }
+                // A peer's physical Task ids cannot disprove the local Work
+                // correspondence carried by an explicitly opened remote pane.
+                if belongs == false, record.workspace?.machineId == localMachineId {
+                    workspace.multiplexer.removeSessions([record.id])
+                }
+                else { workspace.multiplexer.updateSessionLocation(record.id, location: record.workspace?.identity) }
             }
-            let moved = Set(records.compactMap { record -> String? in
-                guard let location = record.workspace?.identity,
-                      location.machineId == identity.machineId, location != identity else { return nil }
-                return record.id
-            })
-            workspace.multiplexer.removeSessions(moved)
         }
     }
 
-    func workspace(for repoPath: WorkspaceIdentity) -> SessionsWorkspace {
-        if let existing = workspaces[repoPath] { return existing }
-        let workspace = SessionsWorkspace(identity: repoPath, isLocal: repoPath.machineId == localMachineId, surfaces: surfaces)
-        workspaces[repoPath] = workspace
+    /// One native occurrence per window. A deliberate eligible Work opening can
+    /// relocate presentation, but neither copies a surface nor binds the Session.
+    func revealSession(_ record: SessionRecord, in workspace: SessionsWorkspace) {
+        for other in workspaces.values where other !== workspace {
+            other.multiplexer.removeSessions([record.id])
+        }
+        workspace.multiplexer.reveal(sessionId: record.id, location: record.workspace?.identity)
+    }
+
+    func reassociateRepository(from previous: String, to repository: String) {
+        for key in keys where key.repository == previous {
+            canonicalize(key, as: WorkWorkspaceKey(repository: repository, kind: key.kind,
+                id: key.kind == .repository ? repository : key.id))
+        }
+    }
+
+    func key(containingSession id: String) -> WorkWorkspaceKey? {
+        workspaces.first { $0.value.multiplexer.pane(forSessionId: id) != nil }?.key
+    }
+
+    func canonicalize(_ previous: WorkWorkspaceKey, as key: WorkWorkspaceKey) {
+        guard previous != key, workspaces[key] == nil, let workspace = workspaces.removeValue(forKey: previous) else { return }
+        workspace.key = key
+        workspaces[key] = workspace
+        openWork = openWork.map { $0 == previous ? key : $0 }
+        if selectedWork == previous { selectedWork = key }
+    }
+
+    func workspace(for key: WorkWorkspaceKey, title: String, location: WorkspaceIdentity?) -> SessionsWorkspace {
+        if let existing = workspaces[key] {
+            if existing.title != title { existing.title = title }
+            if let location, existing.location != location { existing.location = location }
+            return existing
+        }
+        let workspace = SessionsWorkspace(key: key, title: title, location: location,
+            localMachineId: localMachineId, surfaces: surfaces)
+        workspaces[key] = workspace
         return workspace
     }
+
 }
 
 struct SessionItem: Identifiable, Equatable {
@@ -597,18 +668,21 @@ struct SessionsView: View {
     let model: WorkModel
     let repoPath: String
     let workspaces: SessionsWorkspaceRegistry
+    var repository: String? = nil
+    @State private var resolvedRepository: String?
+    @State private var repositoryError: String?
     var query: RegistryQuery = RegistryQueryLocal.shared
 
     var body: some View {
         let taskPage = model.linkedTaskPage
         Group {
-            if let home = workspaces.localMachineId {
+            if let home = workspaces.localMachineId, let repository = repository ?? resolvedRepository {
                 SessionsContentView(model: model, repoPath: repoPath, workspaces: workspaces,
-                                    machineId: home, query: query)
+                                    machineId: home, repository: repository, query: query)
             } else {
                 HStack {
                     WorkNavigator(model: model, onOpenSession: { _ in })
-                    if let error = workspaces.machineError {
+                    if let error = workspaces.machineError ?? repositoryError {
                         ContentUnavailableView("Workspace unavailable", systemImage: "folder", description: Text(error))
                             .task(id: taskPage) {
                                 if let request = taskPage { model.finishTaskPage(request, error: error) }
@@ -621,6 +695,10 @@ struct SessionsView: View {
         }
         .task {
             await workspaces.refreshMachine(query: query)
+            if repository == nil {
+                do { resolvedRepository = try await query.repositoryIdentity(cwd: repoPath).id }
+                catch { repositoryError = error.localizedDescription }
+            }
             if let home = workspaces.localMachineId, workspaces.machineError == nil { model.confirmMachine(home) }
         }
     }
@@ -633,7 +711,16 @@ struct SessionsContentView: View {
     private var currentIdentity: WorkspaceIdentity {
         selectedWorkspace?.identity ?? taskIdentity ?? rootIdentity
     }
-    private var workspace: SessionsWorkspace { workspaces.workspace(for: currentIdentity) }
+    let repository: String
+    private var currentKey: WorkWorkspaceKey { key(for: model.selection) }
+    private func key(for reference: WorkReference?) -> WorkWorkspaceKey {
+        model.workspaceKey(for: reference, repository: repository)
+    }
+    private func title(for key: WorkWorkspaceKey) -> String { model.workspaceTitle(key) }
+    private var workspace: SessionsWorkspace {
+        workspaces.workspace(for: currentKey, title: title(for: currentKey),
+            location: currentKey.kind == .task ? taskIdentity : rootIdentity)
+    }
     @Bindable var model: WorkModel
     private let workspaces: SessionsWorkspaceRegistry
     private let query: RegistryQuery
@@ -658,17 +745,21 @@ struct SessionsContentView: View {
         return store.sessions.first { $0.id == navigation.selectedSessionId }?.record.workspace
     }
     init(model: WorkModel, repoPath: String, workspaces: SessionsWorkspaceRegistry,
-         machineId: String, query: RegistryQuery = RegistryQueryLocal.shared) {
+         machineId: String, repository: String, query: RegistryQuery = RegistryQueryLocal.shared) {
         self.machineId = machineId
+        self.repository = repository
         self.model = model
         self.workspaces = workspaces
         self.query = query
-        let store = workspaces.workspace(for: WorkspaceIdentity(machineId: machineId, worktree: repoPath)).sessionStore(repoPath: repoPath, query: query)
+        model.bindWorkspaces(workspaces, repository: repository)
+        let root = model.workspaceKey(for: nil, repository: repository)
+        let store = workspaces.workspace(for: root, title: URL(fileURLWithPath: repoPath).lastPathComponent,
+            location: WorkspaceIdentity(machineId: machineId, worktree: repoPath)).sessionStore(repoPath: repoPath, query: query)
         self.store = store
     }
 
     private var navigation: WorkNavigation { model.navigation }
-    private var terminalsVisible: Bool { model.selection?.kind == .task || navigation.content == .terminals }
+    private var terminalsVisible: Bool { workspaces.selectedWork != nil && (model.selection?.kind == .task || workspace.presentation.content == .terminals) }
     private var fileTask: TaskProjection? {
         // A departing repository view must not mount the next repository's
         // retained terminals while SwiftUI replaces its hierarchy.
@@ -691,6 +782,11 @@ struct SessionsContentView: View {
                 Rectangle().fill(palette.border).frame(width: 1)
                 HSplitView {
                     VStack(spacing: 0) {
+                        workTabs
+                        if workspaces.selectedWork == nil {
+                            ContentUnavailableView("No Work open", systemImage: "rectangle.on.rectangle",
+                                description: Text("Open a repository, Wave or Task from the sidebar."))
+                        } else {
                         WorkBreadcrumbBar(
                             model: model,
                             crumb: model.breadcrumb,
@@ -731,7 +827,7 @@ struct SessionsContentView: View {
                                 if let taskPath {
                                     WorkspacePanesView(workspace: workspace,
                                         path: taskPath, isFocused: terminalsVisible, sessions: store)
-                                        .id(taskIdentity)
+                                        .id(currentKey)
                                 } else if fileTask != nil {
                                     VStack(spacing: Spacing.md) {
                                         if let task = fileTask { Text(task.task.task.description) }
@@ -766,6 +862,7 @@ struct SessionsContentView: View {
                         }
                         .frame(maxWidth: .infinity)
                         .clipped()
+                        }
                     }
                 }
             }
@@ -809,18 +906,10 @@ struct SessionsContentView: View {
         .onChange(of: model.sessions.value, initial: true) { _, records in
             guard model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath,
                   let records else { return }
-            let previousLocations = Dictionary(uniqueKeysWithValues: store.sessions.map { ($0.id, $0.record.workspace?.identity) })
             store.reconcile(records)
-            if model.sessions.errorMessage == nil {
-                workspaces.reconcileMembership(records)
-                if let selected = navigation.selectedSessionId,
-                   let record = records.first(where: { $0.id == selected }),
-                   let identity = record.workspace?.identity,
-                   let prior = previousLocations[selected], prior != identity {
-                    workspaces.workspace(for: identity).multiplexer.reveal(sessionId: selected, location: identity)
-                }
-            }
+            if model.sessions.errorMessage == nil { workspaces.reconcileMembership(records) }
         }
+
         .onChange(of: model.linkedSession, initial: true) { _, destination in
             if let destination { openLinkedSession(destination) }
         }
@@ -846,6 +935,35 @@ struct SessionsContentView: View {
         .accessibilityIdentifier("sessions-surface")
     }
 
+    private var workTabs: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 0) {
+                ForEach(workspaces.openWork, id: \.self) { key in
+                    HStack(spacing: Spacing.sm) {
+                        Button(title(for: key)) { selectTab(key) }
+                            .buttonStyle(.plain)
+                        Button { closeTab(key) } label: { Image(systemName: "xmark").font(.system(size: 9)) }
+                            .buttonStyle(.plain).accessibilityLabel("Close \(title(for: key)) tab")
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 8)
+                    .background(workspaces.selectedWork == key ? palette.surface : palette.background)
+                }
+            }
+        }
+        .accessibilityIdentifier("work-tabs")
+    }
+
+    private func selectTab(_ key: WorkWorkspaceKey) {
+        model.select(key.reference)
+    }
+
+    private func closeTab(_ key: WorkWorkspaceKey) {
+        if workspaces.selectedWork == key { model.dismissTaskLink() }
+        workspaces.hide(key)
+        if let selected = workspaces.selectedWork { selectTab(selected) }
+        else { store.surfaces.clearFocus() }
+    }
+
     private func newShell(in workspace: SessionsWorkspace) {
         do { try workspace.newShell() }
         catch { launchErrorTitle = "Could not open shell"; launchError = error.localizedDescription }
@@ -860,7 +978,7 @@ struct SessionsContentView: View {
             if let task = fileTask?.task.id {
                 Button("Files", systemImage: "doc") { multiplexer.show(.files(taskId: task, location: taskIdentity, execution: multiplexer.focusedPane.executionLocation)) }
                     .accessibilityIdentifier("work-add-files")
-                Button("Flow processes", systemImage: "list.bullet.rectangle") { multiplexer.show(.flowLog(taskId: task, execution: multiplexer.focusedPane.executionLocation)) }
+                Button("Flow processes", systemImage: "list.bullet.rectangle") { multiplexer.show(.flowLog(taskId: task, location: taskIdentity, execution: multiplexer.focusedPane.executionLocation)) }
                     .accessibilityIdentifier("work-add-flow-log")
             }
         } label: { Image(systemName: "plus") }
@@ -933,7 +1051,7 @@ struct SessionsContentView: View {
             model.beginSessionBinding(record)
         case .flowLog(let id):
             openTask(.task(id: id))
-            multiplexer.show(.flowLog(taskId: id, execution: multiplexer.focusedPane.executionLocation))
+            multiplexer.show(.flowLog(taskId: id, location: taskIdentity, execution: multiplexer.focusedPane.executionLocation))
         }
         model.remember(destination)
     }
@@ -947,7 +1065,7 @@ struct SessionsContentView: View {
         store.reconcile(model.sessions.value ?? [])
         openSession(record, preservingOpening: true)
         let files: TaskFilesStore?
-        do { files = try workspaces.openLinkedFiles(destination, query: store.query) }
+        do { files = try workspaces.openLinkedFiles(destination, in: currentKey, query: store.query) }
         catch {
             model.failLinkedOpening(destination, reason: error.localizedDescription)
             return
@@ -964,25 +1082,35 @@ struct SessionsContentView: View {
     }
 
     private func openSession(_ record: SessionRecord, preservingOpening: Bool) {
-        let subject = store.taskSubject(for: record) ?? model.projection.subject(for: record.id)
-        if !preservingOpening { model.select(subject, preservingOpening: false) }
+        let subject: WorkReference?
+        if let selected = model.selection, selected.kind == .task,
+           record.taskIds.contains(key(for: selected).id) || record.workspace?.taskId == key(for: selected).id {
+            subject = selected
+        } else if let selected = model.selection, selected.kind == .wave, record.waveId == selected.id {
+            subject = selected
+        } else { subject = store.taskSubject(for: record) ?? model.projection.subject(for: record.id) }
+        if let retained = workspaces.key(containingSession: record.id) {
+            if !preservingOpening { model.select(retained.reference, preservingOpening: false) }
+        } else if !preservingOpening { model.select(subject, preservingOpening: false) }
         Perf.begin(Perf.taskWorkspaceReady, "session", id: record.id)
-        navigation.selectedSessionId = record.id
-        navigation.content = .terminals
         // Place the opening/error/elsewhere pane immediately. A slow preparation
         // must never change focus after the human selects another subject.
         if case .shell(let id, let machineId) = store.localTerminal(for: record),
-           let path = workspaces.path(containingShell: id, machineId: machineId) {
-            let panes = workspaces.workspace(for: path).multiplexer
+           let key = workspaces.key(containingShell: id, machineId: machineId),
+           let retained = workspaces.retained(key) {
+            model.select(key.reference, preservingOpening: preservingOpening)
+            let panes = retained.multiplexer
             panes.setCollapsed(paneId: id, collapsed: false)
             panes.setFocusedPane(id)
             store.surfaces.focus(.shell(id, machineId: machineId))
         } else {
-            multiplexer.load(sessionId: record.id, location: record.workspace?.identity)
+            workspaces.revealSession(record, in: workspace)
             if let machineId = record.workspace?.machineId {
                 store.surfaces.focus(.session(record.id, machineId: machineId))
             }
         }
+        navigation.selectedSessionId = record.id
+        navigation.content = .terminals
         store.beginPaneLoad(record.id)
         if !preservingOpening { Task { @MainActor in await store.select(record.id) } }
     }
@@ -999,29 +1127,30 @@ struct SessionsContentView: View {
             let identity = WorkspaceIdentity(machineId: machineId, worktree: launch.repoPath)
             model.select(nil)
             navigation.content = .terminals
-            workspaces.workspace(for: identity).multiplexer.newShell(command: launch.arguments(lf: lf), location: identity)
+            workspace.multiplexer.newShell(command: launch.arguments(lf: lf), location: identity)
         } catch { launchError = error.localizedDescription }
     }
 
     private func startConversation() {
         guard let conversationScope = model.conversationScope else { return }
-        do { try launch(conversationScope, in: navigation) }
+        do { try launch(conversationScope, in: workspace) }
         catch {
             launchErrorTitle = "Could not start conversation"
             launchError = error.localizedDescription
         }
     }
 
-    /// `navigation` belongs to the repository that requested the launch; a
-    /// launch that finishes after the human switched repositories must not
-    /// redirect the repository now on screen.
-    private func launch(_ scope: ConversationScope, in navigation: WorkNavigation, identity requestedIdentity: WorkspaceIdentity? = nil) throws {
+    /// Capture the Work entry before preparation; a late reply may populate
+    /// that entry, but cannot select or redirect the workspace now on screen.
+    private func launch(_ scope: ConversationScope, in workspace: SessionsWorkspace, identity requestedIdentity: WorkspaceIdentity? = nil) throws {
         let lf = try LocalWaveAgentLauncher.controlLfPath()
-        let identity = requestedIdentity ?? taskIdentity ?? WorkspaceIdentity(machineId: machineId, worktree: scope.repoPath)
+        guard let identity = requestedIdentity ?? workspace.location else {
+            throw RegistryQueryError("Prepare this Work's location before opening a conversation.")
+        }
         guard identity.machineId == machineId else { throw RegistryQueryError("Open a conversation on its owning Machine") }
-        navigation.content = .terminals
-        workspaces.workspace(for: identity).multiplexer.newShell(
-            command: ConversationLaunch(scope: scope).arguments(lf: lf), location: identity)
+        workspace.presentation.content = .terminals
+        workspace.location = identity
+        workspace.multiplexer.newShell(command: ConversationLaunch(scope: scope).arguments(lf: lf), location: identity)
     }
 
     /// An independent conversation with Task context in the Task's checkout.
@@ -1030,6 +1159,8 @@ struct SessionsContentView: View {
     private func newTaskSession(_ taskId: String) async throws {
         guard let found = model.task(id: taskId) else { return }
         let origin = navigation
+        let key = key(for: .task(id: taskId))
+        let entry = workspaces.workspace(for: key, title: found.task.task.name, location: found.task.reference.workspace?.identity)
         let issue = found.task.task.identifier
         let checkout: WorkspaceIdentity
         if let workspace = found.task.reference.workspace, workspace.localExists == true, let identity = workspace.identity {
@@ -1041,7 +1172,7 @@ struct SessionsContentView: View {
             }.value
             origin.preparedTaskWorktrees[taskId] = checkout
         }
-        try launch(.task(repo: checkout.worktree, id: issue), in: origin, identity: checkout)
+        try launch(.task(repo: checkout.worktree, id: issue), in: entry, identity: checkout)
     }
 
     private var focusedProgramStatusSurface: ProgramStatusSurface? {
@@ -1482,7 +1613,6 @@ private struct SessionPaneView: View {
         // context. Companion shells retain the current breadcrumb.
         guard paneSessions.count == 1, let session = paneSessions.first,
               model.navigation.selectedSessionId != session.id else { return }
-        model.select(model.projection.subject(for: session.id))
         model.navigation.selectedSessionId = session.id
         model.navigation.content = .terminals
     }
@@ -1521,8 +1651,10 @@ private struct SessionPaneView: View {
             } else {
                 Text("Shell location is unavailable. Add a new shell in this Work.")
             }
-        case .flowLog(let taskId, _):
-            FlowProcessLog(model: model, taskId: taskId)
+        case .flowLog(let taskId, let location, let execution):
+            FlowProcessLog(model: model, taskId: taskId, location: location, execution: execution,
+                query: sessions.query)
+                .id(pane.incarnation)
                 .background(PaneFocusTarget(isFocused: isFocused))
                 .simultaneousGesture(TapGesture().onEnded { store.setFocusedPane(pane.id) })
         case .files(let taskId, _, _):

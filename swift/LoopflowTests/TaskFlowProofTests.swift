@@ -286,7 +286,7 @@ struct TaskFlowTests {
         try await eventually("planning arrives") { model.task(id: "issue-now") != nil }
         let task = try #require(model.task(id: "issue-now")?.task)
         let identity = try #require(task.reference.workspace?.identity)
-        let panes = registry.workspace(for: identity).multiplexer
+        let panes = fixtureWork(registry, identity).multiplexer
         model.select(.task(id: task.id))
         model.navigation.content = .terminals
         try await eventually("the Task's Session is ensured and opened") {
@@ -312,10 +312,11 @@ struct TaskFlowTests {
         // One menu adds the Flow process log as a pane beside the Session.
         try find("work-add-flow-log").button().tap()
         try await settle()
-        #expect(panes.focusedPane.content == .flowLog(taskId: task.id))
+        #expect(panes.focusedPane.content == .flowLog(taskId: task.id, location: task.reference.workspace?.identity))
         #expect(panes.layout.allPanes.count == 2)
         // A line per process; its id, graph and steps only when opened.
-        let log = FlowProcessLog(model: model, taskId: task.id)
+        model.confirmMachine(try #require(task.reference.workspace?.machineId))
+        let log = FlowProcessLog(model: model, taskId: task.id, location: task.reference.workspace?.identity)
         let stopped = "44444444-4444-4444-8444-444444444444"
         #expect(try log.inspect().find(viewWithAccessibilityIdentifier: "task-work-\(stopped)")
             .find(text: "42s").string() == "42s")
@@ -414,10 +415,10 @@ struct TaskFlowProofTests {
         GhosttyManager.shared.initialize()
         let repo = "/src/loopflow"
         let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
-        let workspace = registry.workspace(for: fixtureWorkspace(repo))
+        let workspace = fixtureWork(registry, fixtureWorkspace(repo))
         var terminals: [GhosttyMetalView] = []
         for _ in 0..<2 {
-            workspace.multiplexer.newShell(location: workspace.identity)
+            workspace.multiplexer.newShell(location: workspace.location)
             let pane = workspace.multiplexer.focusedPaneId
             let terminal = registry.surfaces.view(for: .shell(pane, machineId: fixtureMachineId))
             terminal.frame = CGRect(x: 0, y: 0, width: 400, height: 350)

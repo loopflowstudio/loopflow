@@ -137,8 +137,8 @@ struct WorkDestinationTests {
         let model = WorkModel(query: query, repoPath: wave.wave.repo)
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
         let registry = SessionsWorkspaceRegistry(localMachineId: localIdentity.machineId)
-        let local = registry.workspace(for: localIdentity)
-        local.multiplexer.newShell(command: ["retained-local-shell"], location: local.identity)
+        let local = fixtureWork(registry, localIdentity)
+        local.multiplexer.newShell(command: ["retained-local-shell"], location: local.location)
         let layout = local.multiplexer.layout
         let files = local.files(taskId: task.id, issue: taskID, cwd: localIdentity.worktree, query: query)
         let document = files.document("draft.txt")
@@ -158,15 +158,15 @@ struct WorkDestinationTests {
             #expect(model.selection == .task(id: task.id))
             #expect(model.navigation.preparedTaskWorktrees[task.id] == remoteIdentity)
             #expect(model.taskOpening?.status == .opening)
-            let remote = registry.workspace(for: remoteIdentity)
+            let remote = registry.workspace(for: WorkWorkspaceKey(repository: "repository", kind: .task, id: task.runtime?.workId ?? task.id), title: task.task.name, location: remoteIdentity)
             remote.multiplexer.load(sessionId: record.id, location: record.workspace?.identity)
             let sessionOnly = LinkedSession(generation: request.generation, record: record,
                 task: task, showsChanges: false, location: request.location)
-            #expect(try registry.openLinkedFiles(sessionOnly, query: query) == nil)
+            #expect(try registry.openLinkedFiles(sessionOnly, in: remote.key, query: query) == nil)
             let companion = try remote.files(for: .files(taskId: task.id, execution: request.location), task: task, query: query)
             companion.document("remote-draft.txt").editor.string = "retained peer draft"
             #expect(remote.multiplexer.layout.allPanes.count == 1)
-            #expect(try registry.openLinkedFiles(request, query: query) === companion)
+            #expect(try registry.openLinkedFiles(request, in: remote.key, query: query) === companion)
             #expect(companion.document("remote-draft.txt").editor.string == "retained peer draft")
             let sessions = local.sessionStore(repoPath: wave.wave.repo, query: query)
             sessions.retainLocation(try #require(request.location), for: record)
@@ -183,8 +183,7 @@ struct WorkDestinationTests {
             let focus = remote.multiplexer.focusedPaneId
             remote.multiplexer.setZoom(targetPane.id, enabled: true)
             let target = DesktopPaneTarget(repository: "repository", window: UUID().uuidString,
-                machineId: remoteIdentity.machineId, worktree: remoteIdentity.worktree,
-                pane: targetPane.id, incarnation: targetPane.incarnation)
+                work: remote.key, pane: targetPane.id, incarnation: targetPane.incarnation)
             try registry.controlPane(.init(target: target, action: .shell), model: model)
             let shell = try #require(remote.multiplexer.layout.allPanes.first { $0.content == .shell(location: remoteIdentity, execution: request.location) })
             let command = try #require(remote.multiplexer.shellCommands[shell.id])
@@ -200,7 +199,7 @@ struct WorkDestinationTests {
             // A second same-path owner must not redirect the first pane's shell.
             // This process owns its lf fixture; constructing argv launches nothing.
             do {
-                let workspace = SessionsWorkspace(identity: localIdentity)
+                let workspace = fixtureWork(localIdentity)
                 let peer = WorkspaceIdentity(machineId: "peer", worktree: "/remote/task")
                 let first = TaskLocationObservation(request: "first", repositoryID: "repo-a", taskID: "plan-a",
                     machineID: "peer", observedAt: 1, location: .recorded(taskID: "owner-a", checkout: peer.worktree))
@@ -261,7 +260,7 @@ struct WorkDestinationTests {
             #expect(model.linkedSession == nil)
             #expect(model.taskOpening?.status == .failed)
             #expect(model.navigation.preparedTaskWorktrees[task.id] == nil)
-            #expect(registry.paths == [localIdentity])
+            #expect(registry.keys == [fixtureWorkKey(localIdentity)])
         }
     }
 
@@ -406,13 +405,13 @@ struct WorkDestinationTests {
         #expect(model.linkedSession?.showsChanges == true)
         #expect(model.taskOpening?.status == .opening) // selection is not native readiness
         let registry = SessionsWorkspaceRegistry(localMachineId: identity.machineId)
-        let workspace = registry.workspace(for: identity)
+        let workspace = fixtureWork(registry, identity)
         workspace.multiplexer.load(sessionId: record.id, location: record.workspace?.identity)
         let terminal = try #require(workspace.multiplexer.layout.allPanes.first)
-        try registry.openLinkedFiles(try #require(model.linkedSession), query: query)
+        try registry.openLinkedFiles(try #require(model.linkedSession), in: workspace.key, query: query)
         let files = workspace.files(taskId: task.id, issue: task.task.identifier, cwd: identity.worktree, query: query)
         files.selection = "retained-draft.rs"
-        try registry.openLinkedFiles(try #require(model.linkedSession), query: query)
+        try registry.openLinkedFiles(try #require(model.linkedSession), in: workspace.key, query: query)
         #expect(workspace.multiplexer.layout.allPanes.count == 2)
         #expect(workspace.multiplexer.layout.pane(for: terminal.id) == terminal)
         #expect(workspace.multiplexer.focusedPaneId == terminal.id)
@@ -436,7 +435,7 @@ struct WorkDestinationTests {
         let (model, record, url, query) = try openingFixture(outcome: outcome)
         await model.openTaskLink(url)
         let request = try #require(model.linkedSession)
-        let workspace = SessionsWorkspace(identity: try #require(record.workspace?.identity))
+        let workspace = fixtureWork(try #require(record.workspace?.identity))
         workspace.multiplexer.load(sessionId: record.id, location: record.workspace?.identity)
         workspace.multiplexer.show(.files(taskId: request.task.id), focus: false)
         let store = SessionsStore(repoPath: try #require(model.repoPath), query: query)
@@ -474,7 +473,7 @@ struct WorkDestinationTests {
         let (model, record, url, query) = try openingFixture(outcome: "usable")
         await model.openTaskLink(url)
         let request = try #require(model.linkedSession)
-        let workspace = SessionsWorkspace(identity: try #require(record.workspace?.identity))
+        let workspace = fixtureWork(try #require(record.workspace?.identity))
         workspace.multiplexer.load(sessionId: record.id, location: record.workspace?.identity)
         workspace.multiplexer.show(.files(taskId: request.task.id), focus: false)
         let store = SessionsStore(repoPath: try #require(model.repoPath), query: query)
@@ -493,7 +492,7 @@ struct WorkDestinationTests {
         let (model, record, url, query) = try openingFixture(outcome: "usable")
         await model.openTaskLink(url)
         let oldRequest = try #require(model.linkedSession)
-        let workspace = SessionsWorkspace(identity: try #require(record.workspace?.identity))
+        let workspace = fixtureWork(try #require(record.workspace?.identity))
         workspace.multiplexer.load(sessionId: record.id, location: record.workspace?.identity)
         workspace.multiplexer.show(.files(taskId: oldRequest.task.id), focus: false)
         let oldStore = SessionsStore(repoPath: try #require(model.repoPath), query: query)
@@ -524,7 +523,7 @@ struct WorkDestinationTests {
         let (model, record, url, query) = try openingFixture(outcome: "usable", comparisonBarrier: barrier)
         await model.openTaskLink(url)
         let request = try #require(model.linkedSession)
-        let workspace = SessionsWorkspace(identity: try #require(record.workspace?.identity))
+        let workspace = fixtureWork(try #require(record.workspace?.identity))
         workspace.multiplexer.load(sessionId: record.id, location: record.workspace?.identity)
         workspace.multiplexer.show(.files(taskId: request.task.id), focus: false)
         let store = SessionsStore(repoPath: try #require(model.repoPath), query: query)
@@ -706,15 +705,15 @@ struct WorkDestinationTests {
         #expect(destination.visibleRoadmaps.isEmpty)
         #expect(destination.breadcrumb?.task?.task.id == task.id)
         let registry = SessionsWorkspaceRegistry()
-        let workspace = registry.workspace(for: try #require(task.reference.workspace?.identity))
-        workspace.multiplexer.newShell(command: ["local-server"], location: workspace.identity)
+        let workspace = fixtureWork(registry, try #require(task.reference.workspace?.identity))
+        workspace.multiplexer.newShell(command: ["local-server"], location: workspace.location)
         let layout = workspace.multiplexer.layout
         let document = workspace.files(taskId: task.id, issue: task.task.identifier, cwd: wave.wave.repo,
                                        query: exactQuery).document("note.txt")
         document.editor.string = "unsaved draft"
         let retained = SessionsContentView(
             model: destination, repoPath: wave.wave.repo,
-            workspaces: registry, machineId: "local", query: exactQuery
+            workspaces: registry, machineId: "local", repository: "fixture-repository", query: exactQuery
         )
         #expect(throws: Never.self) {
             try retained.inspect().find(viewWithAccessibilityIdentifier: "task-worktree-location")
@@ -1219,7 +1218,8 @@ struct WorkDestinationTests {
         let deliveredSecond = try #require(TaskLink(issue: "SECOND", repo: scene.path).url)
         let registry = SessionsWorkspaceRegistry(localMachineId: "fixture-machine")
         let identity = WorkspaceIdentity(machineId: "fixture-machine", worktree: path)
-        let retained = registry.workspace(for: identity), store = retained.multiplexer
+        let oldKey = WorkWorkspaceKey(repository: "old-plan", kind: .repository, id: "old-plan")
+        let retained = registry.open(oldKey, title: "Repository", location: identity), store = retained.multiplexer
         store.newShell(command: ["retained-command"], location: identity)
         let pane = store.focusedPane
         let document = retained.files(taskId: "task", issue: "TASK", cwd: path).document("note.txt")
@@ -1233,13 +1233,11 @@ struct WorkDestinationTests {
         #endif
         let window = UUID()
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("No Work reads") })
+        model.bindWorkspaces(registry, repository: "old-plan")
         var received: [URL] = []
         router.register(window, repository: scene.id, openingRequests: router.workspaceRequests(scene.id), focus: {},
             inspect: { repository, incarnation in
-                DesktopWindowInspection(repository: repository, window: incarnation.uuidString, path: path,
-                    selectionKind: nil, selectionId: nil, reading: "current", reason: nil,
-                    task: nil, session: nil, supportedOperations: ["hide", "restore"],
-                    workspaces: registry.inspect(), opening: nil)
+                model.inspectDesktop(repository: repository, window: incarnation, workspaces: registry)
             }, controlPane: { try registry.controlPane($0, model: model) },
             readText: { try registry.readText($0) }) { url in
                 received.append(url)
@@ -1260,7 +1258,7 @@ struct WorkDestinationTests {
         #expect(report.windows[0].repository == "plan")
         #expect(report.windows[0].window != window.uuidString)
         #expect(received == [deliveredFirst])
-        #expect(registry.workspace(for: identity) === retained)
+        #expect(registry.retained(WorkWorkspaceKey(repository: "plan", kind: .repository, id: "plan")) === retained)
         #if canImport(GhosttyKit)
         #expect(registry.surfaces.view(for: terminal) === view)
         #expect(registry.surfaces.programStatus(for: terminal) === view.programStatus)
@@ -1270,12 +1268,12 @@ struct WorkDestinationTests {
         #expect(document.editor.string == "unfinished draft")
         #expect(document.editor.selectedRange() == NSRange(location: 2, length: 4))
         let stale = DesktopPaneTarget(repository: "old-plan", window: window.uuidString,
-            machineId: identity.machineId, worktree: path, pane: pane.id, incarnation: pane.incarnation)
+            work: oldKey, pane: pane.id, incarnation: pane.incarnation)
         #expect(throws: RegistryQueryError.self) {
             try router.controlPane(.init(target: stale, action: .hide))
         }
         let current = DesktopPaneTarget(repository: "plan", window: report.windows[0].window,
-            machineId: identity.machineId, worktree: path, pane: pane.id, incarnation: pane.incarnation)
+            work: retained.key, pane: pane.id, incarnation: pane.incarnation)
         _ = try router.controlPane(.init(target: current, action: .hide))
         _ = try router.controlPane(.init(target: current, action: .restore))
         #expect(store.layout == layout)

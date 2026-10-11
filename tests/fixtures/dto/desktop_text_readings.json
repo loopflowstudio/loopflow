@@ -4,10 +4,13 @@
       "target": {
         "repository": "repo_22222222222222222222222222222222",
         "window": "55555555-5555-5555-5555-555555555555",
-        "machine_id": "home_11111111111111111111111111111111",
-        "worktree": "/repo.task",
         "pane": "session-pane",
-        "incarnation": "occurrence-session-pane"
+        "incarnation": "occurrence-session-pane",
+        "work": {
+          "repository": "repo_22222222222222222222222222222222",
+          "kind": "task",
+          "id": "task_44444444444444444444444444444444"
+        }
       },
       "surface": "native-surface-incarnation",
       "region": "selection",
@@ -26,10 +29,13 @@
       "target": {
         "repository": "repo_22222222222222222222222222222222",
         "window": "55555555-5555-5555-5555-555555555555",
-        "machine_id": "home_11111111111111111111111111111111",
-        "worktree": "/repo.task",
         "pane": "session-pane",
-        "incarnation": "occurrence-session-pane"
+        "incarnation": "occurrence-session-pane",
+        "work": {
+          "repository": "repo_22222222222222222222222222222222",
+          "kind": "task",
+          "id": "task_44444444444444444444444444444444"
+        }
       },
       "surface": "native-surface-incarnation",
       "region": "scrollback",
@@ -39,7 +45,7 @@
     "hidden": true,
     "result": {
       "status": "available",
-      "text": "héλ🙂",
+      "text": "h\u00e9\u03bb\ud83d\ude42",
       "truncated": true
     }
   },
@@ -48,10 +54,13 @@
       "target": {
         "repository": "repo_22222222222222222222222222222222",
         "window": "55555555-5555-5555-5555-555555555555",
-        "machine_id": "home_11111111111111111111111111111111",
-        "worktree": "/repo.task",
         "pane": "session-pane",
-        "incarnation": "occurrence-session-pane"
+        "incarnation": "occurrence-session-pane",
+        "work": {
+          "repository": "repo_22222222222222222222222222222222",
+          "kind": "task",
+          "id": "task_44444444444444444444444444444444"
+        }
       },
       "surface": "native-surface-incarnation",
       "region": "screen",
@@ -69,10 +78,13 @@
       "target": {
         "repository": "repo_22222222222222222222222222222222",
         "window": "55555555-5555-5555-5555-555555555555",
-        "machine_id": "home_11111111111111111111111111111111",
-        "worktree": "/repo.task",
         "pane": "session-pane",
-        "incarnation": "occurrence-session-pane"
+        "incarnation": "occurrence-session-pane",
+        "work": {
+          "repository": "repo_22222222222222222222222222222222",
+          "kind": "task",
+          "id": "task_44444444444444444444444444444444"
+        }
       },
       "surface": "native-surface-incarnation",
       "region": "screen",

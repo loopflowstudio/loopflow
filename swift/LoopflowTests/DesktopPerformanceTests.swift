@@ -396,13 +396,13 @@ struct DesktopPerformanceTests {
         try #require(model.projection.waves.first?.tasks.count == taskCount)
         try #require(model.sessions.value?.count == taskCount / 2)
         let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
-        let workspace = registry.workspace(for: fixtureWorkspace(checkout.path))
+        let workspace = fixtureWork(registry, fixtureWorkspace(checkout.path))
         let files = workspace.files(taskId: "perf-work-0", issue: "perf-work-0", cwd: checkout.path, query: query)
         files.autosave = false
         let multiplexer = workspace.multiplexer
         multiplexer.load(sessionId: "perf-session-0", location: model.sessions.value?.first { $0.id == "perf-session-0" }?.workspace?.identity)
         let sessionPane = multiplexer.focusedPaneId
-        multiplexer.newShell(location: workspace.identity)
+        multiplexer.newShell(location: workspace.location)
         let companionPane = multiplexer.focusedPaneId
         multiplexer.load(sessionId: "perf-session-2", location: model.sessions.value?.first { $0.id == "perf-session-2" }?.workspace?.identity)
         let otherPane = multiplexer.focusedPaneId
@@ -648,7 +648,7 @@ struct DesktopPerformanceTests {
             navigator.onOpenSession(first)
             try await wait(window) { window.firstResponder === terminals[0] }
             guard terminals.enumerated().allSatisfy({ $0.element.surface == surfaces[$0.offset] }),
-                  multiplexer.layout.pane(for: companionPane)?.content == .shell(location: workspace.identity),
+                  multiplexer.layout.pane(for: companionPane)?.content == .shell(location: workspace.location),
                   multiplexer.layout.pane(for: otherPane)?.sessionId == other.id else {
                 throw PerformanceFailure("failed", "Retained terminal identity or companion changed")
             }
@@ -708,15 +708,15 @@ struct DesktopPerformanceTests {
         let record = try #require(try await fixture.records().first)
         try #require(record.taskIds.contains(fixture.taskId))
         let identity = TerminalIdentity.session(fixture.sessionId, machineId: try #require(record.workspace).machineId)
-        let workspace = registry.workspace(for: try #require(record.workspace).identity)
-        let store = registry.workspace(for: WorkspaceIdentity(machineId: try #require(record.workspace).machineId, worktree: fixture.repo))
+        let workspace = fixtureWork(registry, try #require(record.workspace).identity)
+        let store = fixtureWork(registry, WorkspaceIdentity(machineId: try #require(record.workspace).machineId, worktree: fixture.repo))
             .sessionStore(repoPath: fixture.repo, query: query)
         let multiplexer = workspace.multiplexer
         multiplexer.load(sessionId: fixture.sessionId, location: record.workspace?.identity)
         let sessionPane = multiplexer.focusedPaneId
-        multiplexer.newShell(location: workspace.identity)
+        multiplexer.newShell(location: workspace.location)
         let companion = multiplexer.focusedPaneId
-        let companionIdentity = TerminalIdentity.shell(companion, machineId: workspace.identity.machineId)
+        let companionIdentity = TerminalIdentity.shell(companion, machineId: workspace.location!.machineId)
         let companionView = registry.surfaces.view(for: companionIdentity)
         companionView.workingDirectory = fixture.checkout
         companionView.command = buildGhosttyShellCommand(argv: ["/bin/cat"], env: [:])

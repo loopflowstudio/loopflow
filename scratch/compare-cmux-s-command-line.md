@@ -13,7 +13,7 @@ LOO-418/#1499 is integrated; completion/checkout previews and creation receipts 
 LOO-406/#1503 and LOO-412 through `96f714bd6` are composed locally;
 `1ece5cc52` reconciles transitive ancestry. Section 2 retains remaining composition.
 Completion/reopening, delegation exchange and remote companions are composed locally.
-Work-centered tabs are accepted but unimplemented (THIS SLICE below). Exclusive admission, mixed-provider exchange, broader explanation and configured/native proof remain. Mixed Linear/Git
+Work-centered tabs are implemented locally (THIS SLICE below); native review remains. Exclusive admission, mixed-provider exchange, broader explanation and configured/native proof remain. Mixed Linear/Git
 stays disabled; native proof includes request-scoped Task/Session-plus-Changes opening.
 [Findings](findings.md), [questions](questions.md) and the
 [comparison](../docs/reviews/terminal-command-comparison.md) retain evidence and open choices.
@@ -38,7 +38,7 @@ execution and visual placement remain distinct. Desktop is macOS-only; Linux ref
 before launch/Work mutation with a terminal alternative. Ordinary lf stays cross-platform.
 No live planning migration is authorized.
 
-## Work tabs — accepted October 10; THIS SLICE
+## Work tabs — accepted October 10; implemented locally
 
 **Build:** one retained workspace per repository, Wave or Task, shown as a tab
 named for that Work inside its repository window. Jack Heart accepted this internal LOO-427 slice in one PR, not its native experience. This section supersedes checkout-led presentation below;
@@ -48,16 +48,16 @@ unresolved, not a prerequisite for these tabs.
 **October 10 correction:** Jack Heart selected Split → shell, with no empty-pane
 option (comment `ff61b6bc-f40c-4545-a203-82ced3afd335`). Implemented through the
 existing shell-location owner for CLI, shortcuts and pane menus; missing remote
-location refuses before layout mutation. Work-keyed tabs, Flow-log query routing and exact-target DTO
-cutover remain unimplemented. The outer layout and its inspection DTOs are deleted. Files now resolves remote content directly, without link priming.
+location refuses before layout mutation. Work-keyed tabs, content-routed Flow logs
+and exact-target DTOs are now cut over together. The outer layout and its inspection
+DTOs are deleted. Files resolves remote content directly, without link priming.
 
 **Completed prerequisites:** Session/shell and Files locations are content-owned;
 local Files retains its opening placement through missing planning and Close/Undo.
 Remote Files owns observation and transport reuse. Bare Task navigation acquires
 no Session; explicit Session/Changes still does. Evidence and failed attempts:
 [findings](findings.md#content-location-cuts--october-10). These prerequisites are
-not Work-tab completion or native acceptance. The remaining implementation is the registry/DTO and navigation cut below,
-not another preparatory location refactor.
+not native acceptance. The registry/DTO and navigation cut below now consumes them.
 
 ### Experience and boundaries
 
@@ -87,118 +87,56 @@ retain their existing lifecycle: this is not a promise to preserve live PTYs or
 unsent provider drafts across process exit. Saved layout integration belongs to
 LOO-416, not a second persistence system here.
 
-### Current owners → minimal cutover
+### Implemented owner cutover
 
-October 10 deletion cut: `WorktreeLayout`/store/view, checkout picker and
-`showsRetainedTerminals` are removed, including Rust/Swift outer-layout inspection.
-Navigation now renders the selected contents through the existing multiplexer;
-New Session selects repository content rather than an alternate checkout route.
-The registry still keys workspaces by `WorkspaceIdentity`; Flow log still ignores
-its content location. `5af9451cf8` removes Session rows. This is an internal deletion checkpoint, not implemented
-Work tabs. Rekeying, tab retention/navigation and exact-target DTOs remain together.
-The October 9 review is historical:
-`scratch/pr-review.html` (retained local artifact, not tracked in Git). Its stopped-pursuit account, mutation-wide
-inspection replies and pre-caller-inference examples are superseded; it is not
-the current demo or a reason to defer the independent tab implementation.
+`SessionsWorkspaceRegistry` now keys entries by `WorkWorkspaceKey(repository,
+kind, id)`, with ordered open Work and an optional selection. Hiding drops only
+an open reference. WorkModel normalizes planning/runtime Task aliases through its
+shared projection before registry lookup, preserving an existing entry when a
+canonical ID arrives. Repository association rekeys references without replacing
+native owners. Titles refresh from planning; missing planning retains the entry.
 
-`retainedPane` still requires content location to equal the enclosing checkout;
-`reconcileMembership` removes Sessions by path change, not Work membership.
-Both must change with the registry/DTO cutover, not survive as Work-tab rules.
-Files consumes content-owned `TaskLocationObservation` through the pinned query;
-first open no longer depends on `prepareLinkedFiles` (deleted). Session-only links
-retain the owner without allocating Files. `d86e32d466` reuses retained transports
-for same-owner refreshes; changed owners refuse rather than redirect drafts.
-`b295ffba2f` makes `TaskFilesStore` own remote observation and await one cleanup
-path on disconnect, stale frames or owner loss; release cancels observation.
-Tab hide must retain that store, not cancel it or recreate its transport. Local Files now retains its opening location through layout/Undo and missing planning; its CLI reads still use Task-owned placement. Flow log still ignores content location and reads through the window model. Finish Flow-log routing with the Work-key cutover. Empty-pane
-shell creation also still uses checkout identity; bare unplaced Work cannot inherit
-that fallback. Preserve explicit preparation without making navigation acquire it.
-`inspectLayouts()` is deleted; `workspaces.inspect()` remains checkout-keyed.
+Each workspace owns the existing multiplexer, documents, details state and a
+`WorkNavigation.WorkspacePresentation`. Navigation references that presentation;
+there is no separate per-tab conversation selection to synchronize. Model selection
+opens/reuses Work synchronously. Sidebar, palette, Task links and conversation
+opening use it. Shell-default Split resolves content location; an unplaced empty
+Task cannot borrow the repository's cwd.
 
-**Proposed API:**
+One Session has one presentation occurrence. Ordinary opening reveals its retained
+Work; an explicit eligible linked Work may relocate presentation without binding
+or acquiring another client. Shared membership readings, not path changes, prune
+local occurrences. Peer physical Task IDs cannot disprove local correspondence;
+partial/foreign evidence retains content. Exact location changes renew content
+incarnations. Window-owned surfaces remain shared by the retained entries, never
+by different windows. Tab selection/hide revokes native input before view removal.
 
-`WorkWorkspaceKey(repositoryID, subject)` uses the resolved repository plan ID
-and a repository/Wave/Task subject with a canonical stable ID. Adapt the existing
-Work key where appropriate; do not add a second Work resolver. Planning Task IDs
-and durable runtime IDs must converge before registry lookup, including remote
-correspondence. A repository subject is explicit, not the current nil-selection
-accident. The scene's retained locator remains distinct from this identity.
+`DesktopWorkspaceInspection`, internal targets and receipts name Work. Pane leaves
+carry Machine/checkout location. Rust scopes by resolved Wave/Task identity, not
+checkout; caller inference still validates its original PTY and content Machine.
+Mutations validate Work/window/content lifetimes; text/read additionally use the
+surface lifetime. Explicit Focus reveals the Work; other mutations preserve it.
 
-Reshape `SessionsWorkspaceRegistry` into the Work-keyed owner, with ordered
-`openWork`, optional `selectedWork`, and retained workspace entries. These are
-presentation references to the existing entries, not another layout store.
-`openWork(key)` creates at most one entry and selects/reveals it;
-`selectWork(key)` restores that entry's view state; `hideWork(key)` removes only
-its open reference. Keep per-Work detail visibility and selected conversation
-with the workspace; derive global breadcrumb/actions from the selected entry,
-not another independent selected-Session variable. Titles come from Work readings;
-retain last-known titles with truthful unavailable state if planning is missing.
+Flow logs consume their content location. A matching local reading reuses the
+window's Work stream; a different retained location reads captured Flow inventory
+and details through the existing query transport, with explicit Refresh, no new
+poller or planning reader. Remote reads reuse the same before/after owner validator
+as Files. Missing owners do not fall back locally.
 
-Finish removing execution location from workspace identity. Session/shell contents
-retain Machine/path and the exact recorded Task/repository observation for shell construction. Files/log panes retain their Task/location query. Reuse `WorkspaceIdentity`
-as a location value, not a tab key, and existing `TaskLocationObservation`,
-`TerminalIdentity` and pinned query owners. Shell exit callbacks locate the exact
-pane across retained entries; they must not close a different same-path Work.
-Pane moves stay within a workspace and existing execution compatibility rules;
-no cross-Work transfer, new Machine assignment or arbitrary remote repository/Wave
-shell launch is introduced. Unavailable location stays explicit.
+### Delete — completed and retained boundaries
 
-A Session can have several shared memberships. Explicitly selected Work is the
-presentation context if membership permits; otherwise use the shared subject
-projection. This creates no new bind. One native surface must never be mounted in
-two Work tabs at once: reveal its retained occurrence when already displayed;
-for an explicitly different eligible Work, relocate that presentation occurrence
-without restarting the client and remove the old occurrence. Keep this reversible
-presentation choice in questions.md; membership itself remains unchanged.
+Deleted: outer `WorktreeLayout`/store/view and inspection, checkout picker,
+Session sidebar rows, checkout-keyed registry, path-based membership pruning,
+path-only pane targeting and enclosing-checkout location equality. Work details
+remain available inside each tab; there is no alternate all-terminals tree.
+The previous implementation proposal and its historical review references survive
+at `2feed22e1109:scratch/compare-cmux-s-command-line.md`, **Work tabs**.
 
-`openSession(record)` and `openLinkedSession(destination)` first resolve Work,
-then insert/reveal the named conversation in that workspace. Async preparation
-captures Work key, pane occurrence and request generation; completion may update
-that entry's readiness but cannot select a newer tab or steal its responder.
-Opening another Work cannot cancel or discard the first Work's draft.
-
-### Delete — do not maintain in this slice
-
-Deleted: outer `WorktreeLayout`/store/view, registry `layouts`/`inspectLayouts`,
-checkout-picker/split-slot controls and `showsRetainedTerminals`.
-`WorkspaceIdentity.swift` retains location only. Exclusive outer-slot assertions
-are removed; native lifetime, shell and multiplexer coverage survives. Add
-Work-tab retention assertions with the pending rekey; do not restore the outer tree.
-
-Deleted: Session-only presentation, Session hierarchy rows and their exclusive
-disambiguation/benchmark paths. Work menus and diagnostics retain conversations,
-including missing planning; Waiting is unchanged. Session-as-page/global-selection
-branches still need deletion with Work tabs. Keep sidebar
-started/history filtering and current legal actions. No Session tab names, no
-Machine tabs, no parallel “all terminals” workspace. Render Work details and its
-panes from one selected entry rather than maintaining both old and new screens.
-
-Cut over `Models/DesktopInspection.swift` inspections and Rust
-`lf/commands/desktop.rs` plus their DTO owners/fixtures in the same slice:
-expose Work workspace identity, open/hidden state,
-selected Work and exact pane tree; move location facts to contents. Internal
-`DesktopPaneTarget` must address Work workspace plus window/content/surface
-lifetimes, not path alone. A receipt names the affected Work/pane, never readiness.
-Existing `--repo`/`--wave`/`--task` scope and `--pane` resolve through this snapshot;
-explicit pane, PTY-validated caller, then one eligible pane remains the order.
-No new public workspace-ID selector, focus fallback or cross-Work ambiguity guess.
-Update `docs/lf.md`, `swift/README.md` and the comparison's presentation rows at
-implementation cutover; preserve behavioral evidence and external-host judgments.
-LOO-397 owns richer CLI-build/running-app capability discovery; LOO-452 owns richer
-key chords including Ctrl-C. Neither is part of this slice.
-
-### Internal implementation order
-
-1. **THIS SLICE — Work workspace cutover.** Rekey the retained registry and
-   location-bearing contents; add Work tabs after the outer-layout deletion;
-   route sidebar, palette, links and companions through it. Update exact-target
-   inspection/DTOs together. Outer-layout deletion is checkpointed as `5727532b1d`.
-   No temporary dual layout authority or tab bar over checkout identities.
-2. Exercise retention, stale targeting and composed opening through the changed
-   owners; adapt existing headless fixtures and docs. This is the same UI slice,
-   not permission to postpone its deletion or wire consumers to another PR.
-3. Demonstrate the rendered Work/tab/pane experience at the existing demo review
-   boundary. Native judgment remains separate.
+The cut remains one PR with the rest of LOO-427. Saved relaunch layout belongs to
+LOO-416. LOO-452 owns richer key chords, LOO-397 deeper capability discovery.
+First-start admission is independent and still refused; this UI supplies no
+arbitration authority. Configured peers, native draft/focus retention and the
+rendered demo below remain review obligations, not proved by fixture checks.
 
 ### Checks and demo acceptance
 
@@ -582,7 +520,7 @@ LOO-452 shortcut customization and LOO-453 readiness/events explorations.
 
 ### 5. Complete-path verification and demo
 
-**Depends on 1–4.** One PR. Gate owns affected Rust suites and
+**Depends on remaining 1–4 composition.** One PR. Gate owns affected Rust suites and
 `cargo test -p loopflow --test dto_fixtures` for Rust wire fixtures, plus
 `cargo test -p loopflow --test documented_commands` for command ambiguity only.
 Headless Desktop coverage uses `scripts/test_desktop.sh -Xswiftc -gnone --no-parallel`.

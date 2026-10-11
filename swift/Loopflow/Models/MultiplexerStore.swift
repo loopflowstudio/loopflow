@@ -200,7 +200,7 @@ public final class MultiplexerStore {
         let existing = layout.allPanes.first { pane in
             switch (pane.content, content) {
             case (.files(let current, _, _), .files(let requested, _, _)),
-                 (.flowLog(let current, _), .flowLog(let requested, _)):
+                 (.flowLog(let current, _, _), .flowLog(let requested, _, _)):
                 return current == requested
             default: return pane.content == content
             }

@@ -1,12 +1,12 @@
 //! Project selection, membership and pending changes settle in one transaction.
 
 use super::planning_changes::PlanningChanges;
-use super::planning_write::{self, PlanningEdit as Edit};
+use super::planning_write;
 use super::{durable, SqliteStore};
 use crate::durable::ProjectId;
-use crate::planning_exchange::PlanningKind;
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
+use crate::work::edit::WorkValue as Edit;
 use rusqlite::{params, OptionalExtension, TransactionBehavior};
 
 impl SqliteStore {
@@ -81,19 +81,20 @@ impl SqliteStore {
                 planning_write::create(
                     &tx,
                     "",
-                    PlanningKind::Project,
-                    successor.as_str(),
-                    &[
-                        Edit::ProjectWave(input.wave_id.to_string()),
-                        Edit::ProjectSlug(Some(input.project_name.clone())),
-                        Edit::ProjectName(Some(input.project_name.clone())),
-                        Edit::ProjectStatus(crate::work::project::ProjectStatus::Started),
-                        Edit::Workflow(input.workflow.clone()),
-                        Edit::Krs(input.krs.clone()),
-                        Edit::MetricTargets(input.metric_targets.clone()),
-                        Edit::ProjectTeams(serde_json::from_str(&teams)?),
-                        Edit::ProjectInitiatives(serde_json::from_str(&initiatives)?),
-                    ],
+                    &crate::work::edit::WorkEdit::for_target(
+                        successor.as_str(),
+                        &[
+                            Edit::ProjectWave(input.wave_id.to_string()),
+                            Edit::ProjectSlug(Some(input.project_name.clone())),
+                            Edit::ProjectName(Some(input.project_name.clone())),
+                            Edit::ProjectStatus(crate::work::project::ProjectStatus::Started),
+                            Edit::Workflow(input.workflow.clone()),
+                            Edit::Krs(input.krs.clone()),
+                            Edit::MetricTargets(input.metric_targets.clone()),
+                            Edit::ProjectTeams(serde_json::from_str(&teams)?),
+                            Edit::ProjectInitiatives(serde_json::from_str(&initiatives)?),
+                        ],
+                    ),
                 )?;
                 durable::inherit_project_placement(&tx, &successor)?;
             } else {
@@ -154,9 +155,10 @@ impl SqliteStore {
             }
             planning_write::local(
                 &tx,
-                PlanningKind::Wave,
-                input.wave_id.as_str(),
-                &[Edit::WaveProject(Some(successor.to_string()))],
+                &crate::work::edit::WorkEdit::for_target(
+                    input.wave_id.as_str(),
+                    &[Edit::WaveProject(Some(successor.to_string()))],
+                ),
             )?;
             if let Some(predecessor) = predecessor {
                 let id = ProjectId::from_raw(predecessor);

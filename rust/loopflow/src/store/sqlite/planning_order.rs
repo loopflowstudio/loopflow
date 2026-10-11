@@ -1,8 +1,8 @@
 //! A reorder is one Project intention. Its individual provider effects retain
 //! before/after lists so acquisition can recognize our own partial progress.
 
-use super::planning_write::{self, PlanningEdit as Edit};
-use crate::planning_exchange::PlanningKind;
+use super::planning_write;
+use crate::work::edit::WorkValue as Edit;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -286,7 +286,10 @@ fn apply_order(conn: &Connection, project: &ProjectId, order: &[String]) -> Stor
     for (rank, id) in order.iter().enumerate() {
         let member:bool=conn.query_row("SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND project_id=?2 AND planning_deleted_at IS NULL)",params![id,project.as_str()],|r|r.get(0))?;
         if member {
-            planning_write::local(conn, PlanningKind::Task, id, &[Edit::TaskRank(rank as u32)])?;
+            planning_write::local(
+                conn,
+                &crate::work::edit::WorkEdit::for_target(id, &[Edit::TaskRank(rank as u32)]),
+            )?;
         }
     }
     Ok(())

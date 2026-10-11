@@ -1,7 +1,7 @@
 //! SQLite persistence for Project and Tasks.
 
-use super::planning_write::{self, PlanningEdit as Edit};
-use crate::planning_exchange::PlanningKind;
+use super::planning_write;
+use crate::work::edit::WorkValue as Edit;
 use std::path::PathBuf;
 
 // Product writes read before they write (for example, validating parent Work),
@@ -888,20 +888,23 @@ impl SqliteStore {
         planning_write::create(
             &transaction,
             "",
-            PlanningKind::Project,
-            project.id.as_str(),
-            &[
-                Edit::ProjectWave(project.wave_id.to_string()),
-                Edit::ProjectLinearId(project.linear_id.as_ref().map(|id| id.as_str().to_owned())),
-                Edit::ProjectSlug(Some(project.slug.clone())),
-                Edit::ProjectName(Some(project.name.clone())),
-                Edit::ProjectSummary(project.summary.clone()),
-                Edit::ProjectDescription(Some(project.description.clone())),
-                Edit::ProjectStatus(project.status),
-                Edit::Workflow(project.workflow.clone()),
-                Edit::Krs(project.krs.clone()),
-                Edit::MetricTargets(project.metric_targets.clone()),
-            ],
+            &crate::work::edit::WorkEdit::for_target(
+                project.id.as_str(),
+                &[
+                    Edit::ProjectWave(project.wave_id.to_string()),
+                    Edit::ProjectLinearId(
+                        project.linear_id.as_ref().map(|id| id.as_str().to_owned()),
+                    ),
+                    Edit::ProjectSlug(Some(project.slug.clone())),
+                    Edit::ProjectName(Some(project.name.clone())),
+                    Edit::ProjectSummary(project.summary.clone()),
+                    Edit::ProjectDescription(Some(project.description.clone())),
+                    Edit::ProjectStatus(project.status),
+                    Edit::Workflow(project.workflow.clone()),
+                    Edit::Krs(project.krs.clone()),
+                    Edit::MetricTargets(project.metric_targets.clone()),
+                ],
+            ),
         )?;
         transaction.execute("UPDATE projects SET pm_snapshot_synced_at=?2,abandon_requested_at=?3,abandon_reason=?4,created_at=?5,updated_at=?6 WHERE id=?1",params![
             project.id.as_str(),project.pm_snapshot_synced_at,project.abandon_intent.as_ref().map(|i|i.requested_at.unix_timestamp()),
@@ -1197,23 +1200,24 @@ fn insert_task_row(conn: &Connection, task: &Task) -> StoreResult<()> {
     planning_write::create(
         conn,
         "",
-        PlanningKind::Task,
-        task.id.as_str(),
-        &[
-            Edit::TaskProject(task.project_id.to_string()),
-            Edit::TaskLinearId(task.linear_id.as_ref().map(|id| id.as_str().to_owned())),
-            Edit::TaskIdentifier(task.identifier.clone()),
-            Edit::TaskTitle(Some(task.title.clone())),
-            Edit::TaskDescription(Some(task.description.clone())),
-            Edit::TaskRank(task.rank),
-            Edit::TaskAssignee(task.assignee.clone()),
-            Edit::TaskDueDate(task.due_date.clone()),
-            Edit::Disposition(super::planning_write::Disposition {
-                planning_state: task.state.clone(),
-                planning_completed: i64::from(task.completed),
-                planning_completed_at: task.completed_at.clone(),
-            }),
-        ],
+        &crate::work::edit::WorkEdit::for_target(
+            task.id.as_str(),
+            &[
+                Edit::TaskProject(task.project_id.to_string()),
+                Edit::TaskLinearId(task.linear_id.as_ref().map(|id| id.as_str().to_owned())),
+                Edit::TaskIdentifier(task.identifier.clone()),
+                Edit::TaskTitle(Some(task.title.clone())),
+                Edit::TaskDescription(Some(task.description.clone())),
+                Edit::TaskRank(task.rank),
+                Edit::TaskAssignee(task.assignee.clone()),
+                Edit::TaskDueDate(task.due_date.clone()),
+                Edit::Disposition(crate::work::edit::Disposition {
+                    planning_state: task.state.clone(),
+                    planning_completed: i64::from(task.completed),
+                    planning_completed_at: task.completed_at.clone(),
+                }),
+            ],
+        ),
     )?;
     conn.execute("UPDATE tasks SET pm_snapshot_synced_at=?2,worktree=?3,workspace_slug=?4,abandon_requested_at=?5,abandon_reason=?6,created_at=?7,updated_at=?8,agent=?9,branch=?10,base_commit=?11,parent_pr_id=?12 WHERE id=?1",params![
         task.id.as_str(),task.pm_snapshot_synced_at,task.worktree.as_ref().map(|p|p.display().to_string()),task.workspace_slug,
@@ -2031,9 +2035,9 @@ mod local_planning_tests {
 
     #[test]
     fn canonical_task_fields_survive_restart_and_peer_import() {
-        use super::super::planning_write::{self, Disposition, PlanningEdit};
-        use crate::planning_exchange::PlanningKind;
+        use super::super::planning_write;
         use crate::planning_git::PlanningDestination;
+        use crate::work::edit::{Disposition, WorkValue};
 
         let source = tempfile::tempdir().unwrap();
         let target = tempfile::tempdir().unwrap();
@@ -2054,17 +2058,18 @@ mod local_planning_tests {
             let tx = conn.unchecked_transaction().unwrap();
             planning_write::local(
                 &tx,
-                PlanningKind::Task,
-                task.id.as_str(),
-                &[
-                    PlanningEdit::TaskRank(7),
-                    PlanningEdit::TaskAssignee(Some("assignee-1".into())),
-                    PlanningEdit::Disposition(Disposition {
-                        planning_state: Some("completed".into()),
-                        planning_completed: 1,
-                        planning_completed_at: Some("2026-10-10T12:00:00Z".into()),
-                    }),
-                ],
+                &crate::work::edit::WorkEdit::for_target(
+                    task.id.as_str(),
+                    &[
+                        WorkValue::TaskRank(7),
+                        WorkValue::TaskAssignee(Some("assignee-1".into())),
+                        WorkValue::Disposition(Disposition {
+                            planning_state: Some("completed".into()),
+                            planning_completed: 1,
+                            planning_completed_at: Some("2026-10-10T12:00:00Z".into()),
+                        }),
+                    ],
+                ),
             )
             .unwrap();
             tx.commit().unwrap();

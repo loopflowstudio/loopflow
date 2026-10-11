@@ -840,20 +840,20 @@ fn planning_status_reads_retained_journal_without_inventing_recovery_records() {
         .changes
         .iter()
         .find(|(_, change)| {
-            change.object.id == task
-                && change.field == "issue_title"
-                && change.value == "Same title"
+            change.edit.target == task
+                && change.edit.change.field() == "issue_title"
+                && change.edit.change.value().unwrap() == "Same title"
         })
         .unwrap();
     assert!(!active.candidates.contains(old_id));
-    assert_eq!(old.value, "Same title");
+    assert_eq!(old.edit.change.value().unwrap(), "Same title");
     let (current_id, current) = active
         .changes
         .iter()
         .find(|(_, change)| {
-            change.object.id == task
-                && change.field == "issue_title"
-                && change.value == "Later title"
+            change.edit.target == task
+                && change.edit.change.field() == "issue_title"
+                && change.edit.change.value().unwrap() == "Later title"
         })
         .unwrap();
     assert!(active.candidates.contains(current_id));

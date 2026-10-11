@@ -711,10 +711,21 @@ fn peer_planning_status_keeps_journal_and_independent_receipts() {
     assert_eq!(statuses[0].conflicts.len(), 1);
     assert!(statuses[1].pending_local);
     assert_eq!(
-        statuses[1].changes["comment-head"].value["author"],
+        statuses[1].changes["comment-head"]
+            .edit
+            .change
+            .value()
+            .unwrap()["author"],
         serde_json::json!({"kind": "person", "name": "Maya"})
     );
-    assert_eq!(statuses[1].changes["title-loser"].value, "Retained title");
+    assert_eq!(
+        statuses[1].changes["title-loser"]
+            .edit
+            .change
+            .value()
+            .unwrap(),
+        "Retained title"
+    );
     assert!(!statuses[1].candidates.contains("title-loser"));
     assert!(statuses[1].changes["title-head"]
         .parents

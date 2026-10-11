@@ -701,15 +701,15 @@ impl SqliteStore {
             .optional()?;
         let saved = parent.is_some();
         let edits = if saved {
-            vec![planning_write::PlanningEdit::WaveParent(
+            vec![crate::work::edit::WorkValue::WaveParent(
                 parent
                     .flatten()
                     .or_else(|| wave.parent_wave_id().map(ToString::to_string)),
             )]
         } else {
             vec![
-                planning_write::PlanningEdit::WaveName(wave.name().into()),
-                planning_write::PlanningEdit::WaveParent(
+                crate::work::edit::WorkValue::WaveName(wave.name().into()),
+                crate::work::edit::WorkValue::WaveParent(
                     wave.parent_wave_id().map(ToString::to_string),
                 ),
             ]
@@ -717,9 +717,7 @@ impl SqliteStore {
         planning_write::create(
             &tx,
             wave.repo(),
-            crate::planning_exchange::PlanningKind::Wave,
-            wave.id().as_str(),
-            &edits,
+            &crate::work::edit::WorkEdit::for_target(wave.id().as_str(), &edits),
         )?;
         if !saved {
             tx.execute("UPDATE waves SET created_at=?2,retired_at=?3,superseded_by_wave_id=?4,retirement_reason=?5 WHERE id=?1",params![wave.id(),created_at,wave.retired_at().map(|at|at.unix_timestamp()),wave.superseded_by_wave_id(),wave.retirement_reason()])?;
@@ -1926,12 +1924,13 @@ impl SqliteStore {
             )?;
             planning_write::local(
                 &tx,
-                crate::planning_exchange::PlanningKind::Wave,
-                update.wave_id.as_str(),
-                &[
-                    planning_write::PlanningEdit::WaveName(name.into()),
-                    planning_write::PlanningEdit::WaveParent(parent.map(|p| p.to_string())),
-                ],
+                &crate::work::edit::WorkEdit::for_target(
+                    update.wave_id.as_str(),
+                    &[
+                        crate::work::edit::WorkValue::WaveName(name.into()),
+                        crate::work::edit::WorkValue::WaveParent(parent.map(|p| p.to_string())),
+                    ],
+                ),
             )?;
         }
         tx.commit()?;

@@ -3,11 +3,12 @@
 //! transaction; the released `provider` columns remain storage discriminators,
 //! not a choice exposed by the ingestion API.
 
+use crate::work::edit::Disposition;
+use crate::work::edit::WorkValue as Edit;
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 
-use super::planning_write::{self, Disposition, PlanningEdit as Edit};
+use super::planning_write;
 use crate::id::WaveId;
-use crate::planning_exchange::PlanningKind;
 use crate::store::sqlite::SqliteStore;
 use crate::store::{PlanningState, StoreError, StoreResult};
 use crate::work::project::ProjectId;
@@ -76,9 +77,10 @@ impl SqliteStore {
             for id in ids {
                 planning_write::local(
                     &tx,
-                    PlanningKind::Task,
-                    &id,
-                    &[Edit::TaskDeletedAt(Some(super::super::rows::now_unix()))],
+                    &crate::work::edit::WorkEdit::for_target(
+                        &id,
+                        &[Edit::TaskDeletedAt(Some(super::super::rows::now_unix()))],
+                    ),
                 )?;
             }
         }
@@ -466,7 +468,11 @@ pub(crate) fn project_accepted_planning(
             revision.as_deref(),
             &mut edits,
         )?;
-        planning_write::create(tx, repo, PlanningKind::Project, id.as_str(), &edits)?;
+        planning_write::create(
+            tx,
+            repo,
+            &crate::work::edit::WorkEdit::for_target(id.as_str(), &edits),
+        )?;
         tx.execute("UPDATE projects SET pm_snapshot_synced_at=?2,planning_provider_revision=?3 WHERE id=?1",params![id.as_str(),observed_at,revision])?;
     }
     let mut query = tx.prepare(
@@ -591,7 +597,11 @@ pub(crate) fn project_accepted_planning(
                     && (!pending || !matches!(edit, Edit::Disposition(_)))
             });
         }
-        planning_write::create(tx, repo, PlanningKind::Task, id.as_str(), &edits)?;
+        planning_write::create(
+            tx,
+            repo,
+            &crate::work::edit::WorkEdit::for_target(id.as_str(), &edits),
+        )?;
         tx.execute(
             "UPDATE tasks SET planning_provider_revision=?2,pm_snapshot_synced_at=?3 WHERE id=?1",
             params![id.as_str(), revision, observed_at],

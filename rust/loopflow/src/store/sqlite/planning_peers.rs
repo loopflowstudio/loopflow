@@ -1,11 +1,13 @@
 //! Local-only Git planning. Provider attempts and execution never enter this store.
 use super::{
-    planning_write::{self, PlanningEdit, WriteOrigin},
+    planning_write::{self, WriteOrigin},
     SqliteStore,
 };
 use crate::planning_exchange::{PlanningKind, PlanningMutation, PlanningObject, PlanningSnapshot};
 use crate::planning_git::PlanningDestination;
 use crate::store::{PeerPlanningStatus, PeerProjectionConflict, StoreError, StoreResult};
+use crate::work::edit::WorkEdit;
+use crate::work::edit::WorkValue;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -208,19 +210,13 @@ impl SqliteStore {
             .map_err(invalid)?;
         for (id, change) in &incoming.changes {
             planning_write::retain(&tx, id, change)?;
-            tx.execute("INSERT OR IGNORE INTO planning_members(kind,object_id,repo,destination) VALUES(?1,?2,?3,?4)",params![change.object.kind.as_str(),change.object.id,repo,destination])?;
+            tx.execute("INSERT OR IGNORE INTO planning_members(kind,object_id,repo,destination) VALUES(?1,?2,?3,?4)",params![change.edit.change.kind().as_str(),change.edit.target,repo,destination])?;
         }
-        let mut grouped = BTreeMap::<PlanningObject, Vec<PlanningEdit>>::new();
-        for (_, change) in merged.winners() {
-            grouped
-                .entry(change.object.clone())
-                .or_default()
-                .push(PlanningEdit::from_value(
-                    change.object.kind,
-                    &change.field,
-                    change.value.clone(),
-                )?);
-        }
+        let edits: Vec<_> = merged
+            .winners()
+            .map(|(_, change)| change.edit.clone())
+            .collect();
+        let grouped = planning_write::grouped(&edits);
         let mut pending: Vec<_> = grouped.iter().collect();
         let mut conflicts = BTreeMap::new();
         while !pending.is_empty() {
@@ -234,7 +230,7 @@ impl SqliteStore {
                         .kind
                         .fields()
                         .iter()
-                        .all(|field| edits.iter().any(|edit| edit.field() == *field))
+                        .all(|field| edits.iter().any(|edit| edit.change.field() == *field))
                     {
                         return Err(invalid("incomplete planning record"));
                     }
@@ -243,10 +239,10 @@ impl SqliteStore {
                     // Wave selection points to Projects inserted later in this import.
                     let selected: Vec<_> = edits
                         .iter()
-                        .filter(|e| !matches!(e, PlanningEdit::WaveProject(_)))
+                        .filter(|e| !matches!(e.change, WorkValue::WaveProject(_)))
                         .cloned()
                         .collect();
-                    planning_write::write(&save, object, &selected, WriteOrigin::Import)?;
+                    planning_write::write(&save, &selected, WriteOrigin::Import)?;
                     require_repository(&save, repo, object)?;
                     save.execute("INSERT OR IGNORE INTO planning_members(kind,object_id,repo,destination) VALUES(?1,?2,?3,?4)",params![object.kind.as_str(),object.id,repo,destination])?;
                     Ok::<_, StoreError>(())
@@ -281,15 +277,11 @@ impl SqliteStore {
             }
             for edit in edits
                 .iter()
-                .filter(|e| matches!(e, PlanningEdit::WaveProject(_)))
+                .filter(|e| matches!(e.change, WorkValue::WaveProject(_)))
             {
                 let save = tx.savepoint()?;
-                match planning_write::write(
-                    &save,
-                    object,
-                    std::slice::from_ref(edit),
-                    WriteOrigin::Import,
-                ) {
+                match planning_write::write(&save, std::slice::from_ref(edit), WriteOrigin::Import)
+                {
                     Ok(_) => save.commit()?,
                     Err(StoreError::Sqlite(rusqlite::Error::SqliteFailure(ref e, _)))
                         if e.code == rusqlite::ErrorCode::ConstraintViolation =>
@@ -318,7 +310,9 @@ impl SqliteStore {
                         field,
                         merged
                             .heads()
-                            .filter(|(_, c)| c.object == *object && c.field == field)
+                            .filter(|(_, c)| {
+                                c.edit.object() == *object && c.edit.change.field() == field
+                            })
                             .map(|(id, _)| id),
                     )?;
                 }
@@ -371,7 +365,7 @@ impl SqliteStore {
             let selected_records = snapshot
                 .changes
                 .values()
-                .map(|change| &change.object)
+                .map(|change| change.edit.object())
                 .collect::<BTreeSet<_>>()
                 .len() as u64;
             let candidates = snapshot.winners().map(|(id, _)| id.to_owned()).collect();
@@ -475,12 +469,14 @@ fn export_in(conn: &Connection, repo: &str, destination: &str) -> StoreResult<Pl
         snapshot.changes.insert(
             id,
             PlanningMutation {
-                object: PlanningObject {
-                    kind: serde_json::from_value(kind.into())?,
-                    id: object,
+                edit: WorkEdit {
+                    target: object,
+                    change: WorkValue::from_value(
+                        serde_json::from_value(kind.into())?,
+                        &field,
+                        serde_json::from_str(&value)?,
+                    )?,
                 },
-                field,
-                value: serde_json::from_str(&value)?,
                 clock,
                 parents: serde_json::from_str(&parents)?,
             },

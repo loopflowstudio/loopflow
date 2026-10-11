@@ -22,14 +22,15 @@
     ],
     "changes": {
       "held-title": {
-        "object": {
-          "kind": "task",
-          "id": "retained-task"
-        },
-        "field": "issue_title",
-        "value": "Held title",
         "clock": 1,
-        "parents": []
+        "parents": [],
+        "edit": {
+          "target": "retained-task",
+          "change": {
+            "field": "task_title",
+            "value": "Held title"
+          }
+        }
       }
     },
     "candidates": [
@@ -51,53 +52,57 @@
     "conflicts": [],
     "changes": {
       "title-loser": {
-        "object": {
-          "kind": "task",
-          "id": "retained-task"
-        },
-        "field": "issue_title",
-        "value": "Retained title",
         "clock": 1,
-        "parents": []
+        "parents": [],
+        "edit": {
+          "target": "retained-task",
+          "change": {
+            "field": "task_title",
+            "value": "Retained title"
+          }
+        }
       },
       "title-head": {
-        "object": {
-          "kind": "task",
-          "id": "retained-task"
-        },
-        "field": "issue_title",
-        "value": "Current title",
         "clock": 2,
         "parents": [
           "title-loser"
-        ]
+        ],
+        "edit": {
+          "target": "retained-task",
+          "change": {
+            "field": "task_title",
+            "value": "Current title"
+          }
+        }
       },
       "assignee-head": {
-        "object": {
-          "kind": "task",
-          "id": "retained-task"
-        },
-        "field": "planning_assignee",
-        "value": "Maya",
         "clock": 3,
-        "parents": []
+        "parents": [],
+        "edit": {
+          "target": "retained-task",
+          "change": {
+            "field": "task_assignee",
+            "value": "Maya"
+          }
+        }
       },
       "comment-head": {
-        "object": {
-          "kind": "comment",
-          "id": "retained-comment"
-        },
-        "field": "content",
-        "value": {
-          "body": "Direction",
-          "author": {
-            "kind": "person",
-            "name": "Maya"
-          },
-          "created_at": "2026-10-10T12:00:00Z"
-        },
         "clock": 4,
-        "parents": []
+        "parents": [],
+        "edit": {
+          "target": "retained-comment",
+          "change": {
+            "field": "comment_content",
+            "value": {
+              "body": "Direction",
+              "author": {
+                "kind": "person",
+                "name": "Maya"
+              },
+              "created_at": "2026-10-10T12:00:00Z"
+            }
+          }
+        }
       }
     },
     "candidates": [

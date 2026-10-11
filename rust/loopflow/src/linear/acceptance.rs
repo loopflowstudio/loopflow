@@ -613,7 +613,7 @@ pub(crate) fn observe_task_state(
         &tx,
         &delivery.task_id,
         observed.revision.as_deref(),
-        &sqlite::planning_write::Disposition {
+        &crate::work::edit::Disposition {
             planning_state: observed.state.clone(),
             planning_completed: i64::from(observed.completed),
             planning_completed_at: observed.completed_at.clone(),

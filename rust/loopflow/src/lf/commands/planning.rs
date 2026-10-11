@@ -135,16 +135,16 @@ async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
         for (id, change) in destination.changes {
             println!(
                 "  {} {} {} [{}; {}]: {}",
-                change.object.kind.as_str(),
-                change.object.id,
-                change.field,
+                change.edit.change.kind().as_str(),
+                change.edit.target,
+                change.edit.change.field(),
                 id,
                 if destination.candidates.contains(&id) {
                     "candidate, not confirmed"
                 } else {
                     "retained alternative"
                 },
-                change.value
+                change.edit.change.value()?
             );
         }
     }

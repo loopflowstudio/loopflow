@@ -183,7 +183,7 @@ Existing credential fencing, receipt recovery, lock names and refresh ages remai
 
 `dac4cb1ba6` completed the public acquisition API cut; `06e95d98fe` removed the
 PM facade. Supplied feedback based on `b6df256d0f` predates both. Remaining:
-target-bearing typed edits/journal, ordinary follow-ups and one cron list;
+SQL address/receipt and provider-projection reductions, ordinary follow-ups and one cron list;
 materialized/headless affected gate and fresh +/- HTML review before review-only
 republication. Populated Session/attachment preservation is covered below. Concrete adapter naming alone does not
 finish the remaining writer/delivery hierarchy. No installation was performed.
@@ -286,8 +286,11 @@ comment authors remain typed through the writer. Git reads the selected native J
 format; realign removed the unshipped string-format compatibility decoder and its
 fixture under Jack Heart's no-old-version constraint. Released SQLite conversion
 and causal/losing values remain required. Record creation no longer
-reconstructs a generic JSON field map. The target-bearing edit/journal, provider
-hierarchy, follow-ups and cron cuts remain required.
+reconstructs a generic JSON field map. Local writes and Git mutations now carry the same target-bearing `WorkEdit`.
+Import retains it directly, deleting the parallel mutation object/field/value
+schema and its SQLite-backed wire decoder. The SQL address/receipt and provider
+hierarchy reductions, follow-ups and cron remain required; this is an internal
+slice, not completion of the accepted audit.
 
 The surviving `store/sqlite/planning.rs` still mixes observation invalidation,
 accepted-revision eligibility and Work projection. Its removal is part of the
@@ -323,9 +326,13 @@ Writer transport/causal proofs: `eda4a98097` in this plan.
   follows the entire reduction and affected gate, before review-only republication.
 
 Earlier focused proof: `9dbd6fc2d8`, `dfd3b80611`, `f025e9b7ab`,
-`dfa2cdafba`, `09709a05cc` in this plan. Typed journal,
-follow-ups, cron, gate and review still precede republication.
+`dfa2cdafba`, `09709a05cc` in this plan. Remaining SQL addresses/receipts,
+provider projection, follow-ups, cron, gate and review precede republication.
 
-Prior checks and fixture limits: `1930805f40` at this path. Current command/result: `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo build -p loopflow --bin lf` pass; LF-cleared/headless `cargo nextest run -p loopflow --lib` filters Linear/local planning (181) and writer/chapter (10) pass. Nextest marked the pure `unreviewed_backlog_remains_while_started_work_moves` test leaky; it creates no child or I/O, so no fixture-owned handle repair is identified. Retain this runner observation for gate; no retry or timeout change was added. Final populated migration/import and selected-Git-miss checks pass (3). October 11 prose reconciliation: `git diff --check` passes; `lf context` confirms both budgets fit; unchanged source checks reused. Full gate follows the audit.
+Prior checks and fixture limits: `6b7015d056` at this path. The earlier nextest
+leaky-test report for `unreviewed_backlog_remains_while_started_work_moves` remains
+unexplained and belongs to gate; no retry or timeout adjustment was added.
+Current check: `cargo fmt`, LF-cleared `cargo clippy --all-targets -- -D warnings`, `cargo build -p loopflow --bin lf`, focused `cargo nextest run -p loopflow` (writer, populated migration, exchange/Git, DTO and foreground recovery: 18), and `swift test --package-path swift --filter DTOFixtureTests` (30) pass; `git diff --check` and `lf context` pass. Full materialized/headless gate remains after the audit.
+
 
 Transport evidence: `0181133849` at this path; earlier simulated adoption: `5960415b3:scratch/remote-task-demo.md` (not real SSH or integrated acceptance).

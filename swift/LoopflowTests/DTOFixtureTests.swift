@@ -599,11 +599,11 @@ struct DTOFixtureTests {
         #expect(statuses[0].conflicts[0].object.id == "retained-task")
         #expect(statuses[1].pendingLocal == true)
         #expect(statuses[1].active)
-        #expect(statuses[1].changes["title-loser"]?.value == .string("Retained title"))
+        #expect(statuses[1].changes["title-loser"]?.edit.change.value == .string("Retained title"))
         #expect(!statuses[1].candidates.contains("title-loser"))
         #expect(statuses[1].changes["title-head"]?.parents == ["title-loser"])
         #expect(statuses[1].changes["comment-head"]?.clock == 4)
-        guard case .object(let content) = statuses[1].changes["comment-head"]?.value else {
+        guard case .object(let content) = statuses[1].changes["comment-head"]?.edit.change.value else {
             Issue.record("expected typed comment content")
             return
         }

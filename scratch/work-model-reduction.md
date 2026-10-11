@@ -9,7 +9,7 @@ approval from Jack. This is accepted scope, with conditional deletions identifie
 
 This audit and [design](work-on-another-machine-name.md) share one delivery scope.
 Canonical readers, concrete observation columns and private acquisition exist.
-Remaining: typed edits/journal, ordinary follow-ups and one cron list. Concrete
+Remaining: SQL addresses, receipt/projection reduction, ordinary follow-ups and one cron list. Concrete
 bindings are implemented (§14). All precede Jack Heart's next
 review of PR #1491. Publication is review-only; landing, installation and export
 of actual Work to the public repository remain unauthorized.
@@ -159,24 +159,25 @@ Workflow are different responsibilities and remain separate.
 `sqlite/task_content.rs`, `sqlite/project_content.rs`, `ops/task.rs::TaskEdit`,
 `ops/planning_delivery.rs::task_input`, `linear/mod.rs::project_field_input`.
 
-Current `PlanningEdit` generates kind/field/value/from_value/fields while callers
-also pass `PlanningObject {kind,id}`. `PlanningMutation` repeats the field address
-and untyped JSON payload. The writer validates combinations the representation
-itself could exclude. Use one typed Work edit payload with its target; derive
-transport conflict addresses/encoding from it. Delete the second kind/field schema,
-repeated string-field switches. Team/Initiative edits now carry `Vec<String>`;
-comment edits carry `TaskCommentAuthor`. Persistence and Git use native JSON values.
-The unshipped string-format decoder and its compatibility-only fixture are removed: Jack Heart excluded old-version
-support. Released SQLite conversion still preserves relationships, authors and
-uncertain receipts; selected-format history retains mutation IDs, clocks, parents
-and competing values. `ensure_record` consumes
-typed edits directly instead of reconstructing a field-addressed JSON object.
-The target-bearing enum/journal redesign remains required.
+`WorkEdit { target, change: WorkValue }` now carries both local writes and
+journal mutations. The transactional writer derives record scope from the typed
+value; callers no longer pass a second kind. `PlanningMutation` no longer stores
+independent object/field/JSON values. Import passes the retained typed edit directly;
+Git validation no longer decodes through SQLite. CLI, Swift recovery display and
+the shared DTO fixture consume the same edit. No old wire decoder remains.
 
-Task/Project saves and Task refiling now derive Linear receipts from the same typed
-edit slice as the writer; Task saves no longer read `plan_read::task_in`. The
-Project-only save forwarding and parallel Task JSON receipt values are deleted.
-The journal/address conversion described above remains required.
+**Still delete:** `PlanningKind` / `PlanningObject`, retained SQL kind/field decoding,
+receipt string-field translation and normalization, and the remaining provider
+projection hierarchy. `WorkValue::from_value` still decodes retained SQL columns
+and pending Linear values; moving the former PlanningEdit enum into its Work owner
+has not completed those cuts. The journal's SQL layout is unchanged, preserving
+mutation identities, clocks, parents, losing values and routing evidence.
+
+Task/Project saves and Task refiling derive Linear receipts from the same typed
+values as the writer. Team/Initiative lists and comment authors remain typed.
+Creation reads typed values, never a reconstructed whole-model JSON field map.
+Released SQLite conversion must continue retaining relationships, authors and
+uncertain receipts; no unreleased draft or released SQL changed in this cut.
 
 Keep atomic disposition updates, comment identity, ownership validation, and the
 transaction boundary covering local changes/imports. Serialization at the actual
@@ -201,7 +202,7 @@ the typed-writer cut; adapter confinement is no longer outstanding.
 
 Remaining: remove parallel edit structures that only rename the same values
 (`name`, `issue_title`, `TaskTitle`, for example), receipt string-field addressing
-and duplicated normalization of provider IDs into local owners. The typed journal
+and duplicated normalization of provider IDs into local owners. The remaining SQL address/receipt
 conversion still owns those cuts.
 
 Keep attempted values and their baselines: an acknowledgment of an older attempt
@@ -239,7 +240,7 @@ constant-empty metadata and exclusive fictional fixture cases. Status returns th
 retained `PlanningMutation` map plus ranked candidate IDs; CLI/Desktop show these
 same entries. Values, causal parents, clocks and projection failures survive.
 Candidate means ranked, never applied or published. This is inspection, not another
-writer. The typed edit/journal conversion in sections 6–8 remains outstanding.
+writer. The remaining SQL address/routing reduction in sections 6–8 is still required.
 
 Journal read failure already returns `StoreResult::Err`; WorkReading retains cached
 status and shows that failure. `pending_local` is therefore a required boolean on
@@ -391,7 +392,7 @@ alignment in the same diff as public removals.
 
 ## Proof and stop conditions
 
-Remaining order: typed writer/journal; follow-ups and cron;
+Remaining order: SQL addresses/receipts and provider projection; follow-ups and cron;
 gate and review. Each cut deletes its replaced paths in the same diff.
 
 Before dropping persistent state, inventory the released frontier and current

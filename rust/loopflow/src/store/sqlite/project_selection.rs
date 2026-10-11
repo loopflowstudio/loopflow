@@ -1,11 +1,11 @@
 //! Current Project selection has one owner: the Wave row. YAML is import evidence only.
+use crate::work::edit::WorkValue as Edit;
 use rusqlite::{params, Connection, OptionalExtension};
 
-use super::planning_write::{self, PlanningEdit as Edit};
+use super::planning_write;
 use super::SqliteStore;
 use crate::durable::ProjectId;
 use crate::id::WaveId;
-use crate::planning_exchange::PlanningKind;
 use crate::store::{PlanningLocks, StoreError, StoreResult};
 use crate::work::project::Project;
 
@@ -56,9 +56,10 @@ fn bind_in(conn: &Connection, wave: &WaveId, project: &str) -> StoreResult<Proje
     }
     planning_write::local(
         conn,
-        PlanningKind::Wave,
-        wave.as_str(),
-        &[Edit::WaveProject(Some(id.to_string()))],
+        &crate::work::edit::WorkEdit::for_target(
+            wave.as_str(),
+            &[Edit::WaveProject(Some(id.to_string()))],
+        ),
     )?;
     Ok(id)
 }
@@ -77,9 +78,10 @@ fn write_in(
     let id = resolve_project_id(conn, wave, project)?;
     planning_write::local(
         conn,
-        PlanningKind::Wave,
-        wave.as_str(),
-        &[Edit::WaveProject(Some(id.to_string()))],
+        &crate::work::edit::WorkEdit::for_target(
+            wave.as_str(),
+            &[Edit::WaveProject(Some(id.to_string()))],
+        ),
     )?;
     Ok(())
 }
@@ -177,14 +179,15 @@ impl SqliteStore {
                 planning_write::create(
                     &tx,
                     "",
-                    PlanningKind::Project,
-                    id.as_str(),
-                    &[
-                        Edit::ProjectWave(wave.to_string()),
-                        Edit::ProjectSlug(Some(name.into())),
-                        Edit::ProjectName(Some(name.into())),
-                        Edit::ProjectStatus(crate::work::project::ProjectStatus::Started),
-                    ],
+                    &crate::work::edit::WorkEdit::for_target(
+                        id.as_str(),
+                        &[
+                            Edit::ProjectWave(wave.to_string()),
+                            Edit::ProjectSlug(Some(name.into())),
+                            Edit::ProjectName(Some(name.into())),
+                            Edit::ProjectStatus(crate::work::project::ProjectStatus::Started),
+                        ],
+                    ),
                 )?;
                 super::durable::inherit_project_placement(&tx, &id)?;
                 if pending.is_none() {
@@ -214,11 +217,12 @@ impl SqliteStore {
         )?;
         planning_write::local(
             &tx,
-            PlanningKind::Project,
-            id.as_str(),
-            &[Edit::ProjectStatus(
-                crate::work::project::ProjectStatus::Started,
-            )],
+            &crate::work::edit::WorkEdit::for_target(
+                id.as_str(),
+                &[Edit::ProjectStatus(
+                    crate::work::project::ProjectStatus::Started,
+                )],
+            ),
         )?;
         write_in(&tx, wave, selected.as_deref(), id.as_str())?;
         if readiness_in(&tx, wave)?.state == ProjectReadinessState::Unavailable {

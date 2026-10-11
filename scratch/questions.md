@@ -33,8 +33,8 @@ misses stay on Git. Linear refresh retains unmapped local Projects without looku
 Populated migration/import fixtures now cover Session turns, capture reservations,
 attachment claims/activity and an uncertain local cancellation receipt. This proves
 stored preservation, not configured provider control.
-Typed edits/journal, historical follow-through effects and cron conversion remain
-required before gate and republication. Earlier acquisition/fixture review findings:
+The typed local writer/journal now shares WorkEdit. SQL address/receipt reduction,
+historical follow-through effects and cron conversion remain before gate/republication. Earlier acquisition/fixture review findings:
 `1930805f40:scratch/questions.md`; no installation or stopped-Flow replay occurred.
 
 ## Unresolved operator review — October 11

@@ -1,7 +1,8 @@
 //! Field receipts share one protocol; each object's table retains its foreign key.
 
-use super::planning_write::{self, PlanningEdit as Edit};
+use super::planning_write;
 use crate::planning_exchange::{PlanningKind, PlanningObject};
+use crate::work::edit::WorkValue as Edit;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::Value;
 
@@ -106,9 +107,10 @@ impl SqliteStore {
                 )?;
                 planning_write::local(
                     &tx,
-                    PlanningKind::Task,
-                    id.as_str(),
-                    &[Edit::TaskDeletedAt(None)],
+                    &crate::work::edit::WorkEdit::for_target(
+                        id.as_str(),
+                        &[Edit::TaskDeletedAt(None)],
+                    ),
                 )?;
             }
         }
@@ -193,7 +195,10 @@ impl<'a> PlanningChanges<'a> {
                 .ok_or_else(|| StoreError::InvalidData("Edit belongs to another owner".into()))?;
             self.record(conn, field, previous.value()?, edit.value()?)?;
         }
-        planning_write::local(conn, kind, &object.id, edits)?;
+        planning_write::local(
+            conn,
+            &crate::work::edit::WorkEdit::for_target(&object.id, edits),
+        )?;
         Ok(())
     }
 

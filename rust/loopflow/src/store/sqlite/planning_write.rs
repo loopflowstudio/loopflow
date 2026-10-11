@@ -3,134 +3,10 @@
 //! only planning columns and captures local mutations in that same transaction.
 use crate::planning_exchange::{PlanningKind, PlanningMutation, PlanningObject};
 use crate::store::{StoreError, StoreResult};
+use crate::work::edit::{fields, WorkEdit, WorkValue};
 use rusqlite::{params, Connection, OptionalExtension};
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct Disposition {
-    pub planning_state: Option<String>,
-    pub planning_completed: i64,
-    pub planning_completed_at: Option<String>,
-}
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct CommentContent {
-    pub body: String,
-    pub author: crate::work::task::comment::TaskCommentAuthor,
-    pub created_at: Option<String>,
-}
-
-macro_rules! planning_fields {
-    ($(($kind:ident, $variant:ident, $column:literal, $value:ty)),* $(,)?) => {
-        #[derive(Debug, Clone, PartialEq)]
-        pub(crate) enum PlanningEdit {
-            $($variant($value),)*
-            Workflow(String),
-            Krs(Vec<crate::work::project::ProjectKR>),
-            MetricTargets(Vec<crate::work::wave::metrics::MetricTarget>),
-            Disposition(Disposition),
-            CommentContent(CommentContent),
-        }
-        impl PlanningEdit {
-            pub(crate) fn from_value(kind: PlanningKind, field: &str, value: Value) -> StoreResult<Self> {
-                let edit=match (kind, field) {
-                    $((PlanningKind::$kind, $column) => Self::$variant(serde_json::from_value(value)?),)*
-                    (PlanningKind::Project, "workflow") => Self::Workflow(serde_json::from_value(value)?),
-                    (PlanningKind::Project, "krs") => Self::Krs(serde_json::from_value(value)?),
-                    (PlanningKind::Project, "metric_targets") => Self::MetricTargets(serde_json::from_value(value)?),
-                    (PlanningKind::Task, "disposition") => Self::Disposition(serde_json::from_value(value)?),
-                    (PlanningKind::Comment, "content") => Self::CommentContent(serde_json::from_value(value)?),
-                    _ => return Err(StoreError::InvalidData("unknown planning field".into())),
-                };
-                edit.validate()?;
-                Ok(edit)
-            }
-            pub(crate) fn kind(&self) -> PlanningKind {
-                match self {
-                    $(Self::$variant(_) => PlanningKind::$kind,)*
-                    Self::Workflow(_) | Self::Krs(_) | Self::MetricTargets(_) => PlanningKind::Project,
-                    Self::Disposition(_) => PlanningKind::Task,
-                    Self::CommentContent(_) => PlanningKind::Comment,
-                }
-            }
-            pub(crate) fn field(&self) -> &'static str {
-                match self {
-                    $(Self::$variant(_) => $column,)*
-                    Self::Workflow(_) => "workflow", Self::Krs(_) => "krs",
-                    Self::MetricTargets(_) => "metric_targets", Self::Disposition(_) => "disposition",
-                    Self::CommentContent(_) => "content",
-                }
-            }
-            pub(crate) fn value(&self) -> StoreResult<Value> {
-                Ok(match self {
-                    $(Self::$variant(v) => serde_json::to_value(v)?,)*
-                    Self::Workflow(v) => serde_json::to_value(v)?,
-                    Self::Krs(v) => serde_json::to_value(v)?,
-                    Self::MetricTargets(v) => serde_json::to_value(v)?,
-                    Self::Disposition(v) => serde_json::to_value(v)?,
-                    Self::CommentContent(v) => serde_json::to_value(v)?,
-                })
-            }
-        }
-        pub(crate) fn fields(kind: PlanningKind) -> Vec<&'static str> {
-            let mut fields = Vec::new();
-            $(if kind == PlanningKind::$kind { fields.push($column); })*
-            fields.extend(match kind {
-                PlanningKind::Wave => &[][..],
-                PlanningKind::Project => &["workflow", "krs", "metric_targets"],
-                PlanningKind::Task => &["disposition"],
-                PlanningKind::Comment => &["content"],
-            });
-            fields
-        }
-    }
-}
-planning_fields! {
-    (Wave, WaveName, "name", String),
-    (Wave, WaveParent, "parent_wave_id", Option<String>),
-    (Wave, WaveProject, "current_project_id", Option<String>),
-    (Project, ProjectWave, "wave_id", String),
-    (Project, ProjectLinearId, "external_project_id", Option<String>),
-    (Project, ProjectSlug, "project_slug", Option<String>),
-    (Project, ProjectName, "project_name", Option<String>),
-    (Project, ProjectSummary, "project_summary", String),
-    (Project, ProjectDescription, "description", Option<String>),
-    (Project, ProjectStatus, "status", crate::work::project::ProjectStatus),
-    (Project, ProjectRank, "planning_rank", u32),
-    (Project, ProjectInitiatives, "planning_initiatives", Vec<String>),
-    (Project, ProjectTeams, "planning_teams", Vec<String>),
-    (Task, TaskProject, "project_id", String),
-    (Task, TaskLinearId, "external_issue_id", Option<String>),
-    (Task, TaskIdentifier, "issue_identifier", String),
-    (Task, TaskTitle, "issue_title", Option<String>),
-    (Task, TaskDescription, "issue_description", Option<String>),
-    (Task, TaskRank, "planning_rank", u32),
-    (Task, TaskAssignee, "planning_assignee", Option<String>),
-    (Task, TaskDueDate, "planning_due_date", Option<String>),
-    (Task, TaskDeletedAt, "planning_deleted_at", Option<i64>),
-    (Task, TaskUrl, "planning_url", Option<String>),
-    (Task, TaskBranch, "planning_branch_name", Option<String>),
-    (Task, TaskTeam, "planning_team_id", Option<String>),
-    (Comment, CommentTask, "task_id", String),
-}
-
-impl PlanningEdit {
-    fn validate(&self) -> StoreResult<()> {
-        match self {
-            Self::Disposition(v) if !matches!(v.planning_completed, 0 | 1) => {
-                return Err(StoreError::InvalidData("invalid completion value".into()))
-            }
-            Self::MetricTargets(v) => {
-                crate::work::project::validate_metric_targets(v).map_err(StoreError::InvalidData)?
-            }
-            _ => {}
-        }
-        Ok(())
-    }
-}
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum WriteOrigin {
@@ -147,7 +23,7 @@ pub(crate) fn table(kind: PlanningKind) -> &'static str {
     }
 }
 
-pub(crate) fn read(conn: &Connection, object: &PlanningObject) -> StoreResult<Vec<PlanningEdit>> {
+pub(crate) fn read(conn: &Connection, object: &PlanningObject) -> StoreResult<Vec<WorkValue>> {
     let fields = fields(object.kind);
     let expressions: Vec<_> = fields.iter().map(|field| match *field {
         "krs" | "metric_targets" | "planning_initiatives" | "planning_teams" => field.to_string(),
@@ -169,16 +45,16 @@ pub(crate) fn read(conn: &Connection, object: &PlanningObject) -> StoreResult<Ve
         .into_iter()
         .zip(values)
         .map(|(field, value)| {
-            PlanningEdit::from_value(object.kind, field, serde_json::from_str(&value)?)
+            WorkValue::from_value(object.kind, field, serde_json::from_str(&value)?)
         })
         .collect::<StoreResult<_>>()?;
     Ok(edits)
 }
 
-pub(crate) fn write(
+fn write_record(
     conn: &Connection,
     object: &PlanningObject,
-    edits: &[PlanningEdit],
+    edits: &[WorkEdit],
     origin: WriteOrigin,
 ) -> StoreResult<bool> {
     let before: BTreeMap<_, _> = read(conn, object)?
@@ -187,13 +63,9 @@ pub(crate) fn write(
         .collect::<StoreResult<_>>()?;
     let mut columns = BTreeMap::new();
     for edit in edits {
+        let edit = &edit.change;
         edit.validate()?;
-        if edit.kind() != object.kind {
-            return Err(StoreError::InvalidData(
-                "planning field belongs to another object kind".into(),
-            ));
-        }
-        if let PlanningEdit::WaveProject(Some(project)) = edit {
+        if let WorkValue::WaveProject(Some(project)) = edit {
             let owner: Option<String> = conn
                 .query_row("SELECT wave_id FROM projects WHERE id=?1", [project], |r| {
                     r.get(0)
@@ -210,7 +82,7 @@ pub(crate) fn write(
             continue;
         }
         match edit {
-            PlanningEdit::Disposition(_) | PlanningEdit::CommentContent(_) => {
+            WorkValue::Disposition(_) | WorkValue::CommentContent(_) => {
                 columns.extend(value.as_object().expect("typed fields").clone());
             }
             _ => {
@@ -268,9 +140,10 @@ pub(crate) fn capture(conn: &Connection, object: &PlanningObject) -> StoreResult
         };
         let clock: i64=conn.query_row("SELECT max(CAST(unixepoch('subsec')*1000 AS INTEGER),COALESCE(max(clock)+1,0)) FROM planning_peer_changes",[],|r|r.get(0))?;
         let change = PlanningMutation {
-            object: object.clone(),
-            field: edit.field().into(),
-            value,
+            edit: WorkEdit {
+                target: object.id.clone(),
+                change: edit.clone(),
+            },
             clock,
             parents,
         };
@@ -284,10 +157,10 @@ pub(crate) fn capture(conn: &Connection, object: &PlanningObject) -> StoreResult
 pub(crate) fn retain(conn: &Connection, id: &str, change: &PlanningMutation) -> StoreResult<()> {
     let existing:Option<(String,String,String,String,i64,String)>=conn.query_row("SELECT kind,object_id,field,value,clock,parents FROM planning_peer_changes WHERE id=?1",[id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?))).optional()?;
     if let Some((kind, object, field, value, clock, parents)) = existing {
-        if kind != change.object.kind.as_str()
-            || object != change.object.id
-            || field != change.field
-            || serde_json::from_str::<Value>(&value)? != change.value
+        if kind != change.edit.change.kind().as_str()
+            || object != change.edit.target
+            || field != change.edit.change.field()
+            || serde_json::from_str::<Value>(&value)? != change.edit.change.value()?
             || clock != change.clock
             || serde_json::from_str::<BTreeSet<String>>(&parents)? != change.parents
         {
@@ -297,7 +170,7 @@ pub(crate) fn retain(conn: &Connection, id: &str, change: &PlanningMutation) -> 
         }
         return Ok(());
     }
-    conn.execute("INSERT OR IGNORE INTO planning_peer_changes(id,kind,object_id,field,value,clock,parents) VALUES(?1,?2,?3,?4,?5,?6,?7)",params![id,change.object.kind.as_str(),change.object.id,change.field,serde_json::to_string(&change.value)?,change.clock,serde_json::to_string(&change.parents)?])?;
+    conn.execute("INSERT OR IGNORE INTO planning_peer_changes(id,kind,object_id,field,value,clock,parents) VALUES(?1,?2,?3,?4,?5,?6,?7)",params![id,change.edit.change.kind().as_str(),change.edit.target,change.edit.change.field(),serde_json::to_string(&change.edit.change.value()?)?,change.clock,serde_json::to_string(&change.parents)?])?;
     Ok(())
 }
 
@@ -321,7 +194,7 @@ pub(crate) fn ensure_record(
     conn: &Connection,
     repo: &str,
     object: &PlanningObject,
-    edits: &[PlanningEdit],
+    edits: &[WorkEdit],
 ) -> StoreResult<()> {
     let exists = conn.query_row(
         &format!(
@@ -342,16 +215,16 @@ pub(crate) fn ensure_record(
             let name = edits
                 .iter()
                 .rev()
-                .find_map(|edit| match edit {
-                    PlanningEdit::WaveName(name) => Some(name),
+                .find_map(|edit| match &edit.change {
+                    WorkValue::WaveName(name) => Some(name),
                     _ => None,
                 })
                 .ok_or_else(missing)?;
             let parent = edits
                 .iter()
                 .rev()
-                .find_map(|edit| match edit {
-                    PlanningEdit::WaveParent(parent) => Some(parent),
+                .find_map(|edit| match &edit.change {
+                    WorkValue::WaveParent(parent) => Some(parent),
                     _ => None,
                 })
                 .and_then(Option::as_deref);
@@ -361,8 +234,8 @@ pub(crate) fn ensure_record(
             let wave = edits
                 .iter()
                 .rev()
-                .find_map(|edit| match edit {
-                    PlanningEdit::ProjectWave(wave) => Some(wave),
+                .find_map(|edit| match &edit.change {
+                    WorkValue::ProjectWave(wave) => Some(wave),
                     _ => None,
                 })
                 .ok_or_else(missing)?;
@@ -375,16 +248,16 @@ pub(crate) fn ensure_record(
             let project = edits
                 .iter()
                 .rev()
-                .find_map(|edit| match edit {
-                    PlanningEdit::TaskProject(project) => Some(project),
+                .find_map(|edit| match &edit.change {
+                    WorkValue::TaskProject(project) => Some(project),
                     _ => None,
                 })
                 .ok_or_else(missing)?;
             let identifier = edits
                 .iter()
                 .rev()
-                .find_map(|edit| match edit {
-                    PlanningEdit::TaskIdentifier(identifier) => Some(identifier),
+                .find_map(|edit| match &edit.change {
+                    WorkValue::TaskIdentifier(identifier) => Some(identifier),
                     _ => None,
                 })
                 .ok_or_else(missing)?;
@@ -394,16 +267,16 @@ pub(crate) fn ensure_record(
             let task = edits
                 .iter()
                 .rev()
-                .find_map(|edit| match edit {
-                    PlanningEdit::CommentTask(task) => Some(task),
+                .find_map(|edit| match &edit.change {
+                    WorkValue::CommentTask(task) => Some(task),
                     _ => None,
                 })
                 .ok_or_else(missing)?;
             let content = edits
                 .iter()
                 .rev()
-                .find_map(|edit| match edit {
-                    PlanningEdit::CommentContent(content) => Some(content),
+                .find_map(|edit| match &edit.change {
+                    WorkValue::CommentContent(content) => Some(content),
                     _ => None,
                 })
                 .ok_or_else(missing)?;
@@ -432,49 +305,49 @@ pub(crate) fn seed(conn: &Connection) -> StoreResult<()> {
     Ok(())
 }
 
-/// Save local planning in the caller's transaction, including its causal identity.
-pub(crate) fn local(
-    conn: &Connection,
-    kind: PlanningKind,
-    id: &str,
-    edits: &[PlanningEdit],
-) -> StoreResult<bool> {
-    write(
-        conn,
-        &PlanningObject {
-            kind,
-            id: id.into(),
-        },
-        edits,
-        WriteOrigin::Local,
-    )
+pub(crate) fn grouped(edits: &[WorkEdit]) -> BTreeMap<PlanningObject, Vec<WorkEdit>> {
+    let mut records = BTreeMap::<_, Vec<_>>::new();
+    for edit in edits {
+        records.entry(edit.object()).or_default().push(edit.clone());
+    }
+    records
 }
 
-/// Create the planning record before attaching any machine-local execution data.
-pub(crate) fn create(
+pub(crate) fn write(
     conn: &Connection,
-    repo: &str,
-    kind: PlanningKind,
-    id: &str,
-    edits: &[PlanningEdit],
-) -> StoreResult<()> {
-    let object = PlanningObject {
-        kind,
-        id: id.into(),
-    };
-    ensure_record(conn, repo, &object, edits)?;
-    write(conn, &object, edits, WriteOrigin::Local)?;
+    edits: &[WorkEdit],
+    origin: WriteOrigin,
+) -> StoreResult<bool> {
+    let mut changed = false;
+    for (object, values) in grouped(edits) {
+        changed |= write_record(conn, &object, &values, origin)?;
+    }
+    Ok(changed)
+}
+
+/// Save local Work in the caller's transaction, including its causal identity.
+pub(crate) fn local(conn: &Connection, edits: &[WorkEdit]) -> StoreResult<bool> {
+    write(conn, edits, WriteOrigin::Local)
+}
+
+/// Create shared records before attaching any machine-local execution data.
+pub(crate) fn create(conn: &Connection, repo: &str, edits: &[WorkEdit]) -> StoreResult<()> {
+    for (object, values) in grouped(edits) {
+        ensure_record(conn, repo, &object, &values)?;
+    }
+    write(conn, edits, WriteOrigin::Local)?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{create, local, PlanningEdit as Edit};
+    use super::{create, local};
     use crate::durable::{ProjectId, TaskId};
     use crate::id::WaveId;
     use crate::planning_exchange::PlanningKind;
     use crate::planning_git::PlanningDestination;
     use crate::store::sqlite::SqliteStore;
+    use crate::work::edit::{WorkEdit, WorkValue, WorkValue as Edit};
     use crate::work::task::comment::{TaskComment, TaskCommentAuthor};
     use crate::work::task::NewTask;
     use crate::work::task::TaskUpdate;
@@ -490,20 +363,22 @@ mod tests {
             create(
                 &tx,
                 "/repo",
-                PlanningKind::Project,
-                project.as_str(),
-                &[
-                    Edit::ProjectWave(wave.id().to_string()),
-                    Edit::ProjectSlug(Some("plan".into())),
-                    Edit::ProjectName(Some("Plan".into())),
-                ],
+                &crate::work::edit::WorkEdit::for_target(
+                    project.as_str(),
+                    &[
+                        Edit::ProjectWave(wave.id().to_string()),
+                        Edit::ProjectSlug(Some("plan".into())),
+                        Edit::ProjectName(Some("Plan".into())),
+                    ],
+                ),
             )
             .unwrap();
             local(
                 &tx,
-                PlanningKind::Wave,
-                wave.id().as_str(),
-                &[Edit::WaveProject(Some(project.to_string()))],
+                &crate::work::edit::WorkEdit::for_target(
+                    wave.id().as_str(),
+                    &[Edit::WaveProject(Some(project.to_string()))],
+                ),
             )
             .unwrap();
             tx.commit().unwrap();
@@ -557,12 +432,13 @@ mod tests {
             let conn = a.conn.lock().unwrap();
             local(
                 &conn,
-                PlanningKind::Project,
-                project.as_str(),
-                &[
-                    Edit::ProjectTeams(vec!["team-1".into(), "team-2".into()]),
-                    Edit::ProjectInitiatives(vec!["initiative-1".into()]),
-                ],
+                &crate::work::edit::WorkEdit::for_target(
+                    project.as_str(),
+                    &[
+                        Edit::ProjectTeams(vec!["team-1".into(), "team-2".into()]),
+                        Edit::ProjectInitiatives(vec!["initiative-1".into()]),
+                    ],
+                ),
             )
             .unwrap();
         }
@@ -803,27 +679,32 @@ mod tests {
         let mut incoming = store.export_peer_planning("/repo", &route.id()).unwrap();
         let prior = incoming
             .winners()
-            .find(|(_, c)| c.object == object && c.field == "current_project_id")
+            .find(|(_, c)| {
+                c.edit.object() == object && c.edit.change.field() == "current_project_id"
+            })
             .unwrap()
             .1
-            .value
-            .clone();
+            .edit
+            .change
+            .value()
+            .unwrap();
         for (id, field, value) in [
             ("rejected", "current_project_id", json!("project_missing")),
             ("rename", "name", json!("Renamed")),
         ] {
             let parents = incoming
                 .heads()
-                .filter(|(_, c)| c.object == object && c.field == field)
+                .filter(|(_, c)| c.edit.object() == object && c.edit.change.field() == field)
                 .map(|(id, _)| id.to_owned())
                 .collect();
             let clock = incoming.changes.values().map(|c| c.clock).max().unwrap() + 1;
             incoming.changes.insert(
                 id.into(),
                 PlanningMutation {
-                    object: object.clone(),
-                    field: field.into(),
-                    value,
+                    edit: WorkEdit {
+                        target: object.id.clone(),
+                        change: WorkValue::from_value(object.kind, field, value).unwrap(),
+                    },
                     clock,
                     parents,
                 },
@@ -854,9 +735,10 @@ mod tests {
         let tx = conn.transaction().unwrap();
         local(
             &tx,
-            PlanningKind::Wave,
-            wave.as_str(),
-            &[Edit::WaveName("Local edit".into())],
+            &crate::work::edit::WorkEdit::for_target(
+                wave.as_str(),
+                &[Edit::WaveName("Local edit".into())],
+            ),
         )
         .unwrap();
         tx.commit().unwrap();
@@ -864,7 +746,7 @@ mod tests {
         let local = store.export_peer_planning("/repo", &route.id()).unwrap();
         let (_, name) = local
             .winners()
-            .find(|(_, c)| c.object == object && c.field == "name")
+            .find(|(_, c)| c.edit.object() == object && c.edit.change.field() == "name")
             .unwrap();
         assert!(name.parents.contains("rename"));
         assert!(!local
@@ -873,7 +755,8 @@ mod tests {
             .any(|c| c.parents.contains("rejected")));
         let before = local.clone();
         let mut reused = incoming;
-        reused.changes.get_mut("rename").unwrap().value = json!("Reused identity");
+        reused.changes.get_mut("rename").unwrap().edit.change =
+            WorkValue::WaveName("Reused identity".into());
         assert!(store
             .import_peer_planning("/repo", &route.id(), "invalid", &reused)
             .is_err());

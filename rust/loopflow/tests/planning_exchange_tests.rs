@@ -1,30 +1,38 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use loopflow::planning_exchange::{
-    PlanningKind, PlanningMutation, PlanningObject, PlanningSnapshot,
-};
+use loopflow::planning_exchange::{PlanningMutation, PlanningSnapshot};
+use loopflow::work::edit::{Disposition, WorkEdit, WorkValue};
 use serde_json::json;
 
+fn edit(field: &str, value: &str) -> WorkEdit {
+    WorkEdit {
+        target: "task-existing".into(),
+        change: match field {
+            "issue_title" => WorkValue::TaskTitle(Some(value.into())),
+            "issue_description" => WorkValue::TaskDescription(Some(value.into())),
+            "disposition" => WorkValue::Disposition(Disposition {
+                planning_state: Some(value.into()),
+                planning_completed: 0,
+                planning_completed_at: None,
+            }),
+            _ => panic!("unknown test field"),
+        },
+    }
+}
+
 fn write(snapshot: &mut PlanningSnapshot, id: &str, field: &str, value: &str, clock: i64) {
-    let object = PlanningObject {
-        kind: PlanningKind::Task,
-        id: "task-existing".into(),
-    };
+    let edit = edit(field, value);
     let parents = snapshot
         .heads()
-        .filter(|(_, change)| change.object == object && change.field == field)
+        .filter(|(_, change)| {
+            change.edit.target == edit.target && change.edit.change.field() == edit.change.field()
+        })
         .map(|(id, _)| id.to_owned())
         .collect();
     snapshot.changes.insert(
         id.into(),
         PlanningMutation {
-            object,
-            field: field.into(),
-            value: if field == "disposition" {
-                json!({"planning_state":value,"planning_completed":0,"planning_completed_at":null})
-            } else {
-                json!(value)
-            },
+            edit,
             clock,
             parents,
         },
@@ -32,16 +40,19 @@ fn write(snapshot: &mut PlanningSnapshot, id: &str, field: &str, value: &str, cl
 }
 
 fn value(snapshot: &PlanningSnapshot, field: &str) -> serde_json::Value {
-    let value = &snapshot
+    let value = snapshot
         .winners()
-        .find(|(_, change)| change.field == field)
+        .find(|(_, change)| change.edit.change.field() == field)
         .unwrap()
         .1
-        .value;
+        .edit
+        .change
+        .value()
+        .unwrap();
     if field == "disposition" {
         value["planning_state"].clone()
     } else {
-        value.clone()
+        value
     }
 }
 
@@ -59,7 +70,10 @@ fn concurrent_edits_converge_without_losing_independent_fields_or_losing_values(
     assert_eq!(merged.merge(&laptop).unwrap(), merged);
     assert_eq!(value(&merged, "issue_title"), "Worker");
     assert_eq!(value(&merged, "issue_description"), "Independent");
-    assert_eq!(merged.changes["left"].value, "Laptop");
+    assert_eq!(
+        merged.changes["left"].edit.change.value().unwrap(),
+        "Laptop"
+    );
     assert_eq!(
         PlanningSnapshot::from_bytes(&merged.to_bytes().unwrap()).unwrap(),
         merged
@@ -95,7 +109,7 @@ fn equal_values_retain_both_causes_and_ties_use_stable_identity() {
         BTreeSet::from(["a".into(), "b".into()])
     );
     assert_eq!(value(&merged.merge(&left).unwrap(), "issue_title"), "Next");
-    right.changes.get_mut("b").unwrap().value = json!("Tie winner");
+    right.changes.get_mut("b").unwrap().edit = edit("issue_title", "Tie winner");
     assert_eq!(
         value(&left.merge(&right).unwrap(), "issue_title"),
         "Tie winner"
@@ -107,7 +121,7 @@ fn conflicting_identity_missing_ancestors_and_execution_fields_are_rejected() {
     let mut saved = PlanningSnapshot::default();
     write(&mut saved, "a", "issue_title", "Saved", 1);
     let mut reused = saved.clone();
-    reused.changes.get_mut("a").unwrap().value = json!("Replacement");
+    reused.changes.get_mut("a").unwrap().edit = edit("issue_title", "Replacement");
     assert!(saved.merge(&reused).is_err());
     let mut incomplete = saved.clone();
     incomplete
@@ -117,9 +131,9 @@ fn conflicting_identity_missing_ancestors_and_execution_fields_are_rejected() {
         .parents
         .insert("missing".into());
     assert!(incomplete.to_bytes().is_err());
-    let mut execution = saved.clone();
-    execution.changes.get_mut("a").unwrap().field = "worktree".into();
-    assert!(execution.to_bytes().is_err());
+    let mut execution = serde_json::to_value(&saved).unwrap();
+    execution["changes"]["a"]["edit"]["change"]["field"] = json!("worktree");
+    assert!(PlanningSnapshot::from_bytes(&serde_json::to_vec(&execution).unwrap()).is_err());
     let empty = PlanningSnapshot {
         changes: BTreeMap::new(),
     };

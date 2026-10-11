@@ -1,7 +1,7 @@
 //! Task fields and their delivery evidence commit together, before provider I/O.
 
-use super::planning_write::{self, PlanningEdit as Edit};
-use crate::planning_exchange::PlanningKind;
+use super::planning_write;
+use crate::work::edit::WorkValue as Edit;
 use rusqlite::TransactionBehavior;
 
 use crate::durable::{ProjectId, TaskId};
@@ -30,9 +30,10 @@ impl SqliteStore {
         } else {
             planning_write::local(
                 &tx,
-                PlanningKind::Task,
-                id.as_str(),
-                &[Edit::TaskDeletedAt(Some(now_unix()))],
+                &crate::work::edit::WorkEdit::for_target(
+                    id.as_str(),
+                    &[Edit::TaskDeletedAt(Some(now_unix()))],
+                ),
             )?
         };
         if changed {

@@ -6,7 +6,7 @@ use crate::planning_git::PlanningDestination;
 
 use super::{run_sqlite, Store, StoreResult};
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PeerProjectionConflict {
     pub object: PlanningObject,
     pub reason: String,
@@ -14,7 +14,7 @@ pub struct PeerProjectionConflict {
 
 /// Local routing and import evidence. Endpoints are deliberately not displayed:
 /// Git URLs can contain credentials. A checkpoint is not publication evidence.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PeerPlanningStatus {
     pub id: String,
     pub reference: String,

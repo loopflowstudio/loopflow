@@ -153,8 +153,10 @@ observations from another Wave to adopt conflicting Linear membership, retain bo
 values and advance unrelated fields. It never grants execution or provider-write authority.
 
 One typed writer, `sqlite/planning_write.rs`, owns planning field persistence and
-Git mutation capture. Local operations and incoming planning use the same typed
-edits and record construction. The caller's transaction includes admission, planning,
+Git mutation capture. Local writes and journal mutations carry `WorkEdit`: a target
+identity and a typed `WorkValue`. The value determines its scope and conflict field;
+Git does not carry a separate kind/field/JSON edit schema. Import uses those values
+directly, with the same record construction as local writes. The caller's transaction includes admission, planning,
 local delivery receipts and mutation identity. Execution columns are absent from
 this writer. Local creation attaches machine-specific metadata afterward in the
 same transaction. Import never creates execution placement or provider attempts.

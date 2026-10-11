@@ -1,7 +1,7 @@
 //! Delivery evidence for local Task decisions; never another lifecycle owner.
 
-use super::planning_write::{self, PlanningEdit as Edit};
-use crate::planning_exchange::PlanningKind;
+use super::planning_write;
+use crate::work::edit::WorkValue as Edit;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::durable::TaskId;
@@ -39,13 +39,14 @@ pub(super) fn queue_in(conn: &Connection, task: &TaskId, target: &str) -> StoreR
         .map_err(|error| StoreError::InvalidData(error.to_string()))?;
     planning_write::local(
         conn,
-        PlanningKind::Task,
-        task.as_str(),
-        &[Edit::Disposition(super::planning_write::Disposition {
-            planning_state: Some(target.into()),
-            planning_completed: i64::from(target == "completed"),
-            planning_completed_at: completed_at,
-        })],
+        &crate::work::edit::WorkEdit::for_target(
+            task.as_str(),
+            &[Edit::Disposition(crate::work::edit::Disposition {
+                planning_state: Some(target.into()),
+                planning_completed: i64::from(target == "completed"),
+                planning_completed_at: completed_at,
+            })],
+        ),
     )?;
     conn.execute(
         "INSERT INTO task_state_deliveries(id,task_id,move_seq,target,base_revision,base_state)
@@ -64,7 +65,7 @@ pub(crate) fn reconcile_in(
     conn: &Connection,
     task: &TaskId,
     observed_revision: Option<&str>,
-    observed: &super::planning_write::Disposition,
+    observed: &crate::work::edit::Disposition,
     evidence: &str,
 ) -> StoreResult<bool> {
     let pending: Option<(TaskStateDelivery, Option<String>)> = conn.query_row(
@@ -114,9 +115,10 @@ pub(crate) fn reconcile_in(
     )?;
     planning_write::local(
         conn,
-        PlanningKind::Task,
-        task.as_str(),
-        &[Edit::Disposition(observed.clone())],
+        &crate::work::edit::WorkEdit::for_target(
+            task.as_str(),
+            &[Edit::Disposition(observed.clone())],
+        ),
     )?;
     conn.execute(
         "UPDATE tasks SET planning_provider_revision=?2 WHERE id=?1",

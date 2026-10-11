@@ -1,6 +1,6 @@
 //! Project content and stored Wave workflows share one transaction in every repository.
 
-use super::planning_write::PlanningEdit as Edit;
+use crate::work::edit::WorkValue as Edit;
 use rusqlite::{params, OptionalExtension, TransactionBehavior};
 
 use crate::durable::ProjectId;

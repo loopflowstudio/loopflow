@@ -180,7 +180,7 @@ pub(super) fn attach_in(
     project: bool,
     external: &str,
     revision: Option<&str>,
-    observed: &[super::planning_write::PlanningEdit],
+    observed: &[crate::work::edit::WorkValue],
 ) -> StoreResult<()> {
     let (kind, table, key, mapping, join) = if project {
         (
@@ -250,18 +250,12 @@ pub(super) fn attach_in(
         conn.execute("UPDATE task_changes SET base_json=?2 WHERE task_id=?1 AND field='deleted' AND base_json IS NULL",
             params![id,json!({"revision":revision,"value":false}).to_string()])?;
     }
-    let (kind, edit) = if project {
-        (
-            crate::planning_exchange::PlanningKind::Project,
-            super::planning_write::PlanningEdit::ProjectLinearId(Some(export.id.clone())),
-        )
+    let edit = if project {
+        crate::work::edit::WorkValue::ProjectLinearId(Some(export.id.clone()))
     } else {
-        (
-            crate::planning_exchange::PlanningKind::Task,
-            super::planning_write::PlanningEdit::TaskLinearId(Some(export.id.clone())),
-        )
+        crate::work::edit::WorkValue::TaskLinearId(Some(export.id.clone()))
     };
-    super::planning_write::local(conn, kind, &id, &[edit])?;
+    super::planning_write::local(conn, &crate::work::edit::WorkEdit::for_target(&id, &[edit]))?;
     conn.execute(
         &format!("UPDATE {table} SET export_error=NULL WHERE {key}=?1"),
         [id],

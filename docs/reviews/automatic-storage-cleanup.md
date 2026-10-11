@@ -36,8 +36,13 @@ Final safety evidence is now streamed: a no-progress deadline replaces the
 whole-set timeout, with no larger constant and no persisted negative filesystem
 observations. Healthy finite work can take longer than the admission window;
 stalls retain safely and report why. Remaining: resolve the separate
-unknown-alias locality contract without interpreting unknown as safe; run
-composed gate and installation proof.
+unknown-alias locality contract without interpreting unknown as safe, and prove
+native provider resume, live OS scheduling and published upgrades. The 2026-10-10
+review gate exercised affected Rust suites and both scheduled-cleanup CLI proofs
+in the disposable OS account. Host fixtures cannot substitute a temporary
+`LF_HOME` for that isolation: the installed release registry is account-owned.
+The local walkthrough is `scratch/pr-review.html`; these passes do not establish
+the unresolved progress contract or make the branch merge-ready.
 
 The demo is a real Process exiting after a finished Task: the configured tick then
 removes its checkout without another agent. An unfinished neighbor, post-merge

@@ -6,6 +6,7 @@ import tarfile
 from pathlib import Path
 
 PROOFS = {
+    "scheduled_cleanup_retries_a_busy_checkout_after_it_becomes_idle": "cleanup_schedule",
     "experimental_cleanup_discovers_release_checkout_admission": "cleanup_schedule",
     "default_and_nested_commands_use_the_installed_cli_and_main_home": "one_machine_tests",
     "task_adopts_linear_checkout_and_preserves_flow_history": "task_adoption_tests",

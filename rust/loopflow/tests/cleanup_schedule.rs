@@ -36,6 +36,7 @@ impl Launchctl for HeadlessLaunchctl {
 }
 
 #[test]
+#[ignore = "requires disposable OS installation: scripts/test_task_installation.py"]
 fn scheduled_cleanup_retries_a_busy_checkout_after_it_becomes_idle() {
     scheduled_cleanup(false);
 }
@@ -43,15 +44,15 @@ fn scheduled_cleanup_retries_a_busy_checkout_after_it_becomes_idle() {
 #[test]
 #[ignore = "requires disposable OS installation: scripts/test_task_installation.py"]
 fn experimental_cleanup_discovers_release_checkout_admission() {
+    scheduled_cleanup(true);
+}
+
+fn scheduled_cleanup(release_admission: bool) {
     assert!(Path::new("/.dockerenv").is_file());
     assert_eq!(
         loopflow::installation::account_home().unwrap(),
         Path::new("/home/lf-task-proof")
     );
-    scheduled_cleanup(true);
-}
-
-fn scheduled_cleanup(release_admission: bool) {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     let binary = Path::new(env!("CARGO_BIN_EXE_lf"));

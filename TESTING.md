@@ -117,6 +117,19 @@ Escalate from a focused behavior to affected suites when crossing a component
 boundary. CI and release own the full matrix. Run `scripts/test.py --all` only
 to reproduce a matrix failure or when release guidance requires it.
 
+The two `cleanup_schedule` integration proofs use an OS-account-owned release
+registry even when `LF_HOME` points elsewhere. Run them in the disposable account,
+not against a developer's installed database:
+
+```bash
+uv run python scripts/test_task_installation.py --test scheduled_cleanup_retries_a_busy_checkout_after_it_becomes_idle experimental_cleanup_discovers_release_checkout_admission
+```
+
+Both fixtures are ignored by ordinary Cargo runs and reject execution outside the
+disposable container/account. The first proves retry after a real Process exits;
+the second also checks the independent release registry's checkout admission.
+Neither proves a loaded launchd job firing or an actual published upgrade.
+
 ## External network isolation
 
 `tests/e2e/native_titles.py` exercises real Claude/Codex TUIs against a local fake

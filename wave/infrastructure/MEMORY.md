@@ -631,9 +631,9 @@ One typed writer owns local/imported fields; outages buffer without fallback or
 election. Execution/attempts stay local; preserve causal losers and uncertainty.
 Gate/installation unproved.
 
-Full audit precedes review. Acquisition and Wave/roadmap/Work-frame summaries read
-canonical Tasks: prose/dates, local IDs, Linear bindings and sync evidence.
-Status remains provider-shaped; retain age, invalidation and pending membership.
+Full audit precedes review. Acquisition, summaries and rotation read canonical
+Tasks. Export captures shared creation baselines, never local execution. Status
+remains provider-shaped; retain age, invalidation and pending membership.
 Follow-up conversion retains uncertain effects; Git candidates prove no publication.
 
 Jack assigned LOO-427's combined reduction here; its `bd295866bb` baseline is

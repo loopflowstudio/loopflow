@@ -3956,6 +3956,71 @@ fn planning_export_foreground_reconnect_keeps_distinct_saved_identities() {
 }
 
 #[test]
+fn planning_export_captures_shared_task_fields_without_local_execution() {
+    with_export_plan(|runtime, fixture, repo, task, _state| {
+        runtime
+            .block_on(crate::ops::planning_export::sync_export(
+                &fixture.store,
+                repo,
+                &crate::durable::WorkRef::Project(task.project_id.clone()),
+            ))
+            .unwrap();
+        let child = fixture
+            .store
+            .sqlite
+            .create_task(&crate::planning::NewTask {
+                id: crate::durable::TaskId::new(),
+                project_id: task.project_id.clone(),
+                title: "Retained creation".into(),
+                description: "Authored prose".into(),
+                due_date: Some("2026-12-31".into()),
+            })
+            .unwrap();
+        let owner = crate::store::sqlite::planning_changes::PlanningChanges::Task(&child.id);
+        let first = fixture
+            .store
+            .sqlite
+            .prepare_planning_export(owner, "team-1", "initiative")
+            .unwrap();
+        assert_eq!(first.input["title"], child.title);
+        assert_eq!(first.input["description"], child.description);
+        assert_eq!(first.input["dueDate"], child.due_date.as_deref().unwrap());
+        assert_eq!(
+            first.model,
+            json!({
+                "name": child.title, "description": child.description,
+                "assignee": child.assignee, "due_date": child.due_date,
+                "project_id": child.project_id, "state": child.state,
+            })
+        );
+        fixture
+            .store
+            .sqlite
+            .edit_task(
+                &child.id,
+                child.revision,
+                &crate::pm::PmItemUpdate {
+                    name: Some("Later save".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let retry = fixture
+            .store
+            .sqlite
+            .prepare_planning_export(owner, "another-team", "another-initiative")
+            .unwrap();
+        assert_eq!(retry.input, first.input);
+        assert_eq!(retry.model, first.model);
+        assert_eq!(retry.id, first.id);
+        assert_eq!(
+            fixture.store.sqlite.task(&child.id).unwrap().unwrap().title,
+            "Later save"
+        );
+    });
+}
+
+#[test]
 fn planning_export_lost_creation_and_attachment_recover_without_duplicate_effects() {
     with_export_plan(|runtime, fixture, repo, task, state| {
         let project = crate::durable::WorkRef::Project(task.project_id.clone());

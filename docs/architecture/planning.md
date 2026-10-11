@@ -65,10 +65,10 @@ Prompt assembly and Linear delivery render at their boundaries; malformed legacy
 content refuses the migration rather than discarding criteria. Extraction and Linear
 edits recognize fenced examples as prose and replace only owned field ranges;
 unrecognized paragraphs survive even inside managed sections.
-Linear Project prose is not yet acquired or saved through ordinary Project edits.
-The outbound content adapter preserves managed fields when replacing prose, but
-that alone does not establish save/receipt/readback behavior. Summary maps to
-Linear `description`; authored prose belongs to Linear `content`.
+Project prose saves, Linear delivery and acquisition use the same typed writer.
+Partial observations retain the prose baseline's own revision and age rather than
+refreshing it with unrelated fields. Summary maps to Linear `description`; authored
+prose belongs to Linear `content`. Managed fields and fenced examples survive replacement.
 
 `ProjectKR` is an explicit judgment. `MetricTarget` names a metric and a numeric
 `Threshold`, independently of the Wave's observations. Project iteration is no longer
@@ -170,6 +170,9 @@ Complete-list evidence owns ordering; detail reads never reorder Tasks. Uncertai
 writes remain attempted and require provider readback before another effect.
 
 Creation captures a stable provider UUID and exact input before network I/O.
+Task creation reads canonical Work and retains only shared creation-field baselines,
+not a provider-shaped Task copy or local execution data. Existing receipts keep their
+original input and baseline bytes through retries.
 Acquisition attaches the provider mapping to the original local row. Unknown creation
 or attachment outcomes retain their receipts; a matching title proves nothing.
 Comments retain identity and authorship. Incoming planning completion changes only
@@ -257,6 +260,10 @@ lf repo new-chapter 2026-10 --plan scratch/chapter.json --dry-run --json
 lf repo new-chapter 2026-10 --plan scratch/chapter.json --json
 lf wave new-chapter product 2026-10 --plan scratch/chapter.json --json
 ```
+
+Rotation previews and results return canonical Tasks with local IDs and explicit
+Linear bindings. Classification reads their saved disposition and independent local
+start evidence; it does not reconstruct provider records or resolve the Task twice.
 
 Retain one JSON input with `name` and `waves`. Each entry supplies `wave_id`,
 `successor_id`, `create`, `project_name`, `workflow`, `metric_targets` and `krs`:

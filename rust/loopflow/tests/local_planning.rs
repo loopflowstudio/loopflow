@@ -2096,7 +2096,7 @@ fn rotation_saves_membership_and_pending_effects_offline() {
         }
         let active = store
             .create_task(&NewTask {
-                due_date: None,
+                due_date: Some("2026-12-31".into()),
                 id: TaskId::new(),
                 project_id: project.id.clone(),
                 title: "Started work".into(),
@@ -2126,6 +2126,7 @@ fn rotation_saves_membership_and_pending_effects_offline() {
             projects: vec![saved.project.unwrap()],
             items: vec![saved.item],
         };
+        snapshot.items[0].due_date.clone_from(&active.due_date);
         if mapped {
             store
                 .put_pm_snapshot(&PmSnapshotRow {
@@ -2165,6 +2166,12 @@ fn rotation_saves_membership_and_pending_effects_offline() {
             ],
         );
         assert_eq!(preview["waves"][0]["tasks"][0]["disposition"], "move");
+        let expected = store.task(&active.id).unwrap().unwrap();
+        let preview_task = &preview["waves"][0]["tasks"][0]["task"];
+        assert_eq!(preview_task, &serde_json::to_value(&expected).unwrap());
+        assert_eq!(preview_task["id"], active.id.as_str());
+        assert_eq!(preview_task["due_date"], "2026-12-31");
+        assert_eq!(preview_task["description"], "Retain description");
         assert_eq!(
             store.task(&active.id).unwrap().unwrap().project_id,
             project.id
@@ -2192,8 +2199,12 @@ fn rotation_saves_membership_and_pending_effects_offline() {
             .unwrap()
             .is_empty());
         assert_eq!(revision(), before);
-        lf(repo.path(), home.path(), &args);
+        let applied = lf(repo.path(), home.path(), &args);
         let moved = store.task(&active.id).unwrap().unwrap();
+        assert_eq!(
+            applied["waves"][0]["tasks"][0]["task"],
+            serde_json::to_value(&moved).unwrap()
+        );
         assert_eq!(moved.project_id, successor);
         assert_eq!(
             db.query_row(

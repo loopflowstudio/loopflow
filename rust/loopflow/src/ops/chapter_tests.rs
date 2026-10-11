@@ -11,7 +11,6 @@ use crate::ops::pm::{pm_sync, resolve_context, PmSyncOptions, PmTestContext, PM_
 use crate::ops::NullProgress;
 use crate::planning::LinearIssueId;
 use crate::pm::linear::LinearProject;
-use crate::pm::PmItem;
 use crate::store::{open_ephemeral_store, CredentialType, ProviderToken, StorageConfig};
 use crate::work::project::ProjectStatus;
 use crate::work::task::{LinearWritebackState, Observation, Task, TaskId, TaskPr, TaskPrId};
@@ -35,27 +34,6 @@ fn project(id: &str, name: &str, status: ProjectStatus) -> LinearProject {
     }
 }
 
-fn task(state: &str) -> PmItem {
-    PmItem {
-        branch_name: None,
-        revision: None,
-        id: "issue".into(),
-        identifier: "FIX-1".into(),
-        url: None,
-        name: "Work".into(),
-        description: String::new(),
-        rank: 0,
-        completed: state == "completed",
-        completed_at: None,
-        due_date: None,
-        state: Some(state.into()),
-        project_id: Some("old".into()),
-        project: Some("old".into()),
-        team_id: Some("team-1".into()),
-        assignee: None,
-    }
-}
-
 #[test]
 fn unreviewed_backlog_remains_while_started_work_moves() {
     let mut evidence = TaskStartEvidence {
@@ -66,25 +44,25 @@ fn unreviewed_backlog_remains_while_started_work_moves() {
         completed: false,
     };
     assert_eq!(
-        classify_task(&task("unstarted"), &evidence).0,
+        classify_task(Some("unstarted"), false, &evidence).0,
         TaskDisposition::Historical
     );
     assert_eq!(
-        classify_task(&task("started"), &evidence).0,
+        classify_task(Some("started"), false, &evidence).0,
         TaskDisposition::Move
     );
     assert_eq!(
-        classify_task(&task("completed"), &evidence).0,
+        classify_task(Some("completed"), true, &evidence).0,
         TaskDisposition::Historical
     );
     evidence.authored = None;
     assert_eq!(
-        classify_task(&task("backlog"), &evidence).0,
+        classify_task(Some("backlog"), false, &evidence).0,
         TaskDisposition::Unresolved
     );
     evidence.begun = true;
     assert_eq!(
-        classify_task(&task("backlog"), &evidence).0,
+        classify_task(Some("backlog"), false, &evidence).0,
         TaskDisposition::Move
     );
 }
@@ -99,28 +77,28 @@ fn unresolved_abandonment_requires_explicit_settlement() {
         completed: false,
     };
     assert_eq!(
-        classify_task(&task("unstarted"), &evidence).0,
+        classify_task(Some("unstarted"), false, &evidence).0,
         TaskDisposition::Unresolved
     );
     assert_eq!(
-        classify_task(&task("canceled"), &evidence).0,
+        classify_task(Some("canceled"), false, &evidence).0,
         TaskDisposition::Historical
     );
     evidence.begun = true;
     assert_eq!(
-        classify_task(&task("unstarted"), &evidence).0,
+        classify_task(Some("unstarted"), false, &evidence).0,
         TaskDisposition::Unresolved
     );
     evidence.begun = false;
     evidence.authored = Some(true);
     assert_eq!(
-        classify_task(&task("unstarted"), &evidence).0,
+        classify_task(Some("unstarted"), false, &evidence).0,
         TaskDisposition::Unresolved
     );
     evidence.abandoned = false;
     evidence.completed = true;
     assert_eq!(
-        classify_task(&task("unstarted"), &evidence).0,
+        classify_task(Some("unstarted"), false, &evidence).0,
         TaskDisposition::Unresolved
     );
 }

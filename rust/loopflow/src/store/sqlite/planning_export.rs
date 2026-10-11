@@ -92,9 +92,7 @@ impl SqliteStore {
             .to_string();
         let (model, input) = match owner {
             PlanningChanges::Task(id) => {
-                let record = super::plan_read::task_in(&tx, id)?
-                    .record
-                    .ok_or(StoreError::NotFound)?;
+                let task = super::children::task_on(&tx, id)?.ok_or(StoreError::NotFound)?;
                 let external: Option<String> = tx.query_row(
                     "SELECT p.external_project_id FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=?1",
                     [id.as_str()], |row| row.get(0),
@@ -102,10 +100,9 @@ impl SqliteStore {
                 let external = external.ok_or_else(|| {
                     StoreError::InvalidData("Task export awaits its Project mapping".into())
                 })?;
-                let item = record.item;
-                let input = json!({"id":uuid,"teamId":team,"projectId":external,"title":item.name,
-                    "description":item.description,"assigneeId":item.assignee,"dueDate":item.due_date});
-                (serde_json::to_value(item)?, input)
+                let input = json!({"id":uuid,"teamId":team,"projectId":external,"title":task.title,
+                    "description":task.description,"assigneeId":task.assignee,"dueDate":task.due_date});
+                (task_creation_baseline(&task), input)
             }
             PlanningChanges::Project(id) => {
                 let project = super::children::project_in(&tx, id)?;
@@ -274,13 +271,10 @@ pub(super) fn retain_follow_through_export_in(
     task: &TaskId,
     intent: &crate::work::task::follow_through::FollowThroughIntent,
 ) -> StoreResult<()> {
-    let model = super::plan_read::task_in(conn, task)?
-        .record
-        .ok_or(StoreError::NotFound)?
-        .item;
+    let task = super::children::task_on(conn, task)?.ok_or(StoreError::NotFound)?;
     let export = PlanningExport {
         id: intent.issue_id.clone(),
-        model: serde_json::to_value(model)?,
+        model: task_creation_baseline(&task),
         through: 0,
         input: json!({"id":intent.issue_id,"teamId":intent.team_id,"projectId":intent.project_id,
             "stateId":intent.state_id,"title":intent.title,"description":intent.notes,"dueDate":intent.due}),
@@ -291,7 +285,20 @@ pub(super) fn retain_follow_through_export_in(
         "UPDATE task_creation_intents SET export_json=?2,export_attempted=1,
         export_error='Historical creation outcome is unknown; awaiting exact provider readback'
         WHERE task_id=?1 AND export_json IS NULL",
-        params![task.as_str(), serde_json::to_string(&export)?],
+        params![task.id.as_str(), serde_json::to_string(&export)?],
     )?;
     Ok(())
+}
+
+// Only creation fields can seed delivery baselines. Never persist the whole Task:
+// checkout, Workflow and execution fields are not part of the external effect.
+fn task_creation_baseline(task: &crate::work::task::Task) -> Value {
+    json!({
+        "name": task.title,
+        "description": task.description,
+        "assignee": task.assignee,
+        "due_date": task.due_date,
+        "project_id": task.project_id,
+        "state": task.state,
+    })
 }

@@ -3,7 +3,7 @@
 use super::planning_changes::PlanningChanges;
 use super::planning_write::{self, PlanningEdit as Edit};
 use super::{durable, SqliteStore};
-use crate::durable::{ProjectId, TaskId};
+use crate::durable::ProjectId;
 use crate::planning_exchange::PlanningKind;
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
@@ -133,11 +133,10 @@ impl SqliteStore {
                 .iter()
                 .filter(|t| t.disposition == crate::ops::chapter::TaskDisposition::Move)
             {
-                let task_id = TaskId::parse(&task.task.id)
-                    .map_err(|e| StoreError::InvalidData(e.to_string()))?;
+                let task_id = &task.task.id;
                 let member: bool = tx.query_row(
                     "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND project_id=?2)",
-                    params![task.task.id, predecessor],
+                    params![task_id.as_str(), predecessor],
                     |r| r.get(0),
                 )?;
                 if !member {
@@ -145,22 +144,12 @@ impl SqliteStore {
                         "Task membership changed before rotation".into(),
                     ));
                 }
-                PlanningChanges::Task(&task_id).record(
-                    &tx,
-                    "project_id",
-                    serde_json::to_value(predecessor)?,
-                    serde_json::json!(successor),
-                )?;
-                planning_write::local(
-                    &tx,
-                    PlanningKind::Task,
-                    &task.task.id,
-                    &[Edit::TaskProject(successor.to_string())],
-                )?;
+                PlanningChanges::Task(task_id)
+                    .save(&tx, &[Edit::TaskProject(successor.to_string())])?;
                 tx.execute(
                     "INSERT INTO project_transition_items(wave_id,successor_id,issue_id)
                      VALUES(?1,?2,?3)",
-                    params![input.wave_id, successor.as_str(), task.task.id],
+                    params![input.wave_id, successor.as_str(), task_id.as_str()],
                 )?;
             }
             planning_write::local(

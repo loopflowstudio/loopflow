@@ -2,7 +2,7 @@
 
 The [plan](compare-cmux-s-command-line.md) owns scope. Pre-Work-tab
 findings, failed attempts, log paths and earlier archive links are retained at
-`e4a324636:scratch/findings.md`, under the headings named below. Those findings were committed before compression.
+`e4a324636:scratch/findings.md`, under the headings named below. 
 
 ## Retained evidence and limits
 
@@ -98,8 +98,7 @@ in `/tmp/loo427-compress-ka0wKM/working.patch` and its `scratch/` copy.
 **Remaining cut:** Work-keyed registry, content-routed Flow logs, tabs/navigation
 and exact-target DTOs. `retainedPane` and
 `reconcileMembership` still encode checkout identity. Admission remains independent
-and unresolved. October 10 filesystem inspection found no Product child Wave
-directories; Infrastructure’s planning memory retains the same execution boundary.
+and unresolved. Infrastructure’s planning memory retains the execution boundary.
 
 Task-input compression removes the duplicate `ContextFile` projection and its
 per-file disk reads/hashes. Quoted paths and all present change states remain;

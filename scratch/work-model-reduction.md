@@ -88,8 +88,8 @@ create another generic reader framework simply to replace these functions.
 
 ## 3. Collapse accepted-provider-to-Work projection
 
-**Remove or shrink:** `store/sqlite/planning.rs::project_accepted_planning`.
-Ordinary acquisition now reads eligible Project/Task fields into typed edits,
+**Shrink with persistence conversion:** `store/sqlite/planning.rs::project_accepted_planning`.
+`621b4b851b` reads eligible Project/Task fields into typed edits,
 without reconstructing `LinearProject` or `PmItem`. Creation attachment consumes
 those edits; disposition reconciliation takes the observed disposition/revision
 and retains the exact conflicting input. Ownership and order checks read only
@@ -116,7 +116,7 @@ into acquisition; do not drop checks for stale independent Team/Initiative facts
 
 ## 4. Remove cache joins from secondary SQL readers
 
-`PlanningChanges::observation` is deleted. Receipts read only their field baseline
+`f0932031e5` deletes `PlanningChanges::observation`. Receipts read only their field baseline
 and revision; prose keeps its independent revision, deletion captures `deleted=false`,
 and membership normalizes to local identity. Reteam updates only Team evidence;
 issue invalidation reads revision without decoding unrelated content.

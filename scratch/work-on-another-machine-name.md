@@ -255,12 +255,18 @@ fixtures replay retained inputs directly. Rollback proof now includes canonical
 Project, provider input and Wave acquisition age. The persistent hierarchy, typed
 journal, bindings, follow-ups and cron still precede gate and review.
 `09709a05cc` removes provider Wave and Project display reconstruction.
-Accepted Project/Task projection now builds typed edits directly from retained
-fields; creation attachment and disposition reconciliation no longer require a
-provider object. Ownership and order checks use narrow evidence. The remaining
-persistence cut includes `pm_items`/`pm_projects` JSON, whole-observation comparison,
-secondary receipt readers and populated conversion. Work-watch includes the
-planning cadence. These consumer removals do not satisfy the persistent cut.
+`621b4b851b` makes accepted projection, creation attachment and disposition
+reconciliation consume typed fields. `f0932031e5` removes receipt-baseline object
+reconstruction, preserving independent prose revisions and active-issue deletion
+baselines. Work-watch includes the planning cadence.
+
+The next unit is persistent conversion together with its consumers (audit §§1–4):
+`linear_issue_evidence`, `project_accepted_planning` and receipt baselines still
+extract retained JSON; `put_project`/`put_item` still compare whole observations.
+Concrete Linear evidence must retain foreign/unmapped facts, contradictory ownership,
+independent membership/removal, partial fields and original ages without another
+writable Work hierarchy. Populated released-0.13.11 conversion, delayed updates and
+rollback remain unproved. Narrower readers alone do not complete this unit.
 
 Main #1522 entered at `7d9bf0a4d8`, adding Claude recorded-answer Flow settlement.
 That merge establishes no fresh planning gate acceptance and grants no replay of
@@ -386,6 +392,6 @@ Earlier focused proof: `9dbd6fc2d8`, `dfd3b80611`, `f025e9b7ab`,
 `dfa2cdafba`, `09709a05cc` in this plan. Persistence conversion, typed journal,
 bindings, follow-ups, cron, gate and review still precede republication.
 
-Checks (LF cleared): `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, CLI build, Project baseline (5), reteam (5), acquisition and mapping tests pass; `cargo test -p loopflow --lib planning`: 112 passed, stale-revision fixture repaired and rerun passed. Full gate remains.
+Checks: `git diff --check` and `lf context` pass October 11; memory/scratch fit both limits. Formatting, Clippy, CLI build and focused baseline/reteam/acquisition/planning passes remain at `3d8b939495` in this plan; unchanged source, no rerun. Full gate remains.
 
 Transport evidence: `0181133849` at this path.

@@ -34,12 +34,9 @@ are open. Earlier rationale: `5c5f6477cc:scratch/questions.md`, this heading.
 
 ## Repository selection assumptions — October 9
 
-Names contain no slash; paths use `/`, `./`, `../` or `~/`. `repo_root` must be
-absolute or home-relative, avoiding caller-cwd-dependent configuration. Explicit
-remote relative paths start at the remote login directory, not its saved repo.
-These lookup choices grant no shared identity or publication.
-Primary and stack-parent Task selectors now carry repository-scoped full IDs through
-dispatch; an unscoped ambiguous prefix still fails.
+Names resolve below repo_root; paths retain explicit placement. Primary/stack
+selectors carry repository-scoped IDs. Full path rules and retained ambiguity:
+`bd295866bb:scratch/questions.md`, this heading. Lookup grants no publication.
 
 ## Context budget
 
@@ -89,14 +86,9 @@ in the plan and findings.
 
 ## Reversible exact-input choices — October 8
 
-`desktop text/key` extend the existing pane event. Text rejects C0/C1 controls
-(including newline/Tab), since ordinary terminal paste can submit them outside
-bracketed-paste mode. Quotes, backslashes and Unicode remain literal; keys are
-explicit named press/release actions. Active IME composition is temporarily
-unavailable rather than discarded. This preserves Q3's existing-draft decision;
-multiline insertion needs terminal-mode proof before expanding this contract.
-Pre-input scratch: `/tmp/loo427-input-skDK4w/scratch/`; pre-compression scratch
-and working diff: `/tmp/loo427-compress-input-nryd8M/`.
+Literal input preserves the draft and rejects controls; Enter is separate and IME
+defers. Multiline input needs terminal-mode proof. Full choices and recovery paths:
+`bd295866bb:scratch/questions.md`, this heading; the plan retains current behavior.
 
 ## Reversible composed-opening choices — October 9
 

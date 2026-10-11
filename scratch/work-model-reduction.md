@@ -58,6 +58,9 @@ representation before deleting the old views. Domain ProjectStatus now belongs t
 `work/project.rs`. Optional Linear IDs remain bindings, never replacement domain IDs. Keep
 optimistic revisions, timestamps, historical iteration events and legacy mappings.
 The whole Task struct remains unsuitable for exchange because it contains local data.
+At `41378adacf`, `PmProject` also lacks authored description and accepted acquisition
+emits no `ProjectDescription` edit. Local persistence/Git fidelity and Linear
+in-place Markdown preservation are separate proofs, not end-to-end prose acquisition.
 
 ## 2. Delete the second local reading stack
 

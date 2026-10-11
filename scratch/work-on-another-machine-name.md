@@ -182,12 +182,31 @@ still refuse. The public edit fixture exposed a raw-SQL selection inconsistent
 with its journal; fixture setup now uses ordinary binding, not a production bypass.
 This is only the Project input boundary, not the full reader cut.
 
-Still required: remove ordinary PmProject/PmItem readers,
-complete provider acquisition/prose ownership and integration bindings, remove
-whole-model JSON patching and duplicate edit/journal vocabularies, then finish
-CLI/Desktop/config projections. The existing FollowThrough and cron reductions and
-the entire accepted deletion audit remain unfinished. No partial publication or
-review-readiness claim is authorized by this persistence cut.
+Reconciled against `41378adacf` on October 10: the Project input/persistence cut
+is complete, not the ordinary reader or Linear acquisition cut. `PmProject` still
+has no authored description; `project_accepted_planning` projects its criteria and
+summary but supplies no `ProjectDescription` edit. Boundary-aware Linear Markdown
+replacement preserves provider prose; it does not make that prose locally readable.
+The next Project cut needs canonical reads and explicit acquisition of authored
+prose, with partial responses preserving omissions and pending edits retaining
+baselines. Renaming `PmProject` cannot supply the missing field or delete the
+`plan_read.rs` identity-changing `COALESCE` joins.
+
+The earlier pass still includes Project readers/acquisition, concrete Linear
+bindings, FollowThrough replacement and cron unification. The full deletion audit
+then removes remaining provider hierarchy, whole-model patching, duplicate
+edit/journal vocabularies and CLI/Desktop projections. Each cut includes its
+consumers and preservation proof. Conditional retention needs a named retained
+fact, owner and populated conversion test; it is not an exemption from the audit.
+No partial publication or review-readiness claim follows from this checkpoint.
+
+Cron conversion must retain the installed owner independently of file location.
+Release's October 5 memory records both jobs installed under Infrastructure,
+including the release definition authored in the child; changing the list cannot
+reassign those receipts to the child. Its September 28 failure also requires a
+public command/Flow regression where an operation failure stays nonzero, not only
+parser/filter tests. Read coverage: the sole immediate child, Release, has both
+its GOAL and complete memory inspected; no child-specific history is moved here.
 
 The published transport baseline remains one typed transactional writer for local
 creation/edit, comments, disposition, selection/order and imports. Git capture shares
@@ -210,11 +229,13 @@ Earlier baseline detail: `c8fe4628a:scratch/work-on-another-machine-name.md`.
   cut. Regenerate them after the entire accepted reduction, before review-only
   republication. No readiness or landing follows from this persistence checkpoint.
 
-Checks: `cargo test -p loopflow --lib {project_content,project_markdown_,stored_workflows_use_the_same_owner}` and `--test local_planning {rotation,project_edits_save_offline_in_both_connection_modes}` pass (filters run separately); `cargo fmt --check`, `cargo build -p loopflow --bin lf`, and `cargo clippy --all-targets -- -D warnings` pass. Gate owns affected/materialized/Swift verification.
+Checks: `cargo test -p loopflow --lib {project_content,project_markdown_,stored_workflows_use_the_same_owner}` and `--test local_planning {rotation,project_edits_save_offline_in_both_connection_modes}` pass (filters run separately); `cargo fmt --check`, `cargo build -p loopflow --bin lf`, and `cargo clippy --all-targets -- -D warnings` pass. Gate owns affected/materialized/Swift verification; prose-only realignment: `git diff --check` passes, no product suites rerun.
 
-Context: authored memory/scratch fit. The generated Task launch seed and retained
-steers exceed the 16,000-token goal budget by 2,896 tokens at the pre-checkpoint inspection. The generated
-seed is not an authored source to trim. The complete manifest was inspected. Direction remains preserved.
+Context: authored memory/scratch fit. `lf context --skill realign` reports the
+generated Task seed and retained steers at approximately 18,887 tokens, 2,887 over its 16,000 limit.
+The complete launch source and manifest were inspected. Trimming authored notes
+cannot reduce that separate source; historical direction is preserved rather than
+rewritten to conceal the overage.
 
 ## Delete — do not maintain
 

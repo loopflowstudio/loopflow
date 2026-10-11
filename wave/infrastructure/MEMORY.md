@@ -631,17 +631,18 @@ Git. Outages buffer locally without fallback or publisher election. One typed
 writer owns local/imported fields; execution and attempts stay local. Preserve Git
 causality, losers and uncertain effects. Gate/installation remain unproved.
 
-Jack accepted the full One Work audit: one Project, direct Task fields, explicit
-Linear integration, typed criteria/comments, Tasks/comments replacing FollowThrough,
-one repository cron list, no duplicate readers/writers/provider hierarchies. Preserve
-historical evidence, schedule identity/timing and Machine ownership. Project fields/status are domain-owned; only Linear/migration decode Markdown.
-The [design](../../scratch/work-on-another-machine-name.md)
-owns remaining work. Republish #1491 only after the full reduction, for review;
-no landing, installation, live schedule activation or real Work export.
+Jack accepted the entire One Work audit: direct fields, Linear boundaries,
+typed criteria/comments, Tasks/comments replacing FollowThrough and one cron list.
+Conditional retention needs evidence; partial reduction is not review-ready. `41378adacf` removes public ProjectContent;
+PM readers/acquisition remain. Stored/Git prose and Linear Markdown preservation do not prove acquisition:
+`PmProject` lacks description.
 
-Historical recovery: `e37099e50`/`231e75898`; transport/synthetic Codex proofs:
-`ae96102580e:scratch/work-on-another-machine-name.md`. Source conversion cannot
-transfer installed schedule authority.
+Release's memory requires cron conversion to preserve installed ownership and
+operation failure exits, independently of authored location.
+The [design](../../scratch/work-on-another-machine-name.md) owns remaining work.
+Republish #1491 only after the full reduction, for review; no landing, installation,
+live schedule activation or real Work export. Historical recovery and transport
+proofs: `41378adacf:wave/infrastructure/MEMORY.md`, this heading.
 
 ## Planning and launch preservation (curated 2026-10-02)
 

@@ -761,3 +761,5 @@ strip links to its own site in a new tab.
 - Jack Heart: "or the CLI for shipping software with coding agents?" → set as the `x12` CLI heading, replacing "…for software engineering workflows with coding agents".
 
 - Jack Heart: "the workflow CLI for shipping... ?" → the `x12` CLI heading is "`lf`: the workflow CLI for shipping software with coding agents."
+
+- Jack Heart: "cut It cuts the branch, opens the pull request and gets it merged. One command says where an agent runs, on whose login, with which model, on which piece of work, and what it does." → removed from the `x12` CLI paragraph, which is now his one sentence.

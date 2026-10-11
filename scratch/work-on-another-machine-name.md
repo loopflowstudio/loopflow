@@ -188,14 +188,9 @@ still refuse. The public edit fixture exposed a raw-SQL selection inconsistent
 with its journal; fixture setup now uses ordinary binding, not a production bypass.
 This is only the Project input boundary, not the full reader cut.
 
-October 10 canonical-reader cut: selection, ensure/bind, Project edit/workflow,
-rotation results and Wave/roadmap summaries now use the canonical Project reader.
-`ProjectPlanning` and the public `planning_project(s)` reads are deleted. The
-CLI/Desktop summary no longer joins two Project inventories or exposes `work_id`;
-`id` is local, `linear_id` is the optional binding, and sync is required evidence.
-Readiness also returns local identity. The surviving reader orders by shared rank,
-creation time and ID rather than edit time. Provider adapters compare explicit
-bindings. Rotation retains original receipt bytes and local execution is unchanged.
+Canonical Project readers retain local IDs, optional Linear bindings, sync evidence
+and shared rank. Selection, rotation and CLI/Desktop no longer join inventories.
+Exact reader-cut evidence: `b4e54f7d44:scratch/work-on-another-machine-name.md`.
 
 `7e63c994d0` derives Task/Project save and rotation receipts from the writer's
 typed edits, deleting parallel JSON construction and writer-side PM reads.
@@ -251,10 +246,13 @@ Removing that table therefore requires a concrete replacement for those facts,
 not merely the accepted revision on Work. The same-revision rejection cases remain
 part of delivery acceptance.
 
-Ordinary snapshot confinement remains next: `ops/pm.rs::load_show_snapshot` returns
-`PmSnapshotRow`, and `lf/commands/waves.rs::validate_pm_portfolio` still reconstructs
-provider inventories. Canonical summaries alone have not removed these consumers.
-Retain cross-Wave ownership contradictions and independently unavailable Waves.
+The unused `pm_show` inventory API, DTO and `load_show_snapshot` are deleted.
+Its sole production consumer, Wave status with sync, now performs bounded refresh
+before the existing canonical status read. Acquisition returns no provider inventory;
+OAuth and archived-predecessor fixtures assert saved Work and retained history.
+`validate_pm_portfolio` still reconstructs provider inventories: its cross-Wave
+contradictions and independently unavailable Waves remain required. This cut does
+not complete snapshot confinement or remove private persistent observations.
 
 A separate source-confirmed mismatch remains in `require_planning_home`: both
 `task_refile` and chapter rotation reject a remotely placed Wave before their
@@ -392,11 +390,10 @@ still governs; no execution or delivery-attempt exchange is authorized.
   cut. Regenerate them after the entire accepted reduction, before review-only
   republication. No readiness or landing follows from this persistence checkpoint.
 
-Checks: `git diff --check` passes for this prose-only reconciliation; prior build/focused proofs remain recorded at `1f6ee6485b` here; broader verification belongs to gate.
+Checks: `cargo build -p loopflow --bin lf`, fmt, all-target Clippy, three OAuth refresh tests and archived-predecessor test pass with LF_* cleared; gate owns broader verification.
 
-Context: authored memory/scratch fit. `lf context --skill realign --json` reports
-the generated Task seed/steers/workspace above the 16,000-token limit; authored
-edits cannot remove this stored/generated input. No limit was raised.
+Context: authored memory/scratch fit. The generated Task seed/steers/workspace
+exceeds 16,000 tokens; authored edits cannot remove it. No limit was raised.
 
 Earlier transport evidence: `ae96102580e:scratch/work-on-another-machine-name.md`.
 The mixed model is superseded; its synthetic proofs establish no installed acceptance.

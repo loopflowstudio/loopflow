@@ -568,7 +568,7 @@ fn seed_provider_task(
             "team":{"id":"team-1"},"project":{"id":project,"name":"Chapter"}
         }));
         drop(state);
-        super::load_show_snapshot(repo, "product", PmRefresh::Force, &NullProgress).await?;
+        super::refresh_wave(repo, "product").await?;
         Ok(super::read_task_planning_async(repo, &id, PmRefresh::Force)
             .await?
             .item)
@@ -2033,9 +2033,7 @@ fn assert_completion_adopts_reopening(during_delivery: bool) {
                 provider.issues[0]["state"] = json!({"type":"started"});
                 mark_issue_updated(&mut provider.issues[0]);
                 drop(provider);
-                super::load_show_snapshot(repo, "product", PmRefresh::Force, &NullProgress)
-                    .await
-                    .unwrap();
+                super::refresh_wave(repo, "product").await.unwrap();
             });
         }
         crate::ops::task::task_complete(repo, task.id.as_str(), Some("Delivered locally")).unwrap();
@@ -4151,14 +4149,7 @@ fn planning_export_late_readback_preserves_newer_edits_and_inventory_identity() 
                                 )
                                 .unwrap();
                             // Inventory observes the committed creation before its response returns.
-                            super::load_show_snapshot(
-                                repo,
-                                "product",
-                                PmRefresh::Force,
-                                &NullProgress,
-                            )
-                            .await
-                            .unwrap();
+                            super::refresh_wave(repo, "product").await.unwrap();
                         }
                         _ => unreachable!(),
                     }

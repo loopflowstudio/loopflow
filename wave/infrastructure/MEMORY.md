@@ -631,8 +631,9 @@ Jack requires the full accepted deletion audit before review: Work, private
 observations, typed journal, bindings, ordinary follow-ups and one cron list.
 Renames are insufficient; gate/install unproved.
 
-`fe5262b093`: canonical readers; snapshots remain. Delivery requires accepted Work
-revision plus archive/membership eligibility. Foreign facts grant no ownership.
+The unused `pm_show` inventory is deleted; private snapshots remain.
+Delivery requires accepted Work revision plus archive/membership eligibility.
+Foreign facts grant no ownership.
 Shared refiling/rotation still reject nonlocal Wave placement; source finding,
 not reproduced or repaired. Planning writes must not inherit execution admission.
 

@@ -204,7 +204,7 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         let sibling = Wave::new(WaveId::new(), "sibling".into(), alias.display().to_string());
         store.create_wave(&sibling).await.unwrap();
         let snapshot: loopflow::pm::PmSnapshot =
-            serde_json::from_str(include_str!("../../../tests/fixtures/dto/pm_show.json")).unwrap();
+            serde_json::from_str(include_str!("fixtures/linear_snapshot.json")).unwrap();
         store
             .put_pm_snapshot(
                 PmSnapshotRow {

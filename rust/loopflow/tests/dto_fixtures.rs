@@ -1,9 +1,7 @@
 use loopflow::durable::TaskState;
 use loopflow::lf::commands::waves::{Evidence, RoadmapSnapshot, WaveDetailSnapshot};
-use loopflow::ops::pm::PmShowResult;
 use loopflow::work::wave::metrics::MetricPortfolioDto;
 
-const PM_SHOW: &str = include_str!("../../../tests/fixtures/dto/pm_show.json");
 const WAVE_DETAIL: &str = include_str!("../../../tests/fixtures/dto/wave_detail.json");
 const ROADMAP: &str = include_str!("../../../tests/fixtures/dto/roadmap_snapshot.json");
 const METRIC_PORTFOLIO: &str = include_str!("../../../tests/fixtures/dto/metric_portfolio.json");
@@ -81,47 +79,6 @@ fn task_comments_keep_authorship_and_require_every_field() {
         .unwrap()
         .remove("author");
     assert!(serde_json::from_value::<TaskComments>(missing).is_err());
-}
-
-#[test]
-fn pm_show_preserves_repository_team_and_project_ownership() {
-    let snapshot: PmShowResult = serde_json::from_str(PM_SHOW).unwrap();
-
-    assert_eq!(snapshot.wave, "survival/infrastructure");
-    assert_eq!(
-        snapshot.projects[0].initiative_ids,
-        ["initiative-infrastructure"]
-    );
-    assert_eq!(snapshot.projects[0].name, "Gmail");
-    assert_eq!(snapshot.projects[0].workflow, "feature");
-    assert_eq!(snapshot.projects[0].team_ids, ["team-loo"]);
-    assert_eq!(snapshot.items[0].identifier, "LOO-2");
-    assert_eq!(snapshot.items[0].state.as_deref(), Some("unstarted"));
-    assert_eq!(snapshot.items[0].completed_at, None);
-    assert_eq!(
-        snapshot.items[0].project_id.as_deref(),
-        Some("project-gmail")
-    );
-    assert_eq!(snapshot.items[0].team_id.as_deref(), Some("team-loo"));
-
-    let round_trip = serde_json::to_string(&snapshot).unwrap();
-    assert_eq!(
-        serde_json::from_str::<PmShowResult>(&round_trip).unwrap(),
-        snapshot
-    );
-}
-
-#[test]
-fn pm_show_preserves_an_unmapped_team_as_null() {
-    let mut fixture: serde_json::Value = serde_json::from_str(PM_SHOW).unwrap();
-    fixture["items"][0]["team_id"] = serde_json::Value::Null;
-
-    let snapshot: PmShowResult = serde_json::from_value(fixture.clone()).unwrap();
-    assert_eq!(snapshot.items[0].team_id, None);
-    assert_eq!(
-        serde_json::to_value(&snapshot.items[0]).unwrap(),
-        fixture["items"][0]
-    );
 }
 
 #[test]

@@ -250,9 +250,10 @@ Use the store's canonical Task selector for local Task ID, provider ID and issue
 identifier. Perform selected-transport acquisition where needed, then return that
 same Task. Delete overlapping resolution wrappers and PM-context construction
 that only selects another domain reader. Retain bounded refresh/lock behavior;
-`read_pm_snapshot`, `plan_snapshot_read`, `load_show_snapshot` and
-`fetch_pm_snapshot_with_store` need consolidation with the cache removal rather
-than new wrappers around renamed snapshots.
+The unused `pm_show` inventory/DTO and `load_show_snapshot`/`read_pm_snapshot`
+are deleted. Status sync refreshes before its canonical read; acquisition returns
+no inventory. `plan_snapshot_read` still governs Task acquisition.
+`validate_pm_portfolio` and private acquisition inventory remain to reduce.
 
 `PmResolvedTask`, both `pm_resolve_task` wrappers and `ResolvedTask` are deleted;
 `ops/task_pm.rs` is removed. Acquisition validates concrete Linear ownership and

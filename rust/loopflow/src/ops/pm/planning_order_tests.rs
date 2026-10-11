@@ -6,9 +6,8 @@ use serde_json::json;
 
 use super::{mark_issue_updated, seed_provider_task, with_planning_task, PlanningState};
 use crate::durable::WorkRef;
+use crate::ops::pm::refresh_wave;
 use crate::ops::pm::test_fixture::Fixture;
-use crate::ops::pm::{load_show_snapshot, PmRefresh};
-use crate::ops::NullProgress;
 use crate::pm::PmItemUpdate;
 use crate::store::Store;
 use crate::work::task::Task;
@@ -41,9 +40,7 @@ fn with_order(
                 mark_issue_updated(issue);
             }
             drop(provider);
-            load_show_snapshot(repo, "product", PmRefresh::Force, &NullProgress)
-                .await
-                .unwrap();
+            refresh_wave(repo, "product").await.unwrap();
         });
         test(runtime, fixture, repo, tasks, state);
     });
@@ -268,9 +265,7 @@ fn planning_order_acquisition_during_write_preserves_newer_save_and_scalar_edits
                     provider.issues[0]["title"] = json!("Inbound title during reorder");
                     mark_issue_updated(&mut provider.issues[0]);
                 }
-                load_show_snapshot(repo, "product", PmRefresh::Force, &NullProgress)
-                    .await
-                    .unwrap();
+                refresh_wave(repo, "product").await.unwrap();
                 assert_eq!(
                     local_order(&fixture.store, &tasks),
                     ["issue-3", "issue-4", "issue-1", "issue-2"]
@@ -395,9 +390,7 @@ fn planning_order_equal_keys_preserve_groups_through_intermediate_moves() {
                     mark_issue_updated(issue);
                 }
             }
-            load_show_snapshot(repo, "product", PmRefresh::Force, &NullProgress)
-                .await
-                .unwrap();
+            refresh_wave(repo, "product").await.unwrap();
             reorder(&fixture.store, &tasks[3], 1);
             deliver(&fixture.store, repo, &tasks[0]).await.unwrap();
             assert_eq!(

@@ -612,24 +612,26 @@ async fn archived_predecessor_is_history_even_when_linear_still_says_started() {
     PM_TEST_CONTEXT
         .scope(home, async {
             let ctx = resolve_context(&repo, "a").await.unwrap();
-            let snapshot = crate::ops::pm::refresh_pm_snapshot(&repo, "a", &ctx)
+            crate::ops::pm::refresh_pm_snapshot(&repo, "a", &ctx)
                 .await
                 .unwrap();
-            assert!(snapshot.projects.iter().any(
-                |project| project.id == "a-current" && project.status == ProjectStatus::Started
-            ));
+            let store = super::pm_store().await.unwrap();
+            let projects = store.list_projects(None).await.unwrap();
+            assert!(projects.iter().any(|project| project
+                .linear_id
+                .as_ref()
+                .map(|id| id.as_str())
+                == Some("a-current")
+                && project.status == ProjectStatus::Started));
             assert_eq!(
-                snapshot
-                    .projects
+                projects
                     .iter()
-                    .find(|project| project.id == "00000000-0000-4000-8000-000000000001")
+                    .find(|project| project.linear_id.as_ref().map(|id| id.as_str())
+                        == Some("00000000-0000-4000-8000-000000000001"))
                     .unwrap()
                     .status,
                 ProjectStatus::Completed
             );
-            assert!(snapshot.items.iter().any(|item| item.id == "a-started"
-                && item.project_id.as_deref() == Some("00000000-0000-4000-8000-000000000001")));
-            let store = super::pm_store().await.unwrap();
             let retained = store.get_task(&task.id).await.unwrap().unwrap();
             assert_eq!(retained.id, task.id);
             assert_eq!(retained.project_id, task.project_id);

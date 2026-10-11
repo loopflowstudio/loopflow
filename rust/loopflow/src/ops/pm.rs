@@ -1,9 +1,7 @@
 //! Provider planning operations shared by Task, Wave, and repository commands.
 //!
-//! Linear owns authored Project content and Tasks. `lf repo refresh` accepts
-//! provider facts and projects them into SQLite atomically. Reads serve that
-//! snapshot and only reach Linear through a bounded staleness policy
-//! (see `load_show_snapshot`).
+//! Work owns authored Project content and Tasks. Linear refresh accepts provider
+//! facts through the shared writer; ordinary readers consume saved Work.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::OpenOptions;
@@ -59,12 +57,6 @@ pub struct PmInitResult {
     pub team_created: bool,
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct PmShowOptions {
-    pub wave: Option<String>,
-    pub refresh: PmRefresh,
-}
-
 /// How planning reads reconcile the local snapshot with Linear before reading.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PmRefresh {
@@ -75,16 +67,6 @@ pub enum PmRefresh {
     Force,
     /// Never touch the network; serve the cache as-is (the default for status reads).
     Never,
-}
-
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct PmShowResult {
-    pub wave: String,
-    pub provider: String,
-    pub initiative: String,
-    pub synced_at: i64,
-    pub projects: Vec<LinearProject>,
-    pub items: Vec<PmItem>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -619,56 +601,13 @@ const PM_HARD_STALE_SECS: i64 = 7 * 24 * 60 * 60; // 1 week
 /// Ceiling on an opportunistic refresh; exceeding it counts as a failure.
 const PM_REFRESH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
-fn missing_snapshot_error(wave: &str) -> OpsError {
-    OpsError::Message(format!(
-        "wave/{wave} has no local PM snapshot. Run `lf repo refresh {wave}`."
-    ))
-}
-
-pub(crate) fn format_age(secs: i64) -> String {
-    let secs = secs.max(0);
-    if secs < 60 {
-        "just now".to_string()
-    } else if secs < 60 * 60 {
-        format!("{}m", secs / 60)
-    } else if secs < 24 * 60 * 60 {
-        format!("{}h", secs / (60 * 60))
-    } else {
-        format!("{}d", secs / (24 * 60 * 60))
-    }
-}
-
-async fn snapshot_row(repo: &Path, wave: &str) -> OpsResult<Option<PmSnapshotRow>> {
-    let store = pm_store().await?;
-    let locator = crate::work::wave::WaveLocator::discover(repo, wave)
-        .map_err(|error| OpsError::Message(error.to_string()))?;
-    let Some(wave) = store
-        .get_wave_at(&locator)
-        .await
-        .map_err(|err| OpsError::Message(format!("failed to read Wave registry: {err}")))?
-    else {
-        return Ok(None);
-    };
-    store
-        .pm_snapshot(wave.id())
-        .await
-        .map_err(|err| OpsError::Message(format!("failed to read PM snapshot: {err}")))
-}
-
-async fn read_pm_snapshot(repo: &Path, wave: &str) -> OpsResult<PmSnapshotRow> {
-    snapshot_row(repo, wave)
-        .await?
-        .ok_or_else(|| missing_snapshot_error(wave))
-}
-
 /// Refresh from Linear, bounded by `PM_REFRESH_TIMEOUT`. A timeout, an auth
-/// failure, or any network error surfaces as `Err` so callers can fall back to
-/// the cache.
-async fn try_timed_refresh(repo: &Path, wave: &str) -> OpsResult<PmSnapshotRow> {
+/// failure, or any network error surfaces as `Err`; saved Work remains intact.
+pub(crate) async fn refresh_wave(repo: &Path, wave: &str) -> OpsResult<()> {
     let work = async {
         let ctx = resolve_context(repo, wave).await?;
         refresh_pm_snapshot(repo, wave, &ctx).await?;
-        read_pm_snapshot(repo, wave).await
+        Ok(())
     };
     match tokio::time::timeout(PM_REFRESH_TIMEOUT, work).await {
         Ok(result) => result,
@@ -699,68 +638,6 @@ fn plan_snapshot_read(mode: PmRefresh, age: Option<i64>) -> SnapshotPlan {
                 hard: age >= PM_HARD_STALE_SECS,
             },
             None => SnapshotPlan::Refresh { hard: true },
-        },
-    }
-}
-
-/// Resolve the snapshot to serve, applying the requested refresh mode.
-///
-/// `Never` serves the cache untouched. `Force` always refreshes and errors if it
-/// cannot. `Auto` serves a fresh (<1h) cache without touching the network,
-/// refreshes past that, and on failure falls back to the cache — except a
-/// hard-stale (>1w) snapshot that cannot refresh is an error, since serving a
-/// week-old snapshot silently would mislead.
-async fn load_show_snapshot(
-    repo: &Path,
-    wave: &str,
-    mode: PmRefresh,
-    progress: &impl Progress,
-) -> OpsResult<PmSnapshotRow> {
-    let existing = snapshot_row(repo, wave).await?;
-    let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    let age = existing.as_ref().map(|row| now - row.synced_at);
-
-    let hard = match plan_snapshot_read(mode, age) {
-        SnapshotPlan::ServeCache => return existing.ok_or_else(|| missing_snapshot_error(wave)),
-        SnapshotPlan::Refresh { hard } => hard,
-    };
-
-    match age {
-        Some(age) => progress.status(&format!(
-            "wave/{wave} PM snapshot is {} stale; refreshing from Linear",
-            format_age(age)
-        )),
-        None => progress.status(&format!(
-            "wave/{wave} has no local PM snapshot; fetching from Linear"
-        )),
-    }
-
-    match try_timed_refresh(repo, wave).await {
-        Ok(row) => Ok(row),
-        Err(err) => match existing {
-            Some(row) if !hard => {
-                progress.status(&format!(
-                    "PM refresh failed ({err}); showing cached snapshot from {} ago",
-                    format_age(now - row.synced_at)
-                ));
-                Ok(row)
-            }
-            Some(_) => {
-                let reason = if mode == PmRefresh::Force {
-                    format!("could not refresh wave/{wave} from Linear: {err}")
-                } else {
-                    format!(
-                        "wave/{wave} PM snapshot is over a week stale and refresh failed: {err}"
-                    )
-                };
-                Err(OpsError::Message(format!(
-                    "{reason}. Retry with `lf repo refresh {wave}` after addressing the reported cause."
-                )))
-            }
-            None => Err(OpsError::Message(format!(
-                "{}; refresh failed: {err}",
-                missing_snapshot_error(wave)
-            ))),
         },
     }
 }
@@ -856,11 +733,7 @@ pub(crate) async fn lock_wave_planning(wave: &Wave) -> OpsResult<Arc<crate::stor
     ))
 }
 
-pub(crate) async fn refresh_pm_snapshot(
-    repo: &Path,
-    wave: &str,
-    ctx: &PmContext,
-) -> OpsResult<PmSnapshot> {
+pub(crate) async fn refresh_pm_snapshot(repo: &Path, wave: &str, ctx: &PmContext) -> OpsResult<()> {
     let store = pm_store().await?;
     let registered = crate::work::wave::ensure_wave_row(&store, repo, wave)
         .await
@@ -875,7 +748,7 @@ pub(crate) async fn refresh_pm_snapshot_locked(
     ctx: &PmContext,
     store: &Store,
     acquisition: Arc<crate::store::PlanningLocks>,
-) -> OpsResult<PmSnapshot> {
+) -> OpsResult<()> {
     let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
     let snapshot = fetch_pm_snapshot_with_store(repo, wave.slug(), ctx, store).await?;
     store
@@ -885,13 +758,13 @@ pub(crate) async fn refresh_pm_snapshot_locked(
                 provider: "linear".to_string(),
                 initiative: ctx.initiative.clone(),
                 synced_at: observed_at,
-                snapshot: snapshot.clone(),
+                snapshot,
             },
             Some(acquisition),
         )
         .await
         .map_err(|err| OpsError::Message(format!("failed to store PM snapshot: {err}")))?;
-    Ok(snapshot)
+    Ok(())
 }
 
 // ── init ────────────────────────────────────────────────────────────
@@ -1004,34 +877,6 @@ async fn pm_init_async(
         team_id: team.id,
         team_key: team.key,
         team_created: team.created,
-    })
-}
-
-// ── show ────────────────────────────────────────────────────────────
-
-pub fn pm_show(
-    repo: &Path,
-    options: &PmShowOptions,
-    progress: &impl Progress,
-) -> OpsResult<PmShowResult> {
-    block_on_pm(pm_show_async(repo, options, progress))
-}
-
-pub(crate) async fn pm_show_async(
-    repo: &Path,
-    options: &PmShowOptions,
-    progress: &impl Progress,
-) -> OpsResult<PmShowResult> {
-    let wave = resolve_wave(options.wave.as_deref())?;
-    let row = load_show_snapshot(repo, &wave, options.refresh, progress).await?;
-    require_linear_provider(&row.provider)?;
-    Ok(PmShowResult {
-        wave,
-        provider: "linear".into(),
-        initiative: row.initiative,
-        synced_at: row.synced_at,
-        projects: row.snapshot.projects,
-        items: row.snapshot.items,
     })
 }
 

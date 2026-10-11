@@ -917,15 +917,10 @@ pub fn sync_planning(
 
 pub fn refresh_status(wave: Option<&str>) -> Result<String> {
     let repo = crate::repo::working_directory()?;
-    let result = crate::ops::pm::pm_show(
-        &repo,
-        &crate::ops::pm::PmShowOptions {
-            wave: planning_wave(&repo, wave)?,
-            refresh: crate::ops::pm::PmRefresh::Force,
-        },
-        &crate::ops::NullProgress,
-    )?;
-    Ok(result.wave)
+    let wave =
+        planning_wave(&repo, wave)?.ok_or_else(|| anyhow::anyhow!("Select a Wave to refresh"))?;
+    tokio::runtime::Runtime::new()?.block_on(crate::ops::pm::refresh_wave(&repo, &wave))?;
+    Ok(wave)
 }
 
 pub fn run_repo(cmd: &RepoCommand) -> Result<()> {

@@ -243,6 +243,11 @@ require Linear at any of these boundaries.
 
 ## Select Git planning
 
+This build implements the enrollment baseline below. LOO-412 replaces it with one
+configured transport per repository; that unmerged configuration path is not
+included here. Manual per-Wave enrollment is superseded direction, and mixed
+Linear/Git exchange is not a target. `lf planning status` and key recovery remain.
+
 ```bash
 lf planning key --new               # once; prints the user key to recover elsewhere
 lf planning key --recover <uuid>    # on another machine, instead of --new
@@ -900,7 +905,7 @@ and survive automatic pruning. Memory updates do not require PRs or a schedule.
 lf machine add mini --repo '~/src/project'
 lf machine status mini
 lf machine connect mini codex work@example.com
-lf --machine mini --repo project session list
+lf --machine mini --repo loopflow session list
 ```
 
 `--machine <label-or-id>` runs the entire command on that machine. Commands without

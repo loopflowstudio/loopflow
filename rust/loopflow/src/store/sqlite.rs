@@ -137,9 +137,22 @@ pub(crate) fn read_nonterminal_task_worktrees(path: &Path) -> StoreResult<Vec<Pa
     )?;
     crate::performance::observe_sqlite(&conn);
     conn.execute_batch("PRAGMA query_only = ON; PRAGMA busy_timeout = 5000;")?;
-    let mut statement = conn.prepare(&format!(
-        "SELECT t.worktree FROM tasks t WHERE {}",
+    // This guard reads the installed release without migrating it. Its completion
+    // owner may still be the Workflow, rather than the candidate's planning field.
+    let planning_completion: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('tasks') WHERE name='planning_completed')",
+        [],
+        |row| row.get(0),
+    )?;
+    let open = if planning_completion {
         durable::task_open_sql("t")
+    } else {
+        "t.abandoned_at IS NULL AND NOT EXISTS(SELECT 1 FROM task_workflows wf \
+         WHERE wf.task_id=t.id AND wf.node='end' AND wf.edge IS NULL)"
+            .to_owned()
+    };
+    let mut statement = conn.prepare(&format!(
+        "SELECT t.worktree FROM tasks t WHERE t.worktree IS NOT NULL AND ({open})"
     ))?;
     let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
     rows.map(|row| row.map(PathBuf::from).map_err(StoreError::from))

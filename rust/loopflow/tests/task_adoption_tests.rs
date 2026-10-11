@@ -302,7 +302,7 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
                 "agent: claude\npm:\n  provider: linear\n  linear_team: another-team\n",
             )
             .unwrap();
-            let output = run(repo.path(), &["-b", "--task", "FIX-1", "run", "adoption"]);
+            let output = run(repo.path(), &["-b", "--task", "FIX-1", "flow", "adoption"]);
             assert!(
                 output.status.success(),
                 "{}",

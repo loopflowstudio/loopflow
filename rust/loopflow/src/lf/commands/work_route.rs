@@ -280,7 +280,17 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
         let first = TaskId::parse("task_abcd1234400080000000000000000001").unwrap();
         let second = TaskId::parse("task_abcd1235400080000000000000000002").unwrap();
-        for (repo, id) in [("/selected", &first), ("/other", &second)] {
+        let selected_path = home.path().join("selected");
+        let other_path = home.path().join("other");
+        std::fs::create_dir(&selected_path).unwrap();
+        std::fs::create_dir(&other_path).unwrap();
+        let selected_path = selected_path.canonicalize().unwrap();
+        let other_path = other_path.canonicalize().unwrap();
+        let selected_repo = selected_path.to_str().unwrap();
+        for (repo, id) in [
+            (selected_repo, &first),
+            (other_path.to_str().unwrap(), &second),
+        ] {
             let project = store.ensure_wave_project(repo, "inbox").unwrap();
             store
                 .create_task(&NewTask {
@@ -292,9 +302,9 @@ mod tests {
                 })
                 .unwrap();
         }
-        let prior = store.repository_id("/selected").unwrap().unwrap();
+        let prior = store.repository_id(selected_repo).unwrap().unwrap();
         let selected = RepositoryId::new();
-        store.bind_repository("/selected", &selected).unwrap();
+        store.bind_repository(selected_repo, &selected).unwrap();
         let cli = Cli::try_parse_from(["lf", "--repository", prior.as_str()]).unwrap();
         assert_eq!(
             resolve_task(&store, &cli, "abcd").unwrap(),

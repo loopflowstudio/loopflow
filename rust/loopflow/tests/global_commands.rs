@@ -1878,7 +1878,7 @@ fn task_move_explain_validates_the_captured_graph_without_moving_or_reconciling(
         "succeeded",
     );
     db.execute(
-        "UPDATE task_workflows SET edge=0,process_lfid=?1 WHERE task_id=?2",
+        "UPDATE task_workflows SET edge=0,lf_process_id=?1 WHERE task_id=?2",
         rusqlite::params![process, registered.task.id.as_str()],
     )
     .unwrap();
@@ -1910,7 +1910,7 @@ fn task_move_explain_validates_the_captured_graph_without_moving_or_reconciling(
     );
     assert_eq!(
         preview["action"],
-        serde_json::json!({"workflow":"captured","from":{"kind":"edge","edge":0,"process_lfid":process,"running":false},"to":"start","reason":"Restart Workflow"})
+        serde_json::json!({"workflow":"captured","from":{"kind":"edge","edge":0,"lf_process_id":process,"running":false},"to":"start","reason":"Restart Workflow"})
     );
     assert_eq!(preview["impediments"], serde_json::json!([]));
     assert_eq!(

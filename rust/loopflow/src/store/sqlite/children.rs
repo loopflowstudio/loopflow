@@ -1990,12 +1990,13 @@ impl SqliteStore {
             insert_task_row(&tx, task)?;
         } else {
             tx.execute(
-                "UPDATE tasks SET worktree=?2,workspace_slug=?3,agent=?4,branch=?5,base_commit=?6,parent_pr_id=?7 WHERE id=?1",
+                "UPDATE tasks SET worktree=?2,workspace_slug=?3,agent=?4,branch=?5,base_commit=?6,parent_pr_id=?7,checkout_machine_id=?8 WHERE id=?1",
                 params![
                     task.id.as_str(),
                     task.worktree.as_ref().map(|p| p.display().to_string()),
                     task.workspace_slug,
-                    task.agent, task.branch, task.base_commit, task.parent_pr_id.as_ref().map(|id| id.as_str())
+                    task.agent, task.branch, task.base_commit, task.parent_pr_id.as_ref().map(|id| id.as_str()),
+                    task.worktree.as_ref().map(|_| super::durable::map_local_machine(&tx).map(|machine| machine.id.to_string())).transpose()?
                 ],
             )?;
         }
@@ -2054,7 +2055,10 @@ mod local_planning_tests {
             .unwrap();
         let checkout = store.task_checkout(&task.id).unwrap().unwrap();
         assert_eq!(checkout.task_id, task.id);
-        assert_eq!(checkout.issue_identifier, task.plan.identifier);
+        assert_eq!(
+            checkout.issue_identifier,
+            format!("lf-{}", task.id.as_str().trim_start_matches("task_"))
+        );
         assert_eq!(
             checkout.worktree,
             std::path::Path::new("/retained/checkout")

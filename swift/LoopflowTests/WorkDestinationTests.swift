@@ -1663,9 +1663,8 @@ private actor LinkedDestinationBarrier {
     func release(_ key: String) { pending.removeValue(forKey: key)?.resume() }
 }
 
-#endif
-
 private actor DestinationReadCounter {
     private var count = 0
     func next() -> Int { count += 1; return count }
 }
+#endif

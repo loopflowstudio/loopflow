@@ -4469,7 +4469,6 @@ mod tests {
         complete(&target, &task);
         let delivery = target.pending_task_state(&task).unwrap().unwrap();
         let workflow = target.workflow(&task).unwrap();
-        let state = target.task_state(&task).unwrap();
         // Same provider state, a newer concurrent fact: peer policy selects Linear.
         row.snapshot.items[0].revision = Some("2026-10-08T11:00:00Z".into());
         row.synced_at += 1;
@@ -4500,7 +4499,11 @@ mod tests {
             row.snapshot.items[0].state
         );
         assert_eq!(target.workflow(&task).unwrap(), workflow);
-        assert_eq!(target.task_state(&task).unwrap(), state);
+        // Accepted reopening changes planning status, not the captured Workflow.
+        assert_eq!(
+            target.task_state(&task).unwrap(),
+            crate::durable::TaskState::NotReady
+        );
         let revision = target.revisions().unwrap();
         import(&target, "/target", "observed", &observed);
         assert_eq!(target.revisions().unwrap(), revision);
@@ -6124,7 +6127,7 @@ mod tests {
             )
             .unwrap();
             conn.execute(
-                "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,?2,1)",
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?2,1)",
                 params![driver, TraceId::new()],
             )
             .unwrap();
@@ -7442,7 +7445,7 @@ mod tests {
                 [task.as_str()],
             )
             .unwrap();
-            conn.execute("INSERT INTO processes(lfid,trace_id,started_at,completed_at,outcome) VALUES(?1,?2,1,2,'succeeded')",params![driver,TraceId::new()]).unwrap();
+            conn.execute("INSERT INTO processes(id,trace_id,started_at,completed_at,outcome) VALUES(?1,?2,1,2,'succeeded')",params![driver,TraceId::new()]).unwrap();
         }
         let definition = crate::workflow::WorkflowDefinition {
             name: "review".into(),

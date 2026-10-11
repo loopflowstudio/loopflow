@@ -1344,11 +1344,12 @@ mod tests {
             .execute_batch(
                 "CREATE TABLE tasks (
                     id TEXT PRIMARY KEY,
-                    worktree TEXT NOT NULL,
+                    worktree TEXT,
                     abandoned_at INTEGER,
                     planning_completed INTEGER
                  );
                  CREATE TABLE task_workflows (task_id TEXT PRIMARY KEY, node TEXT NOT NULL, edge INTEGER);
+                 INSERT INTO tasks VALUES ('unplaced', NULL, NULL, NULL);
                  INSERT INTO tasks VALUES ('running', '/repo.running', NULL, NULL);
                  INSERT INTO tasks VALUES ('waiting', '/repo.waiting', NULL, NULL);
                  INSERT INTO tasks VALUES ('completed', '/repo.completed', NULL, 1);
@@ -1369,6 +1370,30 @@ mod tests {
                 PathBuf::from("/repo.waiting")
             ]
         );
+    }
+
+    #[test]
+    fn reads_released_task_ownership_without_migrating_or_losing_unknown_work() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("released.db");
+        let connection = rusqlite::Connection::open(&path).unwrap();
+        connection
+            .execute_batch(include_str!(
+                "../../tests/fixtures/migrations/task_ownership_released.sql"
+            ))
+            .unwrap();
+        drop(connection);
+        let before = std::fs::read(&path).unwrap();
+        let mut paths = read_nonterminal_task_worktrees(&path).unwrap();
+        paths.sort();
+        assert_eq!(
+            paths,
+            vec![
+                PathBuf::from("/repo.running"),
+                PathBuf::from("/repo.unknown")
+            ]
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), before);
     }
 
     #[test]

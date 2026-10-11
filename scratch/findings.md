@@ -99,3 +99,38 @@ work. Product has no child Markdown/memories; relevant Infrastructure planning
 sections were read, not its entire unrelated history.
 
 Check: `git diff --check` — PASS (prose-only reconciliation); final affected gate remains with queue on the accepted baseline, with no reusable shipping pass claimed.
+
+
+## Queue gate — October 10, not ready to ship
+
+`20d9ba0d33` preserved incoming scratch before `lf sync`; sync reported success,
+with main already integrated. No newer LOO-412 replacement was imported. Jack
+Heart's shipping approval and deferred owners remain unchanged; these are actual
+queue failures, not a restored demo hold.
+
+The gate repaired nested Tokio startup in foreground planning, PR-dependent file
+comparison, read-only ownership against released schemas, missing repository
+revision triggers, and creation-receipt validation omitting captured due dates.
+Current Process IDs, Machine provenance, completion expectations, command examples,
+preview channels and generated architecture docs were reconciled. Failed repair
+attempts remain in the logs; ineffective Workflow/catalog/collision/endpoint fixture edits were
+removed rather than treated as fixes. No native acceptance is established.
+
+Check: `uv run python scripts/test.py --reuse-passing` — FAIL; initial Rust 2517 passed/87 failed/18 skipped, Python 402 passed/6 failed, website 75 passed/1 failed; app built, headless TaskCapture/TaskFlow proofs failed and a stalled owned Swift helper was terminated. Logs: `.lf/tmp/gate/run-83045/`; failed receipt `20261011T034502Z-83045-733561ea.json` in Git common-dir `loopflow/pre-land/runs/changed`, with exact starting tree/plan hashes; no reusable pass.
+Check: materialized nextest repair filter (`/tmp/loo427-repair-filter.txt`) plus Session lifecycle — 75 passed/31 failed; `/tmp/loo427-rust-repair.log`. Subsequent creation/Machine/migration repair slice — 48 passed/3 failed; `/tmp/loo427-rust-repair2.log`. These are focused repairs, not another full gate.
+Check: isolated architecture/checkout-refresh/gate-runner Python — 85 passed; self-sandbox observation and runner checks — 46 passed; portable architecture browser proof — 1 passed (`/tmp/loo427-{python-repair2,repair-python,website-repair}.log`). macOS nested sandboxing is replaced by a separate self-isolated proof in gate/CI.
+Check: headless Work navigation/workspace/destination/pane/multiplexer/files/DTO selection — 211 passed; `/tmp/loo427-swift-focused.log`. Native/provider/configured-SSH proof stays with LOO-391.
+
+Remaining failures include Wave relocation's repository-locator uniqueness,
+provider-membership invalidation, the partial local-planning migration fixture,
+Workflow selection/catalog and retired command fixtures, shared-location preview
+expectations, association/readback presentation, work-watch publication errors,
+and the unsupported headless OpenCode fixture. TaskCapture and TaskFlow headless
+views still assume retired automatic Session/checkout behavior. Do not ship on
+these focused passes. Linux-only reconnect and the uncompleted installation
+matrix remain with capable CI; the disposable Docker migration pair and repaired
+Task adoption pass, not a host installation or a full installation-matrix pass
+(`/tmp/loo427-installation{,-repair}.log`).
+
+Check: final three repaired Rust checks — 3 passed (`/tmp/loo427-rust-repair3.log`); WorkDestination boundary repair — 49 passed; Swift boundaries and architecture — PASS; fmt/Clippy and affected Ruff — PASS. Nineteen previously failing Rust cases remain without a confirming pass (including the duplicate-provider case not rerun after creation validation was repaired); no final-tree gate pass is claimed.
+Context: authored memory 15,997/16,000 tokens and scratch remain within budget. Installed generated goal still exceeds its token/byte limits; no history deletion, installation or budget increase was used to conceal it.

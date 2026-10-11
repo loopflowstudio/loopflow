@@ -686,6 +686,8 @@ def test_git_outcomes_keep_failed_and_unfinished_children(tmp_path: Path) -> Non
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS sandbox boundary")
 def test_checkout_observation_preserves_read_boundary_and_detects_changes(tmp_path: Path) -> None:
+    if os.environ.get("LOOPFLOW_NETWORK_ISOLATED"):
+        pytest.skip("macOS cannot nest sandboxes; gate runs this self-isolating proof separately")
     tmp_path = tmp_path.resolve()
     checkout = tmp_path / "checkout"
     checkout.mkdir()

@@ -397,7 +397,7 @@ fn status_reports_version_mismatch_and_unreachable_without_prompting() {
         .contains("identity probe failed"));
     let connect = fixture.run(&["--machine", "mini", "session", "list"]);
     assert!(!connect.status.success());
-    assert!(String::from_utf8_lossy(&connect.stderr).contains("versions differ"));
+    assert!(String::from_utf8_lossy(&connect.stderr).contains("unknown machine command"));
     executable(
         &fixture.root.path().join("bin/ssh"),
         "#!/bin/sh\necho 'key unavailable' >&2\nexit 255\n",
@@ -411,7 +411,7 @@ fn status_reports_version_mismatch_and_unreachable_without_prompting() {
 }
 
 #[test]
-fn unregistered_and_changed_machines_cannot_receive_a_command() {
+fn explicit_machine_dispatch_requires_registration_but_does_not_preflight_identity() {
     let fixture = Machines::new();
     let unregistered = fixture.run(&["--machine", "mini", "session", "list"]);
     assert!(!unregistered.status.success());
@@ -422,9 +422,8 @@ fn unregistered_and_changed_machines_cannot_receive_a_command() {
         "home_22222222222222222222222222222222",
     );
     let output = fixture.run(&["--machine", "mini", "session", "list"]);
-    assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("identity changed"));
-    assert!(!String::from_utf8_lossy(&output.stdout).contains("remote cwd"));
+    assert_success(&output);
+    assert!(String::from_utf8_lossy(&output.stdout).contains("remote cwd"));
     assert!(!fixture
         .run(&["machine", "observe", "anything", "mini"])
         .status
@@ -901,11 +900,11 @@ fn remote_preview_resolves_repository_on_selected_machine_without_launch_effects
         );
         assert_eq!(report["resolution"]["task"]["state"], "unbound");
         assert_eq!(report["input"]["checkout"], selected_path.to_str().unwrap());
-        assert!(report["input"]["system_prompt"]
+        assert!(report["input"]["task_prompt"]
             .as_str()
             .unwrap()
             .contains("remote-only marker"));
-        assert!(report["input"]["system_prompt"]
+        assert!(report["input"]["task_prompt"]
             .as_str()
             .unwrap()
             .contains("literal 'draft'; $(false)"));
@@ -1166,7 +1165,7 @@ fn flow_context_preview_reads_selected_machine_graph_without_executing_steps() {
     let inputs = input["inputs"].as_array().unwrap();
     assert_eq!(inputs.len(), 5);
     assert_eq!(inputs[0]["state"], "current");
-    let prompt = inputs[0]["input"]["system_prompt"].as_str().unwrap();
+    let prompt = inputs[0]["input"]["task_prompt"].as_str().unwrap();
     assert!(prompt.contains("Remote router input."));
     assert!(prompt.contains("literal 'input'; $(false)"));
     assert!(prompt.contains("Repair the work"));

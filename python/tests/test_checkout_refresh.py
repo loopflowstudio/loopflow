@@ -48,6 +48,7 @@ def checkout(tmp_path: Path) -> tuple[Path, Path, dict[str, str]]:
         key: value for key, value in os.environ.items() if not key.startswith(("LF_", "LOOPFLOW_"))
     }
     env["LF_HOME"] = str(tmp_path / "lf-home")
+    env["LF_BIN"] = str(LF)
     env["GIT_CONFIG_NOSYSTEM"] = "1"
     return main, author, env
 
@@ -344,9 +345,7 @@ def test_fetch_failure_preserves_state_and_later_invocation_catches_up(checkout:
     (main / "base.txt").write_text("caller edit\n")
     remote = _run(main, "git", "remote", "get-url", "origin")
     _run(main, "git", "remote", "set-url", "origin", str(main / "unavailable"))
-    result = subprocess.run(
-        [str(LF), "sync"], cwd=main, env=env, capture_output=True, text=True
-    )
+    result = subprocess.run([str(LF), "sync"], cwd=main, env=env, capture_output=True, text=True)
     assert result.returncode != 0
     assert "fetch" in result.stderr
     assert _run(main, "git", "rev-parse", "HEAD") == before
@@ -364,9 +363,7 @@ def test_main_merge_conflict_restores_original_history_and_edits(checkout: Check
     _commit(author, "base.txt", "upstream conflict\n")
     _run(author, "git", "push", "origin", "main")
     (main / "notes.txt").write_text("caller notes\n")
-    result = subprocess.run(
-        [str(LF), "sync"], cwd=main, env=env, capture_output=True, text=True
-    )
+    result = subprocess.run([str(LF), "sync"], cwd=main, env=env, capture_output=True, text=True)
     assert result.returncode != 0
     assert _run(main, "git", "rev-parse", "HEAD") == before
     assert (main / "base.txt").read_text() == "local commit\n"

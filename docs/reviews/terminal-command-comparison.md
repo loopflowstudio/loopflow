@@ -167,7 +167,7 @@ Earlier command names below are dated evidence, not compatibility aliases.
   `a342d6870:docs/reviews/terminal-command-comparison.md`, this section.
   **October 10 Split correction:** Jack Heart selected a shell in each new split,
   not an empty pane. CLI and native controls share the existing shell-location
-  owner, preserving retained contents and exact targeting. This correction does
+  owner, preserving retained contents and exact targeting. This correction does not
   establish native acceptance.
   **October 10 Work cutover:** checkout-slot splitting/picking and its inspection
   DTOs are removed. The retained registry is keyed by repository/Wave/Task;

@@ -143,7 +143,7 @@ fn rows(
 // Seed retained records only; the public commands/watchers must leave them alone.
 fn seed_execution(conn: &Connection, task: &Task, repo: &Path, node: &str) {
     conn.execute(
-        "INSERT INTO processes(lfid,trace_id,started_at)
+        "INSERT INTO processes(id,trace_id,started_at)
          VALUES('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000002',1)",
         [],
     )
@@ -174,7 +174,7 @@ fn execution(conn: &Connection, task: &str) -> Vec<Vec<Vec<rusqlite::types::Valu
     .into_iter()
     .map(|table| {
         let (predicate, identity) = if table == "processes" {
-            ("lfid=?1", "00000000-0000-4000-8000-000000000001")
+            ("id=?1", "00000000-0000-4000-8000-000000000001")
         } else {
             ("task_id=?1", task)
         };

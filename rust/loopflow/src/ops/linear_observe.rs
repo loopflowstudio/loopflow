@@ -84,14 +84,19 @@ pub(crate) struct PlanningSync {
 impl PlanningSync {
     /// Repository planning follows every foreground provider, not Task attribution.
     pub(crate) fn start_for_directory(directory: &std::path::Path) -> OpsResult<Self> {
-        super::task::block_on_task(async {
-            let store = super::pm::pm_store().await?;
-            let repo = crate::repository::CanonicalRepo::discover(directory)
-                .map_err(|error| OpsError::Message(error.to_string()))?
-                .to_string();
-            Self::start(std::sync::Arc::new(store), repo)
-                .map_err(|error| OpsError::Message(error.to_string()))
-        })
+        // Provider launch can already be inside Tokio. SQLite opening is
+        // synchronous; only the owned sync thread needs a runtime.
+        let path = crate::store::database_path_from_env()
+            .map_err(|error| OpsError::Message(error.to_string()))?;
+        let store = Store {
+            sqlite: crate::store::sqlite::SqliteStore::new(&path)
+                .map_err(|error| OpsError::Message(error.to_string()))?,
+        };
+        let repo = crate::repository::CanonicalRepo::discover(directory)
+            .map_err(|error| OpsError::Message(error.to_string()))?
+            .to_string();
+        Self::start(std::sync::Arc::new(store), repo)
+            .map_err(|error| OpsError::Message(error.to_string()))
     }
 
     pub(crate) fn start(store: SharedStore, repo: String) -> std::io::Result<Self> {

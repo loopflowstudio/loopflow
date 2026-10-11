@@ -40,6 +40,15 @@ INSERT INTO repository_plans(repo,id,selected)
     SELECT repo, 'repo_' || lower(hex(randomblob(16))), 1 FROM
         (SELECT DISTINCT repo FROM waves);
 
+CREATE TRIGGER store_revision_repository_plans_insert AFTER INSERT ON repository_plans
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+
+CREATE TRIGGER store_revision_repository_plans_update AFTER UPDATE ON repository_plans
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+
+CREATE TRIGGER store_revision_repository_plans_delete AFTER DELETE ON repository_plans
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+
 CREATE TRIGGER store_revision_work_placements_insert AFTER INSERT ON work_placements
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
 

@@ -320,11 +320,11 @@ fn file_context(store: &SqliteStore, issue: &str) -> OpsResult<TaskCheckout> {
 fn comparison_context(issue: &str, base: &str) -> OpsResult<(TaskCheckout, String)> {
     let store = file_store()?;
     let checkout = file_context(&store, issue)?;
-    let pr = store
-        .active_task_pr(&checkout.task_id)
-        .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
-        .ok_or_else(|| task_error("Task has no active PR"))?;
-    let base = resolve_file_base(&checkout.worktree, &pr.base_commit, base)?;
+    let task = store
+        .task(&checkout.task_id)
+        .map_err(|error| task_error(format!("failed to read Task comparison base: {error}")))?
+        .ok_or_else(|| task_error("Task no longer exists"))?;
+    let base = resolve_file_base(&checkout.worktree, &task.base_commit, base)?;
     Ok((checkout, base))
 }
 

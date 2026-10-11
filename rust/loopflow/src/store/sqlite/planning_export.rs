@@ -392,7 +392,7 @@ pub(crate) fn validate_peer_receipt(
             (
                 serde_json::to_value(&item)?,
                 json!({"id":expected,"teamId":export.input["teamId"],
-                "projectId":item.project_id,"title":item.name,"description":item.description,"assigneeId":item.assignee}),
+                "projectId":item.project_id,"title":item.name,"description":item.description,"assigneeId":item.assignee,"dueDate":item.due_date}),
             )
         }
         PlanningKind::Project => {

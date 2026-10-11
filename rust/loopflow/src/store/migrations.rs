@@ -1390,10 +1390,13 @@ mod tests {
             UPDATE tasks SET branch='proof',base_commit='abc' WHERE id='t';
             INSERT INTO task_prs(id,task_id,sequence,slug,branch,base_commit,created_at,updated_at)
                 VALUES('pr','t',1,'proof','proof','abc',1,1);
-            INSERT INTO processes(lfid,trace_id,command,cwd,started_at)
+            INSERT INTO processes(id,trace_id,command,cwd,started_at)
                 VALUES('process','trace','lf run code','/repo/task',1);
-            INSERT INTO agent_sessions(id,title,title_source,created_at,cwd,task_id,wave_id,driver_process_lfid,input_published)
-                VALUES('session','Keep draft','human',1,'/repo/task','t','w','process',0);
+            INSERT INTO agent_sessions(id,title,title_source,created_at,cwd,task_id,wave_id,input_published)
+                VALUES('session','Keep draft','human',1,'/repo/task','t','w',0);
+            INSERT INTO processes(id,kind,trace_id,parent_lf_process_id,agent_session_id,attached_lf_process_id,started_at)
+                VALUES('agent','agent','trace','process','session','process',1);
+            UPDATE agent_sessions SET agent_process_id='agent' WHERE id='session';
         "#).unwrap();
         let history = || -> Vec<Vec<Vec<rusqlite::types::Value>>> {
             ["task_prs", "processes", "agent_sessions"]
@@ -5122,8 +5125,7 @@ mod tests {
     fn a_stale_edit_of_a_shipped_migration_tells_the_user_to_recreate() {
         let conn = open();
         apply_sqlite(&conn).unwrap();
-        conn.execute_batch("ALTER TABLE tasks DROP COLUMN issue_description")
-            .unwrap();
+        conn.execute_batch("DROP INDEX idx_tasks_project").unwrap();
 
         let error = apply_sqlite(&conn).unwrap_err();
         assert!(error.to_string().contains("delete loopflow.db"));

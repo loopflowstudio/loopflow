@@ -529,7 +529,7 @@ LOO-452 shortcut customization and LOO-453 readiness/events explorations.
 
 **Queue scope:** gate the accepted baseline after resolving actual main conflicts
 and build/test failures. Newer unmerged LOO-412 changes and deferred proof owners
-are not shipping holds. No final-tree gate has yet been recorded. One PR.
+are not shipping holds. The October 10 gate failed; focused repairs do not constitute a final-tree pass. See findings for remaining queue blockers. One PR.
 Gate owns affected Rust suites and
 `cargo test -p loopflow --test dto_fixtures` for Rust wire fixtures, plus
 `cargo test -p loopflow --test documented_commands` for command ambiguity only.

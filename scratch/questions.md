@@ -48,9 +48,9 @@ dispatch; an unscoped ambiguous prefix still fails.
 
 Installed `lf context --skill realign --json` still assembles stored historical
 steers and the retired per-file JSON inventory. The October 10 reconciliation
-measured 38,976 goal tokens (22,976 over 16,000) after the updated brief arrived;
+measured 40,256 goal tokens (24,256 over 16,000), 132,751 bytes (1,679 over 131,072) in the gate query;
 authored scratch fits. Complete launch source inspected:
-`.lf/tmp/context/2909e7f82e77cb5a97eb9fa5e489a2e490fd489284da1fa55278f04a7021485b.md`.
+`.lf/tmp/context/ba3e3fb6204fa9c1dcab1093a86de008755b1add3114d66a22ac4c7483688318.md`.
 Its middle repeats historical directives and its tail is generated inventory.
 The local renderer already uses quoted paths/change states. Editing a generated
 capture or deleting authored history cannot fix installed assembly; installation,

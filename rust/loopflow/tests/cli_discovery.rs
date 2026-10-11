@@ -1180,8 +1180,8 @@ fn structured_help_describes_pane_creation_and_read_results_without_desktop() {
         "string"
     );
     assert_eq!(
-        definition["result_schema"]["properties"]["machine_id"]["type"],
-        "string"
+        definition["result_schema"]["properties"]["work"]["$ref"],
+        "#/$defs/WorkWorkspaceKey"
     );
     let read = describe_command(&["desktop".into(), "read".into()], false).unwrap();
     let region = read["definition"]["arguments"]

@@ -3,8 +3,9 @@
 Jack Heart requested one global `-a` / `--agent` declaration on October 8,
 2026. His later steer gives an explicit selection precedence over Task, Flow,
 step and skill agents, including nested child commands. Without the flag,
-existing definition/default selection remains. Delivery stops at demo; no
-logins, credentials or real provider accounts may be used.
+existing definition/default selection remains. Jack Heart approved the demo and
+shipping on October 10: gate, landing and completion after verified merge. No
+logins, credential reads or real-provider tests are authorized.
 
 ## Baseline
 
@@ -47,11 +48,30 @@ Publication checks covered Task launches, replay, native resume, shell isolation
 command discovery and startup after the integrated main changes. Review found
 root help exceeded its existing 25-line limit; removing two blank lines restored
 the limit without dropping the global override explanation. Discovery then passed.
-Demo/review owns judgment using synthetic providers under Jack Heart's constraint.
+Jack Heart accepted the demo; the October 10 steer supersedes review-only delivery.
 Remote execution, installed/live-provider acceptance, hosted CI and delivery
-remain unproved; real-provider use and landing remain outside authorization.
+remain unproved; real-provider tests remain prohibited.
 No product decision is needed for this reconciliation.
 Prior evidence: `69bdad343:scratch/choose-the-agent-with-a.md`; compression:
 `5df2ba251`. The publication repair changes only root-help spacing.
 
-Checks: network-isolated `cargo nextest run -p loopflow` across Task launch, Session CLI, startup, discovery, parser, replay, resume, shell and Flow-graph cases: 77/78 passed; after the help-spacing repair, `--test cli_discovery`: 23/23 passed; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` passed. Full gate and hosted CI remain unproved.
+## Gate findings (2026-10-10)
+
+The global-agent acceptance passed, including all six recorded Claude Sessions,
+no-flag defaults, literal arguments, replay and native-provider refusal. Review
+found no further in-scope code change; stale delivery wording is corrected.
+
+The complete gate is not green. Two unchanged Rust tests failed:
+`claude_cached_identity_requires_current_verified_credentials` reported
+Unavailable instead of Accepted, and
+`surviving_child_keeps_target_exclusive_after_parent_drops_lock` could not
+reacquire the lock after child exit. Their causes remain unresolved; no provider
+login or credential inspection was attempted to repair them. These need diagnosis
+before claiming a passing gate; they are outside this branch's changed code.
+The Python checkout-observation proof cannot nest `sandbox-exec` inside the
+network sandbox (`sandbox_apply: Operation not permitted`); its standalone,
+network-denying sandbox proof passes. Combined-run coverage remains deferred to
+capable CI. Logs: `.lf/tmp/gate/run-25073/`. Remote and installed acceptance remain
+unproved. Nothing was landed or completed by this gate.
+
+Checks: `uv run python scripts/test.py --reuse-passing` (LF authority cleared): architecture, fmt, Clippy and website passed; Rust 2,280 passed/2 failed/17 skipped; Python 388 passed/1 nested-sandbox failure/19 skipped; standalone checkout-observation test 1 passed; `git diff --check` passed. Hosted CI owns the full matrix and deferred checks.

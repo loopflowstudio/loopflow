@@ -140,7 +140,7 @@ main = f'''
 </section>
 <section id="yours" class="reading">
   <h2>Free and open source (MIT).</h2>
-  <p class="say"><code>lf</code> has no servers. Private, secure remote jobs and telemetry made easy through <code>ssh</code>.</p>
+  <p class="say">Private, secure remote jobs and telemetry made easy through <code>ssh</code>. <code>lf</code> has no servers.</p>
   <p class="say req">Currently requires:</p>
   <ul class="reqs"><li><code>claude</code>, <code>codex</code> or <code>opencode</code></li><li><code>github</code></li></ul>
   <p class="say"><code>linear</code> is an optional integration. Plays nicely with <code>herdr</code> and <code>cmux</code>.</p>

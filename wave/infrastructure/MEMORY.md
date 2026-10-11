@@ -270,11 +270,11 @@ Implementation exposed a startup lock cycle: Claude 2.1.296 invokes SessionStart
 before draining stdin. With exclusive hook and input fencing, only 512 of 131,133
 bytes wrote within dispatch's two seconds. The configured isolated probe establishes
 ordering, not a public lf launch or delivery pass. Production source was restored;
-the design retains a Git reference to the diff and a scratch probe. Startup
-exclusion, identity activation and provider acceptance are unresolved. Four draft receipt tests
-prove no cutover. `scratch/session-steer-subscriptions.md` owns remaining work and
-the unselected read-side-fence/startup-protocol revision.
-
+the design retains the diff's Git reference and scratch probe. #1522 now routes
+headless Claude through the shared harness; its combined skill-context/query seed
+still uses exclusive dispatch. Native-answer capture fixes no startup exclusion or
+identity activation. Four draft receipt tests prove no cutover. Startup authority
+and provider acceptance remain unresolved in `scratch/session-steer-subscriptions.md`.
 
 ## Process-owned liveness (LOO-451, 2026-10-10)
 
@@ -449,12 +449,10 @@ October 6 telemetry's retired metric producer failed; the repaired checkout pass
 publication; the operator owns recovery after LOO-382. Original receipts, repair
 ownership and exact evidence: `85490d96ec:wave/infrastructure/MEMORY.md`, this heading.
 
-Release's September 28 incident proves entry points need operation-level recovery:
-an agent reported failure successfully, producing a misleading green cron receipt.
-Jack's later steer records v0.12.24 publication/install and skill-to-Flow activation
-at unchanged 10:00. That supersedes the child's dated pending-activation evidence,
-without proving this accounting branch is installed or either qualifying outcome.
-Release-specific detail remains in [release memory](release/MEMORY.md).
+Release's operation-entry lesson and v0.12.24 activation history remain at
+`ff1dc403c4:wave/infrastructure/MEMORY.md`, this heading, and in
+[release memory](release/MEMORY.md). Successful reporting proves no operation
+success; activation proves neither accounting installation nor qualifying settlement.
 October 5 child evidence records repaired installed jobs using the machine gate
 at unchanged 09:00/10:00 schedules. Ownership remains Infrastructure; the child
 is not registered. History exposed three unresolved opportunities with unknown

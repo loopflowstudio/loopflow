@@ -9,7 +9,7 @@ outcome is unchanged; the startup authority revision below remains draft.
 
 ## Current implementation — reconciled 2026-10-11
 
-At `03ba479ae2`, Task launch still reads event-backed steers into `TaskSeed`;
+At `ff1dc403c4`, Task launch still reads event-backed steers into `TaskSeed`;
 `TaskInput::poll` injects them on a five-second timer, and `RunningFlow` keeps
 per-node cursors through `--steers-after`. `ContextDelivery::prepare` saves generated
 Task summaries as references that later context hooks reread. No publication,
@@ -22,6 +22,16 @@ context reader. Main's #1524 preserves Codex live handoff while Claude/OpenCode
 stop and resume native history. Neither change resolves callback authority.
 Helper tests cannot establish public launch/hook dispatch or configured provider
 acceptance.
+
+Integrated #1522 (`6016eca305`) now routes headless Claude through the shared
+harness and records correlated native answers for Flow decisions. Steering uses
+that owner; the deleted batch launcher and transcript-answer fallback stay deleted.
+`ClaudeHarness::send_input` combines non-query skill context and the correlated
+query into one fenced seed write. It still calls `ensure_process` before that
+write, and replacement there still updates the AgentProcess. The startup cycle
+and identity activation obligations therefore survive this merge. The public
+startup fixture must preserve both seed records, native identity and Flow answer
+correlation, including after replacement; a small single-message probe is insufficient.
 
 ## Startup fence counterexample — 2026-10-11
 
@@ -397,4 +407,4 @@ if the status shape crosses that boundary. Configured provider probes use isolat
 homes and headless fake endpoints; unavailable probes are explicitly deferred to
 capable CI, never recorded as passes.
 
-Check: `git diff --check` and `lf context` — pass after documentation/archive reduction; code and reproducer unchanged, prior startup counterexample retained; provider acceptance remains for implementation/gate.
+Check: `git diff --check` and `lf context` — pass for prose-only reconciliation; prior startup counterexample retained without rerun; public startup and provider acceptance remain for implementation/gate.

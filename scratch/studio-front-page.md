@@ -684,3 +684,5 @@ strip links to its own site in a new tab.
 - Jack Heart: "No one is looking at this you dont have to worry so much about accuracy, just inspiration" → for the prototypes, Claude stops flagging and holding back on things that are not built or not checked. Accuracy gets settled when a prototype is ported to the real site.
 
 - Jack Heart, for the second picture's label: "LOOPFLOW IN YOUR TERMINAL" → set in `x11`. The first picture's label is changed to match, "Loopflow for Mac" (Claude's choice).
+
+- Jack Heart: "Maybe we need a simple sentece above saying Loopflow can be run as a Desktop experience or embedded inside a terminal." → `x11` has "Loopflow can be run as a desktop experience or embedded inside a terminal." directly under the header, above Download and the install line. The line under the buttons is back to "Free and open source (MIT)".

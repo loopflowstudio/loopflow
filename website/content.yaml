@@ -166,82 +166,18 @@ cli:
     - name: Linear
       text: Your Tasks are Linear issues, so the plan your agents work from is the one your team
         already reads.
-# Set by Jack Heart on 2026-10-08: lead with the Mac app at full size, then For
-# you, then the terminal for your agents, questions, install. Claim
-# titles and answers beyond his quoted lines are draft. Backticks set code.
+# The homepage's body is home.html. This block holds what other pages share with
+# it: the install command, the download, and the footer.
 homepage:
-  hero:
-    label: Loopflow is a software instrument
-    heading: Build something you can actually ship to users.
-    needs_label: 'You need:'
-    needs:
-    - A coding agent (Claude Code, Codex, or OpenCode)
-    - A GitHub account
-    introduction: >-
-      We’ll get you building whatever software you want like a software engineer, by guiding you
-      through workflows that get the most out of you and ensure high quality software, not slop.
-    command_line:
-      label: Or install the command line ↓
-      href: '#start'
-    cost: >-
-      Free and open source. The coding agent it drives (Claude Code, Codex, or OpenCode) runs on
-      your own account and has its own cost.
-    capture:
-      image: /static/wave-surface.png
-      image_alt: Loopflow for Mac showing a goal, its key results, and ten tasks with their status
-      width: 2880
-      height: 1800
-      caption: Actual capture, unedited. The Mac app includes the command line tool; the command
-        line tool does not need the Mac app.
-  you:
-    items:
-    - name: Your code stays yours
-      text: It lives in your GitHub and on your Mac, and Loopflow drives the coding agent you
-        already use. Nothing is hosted, so there is nothing to move off later.
-    - name: One piece of work at a time
-      text: Each change is a Task with its own copy of the code and its own pull request, so an
-        idea that goes wrong never breaks what already works.
-    - name: Design first, demo before it ships
-      text: Built-in workflows take a Task from design through building and testing to a pull
-        request, and stop for you at the points you choose.
-    - name: Nothing gets lost
-      text: Every conversation is kept under the Task it belongs to, so you can leave and pick it
-        back up where it was.
-    - name: Many agents, one window
-      text: Run several Tasks side by side and see which one is waiting on you.
-  faq:
-    heading: FAQ
-    items:
-    - question: Which coding agents does it work with?
-      answer: Claude Code, Codex, or OpenCode, on your own accounts. Loopflow uses the one you have
-        installed and signed in.
-    - question: Is it free?
-      answer: Yes. Loopflow is free and open source, MIT licensed. Claude Code, Codex, and OpenCode
-        have their own cost.
-    - question: Do I need the Mac app?
-      answer: No. `lf` is the command line tool, and it runs in the terminal you already use. The
-        Mac app includes it.
-      link:
-        label: The CLI ↗
-        href: /cli
-    - question: Where does it run?
-      answer: On macOS or Linux. It runs locally, and over SSH where you choose. The Mac app is for
-        macOS.
+  title: how you design, implement, demo, release and study software with agents
   install:
     label: Install
-    heading: Start playing.
-    commands: |-
-      # macOS or Linux, with Claude Code, Codex, or OpenCode installed
-      $ curl -fsSL https://loopflow.studio/install.sh | sh
-      $ lf init
     install_command: curl -fsSL https://loopflow.studio/install.sh | sh
-    copy_label: Copy install command
     links:
     - label: Getting started ↗
       href: /docs/getting-started
     - label: Source ↗
       href: https://github.com/loopflowstudio/loopflow
-    download_label: Download for Mac
     download_url: https://downloads.loopflow.studio/Loopflow-latest.dmg
   footer:
     text: Loopflow · An open-source software instrument.

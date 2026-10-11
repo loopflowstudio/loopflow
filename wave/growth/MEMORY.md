@@ -349,3 +349,36 @@ list; which item each one carries is read from its title, not confirmed.
   what each is shown.
 - "Instrument" also names a measurement in the product ("metric
   instruments").
+
+## Homepage shipped 2026-10-10 (LOO-438)
+
+Jack Heart approved this page after twelve prototypes in one session and asked
+for it to ship. It supersedes the October 7 and 8 homepage where they differ.
+Wording in quotes is his.
+
+- The reader already runs a coding agent. "Im not I really want to compete
+  with Replit."
+- The first line names Loopflow and coding agents in plain software words;
+  the musical image comes second. Header: "Loopflow is how you [design,
+  implement, demo, release, study] software with agents." Under it: "Conduct
+  an orchestra of coding agents and hear every part clearly." The cycling
+  words "have to be the software words".
+- The idea underneath is "scaling with the person still at the center". The
+  page speaks to individuals, including those inside large companies:
+  adoption is "from the bottom up". "Scale yourself." closes the page.
+- "Waves" is a musical word. Section heading: "Arrange your coding sessions
+  around sustaining waves and resolving tasks." "task" is lower case, "a
+  common place word, not Our Word".
+- His three paragraphs under that heading stay as he wrote them.
+- `lf` gets its own section: "the workflow CLI for shipping software with
+  coding agents", shown without Task commands ("old school… lf wt create").
+- The page writes ahead of the product: "Just write to the future. Be the
+  light that pulls us forward." It shows `lf graph`, `lf usage --wt` and
+  account, usage and monitor output that `lf` does not print yet. The
+  pictures are drawn; "im not worried about the fake screenshots".
+- Rejected along the way: "Build something you can actually ship to users.",
+  a feature list on this page ("more the cli page"), extended instrument
+  and orchestra metaphors, a Scale / Play / Craft section, "Play at scale",
+  and cycling words drawn from music.
+- Open: a real capture or video on a legible Kata copy in place of the drawn
+  app; whether Flow is renamed Graph in `lf`.

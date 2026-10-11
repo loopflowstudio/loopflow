@@ -123,11 +123,15 @@ def CopyButton(text: str):
 SITE_CONTENT = yaml.safe_load((Path(__file__).parent / "content.yaml").read_text())
 STUDIO_CONTENT = SITE_CONTENT["studio"]
 HOME_CONTENT = SITE_CONTENT["homepage"]
-HERO_CONTENT = HOME_CONTENT["hero"]
 CLI_CONTENT = SITE_CONTENT["cli"]
-YOU_CONTENT = HOME_CONTENT["you"]
-FAQ_CONTENT = HOME_CONTENT["faq"]
 INSTALL_CONTENT = HOME_CONTENT["install"]
+# The homepage is drawn, not listed: its mock, cards and copy are one template.
+HOME_HTML = (
+    (Path(__file__).parent / "home.html")
+    .read_text()
+    .replace("{download_url}", INSTALL_CONTENT["download_url"])
+    .replace("{install_command}", INSTALL_CONTENT["install_command"])
+)
 
 # Copy buttons carry the text they copy.
 COPY_SCRIPT = """
@@ -773,90 +777,12 @@ def _terminal(content: str, label: str) -> FT:
     return Pre(*lines, cls="term", tabindex="0", aria_label=label)
 
 
-def _hero_section() -> FT:
-    capture = HERO_CONTENT["capture"]
-    return Section(
-        P(HERO_CONTENT["label"], cls="eyebrow kicker"),
-        H1(HERO_CONTENT["heading"]),
-        P(HERO_CONTENT["needs_label"], cls="needs-label"),
-        Ul(*[Li(need) for need in HERO_CONTENT["needs"]], cls="needs-list"),
-        P(HERO_CONTENT["introduction"], cls="intro"),
-        Div(
-            A(
-                INSTALL_CONTENT["download_label"],
-                href=INSTALL_CONTENT["download_url"],
-                cls="button solid",
-            ),
-            A(HERO_CONTENT["command_line"]["label"], href=HERO_CONTENT["command_line"]["href"]),
-            cls="actions",
-        ),
-        P(HERO_CONTENT["cost"], cls="cost"),
-        Div(
-            Img(
-                src=capture["image"],
-                alt=capture["image_alt"],
-                width=capture["width"],
-                height=capture["height"],
-            ),
-            cls="window",
-        ),
-        P(capture["caption"], cls="capture-label"),
-        cls="home-hero",
-    )
-
-
 def _install_row() -> FT:
     command = INSTALL_CONTENT["install_command"]
     return Div(
         Pre(Span("$", cls="p"), " ", command, cls="term", tabindex="0", aria_label="Install Loopflow"),
         Button("Copy", type="button", cls="copy", data_copy=command, aria_live="polite"),
         cls="install-row",
-    )
-
-
-def _faq_section() -> FT:
-    return Section(
-        H2(FAQ_CONTENT["heading"]),
-        Dl(
-            *[
-                Div(
-                    Dt(item["question"]),
-                    Dd(
-                        *_inline_code(item["answer"]),
-                        *((" ", A(item["link"]["label"], href=item["link"]["href"])) if "link" in item else ()),
-                    ),
-                )
-                for item in FAQ_CONTENT["items"]
-            ],
-            cls="faq",
-        ),
-        id="faq",
-        cls="block",
-    )
-
-
-def _install_section() -> FT:
-    return Section(
-        P(INSTALL_CONTENT["label"], cls="eyebrow"),
-        H2(INSTALL_CONTENT["heading"]),
-        _terminal(INSTALL_CONTENT["commands"], "Install Loopflow"),
-        Div(
-            Button(
-                INSTALL_CONTENT["copy_label"],
-                type="button",
-                cls="button solid",
-                data_copy=INSTALL_CONTENT["install_command"],
-                aria_live="polite",
-            ),
-            A(INSTALL_CONTENT["download_label"], href=INSTALL_CONTENT["download_url"], cls="button"),
-            cls="actions",
-        ),
-        P(
-            *[A(link["label"], href=link["href"]) for link in INSTALL_CONTENT["links"]],
-            cls="capture-label install-links",
-        ),
-        id="start",
-        cls="start",
     )
 
 
@@ -983,14 +909,7 @@ def _product_page(title: str, current: str, *sections) -> tuple:
 
 
 def build_homepage() -> tuple:
-    return _product_page(
-        "Loopflow — " + HERO_CONTENT["heading"],
-        "/",
-        _hero_section(),
-        Section(_plain_list(YOU_CONTENT["items"]), id="mac", cls="reading"),
-        _faq_section(),
-        _install_section(),
-    )
+    return _product_page("Loopflow — " + HOME_CONTENT["title"], "/", NotStr(HOME_HTML))
 
 
 def _plain_list(items: list) -> FT:

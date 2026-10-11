@@ -6,25 +6,28 @@ import pytest
 from playwright.sync_api import Page, expect
 
 
-def test_approved_homepage_sections(homepage: Page) -> None:
-    expect(homepage.locator("h1")).to_have_text("Build something you can actually ship to users.")
-    assert homepage.locator(".home-hero .needs-list li").count() == 2
+def test_homepage_names_loopflow_and_coding_agents(homepage: Page) -> None:
+    expect(homepage.locator("h1")).to_have_attribute(
+        "aria-label",
+        "Loopflow is how you design, implement, demo, release and study software with agents.",
+    )
+    expect(homepage.locator("h1 .rotating span")).to_have_count(5)
+    expect(homepage.locator(".home-hero .either")).to_have_text(
+        "Conduct an orchestra of coding agents and hear every part clearly."
+    )
     assert homepage.locator("main > section[id]").evaluate_all(
         "sections => sections.map(section => section.id)"
-    ) == ["mac", "faq", "start"]
-    expect(homepage.locator("#mac .plain li")).to_have_count(5)
-    expect(homepage.locator(".faq dt")).to_have_count(4)
+    ) == ["mac", "works"]
 
 
-def test_hero_leads_with_the_mac_app(homepage: Page) -> None:
+def test_hero_offers_the_mac_app_or_the_cli(homepage: Page) -> None:
     hero = homepage.locator(".home-hero")
     expect(hero.get_by_role("link", name="Download for Mac")).to_have_attribute(
         "href", "https://downloads.loopflow.studio/Loopflow-latest.dmg"
     )
-    expect(hero.locator(".cost")).to_contain_text("has its own cost")
-    assert hero.locator(".window img").bounding_box()["width"] > 1000
-    hero.get_by_role("link", name="Or install the command line ↓").click()
-    expect(homepage.locator("#start h2")).to_be_in_viewport()
+    assert "loopflow.studio/install.sh" in hero.locator(".install-row pre").text_content()
+    expect(hero.get_by_role("button", name="Copy", exact=True)).to_be_visible()
+    expect(homepage.locator("#mac .win")).to_be_in_viewport()
 
 
 def test_cli_page_makes_the_case_for_engineers(page: Page, base_url: str) -> None:
@@ -62,22 +65,16 @@ def test_guide_links_resolve(homepage: Page, base_url: str) -> None:
             expect(homepage.locator(f'[id="{fragment}"]')).to_have_count(1)
 
 
-def test_captures_reserve_space_and_load(homepage: Page, base_url: str) -> None:
-    for image in homepage.locator("main img").all():
-        source = image.get_attribute("src")
-        assert int(image.get_attribute("width")) > 0
-        assert int(image.get_attribute("height")) > 0
-        image.scroll_into_view_if_needed()
-        box = image.bounding_box()
-        assert box["height"] == pytest.approx(box["width"] / 1.6, abs=1)
-        assert homepage.request.get(f"{base_url}{source}").ok
-
-
-def test_install_has_commands_and_the_mac_download(homepage: Page) -> None:
-    install = homepage.locator("#start")
-    assert "loopflow.studio/install.sh" in install.locator("pre").text_content()
-    assert "lf init" in install.locator("pre").text_content()
-    expect(install.get_by_role("link", name="Download for Mac")).to_have_attribute(
+def test_pictures_and_sections_tell_the_page(homepage: Page) -> None:
+    expect(homepage.locator("#mac .tasks li")).to_have_count(5)
+    expect(homepage.locator(".system .wfs > li code")).to_have_text(["feature", "code", "research"])
+    card = homepage.locator(".clihero .term").text_content()
+    for command in ("lf wt create", "--machine mini", "lf pr open", "lf land --watch", "lf account"):
+        assert command in card
+    expect(homepage.locator("#works li")).to_have_count(5)
+    for link in homepage.locator("#works a").all():
+        expect(link).to_have_attribute("target", "_blank")
+    expect(homepage.locator(".belief").get_by_role("link", name="Download for Mac")).to_have_attribute(
         "href", "https://downloads.loopflow.studio/Loopflow-latest.dmg"
     )
 
@@ -87,7 +84,7 @@ def test_no_superseded_or_review_content(homepage: Page) -> None:
         homepage.locator(".home-stage, .home-autonomy, .review-note, .review-bar, form")
     ).to_have_count(0)
     body = homepage.locator("body").text_content()
-    for text in ("Linear", "Discord", "Review note for Jack", "cmux’s sidebar"):
+    for text in ("Review note for Jack", "goes here", "stands in", "localhost"):
         assert text not in body
     assert not homepage.locator(
         '[src*="/directions/"], [href*="/directions/"], script[src*="home.js"]'
@@ -109,10 +106,9 @@ def test_page_fits_and_terminals_scroll_within_their_cells(
 
 
 def test_body_command_names_use_monospace(homepage: Page) -> None:
-    names = homepage.locator(".faq code")
-    assert names.count() >= 1
+    names = homepage.locator(".clihero article p code")
+    assert names.count() >= 2
     for name in names.all():
-        assert name.text_content().startswith("lf")
         assert "JetBrains Mono" in name.evaluate("el => getComputedStyle(el).fontFamily")
 
 

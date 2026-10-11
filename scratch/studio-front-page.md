@@ -771,3 +771,5 @@ strip links to its own site in a new tab.
 - Jack Heart: "file tasks to build monitor, and then to improve usage and account so that the output is exactly what we want on this page" → three Tasks filed in the product Wave (monitor summary line; `lf usage --wt` one-line answer; `lf account` rows with bars).
 - Jack Heart: "ok cut the scale yourself from the top now" → the `x12` header is "Loopflow is how you [design | implement | demo | release | study] software with agents." "Scale yourself." remains as the closing line.
 - Jack Heart: "lets go ahead and ship this after youre done. this is good. im not worried about the fake screenshots ." → x12 is the page to port into `website/` and ship.
+
+- Ported 2026-10-10: `website/home.html` is the x12 page body; `main.py` renders it and fills in the download link and install command; the old hero, list, FAQ and install sections, their content and styles, and the unused Mac capture are deleted; homepage tests rewritten. Website suite: `cd website && uv run --no-sync pytest tests -q` → 75 passed.

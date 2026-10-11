@@ -228,6 +228,31 @@
   <p>Coding agents can do amazing things for you, but they ask a lot of focus from you. How can you, a human with a single locus of attention, stay in sync with an entire parallel agent swarm? Shipping tens of thousands of lines is the easy part. Making them lines worth keeping — lines you don’t revert next month — is the hard part.</p>
   <p>Loopflow arranges your agent sessions around the work: long-lived objectives (<b>Waves</b>) and concrete outcomes (<b>Tasks</b>). You don’t have to keep every session window open for fear of it disappearing, or remember why you wanted this massive change in the first place. Each Task follows a workflow you choose, and each session you come to is one where your input really matters. Every Task ends shipped.</p>
 </section>
+<section class="pair clihero">
+  <h2><code>lf</code>: the CLI for agent workflows.</h2>
+  <div class="halves">
+    <article>
+      <p>Loopflow is <code>lf</code> underneath. One command says where an agent runs, on whose login, with which model, in which worktree, and what it does. Set it once in a Flow and every launch is the same.</p>
+      <p>Private, secure remote jobs and telemetry made easy through <code>ssh</code>.</p>
+      <p>Multi-subscription balancing: <code>lf</code> manages your logins, and moves to the next one when one runs out.</p>
+      <p class="more"><a href="http://localhost:5001/cli">The CLI ↗</a><a href="http://localhost:5001/docs/authoring#flows">Skills and Flows ↗</a></p>
+    </article>
+    <article>
+<pre tabindex="0" aria-label="lf commands" class="term"><span class="p">$</span> <b>lf</b> wt create csv-export     <span class="c"># a worktree and a branch</span>
+
+<span class="p">$</span> <b>lf</b> --machine mini \         <span class="c"># where it runs</span>
+     --account claude=you@ \  <span class="c"># whose login pays</span>
+     -a claude:opus \         <span class="c"># which agent and model</span>
+     --wt csv-export \        <span class="c"># in which worktree</span>
+     --docs docs/api.md \     <span class="c"># what it reads first</span>
+     -b \                     <span class="c"># headless, or -i to talk</span>
+     graph pursue             <span class="c"># Skills in sequence: a Graph</span>
+
+<span class="p">$</span> <b>lf</b> pr open                  <span class="c"># a draft PR, opened for you</span>
+<span class="p">$</span> <b>lf</b> land --watch             <span class="c"># merge when checks pass; fix if not</span></pre>
+    </article>
+  </div>
+</section>
 <section class="pair">
   <h2>Stay engaged <em>and</em> scale the swarm.</h2>
   <div class="halves">
@@ -242,32 +267,6 @@
 <li><code>code</code><p class="line"><i>start</i><span>pursue →</span><b>demo</b><span>ship →</span><i>end</i></p><small>One stop. Your agent builds straight from the Task, and you try the change.</small></li>
 <li><code>research</code><p class="line"><i>start</i><span>research →</span><b>findings</b><i>end</i></p><small>No pull request. Your agent investigates, and the Task ends when you accept the findings.</small></li>
       </ul></div>
-    </article>
-  </div>
-</section>
-<section class="pair clihero">
-  <h2><code>lf</code>: the CLI for agent workflows.</h2>
-  <div class="halves">
-    <article>
-      <p>Everything above is <code>lf</code> underneath. One command says where an agent runs, on whose login, with which model, on which piece of work, and what it does. Set it once in a Flow and every launch is the same.</p>
-      <p>Private, secure remote jobs and telemetry made easy through <code>ssh</code>.</p>
-      <p>Multi-subscription balancing: <code>lf</code> manages your logins, and moves to the next one when one runs out.</p>
-      <p class="more"><a href="http://localhost:5001/cli">The CLI ↗</a><a href="http://localhost:5001/docs/authoring#flows">Skills and Flows ↗</a></p>
-    </article>
-    <article>
-<pre tabindex="0" aria-label="lf commands" class="term"><span class="p">$</span> <b>lf</b> task create --wave exports --title "Add CSV export"
-
-<span class="p">$</span> <b>lf</b> --machine mini \         <span class="c"># where it runs</span>
-     --account claude=you@ \  <span class="c"># whose login pays</span>
-     -a claude:opus \         <span class="c"># which agent and model</span>
-     --task EXP-12 \          <span class="c"># which work, in its checkout</span>
-     --docs docs/api.md \     <span class="c"># what it reads first</span>
-     -b \                     <span class="c"># headless, or -i to talk</span>
-     graph pursue             <span class="c"># Skills in sequence: a Graph</span>
-
-<span class="p">$</span> <b>lf</b> resume                   <span class="c"># back to the last Session</span>
-<span class="p">$</span> <b>lf</b> usage --task EXP-12      <span class="c"># what that Task cost</span>
-<span class="p">$</span> <b>lf</b> land --wait              <span class="c"># merge when checks pass</span></pre>
     </article>
   </div>
 </section>

@@ -165,7 +165,7 @@ main = f'''
       <p>To keep every session tied to its goal, Loopflow has to start each agent the same way: on the right machine, on the right login, with the right model, in the right worktree. <code>lf</code> is the command that does it.</p>
       <p>You don’t have to buy into tasks to use it. On its own, <code>lf</code> is a launcher for Claude Code, Codex, and OpenCode: use it anywhere you would start one of them.</p>
       <p>Private, secure remote jobs and telemetry made easy through <code>ssh</code>. Multi-subscription balancing: <code>lf</code> manages your logins, and moves to the next one when one runs out.</p>
-      <p class="more"><a href="/cli">The CLI ↗</a><a href="/docs/authoring#flows">Skills and Flows ↗</a></p>
+      <p class="more"><a href="/cli">The CLI ↗</a><a href="/docs/authoring#flows">Skills and Graphs ↗</a></p>
     </article>
     <article>
 <pre tabindex="0" aria-label="lf commands" class="term"><span class="p">$</span> <b>lf</b> wt create csv-export     <span class="c"># a worktree and a branch</span>

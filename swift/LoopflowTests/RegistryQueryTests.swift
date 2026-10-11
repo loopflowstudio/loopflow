@@ -227,14 +227,14 @@ struct RegistryQueryTests {
           "name": "Wire it",
           "description": "",
           "rank": 1,
-          "completed": false, "state": "unstarted", "completed_at": null,
+          "completed": false, "state": "unstarted", "completed_at": null, "due_date": null, "follow_up_sources": [],
           "assignee": null
         },
         "reference": {
           "issue_url": "https://linear.app/loopflow/issue/INF-123/wire-it",
           "workspace": {
             "slug": "wire-it",
-            "branch": "jack/inf-123",
+            "branch": "jack/inf-123", "base_commit": "fixture-base",
             "worktree": "/task-wt"
           }
         },
@@ -247,7 +247,7 @@ struct RegistryQueryTests {
           "started": true
         },
         "directive": null,
-        "workflow_name":"feature","latest_flow_process":null,"execution":null,"run_control":{"unavailable":null},
+        "workflow_name":"feature","latest_flow_process":null,"execution":null,"run_control":{"unavailable":null}, "follow_through": {"intents":[],"links":[],"reason":null,"needs_conversion":false,"scope_notes":[]},
         "next_move": {
           "owner": "task",
           "reason": "ready"
@@ -271,8 +271,7 @@ struct RegistryQueryTests {
           "recommended": "resume",
           "reason": "resume the parked Task"
         },
-        "prs": [],
-        "active_pr": null
+        "pr": null
       }
     ],
     "truncated": false
@@ -474,7 +473,7 @@ struct RegistryQueryTests {
 
     @Test("Activity requires Session and input identity instead of unrelated process fallbacks")
     func invocationActivityIsNotSessionHistory() async throws {
-        let json = #"{"generated_at":1784606400,"since":1784001600,"limit":50,"truncated":false,"items":[{"id":"event","recorded_at":1784606300,"summary":"Input completed","work":{"kind":"task","id":"task-1"},"subject":"LOO-1","fact":{"kind":"input_completion_recorded","flow_process_lfid":"invocation-1","trace_id":"trace-1","process_lfid":"process-1","status":"ok"}}]}"#
+        let json = #"{"generated_at":1784606400,"since":1784001600,"limit":50,"truncated":false,"items":[{"id":"event","recorded_at":1784606300,"summary":"Input completed","work":{"kind":"task","id":"task-1"},"subject":"LOO-1","fact":{"kind":"input_completion_recorded","flow_lf_process_id":"invocation-1","trace_id":"trace-1","lf_process_id":"process-1","status":"ok"}}]}"#
         let query = RegistryQuery { _, _ in json }
         await #expect(throws: (any Error).self) { try await query.workActivity() }
     }

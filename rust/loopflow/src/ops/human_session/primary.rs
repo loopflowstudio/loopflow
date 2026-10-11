@@ -10,7 +10,7 @@ use super::{
     lock_session_process, publish_prepared_input, session_not_found, start_durable_session,
     surface, NativeSession, SessionRecord,
 };
-use crate::session::{AgentSession, PrimaryScope, TitleSource, WorkSource};
+use crate::session::{LfSession, PrimaryScope, TitleSource, WorkSource};
 use crate::store::SharedStore;
 
 /// Find or admit the primary conversation of a Wave, or of the repository
@@ -78,7 +78,7 @@ pub(crate) async fn ensure_task(
         "Task {task} has no checkout to hold a conversation"
     );
     let session = store
-        .ensure_primary_session(&scope, None, task_session(&binding, id))
+        .ensure_primary_session(&scope, None, task_session(store, &binding, id)?)
         .await?;
     start(store, session).await
 }
@@ -108,10 +108,11 @@ pub(crate) async fn replace(store: &SharedStore, id: &str) -> Result<SessionReco
                 .await?,
         ),
         PrimaryScope::Task(task) => task_session(
+            store,
             &crate::ops::resolve_work_binding(store, &previous.cwd, &format!("task:{task}"))
                 .await?,
             task,
-        ),
+        )?,
     };
     if !matches!(scope, PrimaryScope::Task(_)) {
         successor.cwd = ensure_scope_worktree(&successor.cwd, &scope)?.path;
@@ -125,8 +126,8 @@ pub(crate) async fn replace(store: &SharedStore, id: &str) -> Result<SessionReco
 pub(crate) fn ensure_scope_worktree(
     repo: &Path,
     scope: &PrimaryScope,
-) -> Result<crate::engine::worktrees::AgentWorktree> {
-    use crate::engine::worktrees::{ensure_agent_worktree, wave_agent_segment, WorktreeSegment};
+) -> Result<crate::git::worktrees::AgentWorktree> {
+    use crate::git::worktrees::{ensure_agent_worktree, wave_agent_segment, WorktreeSegment};
     let segment = match scope {
         PrimaryScope::Repository(_) => WorktreeSegment::parse("repo")?,
         PrimaryScope::Wave(id) => wave_agent_segment(id.as_str())?,
@@ -135,12 +136,12 @@ pub(crate) fn ensure_scope_worktree(
     Ok(ensure_agent_worktree(repo, segment)?)
 }
 
-/// Adapt only at an idle driver boundary. Historical captures and native
+/// Adapt only at an idle attachment boundary. Historical captures and native
 /// conversation identity remain attached to the same Session.
 pub(super) async fn admit_workspace(
     store: &SharedStore,
-    mut session: AgentSession,
-) -> Result<AgentSession> {
+    mut session: LfSession,
+) -> Result<LfSession> {
     let Some(scope) = store.sqlite.primary_scope(&session.id)? else {
         return Ok(session);
     };
@@ -171,55 +172,59 @@ pub(super) async fn admit_workspace(
     Ok(session)
 }
 
-fn wave_session(binding: &crate::ops::WorkBinding) -> AgentSession {
-    AgentSession {
+fn wave_session(binding: &crate::ops::WorkBinding) -> LfSession {
+    LfSession {
         wave_id: Some(binding.wave_id.clone()),
         work_source: Some(WorkSource::Declared),
         ..conversation(
             &binding.cwd,
             binding.agent.as_deref(),
-            "wave/session",
+            "wave-session",
             binding.wave_name.clone(),
         )
     }
 }
 
-fn task_session(binding: &crate::ops::WorkBinding, task: &crate::durable::TaskId) -> AgentSession {
-    let title = binding
-        .subjects
-        .iter()
-        .find_map(|subject| subject.strip_prefix("task:"))
-        .unwrap_or(task.as_str())
-        .to_string();
-    AgentSession {
+fn task_session(
+    store: &SharedStore,
+    binding: &crate::ops::WorkBinding,
+    task: &crate::durable::TaskId,
+) -> Result<LfSession> {
+    let plan = store
+        .sqlite
+        .task(task)?
+        .ok_or_else(|| anyhow!("Task {task} is unavailable"))?;
+    let title =
+        crate::naming::generated_session_title(None, None, Some(&plan.plan.title), &binding.cwd);
+    Ok(LfSession {
         task_id: Some(task.clone()),
         wave_id: Some(binding.wave_id.clone()),
         work_source: Some(WorkSource::Declared),
         ..conversation(
             &binding.cwd,
             binding.agent.as_deref(),
-            "task/session",
+            "task-session",
             title,
         )
-    }
+    })
 }
 
-fn repository_session(repo: &crate::repository::CanonicalRepo) -> AgentSession {
+fn repository_session(repo: &crate::repository::CanonicalRepo) -> LfSession {
     let title = repo
         .as_path()
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| repo.to_string());
-    AgentSession {
+    LfSession {
         repo: Some(repo.to_string()),
-        ..conversation(repo.as_path(), None, "repo/session", title)
+        ..conversation(repo.as_path(), None, "repo-session", title)
     }
 }
 
-fn conversation(cwd: &Path, agent: Option<&str>, skill: &str, title: String) -> AgentSession {
+fn conversation(cwd: &Path, agent: Option<&str>, skill: &str, title: String) -> LfSession {
     let agent = crate::ops::task::resolve_task_agent(cwd, agent, None);
-    let (provider, model) = crate::engine::config::parse_agent(&agent);
-    AgentSession {
+    let (provider, model) = crate::config::parse_agent(&agent);
+    LfSession {
         captured: None,
         id: uuid::Uuid::new_v4().simple().to_string(),
         artifact_key: crate::session_record::new_artifact_key(),
@@ -233,7 +238,7 @@ fn conversation(cwd: &Path, agent: Option<&str>, skill: &str, title: String) -> 
         iterations: None,
         task_id: None,
         wave_id: None,
-        flow_process_lfid: None,
+        flow_lf_process_id: None,
         work_source: None,
         bound_at: None,
         interactive: true,
@@ -249,7 +254,7 @@ fn conversation(cwd: &Path, agent: Option<&str>, skill: &str, title: String) -> 
 
 /// Publish the admitted input and launch it unless a launcher already holds
 /// it. A failed start keeps the prepared input for the next caller.
-async fn start(store: &SharedStore, session: AgentSession) -> Result<SessionRecord> {
+async fn start(store: &SharedStore, session: LfSession) -> Result<SessionRecord> {
     let session = if conversation_process_is_running(&session.id).await? {
         session
     } else {
@@ -269,7 +274,7 @@ async fn start(store: &SharedStore, session: AgentSession) -> Result<SessionReco
     if capture_is_prepared(&session.artifact_key)?
         && !conversation_process_is_running(&session.id).await?
     {
-        let lf = crate::engine::process::resolve_pinned_lf_binary()?;
+        let lf = crate::os_process::resolve_pinned_lf_binary()?;
         let argv = vec![
             lf.to_string_lossy().to_string(),
             "session".to_string(),
@@ -292,7 +297,7 @@ async fn start(store: &SharedStore, session: AgentSession) -> Result<SessionReco
     surface(store, &session).await
 }
 
-fn stop_client(session: &AgentSession) -> Result<()> {
+fn stop_client(session: &LfSession) -> Result<()> {
     #[cfg(test)]
     if super::action_test::stop(&session.artifact_key) {
         return Ok(());
@@ -358,7 +363,7 @@ mod tests {
                 .contains(&conversation_background_name(&first.id)));
             let session = store.session(&first.id).await.unwrap().unwrap();
             assert!(session.interactive && session.input_published);
-            assert_eq!(session.skill.as_deref(), Some("wave/session"));
+            assert_eq!(session.skill.as_deref(), Some("wave-session"));
             assert_eq!(session.wave_id.as_ref(), Some(wave.id()));
             assert_eq!(session.task_id, None);
         });
@@ -448,7 +453,7 @@ mod tests {
 
             assert_eq!(first.id, second.id);
             let session = store.session(&first.id).await.unwrap().unwrap();
-            assert_eq!(session.skill.as_deref(), Some("repo/session"));
+            assert_eq!(session.skill.as_deref(), Some("repo-session"));
             assert_eq!((session.wave_id, session.task_id), (None, None));
 
             // A Wave's conversation in the same repository is a separate scope.

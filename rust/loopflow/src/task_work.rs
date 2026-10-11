@@ -1,16 +1,16 @@
-//! Observed Task membership grants no driver, process or Flow authority.
+//! Observed Task membership grants no attachment, process or Flow authority.
 
 use serde::{Deserialize, Serialize};
 
 use crate::durable::FlowProcessInventoryEntry;
-use crate::process::Process;
+use crate::process::LfProcess;
 
 /// All retained work in a checkout, plus explicitly attributed work elsewhere.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskWork {
     pub sessions: Vec<TaskSession>,
     pub flow_processes: Vec<FlowProcessInventoryEntry>,
-    pub processes: Vec<Process>,
+    pub processes: Vec<LfProcess>,
     /// The Task's Workflow; `None` when it runs only ad hoc Flows.
     pub workflow: Option<crate::ops::workflow::Workflow>,
 }
@@ -22,6 +22,6 @@ pub struct TaskSession {
     pub title: String,
     pub interactive: bool,
     /// The Flow whose step opened its current input.
-    pub flow_process_lfid: Option<String>,
+    pub flow_lf_process_id: Option<String>,
     pub completed_at: Option<i64>,
 }

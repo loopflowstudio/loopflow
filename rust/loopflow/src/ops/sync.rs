@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::engine::git::{
+use crate::git::{
     abort_merge, continue_merge, current_branch, fetch, get_default_branch, intervention_state,
     merge, rerere_remaining, rev_parse,
 };
@@ -106,7 +106,7 @@ pub fn plan_sync(
         .any(|path| !path.starts_with(Path::new("scratch")));
 
     let (class, strategy) = if branch == default_branch {
-        let strategy = if crate::engine::git::is_ancestor(repo, &base_ref, "HEAD")? {
+        let strategy = if crate::git::is_ancestor(repo, &base_ref, "HEAD")? {
             SyncStrategy::Noop
         } else {
             SyncStrategy::MergeTarget
@@ -127,9 +127,9 @@ pub fn plan_sync(
     };
     // A stacked child's scratch deletion is intentional history. Resetting to
     // the parent would discard it and copy the parent's notes back into the child.
-    let persistent = crate::engine::worktrees::is_persistent_worktree(repo)?;
+    let persistent = crate::git::worktrees::is_persistent_worktree(repo)?;
     let strategy = if fork_base.is_some() || persistent {
-        if crate::engine::git::is_ancestor(repo, &base_ref, "HEAD")? {
+        if crate::git::is_ancestor(repo, &base_ref, "HEAD")? {
             SyncStrategy::Noop
         } else if fork_base.is_none() && landed(repo, &base_ref)? {
             // A persistent branch outlives its squash-merged PRs. Once the base
@@ -374,7 +374,7 @@ fn verify_sync(
     let target_sha = owner.target_sha.as_deref().ok_or_else(|| {
         OpsError::Message("sync verification has no pinned target commit".to_string())
     })?;
-    if !crate::engine::git::is_ancestor(repo, target_sha, &head)? {
+    if !crate::git::is_ancestor(repo, target_sha, &head)? {
         return Err(OpsError::Message(format!(
             "sync incomplete: pinned target {target_sha} is not an ancestor of HEAD {head}"
         )));
@@ -399,7 +399,7 @@ fn verify_sync(
     }
     let unique_commits = count_unique_commits(repo, target_sha)?;
     if matches!(expected.strategy, SyncStrategy::MergeTarget)
-        && !crate::engine::git::is_ancestor(repo, &owner.head, &head)?
+        && !crate::git::is_ancestor(repo, &owner.head, &head)?
     {
         return Err(OpsError::Message(
             "sync lost the original branch history".to_string(),
@@ -438,7 +438,7 @@ fn verify_control_completion(repo: &Path, owner: &GitOperationOwner) -> OpsResul
         }
     }
     if let Some(target_sha) = owner.target_sha.as_deref() {
-        if !crate::engine::git::is_ancestor(repo, target_sha, "HEAD")? {
+        if !crate::git::is_ancestor(repo, target_sha, "HEAD")? {
             return Err(OpsError::Message(format!(
                 "sync incomplete: pinned target {target_sha} is not an ancestor of HEAD"
             )));
@@ -450,7 +450,7 @@ fn verify_control_completion(repo: &Path, owner: &GitOperationOwner) -> OpsResul
                 introduced.into_iter().collect::<Vec<_>>().join(", ")
             )));
         }
-        if !crate::engine::git::is_ancestor(repo, &owner.head, "HEAD")? {
+        if !crate::git::is_ancestor(repo, &owner.head, "HEAD")? {
             return Err(OpsError::Message(
                 "sync lost the original branch history".to_string(),
             ));
@@ -524,11 +524,11 @@ fn validate_fork_base(repo: &Path, fork_base: Option<&str>) -> OpsResult<()> {
     let Some(base) = fork_base else {
         return Ok(());
     };
-    if crate::engine::git::is_ancestor(repo, base, "HEAD")? {
+    if crate::git::is_ancestor(repo, base, "HEAD")? {
         return Ok(());
     }
     let merge_base =
-        crate::engine::git::merge_base(repo, base, "HEAD").unwrap_or_else(|_| base.to_string());
+        crate::git::merge_base(repo, base, "HEAD").unwrap_or_else(|_| base.to_string());
     let commits =
         git(repo, &["log", "--oneline", &format!("{merge_base}..HEAD")]).unwrap_or_default();
     Err(OpsError::UnsafeSyncBase {
@@ -625,8 +625,7 @@ pub(crate) fn restart_landed_persistent(repo: &Path) -> OpsResult<bool> {
     if rev_parse(repo, &base).is_err() {
         return Ok(false);
     }
-    if intervention_state(repo)?.is_some() || crate::engine::git::is_ancestor(repo, "HEAD", &base)?
-    {
+    if intervention_state(repo)?.is_some() || crate::git::is_ancestor(repo, "HEAD", &base)? {
         return Ok(false);
     }
     let target = if landed(repo, &base)? {
@@ -637,7 +636,7 @@ pub(crate) fn restart_landed_persistent(repo: &Path) -> OpsResult<bool> {
         let branch = current_branch(repo)?.unwrap_or_default();
         match rev_parse(repo, &format!("refs/remotes/origin/{branch}")) {
             Ok(pushed)
-                if crate::engine::git::is_ancestor(repo, &pushed, "HEAD")?
+                if crate::git::is_ancestor(repo, &pushed, "HEAD")?
                     && landed_at(repo, &base, &pushed)? =>
             {
                 replay(repo, &base, &format!("{pushed}..HEAD"))?
@@ -657,7 +656,7 @@ pub(crate) fn restart_landed_persistent(repo: &Path) -> OpsResult<bool> {
 }
 
 fn reset_to_base(repo: &Path, plan: &SyncPlan, progress: &impl Progress) -> OpsResult<()> {
-    if !plan.scratch_stashed && crate::engine::worktrees::is_persistent_worktree(repo)? {
+    if !plan.scratch_stashed && crate::git::worktrees::is_persistent_worktree(repo)? {
         progress.status(&format!(
             "{} has landed; restarting it from {}...",
             plan.branch, plan.base_ref
@@ -724,9 +723,7 @@ fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
 }
 
 fn git(repo: &Path, args: &[&str]) -> OpsResult<String> {
-    Ok(crate::engine::git::git_stdout(repo, args)?
-        .trim()
-        .to_string())
+    Ok(crate::git::git_stdout(repo, args)?.trim().to_string())
 }
 
 fn count_unique_commits(repo: &Path, base_ref: &str) -> OpsResult<usize> {
@@ -761,7 +758,7 @@ fn dirty_paths(repo: &Path) -> OpsResult<Vec<PathBuf>> {
         .args(["status", "--porcelain"])
         .output()?;
     if !output.status.success() {
-        return Err(OpsError::Git(crate::engine::GitError::CommandFailed {
+        return Err(OpsError::Git(crate::error::GitError::CommandFailed {
             command: "git status --porcelain".to_string(),
             stderr: String::from_utf8_lossy(&output.stderr).to_string(),
         }));
@@ -828,15 +825,15 @@ mod tests {
     use std::path::Path;
 
     fn git(repo: &Path, args: &[&str]) -> String {
-        crate::engine::git::git_stdout(repo, args).unwrap()
+        crate::git::git_stdout(repo, args).unwrap()
     }
 
     #[test]
     fn merged_persistent_branch_restarts_from_main_and_keeps_local_files() {
         let repo = loopflow_test_support::TestRepo::new();
-        let persistent = crate::engine::worktrees::ensure_agent_worktree(
+        let persistent = crate::git::worktrees::ensure_agent_worktree(
             repo.path(),
-            crate::engine::worktrees::WorktreeSegment::parse("repo").unwrap(),
+            crate::git::worktrees::WorktreeSegment::parse("repo").unwrap(),
         )
         .unwrap();
         std::fs::write(persistent.path.join("memory.md"), "accepted\n").unwrap();
@@ -870,9 +867,9 @@ mod tests {
     #[test]
     fn commits_made_after_the_merged_push_move_onto_main() {
         let repo = loopflow_test_support::TestRepo::new();
-        let persistent = crate::engine::worktrees::ensure_agent_worktree(
+        let persistent = crate::git::worktrees::ensure_agent_worktree(
             repo.path(),
-            crate::engine::worktrees::WorktreeSegment::parse("repo").unwrap(),
+            crate::git::worktrees::WorktreeSegment::parse("repo").unwrap(),
         )
         .unwrap();
         std::fs::write(persistent.path.join("memory.md"), "accepted\n").unwrap();
@@ -916,9 +913,9 @@ mod tests {
     #[test]
     fn unpublished_merge_results_survive_persistent_restart() {
         let repo = loopflow_test_support::TestRepo::new();
-        let persistent = crate::engine::worktrees::ensure_agent_worktree(
+        let persistent = crate::git::worktrees::ensure_agent_worktree(
             repo.path(),
-            crate::engine::worktrees::WorktreeSegment::parse("repo").unwrap(),
+            crate::git::worktrees::WorktreeSegment::parse("repo").unwrap(),
         )
         .unwrap();
         std::fs::write(persistent.path.join("memory.md"), "accepted\n").unwrap();
@@ -985,9 +982,9 @@ mod tests {
     fn persistent_commit_after_merge_starts_from_main() {
         for selected in [true, false] {
             let repo = loopflow_test_support::TestRepo::new();
-            let persistent = crate::engine::worktrees::ensure_agent_worktree(
+            let persistent = crate::git::worktrees::ensure_agent_worktree(
                 repo.path(),
-                crate::engine::worktrees::WorktreeSegment::parse("repo").unwrap(),
+                crate::git::worktrees::WorktreeSegment::parse("repo").unwrap(),
             )
             .unwrap();
             std::fs::write(persistent.path.join("memory.md"), "accepted\n").unwrap();

@@ -30,25 +30,23 @@ pub fn list_active(json: bool, watch: bool, task: Option<&str>) -> Result<()> {
         Ok::<_, anyhow::Error>((home, store, task))
     })?;
     if watch {
-        return super::session_watch::run(&home, &store, task, &runtime);
+        return super::session_watch::run(&home, &store, task);
     }
-    runtime.block_on(async {
-        let snapshot = crate::session_record::active::snapshot(&home, &store, task).await;
-        if json {
-            println!("{}", serde_json::to_string(&snapshot)?);
-        } else {
-            for session in &snapshot.sessions {
-                println!("{}  {}", session.id, session.title);
-            }
-            for gap in &snapshot.gaps {
-                println!("Unavailable: {gap}");
-            }
-            if snapshot.sessions.is_empty() && snapshot.gaps.is_empty() {
-                println!("No active Sessions.");
-            }
+    let snapshot = crate::session_record::active::snapshot(&home, &store.sqlite, task);
+    if json {
+        println!("{}", serde_json::to_string(&snapshot)?);
+    } else {
+        for session in &snapshot.sessions {
+            println!("{}  {}", session.id, session.title);
         }
-        Ok(())
-    })
+        for gap in &snapshot.gaps {
+            println!("Unavailable: {gap}");
+        }
+        if snapshot.sessions.is_empty() && snapshot.gaps.is_empty() {
+            println!("No active Sessions.");
+        }
+    }
+    Ok(())
 }
 
 /// Shared Session history, newest input first. SQL selects the recent budget
@@ -90,6 +88,17 @@ pub(crate) fn collect_history(
     )?)
 }
 
+/// Supply a name to a plain native conversation without changing its execution.
+pub fn name_native_session(provider: &str) -> Result<()> {
+    let payload: serde_json::Value = serde_json::from_reader(std::io::stdin().lock())?;
+    match crate::harness::native_titles::name_native_session(provider, &payload) {
+        Ok(Some(output)) => println!("{output}"),
+        Ok(None) => {}
+        Err(error) => eprintln!("Session title unavailable: {error:#}"),
+    }
+    Ok(())
+}
+
 /// Record a provider callback against its owning Session capture.
 pub fn observe_provider_session() -> Result<()> {
     let key = crate::session_record::inherited_capture_key()?
@@ -99,7 +108,7 @@ pub fn observe_provider_session() -> Result<()> {
     std::io::stdin().read_to_string(&mut payload)?;
     let payload: serde_json::Value = serde_json::from_str(&payload)
         .map_err(|error| anyhow!("invalid provider session callback: {error}"))?;
-    let provider_session_id = payload
+    let agent_session = payload
         .get("session_id")
         .and_then(serde_json::Value::as_str)
         .filter(|session_id| !session_id.is_empty())
@@ -109,7 +118,7 @@ pub fn observe_provider_session() -> Result<()> {
         .map(|value| crate::store::ProviderAccountId::parse(&value))
         .transpose()
         .map_err(|error| anyhow!("invalid provider account in session callback: {error}"))?;
-    crate::session_record::write_provider_session(&capture_dir, provider_session_id, account_id)
+    crate::session_record::write_provider_session(&capture_dir, &agent_session.into(), account_id)
         .map_err(|error| anyhow!("cannot preserve provider session: {error}"))
 }
 

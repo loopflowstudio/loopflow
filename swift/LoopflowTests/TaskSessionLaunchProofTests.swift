@@ -28,7 +28,7 @@ struct TaskSessionLaunchProofTests {
             try FileManager.default.copyItem(at: executable, to: owned)
             try JSONSerialization.data(withJSONObject: ["lf_path": host.appendingPathComponent("fixture/lf").path])
                 .write(to: host.appendingPathComponent("LoopflowDevControl.json"))
-            let process = Foundation.Process()
+            let process = Process()
             process.executableURL = owned
             process.arguments = ["--test-bundle-path", try #require(Bundle(for: SessionLaunchBundleMarker.self).executablePath),
                                  "--testing-library", "swift-testing",
@@ -126,7 +126,7 @@ struct TaskSessionLaunchProofTests {
             case "wave" where args.dropFirst().first == "list": return "[]"
             case "session", "flow": return "[]"
             case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
-            case "pm": return #"{"identifier":"W2-131","comments":[]}"#
+            case "pm": return #"{"identifier":"W2-131","comments":[],"pending_sync":[],"conflicts":{},"refresh_error":null}"#
             default: throw RegistryQueryError("Unexpected read in preparation proof")
             }
         }

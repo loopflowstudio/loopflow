@@ -1,0 +1,37 @@
+{
+  "date": "2026-10-08",
+  "build": "cargo build --release -p loopflow --bin lf; CARGO_PROFILE_RELEASE_DEBUG=1",
+  "source_base": "4e6770cbf550aa5f9d653650295481ced737a640",
+  "host_architecture": "arm64",
+  "cpu": "Apple M4 Max",
+  "os": "26.0.1",
+  "rust": "rustc 1.98.1 (48a229cea 2026-09-01) (Homebrew)",
+  "providers": {
+    "claude": "2.1.294",
+    "codex": "0.161.0"
+  },
+  "fixture_counts": {
+    "agent_sessions": 1819,
+    "processes": 280936,
+    "session_events": 1334586,
+    "provider_accounts": 0
+  },
+  "binaries": {
+    "baseline": {
+      "sha256": "f666bd94e10942e164bdcdaa9f23c3545fc0169025082dbaf0e587feeb27c05b",
+      "bytes": 52630336
+    },
+    "without_provider_probe": {
+      "sha256": "6aef961eb6498e33fa1df056e8e3cb147794e9fc9b68c695d00828aaad967b13",
+      "bytes": 52630512
+    },
+    "final": {
+      "sha256": "7f9022cdef061b7f59526e976e35053dac45970680109bedb4b89ae1cb101d3a",
+      "bytes": 52630560
+    }
+  },
+  "rejected_binary": {
+    "change": "retain store across capture publication",
+    "sha256": "7cac0822a76e7e29d30e42f53c5526a1b8297ecc9f215fa12cdde0a6a5927522"
+  }
+}

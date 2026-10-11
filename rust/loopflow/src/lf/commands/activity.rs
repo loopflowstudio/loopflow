@@ -52,7 +52,7 @@ pub enum WorkActivityFact {
         session_id: String,
         captured: Option<i64>,
         reference: crate::session_record::ProviderHistoryReference,
-        process_lfid: Option<crate::id::ProcessLfid>,
+        lf_process_id: Option<crate::id::LfProcessId>,
         status: Option<String>,
     },
     PrStarted {
@@ -192,7 +192,7 @@ pub(crate) fn build_snapshot(
                         session_id: snapshot.session_id.clone(),
                         captured: snapshot.captured,
                         reference: provider.reference.clone(),
-                        process_lfid: provider.process_lfid.clone(),
+                        lf_process_id: provider.lf_process_id.clone(),
                         status: if phase == "completed" {
                             provider.outcome.clone()
                         } else {
@@ -466,8 +466,7 @@ fn print_snapshot(snapshot: &WorkActivitySnapshot) {
 mod tests {
     use super::*;
     use crate::work::task::{
-        AfterMerge, GithubPr, PrMergeMode, PrMergeRequest, PrPresentation, PrPublication, TaskId,
-        TaskPrId,
+        GithubPr, PrMergeMode, PrMergeRequest, PrPresentation, PrPublication, TaskId, TaskPrId,
     };
 
     #[test]
@@ -682,8 +681,6 @@ mod tests {
                     mode: PrMergeMode::Auto,
                     requested_at: OffsetDateTime::from_unix_timestamp(30).unwrap(),
                     head_sha: "head".to_string(),
-                    after_merge: AfterMerge::ContinueTask,
-                    next_slug: None,
                 }),
             }),
             merge_commit: Some("merge".to_string()),

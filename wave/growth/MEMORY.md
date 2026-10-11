@@ -89,7 +89,7 @@ canonical ownership stays in reference/help. Keep `wt`, `top` and `ps`; `mon`
 is a derived prefix. The newest selectors are `--task` / `--wt` for location
 and `--wave` for context and identity, with no `--as` alias.
 
-LOO-338 now integrates the landed Exec/AgentSession/FlowSession and Account
+LOO-338 now integrates the landed Exec/LfSession/FlowSession and Account
 models. Monitor separates live processes, recorded outcomes and missing
 observations; active conversation streaming, raw/final Session evidence, usage
 and historical Work queries retain distinct readers. Account and route each

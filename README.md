@@ -45,8 +45,8 @@ conversation cannot dirty main.
 ```bash
 lf                         # follow the conversation wherever it goes
 lf operate                 # review and operate this repository’s work
-lf repo/operate            # canonical name for the same skill
-lf --wave designer wave/operate  # operate one Wave
+lf repo-operate             # canonical name for the same skill
+lf --wave designer wave-operate  # operate one Wave
 ```
 
 Give an external agent harness the Loopflow operating skill:
@@ -80,6 +80,18 @@ See [skill sources](docs/config.md#skill-sources) for precedence and export beha
 Flows invoke builtin commands with `cmd:`, for example `- cmd: pr land`.
 See [Authoring](docs/authoring.md) for composition and review boundaries.
 
+## Run a Flow in chat
+
+```bash
+lf sync-skills --yes        # export personal skills and builtin Flows
+lf sync-skills --repo       # export this repository’s skills and Flows locally
+```
+
+Select `/pursue` in Claude Code or `pursue` in Codex’s skill picker to follow
+its generated checklist: headless commands, conversational reviews, and loops.
+Flow exports yield to existing skills with the same name. See
+[chat Flows](docs/authoring.md#flows-in-chat) for boundaries.
+
 ## Keep work moving
 
 Author a Wave in the repo and open its conversation:
@@ -94,8 +106,8 @@ Task only after it has a Linear issue, and fold what changed into memory.
 ```
 
 ```bash
-lf --wave designer wave/operate        # one finite pass: keep started Tasks moving
-lf --wave designer wave/operate "ship the button audit first"
+lf --wave designer wave-operate        # one finite pass: keep started Tasks moving
+lf --wave designer wave-operate "ship the button audit first"
 lf session ensure -w designer          # the Wave's ongoing conversation, applying that pass on every return
 ```
 
@@ -113,10 +125,12 @@ lf interrupt INF-123                             # end this turn so fresh direct
 lf --task INF-123 research "write scratch/runtime.md"    # one independent Task conversation
 lf task run INF-123 --reason "reconcile all scratch first" # publish direction, then run fresh work
 lf task status INF-123 --json                         # inspect planning, even when sync is unavailable
-lf task/operate "INF-123"                           # advance until landed or blocked; link the blocking Session
-lf --task INF-123 skill task/session               # ongoing conversation that keeps applying task/operate
+lf task complete INF-123                             # complete without moving the Workflow
+lf task reopen INF-123                               # reopen planning; keep the Workflow and PR
+lf task-operate "INF-123"                           # advance through follow-through to completion, or a blocker
+lf --task INF-123 skill task-session               # ongoing conversation that keeps applying task-operate
 lf arm                                             # request exact-head auto-merge and return
-lf land                                            # complete the Task after verified merge
+lf land                                            # request merge; follow-through completes the Task
 lf pr reconcile                                      # check recorded deliveries once and settle merges
 lf ci watch                                          # watch PR checks; start a ci-fix when a landing fails
 ```
@@ -167,6 +181,21 @@ lf session bind SESSION --task INF-123
 
 Claude and Codex terminal Sessions load assembled context from a system instructions
 file, keeping the initial command-line message short even with large Wave memory.
+New Session names use a short excerpt of the request, or the invoked skill when
+no request was supplied. Task conversations use the Task title when no specific
+purpose was supplied. Human-assigned names survive reconnects and suggestions.
+Interactive terminal titles use the Session name, with the Task identifier first
+and a short purpose for Task work. In cmux, the attached workspace and tab follow
+`lf session rename`; other terminals pick up a changed name on reconnect.
+
+Published installs also add native naming hooks, preserving existing hooks. In
+repositories with `.lf`, plain Claude and Codex use the first request as a short
+name when unnamed. Existing names stay, including instruction-derived titles;
+preservation during concurrent renames remains unproved. Review the installed
+hooks with Codex's `/hooks`.
+Claude naming also works with `claude -p`. Codex naming requires its shared
+app-server; embedded launches and `codex exec` lack that naming endpoint.
+No resume hooks repair old conversations. Native providers own their terminal output.
 
 A Session keeps the conversation's identity, name, feedback and native history
 across commands. Interactive and headless work use the same model. Default lists
@@ -192,9 +221,9 @@ Bind assigns an unbound conversation to one Task permanently, including a done T
 | **Wave** | Keeps the objective, memory, cadence, budget and instruments | `wave/<name>/` |
 | **Project** | Holds one Wave's plan, Tasks, KRs, targets and the workflow its Tasks take up | Linear |
 | **Chapter** | Names the repository's current group of In Progress Projects | Linear Project names and statuses |
-| **Task** | Owns concrete work, its checkout, serial PRs and every Flow process for it | Linear and local SQLite |
+| **Task** | Owns concrete work, its checkout, optional PR and every Flow process for it | Linear and local SQLite |
 | **Process** | Records one actual lf process and its observed command outcome | Machine-local SQLite |
-| **AgentSession** | Keeps a continuable interactive or headless conversation and native history | Machine-local SQLite and provider-native storage |
+| **LfSession** | Keeps a continuable interactive or headless conversation and native history | Machine-local SQLite and provider-native storage |
 | **Machine** | Places execution and scopes its store, credentials and process authority | Machine identity and local data |
 
 The [execution contract and cutover status](docs/architecture-reference.md#cutover-status)

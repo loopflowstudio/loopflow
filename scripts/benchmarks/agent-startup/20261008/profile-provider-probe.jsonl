@@ -1,0 +1,12 @@
+{"path": "bare", "variant": "baseline", "sample": 0, "handoff_ms": 470.54441703949124, "git_processes": 17, "connections": 22, "statements": 1260, "rows": 15686, "load1": 22.66650390625}
+{"path": "bare", "variant": "candidate", "sample": 0, "handoff_ms": 431.787165987771, "git_processes": 17, "connections": 22, "statements": 1260, "rows": 15686, "load1": 22.66650390625}
+{"path": "connect", "variant": "baseline", "sample": 0, "handoff_ms": 2303.9452920202166, "git_processes": 8, "connections": 15, "statements": 790, "rows": 10614, "load1": 21.49169921875}
+{"path": "connect", "variant": "candidate", "sample": 0, "handoff_ms": 273.35970796411857, "git_processes": 8, "connections": 15, "statements": 790, "rows": 10616, "load1": 21.49169921875}
+{"path": "bare", "variant": "candidate", "sample": 1, "handoff_ms": 439.16112498845905, "git_processes": 17, "connections": 22, "statements": 1260, "rows": 15686, "load1": 21.49169921875}
+{"path": "bare", "variant": "baseline", "sample": 1, "handoff_ms": 461.7587499669753, "git_processes": 17, "connections": 22, "statements": 1260, "rows": 15686, "load1": 21.49169921875}
+{"path": "connect", "variant": "candidate", "sample": 1, "handoff_ms": 275.24250000715256, "git_processes": 8, "connections": 15, "statements": 790, "rows": 10618, "load1": 21.49169921875}
+{"path": "connect", "variant": "baseline", "sample": 1, "handoff_ms": 347.7242909721099, "git_processes": 8, "connections": 15, "statements": 790, "rows": 10620, "load1": 21.49169921875}
+{"path": "bare", "variant": "baseline", "sample": 2, "handoff_ms": 463.1612920202315, "git_processes": 17, "connections": 22, "statements": 1260, "rows": 15686, "load1": 21.49169921875}
+{"path": "bare", "variant": "candidate", "sample": 2, "handoff_ms": 442.35887500690296, "git_processes": 17, "connections": 22, "statements": 1260, "rows": 15686, "load1": 20.4111328125}
+{"path": "connect", "variant": "baseline", "sample": 2, "handoff_ms": 294.3452089675702, "git_processes": 8, "connections": 15, "statements": 790, "rows": 10622, "load1": 20.4111328125}
+{"path": "connect", "variant": "candidate", "sample": 2, "handoff_ms": 276.4083750080317, "git_processes": 8, "connections": 15, "statements": 790, "rows": 10624, "load1": 20.4111328125}

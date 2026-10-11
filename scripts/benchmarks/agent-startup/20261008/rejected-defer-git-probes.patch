@@ -1,0 +1,39 @@
+diff --git a/rust/loopflow/src/repo.rs b/rust/loopflow/src/repo.rs
+index 52eaaff9d6..a37ed4bc98 100644
+--- a/rust/loopflow/src/repo.rs
++++ b/rust/loopflow/src/repo.rs
+@@ -4,10 +4,12 @@ use anyhow::{anyhow, Context, Result};
+ use std::path::{Path, PathBuf};
+ 
+ pub fn discover_repo_root(cwd: &Path) -> Result<Option<PathBuf>> {
+-    let has_git_context = std::env::var_os("GIT_DIR").is_some()
+-        || cwd
+-            .ancestors()
+-            .any(|path| path.join(".git").symlink_metadata().is_ok());
++    let has_git_context = || {
++        std::env::var_os("GIT_DIR").is_some()
++            || cwd
++                .ancestors()
++                .any(|path| path.join(".git").symlink_metadata().is_ok())
++    };
+     let output = match std::process::Command::new("git")
+         .args(["rev-parse", "--show-toplevel"])
+         .env("LC_ALL", "C")
+@@ -15,7 +17,7 @@ pub fn discover_repo_root(cwd: &Path) -> Result<Option<PathBuf>> {
+         .output()
+     {
+         Ok(output) => output,
+-        Err(error) if error.kind() == std::io::ErrorKind::NotFound && !has_git_context => {
++        Err(error) if error.kind() == std::io::ErrorKind::NotFound && !has_git_context() => {
+             std::fs::metadata(cwd).context("read the working directory")?;
+             return Ok(None);
+         }
+@@ -27,7 +29,7 @@ pub fn discover_repo_root(cwd: &Path) -> Result<Option<PathBuf>> {
+         )));
+     }
+     let error = String::from_utf8_lossy(&output.stderr);
+-    if !has_git_context && error.contains("not a git repository") {
++    if !has_git_context() && error.contains("not a git repository") {
+         return Ok(None);
+     }
+     Err(anyhow!(

@@ -52,7 +52,7 @@ mod tests {
     use rusqlite::params;
 
     use super::{SqliteStore, StoreRevisions};
-    use crate::id::{ProcessLfid, TraceId, WaveId};
+    use crate::id::{LfProcessId, TraceId, WaveId};
 
     /// Tables no workspace surface reads. A new table belongs here or in a
     /// domain; `session_events` is covered except for transcript and usage rows.
@@ -163,26 +163,25 @@ mod tests {
     fn a_session_reading_moves_sessions_only_when_waiting_could_change() {
         let (_dir, store) = store();
         session(&store, "conversation");
-        let generation = store
+        let process = LfProcessId::new();
+        store
             .conn
             .lock()
             .unwrap()
-            .query_row("SELECT driver_generation FROM agent_sessions", [], |row| {
-                row.get(0)
-            })
+            .execute(
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+                [&process],
+            )
             .unwrap();
-        let driver = crate::process::SessionDriver {
-            process_lfid: None,
-            generation,
-            provider_generation: 0,
-            provider_process_lfid: ProcessLfid::new(),
-        };
+        let attachment = store
+            .claim_session_attachment("conversation", None, &process, true)
+            .unwrap();
         let record = |observed_at, open_tools, pending_input, yielded| {
             let before = store.revisions().unwrap();
             store
                 .record_session_activity(
                     "conversation",
-                    &driver,
+                    &attachment,
                     &crate::session::SessionActivity {
                         observed_at,
                         open_tools,
@@ -245,8 +244,8 @@ mod tests {
             )
             .unwrap();
             conn.execute(
-                "INSERT INTO processes(lfid,trace_id,cwd,started_at) VALUES(?1,?2,'/repo',1)",
-                params![ProcessLfid::new(), TraceId::new()],
+                "INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?2,'/repo',1)",
+                params![LfProcessId::new(), TraceId::new()],
             )
             .unwrap();
         }
@@ -309,7 +308,7 @@ mod tests {
         for (kind, receipt, payload) in [
             ("observed", "input:manifest.json", "{}".to_owned()),
             ("observed", "input:terminal.json", "{}".to_owned()),
-            ("observed", "driver:0:exit", "{}".to_owned()),
+            ("observed", "attachment:0:exit", "{}".to_owned()),
             ("started", "turn", "{}".to_owned()),
             ("completed", "turn", "{}".to_owned()),
             (

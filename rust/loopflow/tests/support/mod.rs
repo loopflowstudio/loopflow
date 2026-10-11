@@ -1,8 +1,12 @@
+pub mod planning;
+
 use std::env;
 use std::ffi::OsString;
+use std::fs;
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
+use base64::prelude::*;
 use loopflow::id::WaveId;
 use loopflow::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
 use loopflow::store::{PmSnapshotRow, StorageConfig, Store};
@@ -138,10 +142,53 @@ fi
     )
 }
 
+#[allow(dead_code)] // Shared synthetic account for provider-backed CLI proofs.
+pub fn register_codex_account(home: &Path) {
+    let account_home = home.join("accounts/codex/fixture");
+    fs::create_dir_all(&account_home).unwrap();
+    let email = "fixture@example.com";
+    let claims = BASE64_URL_SAFE_NO_PAD
+        .encode(serde_json::json!({"email": email, "sub": "fixture"}).to_string());
+    fs::write(
+        account_home.join("auth.json"),
+        serde_json::json!({"tokens": {
+            "access_token": "synthetic-fixture-token",
+            "id_token": format!("h.{claims}.s")
+        }})
+        .to_string(),
+    )
+    .unwrap();
+    let store = loopflow::store::sqlite::SqliteStore::new(&home.join("loopflow.db")).unwrap();
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    store
+        .upsert_provider_account(&loopflow::store::ProviderAccount {
+            provider: "codex".into(),
+            account_id: loopflow::store::ProviderAccountId::parse("fixture").unwrap(),
+            home: Some(account_home),
+            login_email: Some(loopflow::profile::EmailAddress::parse(email).unwrap()),
+            observed_email: None,
+            observed_subject: None,
+            observed_credential_digest: None,
+            observed_plan: None,
+            credential_state: loopflow::store::CredentialState::Connected,
+            routing_state: loopflow::store::RoutingState::Automatic,
+            plan: None,
+            paid_through: None,
+            utilization_percent: None,
+            cooldown_until: None,
+            cooldown_reason: None,
+            last_selected_at: None,
+            created_at: now,
+            updated_at: now,
+        })
+        .unwrap();
+}
+
 pub struct EnvGuard {
     previous_path: Option<String>,
     previous_home: Option<String>,
     previous_lf_home: Option<OsString>,
+    previous_lf_bin: Option<OsString>,
     previous_codex_home: Option<OsString>,
     previous_claude_home: Option<OsString>,
     _ambient: ambient::EnvGuard,
@@ -188,6 +235,8 @@ impl EnvGuard {
         }
         let previous_lf_home = env::var_os("LF_HOME");
         let ambient = ambient::EnvGuard::new();
+        let previous_lf_bin = env::var_os("LF_BIN");
+        env::set_var("LF_BIN", env!("CARGO_BIN_EXE_lf"));
         let lf_home = TempDir::new().expect("temp lf machine dir");
         env::remove_var("LF_HOME");
         if let Some(home) = home {
@@ -207,6 +256,7 @@ impl EnvGuard {
             previous_path,
             previous_home,
             previous_lf_home,
+            previous_lf_bin,
             previous_codex_home,
             previous_claude_home,
             _ambient: ambient,
@@ -234,6 +284,10 @@ impl Drop for EnvGuard {
             env::set_var("HOME", prev);
         } else {
             env::remove_var("HOME");
+        }
+        match &self.previous_lf_bin {
+            Some(previous) => env::set_var("LF_BIN", previous),
+            None => env::remove_var("LF_BIN"),
         }
         match &self.previous_lf_home {
             Some(prev) => env::set_var("LF_HOME", prev),
@@ -266,23 +320,30 @@ pub fn bind_task_planning(repo: &TestRepo) {
 
 #[allow(dead_code)] // Shared helper compiled into integration tests that do not need Task state.
 pub struct RegisteredTask {
+    database: std::path::PathBuf,
     pub store: Store,
     pub task: Task,
     pub pr: TaskPr,
 }
 
-#[allow(dead_code)] // Shared helper compiled into integration tests that do not need Task state.
-pub fn register_task(
+/// Seed a retained PR row explicitly, independently of checkout placement.
+#[allow(dead_code)] // Shared helper compiled into tests without delivery fixtures.
+pub fn register_task_with_pr(
     home: &Path,
     worktree: &Path,
     branch: &str,
     base_commit: &str,
 ) -> RegisteredTask {
-    register_task_fixture(home, worktree, branch, base_commit)
+    let registered = register_task_fixture(home, worktree, branch, base_commit);
+    tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(registered.store.insert_task_pr(&registered.pr))
+        .unwrap();
+    registered
 }
 
-#[allow(dead_code)] // Shared helper compiled into integration tests without this incident shape.
-pub fn register_unrun_task(
+#[allow(dead_code)] // Shared helper compiled into suites with published Tasks only.
+pub fn register_task_without_pr(
     home: &Path,
     worktree: &Path,
     branch: &str,
@@ -312,13 +373,16 @@ fn register_task_fixture(
     let project = Project {
         id: ProjectId::new(),
         plan: ProjectPlan {
+            summary: String::new(),
             workflow: "feature".into(),
             status: loopflow::pm::ProjectStatus::Started,
-            id: LinearProjectId::new(format!("project-{}", WaveId::new())).expect("project id"),
+            linear_id: Some(
+                LinearProjectId::new(format!("project-{}", WaveId::new())).expect("project id"),
+            ),
             slug: "task-pr-tests".to_string(),
             name: "Task PR tests".to_string(),
             prompt_context: "Keep Task PR transitions durable.".to_string(),
-            pm_snapshot_synced_at: now.unix_timestamp(),
+            pm_snapshot_synced_at: Some(now.unix_timestamp()),
         },
         wave_id: wave.id().clone(),
         iteration: 0,
@@ -326,27 +390,33 @@ fn register_task_fixture(
         created_at: now,
         updated_at: now,
     };
-    let task = Task {
+    let mut task = Task {
         id: TaskId::new(),
         plan: TaskPlan {
-            id: LinearIssueId::new(format!("issue-{}", WaveId::new())).expect("issue id"),
+            revision: 0,
+            linear_id: Some(
+                LinearIssueId::new(format!("issue-{}", WaveId::new())).expect("issue id"),
+            ),
             identifier: "INF-123".to_string(),
             title: "Prove Task PR transitions".to_string(),
             description: "Exercise the persisted lifecycle.".to_string(),
-            pm_snapshot_synced_at: now.unix_timestamp(),
+            pm_snapshot_synced_at: Some(now.unix_timestamp()),
         },
         pm_writeback: PmWritebackState::Current,
         wave_id: wave.id().clone(),
         project_id: project.id.clone(),
-        worktree: worktree.to_path_buf(),
+        worktree: Some(worktree.to_path_buf()),
         workspace_slug: "task-pr-proof".to_string(),
+        branch: branch.to_string(),
+        base_commit: base_commit.to_string(),
+        parent_pr_id: None,
         agent: None,
         abandon_intent: None,
         created_at: now,
         updated_at: now,
         observation: loopflow::work::task::Observation::NotRequired,
     };
-    let pr = TaskPr {
+    let mut pr = TaskPr {
         id: TaskPrId::new(),
         task_id: task.id.clone(),
         sequence: 1,
@@ -380,7 +450,7 @@ fn register_task_fixture(
             .expect("select fixture Project");
         let pm_payload = serde_json::json!({
             "projects": [{
-                "id": project.plan.id.as_str(),
+                "id": project.plan.linear_id.as_ref().unwrap().as_str(),
                 "slug": project.plan.slug.as_str(),
                 "name": project.plan.name.as_str(),
                 "summary": "",
@@ -392,14 +462,14 @@ fn register_task_fixture(
                 "team_ids": ["team-task-pr-tests"]
             }],
             "items": [{
-                "id": task.plan.id.as_str(),
+                "id": task.plan.linear_id.as_ref().unwrap().as_str(),
                 "identifier": task.plan.identifier.as_str(),
                 "url": "https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions",
                 "name": task.plan.title.as_str(),
                 "description": task.plan.description.as_str(),
                 "rank": 1,
                 "completed": false,
-                "project_id": project.plan.id.as_str(),
+                "project_id": project.plan.linear_id.as_ref().unwrap().as_str(),
                 "project": project.plan.slug.as_str(),
                 "team_id": "team-task-pr-tests",
                 "assignee": null
@@ -418,12 +488,40 @@ fn register_task_fixture(
             )
             .await
             .expect("cache Task PR context");
+        task.id = store
+            .get_task_by_issue(task.plan.linear_id.as_ref().unwrap().as_str())
+            .await
+            .unwrap()
+            .unwrap()
+            .id;
+        pr.task_id = task.id.clone();
         store
-            .create_task(&task, &pr, None)
+            .place_task(
+                &task.id,
+                task.worktree.as_ref().unwrap(),
+                &task.workspace_slug,
+                &pr,
+                None,
+            )
             .await
             .expect("create test Task");
+        store
+            .append_task_event(
+                &task.id,
+                &loopflow::work::task::TaskEventKind::CheckoutReady {
+                    branch: branch.to_string(),
+                    base_commit: base_commit.to_string(),
+                },
+            )
+            .await
+            .unwrap();
     });
-    RegisteredTask { store, task, pr }
+    RegisteredTask {
+        store,
+        task,
+        pr,
+        database: home.join("loopflow.db"),
+    }
 }
 
 /// A second Task in the fixture's Wave and Project, tracking `branch` from its
@@ -441,11 +539,13 @@ pub fn register_sibling_task(
     let now = OffsetDateTime::now_utc();
     let mut task = registered.task.clone();
     task.id = TaskId::new();
-    task.plan.id = LinearIssueId::new(format!("issue-{}", WaveId::new())).expect("issue id");
+    task.plan.linear_id =
+        Some(LinearIssueId::new(format!("issue-{}", WaveId::new())).expect("issue id"));
     task.plan.identifier = identifier.to_string();
     task.plan.title = format!("Sibling {identifier}");
     task.workspace_slug = branch.to_string();
-    task.worktree = worktree.to_path_buf();
+    task.branch = branch.to_string();
+    task.worktree = Some(worktree.to_path_buf());
     task.created_at = now;
     task.updated_at = now;
     let pr = TaskPr {
@@ -457,9 +557,27 @@ pub fn register_sibling_task(
         updated_at: now,
         ..registered.pr.clone()
     };
+    planning::seed_unplaced_task(&registered.database, &task);
     runtime
-        .block_on(registered.store.create_task(&task, &pr, None))
+        .block_on(registered.store.place_task(
+            &task.id,
+            task.worktree.as_ref().unwrap(),
+            &task.workspace_slug,
+            &pr,
+            None,
+        ))
         .expect("create sibling Task");
+    if worktree.is_dir() {
+        runtime
+            .block_on(registered.store.append_task_event(
+                &task.id,
+                &loopflow::work::task::TaskEventKind::CheckoutReady {
+                    branch: branch.to_string(),
+                    base_commit: task.base_commit.clone(),
+                },
+            ))
+            .unwrap();
+    }
     task
 }
 
@@ -492,25 +610,25 @@ fn write_executable(dir: &Path, name: &str, content: &str) {
     }
 }
 
-/// Record a Flow the way `lf run` leaves one: a driver Process, its FlowProcess row
-/// and one step Process in `cwd`, both exited. Returns the driver's id, which
+/// Record a Flow the way `lf run` leaves one: a Flow process, its FlowProcess row
+/// and one step Process in `cwd`, both exited. Returns the Flow process's id, which
 /// names the Flow.
 #[allow(dead_code)] // Shared helper compiled into integration tests that record no Flow.
 pub fn record_flow(home: &Path, cwd: &Path, flow: &str, label: &str, outcome: &str) -> String {
-    use loopflow::engine::flow::{ConcreteSkill, ConcreteStep, Skill};
+    use loopflow::flow::{ConcreteSkill, ConcreteStep, Skill};
     let db = rusqlite::Connection::open(home.join("loopflow.db")).expect("open test registry");
-    let driver = loopflow::id::ProcessLfid::new();
-    let step = loopflow::id::ProcessLfid::new();
+    let flow_process = loopflow::id::LfProcessId::new();
+    let step = loopflow::id::LfProcessId::new();
     for (id, parent, argv) in [
-        (driver.clone(), None, vec!["lf", "run", flow]),
+        (flow_process.clone(), None, vec!["lf", "run", flow]),
         (
             step.clone(),
-            Some(driver.clone()),
+            Some(flow_process.clone()),
             vec!["lf", "--batch", "skill", label],
         ),
     ] {
         db.execute(
-            "INSERT INTO processes(lfid,trace_id,parent_process_lfid,command,repo,cwd,started_at,completed_at,outcome)
+            "INSERT INTO processes(id,trace_id,parent_lf_process_id,command,repo,cwd,started_at,completed_at,outcome)
              VALUES(?1,?2,?3,?4,?5,?5,1,2,?6)",
             rusqlite::params![
                 id.as_str(),
@@ -523,7 +641,7 @@ pub fn record_flow(home: &Path, cwd: &Path, flow: &str, label: &str, outcome: &s
         )
         .expect("record Flow Process");
     }
-    let graph = loopflow::engine::flow_graph::FlowGraph::new(
+    let graph = loopflow::flow::graph::FlowGraph::new(
         flow,
         &[ConcreteStep::Skill(ConcreteSkill {
             skill: Skill::named(label),
@@ -534,45 +652,45 @@ pub fn record_flow(home: &Path, cwd: &Path, flow: &str, label: &str, outcome: &s
         })],
     );
     db.execute(
-        "INSERT INTO flow_processes(process_lfid,flow,graph) VALUES(?1,?2,?3)",
+        "INSERT INTO flow_processes(lf_process_id,flow,graph) VALUES(?1,?2,?3)",
         rusqlite::params![
-            driver.as_str(),
+            flow_process.as_str(),
             flow,
             serde_json::to_string(&graph).expect("graph serializes")
         ],
     )
     .expect("record FlowProcess");
     db.execute(
-        "INSERT INTO flow_process_steps(flow_process_lfid,process_lfid,node,iterations) VALUES(?1,?2,0,'[[]]')",
-        rusqlite::params![driver.as_str(), step.as_str()],
+        "INSERT INTO flow_process_steps(flow_lf_process_id,lf_process_id,node,iterations) VALUES(?1,?2,0,'[[]]')",
+        rusqlite::params![flow_process.as_str(), step.as_str()],
     )
     .expect("record Flow step");
-    driver.to_string()
+    flow_process.to_string()
 }
 
-/// Every Flow in launch order: its driver's outcome and each recorded step as
+/// Every Flow in launch order: its process's outcome and each recorded step as
 /// `{flow, label, key, iterations, argv}`, `argv` without the binary path.
 #[allow(dead_code)] // Shared helper compiled into integration tests that read no Flow.
 pub fn recorded_flows(home: &Path) -> Vec<(Option<String>, Vec<serde_json::Value>)> {
     let db = rusqlite::Connection::open(home.join("loopflow.db")).expect("open test registry");
-    let mut drivers = db
+    let mut flow_processes = db
         .prepare(
-            "SELECT d.lfid,d.outcome,f.flow,f.graph FROM flow_processes f JOIN processes d ON d.lfid=f.process_lfid
+            "SELECT d.id,d.outcome,f.flow,f.graph FROM flow_processes f JOIN processes d ON d.id=f.lf_process_id
              ORDER BY d.rowid",
         )
-        .expect("select Flow drivers");
-    let rows = drivers
+        .expect("select Flow processes");
+    let rows = flow_processes
         .query_map([], |row| {
             Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
         })
-        .expect("read Flow drivers")
+        .expect("read Flow processes")
         .collect::<rusqlite::Result<Vec<(String, Option<String>, String, String)>>>()
-        .expect("decode Flow drivers");
+        .expect("decode Flow processes");
     rows.into_iter()
-        .map(|(driver, outcome, flow, graph)| {
-            let graph: loopflow::engine::flow_graph::FlowGraph =
+        .map(|(flow_process, outcome, flow, graph)| {
+            let graph: loopflow::flow::graph::FlowGraph =
                 serde_json::from_str(&graph).expect("a Flow graph");
-            fn label(nodes: &[loopflow::engine::flow_graph::FlowNode], key: u32) -> Option<String> {
+            fn label(nodes: &[loopflow::flow::graph::FlowNode], key: u32) -> Option<String> {
                 nodes.iter().find_map(|node| {
                     if node.key == key {
                         return Some(node.label.clone());
@@ -583,11 +701,11 @@ pub fn recorded_flows(home: &Path) -> Vec<(Option<String>, Vec<serde_json::Value
             let mut steps = db
                 .prepare(
                     "SELECT e.command,s.node,s.iterations FROM flow_process_steps s
-                     JOIN processes e ON e.lfid=s.process_lfid WHERE s.flow_process_lfid=?1 ORDER BY s.seq",
+                     JOIN processes e ON e.id=s.lf_process_id WHERE s.flow_lf_process_id=?1 ORDER BY s.seq",
                 )
                 .expect("select Flow steps");
             let steps = steps
-                .query_map([driver], |row| {
+                .query_map([flow_process], |row| {
                     Ok((
                         row.get::<_, String>(0)?,
                         row.get::<_, u32>(1)?,

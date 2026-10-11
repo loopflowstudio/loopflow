@@ -4,7 +4,7 @@ import Foundation
 ///
 /// A running wave publishes `wave/<name>/.wave-endpoint` and its journal to the
 /// ORIGIN repo — the main checkout — never to a worktree. Mirrors Rust
-/// `wave_origin` in `rust/loopflow/src/engine/wave_context.rs` (keep the two in
+/// `wave_origin` in `rust/loopflow/src/work/wave/context.rs` (keep the two in
 /// skill): a path that is itself a working-tree root resolves to the parent of
 /// its shared git dir (`git rev-parse --git-common-dir`); the main checkout
 /// resolves to itself; a non-git path, a plain subdirectory of a repo, or any
@@ -94,7 +94,7 @@ public enum WaveOrigin {
     }
 
     private static func git(_ args: [String], at path: String) -> String? {
-        let process = Foundation.Process()
+        let process = Process()
         let stdout = Pipe()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = ["git", "-C", path] + args

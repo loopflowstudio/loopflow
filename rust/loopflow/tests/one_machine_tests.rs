@@ -83,7 +83,7 @@ fn flow_steps_keep_the_explicit_home_despite_stale_pins_and_path() {
     success(output);
     let connection = Connection::open(home.path().join("loopflow.db")).unwrap();
     let child_commands: i64 = connection.query_row(
-        "SELECT count(*) FROM processes e JOIN flow_process_steps s ON s.process_lfid=e.lfid WHERE e.exit_code=0",
+        "SELECT count(*) FROM processes e JOIN flow_process_steps s ON s.lf_process_id=e.id WHERE e.exit_code=0",
         [], |row| row.get(0)
     ).unwrap();
     assert_eq!(child_commands, 1);

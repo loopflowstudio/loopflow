@@ -5,7 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SKILL = ROOT / "skills/loopflow/SKILL.md"
-LOOPFLOW = ROOT / "rust/loopflow/src/engine/builtins/LOOPFLOW.md"
+LOOPFLOW = ROOT / "rust/loopflow/src/builtins/LOOPFLOW.md"
 
 
 def test_skill_frontmatter_is_valid():

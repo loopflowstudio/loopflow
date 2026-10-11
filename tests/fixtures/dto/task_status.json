@@ -16,7 +16,8 @@
         "state": "unstarted",
         "revision": "2026-09-29T12:00:00.123Z",
         "branch_name": "dev/fix-1-existing",
-        "completed_at": null
+        "completed_at": null,
+        "due_date": null
       },
       "project": {
         "id": "project-gmail",
@@ -44,6 +45,7 @@
     },
     "planning_error": null,
     "planning_stale": false,
+    "sync": null,
     "execution": null,
     "planning_state": "available"
   },
@@ -64,7 +66,8 @@
         "state": "unstarted",
         "revision": "2026-09-29T12:00:00.123Z",
         "branch_name": "dev/fix-1-existing",
-        "completed_at": null
+        "completed_at": null,
+        "due_date": null
       },
       "project": {
         "id": "project-gmail",
@@ -92,6 +95,7 @@
     },
     "planning_error": "Linear unavailable",
     "planning_stale": true,
+    "sync": null,
     "execution": null,
     "planning_state": "unavailable"
   },
@@ -99,6 +103,7 @@
     "planning": null,
     "planning_error": "Planning needs refresh",
     "planning_stale": true,
+    "sync": null,
     "execution": null,
     "planning_state": "unavailable"
   },
@@ -119,7 +124,8 @@
         "state": "unstarted",
         "revision": "2026-09-29T12:00:00.123Z",
         "branch_name": "dev/fix-1-existing",
-        "completed_at": null
+        "completed_at": null,
+        "due_date": null
       },
       "project": {
         "id": "project-gmail",
@@ -147,6 +153,7 @@
     },
     "planning_error": null,
     "planning_stale": true,
+    "sync": null,
     "execution": null,
     "planning_state": "invalid"
   },
@@ -167,7 +174,8 @@
         "state": "unstarted",
         "revision": "2026-09-29T12:00:00.123Z",
         "branch_name": "dev/fix-1-existing",
-        "completed_at": null
+        "completed_at": null,
+        "due_date": null
       },
       "project": {
         "id": "project-gmail",
@@ -195,6 +203,7 @@
     },
     "planning_error": null,
     "planning_stale": true,
+    "sync": null,
     "execution": null,
     "planning_state": "removed"
   },
@@ -215,7 +224,8 @@
         "state": "unstarted",
         "revision": "2026-09-29T12:00:00.123Z",
         "branch_name": "dev/fix-1-existing",
-        "completed_at": null
+        "completed_at": null,
+        "due_date": null
       },
       "project": {
         "id": "project-gmail",
@@ -243,6 +253,7 @@
     },
     "planning_error": "Task absent from repository planning",
     "planning_stale": true,
+    "sync": null,
     "execution": null,
     "planning_state": "absent"
   }

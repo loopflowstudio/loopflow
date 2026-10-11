@@ -491,7 +491,7 @@ fn machine_selector_dispatches_before_local_help_and_placement() {
 
 #[test]
 fn selected_machine_login_stays_restricted_and_missing_login_stops_headless() {
-    use base64::Engine;
+    use base64::prelude::*;
 
     let fixture = Machines::new();
     assert_success(&fixture.run(&["machine", "add", "mini", "--repo", "."]));
@@ -548,12 +548,8 @@ esac
             .lines()
             .find_map(|line| line.strip_prefix("selection: "))
             .unwrap();
-        let selection: Value = serde_json::from_slice(
-            &base64::engine::general_purpose::URL_SAFE_NO_PAD
-                .decode(selection)
-                .unwrap(),
-        )
-        .unwrap();
+        let selection: Value =
+            serde_json::from_slice(&BASE64_URL_SAFE_NO_PAD.decode(selection).unwrap()).unwrap();
         assert_eq!(
             selection,
             serde_json::json!({"Restrict": [{"provider": "codex", "account": "person@example.com"}]})

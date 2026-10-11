@@ -237,46 +237,69 @@ fn flow_and_workflow_catalogs_keep_same_name_sources_separate() {
         serde_json::from_slice::<serde_json::Value>(&shown.stdout).unwrap(),
         entry(&flows)
     );
-    for args in [
-        vec!["flow", "customize", "feature"],
-        vec!["project", "workflow", "customize", "feature"],
-    ] {
-        let output = run(&args);
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let expected = if args[0] == "flow" {
-            ".lf/flows/feature.yaml"
-        } else {
-            ".lf/workflows/feature.yaml"
-        };
-        assert_eq!(
-            String::from_utf8(output.stdout).unwrap().trim(),
-            repo.path()
-                .canonicalize()
-                .unwrap()
-                .join(expected)
-                .to_str()
-                .unwrap()
-        );
-    }
+    let customized = run(&["flow", "customize", "feature"]);
+    assert!(customized.status.success());
+    let store =
+        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let project = store
+        .ensure_wave_project(
+            repo.path().canonicalize().unwrap().to_str().unwrap(),
+            "proof",
+        )
+        .unwrap();
+    let definition = repo.path().join("workflow.yaml");
     std::fs::write(
-        repo.path().join(".lf/workflows/feature.yaml"),
-        "invalid: true\n",
+        &definition,
+        "nodes: {}\nedges:\n  - from: start\n    to: end\n    flow: feature\n",
     )
     .unwrap();
-    let invalid = entry(&run(&["project", "workflow", "list", "--json"]));
-    assert!(invalid["workflow"].is_null());
-    assert!(invalid["unavailable"].is_string());
+    let selected = run(&[
+        "project",
+        "workflow",
+        "set",
+        project.id.as_str(),
+        "feature",
+        "--file",
+        definition.to_str().unwrap(),
+    ]);
+    assert!(
+        selected.status.success(),
+        "{}",
+        String::from_utf8_lossy(&selected.stderr)
+    );
+    let workflows = run(&[
+        "project",
+        "workflow",
+        "list",
+        "--project",
+        project.id.as_str(),
+        "--json",
+    ]);
+    assert!(entry(&workflows)["workflow"].is_object());
+    std::fs::write(&definition, "invalid: true\n").unwrap();
+    assert!(!run(&[
+        "project",
+        "workflow",
+        "set",
+        project.id.as_str(),
+        "feature",
+        "--file",
+        definition.to_str().unwrap()
+    ])
+    .status
+    .success());
+    assert_eq!(
+        entry(&run(&[
+            "project",
+            "workflow",
+            "list",
+            "--project",
+            project.id.as_str(),
+            "--json"
+        ])),
+        entry(&workflows)
+    );
     assert_eq!(entry(&run(&["flow", "list", "--json"])), entry(&flows));
-    // A directory read failure cannot claim only builtins exist.
-    std::fs::remove_dir_all(repo.path().join(".lf/workflows")).unwrap();
-    std::fs::write(repo.path().join(".lf/workflows"), "not a directory").unwrap();
-    assert!(!run(&["project", "workflow", "list", "--json"])
-        .status
-        .success());
 }
 
 #[test]

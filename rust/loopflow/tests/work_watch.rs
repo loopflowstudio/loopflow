@@ -11,12 +11,10 @@ use std::time::{Duration, Instant};
 use loopflow::id::WaveId;
 use loopflow::lf::commands::waves::{Evidence, RoadmapSnapshot};
 use loopflow::lf::commands::work_watch::{WorkContent, WorkFrame};
-#[cfg(target_os = "macos")]
-use loopflow::planning::{LinearIssueId, TaskPlan};
 use loopflow::store::sqlite::SqliteStore;
 use loopflow::store::PmSnapshotRow;
 #[cfg(target_os = "macos")]
-use loopflow::work::task::{Observation, PmWritebackState, Task, TaskId, TaskPr, TaskPrId};
+use loopflow::work::task::{TaskEventKind, TaskPr, TaskPrId};
 use loopflow::work::wave::Wave;
 
 const PROJECT: &str = "95159066-9098-4d0b-8903-01459dc7ec14";
@@ -46,7 +44,7 @@ fn lf(home: &Path, args: &[&str]) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
     for (key, _) in std::env::vars_os() {
         let key = key.to_string_lossy().into_owned();
-        if key.starts_with("LF_") || key.starts_with("LOOPFLOW_") {
+        if key.starts_with("LF_") || key.starts_with("LOOPFLOW_") || key.starts_with("LINEAR_") {
             command.env_remove(key);
         }
     }
@@ -54,6 +52,8 @@ fn lf(home: &Path, args: &[&str]) -> Command {
         .args(args)
         .current_dir(home)
         .env("LF_HOME", home)
+        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+        .env("HOME", home)
         .stderr(Stdio::inherit());
     command
 }
@@ -123,27 +123,9 @@ impl Machine {
         let worktree = repository(&self.path().join("checkout"));
         let head = git(&worktree, &["rev-parse", "HEAD"]);
         let now = time::OffsetDateTime::now_utc();
-        let project = self.store.project_by_project(PROJECT).unwrap().unwrap();
-        let task = Task {
-            id: TaskId::new(),
-            plan: TaskPlan {
-                id: LinearIssueId::new("issue-1").unwrap(),
-                identifier: "FIX-1".into(),
-                title: "Task 1".into(),
-                description: String::new(),
-                pm_snapshot_synced_at: now.unix_timestamp(),
-            },
-            pm_writeback: PmWritebackState::Current,
-            wave_id: self.wave.id().clone(),
-            project_id: project.id.clone(),
-            worktree: worktree.clone(),
-            workspace_slug: "fix-one".into(),
-            agent: None,
-            abandon_intent: None,
-            created_at: now,
-            updated_at: now,
-            observation: Observation::NotRequired,
-        };
+        let mut task = self.store.task_by_issue("issue-1").unwrap().unwrap();
+        task.worktree = Some(worktree.clone());
+        task.workspace_slug = "fix-one".into();
         let pr = TaskPr {
             id: TaskPrId::new(),
             task_id: task.id.clone(),
@@ -163,7 +145,23 @@ impl Machine {
             created_at: now,
             updated_at: now,
         };
-        self.store.insert_task(task.clone(), &pr, false).unwrap();
+        self.store
+            .place_task(
+                &task.id,
+                task.worktree.as_ref().unwrap(),
+                &task.workspace_slug,
+                &pr,
+            )
+            .unwrap();
+        self.store
+            .append_task_event(
+                &task.id,
+                &TaskEventKind::CheckoutReady {
+                    branch: pr.branch,
+                    base_commit: pr.base_commit,
+                },
+            )
+            .unwrap();
         worktree
     }
 
@@ -179,14 +177,24 @@ impl Machine {
         self.raw()
             .execute_batch(&format!(
                 "BEGIN;
-                 INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,repo,driver_generation)
-                 VALUES('conversation','Conversation','human',1,1,'{repo}','{repo}',1);
+                 INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,repo)
+                 VALUES('conversation','Conversation','human',1,1,'{repo}','{repo}');
                  INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
                  VALUES('conversation','captured','{INPUT}',1,'{{}}');
                  UPDATE agent_sessions SET current_capture=last_insert_rowid() WHERE id='conversation';
                  COMMIT;",
                 repo = self.wave.repo()
             ))
+            .unwrap();
+        let parent = loopflow::id::LfProcessId::new();
+        self.raw()
+            .execute(
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+                [&parent],
+            )
+            .unwrap();
+        self.store
+            .claim_session_attachment("conversation", None, &parent, true)
             .unwrap();
     }
 
@@ -201,7 +209,6 @@ impl Machine {
     }
 }
 
-#[cfg(target_os = "macos")]
 fn git(repo: &Path, args: &[&str]) -> String {
     let output = Command::new("git")
         .arg("-C")
@@ -215,7 +222,6 @@ fn git(repo: &Path, args: &[&str]) -> String {
 }
 
 /// A new repository at `path` holding one commit.
-#[cfg(target_os = "macos")]
 fn repository(path: &Path) -> std::path::PathBuf {
     std::fs::create_dir_all(path).unwrap();
     let repo = path.canonicalize().unwrap();
@@ -466,7 +472,7 @@ fn transcript_lines_read_nothing_and_do_not_delay_a_task() {
 
     // An Process can change a planning condition, so planning is read; nothing
     // displayed changed, so nothing is sent.
-    conn.execute("INSERT INTO processes(lfid,trace_id,cwd,started_at,completed_at,outcome) VALUES('process_00000000000000000000000000000001','trace_00000000000000000000000000000001','/elsewhere',1,2,'succeeded')", []).unwrap();
+    conn.execute("INSERT INTO processes(id,trace_id,cwd,started_at,completed_at,outcome) VALUES('process_00000000000000000000000000000001','trace_00000000000000000000000000000001','/elsewhere',1,2,'succeeded')", []).unwrap();
     assert!(watch
         .parts(Duration::from_millis(1500))
         .iter()
@@ -536,9 +542,9 @@ fn every_displayed_session_fact_committed_elsewhere_is_shown() {
 
     // A question the stream reported is Waiting; its answer ends that.
     write(
-        "INSERT INTO session_activity(session_id,driver_generation,provider_generation,observed_at,open_tools,pending_input,yielded)
-         SELECT id,driver_generation,provider_generation,CAST(strftime('%s','now') AS INTEGER),0,1,0
-         FROM agent_sessions WHERE id='conversation'",
+        "INSERT INTO session_activity(session_id,attachment_token,agent_process_id,observed_at,open_tools,pending_input,yielded)
+         SELECT s.id,p.attachment_token,p.id,CAST(strftime('%s','now') AS INTEGER),0,1,0
+         FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id WHERE s.id='conversation'",
     );
     watch.session(|record| record["attention"] == "waiting");
     write("UPDATE session_activity SET pending_input=0 WHERE session_id='conversation'");
@@ -546,10 +552,11 @@ fn every_displayed_session_fact_committed_elsewhere_is_shown() {
 
     event(
         "observed",
-        "driver:0:exit",
+        "attachment:0:exit",
         None,
         serde_json::json!({"outcome": "interrupted"}),
     );
+    write("UPDATE processes SET attachment_exit_seq=(SELECT seq FROM session_events WHERE session_id='conversation' AND receipt_key='attachment:0:exit') WHERE agent_session_id='conversation'");
     watch.session(|record| record["state"] == "interrupted");
 
     // Transcript lines between those facts were never a reason to read.
@@ -819,4 +826,152 @@ fn selection_only_commit_reaches_two_open_work_readers() {
         .unwrap();
     await_state(&first, ProjectReadinessState::Unconfigured);
     await_state(&second, ProjectReadinessState::Unconfigured);
+}
+
+#[test]
+fn offline_cli_completion_and_reopening_reach_desktop_without_refresh() {
+    let home = Machine::new();
+    repository(Path::new(home.wave.repo()));
+    let config = Path::new(home.wave.repo()).join(".lf");
+    std::fs::create_dir_all(&config).unwrap();
+    std::fs::write(
+        config.join("config.yaml"),
+        "pm:\n  linear_team: team-product\n",
+    )
+    .unwrap();
+    home.plan(1);
+    let mut watch = home.watch();
+    let scope = serde_json::json!({"action":"scope", "id":1, "repo":home.wave.repo(),
+        "headless":false, "task":null, "wave":null, "activity":null});
+    watch.request(scope.clone());
+    let await_state = |watch: &Watch, expected| {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut last = None;
+        loop {
+            let frame = watch
+                .next(deadline.saturating_duration_since(Instant::now()))
+                .unwrap_or_else(|| {
+                    panic!("saved decision did not reach Desktop; last planning: {last:?}")
+                });
+            if let Some(error) = &frame.unavailable {
+                last = Some(error.clone());
+            }
+            if let WorkContent::Planning(Some(part)) = frame.content {
+                last = Some(format!("{part:?}"));
+                for wave in part.roadmap.waves {
+                    if let Evidence::Ok { items, .. } = wave.tasks {
+                        for task in items {
+                            if let Some(runtime) = task.runtime {
+                                if runtime.status == expected
+                                    && task.task.sync.as_ref().is_some_and(|sync| {
+                                        sync.changes.iter().any(|change| {
+                                            change.field == "state" && change.error.is_some()
+                                        })
+                                    })
+                                {
+                                    assert_eq!(
+                                        task.task.completed,
+                                        expected == loopflow::durable::TaskState::Done
+                                    );
+                                    assert_eq!(
+                                        task.task.state.as_deref(),
+                                        Some(if task.task.completed {
+                                            "completed"
+                                        } else {
+                                            "unstarted"
+                                        })
+                                    );
+                                    assert_eq!(
+                                        task.task.completed_at.is_some(),
+                                        task.task.completed
+                                    );
+                                    return runtime;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    };
+    for (operation, state) in [
+        ("complete", loopflow::durable::TaskState::Done),
+        ("reopen", loopflow::durable::TaskState::NotReady),
+    ] {
+        let output = lf(home.path(), &["task", operation, "FIX-1"])
+            .current_dir(home.wave.repo())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        await_state(&watch, state);
+    }
+    drop(watch);
+    let mut reopened = home.watch();
+    reopened.request(scope);
+    await_state(&reopened, loopflow::durable::TaskState::NotReady);
+    let task = home.store.task_by_issue("FIX-1").unwrap().unwrap();
+    assert!(task.worktree.is_none());
+    assert!(home.store.task_prs(&task.id).unwrap().is_empty());
+}
+
+#[test]
+fn an_offline_cli_comment_reaches_the_open_desktop_thread() {
+    let home = Machine::new();
+    repository(Path::new(home.wave.repo()));
+    let config = Path::new(home.wave.repo()).join(".lf");
+    std::fs::create_dir_all(&config).unwrap();
+    std::fs::write(
+        config.join("config.yaml"),
+        "pm:\n  linear_team: team-product\n",
+    )
+    .unwrap();
+    home.plan(1);
+    let mut watch = home.watch();
+    let scope = serde_json::json!({
+        "action":"scope", "id":1, "repo":home.wave.repo(), "headless":false,
+        "task":"FIX-1", "wave":null, "activity":null,
+    });
+    watch.request(scope.clone());
+    let thread = |watch: &Watch, count: usize| {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let frame = watch
+                .next(deadline.saturating_duration_since(Instant::now()))
+                .expect("comment thread did not reach Desktop");
+            if let WorkContent::Task(Some(part)) = frame.content {
+                if part.comments.comments.len() == count {
+                    return part.comments;
+                }
+            }
+        }
+    };
+    assert!(thread(&watch, 0).pending_sync.is_empty());
+    let output = lf(
+        home.path(),
+        &["task", "comment", "FIX-1", "Saved during outage", "--json"],
+    )
+    .current_dir(home.wave.repo())
+    .env("LF_USER_NAME", "Fixture Person")
+    .output()
+    .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let saved: loopflow::ops::pm::TaskComments = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(saved.comments.len(), 1);
+    assert_eq!(saved.pending_sync, [saved.comments[0].id.clone()]);
+    assert_eq!(thread(&watch, 1), saved);
+    drop(watch);
+    let mut reopened = home.watch();
+    reopened.request(scope);
+    assert_eq!(thread(&reopened, 1), saved);
+    let task = home.store.task_by_issue("FIX-1").unwrap().unwrap();
+    assert!(task.worktree.is_none());
+    assert!(home.store.task_prs(&task.id).unwrap().is_empty());
 }

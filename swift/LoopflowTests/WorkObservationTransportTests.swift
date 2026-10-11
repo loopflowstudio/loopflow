@@ -76,7 +76,7 @@ struct WorkObservationTransportTests {
 
     @Test("A stalled or noncooperative reader is reaped without touching other processes")
     func cancellation() async throws {
-        let survivor = Foundation.Process()
+        let survivor = Process()
         survivor.executableURL = URL(fileURLWithPath: "/bin/sleep")
         survivor.arguments = ["30"]
         try survivor.run()
@@ -108,15 +108,14 @@ struct WorkObservationTransportTests {
         #expect(!process.isRunning)
     }
 
-    @Test("Malformed, oversized and cut-off frames fail rather than becoming empty",
-          arguments: ["malformed", "oversized", "partial-exit"])
+    @Test("Malformed and cut-off frames fail rather than becoming empty",
+          arguments: ["malformed", "partial-exit"])
     func invalidFrames(kind: String) async throws {
         let directory = try directory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let payload: String
         switch kind {
         case "malformed": payload = "{bad}\n"
-        case "oversized": payload = String(repeating: "x", count: 64 * 1024 * 1024 + 1)
         default: payload = "{\"part\":"
         }
         try Data(payload.utf8).write(to: directory.appendingPathComponent("frame"))
@@ -131,9 +130,29 @@ struct WorkObservationTransportTests {
             Issue.record("Invalid transport finished successfully")
         } catch {
             #expect(error is RegistryQueryError)
-            if kind == "oversized" { #expect(error.localizedDescription.contains("64 MiB")) }
             if kind == "malformed" { #expect(error.localizedDescription.contains("Invalid workspace observation")) }
             if kind == "partial-exit" { #expect(!error.localizedDescription.contains("ten seconds")) }
+        }
+        await reader.cancel()
+        #expect(!process.isRunning)
+    }
+
+    @Test("The line reader accepts its frame limit and rejects the next byte", arguments: [false, true])
+    func frameLimit(terminated: Bool) async throws {
+        let allowed = String(repeating: "x", count: 32)
+        let oversized = allowed + "x" + (terminated ? "\n" : "")
+        let process = shell("printf '%s\\n' '\(allowed)'; printf '%s' '\(oversized)'; IFS= read -r request")
+        let reader = try LocalLineObservation<Data>.start(
+            name: "Workspace", process: process, frameLimit: 32,
+            configurationChanged: { false }, decode: { $0 }
+        )
+        var frames = reader.frames.makeAsyncIterator()
+        #expect(try await frames.next() == Data(allowed.utf8))
+        do {
+            _ = try await frames.next()
+            Issue.record("Oversized frame was accepted")
+        } catch {
+            #expect(error.localizedDescription.contains("frame exceeds"))
         }
         await reader.cancel()
         #expect(!process.isRunning)
@@ -173,8 +192,8 @@ struct WorkObservationTransportTests {
             #""unavailable":"Task LOO-1 is not registered","body":null}"# + "\n"
     }
 
-    private func shell(_ script: String, cwd: URL? = nil) -> Foundation.Process {
-        let process = Foundation.Process()
+    private func shell(_ script: String, cwd: URL? = nil) -> Process {
+        let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         process.arguments = ["-c", script]
         process.currentDirectoryURL = cwd

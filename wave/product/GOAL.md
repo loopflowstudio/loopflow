@@ -27,7 +27,8 @@ The Wave retains its objective, memory, cadence, budget, chat, and metric
 instruments. Exactly one internal Project owns the current chapter's Tasks, KRs,
 metric targets, and Workflow selection. Present the plan through the Wave; ordinary
 navigation and steering select Waves and Tasks. Historical chapters remain readable.
-Linear owns authored planning; the local registry supplies shared reads.
+One local planning model supplies shared reads and writes, with optional Linear
+synchronization. Observed planning conflicts adopt Linear; execution stays local.
 
 Chapter changes use the deterministic `lf wave new-chapter` operation after the
 concrete plan is accepted. Started unfinished Tasks keep their identity, checkout,

@@ -71,7 +71,10 @@
               "completed": false,
               "assignee": null,
               "state": "unstarted",
-              "completed_at": null
+              "completed_at": null,
+              "due_date": null,
+              "follow_up_sources": [],
+              "sync": null
             },
             "reference": {
               "issue_url": "https://linear.app/loopflow/issue/W2-144/make-lf-roadmap-the-machine-wide-view",
@@ -80,13 +83,14 @@
                 "slug": "make-lf-work-the-machine",
                 "branch": "jack-heart/make-lf-work-the-machine",
                 "worktree": "/src/loopflow.make-lf-work-the-machine",
-                "local_exists": false
+                "local_exists": false,
+                "base_commit": "fixture-base"
               }
             },
             "runtime": {
               "work_id": "ts_now00000000000000000000000000000",
               "status": "ready",
-              "planning_conflict": null,
+              "completion_pending": null,
               "reason": "ready",
               "updated_at": "2026-07-14T23:44:00Z",
               "provider": "claude",
@@ -96,7 +100,6 @@
               "owner": "task",
               "reason": "ready"
             },
-            "active_pr": null,
             "section": "now",
             "actions": {
               "recommended": "resume",
@@ -423,6 +426,14 @@
             },
             "run_control": {
               "unavailable": null
+            },
+            "pr": null,
+            "follow_through": {
+              "intents": [],
+              "links": [],
+              "reason": null,
+              "needs_conversion": false,
+              "scope_notes": []
             }
           },
           {
@@ -435,7 +446,10 @@
               "completed": false,
               "assignee": null,
               "state": "unstarted",
-              "completed_at": null
+              "completed_at": null,
+              "due_date": null,
+              "follow_up_sources": [],
+              "sync": null
             },
             "reference": {
               "issue_url": "https://linear.app/loopflow/issue/W2-131/show-the-all-wave-roadmap",
@@ -444,13 +458,14 @@
                 "slug": "all-wave-roadmap",
                 "branch": "jack-heart/all-wave-roadmap",
                 "worktree": "/src/loopflow.all-wave-roadmap",
-                "local_exists": false
+                "local_exists": false,
+                "base_commit": "abc1234"
               }
             },
             "runtime": {
               "work_id": "ts_review00000000000000000000000000",
               "status": "ready",
-              "planning_conflict": null,
+              "completion_pending": null,
               "reason": "ready",
               "updated_at": "2026-07-14T22:00:00Z",
               "provider": "claude",
@@ -459,36 +474,6 @@
             "next_move": {
               "owner": "user",
               "reason": "merge pull request head abc1234 on GitHub"
-            },
-            "active_pr": {
-              "id": "pr-review",
-              "sequence": 1,
-              "slug": "all-wave-roadmap",
-              "branch": "jack-heart/all-wave-roadmap",
-              "base_commit": "abc1234",
-              "phase": "open",
-              "empty": null,
-              "publication": {
-                "requested_at": "2026-07-14T22:05:00Z",
-                "presentation": {
-                  "title": "Show the all-wave roadmap",
-                  "body": "Explains the intent and proof for this head.",
-                  "head_sha": "abc1234"
-                },
-                "github": {
-                  "number": 899,
-                  "url": "https://github.com/loopflow/loopflow/pull/899"
-                },
-                "merge": {
-                  "mode": "user",
-                  "requested_at": "2026-07-14T22:06:00Z",
-                  "head_sha": "abc1234",
-                  "after_merge": "continue_task",
-                  "next_slug": null
-                }
-              },
-              "merge_commit": null,
-              "abandoned_at": null
             },
             "section": "waiting",
             "actions": {
@@ -818,6 +803,41 @@
             },
             "run_control": {
               "unavailable": null
+            },
+            "pr": {
+              "id": "pr-review",
+              "sequence": 1,
+              "slug": "all-wave-roadmap",
+              "branch": "jack-heart/all-wave-roadmap",
+              "base_commit": "abc1234",
+              "phase": "open",
+              "empty": null,
+              "publication": {
+                "requested_at": "2026-07-14T22:05:00Z",
+                "presentation": {
+                  "title": "Show the all-wave roadmap",
+                  "body": "Explains the intent and proof for this head.",
+                  "head_sha": "abc1234"
+                },
+                "github": {
+                  "number": 899,
+                  "url": "https://github.com/loopflow/loopflow/pull/899"
+                },
+                "merge": {
+                  "mode": "user",
+                  "requested_at": "2026-07-14T22:06:00Z",
+                  "head_sha": "abc1234"
+                }
+              },
+              "merge_commit": null,
+              "abandoned_at": null
+            },
+            "follow_through": {
+              "intents": [],
+              "links": [],
+              "reason": null,
+              "needs_conversion": false,
+              "scope_notes": []
             }
           },
           {
@@ -830,7 +850,10 @@
               "completed": false,
               "assignee": null,
               "state": "unstarted",
-              "completed_at": null
+              "completed_at": null,
+              "due_date": null,
+              "follow_up_sources": [],
+              "sync": null
             },
             "reference": {
               "issue_url": null,
@@ -841,7 +864,6 @@
               "owner": "wave",
               "reason": "Task is ready to start"
             },
-            "active_pr": null,
             "section": "available",
             "actions": {
               "recommended": null,
@@ -872,19 +894,30 @@
             },
             "run_control": {
               "unavailable": null
+            },
+            "pr": null,
+            "follow_through": {
+              "intents": [],
+              "links": [],
+              "reason": null,
+              "needs_conversion": false,
+              "scope_notes": []
             }
           },
           {
             "task": {
               "id": "issue-later",
               "identifier": "W2-141",
-              "name": "Now + Available work views \u2014 research",
+              "name": "Now + Available work views — research",
               "description": "Research delivered in merged PR.",
               "rank": 0,
               "completed": true,
               "assignee": null,
               "state": "completed",
-              "completed_at": null
+              "completed_at": null,
+              "due_date": null,
+              "follow_up_sources": [],
+              "sync": null
             },
             "reference": {
               "issue_url": "https://linear.app/loopflow/issue/W2-141/now-available-work-views-research",
@@ -893,13 +926,14 @@
                 "slug": "now-available-research",
                 "branch": "jack-heart/now-available-research",
                 "worktree": "/src/loopflow.now-available-research",
-                "local_exists": false
+                "local_exists": false,
+                "base_commit": "fixture-base"
               }
             },
             "runtime": {
               "work_id": "ts_later000000000000000000000000000",
               "status": "done",
-              "planning_conflict": null,
+              "completion_pending": null,
               "reason": "done",
               "updated_at": "2026-07-14T21:00:00Z",
               "provider": "claude",
@@ -909,7 +943,6 @@
               "owner": "wave",
               "reason": "Linear Task is complete"
             },
-            "active_pr": null,
             "section": "later",
             "actions": {
               "recommended": "no_action",
@@ -940,6 +973,14 @@
             },
             "run_control": {
               "unavailable": null
+            },
+            "pr": null,
+            "follow_through": {
+              "intents": [],
+              "links": [],
+              "reason": null,
+              "needs_conversion": false,
+              "scope_notes": []
             }
           }
         ],
@@ -981,7 +1022,8 @@
                 "text": "A parallel concept anywhere is a failure event",
                 "holds": false
               }
-            ]
+            ],
+            "sync": null
           }
         ],
         "truncated": false

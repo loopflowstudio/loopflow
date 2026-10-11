@@ -98,6 +98,11 @@ not. Background it yourself when you will not wait. It never continues
 an earlier Flow. `--reason` publishes direction to the Task first. Every
 Flow process for a Task is equally its work.
 
+Flow output shows each step's position and name followed by the agent's messages.
+Use `lf -v -b task run EXP-12 pursue` for context token accounting and INFO
+diagnostics. Codex Session capture uses a temporary launch profile so terminal
+wrapper hooks stay active. No hook setup or saved trust changes are required.
+
 A Task takes up its Project's workflow and moves through its nodes.
 Each `task run` takes one edge leaving the current node: the only one, or the
 one whose Flow you name. At a node the Task waits on you in its conversation;
@@ -109,14 +114,14 @@ its start. See [workflows](authoring.md#workflows).
 ```bash
 lf project workflow list                 # Workflow definitions and validity
 lf project workflow set PROJECT code     # selection for future Tasks
-lf project workflow customize feature    # print its local source path
+lf project workflow source PROJECT feature # read the definition
 lf task workflow show EXP-12             # captured graph, position and history
 lf task workflow restart EXP-12          # move to start; retain graph and history
 lf flow list                             # autonomous Flow definitions
 lf flow customize pursue                 # print its local source path
 ```
 
-A Flow whose driver died leaves its Processes as history. No command resumes it. To change direction or recover:
+A Flow whose process died leaves its Processes as history. No command resumes it. To change direction or recover:
 
 ```bash
 lf task interrupt EXP-12             # end the active provider turn
@@ -125,19 +130,89 @@ lf flow show ID --processes --json    # one Flow's steps, by its Flow process ID
 lf -b task run EXP-12       # run fresh work
 ```
 
-Claude and Codex terminal launches load the complete assembled context from a
-system instructions file. The first user message is a short execution request;
-Wave memory, scratch, diffs, clipboard, skills and Task briefs stay out of the
-command-line argument. Provider refusals remain visible in the native terminal.
+The first turn contains the skill followed by the request and tagged clipboard
+text. Loopflow adds fixed instructions without replacing the provider's native prompt or repo guide.
+Startup and compaction deliver current Wave memory and scratch as a capped
+conversation block: whole files, marked start excerpts and readable source paths.
+Compaction also restores the saved active skill. Task direction and summaries
+remain complete private reference files. Terminal first turns use argv; only a
+first turn exceeding the argument cap is refused before spawning the provider.
 
-Selected Wave goals are supplied once as complete `GOAL.md` documents. Repeated
-requests for the same document do not repeat its contents; distinct memory files
-remain separate even when their text matches.
+Wave goals use the same whole-file, excerpt and listing rules as memory.
+Distinct source files remain separate even when their text matches.
 
 Launching a Flow for an existing Task uses valid cached planning regardless of age.
 Known invalidation, removal, terminal state or ownership changes still block.
 `--reason` requires successful Linear publication before the launch. Status
 retains the planning observation's original age.
+
+## Plan locally
+
+```bash
+lf task create --title "Fix the parser" --json
+lf task edit <id> --notes "Preserve quoted input"
+lf task comment <id> "Keep escaped quotes intact"
+lf task checkout <id>
+lf task run <id> research
+```
+
+Without a selected Wave, explicit creation uses `inbox`. A Task gets its
+identity before placement; creation starts no agent and requires no Linear login.
+Projects and comments stay in SQLite; Wave goals and memory live in the checkout.
+Reads create nothing.
+
+```bash
+lf wave ensure parser
+# Edit wave/parser/GOAL.md and wave/parser/MEMORY.md directly.
+lf task create --wave parser --title "Retain escaped quotes"
+```
+
+Creation generates and saves a Task, then prints its ID. Every invocation creates
+a distinct Task, even with the same title. Use the saved ID to inspect or edit it.
+Task references accept unique UUID prefixes of at least four hex digits, bare or
+prefixed with `lf-` or `task_` (for example, `abcd`, `lf-abcd`, `task_abcd`).
+Hex digits are case-insensitive. Ambiguous prefixes list matching Task IDs;
+add digits to select one. Full IDs and exact Linear ticket aliases still work.
+Displayed local selectors start at seven digits and extend when needed; retain
+full IDs in automation.
+
+```bash
+lf task edit <id> --rank 0 --assignee <person-id>
+lf task edit <id> --unassign
+lf project edit <project-id> --name "Parser" --summary "Retain quoted input"
+lf project workflow set <project-id> review --file /tmp/review.yaml
+lf project workflow list --project <project-id> --json
+lf project workflow source <project-id> review
+lf wave update-plan --wave parser --plan /tmp/plan.json
+```
+
+Project names, summaries, Workflow selections and complete plan replacements save
+locally, including during a Linear outage. Connected repositories report pending sync;
+`lf project workflow show <project-id> --json` includes `sync`: pending changes,
+uncertain attempts, errors and retained losing values. Task edits and status use
+the same receipt-backed presentation as Desktop.
+Inbound refreshes preserve saves against unchanged baselines and adopt conflicting
+Linear edits, retaining losing intentions in delivery history. An active Task Session
+or Desktop connection exports saved Projects and delivers their fields. Lost creation
+or Initiative-attachment replies retain uncertainty until exact readback.
+Readback cannot protect against unseen concurrent provider writes.
+
+Ranks are zero-based within a Project. Selected workflow definitions stay in SQLite
+for every Wave; Desktop’s Customize and Edit controls use the same editor. Stored
+definitions are imported by `lf wave ensure`; builtin definitions remain available.
+Nested Waves use names such as `parser/tokenizer`. Edit `wave/<name>/GOAL.md`
+and `wave/<name>/MEMORY.md` like any other file; the next launch reads that
+checkout's files, including ancestor context. Creation writes missing files without
+overwriting existing content. Registry renaming retains IDs and descendants;
+move the authored directory separately to match its new address. Workflow imports
+remain independent of goal and memory files.
+
+Placement, native Sessions, workflow skills and GitHub delivery use the same Task
+identity. `lf land` requests merge; `lf pr reconcile` observes delivery. After
+merge, follow-through files accepted obligations or records none, then
+`lf task complete <task-id>` completes the source. A repository without a code
+remote supports local work and refuses hosted landing. Local planning does not
+require Linear at any of these boundaries.
 
 ## Connect planning and create work
 
@@ -146,8 +221,8 @@ lf list wave                       # authored goals, including unconnected Waves
 lf account connect linear
 lf repo connect --all --team-key EXP # connect goals and choose the Task prefix
 lf task create --wave exports --title "Add CSV export"
-lf checkout EXP-12                  # prepare its checkout without execution
-lf task run EXP-12
+lf checkout <task-id>               # use the ID printed at creation
+lf task run <task-id>
 lf roadmap --json                   # plans and Tasks across Waves
 lf wave status exports --json       # one Wave's detailed evidence
 ```
@@ -156,10 +231,27 @@ Connected planning needs a Linear login and repository Team. Connection names
 missing access and the command to obtain it. Authored Waves remain discoverable
 before connection. Planning setup is separate from direct local execution.
 
-After Linear accepts a Task creation or update, Loopflow confirms that issue
-directly without another Wave-wide snapshot. If Linear commits but issue
-confirmation fails, the error names the retained issue. Retry the same command
-with the original creation options to reuse it without filing a duplicate.
+Task creation and edits save locally, including during a Linear outage. Creation
+generates the Task ID; later edits, Project rotation and synchronization preserve it.
+Connected repositories report pending sync. Field receipts retain titles, notes, assignment and ordering
+with their provider baselines; observed conflicts adopt Linear and retire the losing
+intention. An active Task connection delivers mapped titles, notes, assignment,
+membership, deletion, Project fields and Task ordering after recovery. Reordering
+saves one Project-wide intention; partial delivery and lost replies retain that identity. Deletion retains execution
+and checkout history. Missing provider evidence keeps deletion pending; newer
+observed Linear edits retire removal and restore planning visibility. The active
+connection exports unmapped Projects and Tasks using their saved UUIDs; lost replies
+never allocate replacement identities. Later local edits survive creation readback.
+The local ID works before a Linear alias arrives.
+
+```bash
+lf task refile <task-id> --wave exports
+```
+
+Move unplaced work to the Wave's selected Project. Membership saves locally during
+an outage and retains pending sync; recorded work keeps its owner. An active Task
+Session or Desktop connection delivers the move when both Task and destination
+Project have Linear mappings. The same active connection exports unmapped records.
 
 ## Inspect and continue
 
@@ -175,7 +267,7 @@ lf mon show SESSION --context       # one step: instructions, memory, scratch, g
 lf session ensure                   # this repository's one ongoing conversation
 lf session ensure -w growth         # a Wave's one ongoing conversation
 lf session ensure --task EXP-12     # a Task's primary conversation
-lf --task EXP-12 skill task/session # another conversation about that Task
+lf --task EXP-12 skill task-session # another conversation about that Task
 lf session connect SESSION         # continue a conversation
 lf session replace SESSION         # fresh conversation for the same scope
 lf context --task EXP-12 --json     # effective context limits, sources and usage
@@ -204,8 +296,8 @@ inspection and replay; they do not select these Session actions.
 | Scope | One finite pass | Ongoing conversation |
 | --- | --- | --- |
 | Repository | `lf operate` | `lf session ensure` |
-| Wave | `lf --wave growth wave/operate` | `lf session ensure -w growth` |
-| Task | `lf task/operate EXP-12` | `lf session ensure --task EXP-12` |
+| Wave | `lf --wave growth wave-operate` | `lf session ensure -w growth` |
+| Task | `lf task-operate EXP-12` | `lf session ensure --task EXP-12` |
 
 Each conversation is its scope's operator and carries the matching operate
 procedure. It leaves running Flows alone, reads a stopped or failed Flow before
@@ -217,56 +309,99 @@ An open conversation keeps the instructions it launched with; `replace` it
 after an upgrade.
 
 Monitor keeps live processes, recorded outcomes and missing observations distinct.
-A process has a durable `lfid` and an optional Unix `pid`. Inspect by LFID; PIDs
-can be reused. `parent_process_lfid` names the recorded parent, and historical
+A process has a durable `id` and an optional Unix `pid`. Inspect by `id`; PIDs
+can be reused. `parent_lf_process_id` names the recorded parent, and historical
 rows without PID evidence keep `pid: null`.
 Its overview explains each item's state and next action. A mechanical Process has
 no provider conclusion. JSON reads emit one document; the active watch emits
 newline-delimited snapshots. Progress and errors go to stderr.
 
-`lf context` previews local launch input; [configure context budgets](config.md#context-budgets)
+`lf context` measures authored memory and scratch against size targets; [configure context budgets](config.md#context-budgets)
 in existing personal, repository or Wave settings.
 
 ## Publish and finish
 
 ```bash
-lf pr publish                         # push a ready PR
+lf pr publish                      # push a ready PR
 lf submit                          # prepare for a reviewer's merge click
 lf arm                             # prepare and request auto-merge; return
 lf land                            # record delivery and return
-lf --task EXP-12 land               # complete after verified merge
+lf land --wait-and-fix              # wait for merge and repair failing CI
 lf sync --plan                     # preview integration with main or stack parent
-lf wt create csv-export
-lf check                   # inspect release eligibility
 ```
 
-Choose one delivery operation for the desired endpoint. Submit, arm, and land
-own preparation and integration; publish does not sync. PR operations work
-on ordinary branches without creating a Task. Verified merge normally completes its Task. Arm and land return after recording delivery;
-`lf pr reconcile` checks it once and settles verified merges. In a Task checkout,
-it also recovers an existing PR whose GitHub identity is missing from the Task,
-without publishing or rotating the branch. Multiple PRs
-for the recorded branch remain unresolved. `lf ci watch`
-starts a ci-fix when a recorded landing fails its required checks. `lf land --watch`
-does both for its own PR: it stays until the PR merges or closes, then settles it.
+A Task has zero or one PR. Choose one delivery operation for the desired
+endpoint. Submit, arm and land own preparation and integration; publish does not
+sync. PR operations also work on ordinary branches without creating a Task.
+Arm and bare land return after recording delivery. `--wait-and-fix` observes and repairs
+its PR every 15 seconds for up to 30 minutes, including with Desktop closed;
+timeout or interruption leaves the intent intact. Repeating land for a merged
+Task PR succeeds and reports whether Task completion remains.
+`lf pr reconcile` checks recorded landings once. In a Task checkout it can also
+recover an existing PR whose GitHub identity is missing, without publishing.
+Ambiguous provider evidence remains unresolved. `lf ci watch` repairs actionable
+CI failures while it runs.
 
 ```bash
-lf task follow-up EXP-12 --outcome 'Installed latency meets the budget' --evidence 'Warm p95 below 1s over 20 samples' --check-at 2026-10-09T17:00:00Z
-lf land
-lf task follow-up EXP-12 --clear 'Published v0.14: 20 samples, p95 0.8s'
+lf task follow-up EXP-12 --title 'Verify the installed command' --notes 'Follow-up to EXP-12: after the release is installed, run the accepted scenario and record its version and result; investigate a failure.' --due 2026-10-09
+lf task follow-up EXP-12 --finish 'The installed check has its own Task'
+lf task complete EXP-12
 ```
 
-Record accepted remaining work before delivery. Its outcome, evidence condition
-and next check stay visible in Task status and Desktop. An overdue check calls
-for evidence or a scope decision; time and green CI never establish production
-success. `--next <slug>` keeps genuinely unfinished PR work open. Older keep-open
-requests without a stated outcome surface for an explicit scope decision.
+After verified merge, file accepted remaining obligations as linked follow-up
+Tasks, or record `lf task follow-up EXP-12 --none 'No accepted work remains'`.
+Use `--existing ISSUE` to link work already filed and `--wave WAVE` to choose its
+owner. Give each additional obligation a distinct `--key` before `--finish`;
+reusing a key (default: `follow-up`) retries the original filing, even if its
+title changes. Retries retain the child identity and Project after chapter
+rotation. Inspect receipts and retry identical input after an uncertain response.
+The source completes after filing,
+without waiting for those children to finish. Preserve accepted later checks in
+PR copy before landing clears scratch.
 
-`lf task move EXP-12 end` records an explicit completion. Old Session turns,
-reserved inputs and unknown process exits cannot veto it. Execution history and
-live process controls remain intact; uncertain or occupied checkouts are retained.
-Cancellation follows the same separation. Open PRs and additional committed work
-still need delivery or explicit abandonment.
+Filing and completion work locally without Linear. In a connected repository,
+foreground planning sync exports saved Tasks and then their related-issue links,
+including links from already completed Tasks. Closing that connection leaves
+unsent or uncertain effects for the next connection; filing starts no watcher.
+Displayed follow-up names and due dates use the current saved Task, while retry
+receipts keep their original identity and input.
+
+`ship` runs gate, waited landing, then follow-through. A bare delivery, manual
+GitHub merge or stopped finishing Flow leaves **Merged · Follow-through pending**.
+The next Task/Wave operation checks for live work, then runs `finish-delivery`
+if needed. It does not rerun gate or re-arm the merged PR.
+
+Due follow-ups return on the owning Wave's next operation, even if unstarted.
+Their briefs carry release prerequisites, expected evidence and any timezone.
+A due date is not an alarm or proof of success. Only a concrete check already
+authorized in the brief can start unattended. Filing installs no schedule;
+without an installed Wave schedule, there is no automatic check between passes.
+
+`lf task complete EXP-12` completes without moving the Workflow. Moving or
+arriving at `end` records the movement, then requests completion. A failed
+request shows **Completion pending**; retry `lf task complete EXP-12`, without
+replaying the Flow. Completion requires merge and a durable none/filed
+disposition when the Task has a PR. Linear completion and reopening change
+status without moving the Workflow or stopping Processes; reopening supersedes
+an older completion request. `lf task reopen EXP-12` does the same locally,
+including offline: it returns planning to unstarted and keeps the PR, checkout,
+Started evidence and Workflow position. Restart the
+Workflow separately when needed; reopening does not start work. A PR-less
+Task can finish with research files or commits; they do not create a PR
+requirement. Old Session turns and unknown process exits cannot veto completion.
+Live controls and execution history remain intact; unsafe or occupied checkouts
+are retained. An open or closed-unmerged PR still requires delivery or explicit
+abandonment. A different PR needs another Task, stacked if dependent:
+
+```bash
+lf checkout EXP-13 --stack-on EXP-12 --design scratch/child-design.md
+lf --task EXP-13 pr publish
+```
+
+A published parent PR, including a draft, is enough to start and publish the
+child. Prepare a child-specific design; checkout transfers it without overwriting
+newer child work. `lf sync` follows parent updates and its squash merge while
+preserving the child's identity, PR, Session and design.
 
 ## Check authorized deliveries in the background
 
@@ -296,7 +431,8 @@ with a recorded landing (`lf arm`, `lf land`) fails its required checks. A
 failing PR nobody armed is reported, not repaired; so is a PR with no Task.
 Loopflow Desktop runs the same command for each open repository and stops it
 on quit. A second copy stands by behind a live one. Nothing depends on the
-watcher running: without it, failures are recorded and wait.
+watcher running during `land --wait-and-fix`: waited landing admits the same repair.
+After bare land returns, failures wait for a watcher or another waited landing.
 An idle check launches no provider. Existing work and GitHub merge requests
 continue when the schedule is disabled or a Task is held.
 
@@ -369,7 +505,7 @@ lf session list --task LOO-358 --interactive all --history
 `--waiting` narrows that selection to conversations waiting on you. In Desktop,
 a program's OSC 7501 report takes precedence: any blocked record means Waiting,
 as does idle for an interactive Session. Working, done, error and explicit clear
-suppress the quiet-time inference for that provider generation. A blocked child
+suppress the quiet-time inference for that AgentProcess. A blocked child
 still counts when its parent reports working.
 
 Without reports, the existing provider stream supplies questions, hand-back and
@@ -408,7 +544,7 @@ workspace; enter its printed path before editing.
 Primary conversations reuse their respective worktrees, including after replacement.
 They display a workspace without gaining Task membership. Moved checkouts are
 rediscovered; missing checkouts recover committed branch state. Live conversations
-keep their placement until an idle driver boundary.
+keep their placement until their attached LfProcess is idle.
 
 Persistent workspaces retain scratch locally through commit, sync, publication and
 landing. Selected-path commits preserve unrelated staged edits. Publication pushes

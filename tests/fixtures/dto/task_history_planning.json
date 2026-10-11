@@ -34,7 +34,8 @@
       "project_id": "current",
       "project": "current",
       "team_id": "team",
-      "assignee": null
+      "assignee": null,
+      "due_date": null
     },
     {
       "id": "LOO-315",
@@ -51,7 +52,8 @@
       "project_id": "current",
       "project": "current",
       "team_id": "team",
-      "assignee": null
+      "assignee": null,
+      "due_date": null
     },
     {
       "id": "LOO-314",
@@ -68,7 +70,8 @@
       "project_id": "current",
       "project": "current",
       "team_id": "team",
-      "assignee": null
+      "assignee": null,
+      "due_date": null
     },
     {
       "id": "LOO-313",
@@ -85,7 +88,8 @@
       "project_id": "current",
       "project": "current",
       "team_id": "team",
-      "assignee": null
+      "assignee": null,
+      "due_date": null
     },
     {
       "id": "LOO-310",
@@ -102,7 +106,8 @@
       "project_id": "current",
       "project": "current",
       "team_id": "team",
-      "assignee": null
+      "assignee": null,
+      "due_date": null
     },
     {
       "id": "LOO-308",
@@ -119,7 +124,8 @@
       "project_id": "current",
       "project": "current",
       "team_id": "team",
-      "assignee": null
+      "assignee": null,
+      "due_date": null
     },
     {
       "id": "LOO-307",
@@ -136,7 +142,8 @@
       "project_id": "current",
       "project": "current",
       "team_id": "team",
-      "assignee": null
+      "assignee": null,
+      "due_date": null
     },
     {
       "id": "LOO-309",
@@ -153,7 +160,8 @@
       "project_id": "current",
       "project": "current",
       "team_id": "team",
-      "assignee": null
+      "assignee": null,
+      "due_date": null
     },
     {
       "id": "LOO-316",
@@ -170,7 +178,8 @@
       "project_id": "current",
       "project": "current",
       "team_id": "team",
-      "assignee": null
+      "assignee": null,
+      "due_date": null
     },
     {
       "id": "LOO-312",
@@ -187,7 +196,8 @@
       "project_id": "current",
       "project": "current",
       "team_id": "team",
-      "assignee": null
+      "assignee": null,
+      "due_date": null
     },
     {
       "id": "LOO-306",
@@ -204,7 +214,8 @@
       "project_id": "current",
       "project": "current",
       "team_id": "team",
-      "assignee": null
+      "assignee": null,
+      "due_date": null
     },
     {
       "id": "recent",
@@ -221,7 +232,8 @@
       "project_id": "current",
       "project": "current",
       "team_id": "team",
-      "assignee": null
+      "assignee": null,
+      "due_date": null
     },
     {
       "id": "old",
@@ -238,7 +250,8 @@
       "project_id": "current",
       "project": "current",
       "team_id": "team",
-      "assignee": null
+      "assignee": null,
+      "due_date": null
     },
     {
       "id": "unknown",
@@ -255,7 +268,8 @@
       "project_id": "current",
       "project": "current",
       "team_id": "team",
-      "assignee": null
+      "assignee": null,
+      "due_date": null
     },
     {
       "id": "reopened",
@@ -272,7 +286,8 @@
       "project_id": "current",
       "project": "current",
       "team_id": "team",
-      "assignee": null
+      "assignee": null,
+      "due_date": null
     },
     {
       "id": "unresolved",
@@ -289,7 +304,8 @@
       "project_id": "current",
       "project": "current",
       "team_id": "team",
-      "assignee": null
+      "assignee": null,
+      "due_date": null
     }
   ]
 }

@@ -23,7 +23,12 @@ classifiers = [
 dependencies = ["typer>=0.9", "pyyaml>=6.0"]
 
 [dependency-groups]
-dev = ["boto3", "pytest>=8.0", "ruff>=0.8"]
+dev = [
+    "boto3",
+    "pyte>=0.8.2",
+    "pytest>=8.0",
+    "ruff>=0.8",
+]
 
 [project.urls]
 Homepage = "https://loopflow.studio/"

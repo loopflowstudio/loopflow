@@ -34,7 +34,7 @@ fn success(output: Output) -> String {
 }
 
 #[test]
-fn context_budget_preview_reads_authored_wave_without_registration() {
+fn context_targets_measure_checkout_wave_and_refresh_local_edits() {
     let home = tempfile::tempdir().unwrap();
     let repo = TestRepo::new();
     fs::create_dir_all(home.path().join(".lf")).unwrap();
@@ -48,7 +48,7 @@ fn context_budget_preview_reads_authored_wave_without_registration() {
     .unwrap();
     fs::write(
         repo.path().join(".lf/config.yaml"),
-        "context_budgets:\n  memory_tokens: 700\n  input_tokens: 100\n",
+        "agent: not-a-launchable-harness\ndocs: [missing.md]\ncontext_budgets:\n  memory_tokens: 700\n  scratch_bytes: 10000\n",
     )
     .unwrap();
     fs::write(
@@ -64,6 +64,13 @@ fn context_budget_preview_reads_authored_wave_without_registration() {
     )
     .unwrap();
     fs::write(&scratch, "Pending work. ".repeat(500)).unwrap();
+    SqliteStore::new(&home.path().join(".lf/loopflow.db"))
+        .unwrap()
+        .ensure_wave(
+            repo.path().canonicalize().unwrap().to_str().unwrap(),
+            "local",
+        )
+        .unwrap();
     let query = || -> serde_json::Value {
         serde_json::from_str(&success(
             command(
@@ -78,11 +85,12 @@ fn context_budget_preview_reads_authored_wave_without_registration() {
     };
     let report = query();
     assert_eq!(report["wave"], "local");
+    assert!(report.get("goal_status").is_none());
     let budgets = &report["context"]["budgets"];
     for (key, value, source) in [
         ("memory_tokens", 400, repo.path().join("wave/local/GOAL.md")),
         ("scratch_tokens", 600, home.path().join(".lf/config.yaml")),
-        ("input_tokens", 100, repo.path().join(".lf/config.yaml")),
+        ("scratch_bytes", 10000, repo.path().join(".lf/config.yaml")),
     ] {
         assert_eq!(budgets[key]["value"], value);
         assert_eq!(
@@ -95,16 +103,14 @@ fn context_budget_preview_reads_authored_wave_without_registration() {
     let usage = report["context"]["usage"].as_array().unwrap();
     for source in &usage[..2] {
         let limit = source["token_limit"].as_u64().unwrap();
-        assert!(source["original_tokens"].as_u64().unwrap() > limit);
-        assert!(source["submitted_tokens"].as_u64().unwrap() <= limit);
+        assert!(source["tokens"].as_u64().unwrap() > limit);
     }
-    assert!(usage.last().unwrap()["submitted_tokens"].as_u64().unwrap() > 100);
+    assert!(budgets.get("input_tokens").is_none());
     fs::write(memory, "Live decision retained.").unwrap();
     fs::write(scratch, "Pending work retained.").unwrap();
     let refreshed = query();
     for source in &refreshed["context"]["usage"].as_array().unwrap()[..2] {
-        assert_eq!(source["original_tokens"], source["submitted_tokens"]);
-        assert!(source["original_tokens"].as_u64().unwrap() < 100);
+        assert!(source["tokens"].as_u64().unwrap() < 100);
     }
 }
 
@@ -150,7 +156,7 @@ fn installation_uses_candidate_authority_from_any_checkout() {
     let home = tempfile::tempdir().unwrap();
     let repo = TestRepo::new();
     repo.create_branch("install-task");
-    let task = support::register_unrun_task(
+    let task = support::register_task_with_pr(
         &home.path().join(".lf"),
         repo.path(),
         "install-task",

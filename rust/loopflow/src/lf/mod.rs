@@ -49,7 +49,7 @@ pub struct Cli {
     #[arg(long, hide = true)]
     pub skill_input: Option<std::path::PathBuf>,
     #[arg(skip)]
-    pub resolved_invocation: Option<crate::engine::skill_invocation::SkillInvocation>,
+    pub resolved_invocation: Option<crate::skills::invocation::SkillInvocation>,
 
     /// Prefer this managed provider login before the normal route. Repeat to
     /// select provider-qualified preferences such as `claude=jack@`.
@@ -94,9 +94,9 @@ pub struct Cli {
     #[arg(short = 'b', long = "batch")]
     pub batch: bool,
 
-    /// Hand off Claude, Codex, or OpenCode to the terminal
-    #[arg(long, conflicts_with = "batch")]
-    pub tui: bool,
+    /// Show context accounting and diagnostic logs
+    #[arg(short = 'v', long, global = true)]
+    pub verbose: bool,
 
     /// Override Chrome integration; omission inherits configuration
     #[arg(long, value_enum)]
@@ -186,12 +186,12 @@ impl Cli {
         for (flag, enabled) in [
             ("--batch", self.batch),
             ("--interactive", self.interactive),
-            ("--tui", self.tui),
             ("--clipboard", self.clipboard),
             ("--yolo", self.yolo),
             ("--no-loopflow", self.no_loopflow),
             ("--isolate", self.isolate),
             ("--shared", self.shared),
+            ("--verbose", self.verbose),
         ] {
             if enabled {
                 args.push(flag.to_string());
@@ -255,7 +255,7 @@ impl Cli {
             yolo: self.yolo,
             interactive: self.interactive,
             batch: self.batch,
-            tui: self.tui,
+            verbose: self.verbose,
             chrome: self.chrome,
             diff: self.diff,
             max_turns: self.max_turns,
@@ -341,6 +341,20 @@ pub enum Commands {
     /// Internal provider callback that records one native interactive session.
     #[command(name = "__provider-session", hide = true)]
     ProviderSession,
+    /// Internal conversation context for native startup/compaction hooks.
+    #[command(name = "__context-block", hide = true)]
+    ContextBlock {
+        #[arg(long)]
+        delivery: std::path::PathBuf,
+        #[arg(long, value_enum)]
+        moment: crate::context_block::ContextMoment,
+    },
+    /// Native provider naming callback.
+    #[command(name = "__session-title", hide = true)]
+    SessionTitle {
+        #[arg(value_parser = ["claude", "codex"])]
+        provider: String,
+    },
     /// Inspect and continue Sessions
     Session {
         #[command(subcommand)]
@@ -405,19 +419,16 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: TaskCommand,
     },
-    /// Show effective context budgets, their sources, and current source usage
+    /// Show memory and scratch size targets, their sources, and current usage
     Context {
         #[arg(long)]
         json: bool,
         /// Inspect a Wave's local authored context
         #[arg(long, conflicts_with = "task")]
         wave: Option<String>,
-        /// Inspect a Task's checkout and locally stored goal
+        /// Inspect a Task's checkout and Wave context
         #[arg(long)]
         task: Option<String>,
-        /// Skill to include in the launch preview
-        #[arg(long, default_value = "realign")]
-        skill: String,
     },
     /// Internal: render the repository maintainer scorecard for telemetry-daily
     #[command(name = "__telemetry-scorecard", hide = true)]
@@ -490,6 +501,14 @@ pub enum SkillCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum ProjectCommand {
+    /// Update a Project's name or summary
+    Edit {
+        project: String,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        summary: Option<String>,
+    },
     /// Select and inspect reusable Workflows
     Workflow {
         #[command(subcommand)]
@@ -499,8 +518,13 @@ pub enum ProjectCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum ProjectWorkflowCommand {
+    /// Read the authored definition without creating a repository file
+    Source { project: String, name: String },
     /// List Workflow definitions, including unavailable local files
     List {
+        /// Include this Project's stored Wave Workflow definitions
+        #[arg(long)]
+        project: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -511,9 +535,13 @@ pub enum ProjectWorkflowCommand {
         json: bool,
     },
     /// Select the Workflow future Tasks take up; captured Tasks stay unchanged
-    Set { project: String, name: String },
-    /// Copy a builtin Workflow when needed and print its local path
-    Customize { name: String },
+    Set {
+        project: String,
+        name: String,
+        /// Store this definition in the Wave
+        #[arg(long)]
+        file: Option<std::path::PathBuf>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -579,9 +607,9 @@ pub enum SessionCommand {
         /// The terminal marker in the current provider client receipt
         #[arg(long)]
         terminal: String,
-        /// Provider generation from the Session reading
+        /// AgentProcess from the Session reading; omit when it reported none
         #[arg(long)]
-        generation: i64,
+        agent_process: Option<String>,
     },
     /// Resume a conversation by ID, or the last interactive Session in this worktree
     Resume {
@@ -809,6 +837,8 @@ pub struct SyncArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum TaskCommand {
+    /// Synchronize a Task; observed planning conflicts adopt Linear
+    Sync { issue: String },
     /// Inspect or reset this Task's captured Workflow
     Workflow {
         #[command(subcommand)]
@@ -824,19 +854,26 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Record accepted work remaining after merge, or resolve it with evidence
+    /// File or link follow-up Tasks after merge, then record the disposition
     FollowUp {
         issue: String,
-        #[arg(long, required_unless_present = "clear", conflicts_with = "clear")]
-        outcome: Option<String>,
-        #[arg(long, required_unless_present = "clear", conflicts_with = "clear")]
-        evidence: Option<String>,
-        /// Next observation or decision, as an RFC 3339 timestamp
-        #[arg(long, required_unless_present = "clear", conflicts_with = "clear")]
-        check_at: Option<String>,
-        /// Evidence that the remaining work is satisfied or no longer needed
+        #[arg(long, conflicts_with_all = ["existing", "none", "finish"], requires = "notes")]
+        title: Option<String>,
+        #[arg(long, requires = "title")]
+        notes: Option<String>,
+        #[arg(long, requires = "title")]
+        due: Option<String>,
         #[arg(long)]
-        clear: Option<String>,
+        wave: Option<String>,
+        #[arg(long, conflicts_with_all = ["title", "none", "finish"])]
+        existing: Option<String>,
+        #[arg(long, conflicts_with_all = ["title", "existing", "finish"])]
+        none: Option<String>,
+        #[arg(long, conflicts_with_all = ["title", "existing", "none"])]
+        finish: Option<String>,
+        /// Stable obligation key; use a distinct key for each additional follow-up
+        #[arg(long)]
+        key: Option<String>,
     },
     /// Enable or hold CI repair for a Task without interrupting running work
     Automate {
@@ -857,6 +894,9 @@ pub enum TaskCommand {
         stack_on: Option<String>,
         #[arg(long)]
         directive: Option<String>,
+        /// Hand off a child-specific design from the caller's checkout
+        #[arg(long, value_name = "PATH")]
+        design: Option<PathBuf>,
         #[arg(long)]
         json: bool,
     },
@@ -876,11 +916,21 @@ pub enum TaskCommand {
         /// Direction for this run, published to the Task
         #[arg(long)]
         reason: Option<String>,
-        /// Reach `end` although Linear already calls the active Task complete
-        #[arg(long)]
-        force: bool,
     },
-    /// Put a Task at a node of its workflow without running anything; `end` completes it
+    /// Complete a Task without moving its Workflow
+    Complete {
+        issue: String,
+        /// Why, kept in the Task's completion request
+        #[arg(long)]
+        reason: Option<String>,
+    },
+    /// Reopen local planning without moving Workflow or replacing the PR
+    Reopen {
+        issue: String,
+        #[arg(long)]
+        reason: Option<String>,
+    },
+    /// Move Workflow position without running anything; `end` requests completion
     Move {
         issue: String,
         /// `start`, `end` or one of the workflow's nodes
@@ -888,11 +938,8 @@ pub enum TaskCommand {
         /// Why, kept in the Task's workflow history
         #[arg(long)]
         reason: Option<String>,
-        /// Reach `end` although Linear already calls the active Task complete
-        #[arg(long)]
-        force: bool,
     },
-    /// File a Task in the current chapter
+    /// Create a planning Task without allocating a checkout or starting work
     Create {
         /// Wave name; defaults to the bound Wave
         #[arg(long)]
@@ -984,6 +1031,14 @@ pub enum TaskCommand {
         title: Option<String>,
         #[arg(long)]
         notes: Option<String>,
+        /// Zero-based position in the Project's Task order
+        #[arg(long)]
+        rank: Option<u32>,
+        /// Assignee identity; provider user ID in connected plans
+        #[arg(long, conflicts_with = "unassign")]
+        assignee: Option<String>,
+        #[arg(long)]
+        unassign: bool,
         #[arg(short = 'w', long)]
         wave: Option<String>,
     },
@@ -1039,8 +1094,11 @@ impl TaskCommand {
             Self::Automate { issue, .. } => Some(issue),
             Self::Status { issue, .. } | Self::Abandon { issue, .. } => issue.as_deref(),
             Self::Checkout { issue, .. }
+            | Self::Sync { issue, .. }
             | Self::Run { issue, .. }
             | Self::Move { issue, .. }
+            | Self::Complete { issue, .. }
+            | Self::Reopen { issue, .. }
             | Self::Diff { issue, .. }
             | Self::Files { issue, .. }
             | Self::File { issue, .. }
@@ -1146,13 +1204,6 @@ pub enum PrCommand {
         logs: bool,
     },
 
-    /// After an out-of-band merge, rotate this Task to its next serial PR,
-    /// carrying committed and uncommitted follow-up onto the new branch.
-    Next {
-        /// Name the next serial branch (defaults to the settled PR's next slug,
-        /// then the sequence number).
-        slug: Option<String>,
-    },
     /// Publish a ready PR headlessly: push, create or refresh, print state + URL.
     /// Opens no review surface.
     Publish {
@@ -1182,11 +1233,6 @@ pub enum PrCommand {
         strict: bool,
         #[arg(short = 'p', long = "create-pr")]
         create_pr: bool,
-        /// Complete after verified merge (the default unless --next is supplied)
-        #[arg(short = 'c', long)]
-        complete: bool,
-        #[arg(long = "next")]
-        next: Option<String>,
         #[arg(short = 'w', long = "worktree")]
         worktree: Option<String>,
         #[arg(short = 'm', long = "message")]
@@ -1202,11 +1248,6 @@ pub enum PrCommand {
         strict: bool,
         #[arg(long)]
         local: bool,
-        /// Complete after verified merge (the default unless --next is supplied)
-        #[arg(short = 'c', long)]
-        complete: bool,
-        #[arg(long = "next")]
-        next: Option<String>,
         #[arg(short = 'w', long = "worktree")]
         worktree: Option<String>,
         #[arg(short = 'm', long = "message")]
@@ -1218,18 +1259,13 @@ pub enum PrCommand {
     },
     /// Request auto-merge, retain settlement intent, and return.
     Land {
+        /// Wait up to 30 minutes for merge and repair failing CI; timeout retains the request
+        #[arg(long)]
+        wait_and_fix: bool,
         #[arg(long)]
         strict: bool,
         #[arg(long)]
         local: bool,
-        /// Stay until the PR merges or closes, starting a ci-fix when a required check fails
-        #[arg(long)]
-        watch: bool,
-        /// Complete after verified merge (the default unless --next is supplied)
-        #[arg(short = 'c', long)]
-        complete: bool,
-        #[arg(long = "next")]
-        next: Option<String>,
         #[arg(short = 'w', long = "worktree")]
         worktree: Option<String>,
         #[arg(short = 'm', long = "message")]
@@ -1471,7 +1507,7 @@ pub enum SelfCommand {
         #[command(subcommand)]
         cmd: Option<InstallCommand>,
     },
-    /// Compile loopflow skills into your home vendor Skills directories.
+    /// Export skills and Flows into native vendor Skills directories.
     #[command(name = "sync-skills", hide = true)]
     SyncSkills {
         /// Confirm writes under ~/ without prompting
@@ -1480,6 +1516,9 @@ pub enum SelfCommand {
         /// Keep stale loopflow-generated skills
         #[arg(long = "no-prune")]
         no_prune: bool,
+        /// Export repository definitions into this checkout instead of home
+        #[arg(long)]
+        repo: bool,
     },
 }
 
@@ -1787,10 +1826,12 @@ mod tests {
     use clap::CommandFactory;
 
     #[test]
-    fn retired_ide_flag_is_rejected_for_a_valid_skill_command() {
-        let error = Cli::try_parse_from(["lf", "--ide", "skill", "debug"]).unwrap_err();
-        assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);
-        assert!(error.to_string().contains("--ide"));
+    fn retired_surface_flags_are_rejected_for_a_valid_skill_command() {
+        for flag in ["--ide", "--tui"] {
+            let error = Cli::try_parse_from(["lf", flag, "skill", "debug"]).unwrap_err();
+            assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);
+            assert!(error.to_string().contains(flag));
+        }
     }
 
     #[test]
@@ -2246,6 +2287,8 @@ mod tests {
             "INF-122",
             "--directive",
             "collect both reports",
+            "--design",
+            "scratch/child.md",
             "--json",
         ])
         .expect("parse task checkout");
@@ -2256,6 +2299,7 @@ mod tests {
                     name,
                     stack_on,
                     directive,
+                    design,
                     json,
                 },
         }) = cli.command
@@ -2266,6 +2310,10 @@ mod tests {
         assert_eq!(name.as_deref(), Some("runtime-research"));
         assert_eq!(stack_on.as_deref(), Some("INF-122"));
         assert_eq!(directive.as_deref(), Some("collect both reports"));
+        assert_eq!(
+            design.as_deref(),
+            Some(std::path::Path::new("scratch/child.md"))
+        );
         assert!(json);
     }
 
@@ -2310,40 +2358,24 @@ mod tests {
     }
 
     #[test]
-    fn task_completion_and_pr_dispositions_parse() {
-        let land = Cli::try_parse_from(["lf", "pr", "land", "-c"]).expect("parse completing land");
+    fn landing_wait_and_fix_is_explicit_and_serial_dispositions_are_rejected() {
+        let land = Cli::try_parse_from(["lf", "pr", "land", "--wait-and-fix"])
+            .expect("parse waited landing");
         assert!(matches!(
             land.command,
             Some(Commands::Pr {
                 cmd: Some(PrCommand::Land {
-                    complete: true,
-                    next: None,
-                    watch: false,
+                    wait_and_fix: true,
                     ..
                 })
             })
         ));
-        let watched = Cli::try_parse_from(["lf", "pr", "land", "--watch"]).expect("parse watch");
-        assert!(matches!(
-            watched.command,
-            Some(Commands::Pr {
-                cmd: Some(PrCommand::Land { watch: true, .. })
-            })
-        ));
-
-        let submit =
-            Cli::try_parse_from(["lf", "pr", "submit", "--next", "released-upgrade-proof"])
-                .expect("parse continuation submit");
-        assert!(matches!(
-            submit.command,
-            Some(Commands::Pr{
-                cmd: Some(PrCommand::Submit {
-                    complete: false,
-                    next: Some(next),
-                    ..
-                })
-            }) if next == "released-upgrade-proof"
-        ));
+        assert!(Cli::try_parse_from(["lf", "pr", "land", "--wait"]).is_err());
+        for command in ["land", "arm", "submit"] {
+            assert!(Cli::try_parse_from(["lf", "pr", command, "-c"]).is_err());
+            assert!(Cli::try_parse_from(["lf", "pr", command, "--next", "follow-up"]).is_err());
+        }
+        assert!(Cli::try_parse_from(["lf", "pr", "next"]).is_err());
     }
 
     #[test]
@@ -2356,7 +2388,7 @@ mod tests {
     }
 
     #[test]
-    fn reaching_end_is_the_one_completion_command() {
+    fn complete_and_move_are_distinct_commands() {
         let cli = Cli::try_parse_from([
             "lf",
             "task",
@@ -2365,12 +2397,17 @@ mod tests {
             "end",
             "--reason",
             "Delivered",
-            "--force",
         ])
         .unwrap();
         assert!(matches!(cli.command,
-            Some(Commands::Task { cmd: TaskCommand::Move { issue, node, reason, force: true } })
+            Some(Commands::Task { cmd: TaskCommand::Move { issue, node, reason } })
                 if issue == "LOO-42" && node == "end" && reason.as_deref() == Some("Delivered")));
+        let cli =
+            Cli::try_parse_from(["lf", "task", "complete", "LOO-42", "--reason", "Delivered"])
+                .unwrap();
+        assert!(matches!(cli.command,
+            Some(Commands::Task { cmd: TaskCommand::Complete { issue, reason } })
+                if issue == "LOO-42" && reason.as_deref() == Some("Delivered")));
         assert!(Cli::try_parse_from([
             "lf",
             "task",
@@ -2465,13 +2502,7 @@ mod tests {
         }
         assert!(!json);
 
-        for removed in [
-            "steer",
-            "follow-up",
-            "acknowledge",
-            "decide",
-            "request-decision",
-        ] {
+        for removed in ["steer", "acknowledge", "decide", "request-decision"] {
             assert!(
                 Cli::try_parse_from(["lf", "task", removed, "INF-123"]).is_err(),
                 "{removed} must not remain as a compatibility command"

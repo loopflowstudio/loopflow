@@ -5,10 +5,11 @@ use serde_json::Value;
 use crate::chat::types::{
     ConversationEvent, ConversationItem, FailureEvidence, FileEdit, Lifecycle,
 };
+use crate::id::AgentSessionId;
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(super) struct ReaderState {
-    session_id: String,
+    session_id: AgentSessionId,
     current_turn_id: Option<String>,
     tools: HashMap<String, ToolLifecycle>,
     text: HashMap<String, String>,
@@ -33,7 +34,11 @@ pub(super) struct ReaderState {
 }
 
 impl ReaderState {
-    pub(super) fn new(session_id: String, model: Option<String>, provider: &'static str) -> Self {
+    pub(super) fn new(
+        session_id: AgentSessionId,
+        model: Option<String>,
+        provider: &'static str,
+    ) -> Self {
         Self {
             session_id,
             turn_open: false,
@@ -104,7 +109,7 @@ impl ReaderState {
         let mut mapped = MappedEvent::default();
         for message in messages {
             let info = &message["info"];
-            if info["sessionID"] != self.session_id || info["role"] != "assistant" {
+            if info["sessionID"] != self.session_id.as_str() || info["role"] != "assistant" {
                 continue;
             }
             let Some(request) = info["parentID"].as_str() else {
@@ -136,7 +141,7 @@ impl ReaderState {
 
     fn accepts(&self, properties: &Value) -> bool {
         match session_id(properties) {
-            Some(event_session_id) => event_session_id == self.session_id,
+            Some(event_session_id) => event_session_id == self.session_id.as_str(),
             None => {
                 tracing::debug!(
                     properties = ?properties,

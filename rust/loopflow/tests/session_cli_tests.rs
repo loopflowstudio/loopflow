@@ -1,3 +1,5 @@
+mod support;
+
 use std::process::{Command, Output};
 
 fn command(home: &std::path::Path, args: &[&str]) -> Command {
@@ -16,7 +18,7 @@ fn command(home: &std::path::Path, args: &[&str]) -> Command {
         .env_remove("LF_CAPTURE_KEY")
         .env_remove("LF_RUN_DIR")
         .env_remove("LF_TRACE_ID")
-        .env_remove("LF_PROCESS_LFID")
+        .env_remove("LF_PROCESS_ID")
         .env_remove("LF_FLOW_ID")
         .env_remove("LF_HUMAN_SESSION")
         .env_remove("LF_WAVE_ID")
@@ -120,7 +122,7 @@ fn development_session_handoff_keeps_its_binary_and_home() {
             "LF_CAPTURE_KEY",
             "LF_RUN_DIR",
             "LF_TRACE_ID",
-            "LF_PROCESS_LFID",
+            "LF_PROCESS_ID",
             "LF_HUMAN_SESSION",
             "LF_FLOW_ID",
         ] {
@@ -276,7 +278,7 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
             let rejected = bin.join("rejecting-lf");
             std::fs::write(
                 &rejected,
-                "#!/bin/sh\necho 'unexpected argument --tui' >&2\nexit 2\n",
+                "#!/bin/sh\necho 'fixture launcher rejected invocation' >&2\nexit 2\n",
             )
             .unwrap();
             std::fs::set_permissions(&rejected, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -373,18 +375,18 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
             serde_json::from_slice(&std::fs::read(home.path().join("resumed.caller")).unwrap())
                 .unwrap();
         assert_eq!(caller.session_id, id);
-        let recorded: (i64, String) = rusqlite::Connection::open(home.path().join("loopflow.db"))
+        let recorded: (Option<loopflow::id::LfProcessId>, String) = rusqlite::Connection::open(home.path().join("loopflow.db"))
             .unwrap()
             .query_row(
-                "SELECT provider_generation,provider_process_lfid FROM agent_sessions WHERE id=?1",
+                "SELECT p.id,p.parent_lf_process_id FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1",
                 [id],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
         assert_eq!(
             (
-                caller.provider_generation,
-                caller.origin_process_lfid.to_string()
+                caller.agent_process_id,
+                caller.origin_lf_process_id.to_string()
             ),
             recorded
         );
@@ -431,6 +433,52 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
 
 const CALLER: &str = "run_00000000000000000000000000000002";
 
+#[test]
+fn native_title_callback_keeps_lf_as_the_naming_owner() {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    let home = tempfile::tempdir().unwrap();
+    std::fs::create_dir(home.path().join(".lf")).unwrap();
+    let (id, _, _) = prepare_conversation(home.path(), home.path(), "claude", "Original purpose");
+    let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    database
+        .execute(
+            "UPDATE agent_sessions SET provider_thread='native-owned' WHERE id=?1",
+            [&id],
+        )
+        .unwrap();
+    for thread in ["native-owned", "native-plain"] {
+        let mut child = command(home.path(), &["__session-title", "claude"])
+            .env("HOME", home.path())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        write!(
+            child.stdin.take().unwrap(),
+            "{}",
+            serde_json::json!({
+                "cwd": home.path(), "session_id": thread, "hook_event_name":"UserPromptSubmit",
+                "prompt":"A different request entirely"
+            })
+        )
+        .unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(output.status.success(), "{output:?}");
+        if thread == "native-owned" {
+            assert!(output.stdout.is_empty(), "{output:?}");
+        } else {
+            let title: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(
+                title["hookSpecificOutput"]["sessionTitle"],
+                "different request entirely"
+            );
+        }
+    }
+}
+
 /// A prepared conversation, before a provider has started.
 fn prepare_conversation(
     home: &std::path::Path,
@@ -442,7 +490,7 @@ fn prepare_conversation(
     let input = format!("run_{}", uuid::Uuid::new_v4().simple());
     let session = store
         .create_session(
-            loopflow::session::AgentSession {
+            loopflow::session::LfSession {
                 captured: None,
                 id: format!("session_{input}"),
                 artifact_key: input.clone(),
@@ -456,7 +504,7 @@ fn prepare_conversation(
                 iterations: None,
                 task_id: None,
                 wave_id: None,
-                flow_process_lfid: None,
+                flow_lf_process_id: None,
                 work_source: None,
                 bound_at: None,
                 interactive: true,
@@ -514,16 +562,16 @@ fn headless_resume_preserves_a_held_owners_capture_on_both_harnesses() {
         let manifest = std::fs::read(dir.join("manifest.json")).unwrap();
         let store =
             loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
-        let process = loopflow::id::ProcessLfid::new();
+        let process = loopflow::id::LfProcessId::new();
         rusqlite::Connection::open(home.path().join("loopflow.db"))
             .unwrap()
             .execute(
-                "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
                 [process.as_str()],
             )
             .unwrap();
-        let driver = store
-            .claim_session_driver(&id, None, &process, true)
+        let attachment = store
+            .claim_session_attachment(&id, None, &process, true)
             .unwrap();
         let before = store.session(&id).unwrap().unwrap();
         let history = store.session_history(&id, 0, 0).unwrap();
@@ -549,10 +597,13 @@ fn headless_resume_preserves_a_held_owners_capture_on_both_harnesses() {
         .unwrap();
         assert!(!output.status.success());
         let error = String::from_utf8_lossy(&output.stderr);
-        assert!(error.contains("already has a driver"), "{harness}: {error}");
+        assert!(
+            error.contains("already has an attached LfProcess"),
+            "{harness}: {error}"
+        );
         assert!(!error.contains("unexpected-provider-launch"), "{error}");
         assert_eq!(store.session(&id).unwrap().unwrap(), before);
-        assert_eq!(store.session_driver(&id).unwrap(), Some(driver));
+        assert_eq!(store.session_attachment(&id).unwrap(), Some(attachment));
         assert_eq!(store.session_history(&id, 0, 0).unwrap(), history);
         assert_eq!(std::fs::read(dir.join("manifest.json")).unwrap(), manifest);
         assert!(dir.join("prepared").exists());
@@ -582,13 +633,14 @@ if [ "${1:-}" = --version ]; then exit 0; fi
 pwd -P > "$LF_TEST_RESUME_PROOF.cwd"
 printf '%s\n' "$@" > "$LF_TEST_RESUME_PROOF.args"
 printf '%s\n' "$LF_AGENT_CALLER" > "$LF_TEST_RESUME_PROOF.caller"
-while [ "$#" -gt 0 ]; do
-    if [ "$1" = --append-system-prompt-file ]; then
-        cat "$2" > "$LF_TEST_RESUME_PROOF.context"
-        break
-    fi
-    shift
-done
+python3 - "$@" <<'PYTHON'
+import json, os, pathlib, subprocess, sys
+args = sys.argv[1:]
+settings = json.loads(pathlib.Path(args[args.index("--settings") + 1]).read_text())
+hook = settings["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+block = json.loads(subprocess.check_output(hook, shell=True))["hookSpecificOutput"]["additionalContext"]
+pathlib.Path(os.environ["LF_TEST_RESUME_PROOF"] + ".context").write_text(block)
+PYTHON
 cat > "$LF_TEST_RESUME_PROOF.input"
 printf '%s\n' '{"type":"result","session_id":"fixture-native","subtype":"success","result":"continued"}'
 "#,
@@ -650,7 +702,8 @@ printf '%s\n' '{"type":"result","session_id":"fixture-native","subtype":"success
     );
     let sent = std::fs::read_to_string(home.path().join("proof.context")).unwrap();
     assert!(sent.contains("SAVED_CONTEXT"), "{sent}");
-    assert!(sent.contains("Continue here"), "{sent}");
+    let sent_input = std::fs::read_to_string(home.path().join("proof.input")).unwrap();
+    assert!(sent_input.contains("Continue here"), "{sent_input}");
     assert!(!sent.contains("CALLER_CONTEXT"), "{sent}");
     assert!(!sent.contains("CALLER_WAVE_CONTEXT"), "{sent}");
     assert!(!sent.contains("missing-original-skill"), "{sent}");
@@ -689,7 +742,7 @@ printf '%s\n' '{"type":"result","session_id":"fixture-native","subtype":"success
         serde_json::from_slice(&std::fs::read(home.path().join("proof.caller")).unwrap()).unwrap();
     assert_eq!(agent_caller.session_id, id);
     let process_cwd = store
-        .process(&agent_caller.origin_process_lfid)
+        .process(&agent_caller.origin_lf_process_id)
         .unwrap()
         .unwrap()
         .cwd
@@ -708,10 +761,21 @@ fn waiting_lists_only_conversations_waiting_on_a_person() {
     let (working, _, _) = prepare_conversation(home.path(), &cwd, "codex", "Working");
     let (asked, _, _) = prepare_conversation(home.path(), &cwd, "codex", "Asked");
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let store =
+        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let parent = loopflow::id::LfProcessId::new();
+    db.execute(
+        "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+        [&parent],
+    )
+    .unwrap();
     for (id, pending) in [(&working, 0), (&asked, 1)] {
+        store
+            .claim_session_attachment(id, None, &parent, true)
+            .unwrap();
         db.execute(
-            "INSERT INTO session_activity(session_id,driver_generation,provider_generation,observed_at,open_tools,pending_input,yielded)
-             SELECT id,driver_generation,provider_generation,unixepoch(),1,?2,0 FROM agent_sessions WHERE id=?1",
+            "INSERT INTO session_activity(session_id,attachment_token,agent_process_id,observed_at,open_tools,pending_input,yielded)
+             SELECT s.id,p.attachment_token,p.id,unixepoch(),1,?2,0 FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1",
             rusqlite::params![id, pending],
         )
         .unwrap();
@@ -793,6 +857,250 @@ fn session_names_are_shared_and_human_names_win() {
     assert!(!dir.join("provider-clients").exists());
     assert!(!dir.join("events.jsonl").exists());
     assert!(dir.join("prepared").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn terminal_titles_follow_session_rename_and_reconnect_without_provider_accounts() {
+    use std::fs;
+    use std::io::{Read, Write};
+    use std::os::fd::FromRawFd;
+    use std::os::unix::fs::PermissionsExt;
+    use std::process::Stdio;
+    use std::time::{Duration, Instant};
+
+    for (provider, host, bound) in [
+        ("claude", "absent", true),
+        ("codex", "absent", true),
+        ("claude", "absent", false),
+        ("claude", "missing", false),
+        ("codex", "failure", false),
+        ("claude", "timeout", false),
+    ] {
+        let home = tempfile::tempdir().unwrap();
+        let bin = home.path().join("bin");
+        fs::create_dir(&bin).unwrap();
+        let repo = loopflow_test_support::TestRepo::new();
+        repo.create_file(
+            "AGENTS.md",
+            "# Loopflow operating guide\nFollow the repository instructions.",
+        );
+        let task = bound.then(|| {
+            support::register_task_with_pr(
+                home.path(),
+                &repo.path().canonicalize().unwrap(),
+                "main",
+                &repo.head_sha(),
+            )
+        });
+        let title = |name: &str| match &task {
+            Some(task) => format!("{} {name}", task.task.plan.identifier),
+            None => name.to_string(),
+        };
+        let mut id = String::new();
+        let native = uuid::Uuid::new_v4().to_string();
+        let transcript = if provider == "codex" {
+            home.path()
+                .join("codex/sessions")
+                .join(format!("rollout-{native}.jsonl"))
+        } else {
+            home.path()
+                .join("claude/projects/test")
+                .join(format!("{native}.jsonl"))
+        };
+        fs::create_dir_all(transcript.parent().unwrap()).unwrap();
+        fs::write(
+            transcript,
+            serde_json::json!({"cwd": repo.path()}).to_string(),
+        )
+        .unwrap();
+        let isolated_command = |args: &[&str]| {
+            let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+            command
+                .env_clear()
+                .args(args)
+                .current_dir(repo.path())
+                .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+                .env("LF_HOME", home.path())
+                .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+                .env("RUST_LOG", "off")
+                .env("HOME", home.path())
+                .env("CLAUDE_CONFIG_DIR", home.path().join("claude"))
+                .env("CODEX_HOME", home.path().join("codex"));
+            command
+        };
+        let inspect = |args: &[&str]| {
+            let output = isolated_command(args).output().unwrap();
+            assert!(output.status.success(), "{provider}/{host}: {output:?}");
+            serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+        };
+        let write_script = |name: &str, script: &str| {
+            let path = bin.join(name);
+            fs::write(&path, script).unwrap();
+            fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+        };
+        write_script(
+            provider,
+            r#"#!/bin/sh
+if [ "$1" = --dangerously-bypass-hook-trust ] && [ "$2" = --model ]; then
+    echo "error: a value is required for '--model <MODEL>' but none was supplied" >&2
+    exit 2
+fi
+printf '%s\n' "$@" > "$LF_HOME/args"
+printf '%s' "${CLAUDE_CODE_DISABLE_TERMINAL_TITLE-}" > "$LF_HOME/title-disabled"
+touch "$LF_HOME/ready"
+IFS= read -r answer
+printf 'latest agent message: %s\n' "$answer"
+"#,
+        );
+        write_script(
+            "cmux",
+            r#"#!/bin/sh
+case "$TITLE_HOST" in timeout) exec /bin/sleep 10;; esac
+exit 2
+"#,
+        );
+        if host == "missing" {
+            fs::remove_file(bin.join("cmux")).unwrap();
+        }
+
+        for name in ["Plan store migration", "Release notes"] {
+            let first = id.is_empty();
+            let expected = title(name);
+            let mut master = -1;
+            let mut slave = -1;
+            // SAFETY: valid output pointers, null selects default PTY settings.
+            assert_eq!(
+                unsafe {
+                    libc::openpty(
+                        &mut master,
+                        &mut slave,
+                        std::ptr::null_mut(),
+                        std::ptr::null_mut(),
+                        std::ptr::null_mut(),
+                    )
+                },
+                0
+            );
+            // SAFETY: openpty returned two independently owned descriptors.
+            let mut master = unsafe { fs::File::from_raw_fd(master) };
+            // SAFETY: the fresh slave descriptor is owned only by this File.
+            let slave = unsafe { fs::File::from_raw_fd(slave) };
+            let mut launch = if first {
+                isolated_command(&[
+                    "-i",
+                    "--agent",
+                    provider,
+                    ":",
+                    "Plan store migration for archived tasks",
+                ])
+            } else {
+                isolated_command(&["session", "connect", &id])
+            };
+            launch
+                .env("TITLE_HOST", host)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::from(slave));
+            if host != "absent" {
+                launch
+                    .env("CMUX_WORKSPACE_ID", "fixture-workspace")
+                    .env("CMUX_SURFACE_ID", "fixture-surface");
+            }
+            let _ = fs::remove_file(home.path().join("ready"));
+            let mut child = launch.spawn().unwrap();
+            drop(launch);
+            let output_reader = std::thread::spawn(move || {
+                let mut output = Vec::new();
+                // Linux reports EIO when the last PTY slave closes; retain bytes.
+                let _ = master.read_to_end(&mut output);
+                String::from_utf8_lossy(&output).into_owned()
+            });
+            let deadline = Instant::now() + Duration::from_secs(30);
+            while !home.path().join("ready").exists()
+                && Instant::now() < deadline
+                && child.try_wait().unwrap().is_none()
+            {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            let started = home.path().join("ready").exists();
+            if !started {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!(
+                    "{provider}/{host} failed to start: {}",
+                    output_reader.join().unwrap()
+                );
+            }
+            if first {
+                let listed = inspect(&["session", "list", "--all", "--json"]);
+                assert_eq!(listed.as_array().unwrap().len(), 1, "{listed}");
+                id = listed[0]["id"].as_str().unwrap().to_string();
+                assert_eq!(listed[0]["title"], name);
+                if let Some(task) = &task {
+                    assert!(
+                        listed[0]["task_ids"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .any(|id| id == task.task.id.as_str()),
+                        "{listed}"
+                    );
+                }
+            }
+            let args = fs::read_to_string(home.path().join("args")).unwrap();
+            if provider == "claude" {
+                assert!(args.contains(&format!("--name\n{expected}\n")), "{args}");
+                assert_eq!(
+                    fs::read_to_string(home.path().join("title-disabled")).unwrap(),
+                    "1"
+                );
+            } else {
+                assert!(args.contains("tui.terminal_title=[]"), "{args}");
+                assert!(args.contains("--no-daemon\n"), "{args}");
+            }
+            if first {
+                let renamed = inspect(&["session", "rename", &id, "Release notes", "--json"]);
+                assert_eq!(renamed["title"], "Release notes");
+            } else {
+                assert!(
+                    args.lines().any(|arg| matches!(arg, "resume" | "--resume")),
+                    "{args}"
+                );
+            }
+            if first {
+                let store =
+                    loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db"))
+                        .unwrap();
+                let input = store.session(&id).unwrap().unwrap().artifact_key;
+                record_native(home.path(), &id, &input, &native);
+            }
+            child.stdin.take().unwrap().write_all(b"done\n").unwrap();
+            let result = child.wait_with_output().unwrap();
+            let terminal = output_reader.join().unwrap();
+            assert!(result.status.success(), "{provider}/{host}: {terminal}");
+            assert!(
+                terminal.contains(&format!("\x1b]0;{expected}\x07")),
+                "{terminal:?}"
+            );
+            assert_eq!(
+                terminal.matches("\x1b]0;").count(),
+                1,
+                "no OSC writer alongside native output"
+            );
+            assert!(String::from_utf8_lossy(&result.stdout).contains("latest agent message: done"));
+            let listed = inspect(&["session", "list", "--all", "--history", "--json"]);
+            assert_eq!(
+                listed
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|row| row["id"] == id)
+                    .unwrap()["title"],
+                "Release notes"
+            );
+        }
+    }
 }
 
 #[cfg(unix)]
@@ -1015,7 +1323,6 @@ fn terminal_first_launch_and_failed_startup_reopen_the_same_conversation() {
     ));
     let failed = open(&["session", "connect", &id, "--replace"]);
     assert!(!failed.status.success());
-    assert!(!String::from_utf8_lossy(&failed.stderr).contains("no confirmed engine exit"));
     write_provider("#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\nprintf '%s\\n' 'message=created id=ses_retained' >&2\n");
     for args in [
         vec!["session", "resume"],
@@ -1029,12 +1336,19 @@ fn terminal_first_launch_and_failed_startup_reopen_the_same_conversation() {
     let session = store.session(&id).unwrap().unwrap();
     assert_eq!(session.id, id);
     let history = store.session_history(&id, 0, 1000).unwrap();
-    assert!(history
-        .iter()
-        .any(|event| event.payload["phase"] == "spawn_failed"));
-    assert!(history
-        .iter()
-        .any(|event| event.payload["phase"] == "exited"));
+    // Failed and exited starts are retained as their own AgentProcess records.
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    for (state, minimum) in [("spawn_failed", 1), ("exited", 1)] {
+        let recorded: i64 = db
+            .query_row(
+                "SELECT count(*) FROM processes
+                 WHERE kind='agent' AND agent_session_id=?1 AND spawn_state=?2",
+                [id.as_str(), state],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(recorded >= minimum, "{state}: {recorded}");
+    }
     assert!(
         history
             .iter()
@@ -1042,7 +1356,6 @@ fn terminal_first_launch_and_failed_startup_reopen_the_same_conversation() {
             .count()
             >= 2
     );
-    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     let count: i64 = db
         .query_row("SELECT count(*) FROM agent_sessions", [], |row| row.get(0))
         .unwrap();
@@ -1266,15 +1579,15 @@ fn program_status_cli_observes_waiting_without_completing_work() {
     .unwrap();
     let store =
         loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
-    let process_lfid = loopflow::id::ProcessLfid::new();
+    let lf_process_id = loopflow::id::LfProcessId::new();
     let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     conn.execute(
-        "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'00000000-0000-0000-0000-000000000001',1)",
-        [&process_lfid],
+        "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'00000000-0000-0000-0000-000000000001',1)",
+        [&lf_process_id],
     )
     .unwrap();
-    // A native conversation needs no lf driver claim for passive display.
-    let generation = "0".to_string();
+    // A native conversation needs no lf attachment for passive display: the
+    // reading reports no AgentProcess, so the observer names none.
     let mut observer = Child(
         command(
             home.path(),
@@ -1284,8 +1597,6 @@ fn program_status_cli_observes_waiting_without_completing_work() {
                 &id,
                 "--terminal",
                 "fixture-pane",
-                "--generation",
-                &generation,
             ],
         )
         .stdin(Stdio::piped())
@@ -1360,7 +1671,7 @@ fn program_status_cli_observes_waiting_without_completing_work() {
     }
     assert!(store.session(&id).unwrap().unwrap().completed_at.is_none());
     assert!(store
-        .process(&process_lfid)
+        .process(&lf_process_id)
         .unwrap()
         .unwrap()
         .completed_at
@@ -1374,9 +1685,9 @@ fn program_status_cli_observes_waiting_without_completing_work() {
         wait_for("done")["program_status"]["records"][0]["state"],
         "done"
     );
-    let driver = store.session_driver(&id).unwrap();
+    let attachment = store.session_attachment(&id).unwrap();
     store
-        .claim_session_driver(&id, driver.as_ref(), &process_lfid, true)
+        .claim_session_attachment(&id, attachment.as_ref(), &lf_process_id, true)
         .unwrap();
     let stale = run(
         home.path(),
@@ -1386,8 +1697,6 @@ fn program_status_cli_observes_waiting_without_completing_work() {
             &id,
             "--terminal",
             "fixture-pane",
-            "--generation",
-            &generation,
         ],
     );
     assert!(!stale.status.success());

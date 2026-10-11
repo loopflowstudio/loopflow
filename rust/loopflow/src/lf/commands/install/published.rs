@@ -75,7 +75,7 @@ fn install_dir() -> Result<PathBuf> {
         return Ok(std::env::current_dir()?.join(directory));
     }
     let home = dirs::home_dir().context("cannot determine the installation home")?;
-    if let Some(binary) = crate::engine::process::which_on_path(Path::new("lf")) {
+    if let Some(binary) = crate::os_process::which_on_path(Path::new("lf")) {
         if let Some(parent) = binary.parent() {
             if parent == home.join(".local/bin") || parent == home.join(".lf/bin") {
                 return Ok(parent.to_path_buf());

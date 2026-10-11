@@ -4,12 +4,12 @@ use std::process::Command;
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::engine::agent::{run_agent, AgentCapabilities, AgentConfig, ProcessConfig};
-use crate::engine::config::load_config_or_default;
-use crate::engine::git::{
+use crate::agent::{run_agent, AgentCapabilities, AgentConfig, ProcessConfig};
+use crate::config::load_config_or_default;
+use crate::flow::load_skill;
+use crate::git::{
     commit, current_branch, git_stdout, is_clean, push, push_with_upstream, stage_all,
 };
-use crate::engine::load_skill;
 
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
@@ -59,7 +59,7 @@ pub fn commit_selected(repo: &Path, paths: &[String], message: Option<&str>) -> 
         message.ok_or_else(|| OpsError::Message("selected-path commits require -m".into()))?;
     let _mutation = crate::ops::task::lock_task_pr_mutation(repo)?;
     restart_landed_persistent(repo)?;
-    let persistent = crate::engine::worktrees::is_persistent_worktree(repo)?;
+    let persistent = crate::git::worktrees::is_persistent_worktree(repo)?;
     let directory = tempfile::tempdir()?;
     let index = directory.path().join("index");
     let run = |args: &[&str]| -> OpsResult<()> {
@@ -104,7 +104,7 @@ pub fn commit_selected(repo: &Path, paths: &[String], message: Option<&str>) -> 
 /// Whenever a persistent checkout is about to commit or publish, drop history
 /// its merged PRs already delivered. Nothing has to observe the merge itself.
 fn restart_landed_persistent(repo: &Path) -> OpsResult<()> {
-    if crate::engine::worktrees::is_persistent_worktree(repo)?
+    if crate::git::worktrees::is_persistent_worktree(repo)?
         && crate::ops::sync::restart_landed_persistent(repo)?
     {
         eprintln!("Earlier commits have merged; restarted this branch from the default branch.");
@@ -113,7 +113,7 @@ fn restart_landed_persistent(repo: &Path) -> OpsResult<()> {
 }
 
 pub(crate) fn prepare_persistent_publication(repo: &Path) -> OpsResult<()> {
-    if !crate::engine::worktrees::is_persistent_worktree(repo)? {
+    if !crate::git::worktrees::is_persistent_worktree(repo)? {
         return Ok(());
     }
     restart_landed_persistent(repo)?;
@@ -128,7 +128,7 @@ pub(crate) fn prepare_persistent_publication(repo: &Path) -> OpsResult<()> {
 }
 
 pub(crate) fn untrack_persistent_scratch(repo: &Path) -> OpsResult<()> {
-    if !crate::engine::worktrees::is_persistent_worktree(repo)? {
+    if !crate::git::worktrees::is_persistent_worktree(repo)? {
         return Ok(());
     }
     git_stdout(repo, UNTRACK_SCRATCH)?;
@@ -158,7 +158,7 @@ pub fn commit_workflow(
 
     if options.add {
         progress.status("Staging changes...");
-        if crate::engine::worktrees::is_persistent_worktree(repo)? {
+        if crate::git::worktrees::is_persistent_worktree(repo)? {
             git_stdout(repo, &["add", "-A", "--", ".", ":(top,exclude)scratch"])?;
         } else {
             stage_all(repo, inherit_git)?;

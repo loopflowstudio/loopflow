@@ -194,17 +194,21 @@ public struct RegistryQuery: Sendable {
         return try Self.decode([FlowCatalogEntry].self, from: stdout)
     }
 
-    public func workflowCatalog(cwd: String?) async throws -> [WorkflowCatalogEntry] {
-        let stdout = try await run(["project", "workflow", "list", "--json"], cwd)
+    public func workflowCatalog(cwd: String?, project: String? = nil) async throws -> [WorkflowCatalogEntry] {
+        let stdout = try await run(["project", "workflow", "list", "--json"] + (project.map { ["--project", $0] } ?? []), cwd)
         return try Self.decode([WorkflowCatalogEntry].self, from: stdout)
+    }
+
+    public func workflowSource(_ name: String, project: String, cwd: String?) async throws -> String {
+        try await run(["project", "workflow", "source", project, name], cwd)
+    }
+
+    public func saveWorkflow(_ name: String, content: String, project: String, cwd: String?) async throws {
+        _ = try await runWithInput(["project", "workflow", "set", project, name, "--file", "/dev/stdin"], cwd, content)
     }
 
     public func customizeFlow(_ name: String, cwd: String?) async throws -> String {
         try await run(["flow", "customize", name], cwd).trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    public func customizeWorkflow(_ name: String, cwd: String?) async throws -> String {
-        try await run(["project", "workflow", "customize", name], cwd).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     public func setWorkflow(_ name: String, project: String, cwd: String?) async throws {
@@ -224,9 +228,12 @@ public struct RegistryQuery: Sendable {
     }
 
     /// Put the Task at a node of its Workflow without running anything.
-    /// `force` reaches `end` although Linear already calls the Task complete.
-    public func moveTask(issue: String, node: String, force: Bool = false, cwd: String?) async throws {
-        _ = try await run(["task", "move", issue, node] + (force ? ["--force"] : []), cwd)
+    public func moveTask(issue: String, node: String, cwd: String?) async throws {
+        _ = try await run(["task", "move", issue, node], cwd)
+    }
+
+    public func completeTask(issue: String, cwd: String?) async throws {
+        _ = try await run(["task", "complete", issue], cwd)
     }
 
     /// One planning Task's complete comment thread. Read-only; works before
@@ -562,7 +569,7 @@ public struct SessionHistory: Decodable, Sendable, Identifiable, Hashable {
     public var id: String {
         if let captured { return "\(sessionId):\(captured)" }
         if case .nativeTurn(let thread, let turn, _, _) = providers.first?.reference {
-            return "\(sessionId):\(thread):\(turn)"
+            return "\(sessionId):\(thread.rawValue):\(turn)"
         }
         return sessionId
     }
@@ -624,7 +631,7 @@ public struct SessionHistory: Decodable, Sendable, Identifiable, Hashable {
 
 public struct ProviderHistory: Decodable, Sendable, Hashable {
     public let reference: ProviderHistoryReference
-    public let processLfid: String?
+    public let lfProcessId: String?
     public let taskId: String?
     public let waveId: String?
     public let startedAt: Int?
@@ -633,13 +640,13 @@ public struct ProviderHistory: Decodable, Sendable, Hashable {
     public let usage: SessionUsage
     enum CodingKeys: String, CodingKey {
         case reference, outcome, usage
-        case processLfid = "process_lfid", taskId = "task_id", waveId = "wave_id"
+        case lfProcessId = "lf_process_id", taskId = "task_id", waveId = "wave_id"
         case startedAt = "started_at", completedAt = "completed_at"
     }
 }
 
 public enum ProviderHistoryReference: Decodable, Sendable, Hashable {
-    case nativeTurn(thread: String, turn: String, startSeq: Int?, completionSeq: Int?)
+    case nativeTurn(thread: AgentSessionId, turn: String, startSeq: Int?, completionSeq: Int?)
     case recordedAttempt(captured: Int, attemptKey: String)
     private enum Keys: String, CodingKey {
         case kind, thread, turn
@@ -651,7 +658,7 @@ public enum ProviderHistoryReference: Decodable, Sendable, Hashable {
         let c = try decoder.container(keyedBy: Keys.self)
         switch try c.decode(Kind.self, forKey: .kind) {
         case .nativeTurn:
-            self = .nativeTurn(thread: try c.decode(String.self, forKey: .thread),
+            self = .nativeTurn(thread: try c.decode(AgentSessionId.self, forKey: .thread),
                 turn: try c.decode(String.self, forKey: .turn),
                 startSeq: try c.decodeIfPresent(Int.self, forKey: .startSeq),
                 completionSeq: try c.decodeIfPresent(Int.self, forKey: .completionSeq))
@@ -716,8 +723,6 @@ public struct StepContext: Decodable, Sendable, Hashable {
     public let observedAt: Int
     public let sources: [ContextSourceUsage]
     public let assembledTokens: Int?
-    public let assembledBudgetTokens: Int?
-    public let overAssembledBudget: Bool
     public let firstRequestTokens: Int?
     public let peakRequestTokens: Int?
     public let gaps: [String]
@@ -727,8 +732,6 @@ public struct StepContext: Decodable, Sendable, Hashable {
         case sessionId = "session_id"
         case observedAt = "observed_at"
         case assembledTokens = "assembled_tokens"
-        case assembledBudgetTokens = "assembled_budget_tokens"
-        case overAssembledBudget = "over_assembled_budget"
         case firstRequestTokens = "first_request_tokens"
         case peakRequestTokens = "peak_request_tokens"
     }
@@ -826,12 +829,12 @@ public struct ProjectReadiness: Decodable, Sendable, Hashable {
     public let activation: Activation?
 
     public struct Activation: Decodable, Sendable, Hashable {
-        public let processLfid: String
+        public let lfProcessId: String
         public let completedAt: Int64?
         public let outcome: String?
         public let error: String?
         enum CodingKeys: String, CodingKey {
-            case processLfid = "process_lfid", completedAt = "completed_at", outcome, error
+            case lfProcessId = "lf_process_id", completedAt = "completed_at", outcome, error
         }
     }
     enum CodingKeys: String, CodingKey {

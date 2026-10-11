@@ -25,39 +25,42 @@ pub struct WorkBinding {
 pub(crate) fn render_task_context(
     task: &Task,
     project: &ProjectPlan,
-    pr: &TaskPr,
+    pr: Option<&TaskPr>,
     wave_name: &str,
     steers: &[Steer],
 ) -> String {
-    let placement = pr
+    let placement = task
         .parent_pr_id
         .as_ref()
         .map(|parent| format!("Stack parent PR: {parent} (land the parent first)"))
         .unwrap_or_else(|| "Stack parent PR: none (rooted on main)".to_string());
+    let pull_request = pr
+        .and_then(TaskPr::github)
+        .map(|pr| format!("\nPull request: {}", pr.url))
+        .unwrap_or_default();
     format!(
-        "Linear Task {identifier}: {title}\n\n{description}\n\nChapter plan: {project} (source {project_id})\n{project_context}\n\n{direction}\n\nTask directive snapshot synced at: {task_snapshot_synced_at}\nChapter plan snapshot synced at: {project_snapshot_synced_at}\nWave: {wave}\nTask Work: {task_id}\nWorktree: {worktree}\nPR {pr_sequence}: {pr_branch}\nBase commit: {base_commit}\n{placement}",
+        "Task {identifier}: {title}\n\n{description}\n\nChapter plan: {project} (source {project_id})\n{project_context}\n\n{direction}\n\nTask directive snapshot synced at: {task_snapshot_synced_at}\nChapter plan snapshot synced at: {project_snapshot_synced_at}\nWave: {wave}\nTask Work: {task_id}\nWorktree: {worktree}\nBranch: {branch}{pull_request}\nBase commit: {base_commit}\n{placement}",
         identifier = task.plan.identifier,
         title = task.plan.title,
         description = task.plan.description,
         project = project.name,
-        project_id = project.id.as_str(),
+        project_id = project.linear_id.as_ref().map(|id| id.as_str()).unwrap_or("local"),
         project_context = project.prompt_context,
         direction = render_steers(steers),
-        task_snapshot_synced_at = task.plan.pm_snapshot_synced_at,
-        project_snapshot_synced_at = project.pm_snapshot_synced_at,
+        task_snapshot_synced_at = task.plan.pm_snapshot_synced_at.map(|at| at.to_string()).unwrap_or_else(|| "not observed".into()),
+        project_snapshot_synced_at = project.pm_snapshot_synced_at.map(|at| at.to_string()).unwrap_or_else(|| "not observed".into()),
         wave = wave_name,
         task_id = task.id,
-        worktree = task.worktree.display(),
-        pr_sequence = pr.sequence,
-        pr_branch = pr.branch,
-        base_commit = pr.base_commit,
+        worktree = task.worktree.as_ref().map(|path| path.display().to_string()).unwrap_or_else(|| "not placed".into()),
+        branch = task.branch,
+        base_commit = task.base_commit,
         placement = placement,
     )
 }
 
 fn render_wave_context(repo: &Path, wave: &str, metric_context: &str) -> String {
     // Authored goals and memory enter once through the prompt document gatherer.
-    let flows = match crate::engine::available_flow_names(repo) {
+    let flows = match crate::flow::available_flow_names(repo) {
         Ok(names) => names
             .iter()
             .map(|flow| format!("- {flow}"))
@@ -147,25 +150,18 @@ pub async fn resolve_work_selection(
         }
         let work = WorkRef::Task(task.id.clone());
         let steers = Vec::new();
-        let pr = store
-            .task_prs(&task.id)
-            .await
-            .map_err(run_error)?
-            .pop()
-            .ok_or_else(|| run_error(format!("Task {} has no recorded PR", task.id)))?;
-        let mut context = render_task_context(&task, &project.plan, &pr, wave.slug(), &steers);
+        let pr = store.active_task_pr(&task.id).await.map_err(run_error)?;
+        let mut context =
+            render_task_context(&task, &project.plan, pr.as_ref(), wave.slug(), &steers);
         if let Ok(Some(workflow)) = store.sqlite.workflow(&task.id) {
             context.push_str(&format!("\n\n{}", workflow.guidance(&task.plan.identifier)));
         }
-        let cwd = if crate::engine::git::current_branch(repo)
-            .ok()
-            .flatten()
-            .as_deref()
-            == Some(pr.branch.as_str())
+        let cwd = if crate::git::current_branch(repo).ok().flatten().as_deref()
+            == Some(task.branch.as_str())
         {
-            crate::engine::git::worktree_root(repo).unwrap_or_else(|_| repo.to_path_buf())
+            crate::git::worktree_root(repo).unwrap_or_else(|_| repo.to_path_buf())
         } else {
-            task.worktree.clone()
+            task.worktree()?.clone()
         };
         return Ok(WorkBinding {
             source: crate::session::WorkSource::Declared,
@@ -196,7 +192,7 @@ pub async fn resolve_work_selection(
         let cwd = if crate::repository::CanonicalRepo::discover(Path::new(wave.repo()))
             .is_ok_and(|canonical| canonical.contains(repo))
         {
-            crate::engine::git::worktree_root(repo).unwrap_or_else(|_| repo.to_path_buf())
+            crate::git::worktree_root(repo).unwrap_or_else(|_| repo.to_path_buf())
         } else {
             PathBuf::from(wave.repo())
         };
@@ -257,7 +253,7 @@ pub async fn resolve_checkout_binding(
     )
     .await?;
     binding.source = crate::session::WorkSource::Checkout;
-    binding.cwd = crate::engine::git::worktree_root(repo).unwrap_or_else(|_| repo.to_path_buf());
+    binding.cwd = crate::git::worktree_root(repo).unwrap_or_else(|_| repo.to_path_buf());
     Ok(Some(binding))
 }
 
@@ -319,13 +315,14 @@ mod tests {
         Project {
             id: ProjectId::new(),
             plan: ProjectPlan {
+                summary: String::new(),
                 workflow: "feature".into(),
                 status: crate::pm::ProjectStatus::Started,
-                id: LinearProjectId::new(planning_id).unwrap(),
+                linear_id: Some(LinearProjectId::new(planning_id).unwrap()),
                 slug: slug.to_string(),
                 name: slug.to_string(),
                 prompt_context: "Ship the requested behavior.".to_string(),
-                pm_snapshot_synced_at: now.unix_timestamp(),
+                pm_snapshot_synced_at: Some(now.unix_timestamp()),
             },
             wave_id: wave.id().clone(),
             iteration: 0,
@@ -340,17 +337,21 @@ mod tests {
         let task = Task {
             id: TaskId::new(),
             plan: TaskPlan {
-                id: LinearIssueId::new("runtime-research").unwrap(),
+                revision: 0,
+                linear_id: Some(LinearIssueId::new("runtime-research").unwrap()),
                 identifier: "LOO-267".to_string(),
                 title: "Research the runtime".to_string(),
                 description: "Compare independent findings.".to_string(),
-                pm_snapshot_synced_at: now.unix_timestamp(),
+                pm_snapshot_synced_at: Some(now.unix_timestamp()),
             },
             pm_writeback: PmWritebackState::Current,
             wave_id: wave.id().clone(),
             project_id: project.id.clone(),
-            worktree,
+            worktree: Some(worktree),
             workspace_slug: "runtime-research".to_string(),
+            branch: "jack/runtime-research".to_string(),
+            base_commit: "deadbeef".to_string(),
+            parent_pr_id: None,
             agent: None,
             abandon_intent: None,
             created_at: now,
@@ -380,30 +381,34 @@ mod tests {
             &store.sqlite,
             wave.id(),
             None,
-            project.plan.id.as_str(),
+            project.plan.linear_id.as_ref().unwrap().as_str(),
             &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
         )
         .unwrap();
-        store.create_task(&task, &pr, None).await.unwrap();
+        store.seed_task(&task, &pr).await.unwrap();
         task
     }
 
     #[test]
     fn context_delivery_supplies_one_goal_for_direct_and_wave_launches() {
-        let tmp = tempfile::tempdir().unwrap();
+        let _lock = crate::journal::test_env_lock();
+        let home = tempfile::tempdir().unwrap();
+        let _home =
+            crate::lf::commands::flow::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        let tmp = loopflow_test_support::TestRepo::new();
         std::fs::create_dir_all(tmp.path().join("wave/release")).unwrap();
         let goal = "---\ncrons: []\n---\n## Objective\nShip a reliable release.\n\n## Bounds\nKeep rollback available.\n";
         std::fs::write(tmp.path().join("wave/release/GOAL.md"), goal).unwrap();
         let seed = super::render_wave_context(tmp.path(), "release", "");
         for message in [None, Some(seed)] {
-            let prepared = crate::engine::process_prompt::prepare_process_prompt(
-                &crate::engine::config::Config {
+            let prepared = crate::prompt::process::prepare_process_prompt(
+                &crate::config::Config {
                     diff_files: false,
                     diff: false,
                     paste: false,
                     ..Default::default()
                 },
-                crate::engine::process_prompt::ProcessPromptInput {
+                crate::prompt::process::ProcessPromptInput {
                     repo_root: tmp.path().to_path_buf(),
                     wave: Some("release".into()),
                     docs: vec!["wave/release/GOAL.md".into()],
@@ -412,20 +417,23 @@ mod tests {
                 },
             )
             .unwrap();
-            assert_eq!(
-                prepared.prompt.matches("Ship a reliable release.").count(),
-                1
-            );
-            assert_eq!(
-                prepared.prompt.matches("Keep rollback available.").count(),
-                1
-            );
-            assert!(prepared.config.system_prompt.contains(goal));
+            let block = prepared
+                .config
+                .conversation_context
+                .as_ref()
+                .unwrap()
+                .block(crate::context_block::ContextMoment::Start)
+                .unwrap()
+                .text;
+            assert_eq!(block.matches("Ship a reliable release.").count(), 1);
+            assert_eq!(block.matches("Keep rollback available.").count(), 1);
+            assert!(!prepared.config.system_prompt.contains(goal));
             let context = crate::lf::commands::run::attributed_context(
                 &prepared.components,
                 &prepared.config.system_prompt,
                 &prepared.config.task_prompt,
                 &prepared.deduplication_decisions,
+                None,
             );
             assert_eq!(
                 context
@@ -438,7 +446,7 @@ mod tests {
                         asset.source_path.as_deref() == Some("wave/release/GOAL.md")
                     })
                     .count(),
-                1
+                0
             );
             assert!(context.decisions.iter().any(|decision| {
                 decision.source_path.as_deref() == Some("wave/release/GOAL.md")
@@ -448,8 +456,12 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // Prompt assembly reads the selected fixture Machine.
     async fn release_task_prompt_follows_parent_rename_and_reparenting() {
-        let (_home, store) = test_store().await;
+        let _lock = crate::journal::test_env_lock();
+        let (home, store) = test_store().await;
+        let _home =
+            crate::lf::commands::flow::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
         let repo = loopflow_test_support::TestRepo::new();
         for (name, memory) in [
             ("infrastructure", "Parent memory"),
@@ -483,21 +495,48 @@ mod tests {
         let child_row = serde_json::to_value(&release).unwrap();
         for address in ["infrastructure/release", "infra/release", "product/release"] {
             if address == "infra/release" {
+                crate::work::wave::relocate::relocate_wave(
+                    &store,
+                    parent.id(),
+                    repo.path(),
+                    None,
+                    Some("infra"),
+                )
+                .await
+                .unwrap();
+                // Registry relocation preserves bytes; authoring moves the directory.
+                assert!(repo
+                    .path()
+                    .join("wave/infrastructure/release/GOAL.md")
+                    .is_file());
+                assert!(!repo.path().join("wave/infra").exists());
                 std::fs::rename(
                     repo.path().join("wave/infrastructure"),
                     repo.path().join("wave/infra"),
                 )
                 .unwrap();
             } else if address == "product/release" {
+                crate::work::wave::ensure_wave_row(&store, repo.path(), "product")
+                    .await
+                    .unwrap();
+                crate::work::wave::relocate::relocate_wave(
+                    &store,
+                    release.id(),
+                    repo.path(),
+                    None,
+                    Some(address),
+                )
+                .await
+                .unwrap();
+                assert!(repo.path().join("wave/infra/release/GOAL.md").is_file());
+                assert!(!repo.path().join("wave/product/release").exists());
                 std::fs::rename(
                     repo.path().join("wave/infra/release"),
                     repo.path().join("wave/product/release"),
                 )
                 .unwrap();
             }
-            let discovered = crate::work::wave::ensure_wave_row(&store, repo.path(), address)
-                .await
-                .unwrap();
+            let discovered = store.get_wave(release.id()).await.unwrap().unwrap();
             assert_eq!(discovered.id(), release.id());
             if address == "infra/release" {
                 assert_eq!(
@@ -518,7 +557,7 @@ mod tests {
                 store.get_task(&task.id).await.unwrap().unwrap().wave_id,
                 *release.id()
             );
-            let components = crate::engine::gather_context(&crate::engine::GatherContextOpts {
+            let components = crate::prompt::gather_context(&crate::prompt::GatherContextOpts {
                 repo_root: binding.cwd,
                 wave: Some(binding.wave_name),
                 include_diff: false,
@@ -526,7 +565,13 @@ mod tests {
                 ..Default::default()
             })
             .unwrap();
-            let prompt = crate::engine::format_prompt(&components);
+            // Source discovery preserves ancestry; diagnostics no longer inline bodies.
+            let prompt = components
+                .docs
+                .iter()
+                .map(|doc| doc.content.as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
             let ancestor = if address.starts_with("product/") {
                 "Product memory"
             } else {
@@ -542,13 +587,8 @@ mod tests {
                 "Parent memory"
             }));
         }
-        // A new Machine reconstructs the same identity from the authored files.
-        let (_fresh_home, fresh) = test_store().await;
-        let recovered = crate::work::wave::ensure_wave_row(&fresh, repo.path(), "product/release")
-            .await
-            .unwrap();
-        assert_eq!(recovered.id(), release.id());
-        assert_eq!(recovered.slug(), "product/release");
+        assert!(repo.path().join("wave/product/release/GOAL.md").is_file());
+        assert!(!repo.path().join("wave/infra/release").exists());
     }
 
     #[tokio::test]
@@ -593,11 +633,10 @@ mod tests {
         let task = task(&store, &wave, &project, worktree.clone()).await;
 
         store
-            .apply_linear_comment(
-                &task.id,
-                "comment-1".into(),
-                "ADVANCER ONLY".into(),
-                time::OffsetDateTime::now_utc(),
+            .append_steer(
+                &WorkRef::Task(task.id.clone()),
+                crate::durable::Author::User,
+                "ADVANCER ONLY",
             )
             .await
             .unwrap();
@@ -642,6 +681,7 @@ mod tests {
 
         // Context and attribution survive retirement and provider deletion.
         store.abandon(&work, "fixture retirement").await.unwrap();
+        let task = store.get_task(&task.id).await.unwrap().unwrap();
         assert!(super::resolve_checkout_binding(&store, repo.path())
             .await
             .unwrap()
@@ -650,13 +690,13 @@ mod tests {
             .unwrap()
             .execute(
                 "INSERT INTO task_deletions(wave_id,issue_id,identifier,confirmed_at) VALUES (?1,?2,?3,1)",
-                rusqlite::params![wave.id().as_str(), task.plan.id.as_str(), task.plan.identifier],
+                rusqlite::params![wave.id().as_str(), task.plan.linear_id.as_ref().unwrap().as_str(), task.plan.identifier],
             )
             .unwrap();
 
         for selector in [
             task.id.as_str(),
-            task.plan.id.as_str(),
+            task.plan.linear_id.as_ref().unwrap().as_str(),
             &task.plan.identifier,
         ] {
             let binding = resolve_work_binding(&store, repo.path(), &format!("task:{selector}"))
@@ -707,21 +747,28 @@ mod tests {
             std::env::set_var(crate::lf::WORK_DECLARATION_ENV, format!("task:{selector}"));
             crate::session_record::write_provider_session(
                 &capture.artifact_dir(),
-                "saved-session",
+                &"saved-session".into(),
                 None,
             )
             .unwrap();
             let history = crate::session_record::read_provider_session(&capture.artifact_dir())
                 .unwrap()
                 .unwrap();
-            let resumed = crate::lf::commands::util::resume_session(
-                "codex",
-                None,
-                repo.path(),
-                &capture.artifact_key(),
-                &history,
+            // The resuming invocation and its capture share this fixture's store.
+            let resumed = crate::journal::with_test_ledger(
+                crate::store::database_path_from_env().unwrap(),
+                || {
+                    crate::lf::commands::util::resume_session(
+                        "codex",
+                        None,
+                        repo.path(),
+                        &capture.artifact_key(),
+                        &history,
+                    )
+                },
             );
-            assert!(resumed.unwrap_err().to_string().contains("was deleted"));
+            let error = resumed.unwrap_err().to_string();
+            assert!(error.contains("was deleted"), "{error}");
             assert!(
                 crate::session_record::read_provider_clients(&capture.artifact_dir())
                     .unwrap()
@@ -765,7 +812,7 @@ mod tests {
         let task = task(&store, &wave, &project, directory.path().join("workspace")).await;
         let session = |task_id: Option<TaskId>, caller: Option<String>| {
             let inherited = caller.is_some();
-            crate::session::AgentSession {
+            crate::session::LfSession {
                 captured: None,
                 id: uuid::Uuid::new_v4().to_string(),
                 artifact_key: crate::session_record::new_artifact_key(),
@@ -786,7 +833,7 @@ mod tests {
                 }),
                 task_id,
                 wave_id: None,
-                flow_process_lfid: None,
+                flow_lf_process_id: None,
                 bound_at: None,
                 interactive: false,
                 repo: None,
@@ -820,7 +867,7 @@ mod tests {
         for selector in [
             task.plan.identifier.as_str(),
             task.id.as_str(),
-            task.plan.id.as_str(),
+            task.plan.linear_id.as_ref().unwrap().as_str(),
         ] {
             let rows = store
                 .sqlite

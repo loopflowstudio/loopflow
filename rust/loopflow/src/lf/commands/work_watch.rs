@@ -3,8 +3,9 @@
 //! The store's change revisions say which parts a commit can have changed. A
 //! part is projected again only then, on a read-only connection, and sent only
 //! when its content differs from the last frame. Bodies are the same wire types
-//! the one-shot `--json` reads print. The reader commits nothing, so it never
-//! wakes itself, and it records one Process for its whole lifetime.
+//! the one-shot `--json` reads print. Projections remain read-only. A separate
+//! foreground synchronization lifetime updates the selected repository's planning;
+//! those commits wake the reader just like edits from another connection.
 
 mod checkouts;
 
@@ -72,7 +73,7 @@ pub struct WorkFrame {
 pub enum WorkContent {
     Planning(Option<Box<PlanningPart>>),
     Sessions(Option<SessionsPart>),
-    Task(Option<TaskPart>),
+    Task(Option<Box<TaskPart>>),
     Wave(Option<Box<WavePart>>),
     WorkActivity(Option<WorkActivityPart>),
     Activity(Option<ActivitySnapshot>),
@@ -101,6 +102,7 @@ pub struct TaskPart {
     pub task: String,
     pub work: TaskWork,
     pub flow_processes: Vec<FlowProcessDetail>,
+    pub comments: crate::ops::pm::TaskComments,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -366,6 +368,7 @@ struct Reader {
     /// The sessions revision a quiet deadline was read at, and that deadline.
     quiet: Option<(i64, Option<i64>)>,
     runtime: tokio::runtime::Runtime,
+    planning_sync: Option<(String, crate::ops::linear_observe::PlanningSync)>,
 }
 
 impl Reader {
@@ -390,6 +393,30 @@ impl Reader {
                 }
                 self.refused = Some(reason);
             }
+        }
+    }
+
+    fn sync_planning(&mut self) {
+        if self.planning_sync.as_ref().map(|(repo, _)| repo) == self.scope.repo.as_ref() {
+            return;
+        }
+        self.planning_sync = None;
+        let Some(repo) = &self.scope.repo else {
+            return;
+        };
+        if self.store.is_none() {
+            return;
+        }
+        let result = self.runtime.block_on(async {
+            let store = Arc::new(
+                crate::store::open_store(&StorageConfig::sqlite(self.database.clone())).await?,
+            );
+            crate::ops::linear_observe::PlanningSync::start(store, repo.clone())
+                .map_err(anyhow::Error::from)
+        });
+        match result {
+            Ok(sync) => self.planning_sync = Some((repo.clone(), sync)),
+            Err(error) => tracing::warn!(%error, "cannot start repository planning sync"),
         }
     }
 
@@ -424,7 +451,7 @@ impl Reader {
         // Every one is asked again, not only up to the first that differs.
         let mut differs = false;
         for worktree in &changed {
-            differs |= crate::engine::git::reread_retained(worktree);
+            differs |= crate::git::reread_retained(worktree);
         }
         if differs {
             for part in [Part::Planning, Part::Wave] {
@@ -577,14 +604,16 @@ impl Reader {
                         let (process, entry) = store
                             .sqlite
                             .flow_process(id)?
-                            .ok_or_else(|| anyhow!("Flow {id} has no driver record"))?;
+                            .ok_or_else(|| anyhow!("Flow {id} has no Flow process record"))?;
                         flow_processes.push(process.detail(entry));
                     }
-                    WorkContent::Task(Some(TaskPart {
+                    let comments = store.sqlite.task_comments(&task)?;
+                    WorkContent::Task(Some(Box::new(TaskPart {
+                        comments,
                         task: selector,
                         work,
                         flow_processes,
-                    }))
+                    })))
                 }
                 Part::Wave => {
                     let id = self.scope.wave.clone().context("no Wave in scope")?;
@@ -735,7 +764,7 @@ pub(super) fn run(watch: bool) -> Result<()> {
         .into_owned();
     if watch {
         // Every reading asks Git the same questions about the same checkouts.
-        crate::engine::git::retain_reads();
+        crate::git::retain_reads();
     }
     let shared: Shared = Arc::new((Mutex::new(Mailbox::default()), Condvar::new()));
     let mut reader = Reader {
@@ -748,6 +777,7 @@ pub(super) fn run(watch: bool) -> Result<()> {
         watched_at: None,
         quiet: None,
         runtime: tokio::runtime::Runtime::new()?,
+        planning_sync: None,
     };
 
     // These threads belong to the foreground command and end with it. Closing
@@ -816,6 +846,7 @@ pub(super) fn run(watch: bool) -> Result<()> {
             }
             seen = revisions;
             if watch {
+                reader.sync_planning();
                 reader.observe_checkouts(revisions, &shared);
                 reader.observe_quiet(revisions);
             }
@@ -950,7 +981,6 @@ mod tests {
                 schema_version: 1,
                 observed_at,
                 nodes: Vec::new(),
-                provider_processes: Vec::new(),
             }))
         };
         assert_eq!(

@@ -4,10 +4,10 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use base64::Engine;
-use loopflow::engine::flow::{ConcreteStep, Skill, Step};
-use loopflow::engine::{compile_flow, load_flow};
-use support::codex_app_server_script;
+use loopflow::flow::compile_flow;
+use loopflow::flow::load_flow;
+use loopflow::flow::{ConcreteStep, Skill, Step};
+use support::{codex_app_server_script, register_codex_account};
 use tempfile::TempDir;
 
 fn session_id_for_capture(home: &Path, artifact: &str) -> String {
@@ -144,7 +144,7 @@ PYTHON
         let executables: Vec<String> = conn
             .prepare(
                 "SELECT json_extract(e.command,'$[0]') FROM processes e
-                 JOIN flow_process_steps s ON s.process_lfid=e.lfid WHERE e.outcome='succeeded'",
+                 JOIN flow_process_steps s ON s.lf_process_id=e.id WHERE e.outcome='succeeded'",
             )
             .unwrap()
             .query_map([], |row| row.get(0))
@@ -174,15 +174,15 @@ PYTHON
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
-        let driver: String = conn
-            .query_row("SELECT process_lfid FROM flow_processes", [], |row| {
+        let flow_process: String = conn
+            .query_row("SELECT lf_process_id FROM flow_processes", [], |row| {
                 row.get(0)
             })
             .unwrap();
         let inspection = run_lf(
             repo.path(),
             home.path(),
-            &["flow", "show", &driver, "--processes", "--json"],
+            &["flow", "show", &flow_process, "--processes", "--json"],
             None,
         );
         assert!(
@@ -259,7 +259,7 @@ print(json.dumps({"report": {}, "metric_observations": [], "text": "finished"}))
         "survive",
         "- cmd: __telemetry-scorecard\n- cmd: sync --plan\n",
     );
-    let mut driver = lf_command(
+    let mut flow_process = lf_command(
         repo.path(),
         home.path(),
         &["--batch", "flow", "survive"],
@@ -271,20 +271,20 @@ print(json.dumps({"report": {}, "metric_observations": [], "text": "finished"}))
     .unwrap();
     wait_for("effect never started", || {
         assert!(
-            driver.try_wait().unwrap().is_none(),
-            "driver exited before the effect"
+            flow_process.try_wait().unwrap().is_none(),
+            "Flow process exited before the effect"
         );
         repo.path().join("entered").exists()
     });
-    driver.kill().unwrap();
-    driver.wait().unwrap();
+    flow_process.kill().unwrap();
+    flow_process.wait().unwrap();
     let read = || {
         let mut flows = flow_details(repo.path(), home.path());
         assert_eq!(flows.len(), 1);
         flows.remove(0)
     };
     // Reconciliation before and after the surviving effect completes must not
-    // continue the dead driver's Flow or execute its successor.
+    // continue the dead process's Flow or execute its successor.
     for effect_finished in [false, true] {
         if effect_finished {
             fs::write(repo.path().join("release"), "").unwrap();
@@ -315,7 +315,7 @@ print(json.dumps({"report": {}, "metric_observations": [], "text": "finished"}))
         );
         assert_ne!(
             flow["entry"]["state"], "completed",
-            "an effect's exit does not finish its dead driver"
+            "an effect's exit does not finish its dead Flow process"
         );
     }
     let sessions = lf_json(
@@ -358,47 +358,6 @@ fn write_executable(path: &Path, content: &str) {
     }
 }
 
-fn register_codex_account(home: &Path) {
-    let account_home = home.join("accounts/codex/fixture");
-    fs::create_dir_all(&account_home).unwrap();
-    let email = "fixture@example.com";
-    let claims = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .encode(serde_json::json!({"email": email, "sub": "fixture"}).to_string());
-    fs::write(
-        account_home.join("auth.json"),
-        serde_json::json!({"tokens": {
-            "access_token": "synthetic-fixture-token",
-            "id_token": format!("h.{claims}.s")
-        }})
-        .to_string(),
-    )
-    .unwrap();
-    let store = loopflow::store::sqlite::SqliteStore::new(&home.join("loopflow.db")).unwrap();
-    let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    store
-        .upsert_provider_account(&loopflow::store::ProviderAccount {
-            provider: "codex".into(),
-            account_id: loopflow::store::ProviderAccountId::parse("fixture").unwrap(),
-            home: Some(account_home),
-            login_email: Some(loopflow::profile::EmailAddress::parse(email).unwrap()),
-            observed_email: None,
-            observed_subject: None,
-            observed_credential_digest: None,
-            observed_plan: None,
-            credential_state: loopflow::store::CredentialState::Connected,
-            routing_state: loopflow::store::RoutingState::Automatic,
-            plan: None,
-            paid_through: None,
-            utilization_percent: None,
-            cooldown_until: None,
-            cooldown_reason: None,
-            last_selected_at: None,
-            created_at: now,
-            updated_at: now,
-        })
-        .unwrap();
-}
-
 fn run_lf(repo: &Path, home: &Path, args: &[&str], path: Option<&str>) -> std::process::Output {
     lf_command(repo, home, args, path).output().unwrap()
 }
@@ -414,6 +373,7 @@ fn lf_command(repo: &Path, home: &Path, args: &[&str], path: Option<&str>) -> Co
         .args(args)
         .current_dir(repo)
         .env("HOME", home)
+        .env("CODEX_HOME", home.join(".codex"))
         .env("LF_HOME", home)
         .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
         .env("NO_COLOR", "1");
@@ -453,7 +413,30 @@ fn publish_stack_fixture_pr(
     let mut pr = runtime
         .block_on(store.active_task_pr(task))
         .unwrap()
-        .unwrap();
+        .unwrap_or_else(|| {
+            let task = runtime.block_on(store.get_task(task)).unwrap().unwrap();
+            let pr = loopflow::work::task::TaskPr {
+                id: loopflow::work::task::TaskPrId::new(),
+                task_id: task.id,
+                sequence: 1,
+                slug: task.workspace_slug,
+                branch: task.branch,
+                base_commit: task.base_commit,
+                parent_pr_id: task.parent_pr_id,
+                publication: None,
+                merge_commit: None,
+                abandoned_at: None,
+                ci_observation: None,
+                github_observation: None,
+                linear_attachment_id: None,
+                linear_comment_id: None,
+                linear_link_error: None,
+                created_at: task.created_at,
+                updated_at: task.updated_at,
+            };
+            runtime.block_on(store.insert_task_pr(&pr)).unwrap();
+            pr
+        });
     pr.publication = Some(loopflow::work::task::PrPublication {
         requested_at: pr.created_at,
         presentation: None,
@@ -484,7 +467,7 @@ fn task_checkout_selects_parent_without_rewriting_work_or_publication() {
     let repo = loopflow_test_support::TestRepo::new();
     let home = TempDir::new().unwrap();
     let child =
-        support::register_unrun_task(home.path(), repo.path(), "child-task", &repo.head_sha());
+        support::register_task_with_pr(home.path(), repo.path(), "child-task", &repo.head_sha());
     let parent_path = repo.create_named_worktree("parent-task");
     let parent = support::register_sibling_task(&child, "INF-124", "parent-task", &parent_path);
     repo.create_branch("child-task");
@@ -543,13 +526,14 @@ fn task_checkout_selects_parent_without_rewriting_work_or_publication() {
         expected.parent_pr_id = Some(parent_pr.id.clone());
         expected.updated_at = after.updated_at;
         assert_eq!(after, expected);
-        assert_eq!(
-            runtime
-                .block_on(child.store.get_task(&child.task.id))
-                .unwrap()
-                .unwrap(),
-            task_before
-        );
+        let task_after = runtime
+            .block_on(child.store.get_task(&child.task.id))
+            .unwrap()
+            .unwrap();
+        let mut expected_task = task_before.clone();
+        expected_task.parent_pr_id = Some(parent_pr.id.clone());
+        expected_task.updated_at = task_after.updated_at;
+        assert_eq!(task_after, expected_task);
         assert_eq!(
             runtime
                 .block_on(child.store.task_events_after(&child.task.id, 0))
@@ -649,7 +633,7 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
         let home = TempDir::new().unwrap();
         let checkout = repo.path().canonicalize().unwrap();
         let child =
-            support::register_unrun_task(home.path(), &checkout, "child-task", &repo.head_sha());
+            support::register_task_with_pr(home.path(), &checkout, "child-task", &repo.head_sha());
         observe_planning(&child, &checkout);
         let parent_path = repo.create_named_worktree("parent-task");
         let parent = support::register_sibling_task(&child, "INF-124", "parent-task", &parent_path);
@@ -664,7 +648,7 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
         if upstream == "parent-task" {
             let parent_pr = publish_stack_fixture_pr(&runtime, &child.store, &parent.id);
             runtime
-                .block_on(child.store.stack_task_pr(&child.pr, &parent_pr.id))
+                .block_on(child.store.stack_task_placement(&child.task, &parent_pr.id))
                 .unwrap();
         }
         write_skill(repo.path(), "identity-proof", "Prove checkout identity.");
@@ -717,7 +701,7 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
         let bin = TempDir::new().unwrap();
         let launched = bin.path().join("launched");
         write_executable(&bin.path().join("codex"), &format!(
-            "#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\nprintf '%s' '{{\"session_id\":\"ses-'\"$LF_CAPTURE_KEY\"'\"}}' | \"$LF_BIN\" __provider-session || exit $?\necho \"$LF_CAPTURE_KEY\" > '{}'\n", launched.display(),
+            "#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\nif [ \"$1\" = --dangerously-bypass-hook-trust ] && [ \"$2\" = --model ]; then echo \"a value is required for '--model <MODEL>'\" >&2; exit 2; fi\nprintf '%s' '{{\"session_id\":\"ses-'\"$LF_CAPTURE_KEY\"'\"}}' | \"$LF_BIN\" __provider-session || exit $?\necho \"$LF_CAPTURE_KEY\" > '{}'\n", launched.display(),
         ));
         let path = format!(
             "{}:{}",
@@ -727,7 +711,7 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
         let launch = run_lf(
             repo.path(),
             home.path(),
-            &["--tui", "skill", "identity-proof", "--no-loopflow"],
+            &["-i", "skill", "identity-proof", "--no-loopflow"],
             Some(&path),
         );
         assert!(
@@ -786,12 +770,12 @@ fn flow_parsing_parity() {
     assert_eq!(flow.name, "sample");
     assert_eq!(flow.items.len(), 2);
     assert!(
-        matches!(&flow.items[0].target, loopflow::engine::target::Target::Skill(skill) if skill.name == "implement")
+        matches!(&flow.items[0].target, loopflow::definition::Target::Skill(skill) if skill.name == "implement")
     );
     assert_eq!(
         flow.items[1],
         Step {
-            target: loopflow::engine::target::Target::Skill(Skill {
+            target: loopflow::definition::Target::Skill(Skill {
                 source: None,
                 name: "review".to_string(),
                 agent: None,
@@ -831,15 +815,16 @@ fn interactive_flow_keeps_input_and_advances_only_after_each_provider_exits() {
             r#"#!/bin/sh
 set -eu
 if [ "${1-}" = --version ]; then echo '2.1.0 (fixture)'; exit 0; fi
-context_file=
+first_turn=
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --print|--output-format) echo 'unexpected headless launch' >&2; exit 1;;
-        --append-system-prompt-file) context_file="$2"; shift;;
+        --append-system-prompt-file|--settings) shift;;
+        *) first_turn="$1";;
     esac
     shift
 done
-case "$(cat "$context_file")" in
+case "$first_turn" in
     *'<lf:skill:first>'*) step=first;;
     *'<lf:skill:second>'*) step=second;;
     *) exit 2;;
@@ -999,6 +984,86 @@ fn authored_flow_records_each_skill_as_one_session() {
     assert!(runs
         .iter()
         .all(|run| run["recorded_outcome"] == "completed"));
+    let sessions = lf_json(
+        repo.path(),
+        home.path(),
+        &[
+            "session",
+            "list",
+            "--all",
+            "--interactive",
+            "false",
+            "--history",
+            "--json",
+        ],
+    );
+    let mut titles = sessions
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|session| session["title"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    titles.sort_unstable();
+    assert_eq!(titles, ["compress", "implement"]);
+}
+
+#[test]
+fn flow_output_shows_steps_and_agent_messages_with_opt_in_diagnostics() {
+    let repo = loopflow_test_support::TestRepo::new();
+    // Even a skill named default obeys the Flow's headless execution mode.
+    for name in ["default", "work"] {
+        write_skill(repo.path(), name, "private-instructions-marker");
+    }
+    write_flow(
+        repo.path(),
+        "readable",
+        "- default\n- cmd: flow list\n- work\n",
+    );
+    let bin = TempDir::new().unwrap();
+    write_executable(
+        &bin.path().join("codex"),
+        &codex_app_server_script("agent-readable-text", ""),
+    );
+    let path = format!(
+        "{}:{}",
+        bin.path().display(),
+        std::env::var("PATH").unwrap()
+    );
+    for (verbose, log_filter) in [
+        (false, None),
+        (true, None),
+        (true, Some("loopflow=trace,lf=trace")),
+    ] {
+        let home = TempDir::new().unwrap();
+        let mut args = vec![
+            "--batch",
+            "--no-loopflow",
+            "-a",
+            "codex",
+            "run",
+            "readable",
+            "private-message-marker",
+        ];
+        if verbose {
+            args.insert(0, "--verbose");
+        }
+        let mut command = lf_command(repo.path(), home.path(), &args, Some(&path));
+        command.env_remove("RUST_LOG");
+        if let Some(filter) = log_filter {
+            command.env("RUST_LOG", filter);
+        }
+        let output = command.output().unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{stderr}");
+        assert!(String::from_utf8_lossy(&output.stdout).contains("agent-readable-text"));
+        assert!(stderr.contains("  default"), "{stderr}");
+        assert!(stderr.contains("  cmd: flow list"), "{stderr}");
+        assert!(stderr.contains("  work"), "{stderr}");
+        assert_eq!(stderr.contains("INFO"), verbose, "{stderr}");
+        assert_eq!(stderr.contains("total"), verbose, "{stderr}");
+        assert!(!stderr.contains("private-message-marker"), "{stderr}");
+        assert!(!stderr.contains("private-instructions-marker"), "{stderr}");
+    }
 }
 
 #[test]
@@ -1050,7 +1115,7 @@ fn operational_flow_rejects_review_before_launch_or_capture() {
 }
 
 #[test]
-fn killed_driver_leaves_its_agent_step_as_history_without_another_turn() {
+fn killed_flow_process_leaves_its_agent_step_as_history_without_another_turn() {
     let repo = loopflow_test_support::TestRepo::new();
     let home = TempDir::new().unwrap();
     let bin = TempDir::new().unwrap();
@@ -1070,7 +1135,7 @@ fn killed_driver_leaves_its_agent_step_as_history_without_another_turn() {
         bin.path().display(),
         std::env::var("PATH").unwrap()
     );
-    let mut driver = lf_command(
+    let mut flow_process = lf_command(
         repo.path(),
         home.path(),
         &["--batch", "--no-loopflow", "flow", "survive-agent"],
@@ -1082,13 +1147,13 @@ fn killed_driver_leaves_its_agent_step_as_history_without_another_turn() {
     .unwrap();
     wait_for("agent never started", || {
         assert!(
-            driver.try_wait().unwrap().is_none(),
-            "driver exited before provider input"
+            flow_process.try_wait().unwrap().is_none(),
+            "Flow process exited before provider input"
         );
         home.path().join("entered").exists()
     });
-    driver.kill().unwrap();
-    driver.wait().unwrap();
+    flow_process.kill().unwrap();
+    flow_process.wait().unwrap();
     let read = || {
         let mut flows = flow_details(repo.path(), home.path());
         assert_eq!(flows.len(), 1);
@@ -1113,7 +1178,7 @@ fn killed_driver_leaves_its_agent_step_as_history_without_another_turn() {
     assert_eq!(
         step_fields(&flow, "label"),
         ["work"],
-        "the dead driver's successor never launched"
+        "the dead Flow process's successor never launched"
     );
     assert_ne!(flow["entry"]["state"], "completed");
     assert_eq!(
@@ -1126,7 +1191,7 @@ fn killed_driver_leaves_its_agent_step_as_history_without_another_turn() {
 fn observing_and_preparing_a_task_are_not_execution() {
     let repo = loopflow_test_support::TestRepo::new();
     let home = TempDir::new().unwrap();
-    let task = support::register_unrun_task(
+    let task = support::register_task_with_pr(
         home.path(),
         repo.path(),
         "task-observation",
@@ -1211,7 +1276,7 @@ fn task_run_history_reads_only_that_tasks_runs_without_starting_it() {
     repo.create_branch("task-history");
     let home = TempDir::new().unwrap();
     let task =
-        support::register_unrun_task(home.path(), repo.path(), "task-history", &repo.head_sha());
+        support::register_task_with_pr(home.path(), repo.path(), "task-history", &repo.head_sha());
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let events = || {
         runtime
@@ -1318,7 +1383,7 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
     let repo = loopflow_test_support::TestRepo::new();
     let home = TempDir::new().unwrap();
     let task =
-        support::register_unrun_task(home.path(), repo.path(), "task-binding", &repo.head_sha());
+        support::register_task_with_pr(home.path(), repo.path(), "task-binding", &repo.head_sha());
     let sibling_worktree = repo.create_named_worktree("task-sibling");
     let sibling =
         support::register_sibling_task(&task, "INF-124", "task-sibling", &sibling_worktree);
@@ -1383,7 +1448,7 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
     write_executable(
         &bin.path().join("codex"),
         &format!(
-            "#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\n\
+            "#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\nif [ \"$1\" = --dangerously-bypass-hook-trust ] && [ \"$2\" = --model ]; then echo \"a value is required for '--model <MODEL>'\" >&2; exit 2; fi\n\
              printf '%s' '{{\"session_id\":\"ses-'\"$LF_CAPTURE_KEY\"'\"}}' \
              | \"$LF_BIN\" __provider-session || exit $?\necho \"$LF_CAPTURE_KEY\" >> '{}'\n",
             launched.display()
@@ -1410,7 +1475,7 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
 
     // In the Task's checkout, a plain launch binds to that Task.
     repo.create_branch("task-binding");
-    let bound = launch(repo.path(), &["--tui", "binding-work", "--no-loopflow"]);
+    let bound = launch(repo.path(), &["-i", "binding-work", "--no-loopflow"]);
     let listed = session(&bound);
     assert_eq!(
         listed["work"],
@@ -1430,7 +1495,7 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
 
     // A checkout no Task owns stays unbound and retires on exit.
     let unrelated = repo.create_named_worktree("unregistered");
-    let unbound = launch(&unrelated, &["--tui", "binding-work", "--no-loopflow"]);
+    let unbound = launch(&unrelated, &["-i", "binding-work", "--no-loopflow"]);
     let history = json(&["session", "list", "--all", "--history", "--json"]);
     let retired = history
         .as_array()
@@ -1446,13 +1511,7 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
     repo.checkout("task-binding");
     let explicit = launch(
         repo.path(),
-        &[
-            "--task",
-            "INF-124",
-            "--tui",
-            "binding-work",
-            "--no-loopflow",
-        ],
+        &["--task", "INF-124", "-i", "binding-work", "--no-loopflow"],
     );
     assert_eq!(
         session(&explicit)["work"],
@@ -1488,7 +1547,7 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
     runtime
         .block_on(task.store.update_task_pr(&landed))
         .unwrap();
-    let after_landing = launch(repo.path(), &["--tui", "binding-work", "--no-loopflow"]);
+    let after_landing = launch(repo.path(), &["-i", "binding-work", "--no-loopflow"]);
     assert_eq!(
         session(&after_landing)["work"],
         serde_json::json!({"kind": "task", "id": task.task.id})
@@ -1505,7 +1564,7 @@ fn bound_flows_keep_task_context_and_leave_other_flows_and_shared_edits_alone() 
     let caller = TestRepo::new();
     let home = TempDir::new().unwrap();
     let checkout = repo.path().canonicalize().unwrap();
-    let task = support::register_unrun_task(
+    let task = support::register_task_with_pr(
         home.path(),
         &checkout,
         "task-contribution",
@@ -1544,10 +1603,11 @@ fn bound_flows_keep_task_context_and_leave_other_flows_and_shared_edits_alone() 
 
     register_codex_account(home.path());
     let bin = TempDir::new().unwrap();
-    let provider = codex_app_server_script("done", "if [ \"$1\" = --version ]; then exit 0; fi\npwd >> \"$LF_HOME/cwds\"").replace(
+    let provider = codex_app_server_script("done", "if [ \"$1\" = --version ]; then exit 0; fi").replace(
         "read -r turn_start",
-        "read -r turn_start\nprintf '%s\\n' \"$thread_start\" >> \"$LF_HOME/prompts\"\nprintf '%s\\n' 'Evidence from preceding step.' > scratch/step.md",
+        "read -r turn_start\npwd >> \"$LF_HOME/cwds\"\n@record-context@\nprintf '%s\\n' 'Evidence from preceding step.' > scratch/step.md",
     );
+    let provider = provider.replace("@record-context@", record_context_script());
     write_executable(&bin.path().join("codex"), &provider);
     let path = format!(
         "{}:{}",
@@ -1709,12 +1769,12 @@ fn flow_names_load_into_targets() {
     assert_eq!(flow.items.len(), 2);
     assert!(matches!(
         &flow.items[0].target,
-        loopflow::engine::target::Target::Flow(_)
+        loopflow::definition::Target::Flow(_)
     ));
     assert!(matches!(
         flow.items[1],
         Step {
-            target: loopflow::engine::target::Target::Skill(_),
+            target: loopflow::definition::Target::Skill(_),
             ..
         }
     ));
@@ -1737,7 +1797,7 @@ fn command_item_parses_and_expands() {
     assert_eq!(flow.items.len(), 2);
     match &flow.items[1] {
         Step {
-            target: loopflow::engine::target::Target::Command(item),
+            target: loopflow::definition::Target::Command(item),
             ..
         } => {
             assert_eq!(item.command, "pr");
@@ -1891,16 +1951,36 @@ fn labels(graph: &serde_json::Value) -> Vec<&str> {
         .collect()
 }
 
+// Stand-in provider executes the supplied startup callback and reads its complete
+// references at turn time; later scratch edits must not rewrite earlier evidence.
+fn record_context_script() -> &'static str {
+    r#"printf '[%s,%s]\n' "$thread_start" "$turn_start" | python3 -c '
+import json, pathlib, shlex, subprocess, sys
+requests = json.load(sys.stdin)
+hook = requests[0]["params"]["config"]["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+block = json.loads(subprocess.check_output(hook, shell=True))["hookSpecificOutput"]["additionalContext"]
+args = shlex.split(hook)
+delivery = json.loads(pathlib.Path(args[args.index("--delivery") + 1]).read_text())
+references = "\n".join(pathlib.Path(path).read_text() for path in delivery["references"])
+requests.append({"context": block + "\n" + references})
+print(json.dumps(requests))
+' >> "$LF_HOME/prompts""#
+}
+
 fn received_contexts(home: &Path) -> Vec<String> {
     fs::read_to_string(home.join("prompts"))
         .unwrap()
         .lines()
         .map(|line| {
-            let thread: serde_json::Value = serde_json::from_str(line).unwrap();
-            let path = thread["params"]["config"]["model_instructions_file"]
+            let requests: serde_json::Value = serde_json::from_str(line).unwrap();
+            let instructions = requests[0]["params"]["developerInstructions"]
                 .as_str()
-                .unwrap();
-            fs::read_to_string(path).unwrap()
+                .unwrap_or_default();
+            let turn = requests[1]["params"]["input"][0]["text"].as_str().unwrap();
+            format!(
+                "{instructions}\n\n{turn}\n{}",
+                requests[2]["context"].as_str().unwrap()
+            )
         })
         .collect()
 }
@@ -1923,7 +2003,7 @@ fn scripted_provider(home: &Path, answers: &[&str]) -> (TempDir, String) {
     let provider = codex_app_server_script("@answer@", "if [ \"$1\" = --version ]; then exit 0; fi")
         .replace(
             "read -r turn_start",
-            "read -r turn_start\nprintf '%s\\n' \"$thread_start\" >> \"$LF_HOME/prompts\"\necho turn >> \"$LF_HOME/turns\"\nanswer=$(sed -n \"$(grep -c turn \"$LF_HOME/turns\")p\" \"$LF_HOME/answers\")",
+            "read -r turn_start\n@record-context@\necho turn >> \"$LF_HOME/turns\"\nanswer=$(sed -n \"$(grep -c turn \"$LF_HOME/turns\")p\" \"$LF_HOME/answers\")",
         )
         .replace("\"@answer@\"", "'\"$answer\"'");
     assert!(
@@ -1932,6 +2012,7 @@ fn scripted_provider(home: &Path, answers: &[&str]) -> (TempDir, String) {
     );
     register_codex_account(home);
     let bin = TempDir::new().unwrap();
+    let provider = provider.replace("@record-context@", record_context_script());
     write_executable(&bin.path().join("codex"), &provider);
     let path = format!(
         "{}:{}",
@@ -1948,10 +2029,10 @@ fn task_flow_read_keeps_captured_topology_and_counts_both_returns() {
     let home = TempDir::new().unwrap();
     // A Task's Flows are those whose Processes ran in its checkout, as Processes name it.
     let checkout = repo.path().canonicalize().unwrap();
-    let task =
-        support::register_unrun_task(home.path(), &checkout, "task-flow-read", &repo.head_sha());
-    observe_planning(&task, &checkout);
     repo.create_branch("task-flow-read");
+    let task =
+        support::register_task_with_pr(home.path(), &checkout, "task-flow-read", &repo.head_sha());
+    observe_planning(&task, &checkout);
     for skill in [
         "implement-proof",
         "decide-proof",
@@ -1981,7 +2062,7 @@ fn task_flow_read_keeps_captured_topology_and_counts_both_returns() {
     let flow = roadmap_task(repo.path(), home.path());
     assert_eq!(flow["workflow_name"], "feature");
     assert!(flow["latest_flow_process"].is_null());
-    assert!(flow["run_control"]["unavailable"].is_null());
+    assert!(flow["run_control"]["unavailable"].is_null(), "{flow}");
     assert_eq!(task_flow()["work"]["flow_processes"], serde_json::json!([]));
 
     // The catalogue previews the authored topology through the shared loader.
@@ -2036,7 +2117,7 @@ fn task_flow_read_keeps_captured_topology_and_counts_both_returns() {
     assert_eq!(sessions.len(), answers.len(), "one conversation per turn");
     assert!(sessions
         .iter()
-        .all(|session| session["flow_process_lfid"] == id));
+        .all(|session| session["flow_lf_process_id"] == id));
     // The failed step is red and stays with the Flow for its caller.
     assert_eq!(execution["execution"]["state"], "blocked");
     assert_eq!(execution["execution"]["step"], "__telemetry-scorecard");
@@ -2088,7 +2169,7 @@ fn task_flow_read_keeps_captured_topology_and_counts_both_returns() {
 
     // A stopped Flow is history: a fresh launch stays legal, and no command
     // restarts or resumes this one.
-    assert!(flow["run_control"]["unavailable"].is_null());
+    assert!(flow["run_control"]["unavailable"].is_null(), "{flow}");
     for removed in [
         vec!["task", "restart", "INF-123", "--flow", "two-loops"],
         vec!["--task", "INF-123", "flow", "start", "two-loops"],
@@ -2147,7 +2228,7 @@ fn three_nested_loops_return_to_named_occurrences_of_one_skill() {
     let home = TempDir::new().unwrap();
     let checkout = repo.path().canonicalize().unwrap();
     let task =
-        support::register_unrun_task(home.path(), &checkout, "nested-loops", &repo.head_sha());
+        support::register_task_with_pr(home.path(), &checkout, "nested-loops", &repo.head_sha());
     observe_planning(&task, &checkout);
     repo.create_branch("nested-loops");
     write_skill(repo.path(), "work-proof", "Fixture step.");
@@ -2247,7 +2328,7 @@ fn a_repeated_node_receives_only_task_direction_newer_than_its_last_run() {
     let home = TempDir::new().unwrap();
     let checkout = repo.path().canonicalize().unwrap();
     let task =
-        support::register_unrun_task(home.path(), &checkout, "repeat-steers", &repo.head_sha());
+        support::register_task_with_pr(home.path(), &checkout, "repeat-steers", &repo.head_sha());
     observe_planning(&task, &checkout);
     repo.create_branch("repeat-steers");
     write_skill(repo.path(), "work-proof", "Fixture step.");
@@ -2285,7 +2366,7 @@ fn a_repeated_node_receives_only_task_direction_newer_than_its_last_run() {
         run(&["--task", "INF-123", "flow", "twice"]),
         [true, true, false, false]
     );
-    // The driver asked for that with an option any run takes.
+    // The Flow process asked for that with an option any run takes.
     steer("Report the first error only.");
     let after = earlier.to_string();
     let given = run(&[
@@ -2311,7 +2392,7 @@ fn the_research_workflow_ends_on_its_edge_that_runs_nothing() {
     let home = TempDir::new().unwrap();
     let checkout = repo.path().canonicalize().unwrap();
     let task =
-        support::register_unrun_task(home.path(), &checkout, "research-end", &repo.head_sha());
+        support::register_task_without_pr(home.path(), &checkout, "research-end", &repo.head_sha());
     observe_planning(&task, &checkout);
     repo.create_branch("research-end");
     let (_bin, path) = scripted_provider(home.path(), &[WORK]);
@@ -2350,7 +2431,7 @@ fn the_research_workflow_ends_on_its_edge_that_runs_nothing() {
 
 #[test]
 fn mixed_provider_flow_keeps_launch_accounts_across_steps() {
-    use base64::Engine;
+    use base64::prelude::*;
     use loopflow::store::{
         CredentialState, ProviderAccount, ProviderAccountId, RoutingState, StorageConfig,
     };
@@ -2374,7 +2455,7 @@ fn mixed_provider_flow_keeps_launch_accounts_across_steps() {
             let credential = if provider == "claude" {
                 serde_json::json!({"claudeAiOauth":{"accessToken":format!("fixture-{id}"),"expiresAt":4102444800000i64}}).to_string()
             } else {
-                let claims = base64::engine::general_purpose::URL_SAFE_NO_PAD
+                let claims = BASE64_URL_SAFE_NO_PAD
                     .encode(serde_json::json!({"email":email,"sub":id}).to_string());
                 serde_json::json!({"tokens":{"access_token":"fixture", "id_token":format!("h.{claims}.s")}}).to_string()
             };
@@ -2507,7 +2588,7 @@ fn wave_context_keeps_task_location_and_rejects_another_owner() {
     repo.create_branch("wave-context");
     let home = TempDir::new().unwrap();
     let task =
-        support::register_unrun_task(home.path(), repo.path(), "wave-context", &repo.head_sha());
+        support::register_task_with_pr(home.path(), repo.path(), "wave-context", &repo.head_sha());
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let other = Wave::new(
         WaveId::new(),

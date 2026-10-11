@@ -9,13 +9,11 @@ use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use loopflow::engine::git::{current_branch, worktree_remove};
+use loopflow::git::{current_branch, worktree_remove};
 use loopflow::ops::{
     commit_workflow, release_publish, release_tag, CommitOptions, NullProgress, OpsError,
 };
-use loopflow::work::task::{
-    AfterMerge, GithubPr, PrMergeMode, PrMergeRequest, PrPresentation, PrPublication,
-};
+use loopflow::work::task::{GithubPr, PrMergeMode, PrMergeRequest, PrPresentation, PrPublication};
 use loopflow_test_support::TestRepo;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -971,25 +969,39 @@ fn surviving_release_notes_provider_retains_target_checkout_and_context() {
             }
         }
         assert!(!parent.child.wait().unwrap().success());
-        let contender = release_tag(repo.path(), "0.9.2", None);
-        let removal = worktree_remove(repo.path(), &checkout);
-        fs::write(state.path().join("allow"), "").unwrap();
-        assert!(
-            matches!(contender, Err(OpsError::ReleaseDeferred { .. })),
-            "{contender:?}"
-        );
-        assert!(
-            removal.is_err(),
-            "removed surviving notes provider checkout"
-        );
-        wait_for(&state.path().join("completed"));
-        let context: Value =
-            serde_json::from_slice(&fs::read(state.path().join("context.json")).unwrap()).unwrap();
-        assert_eq!(context["version"], "0.9.1");
-        wait_until_released(|| release_tag(repo.path(), "0.9.2", None).map(|_| ()));
-        assert!(fs::read_to_string(checkout.join("RELEASE_NOTES.md"))
-            .unwrap()
-            .contains("Notes from the surviving provider."));
+        // The 0.9.2 release may already have replaced an abandoned checkout.
+        let notes = || fs::read_to_string(checkout.join("RELEASE_NOTES.md")).unwrap_or_default();
+        if kill_controller {
+            // A provider cannot outlive the CLI that drove it: it is ended with
+            // that CLI, writes nothing more, and stops holding the release.
+            wait_until_released(|| release_tag(repo.path(), "0.9.2", None).map(|_| ()));
+            fs::write(state.path().join("allow"), "").unwrap();
+            thread::sleep(Duration::from_millis(500));
+            assert!(
+                !state.path().join("completed").exists(),
+                "provider outlived its killed CLI"
+            );
+            assert!(!notes().contains("Notes from the surviving provider."));
+        } else {
+            let contender = release_tag(repo.path(), "0.9.2", None);
+            let removal = worktree_remove(repo.path(), &checkout);
+            fs::write(state.path().join("allow"), "").unwrap();
+            assert!(
+                matches!(contender, Err(OpsError::ReleaseDeferred { .. })),
+                "{contender:?}"
+            );
+            assert!(
+                removal.is_err(),
+                "removed surviving notes provider checkout"
+            );
+            wait_for(&state.path().join("completed"));
+            let context: Value =
+                serde_json::from_slice(&fs::read(state.path().join("context.json")).unwrap())
+                    .unwrap();
+            assert_eq!(context["version"], "0.9.1");
+            wait_until_released(|| release_tag(repo.path(), "0.9.2", None).map(|_| ()));
+            assert!(notes().contains("Notes from the surviving provider."));
+        }
         assert_eq!(git(&["rev-parse", "HEAD"]), head);
         assert_eq!(git(&["branch", "--show-current"]), branch);
         assert_eq!(fs::read(repo.path().join(".git/index")).unwrap(), index);
@@ -1377,7 +1389,7 @@ esac
                 git(&["checkout", "main"]);
                 git(&["branch", "-D", &branch]);
             }
-            let checkout = loopflow::engine::worktrees::worktree_path(
+            let checkout = loopflow::git::worktrees::worktree_path(
                 repo.path(),
                 branch.strip_prefix("jack/").unwrap(),
             );
@@ -1513,7 +1525,7 @@ fn source_creation_mismatch_preserves_surviving_hook_and_its_work() {
     let caller_branch = git(&["branch", "--show-current"]);
     let index = fs::read(repo.path().join(".git/index")).unwrap();
     let name = format!("verify-default-{source}");
-    let checkout = loopflow::engine::worktrees::worktree_path(repo.path(), &name);
+    let checkout = loopflow::git::worktrees::worktree_path(repo.path(), &name);
     let branch = format!("jack/{name}");
     let mutation = blocking_mutation(
         state.path(),
@@ -1686,7 +1698,7 @@ NOTES
         let branch = git_read(&["branch", "--show-current"]);
         // Register the actual generated branch, not the caller's ambient Task.
         let home = PathBuf::from(std::env::var_os("LF_HOME").unwrap());
-        let task = support::register_task(&home, &checkout, &branch, &head);
+        let task = support::register_task_with_pr(&home, &checkout, &branch, &head);
         let now = time::OffsetDateTime::now_utc();
         let mut pr = task.pr.clone();
         pr.publication = Some(PrPublication {
@@ -1705,8 +1717,6 @@ NOTES
                 mode: PrMergeMode::Auto,
                 requested_at: now,
                 head_sha: head.clone(),
-                after_merge: AfterMerge::CompleteTask,
-                next_slug: None,
             }),
         });
         let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -1953,7 +1963,7 @@ esac
     let head = git_output(&repo, &["rev-parse", "HEAD"]);
     let branch = format!(
         "{}/release-default-v0-9-2",
-        loopflow::engine::naming::git_user(repo.path()).unwrap()
+        loopflow::naming::git_user(repo.path()).unwrap()
     );
     git(
         &repo,

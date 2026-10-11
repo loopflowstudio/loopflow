@@ -1,7 +1,9 @@
-//! Durable state for one Linear Task.
+//! Durable state for one Task.
 //!
-//! A Task owns one durable worktree, serial PR chain, and Flow progression.
+//! A Task owns one durable checkout, an optional PR, and Workflow progression.
 //! Sessions, Flows and Processes record work against that state.
+
+pub mod follow_through;
 
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -262,36 +264,6 @@ impl PrPhase {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum AfterMerge {
-    ContinueTask,
-    CompleteTask,
-}
-
-impl AfterMerge {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::ContinueTask => "continue_task",
-            Self::CompleteTask => "complete_task",
-        }
-    }
-}
-
-impl FromStr for AfterMerge {
-    type Err = TaskDataError;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value {
-            "continue_task" => Ok(Self::ContinueTask),
-            "complete_task" => Ok(Self::CompleteTask),
-            _ => Err(TaskDataError::InvalidInvariant(format!(
-                "invalid after-merge disposition: {value}"
-            ))),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
 pub enum PrMergeMode {
     User,
     Auto,
@@ -325,8 +297,6 @@ pub struct PrMergeRequest {
     pub mode: PrMergeMode,
     pub requested_at: OffsetDateTime,
     pub head_sha: String,
-    pub after_merge: AfterMerge,
-    pub next_slug: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -424,17 +394,6 @@ impl TaskPr {
         (self.head_sha() == Some(request.head_sha.as_str())).then_some(request)
     }
 
-    /// Verified delivery completes by default; explicit continuation remains recorded.
-    pub fn after_merge(&self) -> AfterMerge {
-        self.merge_request()
-            .map_or(AfterMerge::CompleteTask, |request| request.after_merge)
-    }
-
-    pub fn next_slug(&self) -> Option<&str> {
-        self.merge_request()
-            .and_then(|request| request.next_slug.as_deref())
-    }
-
     /// The CI reading, but only while it still describes the PR's current head.
     /// Once the head moves, the reading is stale and this returns `None` — the
     /// same freshness rule that keeps stale failures from waking work.
@@ -523,23 +482,6 @@ impl TaskPr {
                     }
                     Some(_) | None => {}
                 }
-                if request.next_slug.as_deref().is_some_and(|slug| {
-                    slug.split('-').any(|word| {
-                        word.is_empty()
-                            || !word
-                                .bytes()
-                                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
-                    })
-                }) {
-                    return Err(TaskDataError::InvalidInvariant(
-                        "next branch slug must be lowercase kebab-case".to_string(),
-                    ));
-                }
-                if request.after_merge == AfterMerge::CompleteTask && request.next_slug.is_some() {
-                    return Err(TaskDataError::InvalidInvariant(
-                        "a completing pull request cannot name a next branch".to_string(),
-                    ));
-                }
                 let github = publication.github.as_ref().ok_or_else(|| {
                     TaskDataError::InvalidInvariant(
                         "merge request requires a GitHub PR".to_string(),
@@ -573,6 +515,8 @@ impl TaskPr {
 #[non_exhaustive]
 pub enum PmWritebackOperation {
     CompleteTask,
+    ReopenTask,
+    CancelTask,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -611,7 +555,7 @@ pub enum Observation {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Task {
     pub id: TaskId,
-    /// Current planning facts from the PM system.
+    /// Authored local planning or accepted Linear facts.
     pub plan: TaskPlan,
     pub pm_writeback: PmWritebackState,
     /// Root ownership. Wave name and checkout are resolved from this id.
@@ -619,8 +563,11 @@ pub struct Task {
     /// Required runtime parent. Every Task reports through one durable Project
     /// Work; its Wave retains root inspection and override authority.
     pub project_id: ProjectId,
-    pub worktree: PathBuf,
+    pub worktree: Option<PathBuf>,
     pub workspace_slug: String,
+    pub branch: String,
+    pub base_commit: String,
+    pub parent_pr_id: Option<TaskPrId>,
     /// Explicit choice for every Flow step; None uses the step/config defaults.
     pub agent: Option<String>,
     /// Set when abandonment is *requested*, not when it is applied. No launch
@@ -634,8 +581,17 @@ pub struct Task {
 }
 
 impl Task {
+    pub fn worktree(&self) -> Result<&PathBuf, TaskDataError> {
+        self.worktree.as_ref().ok_or_else(|| {
+            TaskDataError::InvalidInvariant(format!(
+                "Task {} has no checkout; place it with `lf checkout {}`",
+                self.id, self.id
+            ))
+        })
+    }
+
     pub fn validate(&self) -> Result<(), TaskDataError> {
-        if self.workspace_slug.trim().is_empty() {
+        if self.worktree.is_some() && self.workspace_slug.trim().is_empty() {
             return Err(TaskDataError::InvalidInvariant(format!(
                 "Task {} requires a workspace slug",
                 self.id
@@ -645,7 +601,7 @@ impl Task {
     }
 }
 
-/// Accepted work remaining after source delivery. Time calls for a check, not success.
+/// Historical keep-open scope, retained for conversion into follow-up Tasks.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskFollowUp {
     pub outcome: String,
@@ -653,25 +609,35 @@ pub struct TaskFollowUp {
     pub check_at: i64,
 }
 
-impl TaskFollowUp {
-    pub fn summary(&self, now: i64) -> String {
-        let due = if now >= self.check_at {
-            "overdue"
-        } else {
-            "pending"
-        };
-        let at = OffsetDateTime::from_unix_timestamp(self.check_at)
-            .expect("follow-up timestamp validated when written");
-        format!(
-            "Remaining work: {}; evidence: {}; next check {at} ({due})",
-            self.outcome, self.evidence
-        )
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TaskEventKind {
+    FollowThroughIntent {
+        intent: follow_through::FollowThroughIntent,
+    },
+    FollowThroughLinked {
+        link: follow_through::FollowThroughLink,
+    },
+    FollowThroughRelationConfirmed {
+        relation_id: String,
+        source_issue_id: String,
+        target_issue_id: String,
+    },
+    FollowThroughDisposition {
+        reason: String,
+    },
+    FollowThroughConversion {
+        reason: String,
+    },
+    CheckoutInitializing {
+        branch: String,
+        path: String,
+        base_commit: String,
+    },
+    CheckoutReady {
+        branch: String,
+        base_commit: String,
+    },
     WorktreeInitializing {
         pr_id: TaskPrId,
         sequence: u32,
@@ -693,7 +659,7 @@ pub enum TaskEventKind {
     // Retained for reading recorded decisions; no current writer.
     HistoricalUncertaintyAccepted {
         #[serde(alias = "exec_ids")] // Append-only decisions keep their original bytes.
-        process_lfids: Vec<crate::id::ProcessLfid>,
+        lf_process_ids: Vec<crate::id::LfProcessId>,
         reason: String,
     },
     FlowFinished {
@@ -731,6 +697,9 @@ pub enum TaskEventKind {
         url: String,
         merge_commit: String,
     },
+    CompletionRequested {
+        reason: Option<String>,
+    },
     Completed {
         summary: String,
     },
@@ -745,7 +714,9 @@ impl TaskEventKind {
     pub fn is_wave_observable(&self) -> bool {
         !matches!(
             self,
-            Self::WorktreeInitializing { .. }
+            Self::CheckoutInitializing { .. }
+                | Self::CheckoutReady { .. }
+                | Self::WorktreeInitializing { .. }
                 | Self::Started
                 | Self::Progress { .. }
                 | Self::HistoricalUncertaintyAccepted { .. }
@@ -783,36 +754,11 @@ pub struct TaskLinearObservation {
     pub updated_at: OffsetDateTime,
 }
 
-/// One Linear observation, ready to persist atomically as Task direction. The
-/// directive is applied only if the stored title/description still differ
-/// (compare-and-set), and each follow-up becomes a command only on its first
-/// entry into the ledger — so overlapping polls, restarts, and out-of-order
-/// responses never duplicate direction.
-#[derive(Debug, Clone)]
-pub struct LinearObservationApply {
-    pub task_id: TaskId,
-    pub revision: String,
-    pub title: String,
-    pub description: String,
-    pub observed_at: OffsetDateTime,
-    /// A title/description edit to persist as one authored Steer.
-    pub content_steer: Option<String>,
-    /// Participant comments observed this pass, oldest first.
-    pub follow_ups: Vec<LinearFollowUp>,
-}
-
-#[derive(Debug, Clone)]
-pub struct LinearFollowUp {
-    pub comment_id: String,
-    pub text: String,
-}
-
-/// What one [`LinearObservationApply`] actually wrote — enough for the caller to
-/// report receipts without re-reading the store.
+/// Direction persisted from one observation, without re-reading the store.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LinearObservationOutcome {
     /// The Task had no cursor yet: this observation seeded the baseline and
-    /// emitted no direction (existing comments are marked seen, not replayed).
+    /// emitted no content Steer; participant comments are still imported.
     pub baselined: bool,
     pub content_steer_applied: bool,
     /// Event ids of the steer comments this observation appended.
@@ -822,8 +768,8 @@ pub struct LinearObservationOutcome {
 #[cfg(test)]
 mod tests {
     use super::{
-        AfterMerge, GithubPr, PmWritebackOperation, PmWritebackState, PrPhase, PrPublication, Task,
-        TaskId, TaskPr, TaskPrId,
+        GithubPr, PmWritebackOperation, PmWritebackState, PrPhase, PrPublication, Task, TaskId,
+        TaskPr, TaskPrId,
     };
     use crate::planning::{LinearIssueId, TaskPlan};
 
@@ -832,17 +778,21 @@ mod tests {
         Task {
             id: TaskId::new(),
             plan: TaskPlan {
-                id: LinearIssueId::new("issue-1").unwrap(),
+                revision: 0,
+                linear_id: Some(LinearIssueId::new("issue-1").unwrap()),
                 identifier: "INF-123".to_string(),
                 title: "Ship it".to_string(),
                 description: String::new(),
-                pm_snapshot_synced_at: 1,
+                pm_snapshot_synced_at: Some(1),
             },
             pm_writeback: PmWritebackState::Current,
             wave_id: crate::id::WaveId::new(),
             project_id: crate::work::project::ProjectId::new(),
-            worktree: "/tmp/task".into(),
+            worktree: Some("/tmp/task".into()),
             workspace_slug: "ship-it".to_string(),
+            branch: "jack/ship-it".to_string(),
+            base_commit: "abc".to_string(),
+            parent_pr_id: None,
             agent: None,
             abandon_intent: None,
             created_at: now,
@@ -925,7 +875,7 @@ mod tests {
     }
 
     #[test]
-    fn merge_request_contains_its_disposition() {
+    fn merge_request_retains_exact_head_and_publication_evidence() {
         let now = time::OffsetDateTime::now_utc();
         let mut pr = TaskPr {
             id: TaskPrId::new(),
@@ -951,8 +901,6 @@ mod tests {
                     mode: super::PrMergeMode::User,
                     requested_at: now,
                     head_sha: "head".to_string(),
-                    after_merge: AfterMerge::ContinueTask,
-                    next_slug: Some("released_upgrade".to_string()),
                 }),
             }),
             merge_commit: None,
@@ -965,10 +913,6 @@ mod tests {
             linear_comment_id: None,
             linear_link_error: None,
         };
-        assert!(pr.validate().is_err());
-
-        let merge = pr.publication.as_mut().unwrap().merge.as_mut().unwrap();
-        merge.next_slug = Some("released-upgrade".to_string());
         assert!(pr.validate().is_ok());
         assert!(pr.presentation().is_some());
 
@@ -994,14 +938,8 @@ mod tests {
             .unwrap()
             .head_sha = Some("head".to_string());
 
-        pr.publication
-            .as_mut()
-            .unwrap()
-            .merge
-            .as_mut()
-            .unwrap()
-            .after_merge = AfterMerge::CompleteTask;
-        assert!(pr.validate().is_err());
+        assert!(pr.validate().is_ok());
+        assert!(pr.merge_request().is_some());
     }
 
     fn open_pr(head_sha: &str, observation: Option<super::CiObservation>) -> TaskPr {

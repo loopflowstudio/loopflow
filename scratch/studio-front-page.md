@@ -767,3 +767,7 @@ strip links to its own site in a new tab.
 - Jack Heart: "can we also see some usage / telemetry in action", then "in the right hand" → the `x12` command card (right side) continues after `lf land --watch` with `lf account` showing three logins and what is left on each, `lf usage --wt slow-loop` with sessions, tokens and cost, and `lf --machine mini monitor` with running and waiting counts. The output lines are drawn for the page.
 
 - Jack Heart, on the closing line "Agents make software cheap. Loopflow makes it yours.": "kinda out of nowere now?" → yes; the section that set it up is gone. In `x12` the closing line is "Scale yourself." above the second Download, echoing the header.
+
+- Jack Heart: "file tasks to build monitor, and then to improve usage and account so that the output is exactly what we want on this page" → three Tasks filed in the product Wave (monitor summary line; `lf usage --wt` one-line answer; `lf account` rows with bars).
+- Jack Heart: "ok cut the scale yourself from the top now" → the `x12` header is "Loopflow is how you [design | implement | demo | release | study] software with agents." "Scale yourself." remains as the closing line.
+- Jack Heart: "lets go ahead and ship this after youre done. this is good. im not worried about the fake screenshots ." → x12 is the page to port into `website/` and ship.

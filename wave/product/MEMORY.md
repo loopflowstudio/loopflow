@@ -976,23 +976,16 @@ this heading.
 
 ## Performance — launch renders before any read (2026-10-04)
 
-Jack Heart requested Desktop open on a usable workspace with one loading
-vocabulary and one refresh path (LOO-376). On Jack's Home no `lf` read fits the
-1000 ms budget (`roadmap --all` 14.5 s), so a returning launch shows saved wire
-text first; that latency has no owning Task (LOO-375 owns `wt list` only).
-
-- Save the reads' wire text, restore through the live decoder, and strip
-  liveness and legal actions before saving. Display evidence, never authority.
-  Keep it inside the Home; a different `lf home id` drops content and selection.
-- One model owns refresh; views that each start a loop supersede each other's
-  reads. A view that builds its own model reopens the blocking path.
-- Jack's delivery contract (2026-10-04): land on autonomous checks and honest
-  benchmark evidence; rendered startup is post-merge validation, not a gate.
-- Measurements, normalization/dSYM findings, failed cold-cache/refresh and
-  duplicate-read observations: `b2add0cf8:wave/product/MEMORY.md`, this heading,
-  and `scripts/benchmarks/desktop-performance/`. October 7 retired LOO-376's
-  numeric acceptance; LOO-408 owns installed settlement. Stripping with a retained
-  dSYM remains Jack's open choice, not an optimization instruction.
+Jack Heart selected usable saved-work startup, one refresh owner and loading
+vocabulary (LOO-376). Save wire text within its Home, decode with current models,
+strip liveness/legal actions, and drop content/selection on Machine identity change.
+Saved display is evidence, never authority. Extra view-owned refresh loops reopen
+the blocking path. Jack accepted autonomous checks and honest benchmarks before
+post-merge rendered validation; October 7 retired numeric acceptance. LOO-408 owns
+installed settlement. Stripping with a retained dSYM remains Jack's open choice.
+Failed measurements, duplicate reads, original Home identity spelling and owners:
+`ddc009d780:wave/product/MEMORY.md`, this heading; instruments remain under
+`scripts/benchmarks/desktop-performance/`. No configured startup proof is added.
 
 ## Sessions projection and native resume (reconciled 2026-09-24)
 

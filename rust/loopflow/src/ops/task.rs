@@ -1,8 +1,8 @@
 mod directory;
-mod follow_through;
-pub use follow_through::{task_follow_up, FollowUpOptions};
 mod handoff;
 mod lifecycle;
+#[cfg(test)]
+mod lifecycle_tests;
 pub(crate) mod remote;
 pub(crate) use lifecycle::{cleanup_completed_task, notice_retained_task, record_abandoned_pr};
 pub use lifecycle::{task_abandon, task_delete, task_repository, task_sweep};
@@ -40,7 +40,6 @@ use crate::store::sqlite::EndMove;
 use crate::store::{
     open_existing_store, open_registry_for_authority, RegistryUnavailable, SharedStore, Store,
 };
-use crate::work::task::follow_through::FollowThrough;
 use crate::work::task::{
     CiCheck, CiObservation, CiState, GithubObservation, GithubObservationResult, GithubPr,
     Observation, PrMergeMode, PrMergeRequest, PrPhase, PrPresentation, PrPublication, Task,
@@ -116,7 +115,6 @@ pub struct TaskSnapshot {
     pub agent: Option<String>,
     pub provider: String,
     pub pr: Option<TaskPr>,
-    pub follow_through: crate::work::task::follow_through::FollowThrough,
     pub latest_event: Option<crate::work::task::TaskEvent>,
     pub created_at: time::OffsetDateTime,
     pub updated_at: time::OffsetDateTime,
@@ -3157,10 +3155,7 @@ async fn settle_completion(store: &SharedStore, task: &mut Task, request: i64) -
             return Err(task_error("An abandoned Task cannot be completed"));
         }
         reconcile_task_pr_observation(store, task, crate::ops::pr::PrReadFreshness::Cached).await?;
-        if let Some(refusal) = task_completion_gate(store, task)
-            .await?
-            .refusal(&task.identifier)
-        {
+        if let Some(refusal) = task_completion_refusal(store, task).await? {
             return Err(task_error(refusal));
         }
         // Recheck after observation: a newer authored status may have superseded the request.
@@ -3214,7 +3209,7 @@ fn pr_link_state_label(pr: &TaskPr) -> String {
     match pr.phase() {
         PrPhase::Merged => "Merged".to_string(),
         PrPhase::Abandoned => "Abandoned".to_string(),
-        _ => "Open · follow-through after merge".to_string(),
+        _ => "Open".to_string(),
     }
 }
 
@@ -3268,69 +3263,22 @@ async fn link_pr_to_linear(store: &SharedStore, task: &Task, pr: &mut TaskPr) {
 }
 
 // ---------------------------------------------------------------------------
-// Loopflow-requested completion needs merge and confirmed follow-through.
-// Reads use their loaded delivery evidence; settlement checks it again in storage.
+// Completion requires the Task's recorded PR to be merged. Follow-up comments
+// are ordinary Work and do not supply completion or cleanup authority.
 // ---------------------------------------------------------------------------
 
-/// The outcome of evaluating the completion gate.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct CompletionGate {
-    pub blockers: Vec<String>,
+pub(crate) fn completion_refusal(pr: Option<&TaskPr>, identifier: &str) -> Option<String> {
+    pr.filter(|pr| pr.phase() != PrPhase::Merged).map(|_| {
+        format!("Task {identifier} cannot complete: its pull request has not merged; merge it or abandon the Task")
+    })
 }
 
-impl CompletionGate {
-    pub(crate) fn from_delivery(pr: Option<&TaskPr>, follow_through: &FollowThrough) -> Self {
-        let mut blockers = Vec::new();
-        if (follow_through.needs_conversion || !follow_through.intents.is_empty())
-            && !follow_through.resolved()
-        {
-            blockers.push(
-                "Follow-through scope needs resolution; confirm filing or record none needed"
-                    .into(),
-            );
-        }
-        if let Some(pr) = pr {
-            if pr.phase() != PrPhase::Merged {
-                blockers.push("Pull request has not merged; merge it or abandon the Task".into());
-            } else if !follow_through.resolved() {
-                blockers.push("Merged · Follow-through pending; file follow-ups or record `lf task follow-up <issue> --none REASON`".into());
-            }
-        }
-        Self { blockers }
-    }
-
-    fn satisfied(&self) -> bool {
-        self.blockers.is_empty()
-    }
-
-    /// One actionable, human-readable sentence. Empty when the gate is
-    /// satisfied.
-    pub fn reason(&self) -> String {
-        self.blockers.join("; ")
-    }
-
-    pub(crate) fn refusal(&self, identifier: &str) -> Option<String> {
-        (!self.satisfied()).then(|| {
-            format!(
-                "Task {identifier} cannot complete until its gates close: {}",
-                self.reason()
-            )
-        })
-    }
-}
-
-/// Evaluate the completion gate against the Task's durable PR state. Pure over
-/// store state: running it twice changes nothing.
-pub(crate) async fn task_completion_gate(
+pub(crate) async fn task_completion_refusal(
     store: &SharedStore,
     task: &Task,
-) -> OpsResult<CompletionGate> {
-    let follow_through = store
-        .sqlite
-        .task_follow_through(&task.id)
-        .map_err(task_error)?;
+) -> OpsResult<Option<String>> {
     let pr = store.active_task_pr(&task.id).await.map_err(task_error)?;
-    Ok(CompletionGate::from_delivery(pr.as_ref(), &follow_through))
+    Ok(completion_refusal(pr.as_ref(), &task.identifier))
 }
 
 /// Reconcile retained delivery on the repository's existing periodic check.
@@ -3357,7 +3305,7 @@ pub(crate) async fn reconcile_delivered_task(
     if let Observation::Degraded { reason, .. } = &task.observation {
         return Err(task_error(reason));
     }
-    // Observing a merge succeeded even while authored follow-through is pending.
+    // Observing a merge succeeds independently of the Task completion request.
     reconcile_task_completion(store, task).await
 }
 
@@ -3405,10 +3353,6 @@ async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsResult<TaskSn
         .task_events_after(&task.id, 0)
         .await
         .map_err(|error| task_error(format!("failed to read task events: {error}")))?;
-    let follow_through = store
-        .sqlite
-        .follow_through_from_events(&events)
-        .map_err(task_error)?;
     let latest_event = events.pop();
     let pr = store.active_task_pr(&task.id).await.map_err(task_error)?;
     let active = pr.as_ref().filter(|pr| pr.is_active());
@@ -3434,8 +3378,7 @@ async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsResult<TaskSn
                 .map(|pr| pr.phase()),
             None => None,
         };
-        let completion_gate = CompletionGate::from_delivery(pr.as_ref(), &follow_through);
-        let completion_refusal = completion_gate.refusal(&task.identifier);
+        let completion_refusal = completion_refusal(pr.as_ref(), &task.identifier);
         let worktree_blocker = task_worktree_blocker(store, &task).await?;
         let resume_refusal = worktree_blocker
             .as_ref()
@@ -3513,7 +3456,6 @@ async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsResult<TaskSn
         agent: task.agent,
         provider,
         pr,
-        follow_through,
         latest_event,
         created_at: task.created_at,
         updated_at: task.updated_at,
@@ -4507,9 +4449,12 @@ mod tests {
         assert_eq!(blockers.len(), 1, "{blockers:?}");
         assert!(blockers[0].contains(process.id.as_str()));
         let gate = runtime
-            .block_on(super::task_completion_gate(&fixture.store, &fixture.task))
+            .block_on(super::task_completion_refusal(
+                &fixture.store,
+                &fixture.task,
+            ))
             .unwrap();
-        assert!(gate.satisfied(), "{:?}", gate.blockers);
+        assert!(gate.is_none(), "{:?}", gate);
 
         // Exact live identity does not change the decision or confer stop authority.
         let root = ledger.home().join(crate::journal::PROCESS_RECEIPT_ROOT);
@@ -4526,9 +4471,12 @@ mod tests {
         let receipt_bytes = serde_json::to_vec(&receipt).unwrap();
         std::fs::write(&receipt_path, &receipt_bytes).unwrap();
         assert!(runtime
-            .block_on(super::task_completion_gate(&fixture.store, &fixture.task))
+            .block_on(super::task_completion_refusal(
+                &fixture.store,
+                &fixture.task
+            ))
             .unwrap()
-            .satisfied());
+            .is_none());
         for _ in 0..2 {
             runtime
                 .block_on(
@@ -5432,21 +5380,14 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(store.work_status(&work).await.unwrap(), WorkStatus::Ready);
-            let gate = super::task_completion_gate(&store, &task).await.unwrap();
-            assert!(gate.reason().contains("Follow-through"));
-            let disposition = store.sqlite.task_follow_through(&task.id).unwrap();
-            assert!(disposition.needs_conversion);
-            assert!(disposition.scope_notes[0].contains(&follow_up.outcome));
-            assert!(disposition.scope_notes[0].contains(&follow_up.evidence));
+            assert!(super::task_completion_refusal(&store, &task)
+                .await
+                .unwrap()
+                .is_none());
+            assert!(store.task_events_after(&task.id, 0).await.unwrap().iter().any(|event|
+                matches!(&event.kind, TaskEventKind::FollowUp { remaining: Some(saved), .. } if saved == &follow_up)
+            ));
         }
-        store
-            .sqlite
-            .finish_follow_through(
-                &task.id,
-                "Accepted later evidence was independently satisfied",
-                true,
-            )
-            .unwrap();
         apply_merged_task_landing(&store, &mut task, &pr, &landing)
             .await
             .unwrap();

@@ -275,10 +275,10 @@ pub(crate) fn attach_in(
 
 // Historical filing persisted intent before its network call, but recorded no
 // attempt boundary. Conversion must preserve uncertainty, never guess no send.
-pub(super) fn retain_follow_through_export_in(
+pub(super) fn retain_filing_export_in(
     conn: &Connection,
     task: &TaskId,
-    intent: &crate::work::task::follow_through::FollowThroughIntent,
+    intent: &crate::store::sqlite::task_history::RetainedFiling,
 ) -> StoreResult<()> {
     let project: Option<String> = conn
         .query_row(
@@ -342,14 +342,14 @@ mod tests {
     use rusqlite::{params, Connection};
     use serde_json::{json, Value};
 
-    use super::{attach_in, retain_follow_through_export_in, PlanningExport};
+    use super::{attach_in, retain_filing_export_in, PlanningExport};
     use crate::durable::{ProjectId, TaskId};
     use crate::store::migrations::{
         apply_before_current_draft, current_draft_sql, seed_peer_planning,
     };
     use crate::store::sqlite::planning_changes::PlanningChanges;
+    use crate::store::sqlite::task_history::RetainedFiling;
     use crate::work::edit::WorkValue;
-    use crate::work::task::follow_through::FollowThroughIntent;
 
     #[test]
     fn historical_creation_keeps_intent_values_after_local_edits() {
@@ -364,7 +364,7 @@ mod tests {
         seed_peer_planning(&conn, &sql).unwrap();
         conn.execute("UPDATE task_creation_intents SET export_json=NULL", [])
             .unwrap();
-        let intent = FollowThroughIntent {
+        let intent = RetainedFiling {
             key: "historical-key".into(),
             issue_id: "historical-issue".into(),
             relation_id: "historical-relation".into(),
@@ -378,8 +378,7 @@ mod tests {
             existing: false,
         };
         for _ in 0..2 {
-            retain_follow_through_export_in(&conn, &TaskId::from_raw("task-proof"), &intent)
-                .unwrap();
+            retain_filing_export_in(&conn, &TaskId::from_raw("task-proof"), &intent).unwrap();
         }
         let (receipt, attempted, error): (String, bool, String) = conn
             .query_row(

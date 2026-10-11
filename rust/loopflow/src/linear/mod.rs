@@ -3520,8 +3520,7 @@ mod tests {
 }
 
 #[cfg(test)]
-#[path = "linear_follow_through_tests.rs"]
-mod follow_through_tests;
+mod retained_relation_tests;
 
 /// Retained Linear facts, including foreign and not-yet-associated Projects.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

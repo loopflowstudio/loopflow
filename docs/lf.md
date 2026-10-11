@@ -232,7 +232,7 @@ remain independent of goal and memory files.
 
 Placement, native Sessions, workflow skills and GitHub delivery use the same Task
 identity. `lf land` requests merge; `lf pr reconcile` observes delivery. After
-merge, follow-through files accepted obligations or records none, then
+merge, record independently accepted later work as ordinary Tasks and comments, then
 `lf task complete <task-id>` completes the source. A repository without a code
 remote supports local work and refuses hosted landing. Local planning does not
 require Linear at any of these boundaries.
@@ -421,33 +421,23 @@ Ambiguous provider evidence remains unresolved. `lf ci watch` repairs actionable
 CI failures while it runs.
 
 ```bash
-lf task follow-up EXP-12 --title 'Verify the installed command' --notes 'Follow-up to EXP-12: after the release is installed, run the accepted scenario and record its version and result; investigate a failure.' --due 2026-10-09
-lf task follow-up EXP-12 --finish 'The installed check has its own Task'
+lf task comment EXP-12 'Installed verification continues in EXP-13.'
 lf task complete EXP-12
 ```
 
-After verified merge, file accepted remaining obligations as linked follow-up
-Tasks, or record `lf task follow-up EXP-12 --none 'No accepted work remains'`.
-Use `--existing ISSUE` to link work already filed and `--wave WAVE` to choose its
-owner. Give each additional obligation a distinct `--key` before `--finish`;
-reusing a key (default: `follow-up`) retries the original filing, even if its
-title changes. Retries retain the child identity and Project after chapter
-rotation. Inspect receipts and retry identical input after an uncertain response.
-The source completes after filing,
-without waiting for those children to finish. Preserve accepted later checks in
-PR copy before landing clears scratch.
+Record independently accepted later work as ordinary Tasks and linking comments.
+A saved Task survives a failed comment; retry only the comment against that Task.
+Complete the delivered source outcome without waiting for its follow-ups. Preserve
+accepted later checks in PR copy before landing clears scratch.
 
-Filing and completion work locally without Linear. In a connected repository,
-foreground planning sync exports saved Tasks and then their related-issue links,
-including links from already completed Tasks. Closing that connection leaves
-unsent or uncertain effects for the next connection; filing starts no watcher.
-Displayed follow-up names and due dates use the current saved Task, while retry
-receipts keep their original identity and input.
+Task and comment saves work locally. The configured transport delivers them while
+connected; an outage leaves local changes pending. Historical uncertain filings
+retain their original creation and relation IDs until confirmed. They do not
+require a separate disposition or control Task completion.
 
-`ship` runs gate, waited landing, then follow-through. A bare delivery, manual
-GitHub merge or stopped finishing Flow leaves **Merged · Follow-through pending**.
-The next Task/Wave operation checks for live work, then runs `finish-delivery`
-if needed. It does not rerun gate or re-arm the merged PR.
+`ship` runs gate and waited landing. Its caller or Workflow arrival owns completion.
+After a manual merge or stopped Flow, inspect live work and repeat only unfinished
+operations. Do not rerun gate or re-arm an already merged PR.
 
 Due follow-ups return on the owning Wave's next operation, even if unstarted.
 Their briefs carry release prerequisites, expected evidence and any timezone.

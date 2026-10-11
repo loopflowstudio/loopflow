@@ -61,12 +61,5 @@
   },
   "pr": null,
   "branch": "jack/workspace",
-  "base_commit": "1111111111111111111111111111111111111111",
-  "follow_through": {
-    "intents": [],
-    "links": [],
-    "reason": null,
-    "needs_conversion": false,
-    "scope_notes": []
-  }
+  "base_commit": "1111111111111111111111111111111111111111"
 }

@@ -123,7 +123,6 @@ pub struct TaskSummary {
     pub state: Option<String>,
     pub completed_at: Option<String>,
     pub due_date: Option<String>,
-    pub follow_up_sources: Vec<crate::work::task::follow_through::FollowThroughSource>,
     pub assignee: Option<String>,
 }
 
@@ -253,7 +252,6 @@ pub struct TaskDetailSnapshot {
     pub execution: Option<TaskExecutionSnapshot>,
     pub run_control: TaskRunControl,
     pub pr: Option<PrSnapshot>,
-    pub follow_through: crate::work::task::follow_through::FollowThrough,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -477,7 +475,6 @@ pub struct RoadmapTask {
     pub execution: Option<TaskExecutionSnapshot>,
     pub run_control: TaskRunControl,
     pub pr: Option<PrSnapshot>,
-    pub follow_through: crate::work::task::follow_through::FollowThrough,
     pub section: RoadmapSection,
 }
 
@@ -754,7 +751,6 @@ async fn roadmap_snapshot(
 struct SharedTaskReads {
     checkouts: Vec<crate::store::sqlite::TaskCheckout>,
     local_machine: crate::durable::MachineId,
-    follow_up_sources: HashMap<String, Vec<crate::work::task::follow_through::FollowThroughSource>>,
 }
 
 impl SharedTaskReads {
@@ -764,7 +760,6 @@ impl SharedTaskReads {
         Ok(Self {
             checkouts,
             local_machine: store.local_machine().await?.id,
-            follow_up_sources: store.sqlite.follow_up_sources()?,
         })
     }
 }
@@ -852,7 +847,6 @@ fn roadmap_task(detail: TaskDetailSnapshot) -> RoadmapTask {
         execution: detail.execution,
         run_control: detail.run_control,
         pr: detail.pr,
-        follow_through: detail.follow_through,
         section,
     }
 }
@@ -1193,7 +1187,6 @@ async fn snapshot_task_detail(
     } else {
         None
     };
-    let follow_through = store.sqlite.task_follow_through(&task.id)?;
     let next_move = if execution.state != TaskExecutionState::Idle && !runtime.status.is_terminal()
     {
         NextMove {
@@ -1208,13 +1201,7 @@ async fn snapshot_task_detail(
     {
         NextMove {
             owner: NextMoveOwner::Wave,
-            reason: if follow_through.needs_conversion {
-                "Merged · Follow-through scope needs conversion".into()
-            } else if follow_through.resolved() {
-                "Merged · Follow-through recorded; complete the Task".into()
-            } else {
-                "Merged · Follow-through pending".into()
-            },
+            reason: "Merged; complete the Task".into(),
         }
     } else {
         next_move_for_task(
@@ -1235,8 +1222,7 @@ async fn snapshot_task_detail(
         worktree_blocker.as_ref(),
     );
     let completion_refusal = if runtime.status != TaskState::Abandoned {
-        crate::ops::task::CompletionGate::from_delivery(pr.as_ref(), &follow_through)
-            .refusal(&task.identifier)
+        crate::ops::task::completion_refusal(pr.as_ref(), &task.identifier)
     } else {
         None
     };
@@ -1294,10 +1280,8 @@ async fn snapshot_task_detail(
         .map(|workflow| workflow.definition.name)
         .or_else(|| (!recommended.is_empty()).then_some(recommended));
     Ok(TaskDetailSnapshot {
-        follow_through,
         task: task_summary(
             task,
-            &shared.follow_up_sources,
             store.sqlite.task_planning_sync(&task.id)?,
             acquisition,
         ),
@@ -1584,21 +1568,11 @@ async fn current_direction(
 
 fn task_summary(
     task: &Task,
-    sources: &HashMap<String, Vec<crate::work::task::follow_through::FollowThroughSource>>,
     sync: crate::store::planning_sync::PlanningSyncStatus,
     acquisition: crate::store::TaskAcquisition,
 ) -> TaskSummary {
     TaskSummary {
         acquisition,
-        follow_up_sources: sources
-            .get(task.id.as_str())
-            .or_else(|| {
-                task.linear_id
-                    .as_ref()
-                    .and_then(|id| sources.get(id.as_str()))
-            })
-            .cloned()
-            .unwrap_or_default(),
         due_date: task.due_date.clone(),
         sync,
         id: task.id.to_string(),
@@ -1789,22 +1763,6 @@ fn print_status(status: &WaveDetailSnapshot) {
                 );
                 if let Some(due) = &task.task.due_date {
                     println!("    due        {due}");
-                }
-                for source in &task.task.follow_up_sources {
-                    println!("    follow-up to {}", source.identifier);
-                }
-                for note in &task.follow_through.scope_notes {
-                    println!("    scope needs conversion: {note}");
-                }
-                for link in &task.follow_through.links {
-                    println!(
-                        "    follow-up  {}{}",
-                        link.identifier,
-                        link.url
-                            .as_ref()
-                            .map(|url| format!(" · {url}"))
-                            .unwrap_or_default()
-                    );
                 }
                 for line in task.task.sync.lines() {
                     println!("    {line}");

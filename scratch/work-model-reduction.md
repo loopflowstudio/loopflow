@@ -9,8 +9,8 @@ approval from Jack. This is accepted scope, with conditional deletions identifie
 
 This audit and [design](work-on-another-machine-name.md) share one delivery scope.
 Canonical readers, concrete observation columns and private acquisition exist.
-Remaining: ordinary follow-ups, one cron list and conditional routing reduction. Concrete
-bindings are implemented (§14). All precede Jack Heart's next
+Remaining: one cron list and affected gate/review. Ordinary follow-ups and concrete
+bindings are implemented (§13–14). All precede Jack Heart's next
 review of PR #1491. Publication is review-only; landing, installation and export
 of actual Work to the public repository remain unauthorized.
 
@@ -223,12 +223,14 @@ Import groups typed edits through the writer, derives completeness from typed
 reads, retries parent dependencies and retains failed projections. Equal raw IDs
 with distinct typed fields remain independent causal histories.
 
-**Conditional:** `enroll_repository` scans Wave/Project/Task/comment tables on
-use/import/export to populate `planning_members`; `planning_active` mirrors selected
-routing. Prefer current ownership plus configured transport and routing evidence on
-the journal. Delete these extra inventories only after proving destination history
-survives ownership moves, config switches, rejected records and tombstones with no
-live Work row. Current membership alone cannot recover historical routing.
+**Removed:** `planning_members`, `planning_active`, `use_peer_planning` and
+`enroll_repository`. Current Work ownership selects new exports; journal routes
+retain each mutation's repository/destination independently of live rows. Switching
+configuration cannot replace earlier routes. Rejected imports retain routing even
+without a materialized Work record; routes neither claim Work nor authorize execution.
+Status derives active selection from configuration, and Desktop observes config
+changes without a store write. Repeated exchange retains routes without revision churn.
+Only the Task draft changes; these inventories never entered the released frontier.
 
 Keep causal heads, competing values, applied-versus-observed distinction, exact
 remote/ref identity, publication readback, cancellation-safe locks and bounded
@@ -242,7 +244,7 @@ constant-empty metadata and exclusive fictional fixture cases. Status returns th
 retained `PlanningMutation` map plus ranked candidate IDs; CLI/Desktop show these
 same entries. Values, causal parents, clocks and projection failures survive.
 Candidate means ranked, never applied or published. This is inspection, not another
-writer. The conditional routing reduction in §8 still requires its preservation proof.
+writer. Section 8 replaces the routing inventories with retained mutation routes.
 
 Journal read failure already returns `StoreResult::Err`; WorkReading retains cached
 status and shows that failure. `pending_local` is therefore a required boolean on
@@ -338,36 +340,26 @@ content, independent Session reads and independently failed frame parts. Shared
 completion must update displayed Work without moving a local Workflow or cleaning
 up its checkout.
 
-## 13. Finish every follow-through producer and consumer
+## 13. Ordinary Tasks and comments replace follow-through
 
-The existing pass owns this cut; the deeper pass must not leave indirect producers:
+October 11 inline cut removes `work/task/follow_through.rs`, its operation/store
+modules, CompletionGate, active DTOs, Swift lifecycle display, `task follow-up`,
+`--none`/`--finish`, the follow-through skill and finish-delivery Flow. `ship`
+runs gate and waited landing; its caller or Workflow arrival owns completion.
+PR merge checks and execution/checkout preservation remain independent.
 
-- `work/task/follow_through.rs`, `ops/task/follow_through.rs`,
-  `sqlite/task_follow_through.rs`, special CompletionGate/settlement/cleanup paths.
-- `ops/planning_export.rs::sync_follow_through_relations` and retained export
-  conversion; Linear related-issue helpers used only by that lifecycle.
-- Task DTO `follow_through` / `follow_up_sources`, Swift status/due filters.
-- `builtins/task/skill/follow-through.md`, `ship.yaml`, `finish-delivery.yaml`,
-  and instructions in LOOPFLOW, pr-land, ci-fix, ship-decomposed, capture-tasks,
-  task/wave/repo operator and conversation skills that require the ritual.
+Private `sqlite/task_history.rs` decodes retained filing events into ordinary
+Tasks and comments during synchronization. Original events stay unchanged; Task
+creation commits before its comment, so comment failure retries no creation.
+Provider-UUID attempts retain original input and unknown outcome; `existing`
+never creates. Original relation IDs and exact confirmations survive even when
+the old local link was never written. No active filing/disposition model remains.
+Earlier counterexamples: `7ec3ff7dc4:scratch/follow-up-recovery-review.md`.
 
-New remaining work is an ordinary Task plus an ordinary linking comment. Delete
-`--none` / `--finish` requirements and dedicated active models. Keep historical
-event decoding and unfinished effects until converted without loss. A Task saved
-before comment failure must survive; retry only the comment. Neither comments nor
-removal of the old gate grants process-control or checkout-deletion authority.
-
-Retained-effect counterexamples (`7ec3ff7dc4`, October 10): historical
-provider-UUID intents can predate a local Task and have no recorded network-attempt
-boundary. `retain_follow_through_export_in` retains their exact creation ID/input
-as attempted and unknown; conversion cannot mint a replacement. An `existing`
-intent never creates. Unconfirmed `sync_follow_through_relations` effects retain
-their original relation ID/input and confirmation history, not synthetic comment
-success. Conversion/retry twice must preserve the reserved local child with missing
-link, uncertain provider creation without a local child, and unconfirmed relation
-after both endpoints publish. Stable Task/comment identities and unchanged events
-are required proof, not executed results. Full source review:
-`7ec3ff7dc4:scratch/follow-up-recovery-review.md`.
+Four recovery/export tests and the adapted CLI/Flow/monitor proof pass: ordinary
+creation/comments buffer offline, completion preserves the live Flow and its later
+arrival. Public completion, historical relation readback and Rust/Swift wire checks
+pass. Materialized/affected gate remains before review.
 
 ## 14. Config, cron, naming and public documentation
 

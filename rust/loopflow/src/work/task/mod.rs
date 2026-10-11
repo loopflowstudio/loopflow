@@ -4,7 +4,6 @@
 //! Sessions, Flows and Processes record work against that state.
 
 pub mod comment;
-pub mod follow_through;
 
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -653,10 +652,10 @@ pub struct TaskFollowUp {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TaskEventKind {
     FollowThroughIntent {
-        intent: follow_through::FollowThroughIntent,
+        intent: serde_json::Value,
     },
     FollowThroughLinked {
-        link: follow_through::FollowThroughLink,
+        link: serde_json::Value,
     },
     FollowThroughRelationConfirmed {
         relation_id: String,

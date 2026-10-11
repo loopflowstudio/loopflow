@@ -498,8 +498,7 @@ Task completion, Workflow position and Process liveness are independent.
 `task complete` changes status without moving or creating a Workflow. Moving or
 arriving at end atomically records the move and a completion request, then
 attempts settlement. Failed settlement retains end and its reason; retry only
-`task complete`, never the successful edge. PR delivery requires verified merge
-and confirmed follow-through; PR-less completion retains useful artifacts.
+`task complete`, never the successful edge. PR delivery requires verified merge; PR-less completion retains useful artifacts.
 Accepted Linear completion or reopening updates status without moving Workflow
 or terminating Processes. Reopening supersedes old requests. Ordinary reads do
 not execute completion. Unfinished readiness remains not ready with no Workflow,

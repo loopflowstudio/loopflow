@@ -205,6 +205,7 @@ fn exchange_destination(store: &SqliteStore, repo: &str, id: &str, publish: bool
             .ok_or_else(|| message("planning destination is missing"))?;
         let git = PlanningGit::new(Path::new(repo), &binding).map_err(message)?;
         if publish {
+            store.recover_task_filings(repo).map_err(message)?;
             publish_destination(store, repo, id, &git)
         } else {
             acquire_destination(store, repo, id, &git).map(|_| ())

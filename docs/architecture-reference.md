@@ -894,17 +894,16 @@ Task row ----> managed worktree ----> commits
 5. PR landing is fenced by landing generation. A check repairs an unchanged
    incident once; a moved head requires fresh evidence. A blocked landing still
    observes merge, and explicit arm or land resumes it.
-6. Verified merge leaves follow-through pending. `ship` uses `land --wait-and-fix`,
-   then files linked follow-up Tasks or records none needed before completing.
-   The next Task/Wave operation recovers stopped finishing work with
-   `finish-delivery`, after checking live Flow processes. Reconciliation records facts
-   and settles an existing disposition; it never invents the agent's verdict.
+6. `ship` runs gate and `land --wait-and-fix`. Record independent later work as
+   ordinary Tasks and linking comments; retry failed comments against saved Tasks.
+   Inspect live processes after a stopped Flow and retry only unfinished work.
+   Reconciliation records merge evidence without inventing a completion request.
 7. `task complete` changes status without moving the Workflow. Arrival at end
    atomically requests completion; a failure retains arrival and retries only
    completion. Accepted Linear completion/reopening leaves execution intact and
    supersedes old completion intent. Ordinary reads execute no trigger. A PR-less Task
    may finish with retained artifacts; a Task with a PR needs authoritative
-   merge and durable follow-through. Dependent PRs belong to stacked Tasks.
+   merge. Dependent PRs belong to stacked Tasks.
 
 GitHub remains merge truth. SQLite stores the observed PR/head/check/disposition
 needed to resume safely; it cannot declare an unmerged PR merged.

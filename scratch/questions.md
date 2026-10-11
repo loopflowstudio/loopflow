@@ -33,8 +33,7 @@ WorkValue owns saved content and journal/receipt values. Creation retains captur
 inputs and typed baselines, never reconstructing an attempt from current Work.
 Historical intent state UUIDs cannot establish semantic state. Ordering/deletion
 keep separate effect semantics. Full follow-up lifecycle removal, cron conversion
-and conditional routing-inventory reduction remain before gate/republication.
-Earlier store-owner and acquisition findings: `216668cd9b:scratch/questions.md`.
+remain before gate/republication; routing inventories are removed.
 
 Populated migration/import proof retains Session turns, reservations, claims,
 activity and uncertain controls. Stored preservation is not configured provider
@@ -43,10 +42,20 @@ no missing-placement inference or LOO-427 landing authority is introduced.
 
 ## Receipt review — October 11
 
-The field-attempt deletion check is restored inside its transaction, with a
-select/edit/delete/attempt regression. Creation acquisition now resolves Linear
-Project IDs to canonical Work IDs before matching typed baselines; its regression
-retains a pre-creation membership receipt with distinct identities. Partial
-assignee omission supplies no invented null observation. Released conversion retains
-explicit-null membership separately from an absent baseline; older acknowledgment
-rebases a later save without clearing it. The pursuit design owns check results.
+`52f7f3f99f` preserves transactional deletion eligibility, canonical creation
+membership, partial assignee omission, explicit-null baselines and later saves
+across older acknowledgment. Focused regressions pass; the design owns check results.
+
+## Routing reduction review — October 11
+
+Both routing inventories are now removed in source; preservation and transport
+checks pass, including headless configuration refresh. Nextest additionally reported
+leaks in `provider_columns_preserve_released_observations_and_local_execution` and
+`observed_reopening_beats_delayed_completion`; retain both for gate alongside the
+five earlier observations. Passing assertions do not prove handle cleanup.
+
+## Stopped Flow — October 11
+
+Flow `87ecd305-cafb-450f-8292-58101aadad4b` exited 1 during realign after Codex
+reported its usage limit. Implement, compress and sync succeeded; source through
+`47b5edb701` and local designs survive. Realign read sources and renamed its Session; no replay or delivery occurred.

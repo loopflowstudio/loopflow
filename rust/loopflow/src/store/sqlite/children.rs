@@ -287,22 +287,10 @@ impl SqliteStore {
             return Ok(false);
         }
         let current = active_task_pr_on(&transaction, &task.id)?;
-        let disposition = crate::work::task::follow_through::FollowThrough::from_events(
-            &task_events_after_in(&transaction, &task.id, 0)?,
-        );
-        if (disposition.needs_conversion || !disposition.intents.is_empty())
-            && !disposition.resolved()
-        {
+        if current.is_some_and(|pr| pr.phase() != PrPhase::Merged) {
             return Err(StoreError::InvalidAuthority(
-                "Follow-through scope needs resolution".into(),
+                "Task requires a verified merge".into(),
             ));
-        }
-        if let Some(pr) = current {
-            if pr.phase() != PrPhase::Merged || !disposition.resolved() {
-                return Err(StoreError::InvalidAuthority(
-                    "Task requires verified merge and resolved follow-through".into(),
-                ));
-            }
         }
         if state == TaskState::Abandoned {
             return Err(StoreError::InvalidData(format!(

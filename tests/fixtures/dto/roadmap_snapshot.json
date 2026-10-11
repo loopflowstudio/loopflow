@@ -73,7 +73,6 @@
               "state": "unstarted",
               "completed_at": null,
               "due_date": null,
-              "follow_up_sources": [],
               "sync": {
                 "connected": false,
                 "changes": []
@@ -435,14 +434,7 @@
             "run_control": {
               "unavailable": null
             },
-            "pr": null,
-            "follow_through": {
-              "intents": [],
-              "links": [],
-              "reason": null,
-              "needs_conversion": false,
-              "scope_notes": []
-            }
+            "pr": null
           },
           {
             "task": {
@@ -456,7 +448,6 @@
               "state": "unstarted",
               "completed_at": null,
               "due_date": null,
-              "follow_up_sources": [],
               "sync": {
                 "connected": false,
                 "changes": []
@@ -847,13 +838,6 @@
               },
               "merge_commit": null,
               "abandoned_at": null
-            },
-            "follow_through": {
-              "intents": [],
-              "links": [],
-              "reason": null,
-              "needs_conversion": false,
-              "scope_notes": []
             }
           },
           {
@@ -868,7 +852,6 @@
               "state": "unstarted",
               "completed_at": null,
               "due_date": null,
-              "follow_up_sources": [],
               "sync": {
                 "connected": false,
                 "changes": []
@@ -919,14 +902,7 @@
             "run_control": {
               "unavailable": null
             },
-            "pr": null,
-            "follow_through": {
-              "intents": [],
-              "links": [],
-              "reason": null,
-              "needs_conversion": false,
-              "scope_notes": []
-            }
+            "pr": null
           },
           {
             "task": {
@@ -940,7 +916,6 @@
               "state": "completed",
               "completed_at": null,
               "due_date": null,
-              "follow_up_sources": [],
               "sync": {
                 "connected": false,
                 "changes": []
@@ -1006,14 +981,7 @@
             "run_control": {
               "unavailable": null
             },
-            "pr": null,
-            "follow_through": {
-              "intents": [],
-              "links": [],
-              "reason": null,
-              "needs_conversion": false,
-              "scope_notes": []
-            }
+            "pr": null
           }
         ],
         "truncated": false

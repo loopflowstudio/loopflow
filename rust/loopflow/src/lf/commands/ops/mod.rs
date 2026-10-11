@@ -619,7 +619,7 @@ pub(crate) fn land_repo(
                         format!("Task {} is abandoned.", task.identifier)
                     }
                     _ => format!(
-                        "Finish follow-through, then run lf task complete {}.",
+                        "Complete the accepted outcome with lf task complete {}.",
                         task.identifier
                     ),
                 };
@@ -652,7 +652,7 @@ pub(crate) fn land_repo(
                     error => anyhow::Error::new(error),
                 }
             })?;
-            progress.status("Pull request merged; follow-through can proceed.");
+            progress.status("Pull request merged; Task completion can proceed.");
             return Ok(());
         }
         progress.status(&format!(

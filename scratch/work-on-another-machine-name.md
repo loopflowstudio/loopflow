@@ -185,7 +185,7 @@ Existing credential fencing, receipt recovery, lock names and refresh ages remai
 PM facade. `5a8ae4cdb6` and `c7bb8a58e0` then completed the typed journal and
 concrete observation/projection owners; feedback based on `6b7015d056` predates
 those cuts. Remaining:
-Ordinary follow-ups, one cron list and conditional routing reduction;
+One cron list; ordinary Task/comment conversion is implemented (§13 of the audit);
 materialized/headless affected gate and fresh +/- HTML review before review-only
 republication. Populated Session/attachment preservation is covered below. Concrete adapter naming alone does not
 finish the remaining writer/delivery hierarchy. No installation was performed.
@@ -282,29 +282,24 @@ and contrary evidence: `f025e9b7ab:scratch/work-on-another-machine-name.md`,
 “Project prose: composed behavior and remaining ownership cut.” These passes do
 not establish adapter confinement or provider-hierarchy conversion.
 
-Root `planning.rs` is deleted. Task creation inputs, Linear binding identities and
-stored delivery/status evidence have concrete owners. Team/Initiative edits and
-comment authors remain typed through the writer. Git reads the selected native JSON
-format; realign removed the unshipped string-format compatibility decoder and its
-fixture under Jack Heart's no-old-version constraint. Released SQLite conversion
-and causal/losing values remain required. Record creation no longer
-reconstructs a generic JSON field map. Local writes and Git mutations now carry the same target-bearing `WorkEdit`.
-SQLite and Git retain that same mutation. `PlanningKind`/`PlanningObject`, the
-parallel SQL mutation columns and SQLite field decoder are deleted. Generated
-indexes support lookup; private writer-derived table routing preserves destination
-history. Parent-first creation, observed-versus-applied heads and losing values
-remain. `store/sqlite/planning.rs` is deleted: Linear acceptance owns projection,
-Linear observations own invalidation/evidence, and field delivery owns accepted
-revision eligibility. Creation now retains typed fields and captured Task state; whole-model snapshots
-and generic-map attachment are deleted. Released conversion retains provider input,
-identity, sequence bounds and uncertainty independently of later Work edits.
-Historical intent conversion retains intent values, leaving unknown semantic state
-unknown. Field receipts now retain typed WorkValue and baseline evidence. Generated field
-indexes replace duplicate keys; reconciliation preserves later saves across older
-acknowledgments without JSON patching. Acquisition resolves canonical membership
-before creation comparison. Ordering/deletion retain separate effect readers and
-errors; ordinary field attempts still refuse a Task deleted after selection.
-Follow-ups, cron and conditional routing reduction remain before audit completion.
+Root `planning.rs`, PM facade, duplicate object/edit vocabularies and whole-model
+receipt patching are removed. Local writes and Git retain target-bearing `WorkEdit`;
+Linear owns observation/projection. Typed creation/field baselines retain attempted
+inputs and sequence boundaries independently of current Work. Partial omissions,
+explicit-null membership, canonical Project IDs, older acknowledgments and uncertain
+effects retain their meaning. Exact cuts and proof: `52f7f3f99f` at this path.
+Released SQL stays immutable; unshipped Git encodings need no compatibility decoder.
+
+`planning_members`, `planning_active`, `use_peer_planning` and enrollment are
+removed. Current ownership selects new exports; retained mutation routes preserve
+old destinations, rejected imports and missing Work rows. Passive status takes its
+selection from configuration; Desktop rereads it without a database write. Populated
+routing tests cover switches, ownership moves, missing rows and rejected orphan
+imports; existing import/execution preservation fixtures remain required.
+This changes no execution admission: LOO-427 must adapt its stacked membership
+consumer without interpreting a route or absent placement as first-start authority.
+LOO-414's unresolved authority still blocks stack readiness. Cron unification,
+affected gate and fresh +/- review remain.
 
 Cron conversion must retain the installed owner independently of file location.
 Release's October 5 memory records both jobs installed under Infrastructure,
@@ -335,15 +330,20 @@ Writer transport/causal proofs: `eda4a98097` in this plan.
   follows the entire reduction and affected gate, before review-only republication.
 
 Earlier focused proof: `9dbd6fc2d8`, `dfd3b80611`, `f025e9b7ab`,
-`dfa2cdafba`, `09709a05cc` in this plan. Remaining follow-ups, cron, conditional routing reduction, gate and review
-precede republication.
+`dfa2cdafba`, `09709a05cc` in this plan. Cron, gate and review still precede republication.
 
 Prior checks and fixture limits: `6b7015d056` at this path. The earlier nextest
 leaky-test report for `unreviewed_backlog_remains_while_started_work_moves` remains
 unexplained and belongs to gate; no retry or timeout adjustment was added.
-Reused source checks at `c7bb8a58e0`: `cargo fmt`, LF-cleared `cargo clippy --all-targets -- -D warnings`, CLI build, focused nextest writer/migration/Linear acceptance/exchange/Git/DTO/foreground cases and Swift DTO tests (30) pass across targeted runs; stale migration-frontier, Process-column and streaming-provider fixtures were repaired without weakening assertions. Full materialized/headless gate remains after the audit.
+Earlier focused writer, migration, transport, Rust/Swift DTO, fmt/Clippy and CLI
+build passes remain at `52f7f3f99f` in this plan. Gate still owns materialized/headless
+acceptance; these checks are not a full gate.
 Additional intermittent nextest leaks: `flow_compositions_round_trip_distinct_compositions_and_required_children` and `due_dates_enrich_absent_history_but_preserve_observed_null_at_equal_revision`; causes unresolved, retained for gate.
 
-Receipt sanity: `cargo fmt`, LF-cleared `cargo clippy --all-targets -- -D warnings`, CLI build, focused nextest receipt/migration/Linear/local-planning checks, 25 Rust DTO fixtures and 30 Swift DTO tests pass after fixture updates. Gate owns materialized/headless acceptance and the three earlier leaks plus `planning_export_late_readback_preserves_newer_edits_and_inventory_identity` and `project_markdown_rejects_ambiguous_targets`. `git diff --check` and `lf context` pass.
+Receipt sanity: `cargo fmt`, LF-cleared `cargo clippy --all-targets -- -D warnings`, CLI build, focused nextest receipt/migration/Linear/local-planning checks, 25 Rust DTO fixtures and 30 Swift DTO tests pass after fixture updates. Gate owns materialized/headless acceptance and the three earlier leaks plus `planning_export_late_readback_preserves_newer_edits_and_inventory_identity` and `project_markdown_rejects_ambiguous_targets`. Routing checks additionally reported leaks in `provider_columns_preserve_released_observations_and_local_execution` and `observed_reopening_beats_delayed_completion` (a pure exchange test); causes remain unknown. `git diff --check` and `lf context` pass.
+
+Routing sanity: `cargo fmt`, LF-cleared `cargo clippy --all-targets -- -D warnings`, CLI build, focused nextest routing/writer/migration/watch and exchange/Git/foreground checks (25 tests, plus the updated config regression) pass; the two new leaks above remain for gate. `git diff --check` and `lf context` pass.
 
 Transport evidence: `0181133849` at this path; earlier simulated adoption: `5960415b3:scratch/remote-task-demo.md` (not real SSH or integrated acceptance).
+
+Follow-up cut sanity: `cargo check --all-targets`, fmt/Clippy, 4 recovery/export tests, 3 CLI/Flow tests, 2 merge/process preservation tests, 29 wire/relation/history/catalog tests, headless Desktop build/31 Swift tests and 4 skill-alignment tests pass; full affected/materialized gate remains.

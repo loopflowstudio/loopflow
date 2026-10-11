@@ -100,13 +100,13 @@ paths too. Run `TMPDIR=/tmp cargo test -p loopflow --lib context_block` when
 changing them; macOS's longer default paths can hide an undersized fixture.
 
 The composed delivery fixture runs a real CLI/Flow against an isolated Home and
-simulated provider observations, local follow-up filing and independent completion,
+simulated provider observations, ordinary Task/comment saves and independent completion,
 then checks its captured CLI and monitor population in Rust
 and Swift. It builds the CLI with Cargo so a unit-test binary cannot accidentally
 launch an installed version. Regenerate its wire capture with
-`LOOPFLOW_UPDATE_LIFECYCLE_FIXTURE=1 cargo test -p loopflow --lib merged_follow_up_completion_and_arrival`,
+`LOOPFLOW_UPDATE_LIFECYCLE_FIXTURE=1 cargo test -p loopflow --lib ordinary_task_comments_and_completion_preserve_live_flow_and_arrival`,
 then run `cargo test -p loopflow --test dto_fixtures composed_lifecycle` and
-`swift test --package-path swift --filter 'composedTaskLifecycle|composedLifecycleDelivery'`.
+`swift test --package-path swift --filter 'composedTaskLifecycle|dueDate'`.
 
 Provider fixtures must read the launch's actual context channel. When a final
 sync adds fixtures that inspect a changed transport, run those focused tests

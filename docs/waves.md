@@ -435,7 +435,6 @@ steering and recovery use the same commands for people and agents:
 
 ```bash
 lf land --wait-and-fix
-lf task follow-up INF-124 --none 'No accepted obligations remain'
 lf task complete INF-124
 ```
 
@@ -443,15 +442,16 @@ Task completion is independent of Workflow position. `task complete` changes
 status; `task move end` records the move and requests completion. If completion
 fails, retry it alone without replaying the Flow. Linear completion and reopening
 leave execution intact; reopening supersedes old requests. A Task with a PR needs
-authoritative merge and a durable disposition: linked follow-ups filed, or none
-needed with a reason. A PR-less Task may finish with research files and commits;
+authoritative merge. Record independently accepted later work as ordinary Tasks
+and linking comments. A PR-less Task may finish with research files and commits;
 unsafe or occupied checkouts are retained. Completion does not settle Session
 turns or process exits. Repeat completion to retry pending planning writeback.
 
-`ship` waits for merge, then performs follow-through. A manual merge or stopped
-finishing Flow stays visibly pending until the next Task/Wave operation recovers
-it with `finish-delivery`, after inspecting live Flow processes. No fresh gate or landing
-is required. The source completes after filing, without waiting for the children.
+`ship` runs gate and waits for merge. Its caller or Workflow arrival owns Task
+completion. After a stopped Flow or manual merge, inspect live processes and
+retry only unfinished operations. Complete the delivered source outcome without
+waiting for independent later Tasks. A failed linking comment retries only that
+comment; the saved Task remains.
 
 A due follow-up returns on its owning Wave's next operation, even if unstarted.
 Surface it for selection unless its brief already authorizes a concrete unattended
@@ -459,7 +459,7 @@ check. Filing installs no schedule; an open conversation schedules no next turn.
 Without an installed Wave schedule, report no automatic check scheduled. Missing
 installation or provider evidence stays unknown, and time is never proof of success.
 
-An early Linear completion cannot supply local merge or follow-through evidence.
+An early Linear completion cannot supply local merge evidence.
 Canceled and duplicate issues cannot become successful completion. Each additional
 PR belongs to another Task, stacked where dependent; a reopened Task keeps its
 same PR.

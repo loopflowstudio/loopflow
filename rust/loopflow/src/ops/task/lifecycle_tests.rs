@@ -8,13 +8,19 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use axum::{routing::post, Router};
+use axum::{extract::State, routing::post, Json, Router};
 use serde_json::{json, Value};
 
-use super::{fixture, respond, Linear};
+use crate::id::WaveId;
 use crate::lf::commands::work_watch::{WorkContent, WorkFrame};
+use crate::linear::{LinearIssueId, LinearProjectId};
 use crate::ops::linear::{LinearRefresh, LinearTestContext, LINEAR_TEST_CONTEXT};
-use crate::ops::task::follow_through::{task_follow_up, FollowUpOptions};
+use crate::store::{open_ephemeral_store, CredentialType, ProviderToken, StorageConfig};
+use crate::work::project::{Project, ProjectId};
+use crate::work::task::{
+    GithubPr, LinearWritebackState, Observation, PrPublication, Task, TaskId, TaskPr, TaskPrId,
+};
+use crate::work::wave::Wave;
 
 struct Running {
     child: Child,
@@ -152,7 +158,6 @@ fn capture(binary: &Path, repo: &Path, home: &Path) -> Value {
             WorkContent::Planning(Some(part)) => {
                 let projected = task_row(&serde_json::to_value(&part.roadmap).unwrap());
                 assert_eq!(projected["runtime"]["status"], row["runtime"]["status"]);
-                assert_eq!(projected["follow_through"], row["follow_through"]);
                 planning = Some(frame);
             }
             WorkContent::Task(Some(part)) => {
@@ -174,23 +179,6 @@ fn contract(population: &Value) -> Value {
         let capture = &population[phase];
         let execution = &capture["status"]["execution"];
         let workflow = &execution["work"]["workflow"];
-        let links: Vec<_> = execution["follow_through"]["links"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|link| {
-                json!([
-                    link["identifier"]
-                        .as_str()
-                        .map(|id| if id.starts_with("lf-") {
-                            "local-follow-up"
-                        } else {
-                            id
-                        }),
-                    link["due"]
-                ])
-            })
-            .collect();
         let history: Vec<_> = workflow["history"]
             .as_array()
             .unwrap()
@@ -201,7 +189,7 @@ fn contract(population: &Value) -> Value {
             .map(|flow| json!({"state":flow["entry"]["state"], "steps":flow["steps"].as_array().unwrap().iter()
                 .map(|step| step["outcome"].clone()).collect::<Vec<_>>()})).collect();
         phases.insert(phase.into(), json!({
-            "status": execution["status"], "pr": capture["row"]["pr"]["phase"], "links":links,
+            "status": execution["status"], "pr": capture["row"]["pr"]["phase"],
             "position": [workflow["position"]["kind"],workflow["position"]["node"],workflow["position"]["running"]],
             "history": history, "flows": flows,
         }));
@@ -210,7 +198,7 @@ fn contract(population: &Value) -> Value {
 }
 
 #[test]
-fn merged_follow_up_completion_and_arrival_share_cli_monitor_and_desktop_evidence() {
+fn ordinary_task_comments_and_completion_preserve_live_flow_and_arrival() {
     let _lock = crate::journal::test_env_lock();
     let path = std::env::var_os("PATH").unwrap();
     let mut keys: Vec<_> = std::env::vars_os()
@@ -299,17 +287,13 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
         let merged = capture(&binary, repo.path(), home.path());
         assert_eq!(merged["status"]["execution"]["work"]["workflow"]["position"]["running"], true);
         assert_ne!(merged["status"]["execution"]["status"], "done");
-        assert!(crate::ops::task::task_complete(repo.path(), "FIX-1", None).is_err());
         // Exercise buffered filing while the selected planning transport is offline.
         provider.lock().unwrap().unavailable = true;
-        task_follow_up(repo.path(), "FIX-1", &FollowUpOptions {
-            key: Some("installed".into()), title: Some("Verify installed release".into()),
-            notes: Some("Run the released command; retain failures.".into()), due: Some("2026-10-09".into()),
-            ..Default::default()
-        }).unwrap();
-        task_follow_up(repo.path(), "FIX-1", &FollowUpOptions {
-            finish: Some("Accepted installed check filed".into()), ..Default::default()
-        }).unwrap();
+        let child = crate::ops::task::task_create(repo.path(), Some(wave.slug()),
+            Some("Verify installed release".into()), Some("Run the released command; retain failures.".into())).unwrap();
+        let thread = crate::ops::task::task_comment(repo.path(), "FIX-1", None,
+            Some(&format!("Installed verification continues in {}.", child.identifier)), false).unwrap();
+        assert!(thread.comments.iter().any(|comment| comment.body.contains(&child.identifier)));
         crate::ops::task::task_complete(repo.path(), "FIX-1", None).unwrap();
         let completed = capture(&binary, repo.path(), home.path());
         assert_eq!(completed["status"]["execution"]["status"], "done");
@@ -325,21 +309,210 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
         assert_eq!(completions, 1);
         let flows: i64 = db.query_row("SELECT count(*) FROM flow_processes f JOIN processes p ON p.id=f.lf_process_id WHERE p.outcome='succeeded'", [], |row| row.get(0)).unwrap();
         assert_eq!(flows, 1);
-        let child_id = store.sqlite.task_follow_through(&source.id).unwrap().intents[0].issue_id.clone();
-        let child = runtime.block_on(store.get_task_by_issue(&child_id)).unwrap().unwrap();
         assert!(child.worktree.is_none());
         assert!(child.linear_id.is_none());
         assert_ne!(store.sqlite.task_state(&child.id).unwrap(), crate::durable::TaskState::Done);
         // Completion and filing are saved locally; provider delivery has its own receipt.
-        assert!(provider.lock().unwrap().issues.is_empty());
+        assert!(provider.lock().unwrap().unavailable);
         let population = json!({"merged":merged,"completed":completed,"arrived":arrived});
         if std::env::var_os("LOOPFLOW_UPDATE_LIFECYCLE_FIXTURE").is_some() {
             let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/dto/task_lifecycle.json");
             fs::write(path, serde_json::to_string_pretty(&population).unwrap() + "\n").unwrap();
         } else {
-            let frozen: Value = serde_json::from_str(include_str!("../../../../../../../tests/fixtures/dto/task_lifecycle.json")).unwrap();
+            let frozen: Value = serde_json::from_str(include_str!("../../../../../tests/fixtures/dto/task_lifecycle.json")).unwrap();
             assert_eq!(contract(&population), contract(&frozen));
         }
     });
     server.abort();
+}
+
+#[derive(Default)]
+struct Linear {
+    unavailable: bool,
+}
+
+async fn respond(
+    State(state): State<Arc<Mutex<Linear>>>,
+    Json(request): Json<Value>,
+) -> Json<Value> {
+    if state.lock().unwrap().unavailable {
+        return Json(json!({"errors": [{"message": "provider unavailable"}]}));
+    }
+    let query = request["query"].as_str().unwrap();
+    let data = if query.contains("ListTeams") {
+        json!({"teams": {"nodes": [{"id": "team-1", "name": "Fixture", "key": "FIX",
+            "description": "<!-- loopflow-repository: loopflowstudio/fixture -->"}]}})
+    } else if query.contains("IssueComments") {
+        json!({"issue": {"comments": {"nodes": [], "pageInfo": {"hasNextPage": false, "endCursor": null}}}})
+    } else if query.contains("IssueOwnership") {
+        json!({"issue": {"id":"source-issue", "identifier":"FIX-1", "url":"https://linear.app/fixture/issue/FIX-1",
+            "title":"Deliver the command", "description":"", "dueDate":null,
+            "updatedAt":"2026-10-07T00:00:00Z", "completedAt":null, "branchName":null,
+            "prioritySortOrder":1.0, "sortOrder":1.0, "assignee":null, "state":{"type":"unstarted"},
+            "team":{"id":"team-1"}, "project":{"id":"project-1", "name":"Provider destination",
+                "description":"", "content":"workflow: feature", "status":{"type":"started"},
+                "updatedAt":"2026-10-07T00:00:00Z", "archivedAt":null,
+                "initiatives":{"nodes":[{"id":"initiative-1"}]}, "teams":{"nodes":[{"id":"team-1"}]}}}})
+    } else {
+        panic!("unexpected fixture query: {query}");
+    };
+    Json(json!({"data":data}))
+}
+
+fn fixture(
+    runtime: &tokio::runtime::Runtime,
+) -> (
+    tempfile::TempDir,
+    crate::store::SharedStore,
+    loopflow_test_support::TestRepo,
+    Task,
+    Wave,
+) {
+    let directory = tempfile::tempdir().unwrap();
+    let database = directory.path().join("loopflow.db");
+    let store = Arc::new(
+        runtime
+            .block_on(open_ephemeral_store(&StorageConfig::sqlite(
+                database.clone(),
+            )))
+            .unwrap(),
+    );
+    let repo = loopflow_test_support::TestRepo::new();
+    assert!(std::process::Command::new("git")
+        .args([
+            "remote",
+            "set-url",
+            "origin",
+            "https://github.com/loopflowstudio/fixture.git"
+        ])
+        .current_dir(repo.path())
+        .status()
+        .unwrap()
+        .success());
+    std::fs::create_dir_all(repo.path().join(".lf")).unwrap();
+    std::fs::write(
+        repo.path().join(".lf/config.yaml"),
+        "linear:\n  team: team-1\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(repo.path().join("wave/product")).unwrap();
+    std::fs::write(
+        repo.path().join("wave/product/GOAL.md"),
+        "---\nlinear:\n  initiative: initiative-1\n---\nProduct\n",
+    )
+    .unwrap();
+    repo.create_file(
+        ".lf/workflows/delivery.yaml",
+        "edges:\n  - {from: start, to: end, flow: delivery}\n",
+    );
+    let now = time::OffsetDateTime::now_utc();
+    let wave = Wave::new(
+        WaveId::new(),
+        "product".into(),
+        repo.path().canonicalize().unwrap().display().to_string(),
+    );
+    let project = Project {
+        id: ProjectId::new(),
+
+        linear_id: Some(LinearProjectId::new("project-1").unwrap()),
+        summary: String::new(),
+        slug: "chapter".into(),
+        name: "Chapter".into(),
+        workflow: "feature".into(),
+        status: crate::work::project::ProjectStatus::Started,
+        description: String::new(),
+        krs: Vec::new(),
+        metric_targets: Vec::new(),
+        pm_snapshot_synced_at: Some(now.unix_timestamp()),
+
+        wave_id: wave.id().clone(),
+        abandon_intent: None,
+        created_at: now,
+        updated_at: now,
+    };
+    let task = Task {
+        id: TaskId::new(),
+
+        linear_id: Some(LinearIssueId::new("source-issue").unwrap()),
+        revision: 0,
+        identifier: "FIX-1".into(),
+        title: "Deliver the command".into(),
+        description: String::new(),
+        pm_snapshot_synced_at: Some(now.unix_timestamp()),
+
+        pm_writeback: LinearWritebackState::Current,
+        wave_id: wave.id().clone(),
+        project_id: project.id.clone(),
+        worktree: Some(repo.path().canonicalize().unwrap()),
+        workspace_slug: "delivery".into(),
+        branch: "main".into(),
+        base_commit: repo.head_sha(),
+        parent_pr_id: None,
+        agent: None,
+        abandon_intent: None,
+        created_at: now,
+        updated_at: now,
+        rank: 0,
+        assignee: None,
+        due_date: None,
+        state: None,
+        completed: false,
+        completed_at: None,
+        observation: Observation::NotRequired,
+    };
+    let pr = TaskPr {
+        id: TaskPrId::new(),
+        task_id: task.id.clone(),
+        sequence: 1,
+        slug: task.workspace_slug.clone(),
+        branch: task.branch.clone(),
+        base_commit: task.base_commit.clone(),
+        parent_pr_id: None,
+        publication: Some(PrPublication {
+            requested_at: now,
+            presentation: None,
+            merge: None,
+            github: Some(GithubPr {
+                number: 1,
+                url: "https://github.com/loopflowstudio/fixture/pull/1".into(),
+                head_sha: Some(repo.head_sha()),
+            }),
+        }),
+        merge_commit: None,
+        abandoned_at: None,
+        ci_observation: None,
+        github_observation: None,
+        linear_attachment_id: None,
+        linear_comment_id: None,
+        linear_link_error: None,
+        created_at: now,
+        updated_at: now,
+    };
+    runtime.block_on(async {
+        store.create_wave(&wave).await.unwrap();
+        store.create_project(&project).await.unwrap();
+        crate::store::sqlite::project_selection::write_project_binding(
+            &store.sqlite,
+            wave.id(),
+            None,
+            project.linear_id.as_ref().unwrap().as_str(),
+            &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
+        )
+        .unwrap();
+        store.seed_task(&task, &pr).await.unwrap();
+        store
+            .upsert_provider_token(&ProviderToken {
+                provider: "linear".into(),
+                access_token: "fixture-token".into(),
+                refresh_token: None,
+                oauth_client_id: None,
+                expires_at: Some(now.unix_timestamp() + 3600),
+                login: None,
+                updated_at: now.unix_timestamp(),
+                credential_type: CredentialType::OAuth,
+            })
+            .await
+            .unwrap();
+    });
+    (directory, store, repo, task, wave)
 }

@@ -228,7 +228,7 @@ struct RegistryQueryTests {
           "name": "Wire it",
           "description": "",
           "rank": 1,
-          "completed": false, "state": "unstarted", "completed_at": null, "due_date": null, "follow_up_sources": [], "acquisition": {"state": "available", "observed_at": null}, "linear_id": null, "sync": {"connected": false, "changes": []},
+          "completed": false, "state": "unstarted", "completed_at": null, "due_date": null, "acquisition": {"state": "available", "observed_at": null}, "linear_id": null, "sync": {"connected": false, "changes": []},
           "assignee": null
         },
         "reference": {
@@ -248,7 +248,7 @@ struct RegistryQueryTests {
           "started": true
         },
         "directive": null,
-        "workflow_name":"feature","latest_flow_process":null,"execution":null,"run_control":{"unavailable":null}, "follow_through": {"intents":[],"links":[],"reason":null,"needs_conversion":false,"scope_notes":[]},
+        "workflow_name":"feature","latest_flow_process":null,"execution":null,"run_control":{"unavailable":null},
         "next_move": {
           "owner": "task",
           "reason": "ready"

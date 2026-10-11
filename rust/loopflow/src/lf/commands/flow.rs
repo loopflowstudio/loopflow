@@ -44,15 +44,7 @@ pub fn run(
     if let Some(WorkRef::Task(task)) = binding.map(|binding| &binding.work) {
         block_on(async {
             let store = open_flow_store().await?;
-            // Judge the compiled work, not the Flow's name: a local override must
-            // not smuggle an implementation edge into completed delivery recovery.
-            if matches!(items.as_slice(), [ConcreteStep::Skill(step)]
-                if step.skill.name == "follow-through" && step.returns.is_none())
-            {
-                store.sqlite.require_task_delivery(task)?;
-            } else {
-                store.sqlite.require_task_launch(task)?;
-            }
+            store.sqlite.require_task_launch(task)?;
             Ok(())
         })?;
     }

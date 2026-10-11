@@ -619,24 +619,22 @@ One typed writer owns local/imported Work; outages buffer without fallback/elect
 Execution/attempts stay local; retain causal losers and uncertainty. The generic
 PM facade is removed; Task edits/comments and exchange have concrete owners.
 
-Canonical readers use Work and narrow retained claims. Delivery needs accepted
-revision plus archive/membership eligibility; foreign facts grant no ownership.
-Missing issue content cannot hide a canonical parent's archive or membership
-dispute. Projection, receipts and acquisition now read concrete observation columns;
-whole Project/issue bodies are removed by the Task draft. Partial fields retain
-presence and prose age. Public snapshot/detail envelopes and Store ingestion APIs are removed. Private
-Linear acquisition commits observations with Work; projection uses retained IDs.
-Ordering takes local IDs; new disposition receipts keep state evidence only. Rejected
-membership must retain its dispute marker even when Work acceptance rolls back.
-Concrete Linear bindings are separate from repository transport selection.
-Populated fixtures prove stored Session/control preservation, not provider control.
-SQLite, Git and Linear field receipts share typed Work values. Creation retains
-captured inputs; older acknowledgments cannot clear later saves. Explicit null
-membership differs from omission; acquisition resolves provider IDs before receipt
-comparison. Journal routes replace membership/active inventories, retaining moved,
-missing and rejected Work; configuration selects status. Source proofs at `47b5edb701`
-include headless refresh, not installation. Released SQLite preservation remains
-required; Jack Heart excludes old-version Git decoders.
+Canonical readers and one typed writer use Work; Linear privately owns acquisition,
+observations and acceptance. Delivery requires accepted revision and independent
+archive/membership eligibility. Partial presence, prose age, rejected disputes and
+foreign ownership survive; projection reuses retained IDs. Typed creation/field
+receipts preserve attempted inputs, later saves, explicit null and canonical IDs.
+Journal routes replace membership/active inventories; configuration selects status.
+Source and headless refresh proof: `47b5edb701`. Released SQLite stays immutable;
+Jack Heart excludes old-version Git decoders. Fixtures prove stored Session/control
+preservation, not configured provider control or installation.
+
+October 11 source deletes the active FollowThrough model, completion ritual,
+CLI/DTO/UI consumers and finish-delivery Flow. Remaining work uses ordinary Tasks
+and comments. Private event conversion retains original uncertain creation/relation
+IDs; failed comments cannot discard saved Tasks. Merge checks, Workflow and Process
+preservation remain separate. Focused recovery, CLI/Flow and headless Desktop
+checks pass; cron unification, affected/materialized gate and fresh review remain.
 
 Jack's `19116a1b`: stack 427 on 412; land afterward. No 412 landing authority.
 Default-Git enrollment conflicts with 427's conservative first-start

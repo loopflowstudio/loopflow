@@ -20,13 +20,14 @@ pub(crate) async fn sync_repository_exports(store: &Store, repo: &str) -> OpsRes
     if !super::linear_observe::connected(repo) {
         return Ok(());
     }
+    store.sqlite.recover_task_filings(repo).map_err(message)?;
     // Projects precede Tasks; each failure is bounded and leaves other exports eligible.
     for work in store.sqlite.planning_export_owners(repo).map_err(message)? {
         if let Err(error) = sync_export(store, Path::new(repo), &work).await {
             tracing::debug!(%error, "planning export pending");
         }
     }
-    sync_follow_through_relations(store, Path::new(repo)).await?;
+    sync_retained_relations(store, Path::new(repo)).await?;
     Ok(())
 }
 
@@ -231,10 +232,10 @@ async fn observe(
 
 // Local filing settles independently. Exporting either endpoint makes its retained
 // relation eligible, including after the source Task has already completed.
-async fn sync_follow_through_relations(store: &Store, repo: &Path) -> OpsResult<()> {
+async fn sync_retained_relations(store: &Store, repo: &Path) -> OpsResult<()> {
     for relation in store
         .sqlite
-        .pending_follow_through_relations(&repo.to_string_lossy())
+        .pending_retained_relations(&repo.to_string_lossy())
         .map_err(message)?
     {
         let path = store
@@ -258,7 +259,7 @@ async fn sync_follow_through_relations(store: &Store, repo: &Path) -> OpsResult<
                 .map_err(message)?;
             store
                 .sqlite
-                .confirm_follow_through_relation(&relation)
+                .confirm_retained_relation(&relation)
                 .map_err(message)
         };
         match tokio::time::timeout(Duration::from_secs(5), attempt).await {

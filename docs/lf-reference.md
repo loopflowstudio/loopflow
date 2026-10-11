@@ -1548,23 +1548,6 @@ Check authorized deliveries once, then exit
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
-## lf task follow-up
-
-File or link follow-up Tasks after merge, then record the disposition
-
-| Argument | What it does |
-|---|---|
-| `<issue>` | issue |
-| `--title` | title |
-| `--notes` | notes |
-| `--due` | due |
-| `--wave` | wave |
-| `--existing` | existing |
-| `--none` | none |
-| `--finish` | finish |
-| `--key` | Stable obligation key; use a distinct key for each additional follow-up |
-| `--help / -h` | Print help |
-
 ## lf task automate
 
 Enable or hold CI repair for a Task without interrupting running work

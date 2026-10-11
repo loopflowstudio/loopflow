@@ -719,18 +719,6 @@ private struct WaveTaskWorkView: View {
                 Text("\(task.task.historyLabel ?? task.runtime?.status.label ?? "unstarted") · next: \(task.nextMove.owner.rawValue)")
                     .font(Typography.caption(10))
                     .foregroundStyle(palette.textSecondary)
-                if let label = task.task.followUpLabel {
-                    Text(label)
-                        .font(Typography.caption(10))
-                        .foregroundStyle(palette.textSecondary)
-                }
-                if let label = task.followThrough.deliveryLabel(
-                    merged: task.pr?.phase == .merged, done: task.runtime?.status == .done
-                ) {
-                    Text(label)
-                        .font(Typography.caption(10))
-                        .foregroundStyle(palette.textSecondary)
-                }
                 if let directive = task.directive {
                     Text("direction v\(directive.version) · \(directive.incorporatedAt == nil ? "pending" : "incorporated")")
                         .font(Typography.caption(10))

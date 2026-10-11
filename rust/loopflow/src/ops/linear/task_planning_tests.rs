@@ -2596,15 +2596,6 @@ fi
                         &mut task,
                     ))
                     .unwrap();
-                fixture
-                    .store
-                    .sqlite
-                    .finish_follow_through(
-                        &task.id,
-                        "Accepted checks complete; no later obligation",
-                        true,
-                    )
-                    .unwrap();
             }
             task
         };

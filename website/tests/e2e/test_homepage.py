@@ -69,7 +69,7 @@ def test_pictures_and_sections_tell_the_page(homepage: Page) -> None:
     expect(homepage.locator("#mac .tasks li")).to_have_count(5)
     expect(homepage.locator(".system .wfs > li code")).to_have_text(["feature", "code", "research"])
     card = homepage.locator(".clihero .term").text_content()
-    for command in ("lf wt create", "--machine mini", "lf pr open", "lf land --watch", "lf account"):
+    for command in ("lf wt create", "--machine mini", "lf pr open", "lf land --wait-and-fix", "lf account"):
         assert command in card
     expect(homepage.locator("#works li")).to_have_count(5)
     for link in homepage.locator("#works a").all():

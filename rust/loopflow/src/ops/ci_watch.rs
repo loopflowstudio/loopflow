@@ -774,12 +774,6 @@ pub struct WatchOptions {
     pub once: bool,
     /// Stop when this process exits; Desktop passes its own pid.
     pub parent_pid: Option<u32>,
-    /// Stop once this PR is no longer open; `lf land --watch` passes its own.
-    pub until_pr: Option<u32>,
-}
-
-fn left_open_list(state: &CiWatchState, pr: u32) -> bool {
-    state.prs.iter().all(|open| open.number != pr)
 }
 
 fn parent_gone(options: &WatchOptions) -> bool {
@@ -812,8 +806,7 @@ pub fn watch(repo: &Path, options: WatchOptions) -> OpsResult<()> {
             if let Some(lock) = try_lock(&root)? {
                 break lock;
             }
-            // Standing by in a Task checkout would hold that watcher's repair off.
-            if options.once || options.until_pr.is_some() {
+            if options.once {
                 println!("another watcher is live for this repository; nothing to do");
                 return Ok(());
             }
@@ -863,13 +856,6 @@ pub fn watch(repo: &Path, options: WatchOptions) -> OpsResult<()> {
             write_state(&root, &watcher.state)?;
             if options.once {
                 return outcome.map(|_| ());
-            }
-            if clean
-                && options
-                    .until_pr
-                    .is_some_and(|pr| left_open_list(&watcher.state, pr))
-            {
-                return Ok(());
             }
             if !wait(delay, &options).await {
                 return Ok(());

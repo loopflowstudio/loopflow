@@ -1079,11 +1079,7 @@ fn ci_watch_cmd(cmd: &crate::lf::CiCommand) -> Result<()> {
     match (install, uninstall, status) {
         (false, false, false) => Ok(ci_watch::watch(
             &repo,
-            ci_watch::WatchOptions {
-                once,
-                parent_pid,
-                until_pr: None,
-            },
+            ci_watch::WatchOptions { once, parent_pid },
         )?),
         (true, _, _) => {
             require_release_cron_binary()?;

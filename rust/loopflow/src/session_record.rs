@@ -23,8 +23,7 @@ use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
-use crate::agent::stream::{ResultSubtype, StreamEvent};
-use crate::chat::types::{ConversationEvent, ConversationItem, ItemDelta, Lifecycle, TurnUsage};
+use crate::chat::types::{ConversationEvent, ItemDelta, TurnUsage};
 use crate::naming::generated_session_title;
 use crate::store::{StoreError, StoreResult};
 
@@ -1382,77 +1381,6 @@ fn provider_session_from_events(
     Ok(provider_session)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct FinalAnswer {
-    pub text: String,
-    pub exact: bool,
-}
-
-#[derive(Default)]
-struct TurnProse {
-    tagged: Option<String>,
-    untagged: Option<String>,
-    streamed: String,
-}
-
-impl TurnProse {
-    fn answer(self) -> Option<FinalAnswer> {
-        self.tagged
-            .map(|text| FinalAnswer { text, exact: true })
-            .or_else(|| self.untagged.map(|text| FinalAnswer { text, exact: true }))
-            .or_else(|| {
-                (!self.streamed.is_empty()).then_some(FinalAnswer {
-                    text: self.streamed,
-                    exact: false,
-                })
-            })
-    }
-}
-
-/// Reduce retained observations; only a successful provider turn supplies a conclusion.
-pub(crate) fn final_answer(events: Vec<serde_json::Value>) -> std::io::Result<Option<FinalAnswer>> {
-    let mut turns = HashMap::<String, TurnProse>::new();
-    let mut answer = None;
-    for event in events {
-        let envelope: EventEnvelope =
-            serde_json::from_value(event).map_err(std::io::Error::other)?;
-        if envelope.schema_version != SCHEMA_VERSION {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "unsupported capture event schema",
-            ));
-        }
-        let CaptureEvent::Conversation { event } = envelope.event else {
-            continue;
-        };
-        match *event {
-            ConversationEvent::TextDelta { turn_id, content } => {
-                turns
-                    .entry(turn_id)
-                    .or_default()
-                    .streamed
-                    .push_str(&content);
-            }
-            ConversationEvent::ItemCompleted {
-                turn_id,
-                item: ConversationItem::Message { text, phase, .. },
-            } => match phase.as_deref() {
-                Some("final_answer") => turns.entry(turn_id).or_default().tagged = Some(text),
-                None => turns.entry(turn_id).or_default().untagged = Some(text),
-                Some(_) => {}
-            },
-            ConversationEvent::TurnCompleted { turn_id, status } => {
-                let prose = turns.remove(&turn_id).unwrap_or_default();
-                if status == Lifecycle::Completed {
-                    answer = prose.answer().or(answer);
-                }
-            }
-            _ => {}
-        }
-    }
-    Ok(answer)
-}
-
 pub(crate) fn write_provider_session(
     dir: &Path,
     agent_session: &AgentSessionId,
@@ -2457,10 +2385,6 @@ impl CaptureHandle {
         self.with_capture(|capture| capture.record_raw(stream, line));
     }
 
-    pub(crate) fn record_stream_event(&self, event: &StreamEvent) {
-        self.with_capture(|capture| capture.record_stream_event(event));
-    }
-
     pub(crate) fn record_conversation(&self, event: ConversationEvent) {
         self.with_capture(|capture| capture.record_conversation(event));
     }
@@ -2541,7 +2465,7 @@ impl CaptureHandle {
         });
     }
 
-    pub(crate) fn final_answer(&self) -> StoreResult<Option<FinalAnswer>> {
+    pub(crate) fn final_answer(&self) -> StoreResult<Option<String>> {
         let capture = self.0.lock().expect("Session capture mutex poisoned");
         row_store(&capture.dir)?.input_final_answer(&capture.manifest.artifact_key)
     }
@@ -2753,52 +2677,6 @@ impl SessionCapture {
             stream: stream.to_string(),
             line: line.to_string(),
         })
-    }
-
-    fn record_stream_event(&mut self, event: &StreamEvent) -> std::io::Result<()> {
-        match event {
-            StreamEvent::Text(text) => self.append_event(CaptureEvent::Text { text: text.clone() }),
-            StreamEvent::ToolUse { name, summary } => self.append_event(CaptureEvent::ToolUse {
-                name: name.clone(),
-                summary: summary.clone(),
-            }),
-            StreamEvent::Usage {
-                input_tokens,
-                output_tokens,
-                cache_read_tokens,
-            } => self.append_usage(
-                TurnUsage {
-                    input_tokens: *input_tokens,
-                    output_tokens: *output_tokens,
-                    cache_read_tokens: *cache_read_tokens,
-                    ..TurnUsage::default()
-                },
-                false,
-            ),
-            StreamEvent::Result {
-                subtype,
-                cost_usd,
-                duration_secs,
-            } => {
-                if cost_usd.is_some() {
-                    self.append_usage(
-                        TurnUsage {
-                            cost_usd: *cost_usd,
-                            ..TurnUsage::default()
-                        },
-                        true,
-                    )?;
-                }
-                self.append_event(CaptureEvent::Result {
-                    outcome: match subtype {
-                        ResultSubtype::Success => "completed",
-                        ResultSubtype::Error => "failed",
-                    }
-                    .to_string(),
-                    duration_secs: *duration_secs,
-                })
-            }
-        }
     }
 
     fn record_conversation(&mut self, event: ConversationEvent) -> std::io::Result<()> {
@@ -3316,10 +3194,9 @@ mod tests {
         write_provider_client, AgentProcessRequest, CaptureHandle, SessionCaptureManifest,
         SessionCaptureSpec, SubjectAttribution, TerminalReceipt,
     };
-    use crate::agent::stream::{ResultSubtype, StreamEvent};
     use crate::agent::AgentCapabilities;
     use crate::agent::AgentConfig;
-    use crate::chat::types::{ConversationEvent, ConversationItem, TurnUsage};
+    use crate::chat::types::{ConversationEvent, TurnUsage};
 
     #[test]
     fn terminal_attachment_probe() {
@@ -3961,10 +3838,9 @@ mod tests {
 
         capture.mark_spawn_requested();
         capture.record_raw("stderr", "provider diagnostic");
-        capture.record_stream_event(&StreamEvent::Text("provider response".to_string()));
-        capture.record_stream_event(&StreamEvent::ToolUse {
-            name: "shell".to_string(),
-            summary: "inspect files".to_string(),
+        capture.record_conversation(ConversationEvent::TextDelta {
+            turn_id: "provider-turn".to_string(),
+            content: "provider response".to_string(),
         });
         capture.record_conversation(ConversationEvent::UsageCheckpoint {
             turn_id: "provider-turn".to_string(),
@@ -3984,8 +3860,7 @@ mod tests {
         assert!(!events.contains("\"final_receipt\":true"));
         assert!(events.contains("\"type\":\"user_input\""));
         assert!(events.contains("\"type\":\"provider_output\""));
-        assert!(events.contains("\"type\":\"text\""));
-        assert!(events.contains("\"type\":\"tool_use\""));
+        assert!(events.contains("\"type\":\"text_delta\""));
         let terminal = fs::read(dir.join("terminal.json")).unwrap();
         let terminal: TerminalReceipt = serde_json::from_slice(&terminal).unwrap();
         assert_eq!(terminal.outcome, "completed");
@@ -4004,45 +3879,6 @@ mod tests {
         let unchanged: TerminalReceipt =
             serde_json::from_slice(&fs::read(dir.join("terminal.json")).unwrap()).unwrap();
         assert_eq!(unchanged.outcome, "completed");
-    }
-
-    #[test]
-    fn final_answer_reader_returns_the_conclusion_without_commentary() {
-        let _lock = crate::journal::test_env_lock();
-        let _ambient = crate::test_ambient::EnvGuard::new();
-        let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
-        let home = tempfile::tempdir().unwrap();
-        let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
-        capture.record_conversation(ConversationEvent::ItemCompleted {
-            turn_id: "turn-1".to_string(),
-            item: ConversationItem::Message {
-                id: "commentary".to_string(),
-                text: "still working".to_string(),
-                phase: Some("commentary".to_string()),
-            },
-        });
-        capture.record_conversation(ConversationEvent::ItemCompleted {
-            turn_id: "turn-1".to_string(),
-            item: ConversationItem::Message {
-                id: "answer".to_string(),
-                text: "final report".to_string(),
-                phase: Some("final_answer".to_string()),
-            },
-        });
-        capture.record_conversation(ConversationEvent::TurnCompleted {
-            turn_id: "turn-1".to_string(),
-            status: crate::chat::types::Lifecycle::Completed,
-        });
-        capture.finish("completed").unwrap();
-
-        fs::remove_dir_all(capture.artifact_dir()).unwrap();
-        assert_eq!(
-            capture.final_answer().unwrap(),
-            Some(super::FinalAnswer {
-                text: "final report".to_string(),
-                exact: true,
-            })
-        );
     }
 
     #[test]
@@ -4078,6 +3914,8 @@ mod tests {
         });
         capture.finish("completed").unwrap();
 
+        // Capture prose remains readable, but cannot substitute for native turn output.
+        assert_eq!(capture.final_answer().unwrap(), None);
         let file = fs::read_to_string(capture.artifact_dir().join("events.jsonl")).unwrap();
         assert_eq!(file.matches("item/agentMessage/delta").count(), 4);
         assert_eq!(file.matches("\"type\":\"text_delta\"").count(), 4);
@@ -4114,37 +3952,6 @@ mod tests {
                 r#"{"method":"item/completed","params":{}}"#,
                 "turn_completed:",
             ]
-        );
-    }
-
-    #[test]
-    fn final_answer_reader_recovers_legacy_streamed_prose_honestly() {
-        let home = tempfile::tempdir().unwrap();
-        let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
-        capture.record_conversation(ConversationEvent::TurnStarted {
-            turn_id: "turn-1".to_string(),
-        });
-        capture.record_conversation(ConversationEvent::TextDelta {
-            turn_id: "turn-1".to_string(),
-            content: "working\n".to_string(),
-        });
-        capture.record_conversation(ConversationEvent::TextDelta {
-            turn_id: "turn-1".to_string(),
-            content: "final report".to_string(),
-        });
-        capture.record_conversation(ConversationEvent::TurnCompleted {
-            turn_id: "turn-1".to_string(),
-            status: crate::chat::types::Lifecycle::Completed,
-        });
-        capture.finish("completed").unwrap();
-
-        fs::remove_dir_all(capture.artifact_dir()).unwrap();
-        assert_eq!(
-            capture.final_answer().unwrap(),
-            Some(super::FinalAnswer {
-                text: "working\nfinal report".to_string(),
-                exact: false,
-            })
         );
     }
 
@@ -4690,10 +4497,15 @@ mod tests {
         let dir = capture.artifact_dir();
 
         capture.mark_spawn_requested();
-        capture.record_stream_event(&StreamEvent::Usage {
-            input_tokens: Some(10),
-            output_tokens: Some(4),
-            cache_read_tokens: None,
+        capture.record_conversation(ConversationEvent::UsageCheckpoint {
+            turn_id: "provider-turn".to_string(),
+            usage: TurnUsage {
+                input_tokens: Some(10),
+                output_tokens: Some(4),
+                cache_read_tokens: None,
+                ..TurnUsage::default()
+            },
+            final_receipt: false,
         });
         capture
             .0
@@ -4705,10 +4517,15 @@ mod tests {
                 Some(crate::store::ProviderAccountId::parse("fallback-account").unwrap()),
             )
             .unwrap();
-        capture.record_stream_event(&StreamEvent::Usage {
-            input_tokens: Some(12),
-            output_tokens: Some(5),
-            cache_read_tokens: None,
+        capture.record_conversation(ConversationEvent::UsageCheckpoint {
+            turn_id: "provider-turn".to_string(),
+            usage: TurnUsage {
+                input_tokens: Some(12),
+                output_tokens: Some(5),
+                cache_read_tokens: None,
+                ..TurnUsage::default()
+            },
+            final_receipt: false,
         });
         capture.finish("completed").expect("settle capture");
 
@@ -4763,23 +4580,38 @@ mod tests {
             .expect("publish Session capture manifest");
         let dir = capture.artifact_dir();
 
-        capture.record_stream_event(&StreamEvent::Usage {
-            input_tokens: Some(10),
-            output_tokens: None,
-            cache_read_tokens: None,
+        capture.record_conversation(ConversationEvent::UsageCheckpoint {
+            turn_id: "provider-turn".to_string(),
+            usage: TurnUsage {
+                input_tokens: Some(10),
+                output_tokens: None,
+                cache_read_tokens: None,
+                ..TurnUsage::default()
+            },
+            final_receipt: false,
         });
-        capture.record_stream_event(&StreamEvent::Usage {
-            input_tokens: None,
-            output_tokens: Some(4),
-            cache_read_tokens: None,
+        capture.record_conversation(ConversationEvent::UsageCheckpoint {
+            turn_id: "provider-turn".to_string(),
+            usage: TurnUsage {
+                input_tokens: None,
+                output_tokens: Some(4),
+                cache_read_tokens: None,
+                ..TurnUsage::default()
+            },
+            final_receipt: false,
         });
         capture.record_conversation(ConversationEvent::TurnStarted {
             turn_id: "provider-turn-2".to_string(),
         });
-        capture.record_stream_event(&StreamEvent::Usage {
-            input_tokens: Some(3),
-            output_tokens: None,
-            cache_read_tokens: None,
+        capture.record_conversation(ConversationEvent::UsageCheckpoint {
+            turn_id: "provider-turn-2".to_string(),
+            usage: TurnUsage {
+                input_tokens: Some(3),
+                output_tokens: None,
+                cache_read_tokens: None,
+                ..TurnUsage::default()
+            },
+            final_receipt: false,
         });
         capture.finish("completed").unwrap();
 
@@ -4805,15 +4637,25 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
 
-        capture.record_stream_event(&StreamEvent::Usage {
-            input_tokens: Some(10),
-            output_tokens: None,
-            cache_read_tokens: None,
+        capture.record_conversation(ConversationEvent::UsageCheckpoint {
+            turn_id: "provider-turn".to_string(),
+            usage: TurnUsage {
+                input_tokens: Some(10),
+                output_tokens: None,
+                cache_read_tokens: None,
+                ..TurnUsage::default()
+            },
+            final_receipt: false,
         });
-        capture.record_stream_event(&StreamEvent::Usage {
-            input_tokens: Some(15),
-            output_tokens: Some(4),
-            cache_read_tokens: None,
+        capture.record_conversation(ConversationEvent::UsageCheckpoint {
+            turn_id: "provider-turn".to_string(),
+            usage: TurnUsage {
+                input_tokens: Some(15),
+                output_tokens: Some(4),
+                cache_read_tokens: None,
+                ..TurnUsage::default()
+            },
+            final_receipt: false,
         });
         capture
             .0
@@ -4821,15 +4663,23 @@ mod tests {
             .unwrap()
             .fail_and_begin_attempt("fallback".to_string(), None, None)
             .unwrap();
-        capture.record_stream_event(&StreamEvent::Usage {
-            input_tokens: Some(12),
-            output_tokens: Some(3),
-            cache_read_tokens: None,
+        capture.record_conversation(ConversationEvent::UsageCheckpoint {
+            turn_id: "provider-turn".to_string(),
+            usage: TurnUsage {
+                input_tokens: Some(12),
+                output_tokens: Some(3),
+                cache_read_tokens: None,
+                ..TurnUsage::default()
+            },
+            final_receipt: false,
         });
-        capture.record_stream_event(&StreamEvent::Result {
-            subtype: ResultSubtype::Success,
-            cost_usd: Some(0.25),
-            duration_secs: Some(1.0),
+        capture.record_conversation(ConversationEvent::UsageCheckpoint {
+            turn_id: "provider-turn".to_string(),
+            usage: TurnUsage {
+                cost_usd: Some(0.25),
+                ..TurnUsage::default()
+            },
+            final_receipt: true,
         });
         capture.finish("completed").unwrap();
 

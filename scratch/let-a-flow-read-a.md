@@ -1,16 +1,30 @@
 # LOO-450 — Claude Flow answers
 
 Jack Heart requested one Claude turn-recording path and native JSON schema delivery
-on October 9, 2026. Reconciled October 10 against `4c79cccf7`.
+on October 9, 2026; October 10’s deletion steer extends that cut.
 The engine/driver vocabulary strike is integrated at base be4a2b2af (#1520).
 The former headless print path bypassed ClaudeHarness; it is removed.
+
+## Delete — do not maintain
+
+Jack Heart’s October 10 steer removes `run_batch`, `run_streaming`, their
+exclusive stream parsers/renderers, obsolete Codex/OpenCode batch command branches
+and their fixtures, the unknown-provider Claude
+fallback, and `session_record::final_answer` / `FinalAnswer.exact`. Preserve
+terminal launches, replay/run display types, native correlated answer history,
+captures and all three headless harnesses. Removed the exclusive capture stream
+writer too; usage fixtures now exercise harness conversation checkpoints. Shared
+`StreamFormat` stays for run/replay; captured event schemas remain readable.
+No migration or capture rewrite.
 
 ## Implementation
 
 Headless Claude now uses the existing harness, preserving native skill
 selection, context, resume and attachment ownership. The Flow output schema travels
 through the ordinary CLI launch, capture/replay and correction turns to Claude. The existing
-native answer reader remains; no new capture format or migration.
+native answer reader is the only answer source. `FinalAnswer` collapses to a
+String; missing native output returns absence, even when capture prose exists.
+Unknown providers fail in both terminal and headless launch modes.
 
 ## Review findings
 
@@ -26,6 +40,9 @@ Native skill commands retain declarations and non-query context on the surviving
 harness. Non-query context and the correlated query share one write/error path;
 a failed context write now tears down the process too. No store migration or
 third answer reader is needed.
+Deletion review found capture usage fixtures still calling the retired writer;
+they now use conversation checkpoints and retain cumulative/retry/finality proofs.
+Historical capture schemas and payloads remain intact; only answer inference is removed.
 
 ## Remaining acceptance
 
@@ -44,4 +61,4 @@ both. Terminal behavior and native/translated skill declarations remain required
 removing the print branch does not waive them. No new product decision is needed.
 Release's entry-point lesson applies: Flow success is not Task-to-publication proof.
 
-Checks: network-isolated `cargo test -p loopflow` with `--test flow_tests claude_deciding_step_records_native_answer_and_advances`, `--test default_conversation_tests`, and `--lib claude_stream_context_keeps_large_instructions_and_reply_guidance_off_argv` passed; `cargo fmt` and `cargo clippy --all-targets -- -D warnings` passed; attachment-rejection proof remains applicable; gate owns wider launch/skill and replay checks.
+Checks: `cargo fmt` and `cargo clippy --all-targets -- -D warnings` pass; network-isolated `cargo test -p loopflow` focused unknown-provider and Claude deciding-Flow tests pass, as do six native-answer/capture/usage/telemetry cases; 12 terminal-builder/capture checks pass. Gate owns wider launch/skill and schema replay checks; configured demo remains open.

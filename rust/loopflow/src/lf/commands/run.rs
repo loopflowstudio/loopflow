@@ -16,7 +16,7 @@ use crate::prompt::process::ProcessPromptInput;
 use crate::prompt::PromptComponents;
 use crate::prompt::Surface;
 use crate::session_record::{
-    AgentProcessRequest, CaptureHandle, FinalAnswer, SessionCaptureSpec, SubjectAttribution,
+    AgentProcessRequest, CaptureHandle, SessionCaptureSpec, SubjectAttribution,
 };
 use anyhow::{anyhow, Result};
 use std::io::IsTerminal;
@@ -107,7 +107,6 @@ pub(crate) fn answer_bound(
     binding: &crate::ops::WorkBinding,
 ) -> Result<Option<String>> {
     run_bound_prompt(None, Some(message), cli, binding)
-        .map(|answer| answer.map(|answer| answer.text))
 }
 
 fn run_bound_prompt(
@@ -115,7 +114,7 @@ fn run_bound_prompt(
     message: Option<&str>,
     cli: &Cli,
     binding: &crate::ops::WorkBinding,
-) -> Result<Option<FinalAnswer>> {
+) -> Result<Option<String>> {
     let mut scoped;
     let binding = if resolve_skill(skill, cli, &binding.cwd)?
         .as_ref()
@@ -552,7 +551,7 @@ fn print_context_header(built: &PromptBuild, cli: &Cli) {
     );
 }
 
-fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
+fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<String>> {
     if !built.process.auto {
         info!("launching interactive vendor session");
         let capture = begin_capture(built, "tui", &built.agent_config, None)?;

@@ -570,7 +570,7 @@ impl RunningFlow<'_> {
             .captured(step)?
             .with_context(|| format!("{label} captured no Session input"))?;
         let answer = self.store.sqlite.input_final_answer(&input)?;
-        Ok((session, answer.map(|answer| answer.text)))
+        Ok((session, answer))
     }
 }
 

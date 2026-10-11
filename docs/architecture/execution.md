@@ -184,8 +184,11 @@ The snapshot supplies history only and never authorizes dispatch.
 
 Headless Claude uses the same stream-input harness and correlated turn history as
 chat. Deciding Flow steps pass their JSON schema to Claude, including correction
-turns; the existing answer reader consumes the native structured result. Terminal
-Claude launches retain native terminal behavior.
+turns. Headless Claude, Codex and OpenCode all use their harness; unknown provider
+names fail instead of selecting Claude. Flow decisions and final-answer reads use
+only correlated native `started`/`output`/successful `completed` rows. Capture
+prose remains history, never an answer fallback. Terminal launches retain native
+terminal behavior.
 
 The continuing AgentProcess retains its identity while each attachment
 receives a fresh opaque token, including reattachment of the same lf Process.
@@ -245,8 +248,8 @@ start/assignment evidence; uncertainty never becomes an invented token split.
 
 Conversation, Flow and command summaries filter and page in SQL before opening
 payloads. Exact detail can load the selected captured input, transcript or final
-answer. A provider-neutral exact final-answer receipt and recovered streamed
-prose remain distinguishable; incomplete extraction is labeled.
+answer. Without correlated native output from a completed turn, the final answer
+is absent; retained transcript prose never substitutes for it.
 
 Session inventory reads the selected rows, Work labels and indexed Flow metadata;
 it does not decode captures or Session history. Readiness text remains the exact

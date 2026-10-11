@@ -690,3 +690,5 @@ strip links to its own site in a new tab.
 - Jack Heart, on the three-flows card: "this needs a caption" → `x11` has under it: "Three workflows that ship with Loopflow. The highlighted stops are where you come in; everything between them runs on its own."
 
 - Jack Heart: "We gotta change off Adding CSV Export as demo", then "Use something more musical and creative from Kata" → every example in `x11` is now Kata's Ear wave ("Learn a piece by ear, from the recording itself."): tasks "Loop a phrase at half speed", "Shift a passage into your register", "Split a recording into stems", "Bring recordings in from anywhere", "Keep a loop when its recording is replaced"; the sidebar's other waves are Theory and Teacher. Wave names and the objective are from `kata/wave/*/GOAL.md`; the task titles, ids and the conversation in the terminal sketch are written for the page.
+
+- Jack Heart: "Your App should say Repo" → the Mac mock's sidebar title in `x11` is "Kata" with a small "repo" label beside it. Claude's reading; he may have meant the word "Repo" alone.

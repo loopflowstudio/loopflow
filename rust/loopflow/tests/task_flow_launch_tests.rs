@@ -51,14 +51,29 @@ fn explicit_agent_wins_through_task_nested_flows_and_provider_children() {
             ),
             (
                 "claude",
-                r#"#!/bin/sh
-set -eu
-read -r input || :
-if [ "${LF_AGENT_CHILD-}" != yes ]; then
-    LF_AGENT_CHILD=yes "$LF_BIN" -b skill child -a codex > "$LF_HOME/child-output" 2>&1
-fi
-echo '{"type":"system","subtype":"init","session_id":"agent-fixture"}'
-echo '{"type":"result","subtype":"success","is_error":false,"result":"done","session_id":"agent-fixture"}'
+                r#"#!/usr/bin/python3
+import json
+import os
+import subprocess
+import sys
+
+if '--version' in sys.argv:
+    print('fixture')
+    sys.exit(0)
+message = json.loads(sys.stdin.readline())
+message['session_id'] = 'agent-fixture'
+print(json.dumps(message), flush=True)
+print(json.dumps({'type': 'system', 'subtype': 'init', 'session_id': 'agent-fixture'}), flush=True)
+if os.environ.get('LF_AGENT_CHILD') != 'yes':
+    with open(os.path.join(os.environ['LF_HOME'], 'child-output'), 'w') as output:
+        subprocess.run(
+            [os.environ['LF_BIN'], '-b', 'skill', 'child', '-a', 'codex'],
+            env={**os.environ, 'LF_AGENT_CHILD': 'yes'},
+            stdout=output, stderr=subprocess.STDOUT, check=True, timeout=30,
+        )
+print(json.dumps({'type': 'result', 'uuid': 'fixture-result', 'session_id': 'agent-fixture', 'subtype': 'success', 'is_error': False, 'result': 'done'}), flush=True)
+for line in sys.stdin:
+    pass
 "#,
             ),
         ],

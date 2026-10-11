@@ -99,6 +99,11 @@ then run `cargo test -p loopflow --test dto_fixtures composed_lifecycle` and
 Provider fixtures must read the launch's actual context channel. When a final
 sync adds fixtures that inspect a changed transport, run those focused tests
 before arming; the earlier gate did not cover the newly combined behavior.
+Claude stream fixtures must acknowledge the input's UUID before completing its
+result, and stay alive until the harness closes stdin. Include
+`explicit_agent_wins_through_task_nested_flows_and_provider_children` when
+integrating Claude transport changes; bound the test so missing acknowledgements
+fail locally instead of exhausting the merge queue's deadline.
 
 ## Quick Reference
 

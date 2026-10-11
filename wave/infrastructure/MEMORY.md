@@ -251,7 +251,10 @@ frontier fixtures in the materialized run only. PR CI defers every job while
 Jack Heart removed client-file compatibility (`5228ab69`); launches record an
 AgentProcess before exec. Unknown stays unknown, granting no Waiting or cleanup.
 Terminals follow attachment. Completion outranks sockets;
-OS death needs watch rereads. Kill/reconnect acceptance remains unproved.
+OS death needs watch rereads. Input completion follows its latest turn's LfProcess,
+not an ended creator; native outcomes remain history, not life evidence.
+Release's entry-point lesson applies: reducer tests do not prove the composed
+kill/reconnect path. Kill/reconnect acceptance remains unproved.
 
 ## Execution vocabulary (LOO-441/442/446, 2026-10-10)
 
@@ -413,14 +416,10 @@ linked receipts. They preserve due ownership, candidate, uncertain publication,
 caller edits and child-held leases; simulated passes establish neither public
 container/macOS acceptance nor configured automatic settlement.
 
-October 6 scheduled receipt cron_a4b8b11b2a534bf99d183e677f2a6871 failed after
-recovery cron_5d930c31c7ae4a118f6b93774496991c passed continuity but the scorecard
-emitted retired product/task-loop-trust. Accepted chapter commit 42451654e removed
-that contract; remove its hardcoded producer output, preserving strict metric
-validation and lifecycle rows. Installed CLI with the repaired checkout reports
-35 rows; twelve focused tests pass. Original failed receipts and repair ownership
-remain unchanged. Jack Heart authorized publication; the operator owns subsequent
-release recovery after LOO-382. This manual proof supplies no automatic settlement.
+October 6 telemetry's retired metric producer failed; the repaired checkout passed
+35 rows and twelve tests, not automatic settlement. Jack Heart authorized
+publication; the operator owns recovery after LOO-382. Original receipts, repair
+ownership and exact evidence: `85490d96ec:wave/infrastructure/MEMORY.md`, this heading.
 
 Release's September 28 incident proves entry points need operation-level recovery:
 an agent reported failure successfully, producing a misleading green cron receipt.

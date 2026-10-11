@@ -4,7 +4,7 @@ Jack Heart requested one process-backed judgment on October 9. Main at
 be4a2b2af contains #1519 and #1520. His October 10 steer `5228ab69` removes
 client-file compatibility, including old Sessions, and leaves unknown unchanged.
 
-## Design and deletion cut
+## Implemented boundary (reconciled 2026-10-10)
 
 AgentProcess completion and exact OS identity alone decide live/dead/unknown.
 Waiting needs positive life before pagination; completed records never reconnect,
@@ -13,7 +13,7 @@ no timeout is selected. Rust/Swift and the shared fixture agree on unknown,
 active and closed. Missing process rows use the same Unknown value, not a
 second optional state. No reader needs exit events for process liveness.
 
-Deleted — do not restore:
+Deleted:
 - `ProviderClientRef`, `ProviderClientStop`, stop reasons and receipt guards;
   their JSON readers/writers, approximate command/age matching and file locks.
 - Client-file Session fallback, terminal lookup and stopping in util,
@@ -37,10 +37,16 @@ New terminal registration uses that fence; takeover invalidates old placement.
 Input completion reads the latest turn's LfProcess, or capture owner before any
 turn. The latest-turn join selects its owner once; missing turn ownership never
 falls back to an ended creator. Preparation exiting cannot finish a later live turn. Provider outcomes stay
-history, not process life. Work-watch rereads Sessions, Task and Work activity on
+history, not process life. Native completed events and terminal outcomes still end
+completed work; they do not decide whether its agent lives. Work-watch rereads Sessions, Task and Work activity on
 process revisions and its two-second OS clock, without requiring store writes.
 
 ## Remaining
+
+Source inspection at `85490d96ec` agrees with the accepted deletion. Main's
+#1518 context delivery is integrated; its fixture repair does not reopen client
+compatibility. The Release child memory reinforces testing the public entry path,
+not inferring composed acceptance from store or projection tests.
 
 Gate owns affected Session/history/connection, primary succession, Work-watch and
 headless Desktop suites, including materialized migration coverage. Demo owns
@@ -56,6 +62,4 @@ Released-history migration and takeover tests retain identity, unknown refusal,
 terminal placement and completion boundaries. Configured remote-client exit remains
 unproved; fenced passive display is not provider death.
 
-Checks: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test -p loopflow --lib --no-run` and network-isolated lib tests (input completion, Program Status, Session projection, native Move): pass, 5 tests; gate/CI own affected suites, materialization and composed acceptance.
-
-Sync check: merged main's native context delivery without restoring client receipts; `test_network.py … --exact lf::commands::util::tests::recorded_native_move_returns_cleanly_without_stop_receipts` passed (1 test); broader verification stays with gate/CI.
+Checks: prior fmt/Clippy/build and five focused tests passed; after #1518, `test_network.py … --exact lf::commands::util::tests::recorded_native_move_returns_cleanly_without_stop_receipts` passed (1 test); prose-only realignment adds no rerun, gate/CI retain affected suites and materialization.

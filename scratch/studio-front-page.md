@@ -612,3 +612,5 @@ strip links to its own site in a new tab.
 - Jack Heart: "make currently reuqires two bullets" → in `x11`, "Currently requires:" is followed by two bullets (the coding agent; `github`); the Linear and herdr/cmux sentences follow as a line.
 
 - Jack Heart: "cut Everything is done through ephemeral processes (like agent sessions) and ssh" → removed from the `x11` closing text.
+
+- Jack Heart: "replace that second sentence with jsut All telemetry is local." → set in the `x11` closing text.

@@ -696,3 +696,5 @@ strip links to its own site in a new tab.
 - Jack Heart: "i think kill the the loopflow in your terminal screenshot" → the terminal sketch is removed from `x11`. The first picture keeps its "Loopflow for Mac" label.
 
 - Jack Heart asked to see earlier, shorter versions of the CLI section text, then: "ok go back to version 2. Underneath Loopflow's task-centered API is a launcher CLI, LF" → the `x11` CLI section is version 2 again (one command says where, whose login, which model, which work; the ssh line; multi-subscription balancing), opening with his sentence in place of "Everything above is lf underneath." "Flow" in it reads "Graph", per his write-to-the-future direction.
+
+- Jack Heart: "Then try one paragraph that combines the private secure remote jobs and the multi-subscription balancing" → one paragraph in `x11`: "It scales across your machines and your subscriptions: private, secure remote jobs and telemetry made easy through `ssh`, and multi-subscription balancing that moves to the next login when one runs out." The lead-in is Claude's; the two halves are his.

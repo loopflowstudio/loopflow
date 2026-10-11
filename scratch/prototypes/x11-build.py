@@ -132,8 +132,7 @@ main = f'''
   <div class="halves">
     <article>
       <p>Underneath Loopflow’s task-centered API is a launcher CLI, <code>lf</code>. One command says where an agent runs, on whose login, with which model, on which piece of work, and what it does. Set it once in a Graph and every launch is the same.</p>
-      <p>Private, secure remote jobs and telemetry made easy through <code>ssh</code>.</p>
-      <p>Multi-subscription balancing: <code>lf</code> manages your logins, and moves to the next one when one runs out.</p>
+      <p>It scales across your machines and your subscriptions: private, secure remote jobs and telemetry made easy through <code>ssh</code>, and multi-subscription balancing that moves to the next login when one runs out.</p>
       <p class="more"><a href="/cli">The CLI ↗</a><a href="/docs/authoring#flows">Skills and Graphs ↗</a></p>
     </article>
     <article>

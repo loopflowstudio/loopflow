@@ -63,7 +63,7 @@ between source proof and installed acceptance applies here too.
 
 ## Remaining
 
-Gate owns post-integration affected suites. Acceptance still needs the installed
+Post-integration Session CLI, journal and native naming suites pass. Acceptance still needs the installed
 hook returning inside the unchanged five-second deadline under concurrent Flows;
 four simultaneous callbacks against held locks are the existing headless proof,
 not an observation of that configured workload. Installation acceptance belongs
@@ -72,4 +72,4 @@ the live store. Publication belongs to the caller's delivery step; Jack Heart's
 review remains required before landing. No new product decision is needed for
 this bounded repair; correlation of the records-read report remains unknown.
 
-Checks: prior to integration, `cargo test -p loopflow --test session_cli_tests native_title_callback` (4), `cargo test -p loopflow --lib journal::tests` (18), `cargo fmt --check`, and `cargo clippy --all-targets -- -D warnings` passed with inherited `LF_*` cleared; `harness::native_titles::tests` (2) retains its earlier pass; reconciliation's `git diff --check` passed and `lf context` fits both budgets; post-integration suites/installed acceptance remain with gate/CI.
+Checks: post-integration builds and network-isolated `session_cli_tests` (20), `journal::tests` (18), and `harness::native_titles::tests` (2) passed with inherited `LF_*` cleared; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` passed; installed concurrent-Flow acceptance remains with gate/release.

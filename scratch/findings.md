@@ -130,3 +130,23 @@ Linux reconnect and the remaining installation matrix stay with capable CI;
 native/configured proof and other deferred Tasks retain their recorded owners.
 Installed generated context remains over budget; authored notes fit without
 installation, history deletion or raised limits.
+
+
+## Final gate — October 10
+
+`run-79717` found two Rust fixture failures: a retained creation input omitted
+`dueDate`, and foreground sync opened an empty Machine after the comment fixture
+changed `LF_HOME`. The version probe also needed a separate stand-in response;
+that correction alone failed. Both fixtures now pass without timeout/retry changes.
+Swift output buffering initially suggested glyph capture hung; its flushed log
+proves it passed. The stopped runner was waiting on WorkCache's retired `roadmap`
+command. Holding the exact `wave show` prefix repairs both delayed-read cases.
+Review corrected stale CLI-guide claims about association, bare Task opening and
+opening receipts. No production behavior changed.
+
+Check: `scripts/test.py --reuse-passing` — architecture/Python (408)/website (76), fmt/Clippy and app build pass; materialized Rust 2604/2606 pass, two repaired; Swift stopped at WorkCache. Logs: `/tmp/loo427-final-gate.log`, `.lf/tmp/gate/run-79717/`.
+Check: network-isolated materialized nextest repair filters — migration 1/1, comments 1/1 pass; `/tmp/loo427-final-repairs{,2}.log` retains the failed first repair.
+Check: `scripts/test_desktop.sh --filter 'WorkCacheTests|WorkDestinationTests|WorkModelTests|WorkNavigationTests|WorkObservationTransportTests|WorkspacePerformanceTests|WorktreeWorkspaceTests' --jobs 4 -Xswiftc -gnone --no-parallel` — remaining/affected Work suites 134 pass; Swift boundaries and doc alignment (4) pass.
+No full-pass receipt is claimed. Linux reconnect/installation remain CI-owned;
+native/configured proof retains the accepted owners. Generated installed context
+still exceeds its budget; authored notes fit, with no installation/history edits.

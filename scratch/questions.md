@@ -29,11 +29,8 @@ are accepted for implementation after Jack's October 8 review; the listed choice
 
 ## CLI/history assumptions — October 8
 
-Flow-first shorthand and explicit skill/Flow kinds survive root `run` removal;
-Task edges resolve in their checkout. Collisions remain open; old turn-limit
-records restore no switches. `history` reuses recorded activity/execution, with
-`list` a reversible spelling. Rationale: `a81245920:scratch/questions.md`,
-**CLI deletion assumptions** and **History command shape**.
+Flow-first shorthand, explicit kinds and existing history records remain; collisions
+are open. Earlier rationale: `5c5f6477cc:scratch/questions.md`, this heading.
 
 ## Repository selection assumptions — October 9
 
@@ -46,17 +43,12 @@ dispatch; an unscoped ambiguous prefix still fails.
 
 ## Context budget
 
-Installed `lf context --skill realign --json` still assembles stored historical
-steers and the retired per-file JSON inventory. The October 10 reconciliation
-measured 40,256 goal tokens (24,256 over 16,000), 132,751 bytes (1,679 over 131,072) in the gate query;
-authored scratch fits. Complete launch source inspected:
-`.lf/tmp/context/ba3e3fb6204fa9c1dcab1093a86de008755b1add3114d66a22ac4c7483688318.md`.
-Its middle repeats historical directives and its tail is generated inventory.
-The local renderer already uses quoted paths/change states. Editing a generated
-capture or deleting authored history cannot fix installed assembly; installation,
-store-history mutation and budget increases remain unauthorized. This is not an
-authored scratch overflow. Earlier measurement/evidence:
-`18e8cb7e1b:scratch/questions.md`, **Context budget**.
+Installed assembly still overfills the generated goal with historical steers and
+retired per-file inventory. The local renderer is corrected; installing it,
+mutating stored history or raising limits is not authorized. Preserve authored
+history. Full prior measurement/source: `5c5f6477cc:scratch/questions.md`, this
+heading. October 10 reduction refresh: generated goal 40,741/16,000 tokens;
+authored scratch is being curated independently.
 
 ## Admission authority — October 9, unresolved
 
@@ -89,15 +81,11 @@ Identity is refreshed on opening/restoration, not by a new timer.
 
 ## Reversible preview limits — October 9
 
-Preview reads current references; it does not freeze future hook input.
-Bare-agent/new operator-checkout previews cannot prepare future checkouts. Remote previews are scoped to the addressed Machine;
-identity failure precedes assembly. Authentication is outside preparation; local
-absence grants no first-start admission.
-
-Task-run and opening explanation share launch owners; broader actions remain.
-Opening JSON uses nullable `url`, not a receipt; unsupported platforms may show
-a proposal beside a blocker. Omitted Task-run subjects use checkout/declaration
-inference in both modes; naming a Flow requires the explicit Task positional form.
+Preview reads current references without preparing checkouts or acquiring Work;
+remote preview stays on the addressed Machine. Missing future facts stay unknown.
+Operation-specific explanations revalidate on execution. Full earlier choices:
+`5c5f6477cc:scratch/questions.md`, this heading. Native and admission limits remain
+in the plan and findings.
 
 ## Reversible exact-input choices — October 8
 

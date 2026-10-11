@@ -17,7 +17,7 @@ struct WorkCacheTests {
         model.confirmMachine("machine-a")
         await model.refreshSessions()
         #expect(model.sessions.value?.isEmpty == false)
-        await source.hold("session")
+        await source.hold(["session"])
         let pending = Task { await model.refreshSessions() }
         await source.waitForHeldRead()
         model.confirmMachine("machine-b")
@@ -181,7 +181,7 @@ struct WorkCacheTests {
         let source = try Source()
         let cache = WorkCache(directory: directory)
         let model = WorkModel(query: source.query, repoPath: Self.repo, cache: cache)
-        await source.hold("session")
+        await source.hold(["session"])
         let read = Task { await model.refreshSessions() }
         await source.waitForHeldRead()
         model.setRepoPath("/src/other")
@@ -202,7 +202,7 @@ struct WorkCacheTests {
         saving.flush()
 
         let returning = WorkModel(query: source.query, repoPath: Self.repo, cache: WorkCache(directory: directory))
-        await source.hold("roadmap")
+        await source.hold(["wave", "show"])
         let read = Task { await returning.refresh() }
         await source.waitForHeldRead()
 
@@ -231,7 +231,7 @@ struct WorkCacheTests {
         let cache = WorkCache(directory: directory)
         let returning = WorkModel(query: source.query, repoPath: Self.repo, cache: cache)
         #expect(returning.selection == .task(id: "issue-now"))
-        await source.hold("roadmap")
+        await source.hold(["wave", "show"])
         let read = Task { await returning.refresh() }
         await source.waitForHeldRead()
         returning.select(.wave(id: "wave-1"))
@@ -343,7 +343,7 @@ private actor Source {
     private let roadmap: String
     private let sessions: String
     private var failed = false
-    private var holding: String?
+    private var holding: [String]?
     private(set) var reads = 0
     private var held: CheckedContinuation<Void, Never>?
     private var arrived: CheckedContinuation<Void, Never>?
@@ -359,7 +359,7 @@ private actor Source {
 
     func fail() { failed = true }
     func recover() { failed = false }
-    func hold(_ verb: String) { holding = verb }
+    func hold(_ command: [String]) { holding = command }
 
     func waitForHeldRead() async {
         if held != nil { return }
@@ -375,7 +375,7 @@ private actor Source {
     private func read(_ args: [String]) async throws -> String {
         reads += 1
         if failed { throw RegistryQueryError("offline") }
-        if holding == args.first {
+        if let holding, args.starts(with: holding) {
             await withCheckedContinuation { continuation in
                 held = continuation
                 arrived?.resume()

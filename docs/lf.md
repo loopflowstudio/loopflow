@@ -264,8 +264,9 @@ lf planning associate <incoming-work-id> --with <local-work-id> --linear <provid
 ```
 
 Both IDs remain intact. The incoming full ID resolves to existing local Work;
-no execution or private history moves. **Joint planning projection is unfinished:**
-association retains sharing/effect holds visible in status, not convergence.
+no execution or private history moves. The next import projects associated histories
+jointly, clearing only the conflicts it resolves. Unresolved sharing/effect holds
+remain visible in status. Association grants no first-start authority.
 
 Setup is local: these commands neither fetch nor publish planning. In local-only
 repositories, interactive and headless sessions exchange selected planning, even
@@ -697,13 +698,15 @@ prompt budgets.
 `desktop open` resolves Work before handing its repository-qualified link to the
 Mac app. Without a Task it opens the current repository. `--session` selects an
 existing Task-associated conversation; `--diff` reveals its retained Changes
-browser without replacing file selection or drafts. Without `--session`, the
-Task's ordinary primary-Session owner chooses/prepares its conversation.
+browser without replacing file selection or drafts. Bare Task opening acquires no
+conversation or checkout. A `--diff` request without `--session` uses the Task's
+ordinary primary-Session owner to choose/prepare its conversation.
 
 JSON returns `opening`, not `usable`: macOS accepting a link proves no native
 endpoint. `desktop list --json` includes each window's latest Task `opening`
-reading and lookup failures. Native usability and connection/comparison failure
-receipts are not yet composed; an `opening` receipt must not authorize pane input.
+reading and lookup failures. Page mounting and requested Session/Changes readiness
+settle that request; connection/comparison failures remain visible. These receipts
+are not configured/native acceptance, and `opening` must not authorize pane input.
 Display opening stays on the Mac. For a recorded remote owner, the Task link carries
 Machine and repository identity into the same repository window; Session and Files
 operations run on that owner after a fresh location read. Missing owners never create

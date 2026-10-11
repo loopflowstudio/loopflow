@@ -7181,7 +7181,7 @@ mod tests {
             .unwrap()
             .to_string();
         let task_receipt = json!({"id":task_uuid,"model":item,"through":1,"initiative":"initiative","link_id":uuid::Uuid::new_v4().to_string(),
-            "input":{"id":task_uuid,"teamId":"team","projectId":item.project_id,"title":item.name,"description":item.description,"assigneeId":item.assignee}});
+            "input":{"id":task_uuid,"teamId":"team","projectId":item.project_id,"title":item.name,"description":item.description,"assigneeId":item.assignee,"dueDate":item.due_date}});
         conn.execute(r#"INSERT INTO task_changes(seq,id,task_id,field,value_json) VALUES(2,'captured-task',?1,'name','"Captured task"'),(3,'later-task',?1,'name','"Later task"')"#, [created_task.as_str()]).unwrap();
         // The existing deletion owns sequence 1; this creation captured through 2.
         let mut task_receipt = task_receipt;

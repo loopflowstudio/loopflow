@@ -328,12 +328,17 @@ async fn task_comments_read_and_publish_without_starting_work() {
             let home = directory.path().join("home");
             std::fs::create_dir_all(&home).unwrap();
             std::env::set_var("HOME", &home);
-            std::env::set_var("LF_HOME", &home);
+            // Foreground sync opens the Machine store independently of TaskInput.
+            std::env::set_var("LF_HOME", directory.path());
             let bin = directory.path().join("bin");
             std::fs::create_dir(&bin).unwrap();
             std::env::set_var("PATH", format!("{}:/usr/bin:/bin", bin.display()));
             std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
             let script = r#"#!/bin/sh
+if [ "${1:-}" = "--version" ]; then
+    echo "2.1.0"
+    exit 0
+fi
 : > "$FIXTURE_STARTED"
 i=0
 while [ ! -e "$FIXTURE_STOP" ] && [ "$i" -lt 100 ]; do

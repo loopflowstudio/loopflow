@@ -177,45 +177,14 @@ rendered exercise below belong to LOO-391, not a LOO-427 delivery hold.
 
 ### Checks and demo acceptance
 
-The cutover is checkpointed in `39698225f3`; `37fa81df13` consolidates content
-location reads. These supersede the earlier feedback that the registry still keys
-by checkout. Recorded focused checks cover the implementation; full affected
-coverage remains with gate/CI and rendered acceptance with demo/review.
-
-Acceptance across `WorkNavigationTests`, `WorktreeWorkspaceTests`,
-`WorkDestinationTests`, `DesktopPaneControlTests` and DTO fixtures remains:
-
-- Repo, Wave and two Tasks open separate Work tabs even when paths match;
-  repeated/concurrent opens and aliases converge, renames do not duplicate.
-- Several named conversations share one Task tab; Work selection restores its
-  focused pane/layout. A retained Session is never mounted twice.
-- Tab hide/reopen retains exact layout, pane/content IDs, document draft/Undo,
-  zoom and surface references; last-tab close launches nothing. Partial Session
-  inventories and missing planning retain panes rather than proving absence.
-- Local/remote Task tabs share one repository window, never rewrite Machine
-  defaults, and keep peer paths out of local file/shell operations.
-- Delayed opens, text, keys and companion replies after switching/hiding tabs
-  remain attached to captured Work/content; replacement refuses stale targets.
-  Hidden native surfaces cannot receive ordinary focus-based typing. Passive
-  inspection starts nothing; an unplaced Task tab requires no first-start claim.
-
-Focused implementation command:
-`scripts/test_desktop.sh --filter 'WorkNavigationTests|WorktreeWorkspaceTests|WorkDestinationTests|DesktopPaneControlTests|DTOFixtureTests' -Xswiftc -gnone --no-parallel`.
-Gate adds affected Rust Desktop/selection tests, `cargo test -p loopflow --test
-dto_fixtures`, documented-command checks and existing §5 suites; expect nonempty
-passing tests with Rust/Swift wire agreement. These checks are headless, not proof
-of provider drafts or mounted native usability.
-
-Demo uses owned fixture Work and shell stand-ins, no accounts/live user sessions:
-open repository, Wave and two Task tabs (one recorded remote fixture); reopen a
-Task to show reuse; name two conversation panes; add Files/Changes and shell;
-retain an unsaved file edit and unsent terminal text; arrange/zoom, switch Work,
-hide/reopen the tab, and observe the same content and focus. Target literal text
-then separate Enter while another tab is selected; only the captured pane changes.
-Show unknown/unavailable remote state without local fallback, then close all tabs
-without stopping the owned children. Native replies and visible draft retention,
-not command success alone, establish acceptance. Clean up owned fixture processes
-explicitly afterward. No rendering or demo acceptance is claimed by this design.
+The detailed headless acceptance matrix and owned-fixture demo are retained at
+`5c5f6477cc:scratch/compare-cmux-s-command-line.md`, under this heading. Current
+results and failures belong in [findings](findings.md); LOO-391 owns native proof.
+Preserve same-path Work separation, alias convergence, hide/reopen retention,
+exact-target replies across navigation, and remote content without local fallback.
+The demo must establish retained drafts, Undo, focus and native replies using owned
+fixtures; no live accounts or user terminals are authorized. Gate covers affected
+Rust/Swift and DTO suites. Headless success is not rendered acceptance.
 
 ## Command map — accepted October 8; remaining composition
 

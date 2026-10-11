@@ -100,6 +100,11 @@ Provider fixtures must read the launch's actual context channel. When a final
 sync adds fixtures that inspect a changed transport, run those focused tests
 before arming; the earlier gate did not cover the newly combined behavior.
 
+When sync crosses Rust module moves or API deletions, include the affected
+integration-test target in the focused proof, not only `--lib`. Preserve deletions
+of obsolete helpers and their exclusive tests together; resolving an import must
+not resurrect a test for an API removed on main.
+
 ## Quick Reference
 
 ```bash

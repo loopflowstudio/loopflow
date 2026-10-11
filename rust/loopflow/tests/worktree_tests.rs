@@ -6,9 +6,7 @@ use loopflow::git::worktrees::{
     create_named_worktree, list_worktrees, push_branch_with_upstream, schedule_upstream_sync,
     sibling_worktree_name_with_main,
 };
-use loopflow::git::{
-    is_clean, origin_branch, worktree_add, worktree_move, worktree_remove, WorktreeBranch,
-};
+use loopflow::git::{is_clean, origin_branch, worktree_add, worktree_remove, WorktreeBranch};
 use loopflow_test_support::TestRepo;
 
 fn lf_command(home: &std::path::Path) -> Command {
@@ -165,21 +163,6 @@ fn worktree_state_detects_dirty() {
     let result = create_named_worktree(repo.path(), "feature", None, &|_| {}).expect("create");
     std::fs::write(result.path.join("dirty.txt"), "dirty").expect("write");
     assert!(!is_clean(&result.path).expect("is_clean"));
-}
-
-#[test]
-fn worktree_move_preserves_content() {
-    let repo = TestRepo::new();
-    let result = create_named_worktree(repo.path(), "feature", None, &|_| {}).expect("create");
-    let file_path = result.path.join("note.txt");
-    std::fs::write(&file_path, "content").expect("write");
-
-    let new_path = result.path.with_extension("moved");
-    worktree_move(repo.path(), &result.path, &new_path).expect("move");
-
-    assert!(!result.path.exists());
-    assert!(new_path.exists());
-    assert!(new_path.join("note.txt").exists());
 }
 
 #[test]

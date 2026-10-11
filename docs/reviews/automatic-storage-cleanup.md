@@ -14,8 +14,8 @@ prune. It explains retained bytes and failures. Active work, source, credentials
 recoverable conversations and rollback state survive.
 
 Infrastructure owns this additive series. The current `clean-up` branch owns the
-worktree collector; `scratch/clean-up.md` owns its exact design and remaining
-acceptance. No second collector, scheduler, Task status or artifact registry is
+worktree collector; this document retains its accepted scope and remaining
+acceptance after delivery clears scratch. No second collector, scheduler, Task status or artifact registry is
 needed. Its publication is not proof that an installed release cleans a machine.
 
 [The earlier storage investigation](storage-footprint.md) and
@@ -41,13 +41,35 @@ native provider resume, live OS scheduling and published upgrades. The 2026-10-1
 review gate exercised affected Rust suites and both scheduled-cleanup CLI proofs
 in the disposable OS account. Host fixtures cannot substitute a temporary
 `LF_HOME` for that isolation: the installed release registry is account-owned.
-The local walkthrough is `scratch/pr-review.html`; these passes do not establish
-the unresolved progress contract or make the branch merge-ready.
+Jack Heart approved landing the reviewed change on 2026-10-10 after the
+unreadable-path limitation was surfaced. This accepts the limitation as remaining
+work, not evidence that it is fixed or that installed rollout is proved.
+
+Remaining outcome: one unreadable unrelated path must not indefinitely retain all
+otherwise eligible checkouts, without treating unknown as permission to delete.
+`ops/wt/cleanup.rs::RegistryObservations::read` still resolves the complete Task
+checkout set; its Process checks and external cwd inspection have the same
+conservative failure behavior. A healthy, settled checkout A remains when an
+unrelated Task B has an unresolved alias. No ownership/disjointness replacement
+is selected. The next check is a composed Task/Process/external-cwd alias proof
+before claiming independent progress for automatic collection. This checkout has
+no bound Task, so the remaining outcome is recorded here rather than assigned to
+the unrelated investigation or diagnostic-retention Tasks.
 
 The demo is a real Process exiting after a finished Task: the configured tick then
 removes its checkout without another agent. An unfinished neighbor, post-merge
 commits, ignored personal files and referenced native history remain intact.
-All source/history preservation conditions in the exact design remain binding.
+The collector must continue preserving primary/persistent checkouts, unfinished
+source, post-merge edits, live or unknown execution, and unclassified ignored
+content. Only wholly ignored directories with a valid `CACHEDIR.TAG` are disposable
+in this core change; names and `.gitignore` are not deletion authority. Final
+history observation streams under admission with a two-second no-progress deadline,
+fresh path resolution and up to eight revision catch-up rounds. A changing or
+incomplete observation retains. The recorded 65,536-row/65,536-entry probe took
+5.1 seconds; this does not prove atomicity against arbitrary external retargeting.
+Native provider launch/resume, a real second release CLI writer, loaded OS
+scheduling, unsupported-host experience and published-upgrade behavior still need
+composed proof. No history expiration or cold-cache policy is included.
 
 ## 2. Bound diagnostics and interrupted temporary output — LOO-448
 

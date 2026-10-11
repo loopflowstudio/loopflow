@@ -51,14 +51,14 @@ unresolved, not a prerequisite for these tabs.
 **October 10 correction:** Jack Heart selected Split → shell, with no empty-pane
 option (comment `ff61b6bc-f40c-4545-a203-82ced3afd335`). Implemented through the
 existing shell-location owner for CLI, shortcuts and pane menus; missing remote
-location refuses before layout mutation. Work-keyed tabs, per-pane locations,
-outer-layout deletion and inspection/DTO cutover remain unimplemented. This is not Work tabs.
+location refuses before layout mutation. Work-keyed tabs, non-shell locations, outer-layout deletion and inspection/DTO
+cutover remain unimplemented.
 
-**Shell locations:** `PaneContent.shell` owns Machine/path, without separate stored
-pane metadata or location propagation through layout operations. Rendering,
-identity, exits, release and split use it. Missing location refuses rather than
-falling back locally. Session/Files/log location cutover, Work keys, tabs, outer
-layout deletion and DTOs remain; this internal cut is not the complete UI slice.
+**Shell locations (`d6640b8c68`):** `PaneContent.shell` owns Machine/path through
+layout changes. Rendering, exits and split consume it; unknown refuses. Sessions still derive Machine from workspace identity,
+and remote shell commands still use workspace-level `executionLocation`. Files/log
+queries and those consumers must move with the Work-keyed cutover; shell content
+alone does not make a mixed-location workspace usable. Wire DTOs remain unchanged.
 
 **Passive entry deletion:** `a1dfa07833` removes implicit primary-Session acquisition
 from Task navigation/refresh and bare links; explicit Session/Changes requests

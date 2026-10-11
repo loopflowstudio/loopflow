@@ -171,13 +171,12 @@ and LOO-453 (readiness/events); research:
 [the comparison](../../docs/reviews/terminal-command-comparison.md#rex-composition-and-discoverability-2026-10-10).
 
 Jack Heart (October 10) accepted Work-named repository/Wave/Task tabs over retained
-panes, with close meaning hide; the Work-keyed cutover remains unimplemented.
-Task selection/refresh and bare remote links no longer acquire primary Sessions;
-explicit Session/Changes opening survives. Headless page-readiness proof is not tabs.
-His later `ff61b6bc` correction selects shell-by-default Split, no empty option.
-CLI and native split controls now share shell-location resolution before mutation;
-missing remote location refuses without a local fallback. Headless fixtures are
-not native acceptance. Admission and all other LOO-427 obligations remain.
+panes; close hides. Work-keyed cutover remains unimplemented. Passive Task navigation
+and bare remote links no longer acquire Sessions; explicit Session/Changes survives.
+His `ff61b6bc` correction selects shell-default Split, with no empty option.
+`d6640b8c68` retains Machine/path in shell content, preserving it through layout/Undo without duplicate metadata. Unknown refuses.
+Session/remote-shell consumers, registry and DTO cutover remain; 97 headless tests
+prove neither Work tabs nor native acceptance. Admission and other obligations remain.
 
 **Confirmation cannot elect execution.** `4c43550c2`: divergent revisions and
 independent refs both confirm, not Task allocation. `42990dea3` shares membership

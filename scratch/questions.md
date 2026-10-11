@@ -48,9 +48,9 @@ dispatch; an unscoped ambiguous prefix still fails.
 
 ## Context budget
 
-Generated Work input is 34,995/16,000 tokens (18,995 over) from retained steers and
-inventory. It cannot fit without changing source requests; this compression does
-not rewrite historical direction or raise limits. Authored scratch and memory fit.
+Generated Work input exceeds 16,000 tokens because it includes retained steers and
+inventory (34,964 at reconciliation). Historical direction is not rewritten to fit;
+`lf context` reports the changing overage. Authored scratch and memory fit.
 
 ## Admission authority — October 9, unresolved
 

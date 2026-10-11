@@ -53,6 +53,7 @@
 .home-page .pair h2{max-width:900px}.home-page .pair .halves .more{margin:0;border:0;padding:0}
 .home-page .works .under{margin:22px 0 0;font:500 14px var(--font-mono)}.home-page .works .under a{color:var(--text);text-decoration:underline;text-decoration-color:#b9b1a6;text-underline-offset:4px}.home-page .works .under a:hover{color:var(--wine)}
 .home-page .reading.closing{padding-top:8px}
+.home-page .get{display:flex;flex-wrap:wrap;align-items:center;gap:12px 16px;margin-top:26px}.home-page .get .or{font:500 11px var(--font-mono);text-transform:uppercase;letter-spacing:.1em;color:var(--text-secondary)}.home-page .get .install-row{margin:0;flex:0 1 auto}.home-page .get .term{margin:0}.home-page .home-hero .cost{margin:12px 0 6px}.home-page .closing .get{margin-top:0}
 .home-page .pair .halves article{padding:0!important;margin:0!important}
 .home-page .thesis{padding:34px 0 8px;max-width:800px}.home-page .thesis p{font:400 clamp(18px,1.5vw,21px)/1.6 var(--font-sans);color:#2a2523;margin:0 0 20px}.home-page .thesis p:last-child{margin-bottom:0}
 .home-page .pair .say:has(+ .say){margin-bottom:16px}
@@ -174,7 +175,8 @@
 <section class="home-hero">
   <h1 aria-label="Loopflow is how you design, implement, demo and ship software with agents.">
   <span aria-hidden="true">Loopflow is how you <span class="rotating"><span>design</span><span>implement</span><span>demo</span><span>ship</span></span> software with agents.</span></h1>
-  <div class="actions top"><a class="button solid" href="http://localhost:5001/download">Download for Mac</a><span>Free and open source. The coding agent it drives (Claude Code, Codex, or OpenCode) runs on your own account and has its own cost.</span></div>
+  <div class="get"><a class="button solid" href="http://localhost:5001/download">Download for Mac</a><span class="or">or the CLI</span><div class="install-row"><pre tabindex="0" aria-label="Install the lf command line" class="term"><span class="p">$</span> curl -fsSL https://loopflow.studio/install.sh | sh</pre><button type="button" data-copy="curl -fsSL https://loopflow.studio/install.sh | sh" aria-live="polite" class="copy">Copy</button></div></div>
+  <p class="cost">Free and open source. The coding agent it drives (Claude Code, Codex, or OpenCode) runs on your own account and has its own cost.</p>
 </section>
 <section id="mac" class="x5 x6">
   <p class="slot"><span>Video goes here</span><span>A mock of the app stands in until it is recorded</span></p>
@@ -262,7 +264,7 @@
   </ul>
 </section>
 <section id="start" class="reading closing">
-  <div class="actions"><a class="button solid" href="http://localhost:5001/download">Download for Mac</a></div>
+  <div class="get"><a class="button solid" href="http://localhost:5001/download">Download for Mac</a><span class="or">or the CLI</span><div class="install-row"><pre tabindex="0" aria-label="Install the lf command line" class="term"><span class="p">$</span> curl -fsSL https://loopflow.studio/install.sh | sh</pre><button type="button" data-copy="curl -fsSL https://loopflow.studio/install.sh | sh" aria-live="polite" class="copy">Copy</button></div></div>
 </section>
 </main>      <footer>
 <span>Loopflow · An open-source software instrument.</span>        <div>

@@ -347,11 +347,8 @@ with their replacements (Started, steer cursors, attribution, normalization).
 SQL strings can compile against deleted columns. Whole-suite failures after passing
 slices are retained in the archive; diff rewritten plans for accidentally dropped work.
 
-October 6 gate and failed checkout-refresh/chapter tests are retained at
+October 6 gate failures and outstanding native/provider/migration proof:
 `16e9c950b9:wave/product/MEMORY.md`, **Task conversation and Workflows**.
-Real-provider, killed-driver, populated-migration, configured Desktop/cron and
-September 30 continuation/association/focus proof remained absent. October 7
-retired numeric layout/soak acceptance, not those limits.
 
 ## Session and operate pairs (2026-10-05)
 
@@ -374,39 +371,42 @@ launching again. The [review](../../docs/reviews/session-operate-prompts.md) has
 simulations and two read-only model runs, not installed proof. Open conversations
 keep old instructions until `lf session replace`.
 
-## Capture and work-first entry (October 1–10)
+## Capture and work-first entry (October 1–11)
 
 Jack Heart accepted capture in the owning repo/Wave conversation: self-contained
-Tasks, no workers or new operation authority. Reconcile uncertain writes with
-identical input in the original destination; successful filings survive.
-October 1–3's New Session/picker decision and six-test evidence remain at
-`ddc009d780:wave/product/MEMORY.md`, **Capture and configurable New Session**;
-configured/native and cross-repository proof remains absent.
+Tasks, no workers or new authority. Retry uncertain writes with identical input
+in the original destination. Picker history:
+`ddc009d780:wave/product/MEMORY.md`, **Capture and configurable New Session**.
 
-October 10, LOO-462 supersedes generic Session navigation: Jack selected the
-homepage at `af48fd81db:website/home.html` as the Work-first design anchor,
-Repo/Wave/Task navigation, and direct configured repo conversation entry when
-there are no Waves or Tasks. Begin with what to work on, not organizational setup.
-Shell-launched unscoped Sessions stay possible but never enter the sidebar;
-power-user Session search is deferred. Reuse LOO-427 owners. Jack subsequently
-selected conversation-first Task entry, repository-name access to its retained
-conversation, and repo/session ownership, then authorized implementation through
-publication for demo review, not landing. No cleanup approval follows.
+October 10, LOO-462: Jack selected `af48fd81db:website/home.html` as the design
+anchor, Repo/Wave/Task navigation, conversation-first Task entry, retained repo
+conversation access from its name, and repo/session ownership. With no Waves or
+Tasks, begin with what to work on, not setup. Implementation is authorized through
+publication for demo review, not landing or cleanup. Shell-launched unscoped
+Sessions remain possible; generic picker/composer, Debug/Orphan and palette Session
+inventory are removed. Power-user Session search is deferred. History and
+missing-Work evidence remain; unknown/interrupted records are not debris.
 
-LOO-462 removes the generic picker/composer and Debug/Orphan/palette inventory,
-not Session history or missing-Work evidence. Primary owners supply repo/Task
-conversations without Workflow launch or takeover. **Current is not empty:** the
-Work stream and roster exclude historical Waves; first-use entry must also read
-full repository Wave history. Errors preserve uncertainty. A shared Rust/Swift
-capture proves configured primary reuse and retained Work, not native/provider
-usability. Cleanup needs reviewed candidates and a restorable backup;
-unknown/interrupted records are not debris.
+Reuse LOO-427's primary and retained Work owners without Workflow launch or takeover.
+**Current is not empty:** first-use entry checks fresh planning plus full Wave
+history; errors preserve uncertainty. Acquisition is considered once per retained
+repository workspace, never repeated by refresh/hide-all. Late ensure populates
+its originating Work. Task rows/palette prepare conversations; retained panes skip
+preparation. Bare links and Flow-log selection stay passive: asynchronous Task entry
+once redirected logs into prior Work. Overview sizing remains unreviewed.
+Rust/Swift capture proves primary reuse and retention, not native/provider usability.
+Cleanup still needs exact reviewed candidates and demonstrated isolated restoration.
 
-October 11: first-use acquisition is considered once per repository workspace; refresh and hide-all never repeat it. Delayed ensure results populate
-the originating Work without selecting it. Task rows/palette prepare conversations;
-bare links and Flow-log inspection stay passive. Reusing the asynchronous Task
-entry for logs had redirected the companion into prior Work; keep log selection
-synchronous. Overview disclosure is an implementation choice awaiting native review.
+October 11's configured demo failed: installed `lf 0.13.11` rejected `repo identity`
+although bundled help succeeded. **Source syntax is not runtime support:** normal
+Machine dispatch forwards to installed lf. The launcher now checks the actual
+operation before opening; it may register the repository. A private fixture cannot replace Jack's real-repository
+review; no runtime bypass, live migration or native acceptance follows.
+
+Jack's configurable-root/manual-portfolio discussion remains research, not approved
+implementation. Swift discovery still unions immediate `~/src` main checkouts,
+saved membership and launch repo; CLI `repo_root` does not configure that scanner.
+Shared repository identity/opening remain the reuse boundary; command spelling remains open.
 
 ## Session working set and Waiting (2026-10-03, revised 2026-10-06)
 

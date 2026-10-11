@@ -1,5 +1,27 @@
 # infrastructure wave memory
 
+## Global agent override (LOO-440, 2026-10-08)
+
+Jack Heart selected one global `-a` / `--agent`, overriding Task, nested Flow,
+step, skill and child-command agents; omission preserves defaults. Jack approved
+the demo and shipping October 10, superseding stop-at-demo: land, then complete
+after verified merge. No logins, credential reads or real-provider tests.
+Installed 0.13.9's parsing failure is historical.
+
+Explicit selection reaches prepared/direct launches; defaults never override.
+Six fixture Sessions record Claude across
+Task/Flow/provider children, even when a child requests Codex; no-flag launches
+retain declared models. Replay preserves its source; native history keeps its
+provider and conflicting resume explains how to start anew. Synthetic accounts
+need isolation: shared macOS activation attempted a Keychain write and failed.
+Remote and installed/live-provider acceptance remain unproved.
+
+October 11 gate repaired synthetic native-login isolation, replay's fixture
+ledger pin and pruning's NULL-worktree read. Six-Session override acceptance
+passed. The prior release-lock failure did not reproduce; its cause remains
+unknown. Gate still reports unchanged homepage overflow at 1,440 px; nested
+Python sandbox coverage remains CI-owned. No landing or completion followed.
+
 ## Plan ownership (LOO-406, revised 2026-10-08)
 
 Jack Heart selected identical local plan records/APIs with or without repository-wide

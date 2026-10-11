@@ -138,6 +138,6 @@ mod tests {
         assert!(ReleaseLock::acquire(repo.path(), "independent").is_ok());
         child.stdin.take().unwrap().write_all(b"finish\n").unwrap();
         assert!(child.wait().unwrap().success());
-        assert!(ReleaseLock::acquire(repo.path(), "default").is_ok());
+        ReleaseLock::acquire(repo.path(), "default").unwrap();
     }
 }

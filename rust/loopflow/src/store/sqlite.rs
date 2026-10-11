@@ -137,7 +137,7 @@ pub(crate) fn read_nonterminal_task_worktrees(path: &Path) -> StoreResult<Vec<Pa
     crate::performance::observe_sqlite(&conn);
     conn.execute_batch("PRAGMA query_only = ON; PRAGMA busy_timeout = 5000;")?;
     let mut statement = conn.prepare(&format!(
-        "SELECT t.worktree FROM tasks t WHERE {}",
+        "SELECT t.worktree FROM tasks t WHERE t.worktree IS NOT NULL AND {}",
         durable::task_open_sql("t")
     ))?;
     let rows = statement.query_map([], |row| row.get::<_, String>(0))?;

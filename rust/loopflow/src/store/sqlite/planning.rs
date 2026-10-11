@@ -1506,6 +1506,9 @@ mod tests {
         .unwrap();
         sqlite.apply_migration_for_test("planning_peers").unwrap();
         sqlite
+            .apply_migration_for_test("task_checkout_machine")
+            .unwrap();
+        sqlite
             .place_work(
                 &crate::durable::WorkRef::Wave(wave.clone()),
                 &sqlite.local_machine().unwrap().id,

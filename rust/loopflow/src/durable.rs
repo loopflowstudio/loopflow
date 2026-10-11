@@ -162,7 +162,24 @@ pub struct TaskExecutionRoute {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskExecutionSource {
     RecordedCheckout,
+    Admission,
     EffectiveDelegation,
+}
+
+/// Immutable first-start coordinator, carried with the Task's planning identity.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskAdmissionAuthority {
+    pub machine_id: MachineId,
+    pub repository_id: RepositoryId,
+}
+
+/// A request-bound reading from the coordinator. A positive owner never expires.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskAdmission {
+    pub request: String,
+    pub task_id: TaskId,
+    pub authority: TaskAdmissionAuthority,
+    pub owner: Option<MachineId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

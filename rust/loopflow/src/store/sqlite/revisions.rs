@@ -115,6 +115,10 @@ mod tests {
                 continue;
             }
             for operation in ["insert", "update", "delete"] {
+                // Admission rows reject update/delete; only insertion can commit.
+                if table == "task_admissions" && operation != "insert" {
+                    continue;
+                }
                 let name = format!("store_revision_{table}_{operation}");
                 let exists: bool = conn
                     .query_row(

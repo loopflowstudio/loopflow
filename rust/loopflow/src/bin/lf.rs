@@ -969,6 +969,14 @@ fn read_task_draft() -> anyhow::Result<String> {
 
 fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
     match command {
+        TaskCommand::Admission {
+            issue,
+            claim,
+            request,
+            json,
+        } => {
+            loopflow::ops::task_admission::command(issue, claim.as_ref(), request.as_deref(), *json)
+        }
         TaskCommand::Shell { .. }
         | TaskCommand::WatchFiles { .. }
         | TaskCommand::Location { .. } => unreachable!("location reads precede admission"),
@@ -1501,7 +1509,9 @@ fn run() -> anyhow::Result<()> {
             || matches!(
                 cli.command,
                 Some(Commands::Task {
-                    cmd: TaskCommand::Location { .. } | TaskCommand::WatchFiles { .. }
+                    cmd: TaskCommand::Location { .. }
+                        | TaskCommand::WatchFiles { .. }
+                        | TaskCommand::Admission { claim: None, .. }
                 })
             );
         if preview {
@@ -1557,7 +1567,9 @@ fn run() -> anyhow::Result<()> {
     let location_read = matches!(
         cli.command,
         Some(Commands::Task {
-            cmd: TaskCommand::Location { .. } | TaskCommand::WatchFiles { .. }
+            cmd: TaskCommand::Location { .. }
+                | TaskCommand::WatchFiles { .. }
+                | TaskCommand::Admission { claim: None, .. }
         })
     );
     if cli.context || cli.explain || planning_read || location_read {
@@ -1589,6 +1601,23 @@ fn run() -> anyhow::Result<()> {
     loopflow::lf::commands::work_route::resolve_repository_selection(&mut cli)?;
     if cli.context || cli.explain {
         return preview_invocation(&cli, &args);
+    }
+    if let Some(Commands::Task {
+        cmd:
+            TaskCommand::Admission {
+                issue,
+                claim: None,
+                request,
+                json,
+            },
+    }) = &cli.command
+    {
+        return loopflow::ops::task_admission::command(
+            issue,
+            None,
+            request.as_deref(),
+            *json || cli.json,
+        );
     }
     if let Some(Commands::Task {
         cmd:

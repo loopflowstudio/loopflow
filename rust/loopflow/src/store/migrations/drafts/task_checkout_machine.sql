@@ -1,6 +1,21 @@
 -- depends_on: local_planning, planning_peers
 
 ALTER TABLE tasks ADD COLUMN checkout_machine_id TEXT REFERENCES machines(id);
+ALTER TABLE tasks ADD COLUMN admission_authority TEXT CHECK(admission_authority IS NULL OR json_valid(admission_authority));
+
+-- The creating Machine arbitrates once. Other Machines may retain its positive
+-- receipt, but no claim participates in planning merge or expires on absence.
+-- Keep claims after a Task is removed; reimport cannot reopen first start.
+CREATE TABLE task_admissions (
+    task_id TEXT PRIMARY KEY,
+    machine_id TEXT NOT NULL
+);
+CREATE TRIGGER task_admissions_immutable BEFORE UPDATE ON task_admissions
+BEGIN SELECT RAISE(ABORT, 'Task admission cannot transfer execution'); END;
+CREATE TRIGGER task_admissions_retained BEFORE DELETE ON task_admissions
+BEGIN SELECT RAISE(ABORT, 'Task admission cannot be discarded'); END;
+CREATE TRIGGER store_revision_task_admissions_insert AFTER INSERT ON task_admissions
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
 
 -- Preserve the only recorded location evidence. Missing placement stays unknown.
 UPDATE tasks SET checkout_machine_id = (

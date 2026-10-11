@@ -105,6 +105,21 @@ pub(super) fn create_task_in(conn: &Connection, input: &NewTask) -> StoreResult<
     };
     validate_task(&task)?;
     insert_task_row(conn, &task)?;
+    let repo: String = conn.query_row(
+        "SELECT repo FROM waves WHERE id=?1",
+        [&task.wave_id],
+        |row| row.get(0),
+    )?;
+    let authority = crate::durable::TaskAdmissionAuthority {
+        machine_id: super::durable::map_local_machine(conn)?.id,
+        repository_id: super::repositories::ensure_repository_in(conn, &repo)?,
+    };
+    planning_write::local(
+        conn,
+        PlanningKind::Task,
+        task.id.as_str(),
+        &[Edit::TaskAdmissionAuthority(Some(authority))],
+    )?;
     conn.execute(
         "INSERT INTO task_creation_intents(task_id, project_id, title, description, due_date)
          VALUES(?1, ?2, ?3, ?4, ?5)",
@@ -152,12 +167,16 @@ impl SqliteStore {
         }
         super::durable::require_selected_project(&tx, &task.project_id)?;
         require_task_planning(&tx, &task)?;
+        super::task_admission::require_admission_in(&tx, &task.id)?;
         let local = super::durable::map_local_machine(&tx)?.id;
-        let destination = super::durable::placement_in(&tx, &WorkRef::Task(task_id.clone()))?;
-        if destination.machine_id != local {
+        let destination = match super::task_admission::owner_in(&tx, task_id)? {
+            Some(owner) => owner,
+            None => super::durable::placement_in(&tx, &WorkRef::Task(task_id.clone()))?.machine_id,
+        };
+        if destination != local {
             return Err(StoreError::InvalidAuthority(format!(
                 "Task {task_id} is delegated to Machine {}; no local checkout was allocated",
-                destination.machine_id,
+                destination,
             )));
         }
         task.worktree = Some(worktree.to_path_buf());
@@ -1084,7 +1103,10 @@ pub(super) fn require_task_not_deleted(conn: &Connection, task: &Task) -> StoreR
 /// evidence still applies; missing inventory cannot erase the saved Task.
 pub(super) fn require_task_planning(conn: &Connection, task: &Task) -> StoreResult<()> {
     require_task_planning_identity(conn, task)?;
-    if task.worktree.is_none() && super::repositories::task_is_shared_in(conn, &task.id)? {
+    if task.worktree.is_none()
+        && super::repositories::task_is_shared_in(conn, &task.id)?
+        && super::task_admission::authority_in(conn, &task.id)?.is_none()
+    {
         // Planning exchange excludes execution. Neither a local absence nor a
         // negative peer reading can reserve first start across Machines.
         return Err(StoreError::InvalidAuthority(

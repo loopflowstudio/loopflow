@@ -881,6 +881,9 @@ fn prepare_task(repo: &Path, issue: &str, options: TaskProcessOptions) -> OpsRes
                 .sqlite
                 .task_issue_branch(&task.id)
                 .map_err(task_error)?);
+            super::task_admission::ensure_local(&store.sqlite, &task.id)
+                .await
+                .map_err(task_error)?;
             let placement =
                 prepare_task_placement(&store, &main, &task, branch.as_deref(), &options).await?;
             place_prepared_task(&store, &task.id, placement).await?

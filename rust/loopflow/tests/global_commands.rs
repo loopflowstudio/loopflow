@@ -3033,11 +3033,13 @@ fn task_checkout_explain_proposes_unallocated_work_and_preserves_missing_storage
         .unwrap()
         .worktree
         .is_none());
-    // Explicitly selected Git planning still cannot authorize first start.
-    db.execute("INSERT INTO planning_destinations(repo,id,endpoint,reference) VALUES(?1,'fixture','file:///unavailable','refs/loopflow/planning/users/fixture')",
-        [repo.path().to_str().unwrap()]).unwrap();
-    db.execute("INSERT INTO planning_members(kind,object_id,repo,destination) VALUES('task',?1,?2,'fixture')",
-        rusqlite::params![id,repo.path().to_str().unwrap()]).unwrap();
+    // A historical shared Task has no trustworthy creating-Machine authority.
+    // Git membership alone still cannot authorize its first start.
+    db.execute(
+        "UPDATE tasks SET admission_authority=NULL WHERE id=?1",
+        [id],
+    )
+    .unwrap();
     db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
     let before = fs::read(&path).unwrap();
     let report: serde_json::Value = serde_json::from_str(&success(

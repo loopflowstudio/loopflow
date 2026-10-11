@@ -30,6 +30,7 @@ mod run;
 mod sync;
 pub mod task;
 pub mod task_actions;
+pub mod task_admission;
 pub mod task_execution;
 #[doc(hidden)]
 pub mod task_input;

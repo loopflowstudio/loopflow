@@ -48,7 +48,7 @@ pub fn resolve_repository_selection(cli: &mut Cli) -> Result<()> {
     if matches!(
         cli.command,
         Some(Commands::Task {
-            cmd: TaskCommand::Location { .. }
+            cmd: TaskCommand::Location { .. } | TaskCommand::Admission { .. }
         })
     ) {
         return Ok(()); // Keep the requested portable ID in the reply envelope.
@@ -106,7 +106,7 @@ fn launch_task(cli: &Cli) -> Option<&str> {
     match &cli.command {
         Some(Commands::Desktop { .. })
         | Some(Commands::Task {
-            cmd: TaskCommand::Location { .. },
+            cmd: TaskCommand::Location { .. } | TaskCommand::Admission { .. },
         }) => None,
         Some(Commands::Task {
             cmd: TaskCommand::Run { issue, .. } | TaskCommand::Checkout { issue, .. },

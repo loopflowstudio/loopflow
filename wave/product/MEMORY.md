@@ -102,18 +102,10 @@ physical IDs, private selection, effects and execution; import creates no reques
 Store/CLI/migration checks pass.
 `2afcfba1a`: lookup shares one snapshot, never a reservation.
 
-**Retention is not observation:** `44d73dbcd`/`d62003e0f` separate accepted
-frontiers from rejected heads (counterexample: `29fa9a90e`). `7165f9a62`/`dffdbaaa5`
-jointly project associated origins, retaining original journals/receipts/private
-holds. `1ece5cc52` retires foreign-bridge ancestry before ranking. Mapping validation,
-per-origin heads and creation inputs survive; causality grants no identity/selection.
-Foreground fixtures cover reconnect, associated continuation, causal reopening and
-recovery with unchanged seeded execution.
-Cached confirmation cannot prove repeat exchange: require fresh stream confirmation
-of an unconfirmed receipt. Git confirmation never acknowledges provider
-delivery; comment errors stay local. No live Linear, running-provider or mounted
-Desktop proof. Mixed-provider exchange and first-start admission stay refused;
-remote-opening composition is recorded below.
+**Retention is not observation:** confirmation/frontier and correspondence lessons
+are preserved at `e97d908241:wave/product/MEMORY.md`, this heading. Their seeded
+execution fixtures never established live Linear, running-provider or mounted
+Desktop proof. Mixed-provider exchange is retired by LOO-412.
 
 #1512 connects live clients or resumes native history after driver death, never
 from import; #1517 preserves opaque AgentSessionId bytes. Evidence/limits:
@@ -179,16 +171,23 @@ this paragraph; checks: `scratch/findings.md`, **Work-tab cutover**.
 
 **Confirmation cannot elect execution.** `4c43550c2`'s divergent revisions and
 independent refs confirm without allocating execution; `42990dea3` shares membership,
-not admission. LOO-414 owns arbitration establishment, associated identity and
-unavailable-owner recovery; no-owner first-start refusal remains.
+not admission. Jack Heart moved minimum admission into 427 on October 11.
+New Tasks carry an immutable creating-Machine coordinator through planning; its
+SQLite transaction grants one permanent execution owner. Positive receipts stay
+local, outside planning merge. Lost replies retry the same owner; later delegation
+cannot replace it. Historical shared Tasks with no coordinator still refuse.
+Race/exchange and real-CLI two-Machine fixtures pass, including lost reply then
+checkout on the admitted Machine only. This is isolated SSH/provider simulation,
+not live migration or native acceptance. LOO-414 keeps unavailable-coordinator
+recovery and detached launch retries; full gate remains pending.
 
 Jack Heart accepted LOO-427 for queue then Task-completing shipping on October 10
 (`16e9c950b9`), superseding the demo hold without claiming missing proof. LOO-397
 owns broader explanations/discovery; LOO-391 native Work-tab/input/read, configured
 remote panes and running-Flow exchange proof; LOO-416 relaunch persistence;
 LOO-452 richer keys; LOO-453 readiness/events. Owners: comparison.
-The operator interprets Jack’s acceptance as covering the earlier LOO-412 baseline;
-its unmerged replacement stays with LOO-412. Jack did not author that brief choice.
+Jack subsequently selected stacking on LOO-412 and landing after it; the earlier
+baseline-first interpretation is superseded.
 Queue repairs pass focused checks; full matrix stays with CI. No installation,
 live migration/publication or provider-account use is authorized.
 

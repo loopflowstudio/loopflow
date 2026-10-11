@@ -22,10 +22,12 @@ manual per-Wave enrollment and mixed-provider projection are removed. This
 supersedes the earlier baseline-first shipping interpretation. LOO-412 must land first.
 
 October 11: Jack Heart moved minimum exclusive first-start admission into LOO-427.
-Git-default planning makes the current no-owner refusal block ordinary new Tasks
-as well as delegated ones. That repair is required before landing; LOO-414 retains
-detached launch retries and unavailable-authority recovery. Missing checkouts and
-negative peer observations cannot authorize a first start.
+New Tasks carry their creating-Machine coordinator through planning. It grants
+one permanent execution owner before checkout allocation; confirmed receipts
+remain outside planning merge. Concurrent requests and lost-reply retries retain
+the same owner. Historical shared Tasks with unknown authority still refuse.
+LOO-414 retains detached launch retries and unavailable-authority recovery.
+Missing checkouts and negative peer observations cannot authorize a first start.
 
 
 Inline `# lf-doc: ambiguous` comments annotate retired spellings for today's

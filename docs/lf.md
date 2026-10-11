@@ -105,10 +105,22 @@ another checkout on the same Machine cannot be rebound to this one.
 An explicit Task from another repository is rejected rather than silently retargeted.
 
 [Select Git planning](#select-git-planning) to exchange planning. Import never
-moves local Workflows or transfers a started Task to another Machine. Remote
-first-start admission remains unavailable; absence on a peer is not a reservation.
-Shared Tasks without a retained local checkout refuse first start. Local-only Tasks
-and retained execution remain usable; planning saves and acquisition still work.
+moves local Workflows or transfers a started Task to another Machine.
+
+```bash
+lf task admission TASK --json    # inspect its first-start coordinator and owner
+lf task checkout TASK            # claim first execution before allocating files
+```
+
+A new Task keeps its creating Machine as its first-start coordinator. Checkout
+and run request one permanent execution owner there. Concurrent requests and
+retries recover the same owner; later delegation cannot transfer that reservation.
+Planning exchanges the coordinator identity, never the execution claim. Both
+Machines need their configured connections; an unavailable coordinator refuses
+before checkout allocation. A confirmed claim needs no renewal. Historical shared
+Tasks without an established coordinator still refuse; local absence is not a claim.
+`task admission TASK --claim MACHINE_ID` explicitly reserves first execution
+without preparing a checkout. There is no automatic expiry, takeover or failover.
 
 `--task` and `--wt` select a location. `--wave` supplies context and identity;
 it cannot override a Task's owning Wave. `task run` places the Task's
@@ -619,7 +631,7 @@ Omit TASK to use `--task` or checkout inference. JSON separates `resolution`,
 `action`, `impediments` and `unavailable`. Local path/branch proposals reserve
 nothing: previews never fetch, allocate a checkout, take a lease, change a stack
 or contact a provider. Missing branch recovery and finalization remain unperformed;
-shared first-start admission stays refused.
+previews read admission without claiming it.
 
 `task move TASK NODE --explain` and `task workflow restart TASK --explain`
 validate the captured Workflow without moving it. JSON adds the intended `action`

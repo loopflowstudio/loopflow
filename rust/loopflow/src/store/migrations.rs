@@ -1406,17 +1406,14 @@ mod tests {
     }
 
     fn apply_project_content_cut(conn: &rusqlite::Connection) -> crate::store::StoreResult<()> {
-        if _draft_is_canonical("local_planning") {
-            apply_sqlite(conn)
-        } else {
-            super::_migration_transaction(conn, |conn| {
-                for draft in crate::build_info::migration_draft_manifest() {
-                    conn.execute_batch(draft.sql)?;
-                    super::seed_peer_planning(conn, draft.sql)?;
-                }
-                super::validate_persisted_json(conn)
-            })
-        }
+        super::_migration_transaction(conn, |conn| {
+            apply_set(conn, MIGRATIONS)?;
+            for draft in crate::build_info::migration_draft_manifest() {
+                conn.execute_batch(draft.sql)?;
+                super::seed_peer_planning(conn, draft.sql)?;
+            }
+            super::validate_persisted_json(conn)
+        })
     }
 
     #[test]

@@ -25,6 +25,7 @@ pub fn run(
             cli.command,
             Some(crate::lf::Commands::Task {
                 cmd: crate::lf::TaskCommand::Location { .. }
+                    | crate::lf::TaskCommand::Admission { claim: None, .. }
             })
         );
     // These operations use the addressed Machine's own records and accounts.
@@ -37,6 +38,7 @@ pub fn run(
                 | crate::lf::SessionCommand::Ensure { .. }
         }) | Some(crate::lf::Commands::Task {
             cmd: crate::lf::TaskCommand::Location { .. }
+                | crate::lf::TaskCommand::Admission { .. }
                 | crate::lf::TaskCommand::Shell { .. }
                 | crate::lf::TaskCommand::WatchFiles { .. }
                 | crate::lf::TaskCommand::Files { .. }
@@ -133,7 +135,7 @@ pub fn run(
             cmd: crate::lf::TaskCommand::Location { .. }
         })
     ) {
-        let bytes = runtime.block_on(read(&target, &cmd[1..]))?;
+        let bytes = runtime.block_on(request(&target, &cmd[1..]))?;
         print!("{}", String::from_utf8(bytes)?);
         return Ok(());
     }
@@ -144,7 +146,7 @@ pub fn run(
         })
     ) && !preview
     {
-        let bytes = runtime.block_on(read(&target, &cmd[1..]))?;
+        let bytes = runtime.block_on(request(&target, &cmd[1..]))?;
         let mut record: crate::ops::human_session::SessionRecord = serde_json::from_slice(&bytes)?;
         anyhow::ensure!(
             record
@@ -433,9 +435,9 @@ fn run_ssh(dest: &str, forward_agent: bool, preamble: &str) -> anyhow::Result<()
     command_result(dest, status.code())
 }
 
-/// One bounded read through the ordinary SSH envelope. No probes, credentials,
+/// One bounded request through the ordinary SSH envelope. No probes, credentials,
 /// provider launch or local fallback; callers validate the request-bound reply.
-pub(crate) async fn read(
+pub(crate) async fn request(
     machine: &crate::durable::Machine,
     args: &[String],
 ) -> anyhow::Result<Vec<u8>> {

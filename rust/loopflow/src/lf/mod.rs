@@ -1119,6 +1119,18 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Inspect or reserve the Task's permanent first execution owner
+    Admission {
+        issue: String,
+        /// Request first execution on this Machine; an existing owner wins
+        #[arg(long)]
+        claim: Option<crate::durable::MachineId>,
+        /// Correlate a coordinator reply with this request
+        #[arg(long)]
+        request: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
     /// Read recorded execution location without preparing or transferring Work
     Location {
         issue: String,
@@ -1290,6 +1302,7 @@ impl TaskCommand {
             Self::Shell { issue, .. }
             | Self::WatchFiles { issue, .. }
             | Self::Location { issue, .. }
+            | Self::Admission { issue, .. }
             | Self::Sync { issue, .. }
             | Self::Move { issue, .. }
             | Self::Complete { issue, .. }
@@ -1327,6 +1340,7 @@ impl TaskCommand {
             Self::Shell { issue, .. }
             | Self::WatchFiles { issue, .. }
             | Self::Location { issue, .. }
+            | Self::Admission { issue, .. }
             | Self::Sync { issue, .. }
             | Self::Move { issue, .. }
             | Self::Complete { issue, .. }

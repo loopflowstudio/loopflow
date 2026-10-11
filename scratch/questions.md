@@ -149,8 +149,8 @@ relocate that occurrence, not copy/mount its surface twice or change membership.
 This presentation policy remains reviewable. Unknown Session ancestry stays
 available through diagnostics, not a guessed Task association.
 
-The arbitration binding's establishment, associated identity and recovery remain
-unresolved. They block shared first start, not this UI slice. Rich key chords are
+The October 11 admission slice establishes the binding and exclusive decision;
+unavailable-authority recovery remains in LOO-414. Rich key chords are
 LOO-452; CLI-build versus running-app capability discovery is LOO-397. No new
 Task filing or claim of their implementation follows from this plan.
 
@@ -163,6 +163,6 @@ reversible presentation limit is not Task transfer or first-start authority.
 
 The combined gate observed Git-by-default creation enrolling ordinary new Tasks
 in shared planning; the existing no-owner first-start refusal then blocks launch.
-LOO-414 owns admission, and LOO-412 received this integration finding through a
-Task steer. No reply or resolution is claimed. Keep the duplicate-execution
-protection; the stack is not landing-ready while ordinary Task startup is blocked.
+Jack Heart subsequently selected minimum admission in LOO-427, superseding the
+LOO-414 dependency for ordinary first start. The slice above owns the repair;
+LOO-414 retains unavailable-authority recovery. Passing gate remains required.

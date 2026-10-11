@@ -8,7 +8,7 @@ preserves accepted Work tabs, pane controls and recorded-Machine execution while
 adopting 412's canonical Work and configured planning transport. Reduction for both
 Tasks remains coordinated with 412; no publication or landing readiness is claimed.
 
-Check: affected Rust suites 170/184 pass; seven contract failures repaired (focused reruns pass), seven first-start failures remain; fmt/all-target Clippy pass; headless Desktop 503 tests and Swift boundary pass; Python/website repairs pass focused checks. Native proof: LOO-391.
+Check: Rust nextest 2544/2549 pass; five fixture/coverage repairs await focused rerun; fmt/all-target Clippy and migration validation pass (68 released migrations unchanged); headless Desktop 503 tests/Swift boundary pass; Python/website repairs pass focused checks. CI owns materialized release graph; native proof: LOO-391.
 
 ## Shipping scope — Jack Heart, October 10
 
@@ -64,8 +64,7 @@ No live planning migration is authorized.
 
 **Build:** one retained workspace per repository, Wave or Task, shown as a tab
 named for that Work inside its repository window. Jack Heart accepted this internal LOO-427 slice in one PR, not its native experience. This section supersedes checkout-led presentation below;
-existing execution/location safeguards remain. Admission is independent and
-unresolved, not a prerequisite for these tabs.
+existing execution/location safeguards remain. Admission is a separate internal slice below, not a prerequisite for these tabs.
 
 **October 10 correction:** Jack Heart selected Split → shell, with no empty-pane
 option (comment `ff61b6bc-f40c-4545-a203-82ced3afd335`). Implemented through the
@@ -160,7 +159,7 @@ at `2feed22e1109:scratch/compare-cmux-s-command-line.md`, **Work tabs**.
 
 The cut remains one PR with the rest of LOO-427. Saved relaunch layout belongs to
 LOO-416. LOO-452 owns richer key chords, LOO-397 deeper capability discovery.
-First-start admission is independent and still refused; this UI supplies no
+First-start admission belongs to the slice below; this UI supplies no
 arbitration authority. Configured peers, native draft/focus retention and the
 rendered exercise below belong to LOO-391, not a LOO-427 delivery hold.
 
@@ -260,19 +259,15 @@ Reuse these owners.
 
 ## Delete — do not maintain
 
-**Replacement owned by LOO-412, not this shipping cut:** configured transport and
-its typed writer supersede `PlanningCommand::{Connect,Use,Select}` and manual
-enrollment. This accepted baseline still implements them. The newer dependency
-also deletes association/recovery paths and retains `TaskSource`; wholesale
-integration would require deliberate reconciliation with correspondence, authored
-delegation and no-owner refusal. The operator’s October 10 brief interpretation leaves
-that unmerged reduction with LOO-412. No second exchange engine is introduced.
+**LOO-412 integrated:** configured transport and its typed writer replace manual
+enrollment and mixed-provider projections. The current parent is recorded above.
+No second exchange engine is introduced; minimum admission is the remaining cut.
 
 `42990dea3` completed both remaining deletions: the stale October 8 walkthrough
 and the duplicate sharing query. The reviewed simulation remains at
 `4c43550c2:scratch/design-walkthrough.html`, not as current status or native acceptance.
 Routing and transactional preparation share `repositories::task_is_shared_in`;
-both first-start refusal boundaries remain pending an accepted admission owner.
+both preparation boundaries now consume the same permanent first-start decision.
 
 - Keep `TaskSource`, started-Task transfer, copied child assignments and remote callback
   planning deleted. Shared planning never supplies checkout, Workflow or control authority.
@@ -348,10 +343,10 @@ use effective delegation. Neither changes Machine defaults. LOO-412's TaskSource
 transfer/preparing selector stays excluded: cold planning acquisition and ordinary
 Task preparation survive, but remote first start still needs exclusive admission.
 
-Git-selected Tasks, including user-keyed refs, without retained checkouts refuse
-first start before Git preparation and at placement. Local-only work, saves,
-acquisition and retained execution remain usable. Local absence, negative peer
-readings and SQLite transactions provide no cross-Machine reservation.
+New Tasks obtain the coordinator’s permanent decision before Git preparation
+and consume the same receipt at placement. Historical shared Tasks lacking an
+established coordinator still refuse first start. Local absence and negative
+peer readings never grant a reservation.
 Jack Heart accepted nearest-ancestor inheritance with narrower overrides (Q2, October 9).
 
 **Retained identity/routing composition:** common-store correspondence/full-ID

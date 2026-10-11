@@ -1459,7 +1459,12 @@ fn imported_execution_location_survives_delegation_and_rejects_stale_peer_reads(
             assert_eq!(report["resolution"][fact]["state"], "unavailable");
         }
         assert!(report["action"].is_null());
-        assert!(report["url"].is_null());
+        if command[0] == "desktop" {
+            // Opening Work remains available without a usable execution location.
+            assert!(report["url"].as_str().unwrap().starts_with("loopflow://"));
+        } else {
+            assert!(report["url"].is_null());
+        }
     }
 
     // A peer reply represents exactly one local observer, never a peer inventory.
@@ -1491,8 +1496,10 @@ fn imported_execution_location_survives_delegation_and_rejects_stale_peer_reads(
         "--json",
     ]);
     assert!(!launch.status.success());
+    let error = String::from_utf8_lossy(&launch.stderr);
     assert!(
-        String::from_utf8_lossy(&launch.stderr).contains("first-start admission is unavailable")
+        error.contains("Machine command unavailable") && error.contains("unreachable"),
+        "{error}"
     );
     assert!(local.task(&task.id).unwrap().unwrap().worktree.is_none());
     assert!(!fixture.root.path().join("forbidden-effect").exists());
@@ -1621,5 +1628,143 @@ fn remote_companions_keep_the_recorded_owner_and_stream_file_changes() {
     let output = child.wait_with_output().unwrap();
     assert_success(&output);
     assert!(changed);
+    assert!(!fixture.root.path().join("forbidden-effect").exists());
+}
+
+#[test]
+fn task_admission_crosses_machines_and_recovers_a_lost_reply_before_checkout() {
+    use loopflow::durable::TaskId;
+    use loopflow::planning::NewTask;
+    use loopflow::planning_git::PlanningDestination;
+    use loopflow::store::sqlite::SqliteStore;
+
+    let fixture = preview_machines();
+    let local_repo = loopflow_test_support::TestRepo::new();
+    let remote_repo = loopflow_test_support::TestRepo::new();
+    let local_path = local_repo.path().canonicalize().unwrap();
+    let remote_path = remote_repo.path().canonicalize().unwrap();
+    let local_db = fixture.root.path().join("local/loopflow.db");
+    let remote_db = fixture.root.path().join("remote/store/loopflow.db");
+    let local = SqliteStore::new(&local_db).unwrap();
+    let remote = SqliteStore::new(&remote_db).unwrap();
+    let repository = remote
+        .ensure_repository(remote_path.to_str().unwrap())
+        .unwrap();
+    local
+        .bind_repository(local_path.to_str().unwrap(), &repository)
+        .unwrap();
+    let project = remote
+        .ensure_wave_project(remote_path.to_str().unwrap(), "admission")
+        .unwrap();
+    let task = remote
+        .create_task(&NewTask {
+            id: TaskId::new(),
+            project_id: project.id,
+            title: "Admit once".into(),
+            description: String::new(),
+            due_date: None,
+        })
+        .unwrap();
+    let destination = PlanningDestination::new(
+        "/fixture/planning",
+        "refs/loopflow/planning/shared/admission",
+    )
+    .unwrap();
+    for (store, path) in [(&local, &local_path), (&remote, &remote_path)] {
+        store
+            .bind_peer_planning(path.to_str().unwrap(), &destination)
+            .unwrap();
+    }
+    local
+        .import_peer_planning(
+            local_path.to_str().unwrap(),
+            &destination.id(),
+            "first",
+            &remote
+                .export_peer_planning(remote_path.to_str().unwrap(), &destination.id())
+                .unwrap(),
+        )
+        .unwrap();
+    let owner = local.local_machine().unwrap().id;
+    let args = [
+        "--repository",
+        repository.as_str(),
+        "task",
+        "admission",
+        task.id.as_str(),
+        "--json",
+    ];
+    let before = [checkpoint_bytes(&local_db), checkpoint_bytes(&remote_db)];
+    let reading = fixture.json(&args);
+    assert!(reading["owner"].is_null());
+    assert_eq!(
+        reading["authority"]["machine_id"],
+        remote.local_machine().unwrap().id.as_str()
+    );
+    assert_eq!(
+        [checkpoint_bytes(&local_db), checkpoint_bytes(&remote_db)],
+        before
+    );
+
+    let ssh = fixture.root.path().join("bin/ssh");
+    let original = fs::read_to_string(&ssh).unwrap();
+    // Execute the real peer CLI, then lose its successful acknowledgement.
+    executable(
+        &ssh,
+        &(original.replace("exec env -i", "env -i") + "\nexit 42\n"),
+    );
+    let mut claim = args.to_vec();
+    claim.extend(["--claim", owner.as_str()]);
+    let lost = fixture.run(&claim);
+    assert!(!lost.status.success());
+    assert_eq!(
+        remote
+            .task_admission(&task.id, "receipt")
+            .unwrap()
+            .unwrap()
+            .owner,
+        Some(owner.clone())
+    );
+    assert!(local
+        .task_admission(&task.id, "local")
+        .unwrap()
+        .unwrap()
+        .owner
+        .is_none());
+    assert!(local.task(&task.id).unwrap().unwrap().worktree.is_none());
+    executable(&ssh, &original);
+    let retried = fixture.json(&claim);
+    assert_eq!(retried["owner"], owner.as_str());
+    assert_eq!(fixture.json(&args)["owner"], owner.as_str());
+    // The ordinary checkout operation consumes the same decision and records
+    // execution only on its admitted Machine.
+    let prepared = fixture.run(&[
+        "--repository",
+        repository.as_str(),
+        "task",
+        "checkout",
+        task.id.as_str(),
+        "--name",
+        "admitted-work",
+        "--json",
+    ]);
+    assert_success(&prepared);
+    assert!(local
+        .task(&task.id)
+        .unwrap()
+        .unwrap()
+        .worktree
+        .unwrap()
+        .join(".git")
+        .exists());
+    assert!(remote.task(&task.id).unwrap().unwrap().worktree.is_none());
+    assert_eq!(
+        local
+            .task_admission(&task.id, "retained")
+            .unwrap()
+            .unwrap()
+            .owner,
+        Some(owner)
+    );
     assert!(!fixture.root.path().join("forbidden-effect").exists());
 }

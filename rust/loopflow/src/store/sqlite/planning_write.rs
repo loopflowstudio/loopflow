@@ -117,6 +117,7 @@ planning_fields! {
     (Project, ProjectInitiatives, "planning_initiatives", String),
     (Project, ProjectTeams, "planning_teams", String),
     (Task, TaskProject, "project_id", String),
+    (Task, TaskAdmissionAuthority, "admission_authority", Option<crate::durable::TaskAdmissionAuthority>),
     (Task, TaskLinearId, "external_issue_id", Option<String>),
     (Task, TaskIdentifier, "issue_identifier", String),
     (Task, TaskTitle, "issue_title", Option<String>),
@@ -190,8 +191,17 @@ pub(crate) fn read(conn: &Connection, object: &PlanningObject) -> StoreResult<Ve
     if !delegated {
         fields.retain(|field| *field != "delegation");
     }
+    let admission: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('tasks') WHERE name='admission_authority')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !admission {
+        fields.retain(|field| *field != "admission_authority");
+    }
     let expressions: Vec<_> = fields.iter().map(|field| match *field {
         "delegation" => format!("COALESCE((SELECT json_object('machine_id',machine_id,'placed_at',placed_at,'provenance',provenance) FROM work_placements WHERE {}_id={}.id),'null')", object.kind.as_str(), table(object.kind)),
+        "admission_authority" => "COALESCE(admission_authority,'null')".into(),
         "krs" | "metric_targets" => field.to_string(),
         "disposition" => "json_object('planning_state',planning_state,'planning_completed',planning_completed,'planning_completed_at',planning_completed_at)".into(),
         "content" => "json_object('body',body,'author',author,'created_at',created_at)".into(),
@@ -251,6 +261,15 @@ pub(crate) fn write(
         let value = edit.value()?;
         if before.get(edit.field()) == Some(&value) {
             continue;
+        }
+        if matches!(edit, PlanningEdit::TaskAdmissionAuthority(_))
+            && before
+                .get(edit.field())
+                .is_some_and(|value| !value.is_null())
+        {
+            return Err(StoreError::InvalidAuthority(
+                "Task admission authority is immutable".into(),
+            ));
         }
         match edit {
             PlanningEdit::Delegation(kind, assignment) => {

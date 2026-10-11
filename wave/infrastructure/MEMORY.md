@@ -614,38 +614,40 @@ acceptance remain at
 
 ## Tasks across machines (LOO-412, 2026-10-11)
 
-Jack Heart selected Linear, shared or default user-keyed Git per repository.
-One typed writer owns local/imported Work; outages buffer without fallback/election.
-Execution/attempts stay local; retain causal losers and uncertainty. The generic
-PM facade is removed; Task edits/comments and exchange have concrete owners.
+Jack Heart approved PR #1491 for landing on October 11 after the complete
+fifteen-area reduction and +/- review, superseding review-only authority.
+Design/checks: `6fabcd0734:scratch/`; [mechanics](../../docs/architecture/planning.md).
 
-Canonical Work owns reads/writes; Linear privately owns acquisition, observations
-and acceptance. Delivery checks accepted revision plus archive/membership evidence.
-Partial fields, prose age, disputes, foreign ownership and retained IDs survive.
-Typed receipts retain attempted inputs, later saves and explicit null. Journal
-routes replace routing inventories; configuration selects status (`47b5edb701`).
-Released SQLite stays immutable; Jack Heart excludes old-version Git decoders.
+Jack selected Linear, shared or default user-keyed Git per repository. One typed
+writer owns local/imported Work; canonical Task/Project fields replace plan/PM
+wrappers and duplicate readers. Linear privately owns acquisition, observations
+and acceptance. Saves attempt delivery before returning; failures buffer locally
+and warn. No fallback transport, publisher election or turn/Flow replay.
+Execution and delivery attempts stay local. Shared completion never moves a
+captured Workflow, signals a Process or authorizes checkout cleanup.
 
-`07a3586ac3` removes FollowThrough, its completion ritual, CLI/DTO/UI and
-finish-delivery Flow. Ordinary Tasks/comments replace it; private recovery retains
-uncertain filing IDs and saves Tasks before comments. Merge, Workflow and Process
-preservation remain separate. Focused recovery, CLI/Flow and headless checks pass.
+Receipts preserve attempts, later edits, nulls, ages, foreign/partial facts and IDs.
+Journal routes replace inventories, retaining causal losers and uncertainty.
+Released SQL stays immutable; no old-version Git decoder. Key pairing and automatic export of Git-imported,
+unmapped Work into Linear remain open; Linear's unconditional updates retain a
+remote-edit race. LOO-414 owns exclusive first-start authority: missing local
+placement proves no peer absence. Jack's `19116a1b` stacks 427 on 412 for later
+landing; this approval does not settle that separate authority.
 
-October 11 cron conversion replaces WaveCronDef/GOAL declarations with one config
-list of ordinary argv. Released labels, Machine, activation, dues, classifications
-and inherited locks survive; release remains Infrastructure-owned. Isolated source
-and public failure proofs pass, not installation or live schedule activation.
-Affected/materialized gate and fresh +/- review remain. Stored Session/control
-proof establishes no configured provider control or installation.
+FollowThrough and its completion ritual, CLI/DTO/UI and finish-delivery Flow are
+removed. Ordinary Tasks/comments replace them; private recovery preserves filing
+IDs and uncertain effects, committing Tasks before linking comments. One config
+cron list replaces WaveCronDef/GOAL declarations. Conversion retains labels,
+Machine, activation, dues, receipt classifications and child-held locks. Release
+remains Infrastructure-owned. Main #1523's Process terminal draft stays separate
+from 412's draft; Work conversion preserves local liveness and placement.
 
-Jack's `19116a1b`: stack 427 on 412; land afterward. No 412 landing authority.
-Default-Git enrollment conflicts with 427's conservative first-start
-admission; LOO-414's authority decision remains open. Missing local placement proves
-no peer absence. Main #1523's Process terminal draft stays separate from 412's
-planning draft; shared Work conversion preserves local liveness/placement.
-[Plan](../../scratch/work-on-another-machine-name.md) owns remaining work.
-Release requires cron conversion to preserve installed owner, child-held locks,
-dues and nonzero operation failures. Files grant no activation/export authority.
+The materialized gate initially failed 30/2,416 Rust tests. Repairs and affected
+rechecks pass, including populated conversion, public simulated remote dispatch,
+Session preservation and headless Desktop; the full matrix was not rerun.
+Unchanged website overflow keeps the aggregate gate red. Source-built offline
+Task/comment saves and readback pass. Browser rendering was unavailable. Real SSH, live Linear continuity, installation
+and schedule activation remain unproved and unauthorized. Hosted checks remain required.
 
 ## Planning and launch preservation (curated 2026-10-02)
 

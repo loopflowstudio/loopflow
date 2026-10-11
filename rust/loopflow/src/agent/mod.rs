@@ -984,11 +984,7 @@ pub fn build_claude_command(
 }
 
 /// Build Codex CLI command.
-pub fn build_codex_command(
-    launch: &AgentConfig,
-    process: &ProcessConfig,
-    model_variant: Option<&str>,
-) -> Vec<String> {
+pub fn build_codex_command(launch: &AgentConfig, model_variant: Option<&str>) -> Vec<String> {
     let mut cmd = vec!["codex".to_string()];
     cmd.push("-c".to_string());
     cmd.push(format!("service_tier=\"{CODEX_DEFAULT_SERVICE_TIER}\""));
@@ -1099,7 +1095,7 @@ pub fn build_model_command(
     let (harness, model_variant) = parse_agent(agent);
     let model_variant = model_variant.as_deref();
     Ok(match harness.as_str() {
-        "codex" => build_codex_command(launch, process, model_variant),
+        "codex" => build_codex_command(launch, model_variant),
         "opencode" => build_opencode_command(model_variant),
         "claude" => build_claude_command(launch, process, capabilities, model_variant),
         _ => {
@@ -2168,12 +2164,7 @@ trust_level = "trusted"
             skip_permissions: false,
             ..default_launch()
         };
-        let process = ProcessConfig {
-            auto: false,
-            stream: false,
-            ..Default::default()
-        };
-        let cmd = build_codex_command(&launch, &process, None);
+        let cmd = build_codex_command(&launch, None);
         assert_arg_pair(&cmd, "-c", "service_tier=\"default\"");
         assert!(
             !cmd.contains(&"exec".to_string()),
@@ -2194,9 +2185,8 @@ trust_level = "trusted"
             skip_permissions: false,
             ..default_launch()
         };
-        let process = auto_process();
 
-        let cmd = build_codex_command(&launch, &process, None);
+        let cmd = build_codex_command(&launch, None);
         let idx = cmd
             .iter()
             .position(|arg| arg == "--add-dir")
@@ -2215,9 +2205,8 @@ trust_level = "trusted"
             skip_permissions: false,
             ..default_launch()
         };
-        let process = auto_process();
 
-        let cmd = build_codex_command(&launch, &process, None);
+        let cmd = build_codex_command(&launch, None);
         assert!(!cmd.contains(&"--add-dir".to_string()));
     }
 
@@ -2238,7 +2227,7 @@ trust_level = "trusted"
         };
         let process = auto_process();
 
-        let codex = build_codex_command(&launch, &process, None);
+        let codex = build_codex_command(&launch, None);
         assert!(codex.contains(&"--dangerously-bypass-approvals-and-sandbox".to_string()));
         assert!(!codex.contains(&"--add-dir".to_string()));
         let thread = build_codex_thread_start_params(&launch);
@@ -2254,8 +2243,7 @@ trust_level = "trusted"
     #[test]
     fn build_codex_command_with_model() {
         let launch = default_launch();
-        let process = auto_process();
-        let cmd = build_codex_command(&launch, &process, Some("o3"));
+        let cmd = build_codex_command(&launch, Some("o3"));
         assert!(cmd.contains(&"model=\"o3\"".to_string()));
     }
 
@@ -2265,8 +2253,7 @@ trust_level = "trusted"
             skip_permissions: true,
             ..default_launch()
         };
-        let process = auto_process();
-        let cmd = build_codex_command(&launch, &process, None);
+        let cmd = build_codex_command(&launch, None);
         assert!(cmd.contains(&"--dangerously-bypass-approvals-and-sandbox".to_string()));
         assert!(!cmd.contains(&"--sandbox".to_string()));
         assert!(!cmd.contains(&"--ask-for-approval".to_string()));
@@ -2291,23 +2278,11 @@ trust_level = "trusted"
             system_prompt: "Fixed additions.".into(),
             ..default_launch()
         };
-        let cmd = build_codex_command(&launch, &auto_process(), None);
+        let cmd = build_codex_command(&launch, None);
         assert!(cmd.contains(&"developer_instructions=\"Fixed additions.\"".to_string()));
         assert!(!cmd
             .iter()
             .any(|arg| arg.contains("model_instructions_file")));
-    }
-
-    #[test]
-    fn build_codex_command_without_context_file() {
-        // Absence of a log file must never replace the native instructions.
-        let launch = default_launch();
-        let process = ProcessConfig {
-            context_file: None,
-            ..Default::default()
-        };
-        let cmd = build_codex_command(&launch, &process, None);
-        assert!(!cmd.iter().any(|a| a.contains("model_instructions_file")));
     }
 
     #[test]

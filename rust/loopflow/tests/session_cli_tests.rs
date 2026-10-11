@@ -434,6 +434,120 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
 const CALLER: &str = "run_00000000000000000000000000000002";
 
 #[test]
+fn native_title_callback_returns_while_store_is_busy() {
+    for exclusive in [false, true] {
+        let home = tempfile::tempdir().unwrap();
+        std::fs::create_dir(home.path().join(".lf")).unwrap();
+        prepare_conversation(home.path(), home.path(), "claude", "Original purpose");
+        let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+        database
+            .execute_batch(if exclusive {
+                "PRAGMA journal_mode=DELETE; BEGIN EXCLUSIVE"
+            } else {
+                "BEGIN IMMEDIATE"
+            })
+            .unwrap();
+        // Several prompt callbacks compete with the same held writer.
+        let children: Vec<_> = (0..4).map(|_| spawn_title_callback(home.path())).collect();
+        for child in children {
+            let output = finish_title_callback(child);
+            if exclusive {
+                assert!(
+                    output.stdout.is_empty(),
+                    "unknown ownership must not rename: {output:?}"
+                );
+            } else {
+                let title: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+                assert_eq!(
+                    title["hookSpecificOutput"]["sessionTitle"],
+                    "Plan store migration"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn native_title_callback_bounds_history_scans() {
+    let home = tempfile::tempdir().unwrap();
+    std::fs::create_dir(home.path().join(".lf")).unwrap();
+    let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    // A lazy billion-row history makes an unbounded ownership scan deterministic
+    // without allocating a large fixture on disk.
+    database
+        .execute_batch(
+            "CREATE TABLE agent_sessions(id TEXT, provider_thread TEXT);
+        CREATE VIEW session_events AS
+        WITH RECURSIVE history(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM history WHERE n<1000000000)
+        SELECT 'session' AS session_id, 'observed' AS kind,
+            json_object('evidence', json_object('provider_session_id', 'other-' || n)) AS payload
+        FROM history;",
+        )
+        .unwrap();
+    let output = finish_title_callback(spawn_title_callback(home.path()));
+    assert!(
+        output.stdout.is_empty(),
+        "incomplete history must not rename: {output:?}"
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("interrupted"),
+        "{output:?}"
+    );
+}
+
+#[test]
+fn native_title_callback_does_not_initialize_a_store() {
+    let home = tempfile::tempdir().unwrap();
+    std::fs::create_dir(home.path().join(".lf")).unwrap();
+    let output = finish_title_callback(spawn_title_callback(home.path()));
+    let title: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        title["hookSpecificOutput"]["sessionTitle"],
+        "Plan store migration"
+    );
+    assert!(!home.path().join("loopflow.db").exists());
+}
+
+fn spawn_title_callback(home: &std::path::Path) -> std::process::Child {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    let mut child = command(home, &["__session-title", "claude"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    write!(
+        child.stdin.take().unwrap(),
+        "{}",
+        serde_json::json!({
+            "cwd": home, "session_id": "native-plain",
+            "hook_event_name": "UserPromptSubmit", "prompt": "Plan store migration"
+        })
+    )
+    .unwrap();
+    child
+}
+
+fn finish_title_callback(mut child: std::process::Child) -> Output {
+    use std::time::{Duration, Instant};
+
+    let started = Instant::now();
+    while child.try_wait().unwrap().is_none() {
+        if started.elapsed() > Duration::from_secs(4) {
+            child.kill().unwrap();
+            let output = child.wait_with_output().unwrap();
+            panic!("title hook exceeded prompt budget: {output:?}");
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success(), "{output:?}");
+    output
+}
+
+#[test]
 fn native_title_callback_keeps_lf_as_the_naming_owner() {
     use std::io::Write;
     use std::process::Stdio;
@@ -477,6 +591,19 @@ fn native_title_callback_keeps_lf_as_the_naming_owner() {
             );
         }
     }
+    let recorded: i64 = database
+        .query_row(
+            "SELECT COUNT(*) FROM processes
+             WHERE json_extract(command, '$[1]')='__session-title'
+               AND outcome='succeeded' AND completed_at IS NOT NULL",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        recorded, 2,
+        "uncontended hooks retain their Process history"
+    );
 }
 
 /// A prepared conversation, before a provider has started.

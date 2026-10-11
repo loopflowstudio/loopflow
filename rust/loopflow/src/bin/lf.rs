@@ -1462,6 +1462,12 @@ fn run() -> anyhow::Result<()> {
     if !bypasses_installation_startup_gate {
         loopflow::installation::dispatch_default_cli()?;
     }
+    if let Some(Commands::SessionTitle { provider }) = &cli.command {
+        // Prompt callbacks must not enter ordinary admission or wait for its
+        // durable-write budget. Keep only bounded, noninitializing observation.
+        journal::observe_process_within(&args, std::time::Duration::from_millis(100));
+        return loopflow::lf::commands::session_history::name_native_session(provider);
+    }
     ctrlc::set_handler(|| loopflow::agent::exit_on_interrupt())
         .expect("failed to set Ctrl+C handler");
 

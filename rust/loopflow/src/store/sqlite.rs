@@ -562,13 +562,14 @@ impl SqliteStore {
     }
 
     /// Append process evidence to an existing compatible store, never initialize it.
-    pub(crate) fn open_existing_processes(path: &Path) -> StoreResult<Self> {
+    pub(crate) fn open_existing_processes(path: &Path, wait: Duration) -> StoreResult<Self> {
         let conn = Connection::open_with_flags(
             path,
             rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
         crate::performance::observe_sqlite(&conn);
-        conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;")?;
+        conn.busy_timeout(wait.min(Duration::from_secs(5)))?;
+        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
         validate_process_schema(&conn)?;
         // An older ledger without the current process owner is not a writable
         // observation destination. Leave upgrade decisions to ordinary admission.
@@ -590,6 +591,19 @@ impl SqliteStore {
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
+    }
+
+    /// Bound both lock waits and query execution for optional prompt naming.
+    pub(crate) fn open_native_title_reader(path: &Path) -> StoreResult<Self> {
+        let store = Self::open_read_only(path)?;
+        {
+            let conn = store.conn.lock().expect("store mutex poisoned");
+            let budget = Duration::from_millis(100);
+            conn.busy_timeout(budget)?;
+            let started = std::time::Instant::now();
+            conn.progress_handler(1000, Some(move || started.elapsed() >= budget))?;
+        }
+        Ok(store)
     }
 
     pub(crate) fn work_identities(&self) -> StoreResult<Vec<WorkIdentity>> {

@@ -270,5 +270,5 @@ extra = '''
 .x6 .t6 .id{font:12px var(--font-mono);color:var(--text-secondary)}.x6 .t6 .done b{font-weight:400;color:var(--text-secondary)}
 @media (max-width:900px){.x6 .wf{align-items:stretch}.x6 .wf .cap{padding-top:0}.x6 .wf .edge i{width:2px;margin:8px auto}.x6 .t6 li{grid-template-columns:22px minmax(0,1fr)}.x6 .t6 .pos{grid-column:2;justify-self:start}.x6 .t6 .id{display:none}}
 '''
-out = (h[:a] + main + h[b:]).replace('"/static/', '"../../website/static/').replace("</head>", style + extra + "</style></head>")
+out = (h[:a] + main + h[b:]).replace('"/static/', '"../../website/static/').replace('href="/', 'href="http://localhost:5001/').replace("</head>", style + extra + "</style></head>")
 pathlib.Path("../scratch/prototypes/x11-redesign.html").write_text(out)

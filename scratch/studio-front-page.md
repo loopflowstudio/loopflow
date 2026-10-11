@@ -630,3 +630,5 @@ strip links to its own site in a new tab.
 - Jack Heart: "I think we need a 2nd thing that is similarly sized to stay engaged and cli is a CLI hero", then "The CLI for agent workflows ?" → `x11` has a second section the size of the swarm section, headed "`lf`: the CLI for agent workflows.": two short paragraphs (the second is his ssh line, moved here) beside a seven-command terminal card, linking to `/cli`. The "Underneath, it is all lf" link under Works with is removed.
 
 - Jack Heart: "just cut" the requirements bullets, the Linear and herdr/cmux line, and the closing Download → `x11` ends on Works with. The "Free and open source (MIT)." closing heading went with them, since nothing was left under it and the line under the top Download says it.
+
+- Jack Heart: "need to get a --machine command in that command list" → `lf --machine mini run pursue  # on another machine, over ssh` added to the `x11` terminal card, after `lf run pursue`. Syntax follows `lf --machine <machine-id> <args...>` in docs/architecture-reference.md; "mini" is the example id from docs/getting-started.md.

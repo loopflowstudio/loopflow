@@ -139,6 +139,7 @@ main = f'''
 <pre tabindex="0" aria-label="lf commands" class="term"><span class="p">$</span> <b>lf</b> -a codex : "fix the test"     <span class="c">  # launch an agent</span>
 <span class="p">$</span> <b>lf</b> skill design "Add CSV export" <span class="c">  # a saved prompt: a Skill</span>
 <span class="p">$</span> <b>lf</b> run pursue                    <span class="c">  # Skills in sequence: a Flow</span>
+<span class="p">$</span> <b>lf</b> --machine mini run pursue     <span class="c">  # on another machine, over ssh</span>
 <span class="p">$</span> <b>lf</b> task run EXP-12               <span class="c">  # its worktree, then its Flow</span>
 <span class="p">$</span> <b>lf</b> resume                        <span class="c">  # back to the last Session</span>
 <span class="p">$</span> <b>lf</b> usage --task EXP-12           <span class="c">  # what that Task cost</span>

@@ -16,8 +16,8 @@ comment/completion saves and active CLI/Desktop propagation without another turn
 manual refresh or unrelated outbound drain. Acceptance requires stable mutation
 identities, retained conflicts and reconnect deduplication. Jack Heart selected
 Linear as winner for every planning conflict.
-Without Linear, prefer the host where possible, otherwise last-write-wins with
-try-not-to-clobber and recoverable losing edits; LOO-412 owns ordering.
+LOO-412's accepted Git ordering supersedes host preference: causality precedes
+clock and mutation-ID ties; losing edits remain recoverable.
 `185de5fbf` implements observed Linear conflict adoption and retires losing
 intentions. Receipts preserve both values; unchanged baselines preserve saves.
 Sessions, Processes, Flow/captured Workflow
@@ -46,17 +46,15 @@ acquisition recognizes partial progress, never detail reads.
 projections, retaining baselines. Configuration selects pending display; creation
 receipts advance revision. `29777b8cb` scopes sync to repositories;
 `b6f34a6f8` separates Linux reconnect and portable abandonment fixtures.
-`078a6642e`: LOO-406 Linux migration/reconnect/adoption pass, not peer acceptance.
-`ffe986160` removes synthetic settlement; queue gate's 15-second lock refusal
-leaves receipts unverified. Swift/matrix await CI. Jack Heart authorized
-LOO-406 landing/CI after queue. Main `d20c56daf` integrates #1503;
-its classifier proves neither acceptance nor installation.
+LOO-406 #1503 is integrated; peer and installed acceptance remain unproved.
+Dated checks and queue uncertainty: `09709a05cc:wave/infrastructure/MEMORY.md`.
 
 Jack Heart's `8821db44-0480-4493-8609-953207663f1d` removes public creation tokens.
 Each create generates/saves/returns a distinct ID, even for identical titles;
 internal delivery retains it. His `34c1739a-8831-4578-96c9-797aeaa87743` proposes
 complete Task/Project planning with machine-local execution linked by Task ID.
-No rewrite is authorized; Linear Done beside a running Flow remains unanswered.
+LOO-412's October 10 accepted redesign now owns that reduction; shared completion
+does not move or stop the local Flow.
 
 Jack Heart authorized this regression repair. Tests distinguish observed reopening
 (adopt Linear, retain both values, retire delivery, preserve execution) from unseen
@@ -626,7 +624,8 @@ SQLite claims. Task status, admission and acquisition read narrow
 Linear evidence; ordinary provider readback is deleted. Delivery needs
 accepted revision plus archive/membership eligibility; foreign facts grant no ownership.
 Missing issue content cannot hide a canonical parent's archive or membership
-dispute. Independent observations retain their ages. Typed values alone
+dispute. Narrow SQL reads still depend on retained provider JSON; deleting display
+models does not prove persistence conversion. Independent observations retain their ages. Typed values alone
 are not a typed journal: field-addressed mutations still require reduction.
 Jack Heart excludes old-version support; an unshipped Git encoding needs no dual
 decoder. Released SQLite preservation and selected-format causal history remain

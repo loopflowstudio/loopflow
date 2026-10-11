@@ -191,7 +191,7 @@ Exact reader-cut evidence: `b4e54f7d44:scratch/work-on-another-machine-name.md`.
 `7e63c994d0` in this plan records typed save/rotation receipts, distinct ordering/
 disposition owners and the repaired fixture that bypassed the writer.
 
-### Canonical readers and remaining acquisition cut — October 10
+### Canonical readers and retained provider persistence — October 11
 
 `18520565d6`, `96607a9a46` and `eda4a98097` establish canonical Task
 creation/status/acquisition and Wave/roadmap/Work-frame summaries. Local IDs,
@@ -248,12 +248,16 @@ Team, invalidation, removal and age. Unrelated malformed content cannot erase th
 facts. Review repaired the canonical Project join: a missing issue cannot hide
 independent archival or unresolved membership. Pending membership only affects display.
 Populated released-frontier and stale-response tests cover this boundary.
-Task acquisition now returns Work using narrow retained Linear ownership/age.
+`dfa2cdafba` makes Task acquisition return Work using narrow Linear ownership/age.
 `PmTaskObservation`, `pm_task_observation_in` and `read_task_planning_async` are
 deleted. Revision-fenced absence, cancellation and foreign/unmapped facts survive;
 fixtures replay retained inputs directly. Rollback proof now includes canonical
 Project, provider input and Wave acquisition age. The persistent hierarchy, typed
 journal, bindings, follow-ups and cron still precede gate and review.
+`09709a05cc` removes provider Wave and Project display reconstruction.
+The remaining persistence cut is explicit: `linear_issue_evidence` still extracts
+fields from `pm_items`/`pm_projects` JSON, and `project_accepted_planning` still
+decodes retained content into typed edits. Narrow reads do not remove that hierarchy.
 The upstream Work-watch clock now includes the planning cadence.
 
 Main #1522 entered at `7d9bf0a4d8`, adding Claude recorded-answer Flow settlement.
@@ -337,7 +341,7 @@ preserve fenced examples and unknown prose; migration retains original bytes.
 The Task draft retains prose receipts and sequence high-water marks. Exact proof
 and contrary evidence: `f025e9b7ab:scratch/work-on-another-machine-name.md`,
 “Project prose: composed behavior and remaining ownership cut.” These passes do
-not establish acquisition confinement or provider-hierarchy conversion.
+not establish adapter confinement or provider-hierarchy conversion.
 
 Root `planning.rs` is deleted. Task creation inputs, Linear binding identities and
 stored delivery/status evidence have concrete owners. Team/Initiative edits and
@@ -372,15 +376,15 @@ Writer transport/causal proofs: `eda4a98097` in this plan.
   transfer another Machine's delivery attempts. Automatic migration of previously
   Git-imported, unmapped work into Linear remains an open design question; no
   exactly-once or seamless switching acceptance is claimed.
-- The [one-page +/- review](pr-review.html) and source manifest retain the prior
-  cut. Regenerate them after the entire accepted reduction, before review-only
-  republication. No readiness or landing follows from this persistence checkpoint.
+- `pr-review.html` is absent. `work-model.html` and `pr-review-sources.json` retain
+  earlier review material, not final acceptance. A fresh one-page +/- HTML review
+  follows the entire reduction and affected gate, before review-only republication.
 
 Prior checks: writer/seeding/DTO/rotation/Swift at `9dbd6fc2d8` and `dfd3b80611`;
 admission/lookup/launch at `f025e9b7ab`; acquisition at `dfa2cdafba`, all in this plan.
 Persistent hierarchy, typed journal, bindings, follow-ups, cron, gate and review
 remain required before republication.
 
-Checks: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, CLI build, acquisition (19), Linear list/setup/sync (14), local planning (21 + repaired canonical-ID case) pass with LF authority cleared and stdin closed; full gate deferred.
+Checks: `git diff --check` and `lf context` pass for prose reconciliation; build/focused passes retained at `09709a05cc` in this plan; full affected gate remains required.
 
 Earlier transport evidence: `0181133849` in this plan.

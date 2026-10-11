@@ -14,13 +14,9 @@ bindings, ordinary follow-ups and one cron list. All precede Jack Heart's next
 review of PR #1491. Publication is review-only; landing, installation and export
 of actual Work to the public repository remain unauthorized.
 
-Jack Heart requires this audit implemented before review. Earlier scratch recovery
-is preserved at `c516c61b4f` here. The later pursuit
-`4be02e43-5240-41fb-9dc3-1f3c4ad558bf` exited 1 during the 0.13.11 schema transition:
-its 0.13.10 driver could not settle. Session
-`session_f2bff40d981b4fa0b689dac72c4358ae` retains native completion at event 1790980
-and the iterate decision, not an lf exit. Installed 0.13.11 reads the store again.
-Stopped history and older provider uncertainty remain intact.
+Stopped-Flow recovery evidence: `09709a05cc:scratch/work-model-reduction.md`.
+Native completion and the recorded iterate decision do not establish an lf exit
+or authorize replay. Older provider uncertainty remains intact.
 
 The result should be one ordinary local reader and typed writer for Wave, Project,
 Task and subordinate Task comments. Linear and Git translate changes into those
@@ -37,8 +33,9 @@ Whole-file and whole-table deletions remain conditional where stated.
 
 ## 1. Domain wrappers and the missing fields
 
-**Remove:** `PmProject` / `PmItem` as ordinary domain records.
-`PmWave` is deleted; setup consumes the existing private Initiative response.
+**Removed:** ordinary provider-shaped Work readers and `PmProject`.
+`PmItem`, `LinearProject` and ingestion envelopes still escape the adapter.
+`09709a05cc` deletes `PmWave`; setup consumes the existing private Initiative response.
 Issue observations no longer duplicate the Project display slug; list acquisition
 requires only its ID. `ProjectRef` and fixture display reconstruction are deleted.
 ProjectPlan, TaskPlan, live Project iteration and public ProjectContent are removed.
@@ -248,14 +245,16 @@ errors keep their distinct owners. No schema or historical evidence is removed.
 ## 10. Unify selectors and acquisition orchestration
 
 **Locations:** `ops/pm.rs::{PmContext,RepositoryPmContext,resolve_saved_task,
-read_task_planning_async,inspect_task_planning,resolve_owned_issue,
+inspect_task_planning_async,acquire_task,resolve_owned_issue,
 list_pm_waves,list_local_waves}`,
 `ops/planning_sync.rs::find_task`, `ops/run.rs`, `ops/task/remote.rs`.
 
 Task status, planning lookup and repository routing now use the canonical scoped
 selector, including repository aliases; explicit Task IDs retain their identity.
-Remaining: selected-transport acquisition returns that same Task without overlapping
-resolution wrappers or PM-context construction merely selecting another reader. Retain bounded refresh/lock behavior;
+`dfa2cdafba` makes `acquire_task` return canonical Work after narrow retained
+evidence checks. `inspect_task_planning_async` remains the bounded refresh owner;
+its name is not evidence of provider reconstruction. Remaining: overlapping
+transport/context orchestration and escaping ingestion shapes. Retain refresh/lock behavior.
 The unused `pm_show` inventory/DTO and `load_show_snapshot`/`read_pm_snapshot`
 are deleted. Status sync refreshes before its canonical read; acquisition returns
 no inventory. The unused `SnapshotPlan` hard-refresh distinction and exclusive band test
@@ -268,8 +267,8 @@ private acquisition inventory and persistent provider hierarchy remain required 
 
 `PmResolvedTask`, both `pm_resolve_task` wrappers and `ResolvedTask` are deleted;
 `ops/task_pm.rs` is removed. Acquisition validates concrete Linear ownership and
-returns the saved Task. The acquisition/lookup split and ordinary provider-shaped
-snapshot results remain.
+returns the saved Task. The acquisition/lookup split and provider-shaped ingestion
+inputs remain.
 
 Linear setup, OAuth, Team/Initiative mapping and reteam are real integration
 operations. Keep them concrete. A local lookup cannot infer that another Machine

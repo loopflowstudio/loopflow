@@ -619,22 +619,24 @@ One typed writer owns local/imported Work; outages buffer without fallback/elect
 Execution/attempts stay local; retain causal losers and uncertainty. The generic
 PM facade is removed; Task edits/comments and exchange have concrete owners.
 
-Canonical readers and one typed writer use Work; Linear privately owns acquisition,
-observations and acceptance. Delivery requires accepted revision and independent
-archive/membership eligibility. Partial presence, prose age, rejected disputes and
-foreign ownership survive; projection reuses retained IDs. Typed creation/field
-receipts preserve attempted inputs, later saves, explicit null and canonical IDs.
-Journal routes replace membership/active inventories; configuration selects status.
-Source and headless refresh proof: `47b5edb701`. Released SQLite stays immutable;
-Jack Heart excludes old-version Git decoders. Fixtures prove stored Session/control
-preservation, not configured provider control or installation.
+Canonical Work owns reads/writes; Linear privately owns acquisition, observations
+and acceptance. Delivery checks accepted revision plus archive/membership evidence.
+Partial fields, prose age, disputes, foreign ownership and retained IDs survive.
+Typed receipts retain attempted inputs, later saves and explicit null. Journal
+routes replace routing inventories; configuration selects status (`47b5edb701`).
+Released SQLite stays immutable; Jack Heart excludes old-version Git decoders.
 
-October 11 source deletes the active FollowThrough model, completion ritual,
-CLI/DTO/UI consumers and finish-delivery Flow. Remaining work uses ordinary Tasks
-and comments. Private event conversion retains original uncertain creation/relation
-IDs; failed comments cannot discard saved Tasks. Merge checks, Workflow and Process
-preservation remain separate. Focused recovery, CLI/Flow and headless Desktop
-checks pass; cron unification, affected/materialized gate and fresh review remain.
+`07a3586ac3` removes FollowThrough, its completion ritual, CLI/DTO/UI and
+finish-delivery Flow. Ordinary Tasks/comments replace it; private recovery retains
+uncertain filing IDs and saves Tasks before comments. Merge, Workflow and Process
+preservation remain separate. Focused recovery, CLI/Flow and headless checks pass.
+
+October 11 cron conversion replaces WaveCronDef/GOAL declarations with one config
+list of ordinary argv. Released labels, Machine, activation, dues, classifications
+and inherited locks survive; release remains Infrastructure-owned. Isolated source
+and public failure proofs pass, not installation or live schedule activation.
+Affected/materialized gate and fresh +/- review remain. Stored Session/control
+proof establishes no configured provider control or installation.
 
 Jack's `19116a1b`: stack 427 on 412; land afterward. No 412 landing authority.
 Default-Git enrollment conflicts with 427's conservative first-start

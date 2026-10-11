@@ -20,14 +20,6 @@ pub(crate) enum WaveConfigError {
     },
 }
 
-/// One cron line from GOAL.md frontmatter: `crons: [{flow, schedule}]`.
-/// `lf wave cron sync` installs these schedules on the placed Machine.
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
-pub struct WaveCronDef {
-    pub flow: String,
-    pub schedule: String,
-}
-
 /// The Linear Initiative linked to this Wave.
 #[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq, Eq)]
 pub struct WaveLinearConfig {
@@ -52,7 +44,6 @@ pub struct WaveConfig {
     pub id: Option<crate::id::WaveId>,
     #[serde(default)]
     pub context_budgets: BTreeMap<BudgetKey, usize>,
-    pub crons: Option<Vec<WaveCronDef>>,
     pub agent: Option<String>,
     pub skill_agents: Option<HashMap<String, String>>,
     pub linear: Option<WaveLinearConfig>,
@@ -362,22 +353,6 @@ mod tests {
             try_read_wave_chat_config(temp.path(), "scan"),
             Ok(None)
         ));
-    }
-
-    /// Crons live in GOAL.md frontmatter, the schedule source. Legacy `triggers:` keys are simply unknown fields now.
-    #[test]
-    fn read_wave_config_parses_crons_and_ignores_legacy_triggers() {
-        let temp = ConfigRepo::new();
-        temp.write(
-            "---\ncrons:\n  - flow: wave-polish\n    schedule: '0 0 0 * * Mon *'\ntriggers:\n  signal: wave\n  source: infra\n  source_repo: /tmp/source\n---\nDrive the work.\n",
-        )
-        .expect("write");
-
-        let config = read_wave_config(temp.path(), "scan").expect("config should parse");
-        let crons = config.crons.expect("crons parse from frontmatter");
-        assert_eq!(crons.len(), 1);
-        assert_eq!(crons[0].flow, "wave-polish");
-        assert_eq!(crons[0].schedule, "0 0 0 * * Mon *");
     }
 
     #[test]

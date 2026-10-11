@@ -53,6 +53,7 @@ Open Loopflow or run its CLI
 | `--clipboard / -c` | Include clipboard content in prompt Default: false. |
 | `--agent / -a` | Agent to use (harness or harness:model) |
 | `--skill-input` | Captured skill and arguments supplied by the invoking Flow process Internal. |
+| `--output-schema` | Native final-answer schema supplied by a deciding step Internal. |
 | `--account` | Prefer this managed provider login before the normal route. Repeat to select provider-qualified preferences such as `claude=jack@`. Logins spend; a profile is only the Chrome venue accounts log in through, so it is never a run-time selector |
 | `--only-account` | Restrict this invocation and its children to exactly these managed provider logins. Providers without a selection are unavailable |
 | `--isolate` | Run in the selected account's own provider home, unmoved by account switches. Applies to this invocation and its children Default: false. |
@@ -166,7 +167,7 @@ Request auto-merge, retain settlement intent, and return
 
 | Argument | What it does |
 |---|---|
-| `--wait` | Wait up to 30 minutes for verified merge; timeout retains the request Default: false. |
+| `--wait-and-fix` | Wait up to 30 minutes for merge and repair failing CI; timeout retains the request Default: false. |
 | `--strict` | strict Default: false. |
 | `--local` | local Default: false. |
 | `--worktree / -w` | worktree |
@@ -441,6 +442,19 @@ Internal command; invoked by the owning operation.
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
+## lf __context-block
+
+Internal conversation context for native startup/compaction hooks
+
+Internal command; invoked by the owning operation.
+
+| Argument | What it does |
+|---|---|
+| `--delivery` | delivery |
+| `--moment` | moment |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
 ## lf __session-title
 
 Native provider naming callback
@@ -521,7 +535,7 @@ List Sessions
 
 ## lf session connect
 
-Connect to the live conversation, or resume its saved history
+Stop headless Claude/OpenCode and resume history; connect to Codex live
 
 | Argument | What it does |
 |---|---|
@@ -707,6 +721,36 @@ Repository releases, source measurement, CI evidence, and provider administratio
 
 | Argument | What it does |
 |---|---|
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf repo planning
+
+Inspect planning synchronization and personal identity
+
+| Argument | What it does |
+|---|---|
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf repo planning key
+
+Show, explicitly create, or recover the same planning user key on another machine
+
+| Argument | What it does |
+|---|---|
+| `--new` | new Default: false. |
+| `--recover` | recover |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf repo planning status
+
+Show selection, retained imports and held records without contacting Git
+
+| Argument | What it does |
+|---|---|
+| `--json` | json Default: false. |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
@@ -1249,13 +1293,13 @@ Record repair ownership without changing the failed evidence
 
 ## lf wave cron add
 
-Install or replace a scheduled lf invocation
+Install a named ordinary lf command on this Machine
 
 | Argument | What it does |
 |---|---|
-| `--wave / -w` | Wave name passed to `lf <flow> --wave <wave>` (ambient if omitted) |
-| `--flow` | Flow or skill name to run |
+| `<name>` | Stable job name, retained across command changes |
 | `--schedule` | Daily or every-minute cron expression, or a schedule alias Default: daily. |
+| `<command>` | Arguments passed to lf, after -- |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
@@ -1265,28 +1309,31 @@ List installed loopflow cron jobs
 
 | Argument | What it does |
 |---|---|
-| `--wave / -w` | Only jobs for this Wave |
+| `--wave / -w` | Only commands with this --wave selector |
+| `--task` | Only commands with this --task selector |
 | `--json` | Emit machine-readable job state Default: false. |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf wave cron preflight
 
-Validate Machine authority and declared jobs without changing launchd
+Validate configured commands and Machine placement without installing jobs
 
 | Argument | What it does |
 |---|---|
-| `--wave / -w` | Wave whose GOAL.md `crons:` are validated |
+| `--wave / -w` | Only commands with this --wave selector |
+| `--task` | Only commands with this --task selector |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf wave cron sync
 
-Reconcile installed launchd jobs to match a wave's declared `crons:`
+Reconcile installed jobs with the repository configuration's cron list
 
 | Argument | What it does |
 |---|---|
-| `--wave / -w` | wave |
+| `--wave / -w` | Only commands with this --wave selector |
+| `--task` | Only commands with this --task selector |
 | `--repo` | Install the finite repository Task check on this Machine Default: false. |
 | `--disable` | Remove the repository schedule; running work retains its authority Default: false. |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
@@ -1415,13 +1462,14 @@ Project-owned planning configuration
 
 ## lf project edit
 
-Update a Project's name or summary
+Update a Project's name, summary or prose
 
 | Argument | What it does |
 |---|---|
 | `<project>` | project |
 | `--name` | name |
 | `--summary` | summary |
+| `--description` | Authored prose; managed Workflow, KRs and targets stay unchanged |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
@@ -1599,6 +1647,7 @@ Place a Task's worktree, then run a Flow there like `lf --task ISSUE run FLOW`
 | `--stack-on` | Fork this Task's worktree from another Task's active PR |
 | `--directive` | directive |
 | `--reason` | Direction for this run, published to the Task |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task complete
@@ -1609,6 +1658,7 @@ Complete a Task without moving its Workflow
 |---|---|
 | `<issue>` | issue |
 | `--reason` | Why, kept in the Task's completion request |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task reopen
@@ -1619,6 +1669,7 @@ Reopen local planning without moving Workflow or replacing the PR
 |---|---|
 | `<issue>` | issue |
 | `--reason` | reason |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task move
@@ -1630,6 +1681,7 @@ Move Workflow position without running anything; `end` requests completion
 | `<issue>` | issue |
 | `<node>` | `start`, `end` or one of the workflow's nodes |
 | `--reason` | Why, kept in the Task's workflow history |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task create
@@ -1811,14 +1863,13 @@ Wait without polling an LM
 
 ## lf context
 
-Show effective context budgets, their sources, and current source usage
+Show memory and scratch size targets, their sources, and current usage
 
 | Argument | What it does |
 |---|---|
 | `--json` | json Default: false. |
 | `--wave` | Inspect a Wave's local authored context |
-| `--task` | Inspect a Task's checkout and goal files |
-| `--skill` | Skill to include in the launch preview Default: realign. |
+| `--task` | Inspect a Task's checkout and Wave context |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 

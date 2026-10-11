@@ -12,8 +12,7 @@ use loopflow::durable::MachineId;
 use loopflow::ops::cron::accounting::ScheduledReleaseOutcome;
 use loopflow::ops::cron::history::release_history;
 use loopflow::ops::{
-    add_cron, run_cron, schedule_from_cron, CronHost, CronSource, CronSpec, CronTargetKind,
-    SystemLaunchctl,
+    add_cron, run_cron, schedule_from_cron, CronHost, CronSource, CronSpec, SystemLaunchctl,
 };
 use loopflow_test_support::TestRepo;
 use sha2::Digest;
@@ -31,6 +30,61 @@ fn git(repo: &Path, args: &[&str]) -> String {
         String::from_utf8_lossy(&output.stderr)
     );
     String::from_utf8(output.stdout).unwrap().trim().to_string()
+}
+
+#[test]
+fn cron_command_failure_stays_nonzero_through_direct_and_flow_entry() {
+    let home = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_home(&[("launchctl", "#!/bin/sh\nexit 0\n")], Some(home.path()));
+    let repo = TestRepo::new();
+    repo.create_file(
+        ".lf/flows/failing.yaml",
+        "- cmd: flow show missing-flow --json\n",
+    );
+    let lf_home = home.path().join(".lf");
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let machine = runtime.block_on(async {
+        let store = loopflow::store::open_ephemeral_store(&loopflow::store::StorageConfig::sqlite(
+            lf_home.join("loopflow.db"),
+        ))
+        .await
+        .unwrap();
+        store.local_machine().await.unwrap().id
+    });
+    let agents = home.path().join("Library/LaunchAgents");
+    for (name, command) in [
+        ("direct", vec!["flow", "show", "missing-flow", "--json"]),
+        ("flow", vec!["--batch", "flow", "failing"]),
+    ] {
+        let spec = CronSpec {
+            wave: String::new(),
+            flow: name.into(),
+            command: command.into_iter().map(str::to_owned).collect(),
+            schedule: loopflow::ops::parse_schedule("daily").unwrap(),
+            working_directory: repo.path().to_path_buf(),
+            lf_path: PathBuf::from(env!("CARGO_BIN_EXE_lf")),
+            host: CronHost {
+                machine_id: machine.clone(),
+                lf_home: lf_home.clone(),
+                path_env: std::env::var("PATH").unwrap(),
+            },
+        };
+        add_cron(&agents, &spec, &SystemLaunchctl).unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+            .args(["cron", "run", "--wave", "", "--flow", name, "--scheduled"])
+            .current_dir(repo.path())
+            .output()
+            .unwrap();
+        assert!(!output.status.success(), "{output:?}");
+        let receipt =
+            loopflow::ops::latest_cron_receipt(&loopflow::ops::receipt_root(&lf_home), "", name)
+                .unwrap()
+                .unwrap();
+        assert_eq!(receipt.outcome, loopflow::ops::CronOutcome::Failed);
+        assert!(receipt.exit_code.is_some_and(|code| code != 0));
+        let log = fs::read_to_string(receipt.log_path).unwrap();
+        assert!(log.contains("missing-flow"), "operation must run: {log}");
+    }
 }
 
 #[test]
@@ -513,7 +567,13 @@ exit 0
         let telemetry = CronSpec {
             wave: "infrastructure".into(),
             flow: "telemetry-daily".into(),
-            target_kind: CronTargetKind::Flow,
+            command: vec![
+                "--wave".into(),
+                "infrastructure".into(),
+                "--batch".into(),
+                "flow".into(),
+                "telemetry-daily".into(),
+            ],
             schedule: schedule.clone(),
             working_directory: repo_path.clone(),
             // Only the external verification is simulated. The release uses the real CLI.
@@ -606,6 +666,13 @@ exit 0
         // production schedule or clock is changed; these are synthetic due dates.
         let mut release = CronSpec {
             flow: "release-template".into(),
+            command: vec![
+                "--wave".into(),
+                "infrastructure".into(),
+                "--batch".into(),
+                "flow".into(),
+                "release-template".into(),
+            ],
             lf_path: PathBuf::from(env!("CARGO_BIN_EXE_lf")),
             ..telemetry
         };

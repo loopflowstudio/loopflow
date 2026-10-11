@@ -60,15 +60,16 @@ neither authorize cleanup nor create a replacement hidden completion gate.
 
 ### One cron definition list
 
-Replace Wave-specific declarations and `WaveCronDef` with one list of scheduled
-ordinary lf commands. Commands carry `--wave` / `--task` when appropriate; scope
-is available for UI filtering through the existing command parser. Use the existing
-repository configuration owner for the list, not another registry or per-Wave
-schedule store. Remove duplicated Wave/flow/target-kind command interpretation.
-Preserve schedule identities, configured timing, installed Machine ownership,
-receipts and due accounting through the configuration conversion. A cloned repo
-must not silently activate duplicate jobs. Implement and test the conversion in
-isolated fixtures; this pursuit authorizes no live schedule activation/change.
+Implemented October 11: `Config.crons` is one list of named ordinary lf argument
+lists. `WaveCronDef` and GOAL declarations are deleted. The CLI parser supplies
+Wave/Task filtering; the runner executes saved argv without kind-based dispatch.
+Released job metadata decodes into that representation. Existing label/lock bytes,
+Machine, activation, dues and receipt classifications survive. Release remains
+under Infrastructure; historical Skill receipts remain Skill receipts. Scope-filtered
+sync preserves other Tasks, Waves and repositories. Missing configuration refuses
+pruning; explicit `crons: []` permits it. Reading installs nothing. No live schedule
+was changed. Configured product `wave/operate` remains an explicit Flow declaration;
+this conversion does not reinterpret it as a skill or claim that missing Flow works.
 
 ### Preservation and proof
 
@@ -185,8 +186,8 @@ Existing credential fencing, receipt recovery, lock names and refresh ages remai
 PM facade. `5a8ae4cdb6` and `c7bb8a58e0` then completed the typed journal and
 concrete observation/projection owners; feedback based on `6b7015d056` predates
 those cuts. Remaining:
-One cron list; ordinary Task/comment conversion is implemented (§13 of the audit);
-materialized/headless affected gate and fresh +/- HTML review before review-only
+Cron and ordinary Task/comment conversion are implemented (§13–14 of the audit);
+materialized/headless affected gate and fresh +/- HTML review precede review-only
 republication. Populated Session/attachment preservation is covered below. Concrete adapter naming alone does not
 finish the remaining writer/delivery hierarchy. No installation was performed.
 
@@ -298,20 +299,16 @@ routing tests cover switches, ownership moves, missing rows and rejected orphan
 imports; existing import/execution preservation fixtures remain required.
 This changes no execution admission: LOO-427 must adapt its stacked membership
 consumer without interpreting a route or absent placement as first-start authority.
-LOO-414's unresolved authority still blocks stack readiness. Cron unification,
-affected gate and fresh +/- review remain.
+LOO-414's unresolved authority still blocks stack readiness. Affected gate and fresh +/- review remain.
 
-Cron conversion must retain the installed owner independently of file location.
-Release's October 5 memory records both jobs installed under Infrastructure,
-including the release definition authored in the child; changing the list cannot
-reassign those receipts to the child. Its September 28 failure also requires a
-public command/Flow regression where an operation failure stays nonzero, not only
-parser/filter tests. Conversion must also retain `(canonical repo,wave,flow)` execution-lock identity
-and inherited descriptor validation while a release child holds the lock; a new
-argv hash or schedule ID must not split exclusion. Original activation, dues and
-receipt classifications survive; historical skill receipts never become Flow
-settlements. Clone/read activates nothing. This is a source-derived preservation
-case, not a reproduced failure (`eda4a98097:scratch/cron-conversion-review.md`).
+Cron checks: 51 focused Rust tests pass; two conversion/filtering proofs and the
+public direct/Flow nonzero regression pass, plus Clippy and generated CLI reference.
+Logs: `/tmp/loo412-cron-{tests,conversion-tests,filter-tests,entry-tests,clippy}.log`.
+The first filtering run exposed an ambiguous fixture command, fixed and rechecked.
+Conversion preserves released metadata and excludes a second execution while the
+original child holds its inherited lock. These are isolated source proofs, not
+installed schedule acceptance. Original counterexample requirements remain at
+`07a3586ac3:scratch/work-on-another-machine-name.md`.
 
 Writer transport/causal proofs: `eda4a98097` in this plan.
 
@@ -330,7 +327,7 @@ Writer transport/causal proofs: `eda4a98097` in this plan.
   follows the entire reduction and affected gate, before review-only republication.
 
 Earlier focused proof: `9dbd6fc2d8`, `dfd3b80611`, `f025e9b7ab`,
-`dfa2cdafba`, `09709a05cc` in this plan. Cron, gate and review still precede republication.
+`dfa2cdafba`, `09709a05cc` in this plan. Gate and review still precede republication.
 
 Prior checks and fixture limits: `6b7015d056` at this path. The earlier nextest
 leaky-test report for `unreviewed_backlog_remains_while_started_work_moves` remains

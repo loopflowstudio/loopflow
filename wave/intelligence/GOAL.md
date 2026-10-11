@@ -1,7 +1,4 @@
 ---
-crons:
-- flow: telemetry-daily
-  schedule: 0 0 8 * * * *
 linear:
   initiative: 1e3d8674-6fbf-4aa8-9bee-1da0fa70d1b7
 ---

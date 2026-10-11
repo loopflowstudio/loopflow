@@ -325,11 +325,6 @@ body is the prompt the wave runs each wake.
 
 ```markdown
 <!-- wave/infra/GOAL.md -->
----
-crons:
-  - flow: sync
-    schedule: "0 0 0 1 * * *"
----
 
 ## Objective
 
@@ -355,8 +350,10 @@ measurement lives in reviewed `wave/<wave>/metrics/*.md` contracts, not a
 | Field | What it does |
 |-------|-------------|
 | `agent` | Preferred agent harness/model |
-| `crons` | Flow schedules installed through `lf cron sync` |
 | `linear.initiative` | Linear Initiative id backing the wave (written by `lf repo connect`) |
+
+Schedules live in the repository configuration as ordinary command arguments;
+see [Schedule ordinary commands](lf.md#schedule-ordinary-commands).
 
 Bind the repository to a Linear Team in `.lf/config.yaml`:
 

@@ -201,9 +201,20 @@ impl Config {
     }
 }
 
+/// An ordinary lf command scheduled by explicit installation on a Machine.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct CronDef {
+    pub name: String,
+    pub command: Vec<String>,
+    pub schedule: String,
+}
+
 /// Main configuration struct.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
+    #[serde(default)]
+    pub crons: Option<Vec<CronDef>>,
     #[serde(default)]
     pub planning: Option<PlanningConfig>,
     #[serde(default)]
@@ -316,6 +327,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             planning: None,
+            crons: None,
             context_budgets: Default::default(),
             context_budget_sources: Default::default(),
             agent: None,

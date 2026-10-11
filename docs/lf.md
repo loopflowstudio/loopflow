@@ -448,8 +448,7 @@ without an installed Wave schedule, there is no automatic check between passes.
 `lf task complete EXP-12` completes without moving the Workflow. Moving or
 arriving at `end` records the movement, then requests completion. A failed
 request shows **Completion pending**; retry `lf task complete EXP-12`, without
-replaying the Flow. Completion requires merge and a durable none/filed
-disposition when the Task has a PR. Linear completion and reopening change
+replaying the Flow. Completion requires merge when the Task has a PR. Linear completion and reopening change
 status without moving the Workflow or stopping Processes; reopening supersedes
 an older completion request. `lf task reopen EXP-12` does the same locally,
 including offline: it returns planning to unstarted and keeps the PR, checkout,
@@ -470,6 +469,30 @@ A published parent PR, including a draft, is enough to start and publish the
 child. Prepare a child-specific design; checkout transfers it without overwriting
 newer child work. `lf sync` follows parent updates and its squash merge while
 preserving the child's identity, PR, Session and design.
+
+## Schedule ordinary commands
+
+```yaml
+# .lf/config.yaml
+crons:
+  - name: daily-review
+    command: [--wave, product, --batch, skill, wave/operate]
+    schedule: 0 0 9 * * *
+```
+
+```bash
+lf cron preflight                  # validate configuration and Machine placement
+lf cron sync                       # explicitly install the configured list
+lf cron list --wave product         # filter by the command's Work selector
+lf cron list --task EXP-12
+lf cron add daily-review --schedule daily -- --wave product --batch skill wave/operate
+```
+
+Commands use ordinary `lf` arguments, including `--wave` and `--task`.
+Reading or cloning the repository installs nothing. An explicit `crons: []`
+removes the repository's jobs when synced; an absent list leaves them alone.
+Scope-filtered sync only changes matching jobs. Existing job names and Wave
+selectors retain installed identities and receipt history.
 
 ## Check authorized deliveries in the background
 

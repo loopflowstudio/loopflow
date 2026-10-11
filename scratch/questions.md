@@ -32,8 +32,8 @@ string/JSON content receipts are removed. Linear owns acquisition/projection;
 WorkValue owns saved content and journal/receipt values. Creation retains captured
 inputs and typed baselines, never reconstructing an attempt from current Work.
 Historical intent state UUIDs cannot establish semantic state. Ordering/deletion
-keep separate effect semantics. Full follow-up lifecycle removal, cron conversion
-remain before gate/republication; routing inventories are removed.
+keep separate effect semantics. Follow-up lifecycle, cron and routing cuts are implemented;
+affected gate/review remain before republication.
 
 Populated migration/import proof retains Session turns, reservations, claims,
 activity and uncertain controls. Stored preservation is not configured provider

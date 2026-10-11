@@ -1286,42 +1286,46 @@ pub enum CronCommand {
         #[arg(long)]
         reason: String,
     },
-    /// Install or replace a scheduled lf invocation
+    /// Install a named ordinary lf command on this Machine
     Add {
-        /// Wave name passed to `lf <flow> --wave <wave>` (ambient if omitted)
-        #[arg(short = 'w', long = "wave")]
-        wave: Option<String>,
-        /// Flow or skill name to run
-        #[arg(long = "flow")]
-        flow: String,
+        /// Stable job name, retained across command changes
+        name: String,
         /// Daily or every-minute cron expression, or a schedule alias
-        #[arg(long = "schedule", default_value = "daily")]
+        #[arg(long, default_value = "daily")]
         schedule: String,
+        /// Arguments passed to lf, after --
+        #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
+        command: Vec<String>,
     },
     /// List installed loopflow cron jobs
     List {
-        /// Only jobs for this Wave
-        #[arg(short = 'w', long = "wave")]
+        /// Only commands with this --wave selector
+        #[arg(short = 'w', long)]
         wave: Option<String>,
+        /// Only commands with this --task selector
+        #[arg(long)]
+        task: Option<String>,
         /// Emit machine-readable job state
         #[arg(long)]
         json: bool,
     },
-    /// Validate Machine authority and declared jobs without changing launchd
+    /// Validate configured commands and Machine placement without installing jobs
     Preflight {
-        /// Wave whose GOAL.md `crons:` are validated
-        #[arg(short = 'w', long = "wave")]
-        wave: String,
-    },
-    /// Reconcile installed launchd jobs to match a wave's declared `crons:`
-    Sync {
-        #[arg(
-            short = 'w',
-            long,
-            required_unless_present = "repo",
-            conflicts_with = "repo"
-        )]
+        /// Only commands with this --wave selector
+        #[arg(short = 'w', long)]
         wave: Option<String>,
+        /// Only commands with this --task selector
+        #[arg(long)]
+        task: Option<String>,
+    },
+    /// Reconcile installed jobs with the repository configuration's cron list
+    Sync {
+        /// Only commands with this --wave selector
+        #[arg(short = 'w', long, conflicts_with = "repo")]
+        wave: Option<String>,
+        /// Only commands with this --task selector
+        #[arg(long, conflicts_with = "repo")]
+        task: Option<String>,
         /// Install the finite repository Task check on this Machine
         #[arg(long)]
         repo: bool,

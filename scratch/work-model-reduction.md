@@ -9,8 +9,8 @@ approval from Jack. This is accepted scope, with conditional deletions identifie
 
 This audit and [design](work-on-another-machine-name.md) share one delivery scope.
 Canonical readers, concrete observation columns and private acquisition exist.
-Remaining: one cron list and affected gate/review. Ordinary follow-ups and concrete
-bindings are implemented (§13–14). All precede Jack Heart's next
+All fifteen structural areas are implemented; affected gate/review remains.
+Ordinary follow-ups, bindings and cron conversion are in §13–14. These precede Jack Heart's next
 review of PR #1491. Publication is review-only; landing, installation and export
 of actual Work to the public repository remain unauthorized.
 
@@ -292,7 +292,7 @@ external effect really needs them. PlanningSync, store opening and Wave locks no
 to `linear/acceptance.rs`; invalidation, evidence and revision parsing to
 `linear/observations.rs`; accepted-revision delivery eligibility to
 `sqlite/planning_changes.rs`. Typed field receipts and creation baselines now replace the remaining string/JSON
-translations. Follow-up and cron deletion still precede audit completion.
+translations. The final follow-up and cron cuts are recorded in §13–14.
 
 October 11 creation cut removes `PlanningExport.model` and generic-map
 attachment. Typed creation values and captured Task state retain the original
@@ -300,7 +300,7 @@ provider input, sequence boundary and link identity. The single draft converts
 released receipts from their captured model, never current Work. Attachment
 compares typed values and rebases from the attempt, not changed readback.
 Historical intent conversion uses the intent's values; a state UUID supplies no
-invented semantic state. Full follow-through deletion remains §13.
+invented semantic state. The completed follow-through deletion is in §13.
 
 `PlanningChanges` now writes and reconciles typed values; `normalize`,
 `linear_field` and `WorkValue::with_value` are deleted. The Task draft converts
@@ -374,10 +374,13 @@ longer commits unrelated checkout edits to remove obsolete configuration sentine
 Provider-shaped acquisition APIs and receipt translations are removed (§3, §11).
 Concrete bindings alone did not establish those completed ownership cuts.
 
-The existing pass owns cron unification: one list of ordinary scheduled commands,
-existing parser for scope filtering, no parallel Wave-specific cron interpretation.
-Preserve identities, timing, Machine ownership, receipts and due accounting without
-activating jobs on cloned repositories.
+**Implemented cron cut:** `Config.crons` holds named ordinary argument lists.
+`WaveCronDef`, GOAL declarations and kind-based execution dispatch are deleted.
+The existing CLI parser filters Wave/Task scope; absent configuration refuses pruning.
+Released metadata decodes once into argv, retaining labels, Machine, activation,
+dues, receipt classifications and inherited execution locks. Release stays under
+Infrastructure. Isolated conversion/filtering and public CLI/Flow failure tests pass;
+no live jobs were changed.
 
 Review `lf/mod.rs`, `lf/commands/planning.rs`, `bin/lf.rs`, builtins, exported skills,
 `docs/lf.md`, `docs/architecture/planning.md`, environment and architecture references.
@@ -403,8 +406,7 @@ alignment in the same diff as public removals.
 
 ## Proof and stop conditions
 
-Remaining order: follow-ups and cron;
-gate and review. Each cut deletes its replaced paths in the same diff.
+Remaining order: affected/materialized/headless gate, then fresh +/- review. Each cut deletes its replaced paths in the same diff.
 
 Before dropping persistent state, inventory the released frontier and current
 Task-owned draft. Main merged at `db36f20ba8` materialized LOO-406 and optional

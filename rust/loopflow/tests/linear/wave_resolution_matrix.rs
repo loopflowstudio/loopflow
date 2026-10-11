@@ -120,21 +120,6 @@ const COMMANDS: &[Cmd] = &[
         global_default: true,
     },
     Cmd {
-        id: "cron add",
-        path: &["wave", "cron", "add"],
-        base_args: &[
-            "wave",
-            "cron",
-            "add",
-            "--flow",
-            "matrix-test-flow",
-            "--schedule",
-            "daily",
-        ],
-        wave_form: WaveForm::Flag,
-        global_default: false,
-    },
-    Cmd {
         id: "task create",
         path: &["task", "create"],
         base_args: &["task", "create", "--title", "Fixture task"],
@@ -394,8 +379,6 @@ fn run_lf(home: &Path, repo: &Path, cmd: &Cmd, env: &Env) -> std::process::Outpu
                 std::env::var("PATH").unwrap_or_default()
             ),
         )
-        // Redirect HOME so `lf cron add` writes plists into the temp dir,
-        // not the real ~/Library/LaunchAgents.
         .env("HOME", home)
         .env_remove("LF_TRACE_ID")
         .env_remove("LF_WAVE_ID");
@@ -630,9 +613,7 @@ fn registry_is_complete() {
 // ─── Mutation targeting ─────────────────────────────────────────────────
 
 /// Cron installation refuses a development binary before writing host state.
-/// The matrix above already proves the command resolves an ambient Wave; this
-/// boundary proves that successful resolution cannot leave a disposable binary
-/// in launchd.
+/// Valid command arguments cannot leave a disposable binary in launchd.
 #[test]
 fn cron_add_rejects_a_development_binary_before_mutation() {
     let tmp = tempfile::tempdir().expect("tempdir");
@@ -672,10 +653,15 @@ fn cron_add_rejects_a_development_binary_before_mutation() {
             "wave",
             "cron",
             "add",
-            "--flow",
             "mutation-test",
             "--schedule",
             "daily",
+            "--",
+            "--wave",
+            "alpha",
+            "--batch",
+            "flow",
+            "mutation-test",
         ])
         .current_dir(&repo)
         .env("LF_HOME", &home)

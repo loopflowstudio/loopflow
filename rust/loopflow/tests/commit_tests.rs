@@ -128,6 +128,21 @@ fn selected_commit_with_no_changes_explains_what_to_do() {
 }
 
 #[test]
+fn empty_git_commit_retains_stdout_diagnostic() {
+    let repo = TestRepo::new();
+    let before = repo.head_sha();
+
+    let error = loopflow::git::commit(repo.path(), "No changes", &|command| {
+        command.env("LC_ALL", "C");
+    })
+    .unwrap_err()
+    .to_string();
+
+    assert!(error.contains("nothing to commit"), "{error}");
+    assert_eq!(repo.head_sha(), before);
+}
+
+#[test]
 fn commit_failures_report_hook_output_or_exit_status() {
     let _env = EnvGuard::new(&[]);
     let repo = TestRepo::new();

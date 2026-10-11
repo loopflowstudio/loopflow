@@ -58,7 +58,7 @@ def Navbar():
                 cls="nav-brand-group",
             ),
             Ul(
-                Li(A("Flows", href="/#flows")),
+                Li(A("Flows", href="/cli#flows")),
                 Li(A("Docs", href="/docs")),
                 Li(
                     A(
@@ -120,14 +120,31 @@ def CopyButton(text: str):
 
 
 # Homepage copy (edit content.yaml, not this file)
-HOME_CONTENT = yaml.safe_load((Path(__file__).parent / "content.yaml").read_text())["homepage"]
-HERO_CONTENT = HOME_CONTENT["hero"]
-OWNERSHIP_CONTENT = HOME_CONTENT["ownership"]
-FLOWS_CONTENT = HOME_CONTENT["flows"]
-TASKS_CONTENT = HOME_CONTENT["tasks"]
-MAC_CONTENT = HOME_CONTENT["mac"]
-WHY_CONTENT = HOME_CONTENT["why"]
+SITE_CONTENT = yaml.safe_load((Path(__file__).parent / "content.yaml").read_text())
+STUDIO_CONTENT = SITE_CONTENT["studio"]
+HOME_CONTENT = SITE_CONTENT["homepage"]
+CLI_CONTENT = SITE_CONTENT["cli"]
 INSTALL_CONTENT = HOME_CONTENT["install"]
+# The homepage is drawn, not listed: its mock, cards and copy are one template.
+HOME_HTML = (
+    (Path(__file__).parent / "home.html")
+    .read_text()
+    .replace("{download_url}", INSTALL_CONTENT["download_url"])
+    .replace("{install_command}", INSTALL_CONTENT["install_command"])
+)
+
+# Copy buttons carry the text they copy.
+COPY_SCRIPT = """
+document.querySelectorAll('[data-copy]').forEach(function (button) {
+  var label = button.textContent;
+  button.addEventListener('click', function () {
+    navigator.clipboard.writeText(button.dataset.copy).then(function () {
+      button.textContent = 'Copied';
+      setTimeout(function () { button.textContent = label; }, 1600);
+    });
+  });
+});
+"""
 
 # Markdown rendering
 
@@ -334,7 +351,7 @@ def generate_llms_full_txt() -> str:
 
 
 def generate_sitemap_xml() -> str:
-    pages = ["", "/download", "/docs"] + [
+    pages = ["", "/cli", "/studio", "/etude", "/fantasia", "/about", "/download", "/docs"] + [
         f"/docs/{slug}" for _, slug in DOCS_NAV if slug != "index" and doc_path(slug)
     ]
     entries = []
@@ -737,54 +754,9 @@ SITEMAP_XML_CONTENT = generate_sitemap_xml()
 # Pages
 
 
-def _loopflow_diagram(example) -> FT:
-    """Steps down a rail, one edge looping back, one exiting."""
-    steps = example["steps"]
-    rows = [(12 + 50 * index, step) for index, step in enumerate(steps)]
-    last_y = rows[-1][0]
-    loop_y = next(y for y, step in rows if step["name"] == example["loop_to"])
-
-    def _name_end(name: str) -> int:
-        return 26 + round(len(name) * 7.9) + 12
-
-    parts = [
-        '<defs><marker id="loopflow-arrow" viewBox="0 0 10 10" refX="9" refY="5" '
-        'markerWidth="7" markerHeight="7" orient="auto-start-reverse">'
-        '<path d="M0 0L10 5L0 10z"/></marker></defs>'
-    ]
-    for y, step in rows:
-        you = " you" if step["you"] else ""
-        if y != last_y:
-            parts.append(f'<line class="rail" x1="8" y1="{y + 8}" x2="8" y2="{y + 42}"/>')
-        parts.append(
-            f'<circle class="dot{you}" cx="8" cy="{y}" r="5.5"/>'
-            f'<text class="name{you}" x="26" y="{y + 4}">{step["name"]}</text>'
-            f'<text class="detail" x="26" y="{y + 21}">{step["detail"]}</text>'
-        )
-    parts.append(
-        f'<path class="edge" d="M{_name_end(steps[-1]["name"])} {last_y}H250V{loop_y}'
-        f'H{_name_end(example["loop_to"])}" marker-end="url(#loopflow-arrow)"/>'
-        f'<text class="edge-label" transform="translate(266 {(last_y + loop_y) // 2}) rotate(90)" '
-        f'text-anchor="middle">{example["loop_label"]}</text>'
-        f'<path class="edge" d="M8 {last_y + 8}V{last_y + 50}" marker-end="url(#loopflow-arrow)"/>'
-        f'<text class="edge-label" x="20" y="{last_y + 40}">{example["exit_label"]}</text>'
-        f'<rect class="end" x="2.5" y="{last_y + 54.5}" width="11" height="11"/>'
-        f'<text class="name" x="26" y="{last_y + 64}">{example["exit_to"]}</text>'
-    )
-    names = ", ".join(step["name"] for step in steps)
-    label = (
-        f"A loopflow: {names}. From {steps[-1]['name']}, one arrow returns to "
-        f"{example['loop_to']} for {example['loop_label']} and one exits to {example['exit_to']}."
-    )
-    return NotStr(
-        f'<svg class="home-loopflow" viewBox="0 0 280 {last_y + 78}" role="img" '
-        f'aria-label="{label}">{"".join(parts)}</svg>'
-    )
-
-
-def _inline_command(text: str) -> list:
-    """Set the command name in monospace without treating copy as HTML."""
-    return [Code(part) if part == "lf" else part for part in re.split(r"\b(lf)\b", text)]
+def _inline_code(text: str) -> list:
+    """Set backticked spans in monospace without treating copy as HTML."""
+    return [Code(part) if index % 2 else part for index, part in enumerate(text.split("`"))]
 
 
 def _terminal(content: str, label: str) -> FT:
@@ -805,173 +777,122 @@ def _terminal(content: str, label: str) -> FT:
     return Pre(*lines, cls="term", tabindex="0", aria_label=label)
 
 
-def _section_heading(content: dict) -> tuple:
-    return (
-        P(content["label"], cls="eyebrow"),
-        H2(content["heading"]),
-        P(*_inline_command(content["introduction"]), cls="lede"),
+def _install_row() -> FT:
+    command = INSTALL_CONTENT["install_command"]
+    return Div(
+        Pre(Span("$", cls="p"), " ", command, cls="term", tabindex="0", aria_label="Install Loopflow"),
+        Button("Copy", type="button", cls="copy", data_copy=command, aria_live="polite"),
+        cls="install-row",
     )
 
 
-def _capture(content: dict) -> tuple:
-    return (
-        Div(
-            Img(
-                src=content["image"],
-                alt=content["image_alt"],
-                width=content["width"],
-                height=content["height"],
-                loading="lazy",
-            ),
-            cls="window",
-        ),
-        P(content["caption"], cls="capture-label"),
-    )
+def _topbar(current: str) -> FT:
+    """The one bar on the homepage and studio pages: brand, links, a company menu, install."""
 
+    def link(item: dict) -> FT:
+        return A(
+            item["label"],
+            href=item["href"],
+            cls="optional" if item.get("optional") else None,
+            aria_current="page" if item["href"] == current else None,
+        )
 
-def _flows_section() -> FT:
-    example = FLOWS_CONTENT["example"]
-    return Section(
-        *_section_heading(FLOWS_CONTENT),
-        Div(
-            Div(
-                P(example["label"], cls="eyebrow"),
-                _loopflow_diagram(example),
-                P(example["caption"], " ", Span(example["file"], cls="folio"), cls="capture-label"),
-            ),
-            _terminal(FLOWS_CONTENT["commands"], "A Flow file and how to run it"),
-            cls="pair",
-        ),
-        Div(
+    install = SITE_CONTENT["install"]
+    return Header(
+        A(Img(src="/static/logo.svg", alt=""), "loopflow", href="/", cls="brand"),
+        Nav(
             *[
-                Article(
-                    H3(part["title"]),
-                    P(*_inline_command(part["description"])),
-                    A(part["link"]["label"], href=part["link"]["href"]),
+                Details(
+                    Summary(item["label"]),
+                    Div(*[link(entry) for entry in item["menu"]], cls="menu"),
                 )
-                for part in FLOWS_CONTENT["parts"]
+                if "menu" in item
+                else link(item)
+                for item in SITE_CONTENT["navigation"]
             ],
-            cls="parts",
+            A(install["label"], href=install["href"], cls="button solid"),
+            aria_label="Main navigation",
         ),
-        id="flows",
-        cls="block",
     )
 
 
-def _tasks_section() -> FT:
-    return Section(
-        *_section_heading(TASKS_CONTENT),
-        Div(
-            *[
-                Article(
-                    Div(item["label"], Span(item["title"]), cls="tag"),
-                    Div(
-                        P(*_inline_command(item["text"])),
-                        P(A(item["link"]["label"], href=item["link"]["href"]), cls="needs")
-                        if "link" in item
-                        else None,
-                    ),
-                    _terminal(item["commands"], item["label"] + " example"),
-                    cls="work-row",
-                )
-                for item in TASKS_CONTENT["items"]
-            ],
-            cls="work-rows",
-        ),
-        id="tasks",
-        cls="block",
-    )
-
-
-def build_homepage() -> tuple:
+def _studio_page(current: str, content: dict, *sections) -> tuple:
     return (
-        Title("Loopflow — " + HERO_CONTENT["tagline"]),
+        Title(content["title"]),
         SkipLink(),
         Div(
-            Header(
-                A(Img(src="/static/logo.svg", alt=""), "loopflow", href="/", cls="brand"),
-                Nav(
-                    *[
-                        A(
-                            link["label"],
-                            href=link["href"],
-                            cls="optional" if link["href"].startswith("#") else None,
-                        )
-                        for link in HOME_CONTENT["navigation"]
-                    ],
-                    aria_label="Main navigation",
-                ),
-            ),
+            _topbar(current),
             Main(
                 Section(
-                    Div(
-                        P(HERO_CONTENT["label"], cls="eyebrow kicker"),
-                        H1(HERO_CONTENT["tagline"]),
-                        P(HERO_CONTENT["subline"], cls="intro"),
-                        Div(
-                            *[
-                                A(
-                                    link["label"],
-                                    href=link["href"],
-                                    cls="button solid" if index == 0 else "button",
-                                )
-                                for index, link in enumerate(HERO_CONTENT["actions"])
-                            ],
-                            cls="actions",
-                        ),
-                    ),
-                    Div(_terminal(HERO_CONTENT["commands"], "lf commands")),
-                    cls="home-hero",
+                    P(content["label"], cls="eyebrow kicker") if "label" in content else None,
+                    H1(content["heading"]),
+                    P(content["lede"], cls="intro") if "lede" in content else None,
+                    cls="studio-hero",
                 ),
-                Section(
-                    *[
-                        Div(B(item["title"]), *_inline_command(item["text"]))
-                        for item in OWNERSHIP_CONTENT["items"]
-                    ],
-                    cls="strip",
-                    aria_label="Ownership",
-                ),
-                _flows_section(),
-                _tasks_section(),
-                Section(
-                    *_section_heading(MAC_CONTENT),
-                    *_capture(MAC_CONTENT["capture"]),
-                    id="mac",
-                    cls="block",
-                ),
-                Section(
-                    P(WHY_CONTENT["label"], cls="eyebrow"),
-                    Div(
-                        P(WHY_CONTENT["claim"], cls="claim"),
-                        P(B(WHY_CONTENT["lead"])),
-                        *[P(paragraph) for paragraph in WHY_CONTENT["paragraphs"]],
-                        cls="essay",
-                    ),
-                    id="why",
-                    cls="block",
-                ),
-                Section(
-                    Div(P(INSTALL_CONTENT["label"], cls="eyebrow"), H2(INSTALL_CONTENT["heading"])),
-                    Div(
-                        _terminal(INSTALL_CONTENT["commands"], "Install Loopflow"),
-                        P(
-                            *[
-                                A(link["label"], href=link["href"])
-                                for link in INSTALL_CONTENT["links"]
-                            ],
-                            A(
-                                INSTALL_CONTENT["download_label"],
-                                href=INSTALL_CONTENT["download_url"],
-                            ),
-                            cls="capture-label install-links",
-                        ),
-                    ),
-                    id="start",
-                    cls="start",
-                ),
+                *sections,
                 id="main-content",
                 cls="home",
             ),
+            cls="home-page",
+        ),
+    )
+
+
+def build_company_page() -> tuple:
+    content = STUDIO_CONTENT["company"]
+    return _studio_page(
+        "/studio",
+        content,
+        Section(
+            *[
+                Article(
+                    P(effort["label"], Span(effort["name"]), cls="tag"),
+                    P(effort["text"]),
+                    Div(
+                        P(effort["status"], cls="eyebrow"),
+                        P(A(effort["link"]["label"], href=effort["link"]["href"]), cls="needs"),
+                    ),
+                    cls="work-row",
+                )
+                for effort in content["efforts"]
+            ],
+            cls="work-rows efforts",
+            aria_label="What we make",
+        ),
+    )
+
+
+def build_effort_page(slug: str) -> tuple:
+    content = STUDIO_CONTENT[slug]
+    if "points" not in content:
+        return _studio_page(f"/{slug}", content)
+    return _studio_page(
+        f"/{slug}",
+        content,
+        Section(
+            *[Div(B(point["title"]), point["text"]) for point in content["points"]],
+            cls="strip points",
+            aria_label=content["title"],
+        ),
+        Section(
+            P(
+                content["status"],
+                " ",
+                A(content["link"]["label"], href=content["link"]["href"]),
+                cls="capture-label install-links",
+            ),
+            cls="studio-status",
+        ),
+    )
+
+
+def _product_page(title: str, current: str, *sections) -> tuple:
+    return (
+        Title(title),
+        SkipLink(),
+        Div(
+            _topbar(current),
+            Main(*sections, id="main-content", cls="home"),
             Footer(
                 Span(HOME_CONTENT["footer"]["text"]),
                 Div(
@@ -981,7 +902,66 @@ def build_homepage() -> tuple:
                     ]
                 ),
             ),
+            Script(COPY_SCRIPT),
             cls="home-page",
+        ),
+    )
+
+
+def build_homepage() -> tuple:
+    return _product_page("Loopflow — " + HOME_CONTENT["title"], "/", NotStr(HOME_HTML))
+
+
+def _plain_list(items: list) -> FT:
+    return Ul(*[Li(B(item["name"]), " ", *_inline_code(item["text"])) for item in items], cls="plain")
+
+
+def _rotating_heading(heading: dict) -> FT:
+    """A headline whose one word cycles; read aloud once, with every word."""
+    verbs = heading["verbs"]
+    spoken = f"{heading['before']} {', '.join(verbs[:-1])} and {verbs[-1]} {heading['after']}"
+    return H1(
+        Span(
+            heading["before"],
+            " ",
+            Span(*[Span(verb) for verb in verbs], cls="rotating"),
+            " ",
+            heading["after"],
+            aria_hidden="true",
+        ),
+        aria_label=spoken,
+    )
+
+
+def build_cli_page() -> tuple:
+    hero, agents, where = CLI_CONTENT["hero"], CLI_CONTENT["agents"], CLI_CONTENT["where"]
+    return _product_page(
+        "Loopflow — " + hero["title"],
+        "/cli",
+        Section(_rotating_heading(hero["heading"]), cls="home-hero"),
+        Section(
+            _terminal(agents["commands"], "lf commands"),
+            _plain_list(agents["items"]),
+            P(*[A(link["label"], href=link["href"]) for link in agents["links"]], cls="more"),
+            id="flows",
+            cls="reading",
+        ),
+        Section(
+            H2(where["heading"]),
+            _plain_list(where["items"]),
+            id="where",
+            cls="reading",
+        ),
+        Section(
+            P(INSTALL_CONTENT["label"], cls="eyebrow"),
+            _install_row(),
+            P(hero["cost"], cls="cost"),
+            P(
+                *[A(link["label"], href=link["href"]) for link in INSTALL_CONTENT["links"]],
+                cls="capture-label install-links",
+            ),
+            id="start",
+            cls="reading closing",
         ),
     )
 
@@ -1001,8 +981,7 @@ def get():
 
 @rt("/cli")
 def get():
-    # Redirect /cli to docs
-    return RedirectResponse("/docs", status_code=302)
+    return build_cli_page()
 
 
 @rt("/products")
@@ -1013,14 +992,33 @@ def get():
 
 @rt("/loopflow")
 def get():
-    # The old product page; the app now lives on /download
-    return RedirectResponse("/download", status_code=302)
+    return RedirectResponse("/", status_code=302)
 
 
 @rt("/maestro")
 def get():
     # Redirect /maestro to download
     return RedirectResponse("/download", status_code=302)
+
+
+@rt("/studio")
+def get():
+    return build_company_page()
+
+
+@rt("/fantasia")
+def get():
+    return build_effort_page("fantasia")
+
+
+@rt("/etude")
+def get():
+    return build_effort_page("etude")
+
+
+@rt("/about")
+def get():
+    return build_effort_page("about")
 
 
 @rt("/team")

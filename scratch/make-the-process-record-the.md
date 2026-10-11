@@ -48,11 +48,11 @@ Source inspection at `85490d96ec` agrees with the accepted deletion. Main's
 compatibility. The Release child memory reinforces testing the public entry path,
 not inferring composed acceptance from store or projection tests.
 
-Gate owns affected Session/history/connection, primary succession, Work-watch and
-headless Desktop suites, including materialized migration coverage. Demo owns
+Gate covered affected Session/history/connection, primary succession, Work-watch and
+headless Desktop suites, including materialized migration coverage. Demo still owns
 approval → SIGKILL → closed/non-Waiting across wave sessions, task status, monitor
 and Work-watch, then fresh resume rejecting the saved dead socket. Source fixtures
-are not installed acceptance. No publication or installation requested.
+are not installed acceptance. Jack Heart authorized shipping below, not installation.
 
 Review found terminal ownership and intentional Move were also receipt consumers;
 they moved with the deletion rather than becoming a replacement receipt format.
@@ -62,4 +62,17 @@ Released-history migration and takeover tests retain identity, unknown refusal,
 terminal placement and completion boundaries. Configured remote-client exit remains
 unproved; fenced passive display is not provider death.
 
-Checks: prior fmt/Clippy/build and five focused tests passed; after #1518, `test_network.py … --exact lf::commands::util::tests::recorded_native_move_returns_cleanly_without_stop_receipts` passed (1 test); prose-only realignment adds no rerun, gate/CI retain affected suites and materialization.
+Gate repaired stale Move-help DTO/Desktop fixtures, Waiting fixtures without live
+process identities, historical-completion expectations and watch tests that forbade
+OS-clock rereads. Monitor now tests recorded process completion separately from
+legacy Session completion; the public watch fixture observes a throwaway provider's
+SIGKILL without any database write. No production changes were needed. The first
+lifecycle repair touched the wrong assertion; it was restored and both cases passed.
+
+Checks: `scripts/test.py --base 5f44fd9e --reuse-passing` passed architecture, fmt/Clippy, website and 411 headless Swift tests; materialized Rust had 2,382 passes/8 stale-fixture failures, repaired via `materialize_rust_tests.py -- cargo … nextest run` (62/64, then final 2/2); final fmt/Clippy and isolated `monitor list`/`usage`/`doctor --json` passed; CI owns the full final-tree matrix.
+
+## Delivery decision (2026-10-10)
+
+Jack Heart approved PR #1523 and requested `ship` in the Task conversation.
+Proceed through the captured code workflow's ship edge (gate, then landing).
+Approval does not claim the kill/reconnect demo or installed acceptance passed.

@@ -62,8 +62,8 @@ edges:
   - { from: demo,   to: end,    flow: ship }"""
 main = f'''
 <section class="home-hero">
-  <h1 aria-label="Loopflow is how you scale, study, design, implement, demo and release software with agents.">
-  <span aria-hidden="true">Loopflow is how you <span class="rotating"><span>scale</span><span>study</span><span>design</span><span>implement</span><span>demo</span><span>release</span></span> software with agents.</span></h1>
+  <h1 aria-label="Loopflow is how you scale, design, implement, demo, release and study software with agents.">
+  <span aria-hidden="true">Loopflow is how you <span class="rotating"><span>scale</span><span>design</span><span>implement</span><span>demo</span><span>release</span><span>study</span></span> software with agents.</span></h1>
   <p class="either">Conduct an orchestra of coding agents and hear every part clearly.</p>
   <div class="get"><a class="button solid" href="/download">Download for Mac</a><span class="or">or the CLI</span><div class="install-row"><pre tabindex="0" aria-label="Install the lf command line" class="term"><span class="p">$</span> curl -fsSL https://loopflow.studio/install.sh | sh</pre><button type="button" data-copy="curl -fsSL https://loopflow.studio/install.sh | sh" aria-live="polite" class="copy">Copy</button></div></div>
   <p class="cost">Free and open source (MIT)</p>

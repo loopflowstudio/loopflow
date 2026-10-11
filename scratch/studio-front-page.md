@@ -737,3 +737,5 @@ strip links to its own site in a new tab.
 - Jack Heart: "cut" the whole "From soloist to maestro." section with Scale, Play and Craft → removed from `x12`. What remains of the musical image: "Conduct an orchestra of coding agents and hear every part clearly." and "waves that sustain and tasks that resolve".
 
 - Jack Heart: "make scale the first word in the word list?" → the `x12` header cycles scale, study, design, implement, demo, release.
+
+- Jack Heart: "move study to last" → the `x12` header cycles scale, design, implement, demo, release, study.

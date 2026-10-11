@@ -175,18 +175,13 @@ Tests cover multiline KR fidelity across restart
 and Git import, transactional failure, released content conversion and retained local
 Workflow/checkout/effect evidence. These are source proofs, not installed acceptance.
 
-Public ProjectContent is removed: ordinary operations take direct typed fields,
-Chapter input is flat, and ProjectStatus belongs to the domain. Linear/migration
-Markdown parsing stays private in `pm/project_document.rs`. One `ProjectDocument`
-now supplies parsed fields and source ranges to both Linear and migration;
-`LinearProjectFields`, its parser/validation forwarding and test-only serialization
-are deleted. Field replacement renders only the selected typed value rather than
-mutating a second content model. The composed prose path is described below.
-Rotation compares
-retained JSON values without rewriting original receipt bytes; changed requests
-still refuse. The public edit fixture exposed a raw-SQL selection inconsistent
-with its journal; fixture setup now uses ordinary binding, not a production bypass.
-This is only the Project input boundary, not the full reader cut.
+Public ProjectContent is removed; ordinary operations take typed fields and
+ProjectStatus belongs to the domain. Private `pm/project_document.rs` owns
+Linear/migration parsing through one `ProjectDocument`; field replacement
+renders only the selected value. Rotation retains original receipt bytes and
+refuses changed requests. Exact input-boundary and fixture corrections:
+`1d97aa98b2:scratch/work-on-another-machine-name.md`. These do not finish
+snapshot confinement.
 
 Canonical Project readers retain local IDs, optional Linear bindings, sync evidence
 and shared rank. Selection, rotation and CLI/Desktop no longer join inventories.
@@ -229,14 +224,11 @@ Earlier reader tracing, fixture corrections and exact proof limits remain at
 headings. Outage/completion fixtures retain captured Workflow; stale and foreign
 observations grant no delivery or execution authority.
 
-Rotation now consumes and returns canonical Tasks, including saved dates/prose and
-explicit bindings. It no longer reconstructs PM records, substitutes IDs or repeats
-the Task lookup. Membership receipts and writes share the typed `save` path.
-Task export likewise reads canonical Work and captures only shared creation-field
-baselines; retained attempted inputs are unchanged. This removes those consumers,
-not the provider hierarchy. Offline public rotation
-covers both transport configurations/mapping states and transaction/retry preservation;
-export fixtures cover retained input and later saves.
+Rotation and export use canonical Work and typed saves, retaining dates,
+prose, bindings, uncertain inputs and later saves. Offline rotation fixtures
+cover both transports/mapping states and retry preservation. Exact evidence:
+`1d97aa98b2:scratch/work-on-another-machine-name.md`; the provider hierarchy
+remains.
 
 ### Reconciled acquisition boundary — October 10
 
@@ -246,21 +238,34 @@ Removing that table therefore requires a concrete replacement for those facts,
 not merely the accepted revision on Work. The same-revision rejection cases remain
 part of delivery acceptance.
 
-The unused `pm_show` inventory API, DTO and `load_show_snapshot` are deleted.
-Its sole production consumer, Wave status with sync, now performs bounded refresh
-before the existing canonical status read. Acquisition returns no provider inventory;
-OAuth and archived-predecessor fixtures assert saved Work and retained history.
-`validate_pm_portfolio` still reconstructs provider inventories: its cross-Wave
-contradictions and independently unavailable Waves remain required. This cut does
-not complete snapshot confinement or remove private persistent observations.
+At `94cb65b569`, `pm_show`, `load_show_snapshot` and
+`read_pm_snapshot` are deleted. Wave status sync refreshes before canonical
+reads; OAuth and archived-predecessor fixtures inspect saved Work. At
+`1d97aa98b2`, refiling/rotation no longer require local Wave placement.
+Public offline fixtures cover both transport configurations and mapping states,
+retaining captured Workflow and unknown Process. Sorted planning/checkout locks
+and execution admission remain. Neither cut proves installed acceptance.
 
-`require_planning_home` and both callers are deleted. Refiling and chapter rotation
-no longer require this Machine to own the Wave's execution placement. Sorted Wave
-locks, checkout locks, backlog eligibility and execution admission remain unchanged.
-Public offline fixtures cover both transport configurations and mapping states with
-nonlocal Wave placement; rotation also retains a captured Workflow and unknown
-Process. This is source-fixture evidence, not installed or cross-Machine acceptance.
-Original finding: `1f6ee6485b:scratch/planning-placement-review.md`.
+**Next coherent cut: portfolio validation and snapshot confinement.** October 10
+source inspection finds `validate_pm_portfolio` in
+`lf/commands/waves.rs`, not `ops/pm.rs`. Its status/roadmap callers reconstruct
+`PmSnapshot` solely to feed `pm::PmPortfolioValidator`. That validator checks
+repository-scoped duplicate Initiative/Project/issue claims and Team/Project
+relations. Canonical Work alone cannot replace contradictory retained claims:
+one accepted owner does not represent every observation. Move these concrete
+checks into acquisition/retained relation evidence, then remove the ordinary
+snapshot read and validator together, without another inventory DTO.
+Malformed or unavailable Wave evidence must still leave readable siblings and
+local execution visible. Existing `portfolio_ownership_is_scoped_to_repository`
+covers duplicate Initiative binding and separate repositories; it is not full
+proof of foreign, stale, removed or independently unavailable observations.
+
+The replacement must preserve same-revision archive/unresolved-membership refusal
+in `accepted_project_revision`, original acquisition ages and rejected values.
+Populated conversion and public status/roadmap tests must demonstrate those
+boundaries before persistent observation owners disappear. Bindings, ordinary
+follow-ups, cron and the remaining typed journal/provider-hierarchy audit remain
+required afterward. No partial publication or readiness.
 
 ### Released migration frontier — October 10
 
@@ -340,9 +345,6 @@ Project reader cut (`52e7da7f35`) is complete. Remaining snapshot consumers of
 `LinearProject` belong to this acquisition prerequisite, before bindings, ordinary
 follow-ups, cron and the rest of the audit. No partial publication or readiness.
 
-Earlier acquisition/fixture corrections: `c3c510f862` here. Canonical Task
-acquisition is recorded above; it does not finish the private-observation boundary.
-
 Compression removes the fabricated Git recovery record/value hierarchy: status and
 CLI/Desktop now inspect retained journal mutations directly, with candidate IDs
 separate from projection failures and publication receipts. Failed journal reads
@@ -390,17 +392,12 @@ still governs; no execution or delivery-attempt exchange is authorized.
   cut. Regenerate them after the entire accepted reduction, before review-only
   republication. No readiness or landing follows from this persistence checkpoint.
 
-Checks: `cargo build -p loopflow --bin lf`, fmt, all-target Clippy and two `local_planning` refiling/rotation tests pass with LF_* cleared; gate owns broader verification.
+Checks: `git diff --check` and `lf context --json` pass for this prose reconciliation (authored budgets); prior build/Clippy/focused-test evidence unchanged, broader verification belongs to gate.
 
-Context: authored memory/scratch fit. `lf context` reports the generated Task
-seed/steers/workspace 5,605 tokens over its 16,000-token limit; authored edits
-cannot remove it. No limit was raised.
+Context: authored memory/scratch fit. The generated Task seed/steers/workspace
+exceeds its 16,000-token limit; it is not an authored plan to trim. The complete
+launch source was inspected; no limit was raised.
 
-Earlier transport evidence: `ae96102580e:scratch/work-on-another-machine-name.md`.
-The mixed model is superseded; its synthetic proofs establish no installed acceptance.
-
-Mixed-design/demo/recovery details and proof limits remain at
-`7853a22f5c:scratch/work-on-another-machine-name.md`; synthetic provider evidence
-and a seeded Workflow prove no configured acceptance or dispatch.
-
-Earlier reduction comparison: `fc7f5cac81:scratch/simplification-opportunities.md`.
+Earlier transport, synthetic demo, recovery and reduction evidence:
+`ae96102580e`, `7853a22f5c` and `fc7f5cac81` in this plan and
+`scratch/simplification-opportunities.md`. These prove no configured acceptance.

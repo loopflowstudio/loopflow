@@ -88,14 +88,12 @@ LOO-406's common writer boundary is `84664e661`; `e68f2a423` exports saved UUIDs
 Separate creation/link attempts retain uncertainty without replay; identity attachment
 precedes inventory, preserving later saves. Export acceptance remains unproved. Prior proofs: `906576f39:wave/infrastructure/MEMORY.md`, this heading.
 
-Jack selected Git-like Task prefixes: four or more hex digits, bare or prefixed;
-reject ambiguity, retain full IDs and lengthen display abbreviations as needed.
-Identity, receipts, mappings and placement stay distinct. No landing/installation.
-Design: `scratch/explore-loopflow-s-own-store.md`.
+Jack selected unambiguous Git-like Task prefixes (4+ hex digits, bare/prefixed);
+retain full IDs and lengthen display prefixes. Identity, receipts, mappings and
+placement stay distinct. No landing/install. Design:
+`scratch/explore-loopflow-s-own-store.md`. Disposable workers prove no backup/export.
 
 Superseded split proofs and recovery evidence: `dfe18ab6060901992b55e64842e23c4295673b08:wave/infrastructure/MEMORY.md`.
-
-Disposable workers prove no backup or private export.
 
 ## Session titles (LOO-439, 2026-10-08)
 
@@ -628,21 +626,21 @@ Jack Heart selected Linear, shared or default user-keyed Git per repository.
 One typed writer owns local/imported Work; outages buffer without fallback/election.
 Execution/attempts stay local; retain causal losers and uncertainty. Before review:
 finish Work, private observations, typed journal, bindings, ordinary follow-ups
-and one cron list. Gate/install unproved.
+and one cron list. Installation unproved.
 
-`pm_show` is deleted; the provider hierarchy remains. Delivery needs accepted Work
-revision and archive/membership eligibility; foreign facts grant no ownership.
-Refiling/rotation omit local Wave placement admission; fixtures preserve placement,
-Workflow and unknown Process.
+`94cb65b569` deletes `pm_show`; `1d97aa98b2` removes refiling/rotation's
+local-placement restriction, preserving execution admission. Portfolio reads still
+reconstruct provider inventories. Accepted Work cannot represent contradictory
+retained claims; acquisition must retain their relation evidence before that
+reader disappears. Delivery needs accepted revision plus archive/membership
+eligibility; foreign facts grant no ownership. Installation remains unproved.
 
-Jack's `19116a1b` resolves LOO-427's stack hold:
-prepare 427 on committed 412 now; land 427 only after 412. No 412 landing request.
-Preserve Machine admission/tabs and adapt to the surviving writer/released frontier.
-[Design and audit](../../scratch/work-on-another-machine-name.md) own remaining work.
-Release child memory requires cron conversion to retain installed ownership,
-lock/child-descriptor identity and dues, not infer them from file location;
-operation failure stays nonzero. No installation, activation or real export.
-Prior proofs: `41378adacf:wave/infrastructure/MEMORY.md`.
+Jack's `19116a1b`: prepare 427 on committed 412; land 427 after 412.
+No 412 landing. Preserve admission/tabs and released frontier.
+[Plan](../../scratch/work-on-another-machine-name.md) owns remaining work.
+Release's inspected memory requires cron conversion to preserve installed owner,
+lock/child-descriptor identity, dues and nonzero operation failures—not infer
+authority from files. No activation/export. Prior: `41378adacf:wave/infrastructure/MEMORY.md`.
 
 ## Planning and launch preservation (curated 2026-10-02)
 

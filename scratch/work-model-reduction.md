@@ -33,8 +33,8 @@ Swift consumers, fixtures, skills and docs. The tree moved during the existing
 pursuit: `28913feeda` flattened plan wrappers; `105e1d15ad` confined Linear comment
 observations; `24c377f43f` merged main; `58de9907b6` repaired integration. Paths below
 use the post-merge layout under `rust/loopflow/src/` unless otherwise stated.
-The earlier HTML diagnosis is pinned to `c8fe4628a`; this audit supersedes its
-incomplete account of persistent provider caches.
+This audit supersedes the incomplete provider-cache account in the HTML
+diagnosis at `c8fe4628a`.
 
 This is a deletion map, not a promise to delete every named file wholesale. Remove
 obsolete responsibilities and all their consumers together. Retain real invariants
@@ -253,7 +253,10 @@ that only selects another domain reader. Retain bounded refresh/lock behavior;
 The unused `pm_show` inventory/DTO and `load_show_snapshot`/`read_pm_snapshot`
 are deleted. Status sync refreshes before its canonical read; acquisition returns
 no inventory. `plan_snapshot_read` still governs Task acquisition.
-`validate_pm_portfolio` and private acquisition inventory remain to reduce.
+`lf/commands/waves.rs::validate_pm_portfolio` and private acquisition inventory
+remain. Its sole `PmPortfolioValidator` consumer checks contradictory retained
+claims, not only accepted Work; the pursuit design specifies the replacement
+boundary and missing proof.
 
 `PmResolvedTask`, both `pm_resolve_task` wrappers and `ResolvedTask` are deleted;
 `ops/task_pm.rs` is removed. Acquisition validates concrete Linear ownership and

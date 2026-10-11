@@ -15,11 +15,13 @@ its Flow merely because this document exists. This is the next scope in the desi
 not a claim that a runtime job was scheduled. Publish for Jack's next review; do not
 land, install or export actual Work into the public repository.
 
-Recovery: the pursuit stopped during sync with `Index was not unstashed`. Both
-sides of the scratch conflict and the accepted queue were preserved in `dc7db5be49`;
-the working tree then read clean. The retained stash and stopped Flow remain
-history. Jack Heart confirmed that implementing this audit is part of the current
-goal, not optional follow-up after review.
+Jack Heart requires this audit implemented before review. Earlier scratch recovery
+is preserved at `c516c61b4f` here. The later pursuit
+`4be02e43-5240-41fb-9dc3-1f3c4ad558bf` exited 1 during the 0.13.11 schema transition:
+its 0.13.10 driver could not settle. Session
+`session_f2bff40d981b4fa0b689dac72c4358ae` retains native completion at event 1790980
+and the iterate decision, not an lf exit. Installed 0.13.11 reads the store again.
+Continue remaining work; preserve stopped history and older provider uncertainty.
 
 The result should be one ordinary local reader and typed writer for Wave, Project,
 Task and subordinate Task comments. Linear and Git translate changes into those

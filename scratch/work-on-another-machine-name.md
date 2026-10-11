@@ -282,7 +282,7 @@ Source materialization proves no installation.
 
 Jack Heart's October 10 comment `19116a1b-456b-47c4-a2ed-2ee9da13ef62`
 resolves the stack hold: prepare LOO-427 on a pinned committed LOO-412 head now;
-427 lands only after 412. Jack will integrate in the 427 checkout, leaving this
+427 lands only after 412. Integration stays in the 427 checkout, leaving this
 checkout's dirty work untouched. The inspected boundary was `94cb65b569`;
 427's earlier gate-repaired boundary is `bd295866bb`. Preserve canonical Work,
 configured transport and Desktop/delegation behavior. This authorizes no 412

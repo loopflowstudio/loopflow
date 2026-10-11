@@ -114,7 +114,7 @@ main = f'''
     <article>
       <p>Coding agents can do amazing things for you, but they ask a lot of focus from you. How can you, a human with a single locus of attention, stay in sync with an entire parallel agent swarm? Shipping tens of thousands of lines is the easy part. Making them lines worth keeping — lines you don’t revert next month — is the hard part.</p>
       <p>You don’t have to keep every session window open for fear of it disappearing, or remember why you wanted this massive change in the first place. Each task follows a workflow you choose, and each session you come to is one where your input really matters. Every task ends shipped.</p>
-      <p>Design, implement, demo, ship: each word in the header is a process someone wrote down. A skill is a prompt saved as a file. A flow is a (looping) sequence of skills: a habit turned into a process you can run again. A workflow joins flows with the points where you come in. Loopflow ships reasonable ones for software engineering, and they are templates. Change them, or write down the way you work and share it.</p>
+      <p>Your work has defined processes: how an idea gets researched, designed, implemented, validated, shipped. Loopflow is a template system for them. A skill is a prompt saved as a file. A flow is a (looping) sequence of skills: a habit turned into a process you can run again. A workflow joins flows with the points where you come in. Loopflow ships reasonable ones for software engineering, and they are templates. Change them, or write down the way you work and share it.</p>
       <p class="more"><a href="/docs/waves">Tasks and Waves ↗</a><a href="/docs/authoring#workflows">Write a workflow ↗</a></p>
     </article>
     <article>

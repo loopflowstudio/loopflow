@@ -643,3 +643,5 @@ strip links to its own site in a new tab.
 - Jack Heart: "account is a good one. Along with remote jobs mention multi-subscription balancing" → the `x11` CLI section gains a third line under the ssh line: "Multi-subscription balancing: `lf` manages your logins, and moves to the next one when one runs out." The second half is from the `/cli` page's Accounts item.
 
 - Jack Heart: "$ lf task run EXP-12 # its worktree, then its Flow can probably kill that now" → removed from the `x11` card; it opens with `task create`, then the launch command.
+
+- Jack Heart: "maybe pass --wait to land?" → the `x11` card's last line is `lf land --wait  # merge when checks pass`. `lf land` has no `--wait` flag in the code today (its flags are --strict, --local, -c, --next, -w, -m, --title, --body; it requests auto-merge and returns). With `graph pursue`, the card now shows two things `lf` does not accept yet.

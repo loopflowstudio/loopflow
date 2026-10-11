@@ -149,7 +149,7 @@ main = f'''
 
 <span class="p">$</span> <b>lf</b> resume                   <span class="c"># back to the last Session</span>
 <span class="p">$</span> <b>lf</b> usage --task EXP-12      <span class="c"># what that Task cost</span>
-<span class="p">$</span> <b>lf</b> land                     <span class="c"># merge when checks pass</span></pre>
+<span class="p">$</span> <b>lf</b> land --wait              <span class="c"># merge when checks pass</span></pre>
     </article>
   </div>
 </section>

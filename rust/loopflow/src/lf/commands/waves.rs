@@ -32,7 +32,7 @@ use crate::work::task::{
 };
 use crate::work::wave::metrics::{
     MetricContractIssueDto, MetricEvidenceDto, MetricFreshnessDto, MetricPortfolioDto,
-    MetricReadingDto, MetricStage, MetricTarget, MetricUnknownCauseDto,
+    MetricReadingDto, MetricStage, MetricUnknownCauseDto, Threshold,
 };
 use crate::work::wave::Wave;
 
@@ -108,12 +108,6 @@ impl<T> Evidence<T> {
             },
         }
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PmKrSummary {
-    pub text: String,
-    pub holds: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -407,8 +401,8 @@ pub struct ProjectSummary {
     pub name: String,
     pub workflow: String,
     pub status: crate::pm::ProjectStatus,
-    pub metric_targets: Vec<crate::pm::ChapterMetricTarget>,
-    pub krs: Vec<crate::pm::PmKr>,
+    pub metric_targets: Vec<crate::work::wave::metrics::MetricTarget>,
+    pub krs: Vec<crate::work::project::ProjectKR>,
 }
 
 async fn project_planning(store: &SharedStore, wave: &Wave) -> Evidence<ProjectSummary> {
@@ -425,7 +419,6 @@ async fn project_planning(store: &SharedStore, wave: &Wave) -> Evidence<ProjectS
                 let work = registered.iter().find(|work| {
                     work.id.as_str() == project.id
                         || work
-                            .plan
                             .linear_id
                             .as_ref()
                             .is_some_and(|id| id.as_str() == project.id)
@@ -841,7 +834,6 @@ async fn wave_tasks(
                 || selected.as_ref().is_some_and(|task| {
                     item.id == task.id.as_str()
                         || task
-                            .plan
                             .linear_id
                             .as_ref()
                             .is_some_and(|id| item.id == id.as_str())
@@ -1076,11 +1068,10 @@ async fn snapshot_tasks(
         let task = tasks.iter().find(|task| {
             task.id.as_str() == item.id
                 || task
-                    .plan
                     .linear_id
                     .as_ref()
                     .is_some_and(|id| id.as_str() == item.id)
-                || task.plan.identifier == item.identifier
+                || task.identifier == item.identifier
         });
         let recommended = recommended_flow(&planning.projects, item.project_id.as_deref());
         requests.push(TaskDetailRequest {
@@ -1105,7 +1096,6 @@ async fn snapshot_tasks(
             planning.projects.iter().find(|plan| {
                 parent.id.as_str() == plan.id
                     || parent
-                        .plan
                         .linear_id
                         .as_ref()
                         .is_some_and(|id| id.as_str() == plan.id)
@@ -1217,7 +1207,7 @@ fn unavailable_task(task: &Task, status: TaskState) -> UnavailableTaskEvidence {
     UnavailableTaskEvidence {
         work_id: task.id.to_string(),
         task_id: task.id.to_string(),
-        task_identifier: task.plan.identifier.clone(),
+        task_identifier: task.identifier.clone(),
         status,
         owner: NextMoveOwner::Wave,
         reason: REASON.to_string(),
@@ -1350,7 +1340,7 @@ async fn snapshot_task_detail(
     let completion_refusal = match (task, runtime.as_ref()) {
         (Some(task), Some(runtime)) if runtime.status != TaskState::Abandoned => {
             crate::ops::task::CompletionGate::from_delivery(pr.as_ref(), &follow_through)
-                .refusal(&task.plan.identifier)
+                .refusal(&task.identifier)
         }
         _ => None,
     };
@@ -2083,10 +2073,10 @@ fn metric_target(metric: &MetricReadingDto, portfolio: &MetricPortfolioDto) -> S
     }
     match metric.target {
         None => "unset for this chapter".into(),
-        Some(MetricTarget::AtLeast { value }) => {
+        Some(Threshold::AtLeast { value }) => {
             format!(">= {}", format_metric_number(value, &metric.unit))
         }
-        Some(MetricTarget::AtMost { value }) => {
+        Some(Threshold::AtMost { value }) => {
             format!("<= {}", format_metric_number(value, &metric.unit))
         }
     }
@@ -2446,7 +2436,7 @@ mod tests {
     use crate::work::task::{CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase};
     use crate::work::wave::metrics::{
         MetricEvidenceDto, MetricFreshnessDto, MetricIdentity, MetricPortfolioDto,
-        MetricReadingDto, MetricStage, MetricTarget, MetricUnknownCauseDto,
+        MetricReadingDto, MetricStage, MetricUnknownCauseDto, Threshold,
     };
     use crate::work::wave::Wave;
 
@@ -3022,7 +3012,7 @@ mod tests {
                 instrumented: true,
                 instrument: "scorecard".to_string(),
                 unit: "ratio".to_string(),
-                target: Some(MetricTarget::AtLeast { value: 1.0 }),
+                target: Some(Threshold::AtLeast { value: 1.0 }),
                 window: "7d".to_string(),
                 freshness_policy: "6h".to_string(),
                 freshness: MetricFreshnessDto::Never,

@@ -80,7 +80,7 @@ pub fn task_follow_up(repo: &Path, issue: &str, options: &FollowUpOptions) -> Op
                 if saved.id == task.id {
                     return Err(task_error("a Task cannot follow up itself"));
                 }
-                (saved.id.to_string(), saved.plan.title, true)
+                (saved.id.to_string(), saved.title, true)
             } else {
                 let title = options
                     .title
@@ -112,7 +112,7 @@ pub fn task_follow_up(repo: &Path, issue: &str, options: &FollowUpOptions) -> Op
                 .unwrap_or("");
             let notes = format!(
                 "Follow-up to {} {}\n\n{}",
-                task.plan.identifier,
+                task.identifier,
                 source,
                 options
                     .notes
@@ -157,7 +157,7 @@ async fn link_intent(
     let link = FollowThroughLink {
         key: intent.key.clone(),
         issue_id: intent.issue_id.clone(),
-        identifier: saved.plan.identifier.clone(),
+        identifier: saved.identifier.clone(),
         url: item.url,
         due: item.due_date,
     };

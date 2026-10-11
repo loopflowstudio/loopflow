@@ -98,7 +98,7 @@ fn filing_cannot_finish_until_every_issue_and_link_is_confirmed() {
         assert_eq!(sources[&link.issue_id].len(), 1);
         assert_eq!(
             sources[&link.issue_id][0].identifier,
-            fixture.task.plan.identifier
+            fixture.task.identifier
         );
     }
     sqlite

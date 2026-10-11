@@ -653,8 +653,8 @@ fn print_task_snapshot(
         println!("{}", serde_json::to_string_pretty(&snapshot)?);
     } else {
         let pm_writeback = match &snapshot.pm_writeback {
-            loopflow::work::task::PmWritebackState::Current => "current".to_string(),
-            loopflow::work::task::PmWritebackState::Pending { error, .. } => {
+            loopflow::work::task::LinearWritebackState::Current => "current".to_string(),
+            loopflow::work::task::LinearWritebackState::Pending { error, .. } => {
                 format!("pending: {error}")
             }
         };
@@ -1645,7 +1645,7 @@ fn dispatch(
             // An edge that runs nothing: setting out on it is the whole move.
             println!(
                 "Task {} moved along a workflow edge that runs no Flow",
-                task.plan.identifier
+                task.identifier
             );
             return Ok(());
         };
@@ -1654,7 +1654,7 @@ fn dispatch(
         // still on the edge.
         loopflow::lf::commands::flow::run_for_task(
             &cli,
-            &task.plan.identifier,
+            &task.identifier,
             &flow,
             task.worktree()?,
         )?;

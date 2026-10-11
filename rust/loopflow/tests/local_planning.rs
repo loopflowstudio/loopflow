@@ -1087,7 +1087,7 @@ fn project_creation_binding_and_activation_save_offline() {
         let projects = store.list_projects(Some(wave.id())).unwrap();
         assert_eq!(projects.len(), 1);
         let id = projects[0].id.clone();
-        assert!(projects[0].plan.linear_id.is_none());
+        assert!(projects[0].linear_id.is_none());
         assert!(store.list_tasks(Some(wave.id())).unwrap().is_empty());
         let db = rusqlite::Connection::open(&path).unwrap();
         let intent: String = db
@@ -1273,7 +1273,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
             summary: "Original summary".into(),
             workflow: "feature".into(),
             status: loopflow::pm::ProjectStatus::Started,
-            krs: vec![loopflow::pm::PmKr {
+            krs: vec![loopflow::work::project::ProjectKR {
                 text: "Retain the proof".into(),
                 holds: false,
             }],
@@ -1304,9 +1304,9 @@ fn project_edits_save_offline_in_both_connection_modes() {
         // Exact identities still resolve when another Project's name/slug shadows them.
         let mut shadow = store.project(&id).unwrap().unwrap();
         shadow.id = loopflow::durable::ProjectId::new();
-        shadow.plan.linear_id = None;
-        shadow.plan.name = id.to_string();
-        shadow.plan.slug = project.id.clone();
+        shadow.linear_id = None;
+        shadow.name = id.to_string();
+        shadow.slug = project.id.clone();
         store.insert_project(&shadow).unwrap();
         // Both repositories use an ordinary Wave, with optional mapping and no credentials.
         let source = home.path().join("workflow.yaml");
@@ -1704,8 +1704,8 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
         lf(repo.path(), home.path(), &edit);
         assert_eq!(store.pending_task_changes(&second).unwrap(), pending);
         assert_eq!(
-            store.task(&second).unwrap().unwrap().plan.revision,
-            edited.plan.revision
+            store.task(&second).unwrap().unwrap().revision,
+            edited.revision
         );
         assert!(store
             .edit_task(
@@ -2025,10 +2025,10 @@ fn rotation_saves_membership_and_pending_effects_offline() {
                 .unwrap();
             let retained = store.task(&active.id).unwrap().unwrap();
             assert_eq!(retained.project_id, successor);
-            assert_eq!(retained.plan.description, "Incoming unrelated edit");
+            assert_eq!(retained.description, "Incoming unrelated edit");
             assert_eq!(store.pending_task_changes(&active.id).unwrap(), changes);
             assert_eq!(
-                store.project(&project.id).unwrap().unwrap().plan.status,
+                store.project(&project.id).unwrap().unwrap().status,
                 loopflow::pm::ProjectStatus::Completed
             );
         }
@@ -2064,15 +2064,14 @@ fn rotation_saves_membership_and_pending_effects_offline() {
         // Select an already stored destination using its provider alias when present.
         let mut existing = project.clone();
         existing.id = loopflow::durable::ProjectId::new();
-        existing.plan.name = "Future".into();
-        existing.plan.slug = "future".into();
-        existing.plan.status = loopflow::pm::ProjectStatus::Planned;
-        existing.plan.linear_id =
+        existing.name = "Future".into();
+        existing.slug = "future".into();
+        existing.status = loopflow::pm::ProjectStatus::Planned;
+        existing.linear_id =
             mapped.then(|| loopflow::planning::LinearProjectId::new("future-provider").unwrap());
         store.insert_project(&existing).unwrap();
         let mut next = plan.clone();
         next["waves"][0]["successor_id"] = serde_json::json!(existing
-            .plan
             .linear_id
             .as_ref()
             .map(|id| id.as_str())
@@ -2084,10 +2083,7 @@ fn rotation_saves_membership_and_pending_effects_offline() {
             store.task(&active.id).unwrap().unwrap().project_id,
             existing.id
         );
-        assert_eq!(
-            store.project(&existing.id).unwrap().unwrap().plan.name,
-            "Next"
-        );
+        assert_eq!(store.project(&existing.id).unwrap().unwrap().name, "Next");
         let pending = store.pending_project_changes(&existing.id).unwrap();
         assert!(pending
             .iter()
@@ -2229,7 +2225,7 @@ fn refiling_saves_membership_offline_and_retains_inbound_changes() {
         let moved = store.task(&task.id).unwrap().unwrap();
         assert_eq!(moved.project_id, projects[1].id);
         assert_eq!(moved.wave_id, projects[1].wave_id);
-        assert_eq!(moved.plan.revision, task.plan.revision + 1);
+        assert_eq!(moved.revision, task.revision + 1);
         assert!(moved.worktree.is_none());
         let changes = store.pending_task_changes(&task.id).unwrap();
         assert_eq!(changes.len(), 1);
@@ -2258,7 +2254,7 @@ fn refiling_saves_membership_offline_and_retains_inbound_changes() {
                 .unwrap();
             let retained = store.task(&task.id).unwrap().unwrap();
             assert_eq!(retained.project_id, projects[1].id);
-            assert_eq!(retained.plan.description, "Incoming after refiling");
+            assert_eq!(retained.description, "Incoming after refiling");
             assert_eq!(store.pending_task_changes(&task.id).unwrap(), changes);
             let mut other = incoming.project.clone().unwrap();
             // Preserve the duplicate slug: exact provider IDs must beat names.
@@ -2540,8 +2536,8 @@ fn deletion_saves_offline_and_retains_execution_and_retry_identity() {
         let removed = store.task(&task_id).unwrap().unwrap();
         assert_eq!(store.work_status(&work).unwrap(), execution);
         assert_eq!(removed.worktree, before.worktree);
-        assert_eq!(removed.plan.linear_id, before.plan.linear_id);
-        assert_eq!(removed.plan.revision, before.plan.revision + 1);
+        assert_eq!(removed.linear_id, before.linear_id);
+        assert_eq!(removed.revision, before.revision + 1);
         let status = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
         assert_eq!(status["planning_state"], "removed");
         assert!(store.list_tasks(None).unwrap().is_empty());

@@ -1118,7 +1118,7 @@ pub(crate) async fn task_comment_async(
             .ok_or_else(|| OpsError::Message("Task Wave is missing".into()))?;
         super::planning_sync::sync_after_save(&store, owner.repo()).await;
     }
-    let refresh_error = if message.is_none() && task.plan.linear_id.is_some() {
+    let refresh_error = if message.is_none() && task.linear_id.is_some() {
         match tokio::time::timeout(
             std::time::Duration::from_secs(5),
             super::linear_observe::refresh_task_comments(&store, &task),
@@ -1558,7 +1558,7 @@ async fn resolve_owned_issue(repo: &Path, issue: &str) -> OpsResult<ResolvedTask
         .map_err(|error| OpsError::Message(error.to_string()))?;
     let issue = task
         .as_ref()
-        .map(|task| task.plan.linear_id())
+        .map(|task| task.linear_id())
         .transpose()?
         .map_or(issue, |id| id.as_str());
     crate::ops::task_pm::resolve_task_async(repo, issue, PmRefresh::Force).await
@@ -2585,7 +2585,6 @@ pub(super) async fn checked_projects_with_store(
         {
             if !projects.iter().any(|project| {
                 known
-                    .plan
                     .linear_id
                     .as_ref()
                     .is_some_and(|id| project.id == id.as_str())
@@ -2593,7 +2592,7 @@ pub(super) async fn checked_projects_with_store(
                 // An omitted membership cannot erase retained Project/Task history.
                 projects.push(
                     ctx.client
-                        .project_ownership(known.plan.linear_id()?.as_str())
+                        .project_ownership(known.linear_id()?.as_str())
                         .await
                         .map_err(pm_to_ops)?,
                 );

@@ -357,7 +357,6 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
             .block_on(fixture.store.get_task(&fixture.task.id))
             .unwrap()
             .unwrap()
-            .plan
             .title
             == "Written offline on worker"
     });
@@ -367,14 +366,12 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
             .block_on(fixture.store.get_task(&fixture.task.id))
             .unwrap()
             .unwrap()
-            .plan
             .title
             == "Written offline on worker"
             && runtime
                 .block_on(worker.get_task(&fixture.task.id))
                 .unwrap()
                 .unwrap()
-                .plan
                 .description
                 == "Written offline on source"
     });
@@ -670,8 +667,8 @@ fn taskless_terminal_and_headless_sessions_keep_planning_live() {
     wait_for(|| {
         let source = runtime.block_on(a.get_task(&task_id)).unwrap().unwrap();
         let target = runtime.block_on(b.get_task(&task_id)).unwrap().unwrap();
-        source.plan.description == "Target offline"
-            && target.plan.title == "Source offline"
+        source.description == "Target offline"
+            && target.title == "Source offline"
             && status(&runtime, &a, source_key).pending_local == Some(false)
             && status(&runtime, &b, target_key).pending_local == Some(false)
     });

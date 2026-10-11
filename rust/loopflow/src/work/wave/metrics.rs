@@ -27,13 +27,19 @@ pub enum MetricStage {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MetricTarget {
+    pub metric_id: String,
+    pub target: Threshold,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum MetricTarget {
+pub enum Threshold {
     AtLeast { value: f64 },
     AtMost { value: f64 },
 }
 
-impl MetricTarget {
+impl Threshold {
     pub fn value(&self) -> f64 {
         match self {
             Self::AtLeast { value } | Self::AtMost { value } => *value,
@@ -688,7 +694,7 @@ pub struct MetricPortfolioDto {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MetricReadingDto {
-    pub target: Option<MetricTarget>,
+    pub target: Option<Threshold>,
     pub identity: MetricIdentity,
     pub contract_revision: String,
     pub name: String,
@@ -833,7 +839,7 @@ pub enum MetricContractIssueDto {
 pub fn derive_metric_reading(
     contract: &MetricContract,
     observations: &[MetricObservation],
-    target: Option<&MetricTarget>,
+    target: Option<&Threshold>,
     evaluation_time: OffsetDateTime,
 ) -> Result<MetricReadingDto, MetricError> {
     let persisted = MetricObservationEvidence::from_history(contract, observations)?;
@@ -843,7 +849,7 @@ pub fn derive_metric_reading(
 fn derive_metric_reading_from_evidence(
     contract: &MetricContract,
     persisted: &MetricObservationEvidence,
-    target: Option<&MetricTarget>,
+    target: Option<&Threshold>,
     evaluation_time: OffsetDateTime,
 ) -> Result<MetricReadingDto, MetricError> {
     let (freshness, evidence) = match persisted.current.as_ref() {
@@ -874,7 +880,7 @@ fn derive_metric_reading_from_evidence(
 
 pub fn derive_metric_portfolio(
     entries: &[(&MetricContract, &[MetricObservation])],
-    targets: &[crate::pm::ChapterMetricTarget],
+    targets: &[crate::work::wave::metrics::MetricTarget],
     evaluation_time: OffsetDateTime,
 ) -> Result<MetricPortfolioDto, MetricError> {
     let mut metrics = Vec::new();
@@ -911,7 +917,7 @@ pub fn compose_metric_portfolio(
     discovery: MetricContractDiscovery,
     registered_instruments: &BTreeMap<MetricIdentity, String>,
     observations: &BTreeMap<MetricIdentity, MetricObservationEvidence>,
-    targets: Option<&[crate::pm::ChapterMetricTarget]>,
+    targets: Option<&[crate::work::wave::metrics::MetricTarget]>,
     evaluation_time: OffsetDateTime,
 ) -> Result<MetricPortfolioDto, MetricError> {
     let mut metrics = Vec::new();
@@ -1003,7 +1009,7 @@ fn select_current<'a>(
 fn derive_evidence(
     contract: &MetricContract,
     observation: &MetricObservation,
-    target: Option<&MetricTarget>,
+    target: Option<&Threshold>,
     evaluation_time: OffsetDateTime,
 ) -> Result<(MetricFreshnessDto, MetricEvidenceDto), MetricError> {
     let source_time = observation.source_time();
@@ -1321,7 +1327,7 @@ mod tests {
         let fresh = derive_metric_reading(
             &contract,
             std::slice::from_ref(&evidence),
-            Some(&MetricTarget::AtLeast { value: 1.0 }),
+            Some(&Threshold::AtLeast { value: 1.0 }),
             at(206) - Duration::SECOND,
         )
         .unwrap();
@@ -1332,7 +1338,7 @@ mod tests {
         let stale = derive_metric_reading(
             &contract,
             &[evidence],
-            Some(&MetricTarget::AtLeast { value: 1.0 }),
+            Some(&Threshold::AtLeast { value: 1.0 }),
             at(206),
         )
         .unwrap();
@@ -1360,7 +1366,7 @@ mod tests {
         let reading = derive_metric_reading(
             &contract,
             &[prior],
-            Some(&MetricTarget::AtLeast { value: 1.0 }),
+            Some(&Threshold::AtLeast { value: 1.0 }),
             at(201),
         )
         .unwrap();
@@ -1379,7 +1385,7 @@ mod tests {
         let reading = derive_metric_reading(
             &contract,
             &[prior],
-            Some(&MetricTarget::AtLeast { value: 1.0 }),
+            Some(&Threshold::AtLeast { value: 1.0 }),
             at(206),
         )
         .unwrap();
@@ -1404,7 +1410,7 @@ mod tests {
         let reading = derive_metric_reading(
             &contract,
             &[wrong_window],
-            Some(&MetricTarget::AtLeast { value: 1.0 }),
+            Some(&Threshold::AtLeast { value: 1.0 }),
             at(201),
         )
         .unwrap();
@@ -1469,14 +1475,14 @@ mod tests {
         let forward = derive_metric_reading(
             &contract,
             &[missed.clone(), met.clone()],
-            Some(&MetricTarget::AtLeast { value: 1.0 }),
+            Some(&Threshold::AtLeast { value: 1.0 }),
             at(201),
         )
         .unwrap();
         let reverse = derive_metric_reading(
             &contract,
             &[met, missed],
-            Some(&MetricTarget::AtLeast { value: 1.0 }),
+            Some(&Threshold::AtLeast { value: 1.0 }),
             at(201),
         )
         .unwrap();
@@ -1504,7 +1510,7 @@ mod tests {
         let reading = derive_metric_reading(
             &contract,
             &[other_metric],
-            Some(&MetricTarget::AtLeast { value: 1.0 }),
+            Some(&Threshold::AtLeast { value: 1.0 }),
             at(201),
         )
         .unwrap();
@@ -1581,7 +1587,7 @@ mod tests {
         let reading = derive_metric_reading(
             &contract,
             &[observed(&contract, 1.0, at(200))],
-            Some(&MetricTarget::AtLeast { value: 1.0 }),
+            Some(&Threshold::AtLeast { value: 1.0 }),
             at(201),
         )
         .unwrap();

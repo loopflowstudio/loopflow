@@ -29,8 +29,8 @@ macro_rules! planning_fields {
         pub(crate) enum PlanningEdit {
             $($variant($value),)*
             Workflow(String),
-            Krs(Vec<crate::pm::PmKr>),
-            MetricTargets(Vec<crate::pm::ChapterMetricTarget>),
+            Krs(Vec<crate::work::project::ProjectKR>),
+            MetricTargets(Vec<crate::work::wave::metrics::MetricTarget>),
             Disposition(Disposition),
             CommentContent(CommentContent),
         }
@@ -580,7 +580,7 @@ mod tests {
         let original = a.task(&task).unwrap().unwrap();
         a.edit_task(
             &task,
-            original.plan.revision,
+            original.revision,
             &PmItemUpdate {
                 name: Some("Changed".into()),
                 ..Default::default()
@@ -617,7 +617,7 @@ mod tests {
             .unwrap();
         assert_eq!(revision, b.revisions().unwrap());
         let received = b.task(&task).unwrap().unwrap();
-        assert_eq!(received.plan.title, "Changed");
+        assert_eq!(received.title, "Changed");
         assert_eq!(received.worktree.unwrap().to_str(), Some("/retained"));
         assert_eq!(received.branch, "local-branch");
         let conn = b.conn.lock().unwrap();
@@ -660,17 +660,14 @@ mod tests {
         assert!(a
             .edit_task(
                 &task,
-                current.plan.revision,
+                current.revision,
                 &PmItemUpdate {
                     name: Some("Must roll back".into()),
                     ..Default::default()
                 }
             )
             .is_err());
-        assert_eq!(
-            a.task(&task).unwrap().unwrap().plan.title,
-            current.plan.title
-        );
+        assert_eq!(a.task(&task).unwrap().unwrap().title, current.title);
         assert_eq!(a.pending_task_changes(&task).unwrap(), pending);
         assert_eq!(
             a.export_peer_planning("/repo", &route.id()).unwrap(),

@@ -26,7 +26,7 @@ public struct ProjectPlanningSnapshot: Decodable, Sendable, Identifiable, Hashab
     public let name: String
     public let workflow: String
     public let status: ProjectStatus
-    public let metricTargets: [ChapterMetricTarget]
+    public let metricTargets: [MetricTarget]
     public let krs: [PlanningKeyResult]
 
     enum CodingKeys: String, CodingKey {

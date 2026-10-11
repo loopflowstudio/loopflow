@@ -14,7 +14,7 @@ use time::OffsetDateTime;
 use crate::child::{prefixed_uuid_id, AbandonIntent};
 pub use crate::durable::TaskId;
 use crate::id::WaveId;
-use crate::planning::TaskPlan;
+use crate::planning::{LinearIssueId, PlanningError};
 use crate::pr_landing::PrLandingId;
 use crate::work::project::ProjectId;
 
@@ -513,7 +513,7 @@ impl TaskPr {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
-pub enum PmWritebackOperation {
+pub enum LinearWritebackOperation {
     CompleteTask,
     ReopenTask,
     CancelTask,
@@ -521,10 +521,10 @@ pub enum PmWritebackOperation {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
-pub enum PmWritebackState {
+pub enum LinearWritebackState {
     Current,
     Pending {
-        operation: PmWritebackOperation,
+        operation: LinearWritebackOperation,
         error: String,
     },
 }
@@ -555,9 +555,16 @@ pub enum Observation {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Task {
     pub id: TaskId,
-    /// Authored local planning or accepted Linear facts.
-    pub plan: TaskPlan,
-    pub pm_writeback: PmWritebackState,
+    /// Local optimistic-write revision; independent of Linear observation age.
+    pub revision: u64,
+    pub identifier: String,
+    pub title: String,
+    pub description: String,
+    /// Optional Linear binding, not a second owner of this record.
+    pub linear_id: Option<LinearIssueId>,
+    /// Acquisition time of the retained Linear observation, never a write clock.
+    pub pm_snapshot_synced_at: Option<i64>,
+    pub pm_writeback: LinearWritebackState,
     /// Root ownership. Wave name and checkout are resolved from this id.
     pub wave_id: WaveId,
     /// Required runtime parent. Every Task reports through one durable Project
@@ -581,6 +588,12 @@ pub struct Task {
 }
 
 impl Task {
+    pub fn linear_id(&self) -> Result<&LinearIssueId, PlanningError> {
+        self.linear_id
+            .as_ref()
+            .ok_or(PlanningError::NoLinearMapping)
+    }
+
     pub fn worktree(&self) -> Result<&PathBuf, TaskDataError> {
         self.worktree.as_ref().ok_or_else(|| {
             TaskDataError::InvalidInvariant(format!(
@@ -768,24 +781,24 @@ pub struct LinearObservationOutcome {
 #[cfg(test)]
 mod tests {
     use super::{
-        GithubPr, PmWritebackOperation, PmWritebackState, PrPhase, PrPublication, Task, TaskId,
-        TaskPr, TaskPrId,
+        GithubPr, LinearWritebackOperation, LinearWritebackState, PrPhase, PrPublication, Task,
+        TaskId, TaskPr, TaskPrId,
     };
-    use crate::planning::{LinearIssueId, TaskPlan};
+    use crate::planning::LinearIssueId;
 
     fn task() -> Task {
         let now = time::OffsetDateTime::now_utc();
         Task {
             id: TaskId::new(),
-            plan: TaskPlan {
-                revision: 0,
-                linear_id: Some(LinearIssueId::new("issue-1").unwrap()),
-                identifier: "INF-123".to_string(),
-                title: "Ship it".to_string(),
-                description: String::new(),
-                pm_snapshot_synced_at: Some(1),
-            },
-            pm_writeback: PmWritebackState::Current,
+
+            revision: 0,
+            linear_id: Some(LinearIssueId::new("issue-1").unwrap()),
+            identifier: "INF-123".to_string(),
+            title: "Ship it".to_string(),
+            description: String::new(),
+            pm_snapshot_synced_at: Some(1),
+
+            pm_writeback: LinearWritebackState::Current,
             wave_id: crate::id::WaveId::new(),
             project_id: crate::work::project::ProjectId::new(),
             worktree: Some("/tmp/task".into()),
@@ -802,6 +815,20 @@ mod tests {
     }
 
     #[test]
+    fn task_content_round_trip_keeps_binding_revision_and_observation_age() {
+        let mut task = task();
+        task.revision = 17;
+        task.pm_snapshot_synced_at = Some(42);
+        let value = serde_json::to_value(&task).unwrap();
+        assert!(value.get("plan").is_none());
+        assert_eq!(value["title"], "Ship it");
+        assert_eq!(value["revision"], 17);
+        assert_eq!(value["linear_id"], "issue-1");
+        assert_eq!(value["pm_snapshot_synced_at"], 42);
+        assert_eq!(serde_json::from_value::<Task>(value).unwrap(), task);
+    }
+
+    #[test]
     fn task_ids_are_prefixed_and_round_trip() {
         let task = TaskId::new();
         assert_eq!(TaskId::parse(task.as_str()).unwrap(), task);
@@ -811,8 +838,8 @@ mod tests {
 
     #[test]
     fn pending_pm_writeback_has_a_stable_json_shape() {
-        let state = PmWritebackState::Pending {
-            operation: PmWritebackOperation::CompleteTask,
+        let state = LinearWritebackState::Pending {
+            operation: LinearWritebackOperation::CompleteTask,
             error: "offline".to_string(),
         };
 
@@ -1149,8 +1176,8 @@ mod tests {
     #[test]
     fn pending_pm_writeback_is_valid_without_a_controller() {
         let mut task = task();
-        task.pm_writeback = PmWritebackState::Pending {
-            operation: PmWritebackOperation::CompleteTask,
+        task.pm_writeback = LinearWritebackState::Pending {
+            operation: LinearWritebackOperation::CompleteTask,
             error: "too early".to_string(),
         };
         assert!(task.validate().is_ok());

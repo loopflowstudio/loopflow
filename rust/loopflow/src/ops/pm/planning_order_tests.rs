@@ -55,7 +55,7 @@ fn reorder(store: &Store, task: &Task, rank: u32) {
         .sqlite
         .edit_task(
             &task.id,
-            current.plan.revision,
+            current.revision,
             &PmItemUpdate {
                 rank: Some(rank),
                 ..Default::default()

@@ -290,10 +290,7 @@ mod tests {
                 store.wave_workflows(&wave).unwrap(),
                 vec![("review".into(), definition.into())]
             );
-            assert_eq!(
-                store.project(&project).unwrap().unwrap().plan.workflow,
-                "review"
-            );
+            assert_eq!(store.project(&project).unwrap().unwrap().workflow, "review");
             for (name, source) in [("invalid/review", definition), ("review", "changed")] {
                 assert!(store
                     .select_project_workflow(&project, name, source)
@@ -307,10 +304,7 @@ mod tests {
                 store.wave_workflow(&wave, "review").unwrap().as_deref(),
                 Some(changed)
             );
-            assert_eq!(
-                store.project(&project).unwrap().unwrap().plan.workflow,
-                "review"
-            );
+            assert_eq!(store.project(&project).unwrap().unwrap().workflow, "review");
         }
         assert!(store
             .update_project_content(&crate::durable::ProjectId::new(), &content)

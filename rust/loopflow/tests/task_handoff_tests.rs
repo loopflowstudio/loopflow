@@ -21,13 +21,7 @@ fn checkout(home: &Path, caller: &Path, child: &Task, design: &str) -> Output {
     command
         .env("LF_HOME", home)
         .current_dir(caller)
-        .args([
-            "checkout",
-            &child.plan.identifier,
-            "--design",
-            design,
-            "--json",
-        ])
+        .args(["checkout", &child.identifier, "--design", design, "--json"])
         .output()
         .unwrap()
 }

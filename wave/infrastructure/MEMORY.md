@@ -626,23 +626,24 @@ execution and retains conservative cleanup. Proofs and unresolved Desktop
 acceptance remain at
 `e50dbd749e3207599f9937ce45653f4c6f33a5cd:wave/infrastructure/MEMORY.md`.
 
-## Tasks across machines (LOO-412, 2026-10-09)
+## Tasks across machines (LOO-412, 2026-10-10)
 
-Jack Heart selected Linear, shared Git or default user-keyed Git through personal
-or repository configuration. Each machine retains local records/APIs and reads/writes
-its selected transport. Linear outages buffer locally without Git fallback; the
-offline-laptop counterexample retires publisher election and mixed receipts.
-Jack requires one typed writer and excludes inferred Machine scheduling.
+Jack Heart selected repository-configured Linear, shared Git or default user-keyed
+Git. Outages buffer locally without fallback or publisher election. One typed
+writer owns local/imported fields; execution and attempts stay local. Preserve Git
+causality and losers. Gate and installation remain unproved.
 
-The reduction routes local/imported planning through one transactional writer,
-deleting capture triggers, mirrored fields and transported provider attempts.
-Local Linear receipts/readback and Git causality/losers remain. Execution and
-placement stay local. Focused Git, writer, Linear and follow-up checks pass; full gate and installed
-acceptance remain unproved. Publication is review-only; no landing or installation.
+Jack's October 10 review selects one Project, direct Task content, explicit Linear
+integration, ProjectKR/MetricTarget, one TaskComment, ordinary Tasks/comments instead
+of FollowThrough gates, and one repository cron command list. Preserve uncertain
+effects, historical evidence, schedule identity/timing and Machine ownership.
+Implementation is incomplete; [the design](../../scratch/work-on-another-machine-name.md)
+owns remaining work. Publish #1491 for review only; no landing, installation,
+live schedule activation or real Work export to the public repository.
 
-Historical mixed recovery: `e37099e50`/`231e75898`. Prior Git/HTTPS and synthetic
-Codex proofs remain at `ae96102580e:scratch/work-on-another-machine-name.md`;
-current design and review preserve their limits. They prove no installed acceptance.
+Historical mixed recovery: `e37099e50`/`231e75898`; prior transport/synthetic Codex
+proofs: `ae96102580e:scratch/work-on-another-machine-name.md`. They establish no
+installed acceptance. Source conversion cannot transfer installed schedule authority.
 
 ## Driver recovery
 

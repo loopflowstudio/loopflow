@@ -7,10 +7,10 @@ use std::process::Command;
 
 use loopflow::durable::{MachineId, WorkRef, WorkStatus};
 use loopflow::id::WaveId;
-use loopflow::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
+use loopflow::planning::{LinearIssueId, LinearProjectId};
 use loopflow::store::{PmSnapshotRow, StorageConfig};
 use loopflow::work::project::{Project, ProjectId};
-use loopflow::work::task::{Observation, PmWritebackState, Task, TaskId, TaskPr, TaskPrId};
+use loopflow::work::task::{LinearWritebackState, Observation, Task, TaskId, TaskPr, TaskPrId};
 use loopflow::work::wave::context::{resolve_managed_wave, WaveResolveError};
 use loopflow::work::wave::relocate::relocate_wave;
 use loopflow::work::wave::{Wave, WaveLocator};
@@ -64,18 +64,17 @@ fn project(wave: &Wave) -> Project {
     let now = OffsetDateTime::now_utc();
     Project {
         id: ProjectId::new(),
-        plan: ProjectPlan {
-            summary: String::new(),
-            workflow: "feature".into(),
-            status: loopflow::pm::ProjectStatus::Started,
-            linear_id: Some(LinearProjectId::new("project-alpha").unwrap()),
-            slug: "architecture".to_string(),
-            name: "Architecture".to_string(),
-            prompt_context: "Keep identity boring.".to_string(),
-            pm_snapshot_synced_at: Some(now.unix_timestamp()),
-        },
+
+        summary: String::new(),
+        workflow: "feature".into(),
+        status: loopflow::pm::ProjectStatus::Started,
+        linear_id: Some(LinearProjectId::new("project-alpha").unwrap()),
+        slug: "architecture".to_string(),
+        name: "Architecture".to_string(),
+        prompt_context: "Keep identity boring.".to_string(),
+        pm_snapshot_synced_at: Some(now.unix_timestamp()),
+
         wave_id: wave.id().clone(),
-        iteration: 0,
         abandon_intent: None,
         created_at: now,
         updated_at: now,
@@ -87,15 +86,15 @@ fn task(wave: &Wave, project: &Project, repo: &Path) -> (Task, TaskPr) {
     let id = TaskId::new();
     let task = Task {
         id: id.clone(),
-        plan: TaskPlan {
-            revision: 0,
-            linear_id: Some(LinearIssueId::new("issue-alpha").unwrap()),
-            identifier: "LOO-127".to_string(),
-            title: "Repository-owned Waves".to_string(),
-            description: "Preserve Task history through relocation.".to_string(),
-            pm_snapshot_synced_at: Some(now.unix_timestamp()),
-        },
-        pm_writeback: PmWritebackState::Current,
+
+        revision: 0,
+        linear_id: Some(LinearIssueId::new("issue-alpha").unwrap()),
+        identifier: "LOO-127".to_string(),
+        title: "Repository-owned Waves".to_string(),
+        description: "Preserve Task history through relocation.".to_string(),
+        pm_snapshot_synced_at: Some(now.unix_timestamp()),
+
+        pm_writeback: LinearWritebackState::Current,
         wave_id: wave.id().clone(),
         project_id: project.id.clone(),
         worktree: Some(repo.join("task-worktree")),

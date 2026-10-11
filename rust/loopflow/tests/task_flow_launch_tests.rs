@@ -116,7 +116,7 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
         if condition.starts_with("invalid") || condition == "removed" {
             runtime
                 .block_on(registered.store.observe_pm_issue_change(
-                    registered.task.plan.linear_id.as_ref().unwrap().as_str(),
+                    registered.task.linear_id.as_ref().unwrap().as_str(),
                     None,
                     condition == "removed",
                 ))

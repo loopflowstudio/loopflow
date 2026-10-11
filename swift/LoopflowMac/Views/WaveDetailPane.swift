@@ -570,7 +570,7 @@ private extension MetricReading {
     }
 }
 
-private extension MetricTarget {
+private extension Threshold {
     func display(unit: String) -> String {
         switch self {
         case let .atLeast(value): return "≥ \(formatted(value, unit: unit))"

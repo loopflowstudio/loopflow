@@ -327,7 +327,7 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
         let child_id = store.sqlite.task_follow_through(&source.id).unwrap().intents[0].issue_id.clone();
         let child = runtime.block_on(store.get_task_by_issue(&child_id)).unwrap().unwrap();
         assert!(child.worktree.is_none());
-        assert!(child.plan.linear_id.is_none());
+        assert!(child.linear_id.is_none());
         assert_ne!(store.sqlite.task_state(&child.id).unwrap(), crate::durable::TaskState::Done);
         // Completion and filing are saved locally; provider delivery has its own receipt.
         assert!(provider.lock().unwrap().issues.is_empty());

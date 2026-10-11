@@ -9,11 +9,11 @@ use crate::durable::TaskState;
 use crate::id::WaveId;
 use crate::ops::pm::{PmTestContext, PM_TEST_CONTEXT};
 use crate::ops::task::task_completion_gate;
-use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
+use crate::planning::{LinearIssueId, LinearProjectId};
 use crate::store::{open_ephemeral_store, CredentialType, ProviderToken, StorageConfig};
 use crate::work::project::{Project, ProjectId};
 use crate::work::task::{
-    GithubPr, Observation, PmWritebackState, PrPublication, Task, TaskId, TaskPr, TaskPrId,
+    GithubPr, LinearWritebackState, Observation, PrPublication, Task, TaskId, TaskPr, TaskPrId,
 };
 use crate::work::wave::Wave;
 
@@ -136,7 +136,7 @@ fn local_follow_up_retries_keep_identity_and_allow_independent_completion() {
                 .unwrap()
                 .unwrap();
             assert!(child.worktree.is_none());
-            assert!(child.plan.linear_id.is_none());
+            assert!(child.linear_id.is_none());
             assert!(runtime
                 .block_on(store.task_prs(&child.id))
                 .unwrap()
@@ -299,7 +299,6 @@ fn follow_up_export_recovers_lost_issue_and_relation_responses_after_completion(
                 .block_on(store.get_task(&child.id))
                 .unwrap()
                 .unwrap()
-                .plan
                 .linear_id
                 .is_none());
             {
@@ -317,14 +316,14 @@ fn follow_up_export_recovers_lost_issue_and_relation_responses_after_completion(
                 .block_on(store.get_task(&child.id))
                 .unwrap()
                 .unwrap();
-            assert!(mapped.plan.linear_id.is_some());
+            assert!(mapped.linear_id.is_some());
             let sources = store.sqlite.follow_up_sources().unwrap();
             let local_sources = &sources[child.id.as_str()];
             assert_eq!(local_sources.len(), 1);
             assert_eq!(local_sources[0].identifier, "FIX-1");
             assert_eq!(
                 local_sources,
-                &sources[mapped.plan.linear_id.as_ref().unwrap().as_str()]
+                &sources[mapped.linear_id.as_ref().unwrap().as_str()]
             );
             let follow = store.sqlite.task_follow_through(&task.id).unwrap();
             assert!(follow.resolved());
@@ -385,7 +384,7 @@ fn follow_up_export_recovers_lost_issue_and_relation_responses_after_completion(
             );
             assert_eq!(
                 provider.relations[&intent.relation_id]["relatedIssueId"],
-                mapped.plan.linear_id.unwrap().as_str()
+                mapped.linear_id.unwrap().as_str()
             );
             assert_eq!(store.sqlite.task_state(&task.id).unwrap(), TaskState::Done);
             assert_ne!(store.sqlite.task_state(&child.id).unwrap(), TaskState::Done);
@@ -450,33 +449,32 @@ fn fixture(
     );
     let project = Project {
         id: ProjectId::new(),
-        plan: ProjectPlan {
-            linear_id: Some(LinearProjectId::new("project-1").unwrap()),
-            summary: String::new(),
-            slug: "chapter".into(),
-            name: "Chapter".into(),
-            workflow: "feature".into(),
-            status: crate::pm::ProjectStatus::Started,
-            prompt_context: String::new(),
-            pm_snapshot_synced_at: Some(now.unix_timestamp()),
-        },
+
+        linear_id: Some(LinearProjectId::new("project-1").unwrap()),
+        summary: String::new(),
+        slug: "chapter".into(),
+        name: "Chapter".into(),
+        workflow: "feature".into(),
+        status: crate::pm::ProjectStatus::Started,
+        prompt_context: String::new(),
+        pm_snapshot_synced_at: Some(now.unix_timestamp()),
+
         wave_id: wave.id().clone(),
-        iteration: 0,
         abandon_intent: None,
         created_at: now,
         updated_at: now,
     };
     let task = Task {
         id: TaskId::new(),
-        plan: TaskPlan {
-            linear_id: Some(LinearIssueId::new("source-issue").unwrap()),
-            revision: 0,
-            identifier: "FIX-1".into(),
-            title: "Deliver the command".into(),
-            description: String::new(),
-            pm_snapshot_synced_at: Some(now.unix_timestamp()),
-        },
-        pm_writeback: PmWritebackState::Current,
+
+        linear_id: Some(LinearIssueId::new("source-issue").unwrap()),
+        revision: 0,
+        identifier: "FIX-1".into(),
+        title: "Deliver the command".into(),
+        description: String::new(),
+        pm_snapshot_synced_at: Some(now.unix_timestamp()),
+
+        pm_writeback: LinearWritebackState::Current,
         wave_id: wave.id().clone(),
         project_id: project.id.clone(),
         worktree: Some(repo.path().canonicalize().unwrap()),
@@ -525,7 +523,7 @@ fn fixture(
             &store.sqlite,
             wave.id(),
             None,
-            project.plan.linear_id.as_ref().unwrap().as_str(),
+            project.linear_id.as_ref().unwrap().as_str(),
             &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
         )
         .unwrap();
@@ -596,8 +594,8 @@ fn filing_is_atomic_and_reserved_recovery_keeps_the_original_chapter() {
         .unwrap()
         .unwrap();
     next.id = ProjectId::new();
-    next.plan.linear_id = None;
-    next.plan.slug = "next".into();
+    next.linear_id = None;
+    next.slug = "next".into();
     runtime.block_on(store.create_project(&next)).unwrap();
     crate::store::sqlite::project_selection::write_project_binding(
         &store.sqlite,
@@ -625,8 +623,8 @@ fn filing_is_atomic_and_reserved_recovery_keeps_the_original_chapter() {
         .unwrap()
         .unwrap();
     assert_eq!(child.project_id, task.project_id);
-    assert_eq!(child.plan.title, intent.title);
-    assert_eq!(child.plan.description, intent.notes);
+    assert_eq!(child.title, intent.title);
+    assert_eq!(child.description, intent.notes);
     assert_eq!(
         super::super::task_planning_item(&store, &child)
             .unwrap()
@@ -687,8 +685,8 @@ fn historical_filing_converts_to_one_local_child_and_preserves_export_uncertaint
             .unwrap()
             .unwrap();
         next.id = ProjectId::new();
-        next.plan.linear_id = None;
-        next.plan.slug = "next".into();
+        next.linear_id = None;
+        next.slug = "next".into();
         runtime.block_on(store.create_project(&next)).unwrap();
         crate::store::sqlite::project_selection::write_project_binding(
             &store.sqlite,
@@ -772,7 +770,7 @@ fn historical_filing_converts_to_one_local_child_and_preserves_export_uncertaint
                     .unwrap()
                     .unwrap();
                 assert_eq!(retained.id, child.id);
-                assert_eq!(retained.plan.linear_id.is_some(), created_remotely);
+                assert_eq!(retained.linear_id.is_some(), created_remotely);
                 assert_eq!(
                     linear.lock().unwrap().issues.len(),
                     usize::from(created_remotely)

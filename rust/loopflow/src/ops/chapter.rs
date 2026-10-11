@@ -364,10 +364,7 @@ async fn prepare_rotation(
             decision.reason = "retained rotation membership".into();
         }
         if decision.disposition == TaskDisposition::Unresolved {
-            return Err(error(format!(
-                "{}: {}",
-                task.plan.identifier, decision.reason
-            )));
+            return Err(error(format!("{}: {}", task.identifier, decision.reason)));
         }
         tasks.push(decision);
     }

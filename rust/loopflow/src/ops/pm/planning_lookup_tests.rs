@@ -1058,7 +1058,7 @@ async fn cold_detail_resolves_configured_wave_before_projecting() {
                     assert!(result.refresh_error.is_none(), "{:?}", result.refresh_error);
                     assert_eq!(current.id, original.id);
                     assert_eq!(current.wave_id, original.wave_id);
-                    assert_eq!(current.plan.name, "Refreshed plan");
+                    assert_eq!(current.name, "Refreshed plan");
                 } else {
                     assert!(result.refresh_error.is_some());
                     assert_eq!(current, original);

@@ -381,7 +381,7 @@ pub(crate) fn validate_persisted_json(conn: &rusqlite::Connection) -> StoreResul
         [],
         |row| row.get::<_, bool>(0),
     )? {
-        validate_json_column::<crate::work::task::PmWritebackState>(
+        validate_json_column::<crate::work::task::LinearWritebackState>(
             conn,
             "tasks",
             "id",
@@ -4486,7 +4486,7 @@ mod tests {
         ))
         .unwrap();
         let project = &mut snapshot.projects[0];
-        project.krs = vec![crate::pm::PmKr {
+        project.krs = vec![crate::work::project::ProjectKR {
             text: "Saved planning survives".into(),
             holds: true,
         }];
@@ -4840,11 +4840,11 @@ mod tests {
         assert_eq!(tasks.len(), 6);
         let reopen = tasks
             .iter()
-            .find(|task| task.plan.identifier == "INF-REOPEN")
+            .find(|task| task.identifier == "INF-REOPEN")
             .unwrap();
         assert!(matches!(
             reopen.pm_writeback,
-            crate::work::task::PmWritebackState::Current
+            crate::work::task::LinearWritebackState::Current
         ));
     }
 

@@ -180,7 +180,6 @@ async fn resolve_project(store: &Store, repo: &Path, selector: &str) -> OpsResul
         .collect();
     if let Some(project) = projects.iter().find(|project| {
         project
-            .plan
             .linear_id
             .as_ref()
             .is_some_and(|id| id.as_str() == selector)
@@ -189,7 +188,7 @@ async fn resolve_project(store: &Store, repo: &Path, selector: &str) -> OpsResul
     }
     let mut matches = projects
         .into_iter()
-        .filter(|project| project.plan.slug == selector || project.plan.name == selector);
+        .filter(|project| project.slug == selector || project.name == selector);
     let project = matches
         .next()
         .ok_or_else(|| project_error(format!("Project {selector:?} not found")))?;

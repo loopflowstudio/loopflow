@@ -50,7 +50,7 @@ pub(crate) async fn sync_export(store: &Store, repo: &Path, work: &WorkRef) -> O
                     .await
                     .map_err(message)?
                     .ok_or_else(|| message("Task is missing"))?;
-                (task.wave_id, task.plan.linear_id.is_some())
+                (task.wave_id, task.linear_id.is_some())
             }
             PlanningChanges::Project(id) => {
                 let project = store
@@ -58,7 +58,7 @@ pub(crate) async fn sync_export(store: &Store, repo: &Path, work: &WorkRef) -> O
                     .await
                     .map_err(message)?
                     .ok_or_else(|| message("Project is missing"))?;
-                (project.wave_id, project.plan.linear_id.is_some())
+                (project.wave_id, project.linear_id.is_some())
             }
         };
         if mapped {

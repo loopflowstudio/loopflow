@@ -1035,8 +1035,8 @@ mod tests {
         let task = store.task_by_issue(&item.id).unwrap().unwrap();
         assert!(task.worktree.is_none());
         assert!(store.task_prs(&task.id).unwrap().is_empty());
-        assert_eq!(task.plan.title, item.name);
-        assert_eq!(task.plan.pm_snapshot_synced_at, Some(42));
+        assert_eq!(task.title, item.name);
+        assert_eq!(task.pm_snapshot_synced_at, Some(42));
         store.put_pm_snapshot(&row).unwrap();
         assert_eq!(store.task_by_issue(&item.id).unwrap().unwrap().id, task.id);
         row.synced_at = 43;

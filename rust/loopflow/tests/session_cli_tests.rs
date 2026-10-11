@@ -878,7 +878,7 @@ fn terminal_titles_follow_session_rename_and_reconnect_without_provider_accounts
             )
         });
         let title = |name: &str| match &task {
-            Some(task) => format!("{} {name}", task.task.plan.identifier),
+            Some(task) => format!("{} {name}", task.task.identifier),
             None => name.to_string(),
         };
         let mut id = String::new();

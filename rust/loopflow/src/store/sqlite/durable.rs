@@ -803,12 +803,12 @@ mod durable_store_tests {
     use crate::durable::{ProjectId, TaskId};
 
     use crate::id::WaveId;
-    use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
+    use crate::planning::{LinearIssueId, LinearProjectId};
     use crate::session::{LfSession, TitleSource, WorkSource};
     use crate::store::sqlite::SqliteStore;
 
     use crate::work::project::Project;
-    use crate::work::task::{PmWritebackState, Task, TaskEventKind, TaskPr, TaskPrId};
+    use crate::work::task::{LinearWritebackState, Task, TaskEventKind, TaskPr, TaskPrId};
 
     fn unpublished_conversation(
         task_id: Option<TaskId>,
@@ -868,20 +868,17 @@ mod durable_store_tests {
         }
         let project = Project {
             id: project_id.clone(),
-            plan: ProjectPlan {
-                summary: String::new(),
-                workflow: "feature".into(),
-                status: crate::pm::ProjectStatus::Started,
-                linear_id: Some(
-                    LinearProjectId::new("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3").unwrap(),
-                ),
-                slug: "probe".to_string(),
-                name: "Probe".to_string(),
-                prompt_context: "Probe Task execution".to_string(),
-                pm_snapshot_synced_at: Some(now.unix_timestamp()),
-            },
+
+            summary: String::new(),
+            workflow: "feature".into(),
+            status: crate::pm::ProjectStatus::Started,
+            linear_id: Some(LinearProjectId::new("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3").unwrap()),
+            slug: "probe".to_string(),
+            name: "Probe".to_string(),
+            prompt_context: "Probe Task execution".to_string(),
+            pm_snapshot_synced_at: Some(now.unix_timestamp()),
+
             wave_id: wave_id.clone(),
-            iteration: 0,
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -891,21 +888,21 @@ mod durable_store_tests {
             &store,
             &wave_id,
             None,
-            project.plan.linear_id.as_ref().unwrap().as_str(),
+            project.linear_id.as_ref().unwrap().as_str(),
             &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
         )
         .unwrap();
         let task = Task {
             id: task_id.clone(),
-            plan: TaskPlan {
-                revision: 0,
-                linear_id: Some(LinearIssueId::new("task-uuid").unwrap()),
-                identifier: "PROBE-1".to_string(),
-                title: "Probe Task execution".to_string(),
-                description: "Exercise the Task Flow store".to_string(),
-                pm_snapshot_synced_at: Some(now.unix_timestamp()),
-            },
-            pm_writeback: PmWritebackState::Current,
+
+            revision: 0,
+            linear_id: Some(LinearIssueId::new("task-uuid").unwrap()),
+            identifier: "PROBE-1".to_string(),
+            title: "Probe Task execution".to_string(),
+            description: "Exercise the Task Flow store".to_string(),
+            pm_snapshot_synced_at: Some(now.unix_timestamp()),
+
+            pm_writeback: LinearWritebackState::Current,
             wave_id,
             project_id,
             worktree: Some(PathBuf::from("/repo.probe")),
@@ -948,9 +945,9 @@ mod durable_store_tests {
         let task = store.task(&task_id).unwrap().unwrap();
         let mut other = store.project(&task.project_id).unwrap().unwrap();
         other.id = ProjectId::new();
-        other.plan.linear_id =
+        other.linear_id =
             Some(LinearProjectId::new("218967b6-a760-4b7c-9a46-11d9d61a42c2").unwrap());
-        other.plan.name = "An unrelated ordinary plan".into();
+        other.name = "An unrelated ordinary plan".into();
         store.insert_project(&other).unwrap();
         // Another Started Project does not compete with the configured identity.
         let (new_task, pr) = unregistered_task(&store, &task_id, dir.path().join("new"));
@@ -966,14 +963,14 @@ mod durable_store_tests {
             &store,
             &task.wave_id,
             Some("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3"),
-            other.plan.linear_id.as_ref().unwrap().as_str(),
+            other.linear_id.as_ref().unwrap().as_str(),
             &guard,
         )
         .unwrap();
         let (mut rejected, mut rejected_pr) =
             unregistered_task(&store, &task_id, dir.path().join("rejected"));
-        rejected.plan.linear_id = Some(LinearIssueId::new("third-issue").unwrap());
-        rejected.plan.identifier = "PROBE-3".into();
+        rejected.linear_id = Some(LinearIssueId::new("third-issue").unwrap());
+        rejected.identifier = "PROBE-3".into();
         rejected.workspace_slug = "rejected".into();
         rejected_pr.slug = "rejected".into();
         rejected_pr.branch = "rejected".into();
@@ -1280,8 +1277,8 @@ mod durable_store_tests {
         let mut task = store.task(existing).unwrap().unwrap();
         let mut pr = store.task_prs(existing).unwrap().remove(0);
         task.id = TaskId::new();
-        task.plan.linear_id = Some(LinearIssueId::new("later-issue").unwrap());
-        task.plan.identifier = "PROBE-2".into();
+        task.linear_id = Some(LinearIssueId::new("later-issue").unwrap());
+        task.identifier = "PROBE-2".into();
         task.worktree = Some(checkout);
         task.workspace_slug = "later-checkout".into();
         pr.id = TaskPrId::new();

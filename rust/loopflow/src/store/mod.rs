@@ -1307,11 +1307,11 @@ mod tests {
     use crate::child::ChildRef;
     use crate::durable::{Author, WorkRef};
     use crate::id::WaveId;
-    use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
+    use crate::planning::{LinearIssueId, LinearProjectId};
     use crate::profile::EmailAddress;
     use crate::work::project::{Project, ProjectId};
     use crate::work::task::{
-        CiIncident, GithubPr, PmWritebackState, PrPhase, PrPresentation, PrPublication, Task,
+        CiIncident, GithubPr, LinearWritebackState, PrPhase, PrPresentation, PrPublication, Task,
         TaskEventKind, TaskId, TaskPr, TaskPrId,
     };
     use crate::work::wave::Wave;
@@ -1452,15 +1452,15 @@ mod tests {
         let id = TaskId::new();
         Task {
             id: id.clone(),
-            plan: TaskPlan {
-                revision: 0,
-                linear_id: Some(LinearIssueId::new("issue-uuid").unwrap()),
-                identifier: "INF-123".to_string(),
-                title: "Add hello world".to_string(),
-                description: "Ship one command".to_string(),
-                pm_snapshot_synced_at: Some(now.unix_timestamp()),
-            },
-            pm_writeback: PmWritebackState::Current,
+
+            revision: 0,
+            linear_id: Some(LinearIssueId::new("issue-uuid").unwrap()),
+            identifier: "INF-123".to_string(),
+            title: "Add hello world".to_string(),
+            description: "Ship one command".to_string(),
+            pm_snapshot_synced_at: Some(now.unix_timestamp()),
+
+            pm_writeback: LinearWritebackState::Current,
             wave_id: wave.id().clone(),
             project_id: project.id.clone(),
             worktree: Some(PathBuf::from("/repo.inf-123")),
@@ -1508,7 +1508,7 @@ mod tests {
             &store.sqlite,
             &project.wave_id,
             previous.as_deref(),
-            project.plan.linear_id.as_ref().unwrap().as_str(),
+            project.linear_id.as_ref().unwrap().as_str(),
             &super::PlanningLocks::new(tempfile::tempfile().unwrap()),
         )
         .unwrap();
@@ -1518,20 +1518,17 @@ mod tests {
             .expect("current unix time");
         Project {
             id: ProjectId::new(),
-            plan: ProjectPlan {
-                summary: String::new(),
-                workflow: "feature".into(),
-                status: crate::pm::ProjectStatus::Started,
-                linear_id: Some(
-                    LinearProjectId::new("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3").unwrap(),
-                ),
-                slug: "developer-efficiency".to_string(),
-                name: "Developer Efficiency".to_string(),
-                prompt_context: "Definition:\nKeep local work fast.".to_string(),
-                pm_snapshot_synced_at: Some(now.unix_timestamp()),
-            },
+
+            summary: String::new(),
+            workflow: "feature".into(),
+            status: crate::pm::ProjectStatus::Started,
+            linear_id: Some(LinearProjectId::new("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3").unwrap()),
+            slug: "developer-efficiency".to_string(),
+            name: "Developer Efficiency".to_string(),
+            prompt_context: "Definition:\nKeep local work fast.".to_string(),
+            pm_snapshot_synced_at: Some(now.unix_timestamp()),
+
             wave_id: wave.id().clone(),
-            iteration: 0,
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -1545,16 +1542,10 @@ mod tests {
         .unwrap();
         snapshot.projects.truncate(1);
         snapshot.items.truncate(1);
-        snapshot.projects[0].id = project
-            .plan
-            .linear_id
-            .as_ref()
-            .unwrap()
-            .as_str()
-            .to_string();
+        snapshot.projects[0].id = project.linear_id.as_ref().unwrap().as_str().to_string();
         snapshot.projects[0].revision = Some("2026-10-05T12:00:00Z".into());
-        snapshot.items[0].id = task.plan.linear_id.as_ref().unwrap().as_str().to_string();
-        snapshot.items[0].identifier = task.plan.identifier.clone();
+        snapshot.items[0].id = task.linear_id.as_ref().unwrap().as_str().to_string();
+        snapshot.items[0].identifier = task.identifier.clone();
         snapshot.items[0].project_id = Some(snapshot.projects[0].id.clone());
         snapshot.items[0].project = Some(snapshot.projects[0].slug.clone());
         snapshot.items[0].revision = Some("2026-10-05T12:00:00Z".into());
@@ -1622,14 +1613,14 @@ mod tests {
                 .await
                 .unwrap();
             let mut expected = task.clone();
-            expected.plan.identifier = "NEXT-9".into();
-            expected.plan.title = "Accepted title".into();
-            expected.plan.description = "Accepted direction".into();
-            expected.plan.pm_snapshot_synced_at = Some(17);
+            expected.identifier = "NEXT-9".into();
+            expected.title = "Accepted title".into();
+            expected.description = "Accepted direction".into();
+            expected.pm_snapshot_synced_at = Some(17);
             assert!(accepted.updated_at >= task.updated_at);
             expected.updated_at = accepted.updated_at;
             if !mapped {
-                expected.plan.linear_id = None;
+                expected.linear_id = None;
             }
             assert_eq!(accepted, expected);
             assert_eq!(store.get_task(&task.id).await.unwrap(), Some(expected));
@@ -1653,7 +1644,7 @@ mod tests {
             select_project(&store, &project);
             let task = make_task(&wave, &project);
             let mut snapshot = task_planning_snapshot(&wave, &project, &task);
-            snapshot.snapshot.projects[0].krs = vec![crate::pm::PmKr {
+            snapshot.snapshot.projects[0].krs = vec![crate::work::project::ProjectKR {
                 text: "Work remains readable".into(),
                 holds: false,
             }];
@@ -1670,7 +1661,7 @@ mod tests {
             snapshot.snapshot.projects.insert(0, first_project);
             store.put_pm_snapshot(snapshot.clone(), None).await.unwrap();
             let task = store
-                .get_task_by_issue(&task.plan.identifier)
+                .get_task_by_issue(&task.identifier)
                 .await
                 .unwrap()
                 .unwrap();
@@ -1794,7 +1785,7 @@ mod tests {
             store.put_pm_snapshot(snapshot.clone(), None).await.unwrap();
             let content = crate::pm::ProjectContent {
                 workflow: "saved-workflow".into(),
-                krs: vec![crate::pm::PmKr {
+                krs: vec![crate::work::project::ProjectKR {
                     text: "Saved plan survives an outage".into(),
                     holds: false,
                 }],
@@ -1914,7 +1905,7 @@ mod tests {
             snapshot.snapshot.items[0].completed = false;
             store.put_pm_snapshot(snapshot.clone(), None).await.unwrap();
             let imported = store
-                .get_task_by_issue(&task.plan.identifier)
+                .get_task_by_issue(&task.identifier)
                 .await
                 .unwrap()
                 .unwrap();
@@ -1968,7 +1959,7 @@ mod tests {
         store.sqlite.seed_unplaced_task(&task);
         let before = store.get_task(&task.id).await.unwrap().unwrap();
         store
-            .observe_pm_issue_change(task.plan.linear_id.as_ref().unwrap().as_str(), None, true)
+            .observe_pm_issue_change(task.linear_id.as_ref().unwrap().as_str(), None, true)
             .await
             .unwrap();
         let pr = make_task_pr(&task);
@@ -2007,7 +1998,7 @@ mod tests {
                 snapshot.snapshot.items[0].state = Some("unstarted".into());
                 store.put_pm_snapshot(snapshot, None).await.unwrap();
                 store
-                    .get_task_by_issue(&task.plan.identifier)
+                    .get_task_by_issue(&task.identifier)
                     .await
                     .unwrap()
                     .unwrap()
@@ -2058,7 +2049,12 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(retried, accepted);
-            assert_eq!(retried.plan, task.plan);
+            assert_eq!(retried.revision, task.revision);
+            assert_eq!(retried.linear_id, task.linear_id);
+            assert_eq!(retried.identifier, task.identifier);
+            assert_eq!(retried.title, task.title);
+            assert_eq!(retried.description, task.description);
+            assert_eq!(retried.pm_snapshot_synced_at, task.pm_snapshot_synced_at);
             assert!(store.task_prs(&task.id).await.unwrap().is_empty());
             assert_eq!(retried.branch, first.branch);
             assert_eq!(retried.base_commit, first.base_commit);
@@ -2119,7 +2115,6 @@ mod tests {
                 .await
                 .unwrap()
                 .unwrap()
-                .plan
                 .pm_snapshot_synced_at,
             Some(1)
         );
@@ -2142,13 +2137,13 @@ mod tests {
                 snapshot.snapshot.items[0].state = Some("unstarted".into());
                 store.put_pm_snapshot(snapshot, None).await.unwrap();
                 let imported = store
-                    .get_task_by_issue(&task.plan.identifier)
+                    .get_task_by_issue(&task.identifier)
                     .await
                     .unwrap()
                     .unwrap();
                 task.id = imported.id;
             } else {
-                task.plan.linear_id = None;
+                task.linear_id = None;
                 store.sqlite.seed_unplaced_task(&task);
             }
             let pr = make_task_pr(&task);
@@ -2219,12 +2214,12 @@ mod tests {
         store.create_project(&project).await.unwrap();
         select_project(&store, &project);
         let mut task = make_task(&wave, &project);
-        task.plan.pm_snapshot_synced_at = Some(1);
+        task.pm_snapshot_synced_at = Some(1);
         let pr = make_task_pr(&task);
         store.seed_task(&task, &pr).await.unwrap();
         let mut snapshot = task_planning_snapshot(&wave, &project, &task);
-        snapshot.snapshot.items[0].name = task.plan.title.clone();
-        snapshot.snapshot.items[0].description = task.plan.description.clone();
+        snapshot.snapshot.items[0].name = task.title.clone();
+        snapshot.snapshot.items[0].description = task.description.clone();
         store.put_pm_snapshot(snapshot.clone(), None).await.unwrap();
 
         let mut confirmed = snapshot.snapshot.items[0].clone();
@@ -2245,7 +2240,7 @@ mod tests {
             .await
             .unwrap();
         let rebound = store.get_task(&task.id).await.unwrap().unwrap();
-        assert_eq!(rebound.plan.identifier, "NEXT-8");
+        assert_eq!(rebound.identifier, "NEXT-8");
 
         // An earlier detail response arrives after the interrupted operation.
         store
@@ -2278,8 +2273,8 @@ mod tests {
         let mut snapshot = task_planning_snapshot(&wave, &project, &task);
         snapshot.synced_at = 10;
         let mut other = make_task(&wave, &project);
-        other.plan.linear_id = Some(LinearIssueId::new("unobserved-issue").unwrap());
-        other.plan.identifier = "INF-124".into();
+        other.linear_id = Some(LinearIssueId::new("unobserved-issue").unwrap());
+        other.identifier = "INF-124".into();
         other.worktree = Some(PathBuf::from("/repo.inf-124"));
         let other_pr = make_task_pr(&other);
         store.seed_task(&other, &other_pr).await.unwrap();
@@ -2313,10 +2308,10 @@ mod tests {
             .unwrap();
         let retained = store.get_project(&project.id).await.unwrap().unwrap();
         let refreshed = store.get_task(&task.id).await.unwrap().unwrap();
-        assert_eq!(retained.plan.name, snapshot.snapshot.projects[0].name);
-        assert_eq!(retained.plan.pm_snapshot_synced_at, Some(10));
-        assert_eq!(refreshed.plan.title, "New issue title");
-        assert_eq!(refreshed.plan.pm_snapshot_synced_at, Some(20));
+        assert_eq!(retained.name, snapshot.snapshot.projects[0].name);
+        assert_eq!(retained.pm_snapshot_synced_at, Some(10));
+        assert_eq!(refreshed.title, "New issue title");
+        assert_eq!(refreshed.pm_snapshot_synced_at, Some(20));
         assert_eq!(refreshed.worktree, task.worktree);
         assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
         assert_eq!(
@@ -2341,21 +2336,14 @@ mod tests {
         let other = Wave::new(crate::id::WaveId::new(), "other".into(), "/repo".into());
         store.create_wave(&other).await.unwrap();
         let mut foreign = make_project(&other);
-        foreign.plan.linear_id =
-            Some(crate::planning::LinearProjectId::new("foreign-project").unwrap());
+        foreign.linear_id = Some(crate::planning::LinearProjectId::new("foreign-project").unwrap());
         store.create_project(&foreign).await.unwrap();
         let mut response = snapshot.clone();
         response.synced_at = 2;
         response.snapshot.items[0].name = "Rejected issue title".into();
         response.snapshot.items[0].revision = Some("2026-10-05T12:00:01Z".into());
         let mut conflict = response.snapshot.projects[0].clone();
-        conflict.id = foreign
-            .plan
-            .linear_id
-            .as_ref()
-            .unwrap()
-            .as_str()
-            .to_string();
+        conflict.id = foreign.linear_id.as_ref().unwrap().as_str().to_string();
         response.snapshot.projects.push(conflict);
         assert!(store.put_pm_snapshot(response, None).await.is_err());
         assert_eq!(
@@ -2385,8 +2373,8 @@ mod tests {
         assert_eq!(accepted.synced_at, 20);
         assert_eq!(accepted.snapshot.projects[0], original);
         let projected = store.get_project(&project.id).await.unwrap().unwrap();
-        assert_eq!(projected.plan.name, original.name);
-        assert_eq!(projected.plan.pm_snapshot_synced_at, Some(10));
+        assert_eq!(projected.name, original.name);
+        assert_eq!(projected.pm_snapshot_synced_at, Some(10));
     }
 
     #[tokio::test]
@@ -2521,12 +2509,17 @@ mod tests {
             .await
             .unwrap();
         let updated_project = store.get_project(&project.id).await.unwrap().unwrap();
-        assert_eq!(updated_project.plan.name, "Refreshed plan");
+        assert_eq!(updated_project.name, "Refreshed plan");
         assert_eq!(updated_project.wave_id, project.wave_id);
         let mut updated_task = store.get_task(&task.id).await.unwrap().unwrap();
-        assert_eq!(updated_task.plan.title, "Refreshed work");
-        assert_eq!(updated_task.plan.pm_snapshot_synced_at, Some(10));
-        updated_task.plan = task.plan.clone();
+        assert_eq!(updated_task.title, "Refreshed work");
+        assert_eq!(updated_task.pm_snapshot_synced_at, Some(10));
+        updated_task.revision = task.revision;
+        updated_task.linear_id = task.linear_id.clone();
+        updated_task.identifier = task.identifier.clone();
+        updated_task.title = task.title.clone();
+        updated_task.description = task.description.clone();
+        updated_task.pm_snapshot_synced_at = task.pm_snapshot_synced_at;
         assert_eq!(updated_task, task);
         assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
         assert!(store.pm_snapshot(wave.id()).await.unwrap().is_none());
@@ -2571,7 +2564,7 @@ mod tests {
             .pm_task_observation(
                 wave.repo(),
                 "linear",
-                task.plan.linear_id.as_ref().unwrap().as_str(),
+                task.linear_id.as_ref().unwrap().as_str(),
             )
             .await
             .unwrap();
@@ -2591,7 +2584,7 @@ mod tests {
         confirmed.name = "Ordinary work".into();
         confirmed.slug = "ordinary-work".into();
         confirmed.workflow.clear();
-        confirmed.krs.push(crate::pm::PmKr {
+        confirmed.krs.push(crate::work::project::ProjectKR {
             text: "Preserve the authored proof".into(),
             holds: false,
         });
@@ -2611,15 +2604,15 @@ mod tests {
         assert_eq!(accepted.synced_at, snapshot.synced_at);
         assert_eq!(accepted.snapshot.projects, vec![confirmed.clone()]);
         let durable = store.get_project(&project.id).await.unwrap().unwrap();
-        assert_eq!(durable.plan.pm_snapshot_synced_at, Some(10));
+        assert_eq!(durable.pm_snapshot_synced_at, Some(10));
         assert_eq!(
-            crate::pm::parse_project_content(&durable.plan.prompt_context)
+            crate::pm::parse_project_content(&durable.prompt_context)
                 .unwrap()
                 .metric_targets,
             confirmed.metric_targets
         );
-        assert!(!durable.plan.prompt_context.contains("flow:"));
-        assert!(durable.plan.prompt_context.contains(&confirmed.krs[0].text));
+        assert!(!durable.prompt_context.contains("flow:"));
+        assert!(durable.prompt_context.contains(&confirmed.krs[0].text));
         let other = Wave::new(WaveId::new(), "other".into(), wave.repo().into());
         store.create_wave(&other).await.unwrap();
         assert!(store
@@ -2660,7 +2653,7 @@ mod tests {
         store.create_project(&predecessor).await.unwrap();
         select_project(&store, &predecessor);
         let mut successor = make_project(&wave);
-        successor.plan.linear_id =
+        successor.linear_id =
             Some(crate::planning::LinearProjectId::new("successor-project").unwrap());
         let task = make_task(&wave, &predecessor);
         let pr = make_task_pr(&task);
@@ -2668,18 +2661,12 @@ mod tests {
         store.create_project(&successor).await.unwrap();
         let mut response = task_planning_snapshot(&wave, &predecessor, &task);
         let mut next = response.snapshot.projects[0].clone();
-        next.id = successor
-            .plan
-            .linear_id
-            .as_ref()
-            .unwrap()
-            .as_str()
-            .to_string();
+        next.id = successor.linear_id.as_ref().unwrap().as_str().to_string();
         response.snapshot.projects.push(next);
         store.put_pm_snapshot(response.clone(), None).await.unwrap();
         // Confirmed transfer is accepted before rotation's final full refresh.
         let mut confirmed = response.snapshot.items[0].clone();
-        confirmed.project_id = Some(successor.plan.linear_id.as_ref().unwrap().as_str().into());
+        confirmed.project_id = Some(successor.linear_id.as_ref().unwrap().as_str().into());
         confirmed.revision = Some("2026-10-05T12:00:01Z".into());
         store
             .put_pm_task(
@@ -2734,14 +2721,14 @@ mod tests {
         assert_eq!(flows.len(), 1);
 
         let mut successor = make_project(&wave);
-        successor.plan.linear_id = Some(LinearProjectId::new("next-chapter").unwrap());
+        successor.linear_id = Some(LinearProjectId::new("next-chapter").unwrap());
         store.create_project(&successor).await.unwrap();
         let response = task_planning_snapshot(&wave, &successor, &task);
         store.put_pm_snapshot(response, None).await.unwrap();
         let moved = store.get_task(&task.id).await.unwrap().unwrap();
         assert_eq!(moved.project_id, successor.id);
         assert_eq!(moved.worktree, task.worktree);
-        assert_eq!(moved.plan.linear_id, task.plan.linear_id);
+        assert_eq!(moved.linear_id, task.linear_id);
         assert_eq!(store.sqlite.task_flows(&task.id).unwrap(), flows);
         assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
         store
@@ -3116,7 +3103,7 @@ mod tests {
         snapshot.snapshot.items[0].state = Some("unstarted".into());
         store.put_pm_snapshot(snapshot, None).await.unwrap();
         let imported = store
-            .get_task_by_issue(&task.plan.identifier)
+            .get_task_by_issue(&task.identifier)
             .await
             .unwrap()
             .unwrap();
@@ -3145,7 +3132,12 @@ mod tests {
         assert_eq!(placement.machine_id, home);
         let saved = store.get_task(&task.id).await.unwrap().unwrap();
         assert_eq!(saved.id, task.id);
-        assert_eq!(saved.plan, task.plan);
+        assert_eq!(saved.revision, task.revision);
+        assert_eq!(saved.linear_id, task.linear_id);
+        assert_eq!(saved.identifier, task.identifier);
+        assert_eq!(saved.title, task.title);
+        assert_eq!(saved.description, task.description);
+        assert_eq!(saved.pm_snapshot_synced_at, task.pm_snapshot_synced_at);
         assert_eq!(saved.worktree, task.worktree);
         let durable_child_rows = |path: &std::path::Path| {
             rusqlite::Connection::open(path)
@@ -3211,8 +3203,8 @@ mod tests {
         let target_prs = store.task_prs(&target.id).await.unwrap();
 
         let mut sibling = make_task(&wave, &project);
-        sibling.plan.linear_id = Some(LinearIssueId::new("sibling-issue-uuid").unwrap());
-        sibling.plan.identifier = "INF-124".to_string();
+        sibling.linear_id = Some(LinearIssueId::new("sibling-issue-uuid").unwrap());
+        sibling.identifier = "INF-124".to_string();
         sibling.worktree = Some(PathBuf::from("/repo.inf-124"));
         store
             .seed_task(&sibling, &make_task_pr(&sibling))
@@ -3252,24 +3244,22 @@ mod tests {
         store.seed_task(&task, &make_task_pr(&task)).await.unwrap();
         let persisted = store.get_task(&task.id).await.unwrap().unwrap();
         let before_pr = store.active_task_pr(&task.id).await.unwrap();
-        let mut plan = persisted.plan.clone();
-        plan.revision += 1;
-        plan.title = "Edited planning title".into();
-        plan.description = "Edited planning notes".into();
-        plan.pm_snapshot_synced_at = plan.pm_snapshot_synced_at.map(|at| at + 1);
+        let mut expected = persisted.clone();
+        expected.revision += 1;
+        expected.title = "Edited planning title".into();
+        expected.description = "Edited planning notes".into();
+        expected.pm_snapshot_synced_at = expected.pm_snapshot_synced_at.map(|at| at + 1);
         let mut snapshot = task_planning_snapshot(&wave, &project, &task);
-        snapshot.synced_at = plan.pm_snapshot_synced_at.unwrap();
-        snapshot.snapshot.items[0].name = plan.title.clone();
-        snapshot.snapshot.items[0].description = plan.description.clone();
+        snapshot.synced_at = expected.pm_snapshot_synced_at.unwrap();
+        snapshot.snapshot.items[0].name = expected.title.clone();
+        snapshot.snapshot.items[0].description = expected.description.clone();
         store.put_pm_snapshot(snapshot, None).await.unwrap();
         let by_stable_id = store
             .get_task_by_issue(task.id.as_str())
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(by_stable_id.plan, plan);
-        let mut expected = persisted;
-        expected.plan = plan;
+
         assert_eq!(
             by_stable_id, expected,
             "editing planning facts must preserve execution facts"
@@ -3325,12 +3315,19 @@ mod tests {
 
         let stored_project = store.get_project(&project.id).await.unwrap().unwrap();
         let stored_task = store.get_task(&task.id).await.unwrap().unwrap();
-        assert_eq!(stored_project.plan.workflow, observed.workflow);
-        assert_eq!(stored_project.plan.status, observed.status);
-        assert_eq!(stored_project.plan.pm_snapshot_synced_at, Some(10));
+        assert_eq!(stored_project.workflow, observed.workflow);
+        assert_eq!(stored_project.status, observed.status);
+        assert_eq!(stored_project.pm_snapshot_synced_at, Some(10));
         assert!(store.pm_snapshot(wave.id()).await.unwrap().is_none());
-        assert_eq!(stored_project.iteration, 0);
-        assert_eq!(stored_task.plan, task.plan);
+        assert_eq!(stored_task.revision, task.revision);
+        assert_eq!(stored_task.linear_id, task.linear_id);
+        assert_eq!(stored_task.identifier, task.identifier);
+        assert_eq!(stored_task.title, task.title);
+        assert_eq!(stored_task.description, task.description);
+        assert_eq!(
+            stored_task.pm_snapshot_synced_at,
+            task.pm_snapshot_synced_at
+        );
         assert_eq!(stored_task.project_id, stored_project.id);
     }
 
@@ -3499,8 +3496,8 @@ mod tests {
         store.update_task_pr(&parent).await.unwrap();
 
         let mut child = make_task(&wave, &project);
-        child.plan.linear_id = Some(LinearIssueId::new("issue-child").unwrap());
-        child.plan.identifier = "INF-124".to_string();
+        child.linear_id = Some(LinearIssueId::new("issue-child").unwrap());
+        child.identifier = "INF-124".to_string();
         child.worktree = Some(PathBuf::from("/repo.child-task"));
         let now = OffsetDateTime::now_utc();
         let child_pr = TaskPr {
@@ -3629,7 +3626,7 @@ mod tests {
         initial.snapshot.items[0].state = Some("unstarted".into());
         store.put_pm_snapshot(initial, None).await.unwrap();
         task.id = store
-            .get_task_by_issue(&task.plan.identifier)
+            .get_task_by_issue(&task.identifier)
             .await
             .unwrap()
             .unwrap()
@@ -3646,7 +3643,7 @@ mod tests {
             .await
             .unwrap();
 
-        let mut refreshed_plan = task.plan.clone();
+        let mut refreshed_plan = task.clone();
         refreshed_plan.title = "Latest provider title".into();
         let mut snapshot = task_planning_snapshot(&wave, &project, &task);
         snapshot.synced_at = refreshed_plan.pm_snapshot_synced_at.unwrap();
@@ -3658,8 +3655,8 @@ mod tests {
         snapshot.snapshot.items[0].description = refreshed_plan.description.clone();
         store.put_pm_snapshot(snapshot, None).await.unwrap();
         let before_completion = store.get_task(&task.id).await.unwrap().unwrap();
-        assert_eq!(before_completion.plan.title, refreshed_plan.title);
-        refreshed_plan.revision = before_completion.plan.revision + 1;
+        assert_eq!(before_completion.title, refreshed_plan.title);
+        refreshed_plan.revision = before_completion.revision + 1;
         store
             .complete_task(
                 &task,
@@ -3672,7 +3669,15 @@ mod tests {
             .await
             .unwrap();
         let retained = store.get_task(&task.id).await.unwrap().unwrap();
-        assert_eq!(retained.plan, refreshed_plan);
+        assert_eq!(retained.revision, refreshed_plan.revision);
+        assert_eq!(retained.linear_id, refreshed_plan.linear_id);
+        assert_eq!(retained.identifier, refreshed_plan.identifier);
+        assert_eq!(retained.title, refreshed_plan.title);
+        assert_eq!(retained.description, refreshed_plan.description);
+        assert_eq!(
+            retained.pm_snapshot_synced_at,
+            refreshed_plan.pm_snapshot_synced_at
+        );
         let stored = store.task_prs(&task.id).await.unwrap();
         assert!(stored.is_empty());
         assert_eq!(retained.branch, task.branch);
@@ -4120,7 +4125,7 @@ mod tests {
         assert_eq!(store.sqlite.task_flows(&task.id).unwrap().len(), 1);
         assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
         assert!(store
-            .get_task_by_issue(&task.plan.identifier)
+            .get_task_by_issue(&task.identifier)
             .await
             .unwrap()
             .is_some());

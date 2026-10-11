@@ -33,20 +33,16 @@ impl TaskSource {
             return Ok(None);
         };
         if !is_clean(worktree)? {
-            return Err(task_error(format!("Task {} has uncommitted work on branch {}; commit and push it before running it on another machine", task.plan.identifier, task.branch)));
+            return Err(task_error(format!("Task {} has uncommitted work on branch {}; commit and push it before running it on another machine", task.identifier, task.branch)));
         }
         let commit = rev_parse(worktree, "HEAD")?;
-        require_pushed_code(worktree, &task.plan.identifier, &task.branch, &commit)?;
+        require_pushed_code(worktree, &task.identifier, &task.branch, &commit)?;
         Ok(Some(Self {
             branch: task.branch,
             commit,
             task_id: task.id,
-            identifier: task.plan.identifier,
-            issue_id: task
-                .plan
-                .linear_id
-                .as_ref()
-                .map(|id| id.as_str().to_owned()),
+            identifier: task.identifier,
+            issue_id: task.linear_id.as_ref().map(|id| id.as_str().to_owned()),
         }))
     }
 

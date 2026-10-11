@@ -1680,7 +1680,7 @@ fn bound_flows_keep_task_context_and_leave_other_flows_and_shared_edits_alone() 
     let runs: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(runs.len(), 10);
     for run in runs {
-        assert_eq!(run["task_identifier"], task.task.plan.identifier);
+        assert_eq!(run["task_identifier"], task.task.identifier);
         assert_eq!(run["recorded_outcome"], "completed");
     }
     for invocation in [vec!["skill", "contribution"], vec!["design"]] {

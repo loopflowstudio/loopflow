@@ -618,7 +618,7 @@ impl Watcher {
                 .get_task_by_branch(&pull.head.name)
                 .await
                 .map_err(error)?
-                .map(|task| task.plan.identifier);
+                .map(|task| task.identifier);
             let landing = landings.get(&pull.number);
             let (state, detail) = match self.gate(fetch, &pull) {
                 Err(cause) => {

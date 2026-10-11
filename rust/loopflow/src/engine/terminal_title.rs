@@ -165,7 +165,7 @@ fn session_title(store: &SqliteStore, session: &LfSession) -> StoreResult<String
         .flatten();
     Ok(display_title(
         &session.title,
-        task.as_ref().map(|task| task.plan.identifier.as_str()),
+        task.as_ref().map(|task| task.identifier.as_str()),
     ))
 }
 

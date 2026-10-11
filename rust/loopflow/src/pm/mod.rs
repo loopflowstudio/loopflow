@@ -1,3 +1,5 @@
+use crate::work::project::ProjectKR;
+use crate::work::wave::metrics::MetricTarget;
 pub mod linear;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -13,12 +15,6 @@ pub struct TeamBinding {
     pub id: String,
     pub key: String,
     pub created: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PmKr {
-    pub text: String,
-    pub holds: bool,
 }
 
 /// Linear's Project status category, independent of the team's display label.
@@ -47,17 +43,11 @@ impl ProjectStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ChapterMetricTarget {
-    pub metric_id: String,
-    pub target: crate::work::wave::metrics::MetricTarget,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectContent {
-    pub metric_targets: Vec<ChapterMetricTarget>,
+    pub metric_targets: Vec<MetricTarget>,
     pub workflow: String,
-    pub krs: Vec<PmKr>,
+    pub krs: Vec<ProjectKR>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -67,10 +57,10 @@ pub struct PmProject {
     pub slug: String,
     pub name: String,
     pub summary: String,
-    pub metric_targets: Vec<ChapterMetricTarget>,
+    pub metric_targets: Vec<MetricTarget>,
     pub workflow: String,
     pub status: ProjectStatus,
-    pub krs: Vec<PmKr>,
+    pub krs: Vec<ProjectKR>,
     pub initiative_ids: Vec<String>,
     /// Stable ids of the Linear teams this Project belongs to. A managed Project
     /// must carry exactly the repository Team.
@@ -361,7 +351,7 @@ pub fn parse_project_content(content: &str) -> PmResult<ProjectContent> {
     let mut workflow = String::new();
     let mut authored_as_flow = String::new();
     let mut krs = Vec::new();
-    let mut current_kr: Option<PmKr> = None;
+    let mut current_kr: Option<ProjectKR> = None;
     for line in content.lines() {
         let trimmed = line.trim();
         if let Some(value) = trimmed.strip_prefix("workflow:") {
@@ -422,7 +412,7 @@ pub fn parse_project_content(content: &str) -> PmResult<ProjectContent> {
                         krs.push(kr);
                     }
                     if !text.trim().is_empty() {
-                        current_kr = Some(PmKr {
+                        current_kr = Some(ProjectKR {
                             text: text.trim().to_string(),
                             holds,
                         });
@@ -701,17 +691,17 @@ mod tests {
     #[test]
     fn project_content_round_trips_linear_markdown() {
         let project = ProjectContent {
-            metric_targets: vec![ChapterMetricTarget {
+            metric_targets: vec![MetricTarget {
                 metric_id: "throughput".into(),
-                target: crate::work::wave::metrics::MetricTarget::AtLeast { value: 0.95 },
+                target: crate::work::wave::metrics::Threshold::AtLeast { value: 0.95 },
             }],
             workflow: "feature".to_string(),
             krs: vec![
-                PmKr {
+                ProjectKR {
                     text: "One proof holds".to_string(),
                     holds: true,
                 },
-                PmKr {
+                ProjectKR {
                     text: "Another remains".to_string(),
                     holds: false,
                 },
@@ -726,7 +716,7 @@ mod tests {
             ProjectContent {
                 metric_targets: Vec::new(),
                 workflow: String::new(),
-                krs: vec![PmKr {
+                krs: vec![ProjectKR {
                     text: "One proof holds across wrapped lines.".to_string(),
                     holds: false,
                 }],

@@ -1265,7 +1265,7 @@ async fn cleanup_landed_pr(store: &SharedStore, landing: &PrLanding) -> OpsResul
         {
             return crate::ops::task::cleanup_completed_task(store, &task).await;
         }
-        eprintln!("Task {} has merged; retained its checkout for follow-through. Inspect remaining work with `lf task status {}`.", task.plan.identifier, task.plan.identifier);
+        eprintln!("Task {} has merged; retained its checkout for follow-through. Inspect remaining work with `lf task status {}`.", task.identifier, task.identifier);
         return Ok(());
     }
     // Only a Flow still being driven needs the checkout; a stopped one is history.
@@ -1606,11 +1606,11 @@ async fn reconcile_repository_async(
         .await
         {
             Ok(Ok(())) => {}
-            Ok(Err(error)) => errors.push(format!("{}: {error}", task.plan.identifier)),
+            Ok(Err(error)) => errors.push(format!("{}: {error}", task.identifier)),
             Err(_) => {
                 errors.push(format!(
                     "{}: delivery observation deadline exceeded",
-                    task.plan.identifier
+                    task.identifier
                 ));
                 break;
             }

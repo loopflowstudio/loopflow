@@ -668,7 +668,7 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
         "--search",
         "local-112",
         "--task",
-        &task.task.plan.identifier,
+        &task.task.identifier,
     ]);
     assert_eq!(filtered.as_array().unwrap().len(), 1);
     assert_eq!(filtered[0]["id"], "inventory-112");
@@ -720,13 +720,7 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
             [],
         )
         .unwrap();
-    let list = [
-        "session",
-        "list",
-        "--task",
-        &task.task.plan.identifier,
-        "--json",
-    ];
+    let list = ["session", "list", "--task", &task.task.identifier, "--json"];
     for _ in 0..2 {
         let current = fixture.json(&list);
         assert_eq!(current.as_array().unwrap().len(), 1);
@@ -736,7 +730,7 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
         "session",
         "list",
         "--task",
-        &task.task.plan.identifier,
+        &task.task.identifier,
         "--interactive",
         "all",
         "--history",

@@ -440,8 +440,8 @@ exit 0
             let delivered = store.task_steers(&task.id).await.unwrap();
             assert_eq!(delivered.iter().filter(|steer| steer.text.contains("incoming-after-reconnect")).count(), 1);
             assert!(matches!(store.get_task(&task.id).await.unwrap().unwrap().pm_writeback,
-                crate::work::task::PmWritebackState::Pending {
-                    operation: crate::work::task::PmWritebackOperation::CompleteTask, ..
+                crate::work::task::LinearWritebackState::Pending {
+                    operation: crate::work::task::LinearWritebackOperation::CompleteTask, ..
                 }));
             assert!(!store.task_started(&task.id).await.unwrap());
 

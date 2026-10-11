@@ -38,15 +38,15 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
         .block_on(task.store.task_linear_observation(&task.task.id))
         .expect("cursor read")
         .expect("cursor seeded at creation");
-    assert_eq!(seeded.last_title, task.task.plan.title);
+    assert_eq!(seeded.last_title, task.task.title);
     assert_eq!(seeded.last_revision, "");
 
     // Prepare a later explicit return to the original definition before either
     // write. Ingestion compares with its committed cursor, not a saved proposal.
     let restored = edit(
         "2026-07-15T02:00:00.000Z",
-        &task.task.plan.title,
-        &task.task.plan.description,
+        &task.task.title,
+        &task.task.description,
     );
 
     // 1. A user edits title + description → one Steer.
@@ -115,8 +115,8 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
             &task.task.id,
             edit(
                 "2026-07-15T00:30:00.000Z",
-                &task.task.plan.title,
-                &task.task.plan.description,
+                &task.task.title,
+                &task.task.description,
             ),
             now,
         ))
@@ -140,5 +140,5 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
     assert!(outcome.content_steer_applied);
     let steers = rt.block_on(task.store.task_steers(&task.task.id)).unwrap();
     assert_eq!(steers.len(), 3);
-    assert!(steers[2].text.contains(&task.task.plan.title));
+    assert!(steers[2].text.contains(&task.task.title));
 }

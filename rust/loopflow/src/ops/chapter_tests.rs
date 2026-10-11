@@ -9,10 +9,10 @@ use super::{classify_task, TaskDisposition, TaskStartEvidence};
 use crate::ops::pm::test_fixture::PlanningEnvironment;
 use crate::ops::pm::{pm_sync, resolve_context, PmSyncOptions, PmTestContext, PM_TEST_CONTEXT};
 use crate::ops::NullProgress;
-use crate::planning::{LinearIssueId, TaskPlan};
+use crate::planning::LinearIssueId;
 use crate::pm::{PmItem, PmProject, ProjectStatus};
 use crate::store::{open_ephemeral_store, CredentialType, ProviderToken, StorageConfig};
-use crate::work::task::{Observation, PmWritebackState, Task, TaskId, TaskPr, TaskPrId};
+use crate::work::task::{LinearWritebackState, Observation, Task, TaskId, TaskPr, TaskPrId};
 use crate::work::wave::{ensure_wave_row, WaveLocator};
 use time::OffsetDateTime;
 
@@ -290,21 +290,19 @@ async fn seed_project(
     let project = crate::work::project::Project {
         id: crate::work::project::ProjectId::new(),
         wave_id: wave.id().clone(),
-        plan: crate::planning::ProjectPlan {
-            summary: String::new(),
-            linear_id: Some(crate::planning::LinearProjectId::new(plan.id.clone()).unwrap()),
-            slug: plan.slug.clone(),
-            name: plan.name.clone(),
-            prompt_context: crate::pm::render_project_content(&crate::pm::ProjectContent {
-                workflow: plan.workflow.clone(),
-                krs: plan.krs.clone(),
-                metric_targets: plan.metric_targets.clone(),
-            }),
-            pm_snapshot_synced_at: Some(now.unix_timestamp()),
+
+        summary: String::new(),
+        linear_id: Some(crate::planning::LinearProjectId::new(plan.id.clone()).unwrap()),
+        slug: plan.slug.clone(),
+        name: plan.name.clone(),
+        prompt_context: crate::pm::render_project_content(&crate::pm::ProjectContent {
             workflow: plan.workflow.clone(),
-            status: plan.status,
-        },
-        iteration: 0,
+            krs: plan.krs.clone(),
+            metric_targets: plan.metric_targets.clone(),
+        }),
+        pm_snapshot_synced_at: Some(now.unix_timestamp()),
+        workflow: plan.workflow.clone(),
+        status: plan.status,
         abandon_intent: None,
         created_at: now,
         updated_at: now,
@@ -336,15 +334,15 @@ async fn local_task(
     let now = OffsetDateTime::now_utc();
     let task = Task {
         id: TaskId::new(),
-        plan: TaskPlan {
-            revision: 0,
-            linear_id: Some(LinearIssueId::new(issue).unwrap()),
-            identifier: format!("FIX-{issue}"),
-            title: "Retain execution".into(),
-            description: String::new(),
-            pm_snapshot_synced_at: Some(now.unix_timestamp()),
-        },
-        pm_writeback: PmWritebackState::Current,
+
+        revision: 0,
+        linear_id: Some(LinearIssueId::new(issue).unwrap()),
+        identifier: format!("FIX-{issue}"),
+        title: "Retain execution".into(),
+        description: String::new(),
+        pm_snapshot_synced_at: Some(now.unix_timestamp()),
+
+        pm_writeback: LinearWritebackState::Current,
         wave_id: wave.id().clone(),
         project_id: parent.id,
         worktree: Some(worktree.into()),
@@ -631,8 +629,8 @@ async fn archived_predecessor_is_history_even_when_linear_still_says_started() {
             assert_eq!(retained.id, task.id);
             assert_eq!(retained.project_id, task.project_id);
             assert_eq!(retained.worktree, task.worktree);
-            assert_eq!(retained.plan.linear_id, task.plan.linear_id);
-            assert_eq!(retained.plan.title, "a-started");
+            assert_eq!(retained.linear_id, task.linear_id);
+            assert_eq!(retained.title, "a-started");
             assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
             assert_eq!(store.sqlite.task_flows(&task.id).unwrap(), flow);
         })

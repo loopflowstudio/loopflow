@@ -9,19 +9,30 @@ use time::OffsetDateTime;
 use crate::child::AbandonIntent;
 pub use crate::durable::ProjectId;
 use crate::id::WaveId;
-use crate::planning::ProjectPlan;
+use crate::planning::{LinearProjectId, PlanningError};
 use crate::work::task::{TaskEventKind, TaskId};
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectKR {
+    pub text: String,
+    pub holds: bool,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Project {
     pub id: ProjectId,
-    /// Authored local planning or accepted Linear facts.
-    pub plan: ProjectPlan,
+    pub summary: String,
+    pub slug: String,
+    pub name: String,
+    pub prompt_context: String,
+    pub workflow: String,
+    pub status: crate::pm::ProjectStatus,
+    /// Optional Linear binding, not a second owner of this record.
+    pub linear_id: Option<LinearProjectId>,
+    /// Acquisition time of the retained Linear observation, never a write clock.
+    pub pm_snapshot_synced_at: Option<i64>,
     /// Current ownership. Wave name and checkout are resolved from this id.
     pub wave_id: WaveId,
-    /// Completed Project judgment passes. This is durable domain progress, not
-    /// the lifetime of a Project process.
-    pub iteration: u32,
     /// Set when abandonment is *requested*, not when it is applied. No launch
     /// path may start a Run for Project Work carrying this.
     pub abandon_intent: Option<AbandonIntent>,
@@ -101,5 +112,13 @@ impl HistoricalFailure {
             message: event.kind.failure_reason()?.to_string(),
             occurred_at: event.created_at,
         })
+    }
+}
+
+impl Project {
+    pub fn linear_id(&self) -> Result<&LinearProjectId, PlanningError> {
+        self.linear_id
+            .as_ref()
+            .ok_or(PlanningError::NoLinearMapping)
     }
 }

@@ -152,7 +152,7 @@ impl SqliteStore {
         )?;
         let connected = crate::ops::linear_observe::connected(&repo);
         let mut thread = TaskComments {
-            identifier: task.plan.identifier,
+            identifier: task.identifier,
             comments: Vec::new(),
             pending_sync: Vec::new(),
             conflicts: Default::default(),

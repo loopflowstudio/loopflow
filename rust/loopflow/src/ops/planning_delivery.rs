@@ -107,7 +107,7 @@ async fn sync_deletion(
         .await
         .map_err(message)?
         .ok_or_else(|| message("Task is missing"))?;
-    let external = task.plan.linear_id()?.as_str();
+    let external = task.linear_id()?.as_str();
     let (trashed, trash_revision) = client
         .issue_trash(external)
         .await
@@ -259,7 +259,7 @@ async fn observe(
                 .await
                 .map_err(message)?
                 .ok_or_else(|| message("Task is missing"))?;
-            let external = task.plan.linear_id()?.as_str().to_owned();
+            let external = task.linear_id()?.as_str().to_owned();
             let (item, project) = client
                 .issue_ownership(&external)
                 .await
@@ -295,7 +295,7 @@ async fn observe(
                 .await
                 .map_err(message)?
                 .ok_or_else(|| message("Project is missing"))?;
-            let external = project.plan.linear_id()?.as_str().to_owned();
+            let external = project.linear_id()?.as_str().to_owned();
             let (observed, content) = client
                 .project_content_observation(&external)
                 .await
@@ -345,7 +345,7 @@ fn task_input(store: &Store, change: &PlanningChange) -> OpsResult<Value> {
                 .project(&id)
                 .map_err(message)?
                 .ok_or_else(|| message("destination Project is missing"))?;
-            Ok(json!({"projectId":project.plan.linear_id()?.as_str()}))
+            Ok(json!({"projectId":project.linear_id()?.as_str()}))
         }
         _ => Err(message(format!(
             "unsupported Task planning field: {}",
@@ -368,8 +368,7 @@ pub(super) async fn ingest_task(
             .await
             .map_err(message)?
             .filter(|p| {
-                p.plan
-                    .linear_id
+                p.linear_id
                     .as_ref()
                     .is_some_and(|id| id.as_str() == project.id)
             })

@@ -12,8 +12,8 @@ use super::{PmRefresh, PM_TEST_CONTEXT};
 use crate::durable::WorkStatus;
 use crate::ops::NullProgress;
 use crate::work::task::{
-    GithubPr, Observation, PmWritebackState, PrMergeMode, PrMergeRequest, PrPhase, PrPresentation,
-    PrPublication, Task, TaskEventKind, TaskPr, TaskPrId,
+    GithubPr, LinearWritebackState, Observation, PrMergeMode, PrMergeRequest, PrPhase,
+    PrPresentation, PrPublication, Task, TaskEventKind, TaskPr, TaskPrId,
 };
 
 async fn planning_repo(fixture: &Fixture) -> (PathBuf, crate::work::wave::Wave) {
@@ -697,8 +697,8 @@ fn task_deletion_active_sync_reconnect_retains_execution_and_history() {
             crate::store::sqlite::SqliteStore::open_ephemeral(&fixture.database).unwrap();
         assert!(reopened.list_tasks(None).unwrap().is_empty());
         assert_eq!(
-            reopened.task(&task.id).unwrap().unwrap().plan.linear_id,
-            task.plan.linear_id
+            reopened.task(&task.id).unwrap().unwrap().linear_id,
+            task.linear_id
         );
         assert!(reopened.pending_task_changes(&task.id).unwrap().is_empty());
         assert_eq!(
@@ -872,7 +872,7 @@ fn task_deletion_adopts_newer_linear_edit_and_retains_losing_removal() {
             assert_eq!(state.lock().await.deletion_writes, 0);
         });
         assert_eq!(
-            fixture.store.sqlite.list_tasks(None).unwrap()[0].plan.title,
+            fixture.store.sqlite.list_tasks(None).unwrap()[0].title,
             "Keep this work"
         );
         assert!(fixture
@@ -921,7 +921,7 @@ fn task_abandonment_saves_offline_in_both_connection_modes() {
                 .unwrap();
             // Every provider operation would fail; the existing Task needs none.
             PM_TEST_CONTEXT.sync_scope(fixture.context("http://127.0.0.1:1"), || {
-                assert_eq!(crate::ops::task::task_abandon(repo, Some(task.id.as_str()), false).unwrap(), task.plan.identifier);
+                assert_eq!(crate::ops::task::task_abandon(repo, Some(task.id.as_str()), false).unwrap(), task.identifier);
                 let work = crate::durable::WorkRef::Task(task.id.clone());
                 assert_eq!(fixture.store.sqlite.work_status(&work).unwrap(), WorkStatus::Abandoned);
                 let receipt = || conn.query_row(
@@ -935,15 +935,20 @@ fn task_abandonment_saves_offline_in_both_connection_modes() {
                 let retained = fixture.store.sqlite.task(&task.id).unwrap().unwrap();
                 assert_eq!(retained.id, original.id);
                 assert_eq!(retained.project_id, original.project_id);
-                let mut expected = original.plan.clone();
+                let mut expected = original.clone();
                 expected.revision += 1;
-                assert_eq!(retained.plan, expected);
+                assert_eq!(retained.revision, expected.revision);
+assert_eq!(retained.linear_id, expected.linear_id);
+assert_eq!(retained.identifier, expected.identifier);
+assert_eq!(retained.title, expected.title);
+assert_eq!(retained.description, expected.description);
+assert_eq!(retained.pm_snapshot_synced_at, expected.pm_snapshot_synced_at);
                 assert!(retained.worktree.is_none());
                 assert!(fixture.store.sqlite.workflow(&task.id).unwrap().is_none());
                 assert_eq!(runtime.block_on(fixture.store.task_events_after(&task.id, 0)).unwrap(), history);
                 if connected {
-                    assert!(matches!(retained.pm_writeback, PmWritebackState::Pending {
-                        operation: crate::work::task::PmWritebackOperation::CancelTask, ..
+                    assert!(matches!(retained.pm_writeback, LinearWritebackState::Pending {
+                        operation: crate::work::task::LinearWritebackOperation::CancelTask, ..
                     }));
                     runtime.block_on(crate::ops::linear_observe::sync_task_state(&fixture.store, &retained)).unwrap();
                     // Cancellation must never fall into the old sender's reopen arm.
@@ -1019,7 +1024,7 @@ fn task_abandonment_active_sync_delivers_after_reconnect() {
         });
         drop(sync);
         let saved = fixture.store.sqlite.task(&task.id).unwrap().unwrap();
-        assert!(matches!(saved.pm_writeback, PmWritebackState::Current));
+        assert!(matches!(saved.pm_writeback, LinearWritebackState::Current));
         assert_eq!(
             fixture
                 .store
@@ -1575,7 +1580,9 @@ fn task_completion_active_sync_acquires_membership_while_delivery_is_pending() {
                 loop {
                     let saved = fixture.store.get_task(&task.id).await.unwrap().unwrap();
                     let added = fixture.store.get_task_by_issue("FIX-2").await.unwrap();
-                    if let (PmWritebackState::Current, Some(added)) = (&saved.pm_writeback, added) {
+                    if let (LinearWritebackState::Current, Some(added)) =
+                        (&saved.pm_writeback, added)
+                    {
                         if fixture
                             .store
                             .sqlite
@@ -1768,7 +1775,7 @@ exit 0
                 .sqlite
                 .edit_task(
                     &task.id,
-                    task.plan.revision,
+                    task.revision,
                     &crate::pm::PmItemUpdate {
                         name: Some("Pending local title".into()),
                         ..Default::default()
@@ -1868,7 +1875,7 @@ exit 0
                         provider.issues.push(added);
                         provider.comments.push(
                             json!({"id":"incoming-reconnect", "body":"Arrived during outage",
-                            "issue":{"id":task.plan.linear_id.as_ref().unwrap()},
+                            "issue":{"id":task.linear_id.as_ref().unwrap()},
                             "createdAt":"2026-10-08T12:00:00Z", "updatedAt":"2026-10-08T12:00:00Z",
                             "user":{"id":"fixture-person","displayName":"Maya","name":"Maya"}}),
                         );
@@ -2340,7 +2347,7 @@ fn assert_unplaced_completion_retry(lose_response: bool, uncached: bool) {
             .unwrap();
         assert!(matches!(
             pending.pm_writeback,
-            PmWritebackState::Pending { .. }
+            LinearWritebackState::Pending { .. }
         ));
         assert!(pending.worktree.is_none());
         assert_eq!(
@@ -2357,7 +2364,7 @@ fn assert_unplaced_completion_retry(lose_response: bool, uncached: bool) {
             .block_on(fixture.store.get_task(&pending.id))
             .unwrap()
             .unwrap();
-        assert_eq!(retained.pm_writeback, PmWritebackState::Current);
+        assert_eq!(retained.pm_writeback, LinearWritebackState::Current);
         assert!(retained.worktree.is_none());
         let events = runtime
             .block_on(fixture.store.task_events_after(&pending.id, 0))
@@ -2442,15 +2449,15 @@ fi
                     .unwrap()
                     .unwrap()
                     .id,
-                plan: crate::planning::TaskPlan {
-                    revision: 0,
-                    linear_id: Some(crate::planning::LinearIssueId::new(&item.id).unwrap()),
-                    identifier: item.identifier.clone(),
-                    title: item.name.clone(),
-                    description: item.description.clone(),
-                    pm_snapshot_synced_at: Some(1),
-                },
-                pm_writeback: PmWritebackState::Current,
+
+                revision: 0,
+                linear_id: Some(crate::planning::LinearIssueId::new(&item.id).unwrap()),
+                identifier: item.identifier.clone(),
+                title: item.name.clone(),
+                description: item.description.clone(),
+                pm_snapshot_synced_at: Some(1),
+
+                pm_writeback: LinearWritebackState::Current,
                 wave_id: wave.id().clone(),
                 project_id: project.id,
                 worktree: Some(repo.clone()),
@@ -2564,7 +2571,7 @@ fi
         let first = complete("Delivered the requested outcome").unwrap();
         assert!(matches!(
             first.pm_writeback,
-            PmWritebackState::Pending { .. }
+            LinearWritebackState::Pending { .. }
         ));
         assert_eq!(
             runtime.block_on(async { state.lock().await.completion_writes }),
@@ -2598,7 +2605,7 @@ fi
             ))
             .unwrap();
         let result = complete("Must preserve the first decision").unwrap();
-        assert_eq!(result.pm_writeback, PmWritebackState::Current);
+        assert_eq!(result.pm_writeback, LinearWritebackState::Current);
         assert_eq!(
             runtime
                 .block_on(fixture.store.task_events_after(&task.id, 0))
@@ -2695,7 +2702,7 @@ esac
                 .block_on(fixture.store.list_projects(Some(wave.id())))
                 .unwrap()
                 .into_iter()
-                .find(|project| project.plan.linear_id.as_ref().unwrap().as_str() == "project-1")
+                .find(|project| project.linear_id.as_ref().unwrap().as_str() == "project-1")
                 .unwrap();
             let task = Task {
                 id: runtime
@@ -2703,15 +2710,15 @@ esac
                     .unwrap()
                     .unwrap()
                     .id,
-                plan: crate::planning::TaskPlan {
-                    revision: 0,
-                    linear_id: Some(crate::planning::LinearIssueId::new(&item.id).unwrap()),
-                    identifier: item.identifier.clone(),
-                    title: item.name,
-                    description: item.description,
-                    pm_snapshot_synced_at: Some(1),
-                },
-                pm_writeback: PmWritebackState::Current,
+
+                revision: 0,
+                linear_id: Some(crate::planning::LinearIssueId::new(&item.id).unwrap()),
+                identifier: item.identifier.clone(),
+                title: item.name,
+                description: item.description,
+                pm_snapshot_synced_at: Some(1),
+
+                pm_writeback: LinearWritebackState::Current,
                 wave_id: wave.id().clone(),
                 project_id: project.id,
                 worktree: Some(checkout.clone()),
@@ -2853,8 +2860,8 @@ esac
                         .unwrap()
                         .unwrap()
                         .pm_writeback,
-                    PmWritebackState::Pending {
-                        operation: crate::work::task::PmWritebackOperation::CancelTask,
+                    LinearWritebackState::Pending {
+                        operation: crate::work::task::LinearWritebackOperation::CancelTask,
                         ..
                     }
                 ));
@@ -3167,7 +3174,7 @@ fn planning_fields_active_connection_delivers_offline_saves_after_recovery() {
                 .sqlite
                 .edit_task(
                     &task.id,
-                    task.plan.revision,
+                    task.revision,
                     &crate::pm::PmItemUpdate {
                         name: Some("Offline title".into()),
                         description: Some("Offline body".into()),
@@ -3388,7 +3395,6 @@ fn planning_fields_older_acknowledgement_preserves_and_delivers_newer_save() {
                             .await
                             .unwrap()
                             .unwrap()
-                            .plan
                             .title,
                         "Newer save"
                     );
@@ -3433,13 +3439,13 @@ fn save_field_name(
             .unwrap()
             .item;
         let current = fixture.store.sqlite.task(&task.id).unwrap().unwrap();
-        assert_eq!(current.plan.title, saved.name);
+        assert_eq!(current.title, saved.name);
         fixture
             .store
             .sqlite
             .edit_task(
                 &task.id,
-                current.plan.revision,
+                current.revision,
                 &crate::pm::PmItemUpdate {
                     name: Some(name.into()),
                     ..Default::default()
@@ -3543,7 +3549,7 @@ fn planning_fields_project_content_preserves_prose_and_task_assignee_can_be_clea
                     &crate::pm::ProjectContent {
                         workflow: "code".into(),
                         metric_targets: Vec::new(),
-                        krs: vec![crate::pm::PmKr {
+                        krs: vec![crate::work::project::ProjectKR {
                             text: "Keep working offline".into(),
                             holds: true,
                         }],
@@ -3580,7 +3586,7 @@ fn planning_fields_project_content_preserves_prose_and_task_assignee_can_be_clea
                     .sqlite
                     .edit_task(
                         &task.id,
-                        saved.plan.revision,
+                        saved.revision,
                         &crate::pm::PmItemUpdate {
                             assignee: Some(assignee.clone()),
                             ..Default::default()
@@ -3627,14 +3633,7 @@ fn planning_fields_uncertain_attempt_does_not_rewrite_an_unchanged_provider() {
             assert_eq!(state.lock().await.field_writes, 1);
             assert_eq!(state.lock().await.issues[0]["title"], "Deliver locally");
             assert_eq!(
-                fixture
-                    .store
-                    .sqlite
-                    .task(&task.id)
-                    .unwrap()
-                    .unwrap()
-                    .plan
-                    .title,
+                fixture.store.sqlite.task(&task.id).unwrap().unwrap().title,
                 "Unconfirmed save"
             );
         });
@@ -3708,7 +3707,7 @@ fn planning_fields_deliver_project_activation_and_task_membership_without_execut
                         content: crate::pm::ProjectContent {
                             workflow: "feature".into(),
                             metric_targets: Vec::new(),
-                            krs: vec![crate::pm::PmKr {
+                            krs: vec![crate::work::project::ProjectKR {
                                 text: "Retain Task identity".into(),
                                 holds: false,
                             }],
@@ -3801,8 +3800,8 @@ fn planning_export_foreground_reconnect_keeps_distinct_saved_identities() {
                 due_date: None,
                 id: crate::durable::TaskId::new(),
                 project_id: task.project_id.clone(),
-                title: task.plan.title.clone(),
-                description: task.plan.description.clone(),
+                title: task.title.clone(),
+                description: task.description.clone(),
             })
             .unwrap();
         state.blocking_lock().field_outage = true;
@@ -3823,7 +3822,6 @@ fn planning_export_foreground_reconnect_keeps_distinct_saved_identities() {
                         .await
                         .unwrap()
                         .unwrap()
-                        .plan
                         .linear_id
                         .is_some()
                         && fixture
@@ -3832,7 +3830,6 @@ fn planning_export_foreground_reconnect_keeps_distinct_saved_identities() {
                             .await
                             .unwrap()
                             .unwrap()
-                            .plan
                             .linear_id
                             .is_some()
                     {
@@ -3849,9 +3846,9 @@ fn planning_export_foreground_reconnect_keeps_distinct_saved_identities() {
         assert_eq!(tasks.len(), 2);
         for saved in tasks {
             assert!(saved.worktree.is_none());
-            assert_eq!(saved.plan.title, "Same title");
+            assert_eq!(saved.title, "Same title");
             assert_eq!(
-                saved.plan.linear_id.unwrap().as_str(),
+                saved.linear_id.unwrap().as_str(),
                 uuid::Uuid::parse_str(saved.id.as_str().trim_start_matches("task_"))
                     .unwrap()
                     .to_string()
@@ -3941,7 +3938,6 @@ fn planning_export_lost_creation_and_attachment_recover_without_duplicate_effect
             .block_on(fixture.store.get_task(&task.id))
             .unwrap()
             .unwrap()
-            .plan
             .linear_id
             .is_some());
         let saved = runtime
@@ -3953,7 +3949,7 @@ fn planning_export_lost_creation_and_attachment_recover_without_duplicate_effect
             .sqlite
             .edit_task(
                 &task.id,
-                saved.plan.revision,
+                saved.revision,
                 &crate::pm::PmItemUpdate {
                     name: Some("After export".into()),
                     ..Default::default()
@@ -4006,7 +4002,7 @@ fn planning_export_late_readback_preserves_newer_edits_and_inventory_identity() 
                                 .sqlite
                                 .edit_task(
                                     id,
-                                    saved.plan.revision,
+                                    saved.revision,
                                     &crate::pm::PmItemUpdate {
                                         name: Some("Later task".into()),
                                         ..Default::default()

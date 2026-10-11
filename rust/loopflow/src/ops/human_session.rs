@@ -966,7 +966,7 @@ async fn session_work_path(store: &SharedStore, session: &LfSession) -> Result<O
     Ok(Some(match &session.task_id {
         None => wave,
         Some(id) => match store.get_task(id).await? {
-            Some(task) => format!("{wave} / {}", task.plan.identifier),
+            Some(task) => format!("{wave} / {}", task.identifier),
             None => format!("Task {id} (unavailable)"),
         },
     }))
@@ -1016,7 +1016,7 @@ pub(crate) async fn bind(store: &SharedStore, id: &str, task: &str) -> Result<Se
         })?;
     eprintln!(
         "Binding {} to {} ({}). Permanent.",
-        session.id, task.plan.identifier, task.plan.title
+        session.id, task.identifier, task.title
     );
     surface(store, &session).await
 }
@@ -1039,8 +1039,8 @@ pub(crate) async fn preview_binding(
     Ok(SessionBindingPreview {
         session_id: session.id,
         task_id: task.id.to_string(),
-        identifier: task.plan.identifier,
-        title: task.plan.title,
+        identifier: task.identifier,
+        title: task.title,
     })
 }
 

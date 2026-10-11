@@ -47,6 +47,15 @@ issues and lost replies retain uncertainty without replaying the mutation. A new
 explicitly active Linear revision retires removal and restores planning visibility,
 retaining the losing receipt. This grants no execution or cleanup authority.
 
+Task content is read directly from `Task` (identifier, title and description),
+with its local write revision, optional Linear binding and observation age retained.
+`Project` likewise owns its fields directly; neither has a separate Plan wrapper.
+`ProjectKR` is an explicit judgment. `MetricTarget` names a metric and a numeric
+`Threshold`, independently of the Wave's observations. Project iteration is no longer
+live state; its stored values and historical judgment events remain readable evidence.
+The typed field writer—not either complete domain struct—defines portable content;
+flattening records does not make checkout or execution fields synchronizable.
+
 Task and Project rows own identity for both paths. Locally authored Tasks mint a
 UUID before placement and retain it through provider creation. New Linear acquisitions
 derive the Task ID from the issue UUID; existing mapped Tasks keep their IDs.

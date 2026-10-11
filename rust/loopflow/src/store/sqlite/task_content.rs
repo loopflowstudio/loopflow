@@ -115,7 +115,7 @@ impl SqliteStore {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let task = super::children::task_on(&tx, id)?.ok_or(StoreError::NotFound)?;
         super::children::require_task_not_deleted(&tx, &task)?;
-        if task.plan.revision != expected_revision {
+        if task.revision != expected_revision {
             return Err(StoreError::InvalidAuthority(
                 "Task changed; read its current revision before editing".into(),
             ));

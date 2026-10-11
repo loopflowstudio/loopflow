@@ -235,7 +235,9 @@ impl Part {
 
     fn clock(self) -> Duration {
         match self {
-            Part::Planning | Part::PeerPlanning | Part::Wave => PLANNING_CLOCK,
+            Part::Planning | Part::Wave => PLANNING_CLOCK,
+            // Transport selection lives in config, so it can change without a store write.
+            Part::PeerPlanning => Duration::from_secs(5),
             Part::Activity | Part::Sessions | Part::Task | Part::WorkActivity => ACTIVITY_CLOCK,
         }
     }
@@ -591,16 +593,8 @@ impl Reader {
                 Part::PeerPlanning => {
                     let repo = self.scope.repo.clone().context("no repository in scope")?;
                     let root = CanonicalRepo::discover(Path::new(&repo))?;
-                    let config =
-                        crate::config::load_config(Some(root.as_path()))?.unwrap_or_default();
-                    let destinations = if matches!(
-                        config.planning_transport(),
-                        crate::config::PlanningConfig::Linear {}
-                    ) {
-                        Vec::new()
-                    } else {
-                        store.peer_planning_status(&root.to_string()).await?
-                    };
+                    let destinations =
+                        crate::ops::planning_sync::peer_status(store, &root.to_string()).await?;
                     WorkContent::PeerPlanning(Some(PeerPlanningPart { repo, destinations }))
                 }
                 Part::Sessions => {

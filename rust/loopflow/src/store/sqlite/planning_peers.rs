@@ -158,27 +158,6 @@ impl SqliteStore {
         })
         .transpose()
     }
-    pub fn use_peer_planning(&self, repo: &str, destination: Option<&str>) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if let Some(destination) = destination {
-            require_destination(&tx, repo, destination)?;
-            tx.execute(
-                "INSERT INTO planning_active(repo,destination) VALUES(?1,?2)
-                ON CONFLICT(repo) DO UPDATE SET destination=excluded.destination
-                WHERE planning_active.destination IS NOT excluded.destination",
-                params![repo, destination],
-            )?;
-        } else {
-            tx.execute("DELETE FROM planning_active WHERE repo=?1", [repo])?;
-        }
-        if let Some(destination) = destination {
-            enroll_repository(&tx, repo, destination)?;
-        }
-        tx.commit()?;
-        Ok(())
-    }
-
     pub fn export_peer_planning(
         &self,
         repo: &str,
@@ -187,8 +166,8 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         require_destination(&tx, repo, destination)?;
-        enroll_repository(&tx, repo, destination)?;
-        let snapshot = export_in(&tx, repo, destination)?;
+        route_repository(&tx, repo, destination)?;
+        let snapshot = export_in(&tx, repo, destination, true)?;
         tx.commit()?;
         Ok(snapshot)
     }
@@ -203,13 +182,16 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let mut tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         require_destination(&tx, repo, destination)?;
-        enroll_repository(&tx, repo, destination)?;
-        let merged = export_in(&tx, repo, destination)?
+        route_repository(&tx, repo, destination)?;
+        let merged = export_in(&tx, repo, destination, true)?
             .merge(incoming)
             .map_err(invalid)?;
         for (id, change) in &incoming.changes {
             planning_write::retain(&tx, id, change)?;
-            tx.execute("INSERT OR IGNORE INTO planning_members(kind,object_id,repo,destination) VALUES(?1,?2,?3,?4)",params![planning_write::table(&change.edit.change),change.edit.target,repo,destination])?;
+            tx.execute(
+                "INSERT OR IGNORE INTO planning_peer_routes(mutation_id,repo,destination) VALUES(?1,?2,?3)",
+                params![id, repo, destination],
+            )?;
         }
         let edits: Vec<_> = merged
             .winners()
@@ -248,7 +230,6 @@ impl SqliteStore {
                         .collect();
                     planning_write::write(&save, &selected, WriteOrigin::Import)?;
                     require_repository(&save, repo, table, target)?;
-                    save.execute("INSERT OR IGNORE INTO planning_members(kind,object_id,repo,destination) VALUES(?1,?2,?3,?4)",params![table,target,repo,destination])?;
                     Ok::<_, StoreError>(())
                 })();
                 match result {
@@ -331,14 +312,18 @@ impl SqliteStore {
         tx.commit()?;
         Ok(())
     }
-    pub fn peer_planning_status(&self, repo: &str) -> StoreResult<Vec<PeerPlanningStatus>> {
+    pub fn peer_planning_status(
+        &self,
+        repo: &str,
+        active: Option<&str>,
+    ) -> StoreResult<Vec<PeerPlanningStatus>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query=conn.prepare("SELECT d.id,d.reference,a.destination=d.id,d.fetched_revision,d.acquisition_error,d.publication_revision,d.publication_state,d.publication_error,d.publication_digest,i.revision FROM planning_destinations d LEFT JOIN planning_active a ON a.repo=d.repo LEFT JOIN planning_peer_imports i ON i.repo=d.repo AND i.destination=d.id WHERE d.repo=?1 ORDER BY d.id")?;
-        let rows = query.query_map([repo], |r| {
+        let mut query=conn.prepare("SELECT d.id,d.reference,d.id IS ?2,d.fetched_revision,d.acquisition_error,d.publication_revision,d.publication_state,d.publication_error,d.publication_digest,i.revision FROM planning_destinations d LEFT JOIN planning_peer_imports i ON i.repo=d.repo AND i.destination=d.id WHERE d.repo=?1 ORDER BY d.id")?;
+        let rows = query.query_map(params![repo, active], |r| {
             Ok((
                 r.get::<_, String>(0)?,
                 r.get::<_, String>(1)?,
-                r.get::<_, Option<bool>>(2)?,
+                r.get::<_, bool>(2)?,
                 r.get::<_, Option<String>>(3)?,
                 r.get::<_, Option<String>>(4)?,
                 r.get::<_, Option<String>>(5)?,
@@ -362,7 +347,7 @@ impl SqliteStore {
                 digest,
                 imported_revision,
             ) = row?;
-            let snapshot = export_in(&conn, repo, &id)?;
+            let snapshot = export_in(&conn, repo, &id, active)?;
             let pending_local = digest.as_deref() != Some(planning_digest(&snapshot)?.as_str());
             let selected_records = snapshot
                 .changes
@@ -390,7 +375,7 @@ impl SqliteStore {
             result.push(PeerPlanningStatus {
                 id,
                 reference,
-                active: active.unwrap_or(false),
+                active,
                 selected_records,
                 imported_revision,
                 fetched_revision,
@@ -439,32 +424,219 @@ fn require_repository(conn: &Connection, repo: &str, table: &str, target: &str) 
     Ok(())
 }
 
-fn enroll_repository(conn: &Connection, repo: &str, destination: &str) -> StoreResult<()> {
-    let mut q=conn.prepare("SELECT 'waves',id FROM waves WHERE repo=?1 UNION ALL SELECT 'projects',p.id FROM projects p JOIN waves w ON w.id=p.wave_id WHERE w.repo=?1 UNION ALL SELECT 'tasks',t.id FROM tasks t JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id WHERE w.repo=?1 UNION ALL SELECT 'task_comments',c.id FROM task_comments c JOIN tasks t ON t.id=c.task_id JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id WHERE w.repo=?1")?;
-    let rows = q
-        .query_map([repo], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
-    for (kind, id) in rows {
-        conn.execute("INSERT INTO planning_members(kind,object_id,repo,destination) VALUES(?1,?2,?3,?4) ON CONFLICT(kind,object_id) DO UPDATE SET destination=excluded.destination WHERE repo=excluded.repo AND destination IS NOT excluded.destination",params![kind,id,repo,destination])?;
-    }
+// Current ownership selects new exports. Retained routes keep prior destinations,
+// tombstones and rejected records readable after ownership or configuration changes.
+const OWNED_CHANGES: &str = "WITH owned(record_table,object_id) AS (
+    SELECT 'waves',id FROM waves WHERE repo=?1
+    UNION ALL SELECT 'projects',p.id FROM projects p JOIN waves w ON w.id=p.wave_id WHERE w.repo=?1
+    UNION ALL SELECT 'tasks',t.id FROM tasks t JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id WHERE w.repo=?1
+    UNION ALL SELECT 'task_comments',c.id FROM task_comments c JOIN tasks t ON t.id=c.task_id JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id WHERE w.repo=?1
+)";
+
+fn route_repository(conn: &Connection, repo: &str, destination: &str) -> StoreResult<()> {
+    conn.execute(
+        &format!(
+            "{OWNED_CHANGES}
+            INSERT OR IGNORE INTO planning_peer_routes(mutation_id,repo,destination)
+            SELECT c.id,?1,?2 FROM planning_peer_changes c
+            JOIN owned o ON o.record_table=c.record_table AND o.object_id=c.object_id"
+        ),
+        params![repo, destination],
+    )?;
     Ok(())
 }
-fn export_in(conn: &Connection, repo: &str, destination: &str) -> StoreResult<PlanningSnapshot> {
+fn export_in(
+    conn: &Connection,
+    repo: &str,
+    destination: &str,
+    include_current: bool,
+) -> StoreResult<PlanningSnapshot> {
     let mut query = conn.prepare(
-        "SELECT c.id,c.mutation FROM planning_peer_changes c JOIN planning_members m
-         ON m.kind=c.record_table AND m.object_id=c.object_id WHERE m.repo=?1 AND m.destination=?2",
+        &format!("{OWNED_CHANGES}
+            SELECT c.id,c.mutation FROM planning_peer_changes c
+            WHERE c.id IN (SELECT mutation_id FROM planning_peer_routes WHERE repo=?1 AND destination=?2)
+            OR (?3 AND EXISTS(SELECT 1 FROM owned o WHERE o.record_table=c.record_table AND o.object_id=c.object_id))"),
     )?;
     let changes = query
-        .query_and_then(params![repo, destination], |row| -> StoreResult<_> {
-            Ok((
-                row.get(0)?,
-                serde_json::from_str::<PlanningMutation>(&row.get::<_, String>(1)?)?,
-            ))
-        })?
+        .query_and_then(
+            params![repo, destination, include_current],
+            |row| -> StoreResult<_> {
+                Ok((
+                    row.get(0)?,
+                    serde_json::from_str::<PlanningMutation>(&row.get::<_, String>(1)?)?,
+                ))
+            },
+        )?
         .collect::<StoreResult<BTreeMap<_, _>>>()?;
     let snapshot = PlanningSnapshot { changes };
     snapshot.validate().map_err(invalid)?;
     Ok(snapshot)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use crate::id::WaveId;
+    use crate::planning_exchange::{PlanningMutation, PlanningSnapshot};
+    use crate::planning_git::PlanningDestination;
+    use crate::store::sqlite::{planning_write, SqliteStore};
+    use crate::work::edit::{WorkEdit, WorkValue};
+    use crate::work::wave::Wave;
+
+    fn destination(store: &SqliteStore, repo: &str, name: &str) -> String {
+        let route = PlanningDestination::new(
+            "/synthetic.git",
+            &format!("refs/loopflow/planning/shared/{name}"),
+        )
+        .unwrap();
+        store.bind_peer_planning(repo, &route).unwrap()
+    }
+
+    #[test]
+    fn routing_retains_each_destination_across_switches_moves_and_missing_work() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("db");
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let wave = Wave::new(WaveId::new(), "original".into(), "/repo".into());
+        store.create_wave(&wave).unwrap();
+        let first = destination(&store, "/repo", "first");
+        let original = store.export_peer_planning("/repo", &first).unwrap();
+        assert!(!original.changes.is_empty());
+
+        let second = destination(&store, "/repo", "second");
+        {
+            let conn = store.conn.lock().unwrap();
+            planning_write::local(
+                &conn,
+                &WorkEdit::for_target(wave.id().as_str(), &[WorkValue::WaveName("next".into())]),
+            )
+            .unwrap();
+        }
+        let current = store.export_peer_planning("/repo", &second).unwrap();
+        assert!(current.changes.len() > original.changes.len());
+        let revision = store.revisions().unwrap();
+        let statuses = store.peer_planning_status("/repo", Some(&second)).unwrap();
+        assert_eq!(store.revisions().unwrap(), revision);
+        assert!(statuses.iter().find(|s| s.id == second).unwrap().active);
+        assert!(!statuses.iter().find(|s| s.id == first).unwrap().active);
+        assert_eq!(
+            statuses.iter().find(|s| s.id == first).unwrap().changes,
+            original.changes
+        );
+        assert_eq!(
+            statuses.iter().find(|s| s.id == second).unwrap().changes,
+            current.changes
+        );
+        // Linear selection does not erase Git history or move later edits to old refs.
+        assert!(store
+            .peer_planning_status("/repo", None)
+            .unwrap()
+            .iter()
+            .all(|s| !s.active));
+
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE waves SET repo='/moved' WHERE id=?1",
+                [wave.id().as_str()],
+            )
+            .unwrap();
+        let moved = destination(&store, "/moved", "moved");
+        assert_eq!(
+            store.export_peer_planning("/moved", &moved).unwrap(),
+            current
+        );
+        // No live owner remains to reconstruct the original routing from.
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute("DELETE FROM waves WHERE id=?1", [wave.id().as_str()])
+            .unwrap();
+        drop(store);
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        assert_eq!(
+            store.export_peer_planning("/repo", &first).unwrap(),
+            original
+        );
+        assert_eq!(
+            store.export_peer_planning("/repo", &second).unwrap(),
+            current
+        );
+        assert_eq!(
+            store.export_peer_planning("/moved", &moved).unwrap(),
+            current
+        );
+        let before = store.revisions().unwrap();
+        assert_eq!(
+            store.export_peer_planning("/moved", &moved).unwrap(),
+            current
+        );
+        assert_eq!(store.revisions().unwrap(), before);
+    }
+
+    #[test]
+    fn rejected_orphan_import_retains_its_route_without_claiming_work() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let route = destination(&store, "/repo", "incoming");
+        let incoming = PlanningSnapshot {
+            changes: [(
+                "orphan".into(),
+                PlanningMutation {
+                    edit: WorkEdit {
+                        target: "project-orphan".into(),
+                        change: WorkValue::ProjectWave(WaveId::new().to_string()),
+                    },
+                    clock: 1,
+                    parents: BTreeSet::new(),
+                },
+            )]
+            .into(),
+        };
+        for _ in 0..2 {
+            store
+                .import_peer_planning("/repo", &route, "revision", &incoming)
+                .unwrap();
+            assert_eq!(
+                store.export_peer_planning("/repo", &route).unwrap(),
+                incoming
+            );
+        }
+        let status = store.peer_planning_status("/repo", None).unwrap().remove(0);
+        assert_eq!(status.conflicts.len(), 1);
+        assert_eq!(status.selected_records, 1);
+        assert_eq!(
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .query_row("SELECT count(*) FROM projects", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .query_row("SELECT count(*) FROM planning_peer_observed", [], |r| r
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        let unrelated = destination(&store, "/repo", "unrelated");
+        assert!(store
+            .export_peer_planning("/repo", &unrelated)
+            .unwrap()
+            .changes
+            .is_empty());
+        assert_eq!(
+            store.export_peer_planning("/repo", &route).unwrap(),
+            incoming
+        );
+    }
 }

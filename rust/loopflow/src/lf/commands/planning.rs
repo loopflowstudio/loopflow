@@ -68,7 +68,7 @@ async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
         return Ok(());
     }
     crate::ops::planning_sync::configured_destination(store, repo).await?;
-    let destinations = store.peer_planning_status(repo).await?;
+    let destinations = crate::ops::planning_sync::peer_status(store, repo).await?;
     if json {
         println!(
             "{}",

@@ -1035,8 +1035,9 @@ fn peer_planning_receipts_reach_open_desktop_without_refresh() {
     )
     .unwrap();
     let id = home.store.bind_peer_planning(repo, &destination).unwrap();
-    home.store.use_peer_planning(repo, Some(&id)).unwrap();
-    let statuses = read(&|statuses| statuses.iter().any(|status| status.active));
+    home.store.export_peer_planning(repo, &id).unwrap();
+    let statuses = read(&|statuses| !statuses.is_empty());
+    assert!(!statuses[0].active);
     assert_eq!(statuses.len(), 1);
     assert_eq!(statuses[0].id, id);
     assert!(statuses[0].pending_local);
@@ -1056,11 +1057,23 @@ fn peer_planning_receipts_reach_open_desktop_without_refresh() {
     assert_eq!(statuses[0].publication_error.as_deref(), Some("reply lost"));
     assert_eq!(statuses[0].imported_revision, None);
     assert!(statuses[0].pending_local);
-    home.store.use_peer_planning(repo, None).unwrap();
-    let statuses = read(&|statuses| !statuses[0].active);
+    let config_dir = Path::new(repo).join(".lf");
+    std::fs::create_dir_all(&config_dir).unwrap();
+    std::fs::write(
+        config_dir.join("config.yaml"),
+        "planning: {provider: linear}\n",
+    )
+    .unwrap();
+    assert!(read(&|statuses| statuses.is_empty()).is_empty());
+    std::fs::write(
+        config_dir.join("config.yaml"),
+        "planning: {provider: git, shared: team}\n",
+    )
+    .unwrap();
+    let statuses = read(&|statuses| !statuses.is_empty());
     assert_eq!(
         statuses[0].selected_records,
-        home.store.peer_planning_status(repo).unwrap()[0].selected_records
+        home.store.peer_planning_status(repo, None).unwrap()[0].selected_records
     );
     assert_eq!(
         statuses[0].publication_state.as_deref(),

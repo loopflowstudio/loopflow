@@ -124,11 +124,51 @@ pub(crate) async fn configured_destination(store: &Store, repo: &str) -> OpsResu
         .bind_peer_planning(repo, &destination)
         .await
         .map_err(message)?;
-    store
-        .use_peer_planning(repo, Some(&id))
-        .await
-        .map_err(message)?;
     Ok(Some(id))
+}
+
+/// Passive status uses configuration, never a persisted copy of its selection.
+/// Retained routes remain readable in a Work folder without a Git checkout.
+pub(crate) async fn peer_status(
+    store: &Store,
+    repo: &str,
+) -> OpsResult<Vec<crate::store::PeerPlanningStatus>> {
+    let config = crate::config::load_config(Some(Path::new(repo)))
+        .map_err(message)?
+        .unwrap_or_default();
+    let crate::config::PlanningConfig::Git { remote, shared } = config.planning_transport() else {
+        return Ok(Vec::new());
+    };
+    let reference = match shared {
+        Some(name) => Some(format!("refs/loopflow/planning/shared/{name}")),
+        None => store
+            .planning_user_key()
+            .await
+            .map_err(message)?
+            .map(|key| format!("refs/loopflow/planning/users/{key}")),
+    };
+    let active = if crate::repo::discover_repo_root(Path::new(repo))
+        .map_err(message)?
+        .is_some()
+    {
+        reference
+            .map(|reference| {
+                crate::planning_git::PlanningDestination::resolve(
+                    Path::new(repo),
+                    &remote,
+                    &reference,
+                )
+                .map(|destination| destination.id())
+                .map_err(message)
+            })
+            .transpose()?
+    } else {
+        None
+    };
+    store
+        .peer_planning_status(repo, active.as_deref())
+        .await
+        .map_err(message)
 }
 
 async fn exchange_repository(store: &Store, repo: &str, publish: bool) -> OpsResult<()> {

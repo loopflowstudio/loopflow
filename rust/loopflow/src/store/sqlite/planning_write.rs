@@ -557,7 +557,6 @@ mod tests {
                 .unwrap();
         for store in [&a, &b] {
             store.bind_peer_planning("/repo", &route).unwrap();
-            store.use_peer_planning("/repo", Some(&route.id())).unwrap();
         }
         {
             let conn = a.conn.lock().unwrap();
@@ -628,7 +627,6 @@ mod tests {
                 .unwrap();
         for store in [&a, &b] {
             store.bind_peer_planning("/repo", &route).unwrap();
-            store.use_peer_planning("/repo", Some(&route.id())).unwrap();
         }
         let base = a.export_peer_planning("/repo", &route.id()).unwrap();
         b.import_peer_planning("/repo", &route.id(), "base", &base)
@@ -801,7 +799,6 @@ mod tests {
             PlanningDestination::new("/synthetic.git", "refs/loopflow/planning/shared/test")
                 .unwrap();
         store.bind_peer_planning("/repo", &route).unwrap();
-        store.use_peer_planning("/repo", Some(&route.id())).unwrap();
         let mut incoming = store.export_peer_planning("/repo", &route.id()).unwrap();
         let prior = incoming
             .winners()
@@ -845,7 +842,7 @@ mod tests {
             .unwrap();
         let exported = store.export_peer_planning("/repo", &route.id()).unwrap();
         assert_eq!(exported.changes["rejected"], incoming.changes["rejected"]);
-        let status = store.peer_planning_status("/repo").unwrap().remove(0);
+        let status = store.peer_planning_status("/repo", None).unwrap().remove(0);
         assert_eq!(status.conflicts.len(), 1);
         assert_eq!(status.changes, exported.changes);
         assert!(status.candidates.contains("rejected"));

@@ -2095,11 +2095,6 @@ mod local_planning_tests {
         let target_repo = target_path.to_str().unwrap();
         let destination_id = store.bind_peer_planning(repo, &destination).unwrap();
         peer.bind_peer_planning(target_repo, &destination).unwrap();
-        store
-            .use_peer_planning(repo, Some(&destination_id))
-            .unwrap();
-        peer.use_peer_planning(target_repo, Some(&destination_id))
-            .unwrap();
         let snapshot = store.export_peer_planning(repo, &destination_id).unwrap();
         for _ in 0..2 {
             peer.import_peer_planning(target_repo, &destination_id, "fixture", &snapshot)

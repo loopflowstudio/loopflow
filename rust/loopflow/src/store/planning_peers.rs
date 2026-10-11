@@ -35,23 +35,15 @@ pub struct PeerPlanningStatus {
 }
 
 impl Store {
-    pub async fn use_peer_planning(
+    pub async fn peer_planning_status(
         &self,
         repo: &str,
-        destination: Option<&str>,
-    ) -> StoreResult<()> {
+        active: Option<&str>,
+    ) -> StoreResult<Vec<PeerPlanningStatus>> {
         let repo = repo.to_string();
-        let destination = destination.map(str::to_string);
+        let active = active.map(str::to_string);
         run_sqlite(&self.sqlite, move |sqlite| {
-            sqlite.use_peer_planning(&repo, destination.as_deref())
-        })
-        .await
-    }
-
-    pub async fn peer_planning_status(&self, repo: &str) -> StoreResult<Vec<PeerPlanningStatus>> {
-        let repo = repo.to_string();
-        run_sqlite(&self.sqlite, move |sqlite| {
-            sqlite.peer_planning_status(&repo)
+            sqlite.peer_planning_status(&repo, active.as_deref())
         })
         .await
     }

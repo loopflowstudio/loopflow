@@ -240,20 +240,15 @@ CREATE TABLE planning_destinations (
     publication_error TEXT,
     PRIMARY KEY(repo,id)
 );
-CREATE TABLE planning_active (
-    repo TEXT PRIMARY KEY,
-    destination TEXT NOT NULL,
-    FOREIGN KEY(repo,destination) REFERENCES planning_destinations(repo,id)
-);
-CREATE TABLE planning_members (
-    kind TEXT NOT NULL CHECK(kind IN ('waves','projects','tasks','task_comments')),
-    object_id TEXT NOT NULL,
+-- Routing belongs to retained mutations, including rejected imports and records
+-- removed from the live Work tables. A later destination never erases an earlier one.
+CREATE TABLE planning_peer_routes (
+    mutation_id TEXT NOT NULL REFERENCES planning_peer_changes(id),
     repo TEXT NOT NULL,
     destination TEXT NOT NULL,
-    PRIMARY KEY(kind,object_id),
+    PRIMARY KEY(repo,destination,mutation_id),
     FOREIGN KEY(repo,destination) REFERENCES planning_destinations(repo,id)
 );
-CREATE INDEX planning_members_destination ON planning_members(repo,destination);
 CREATE TABLE planning_peer_imports (
     repo TEXT NOT NULL,
     destination TEXT NOT NULL,
@@ -274,17 +269,7 @@ CREATE TRIGGER store_revision_planning_destinations_update AFTER UPDATE ON plann
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
 CREATE TRIGGER store_revision_planning_destinations_delete AFTER DELETE ON planning_destinations
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
-CREATE TRIGGER store_revision_planning_active_insert AFTER INSERT ON planning_active
-BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
-CREATE TRIGGER store_revision_planning_active_update AFTER UPDATE ON planning_active
-BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
-CREATE TRIGGER store_revision_planning_active_delete AFTER DELETE ON planning_active
-BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
-CREATE TRIGGER store_revision_planning_members_insert AFTER INSERT ON planning_members
-BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
-CREATE TRIGGER store_revision_planning_members_update AFTER UPDATE ON planning_members
-BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
-CREATE TRIGGER store_revision_planning_members_delete AFTER DELETE ON planning_members
+CREATE TRIGGER store_revision_planning_peer_routes_insert AFTER INSERT ON planning_peer_routes
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
 CREATE TRIGGER store_revision_planning_peer_imports_insert AFTER INSERT ON planning_peer_imports
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;

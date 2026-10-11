@@ -180,6 +180,13 @@ reused mutation IDs and foreign repository ownership roll back the import. Repea
 imports create no echo edits. Fetch, import and publication have distinct receipts;
 a lost push reply requires readback before publication is reported confirmed.
 
+Current Work ownership selects new Git exports. Each exported or imported mutation
+retains its repository and destination in `planning_peer_routes`, independently of
+live Work rows. Switching refs, moving Work or deleting a row cannot erase earlier
+routing or rejected imports. Status derives the active destination from configuration;
+there is no stored selection or per-Work membership inventory. These routes are
+exchange evidence and grant no Machine placement or first-start authority.
+
 Task and Project Linear field receipts share `sqlite/planning_changes.rs`, with
 separate foreign keys. They retain stable mutation identity, provider baseline and
 conflicting values. An unchanged baseline preserves pending local edits; an observed

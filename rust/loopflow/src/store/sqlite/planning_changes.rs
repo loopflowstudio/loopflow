@@ -385,7 +385,7 @@ impl<'a> PlanningChanges<'a> {
 }
 
 // Linear receipt names belong at the adapter boundary, not in the Work model.
-fn linear_field(edit: &Edit) -> Option<&'static str> {
+pub(super) fn linear_field(edit: &Edit) -> Option<&'static str> {
     match edit {
         Edit::ProjectName(_) | Edit::TaskTitle(_) => Some("name"),
         Edit::ProjectSummary(_) => Some("summary"),

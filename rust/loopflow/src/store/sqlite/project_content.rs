@@ -1,9 +1,8 @@
 //! Project content and stored Wave workflows share one transaction in every repository.
 
 use super::planning_write::{self, PlanningEdit as Edit};
-use crate::planning_exchange::PlanningKind;
+use crate::planning_exchange::{PlanningKind, PlanningObject};
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
-use serde_json::Value;
 
 use crate::durable::ProjectId;
 use crate::id::WaveId;
@@ -34,31 +33,12 @@ impl SqliteStore {
         }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current = super::children::project_in(&tx, project)?;
-        let mut changed = false;
-        for (field, previous, value) in [
-            ("name", current.name, name),
-            ("summary", current.summary, summary),
-        ] {
-            if let Some(value) = value {
-                changed |= PlanningChanges::Project(project).record(
-                    &tx,
-                    field,
-                    Value::String(previous),
-                    Value::String(value.into()),
-                )?;
-            }
-        }
-        if changed {
-            let mut edits = Vec::new();
-            if let Some(name) = name {
-                edits.push(Edit::ProjectName(Some(name.into())));
-            }
-            if let Some(summary) = summary {
-                edits.push(Edit::ProjectSummary(summary.into()));
-            }
-            planning_write::local(&tx, PlanningKind::Project, project.as_str(), &edits)?;
-        }
+        let edits: Vec<_> = name
+            .map(|name| Edit::ProjectName(Some(name.into())))
+            .into_iter()
+            .chain(summary.map(|summary| Edit::ProjectSummary(summary.into())))
+            .collect();
+        write_edits(&tx, project, &edits)?;
         tx.commit()?;
         Ok(())
     }
@@ -94,7 +74,6 @@ impl SqliteStore {
         }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current = super::children::project_in(&tx, project)?;
         let repo: String = tx.query_row(
             "SELECT w.repo FROM projects p JOIN waves w ON w.id=p.wave_id WHERE p.id=?1",
             [project.as_str()],
@@ -102,7 +81,7 @@ impl SqliteStore {
         )?;
         crate::workflow::parse_workflow(name, definition, std::path::Path::new(&repo))
             .map_err(StoreError::InvalidData)?;
-        write_content(&tx, project, name, &current.krs, &current.metric_targets)?;
+        write_edits(&tx, project, &[Edit::Workflow(name.into())])?;
         tx.execute(
             "INSERT INTO wave_workflows(wave_id,name,content)
                 SELECT wave_id,?2,?3 FROM projects WHERE id=?1
@@ -123,49 +102,43 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        write_content(&tx, project, workflow, krs, metric_targets)?;
+        write_edits(
+            &tx,
+            project,
+            &[
+                Edit::Workflow(workflow.into()),
+                Edit::Krs(krs.to_vec()),
+                Edit::MetricTargets(metric_targets.to_vec()),
+            ],
+        )?;
         tx.commit()?;
         Ok(())
     }
 }
 
-pub(super) fn write_content(
+/// Save the same typed values to local Work, Git history and Linear receipts.
+pub(super) fn write_edits(
     conn: &Connection,
     project: &ProjectId,
-    workflow: &str,
-    krs: &[ProjectKR],
-    metric_targets: &[MetricTarget],
+    edits: &[Edit],
 ) -> StoreResult<()> {
-    let current = super::children::project_in(conn, project)?;
-    for (field, previous, value) in [
-        (
-            "workflow",
-            serde_json::to_value(&current.workflow)?,
-            serde_json::to_value(workflow)?,
-        ),
-        (
-            "krs",
-            serde_json::to_value(&current.krs)?,
-            serde_json::to_value(krs)?,
-        ),
-        (
-            "metric_targets",
-            serde_json::to_value(&current.metric_targets)?,
-            serde_json::to_value(metric_targets)?,
-        ),
-    ] {
-        PlanningChanges::Project(project).record(conn, field, previous, value)?;
+    let object = PlanningObject {
+        kind: PlanningKind::Project,
+        id: project.to_string(),
+    };
+    let current = planning_write::read(conn, &object)?;
+    for edit in edits {
+        let field = super::planning_changes::linear_field(edit)
+            .ok_or_else(|| StoreError::InvalidData("Project edit has no Linear field".into()))?;
+        let previous = current
+            .iter()
+            .find(|previous| previous.field() == edit.field())
+            .ok_or_else(|| {
+                StoreError::InvalidData("Project edit belongs to another owner".into())
+            })?;
+        PlanningChanges::Project(project).record(conn, field, previous.value()?, edit.value()?)?;
     }
-    planning_write::local(
-        conn,
-        PlanningKind::Project,
-        project.as_str(),
-        &[
-            Edit::Workflow(workflow.into()),
-            Edit::Krs(krs.to_vec()),
-            Edit::MetricTargets(metric_targets.to_vec()),
-        ],
-    )?;
+    planning_write::local(conn, PlanningKind::Project, project.as_str(), edits)?;
     Ok(())
 }
 

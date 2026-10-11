@@ -97,39 +97,21 @@ impl SqliteStore {
                 )?;
                 durable::inherit_project_placement(&tx, &successor)?;
             } else {
-                let previous = super::children::project_in(&tx, &successor)?;
-                PlanningChanges::Project(&successor).record(
-                    &tx,
-                    "name",
-                    serde_json::json!(previous.name),
-                    serde_json::json!(input.project_name),
-                )?;
-                PlanningChanges::Project(&successor).record(
-                    &tx,
-                    "status",
-                    serde_json::to_value(previous.status)?,
-                    serde_json::json!("started"),
-                )?;
-                super::project_content::write_content(
-                    &tx,
-                    &successor,
-                    &input.workflow,
-                    &input.krs,
-                    &input.metric_targets,
-                )?;
                 let available:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM projects WHERE id=?1 AND wave_id=?2 AND status IN ('backlog','planned','started'))",params![successor.as_str(),input.wave_id],|r|r.get(0))?;
                 if !available {
                     return Err(StoreError::InvalidAuthority(
                         "destination is no longer available".into(),
                     ));
                 }
-                planning_write::local(
+                super::project_content::write_edits(
                     &tx,
-                    PlanningKind::Project,
-                    successor.as_str(),
+                    &successor,
                     &[
                         Edit::ProjectName(Some(input.project_name.clone())),
                         Edit::ProjectStatus(crate::work::project::ProjectStatus::Started),
+                        Edit::Workflow(input.workflow.clone()),
+                        Edit::Krs(input.krs.clone()),
+                        Edit::MetricTargets(input.metric_targets.clone()),
                     ],
                 )?;
             }
@@ -154,16 +136,6 @@ impl SqliteStore {
             {
                 let task_id = TaskId::parse(&task.task.id)
                     .map_err(|e| StoreError::InvalidData(e.to_string()))?;
-                let previous = super::plan_read::task_in(&tx, &task_id)?
-                    .record
-                    .ok_or(StoreError::NotFound)?
-                    .item;
-                PlanningChanges::Task(&task_id).record(
-                    &tx,
-                    "project_id",
-                    serde_json::to_value(previous.project_id)?,
-                    serde_json::json!(successor),
-                )?;
                 let member: bool = tx.query_row(
                     "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND project_id=?2)",
                     params![task.task.id, predecessor],
@@ -174,6 +146,12 @@ impl SqliteStore {
                         "Task membership changed before rotation".into(),
                     ));
                 }
+                PlanningChanges::Task(&task_id).record(
+                    &tx,
+                    "project_id",
+                    serde_json::to_value(predecessor)?,
+                    serde_json::json!(successor),
+                )?;
                 planning_write::local(
                     &tx,
                     PlanningKind::Task,
@@ -194,17 +172,9 @@ impl SqliteStore {
             )?;
             if let Some(predecessor) = predecessor {
                 let id = ProjectId::from_raw(predecessor);
-                let previous = super::plan_read::project_in(&tx, &id)?;
-                PlanningChanges::Project(&id).record(
+                super::project_content::write_edits(
                     &tx,
-                    "status",
-                    serde_json::to_value(previous.status)?,
-                    serde_json::json!("completed"),
-                )?;
-                planning_write::local(
-                    &tx,
-                    PlanningKind::Project,
-                    predecessor,
+                    &id,
                     &[Edit::ProjectStatus(
                         crate::work::project::ProjectStatus::Completed,
                     )],

@@ -196,6 +196,13 @@ Readiness also returns local identity. The surviving reader orders by shared ran
 creation time and ID rather than edit time. Provider adapters compare explicit
 bindings. Rotation retains original receipt bytes and local execution is unchanged.
 
+Project save compression removes `write_content` and the parallel hand-built
+receipt values. Name/summary, workflow selection, content edits and rotation use
+one typed edit slice for receipts and the common writer, sharing acquisition's
+Linear field mapping. Rotation no longer reconstructs PM Project/Task records:
+its membership check supplies the exact previous Project. No schema or receipt
+format changes; prose acquisition and ordinary prose saves remain unfinished.
+
 ### Next coherent cut: Project prose acquisition and receipts
 
 Source reconciliation at `ba8dc94830` (2026-10-10) confirms that Linear's
@@ -314,13 +321,13 @@ Earlier baseline detail: `c8fe4628a:scratch/work-on-another-machine-name.md`.
   cut. Regenerate them after the entire accepted reduction, before review-only
   republication. No readiness or landing follows from this persistence checkpoint.
 
-Checks: `cargo build -p loopflow --bin lf`, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, LF-scrubbed `cargo test -p loopflow --lib project_markdown` (5 tests) and `git diff --check` pass; gate owns composed/materialized acceptance. Earlier parser/conversion checks: `939deb7073:scratch/work-on-another-machine-name.md`.
+Checks: `cargo build -p loopflow --bin lf`, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, LF-scrubbed `cargo test -p loopflow --lib store::sqlite::project_content::tests` (2), `--test local_planning project_` (5), `--test local_planning rotation` (2), and `git diff --check` pass; gate owns composed/materialized acceptance. Earlier parser/conversion checks: `d1e23a736f:scratch/work-on-another-machine-name.md`.
 
-Context: authored memory/scratch fit. `lf context --skill implement` reports the
-generated Task seed/steers and workspace manifest at 19,394 tokens (3,394 over
-16,000); full source `.lf/tmp/context/31f41f1e920e351177aa6506584315bc7a40aad3665bbda3b973441a8167e281.md`.
-Retained Task history and the generated manifest own the excess; authored-note
-curation cannot remove it. No history or limits changed.
+Context: authored memory/scratch fit. `lf context --skill compress` reports the
+generated Task seed/steers and workspace manifest at 19,404 tokens (3,404 over
+16,000); full source `.lf/tmp/context/4b77ceb81b3db84e980b7ec3054f2fa46c0e3a59fe98e1da456f9ffb911558ac.md`.
+The excess belongs to retained Task history/generated metadata, not authored
+notes. No history or limits changed; authored-note curation cannot remove it.
 
 
 ## Delete — do not maintain

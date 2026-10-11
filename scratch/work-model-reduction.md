@@ -133,14 +133,15 @@ An old observation remains old after conversion.
 
 ## 5. Delete the internal Markdown storage round trip
 
-**Locations:** `sqlite/project_content.rs::{write_content,update_project_content,
-select_project_workflow}`, `sqlite/planning_write.rs`'s
+**Locations:** `sqlite/project_content.rs::{update_project_content,select_project_workflow}`, `sqlite/planning_write.rs`'s
 special Project reads/writes and `ops/chapter.rs`. The former `pm/mod.rs` Markdown
 functions now live privately in `pm/project_document.rs` for Linear and migration.
 
 Structured persistence and removal of `read_content`/writer Markdown assembly
 are implemented. Ordinary operations now take typed fields directly; Chapter input
-is flat. The redundant `save_content` forwarding layer is deleted. Migration parses
+is flat. The redundant `save_content` forwarding layer and `write_content` value mirrors
+are deleted. Project saves and rotation derive receipts from the typed edits,
+sharing acquisition’s Linear field mapping; rotation no longer reads PM projections. Migration parses
 released Markdown before journal seeding; malformed content refuses without losing original bytes. Conversion and
 Linear edits share recognized field ranges, preserving fenced examples and unknown
 prose. The private `pm/project_document.rs` parser/renderer owns managed description

@@ -1,8 +1,10 @@
 # Session steer subscriptions
 
 Task `lf-9c03797`, 2026-10-11. Jack Heart accepted the Session-only primitive and
-wrappers for pursuit (“ok, pursue”). Production cutover has not started; the
-handoff authority amendment below remains unapproved.
+wrappers for pursuit (“ok, pursue”). After the stopped Flow reported the Codex
+handoff and OpenCode boundary gaps, Jack Heart renewed pursuit (“pursuse!”).
+Production cutover has not started. The implementation choices below resolve those
+gaps within the accepted scope; provider proofs remain required.
 
 ## Current implementation — reconciled 2026-10-11
 
@@ -45,7 +47,7 @@ This is an indivisible replacement: internal slices, one PR. Delivery ownership,
 launch seeding and old-path deletion cannot ship independently without two cursors.
 No follow-up Tasks are proposed.
 
-## Authority amendment for review — 2026-10-11
+## Provider delivery authority — 2026-10-11
 
 Codex live handoff outlives the launch claim. `store/sqlite/processes.rs::attach_in`
 preserves `agent_process_id` when `replace_provider=false` but always creates a new
@@ -60,7 +62,7 @@ Blindly substituting the current token instead would give an old callback new
 authority, including after A → B → A. Retiring live handoff is outside this Task
 and is explicitly excluded by Infrastructure's AgentProcess direction.
 
-Proposed amendment: distinguish provider-originated context emission from
+Implementation choice: distinguish provider-originated context emission from
 attached-client input. Save the existing AgentProcess ID and provider conversation
 identity with the adapter. Under the existing Session attachment lock, verify that
 the same provider still belongs to the Session, capture the current claim, and
@@ -68,12 +70,15 @@ hold that lock through the bounded output write. Receipts retain both provider
 identity and the claim observed for that attempt. Provider replacement rejects
 the old adapter; attachment-only handoff preserves the provider's adapter.
 This must not upgrade client commands, passive viewers or unrelated callbacks.
-The exact mechanism establishing a callback's provider provenance remains to be
-specified and proved; a caller-supplied Session ID alone is insufficient.
-
-Alternative: explicitly rebind adapters under the handoff fence and revoke already
-prepared callbacks. Neither option is approved. Settle this authority decision and
-prove handoff/replacement before deleting existing delivery.
+Bind the installed adapter to its recorded AgentProcess and native conversation
+through a private launch-owned capability, scoped only to context delivery. Reuse
+existing provider provenance where it establishes that binding; otherwise include
+the capability in the Task's single migration. Do not derive it from the current
+attachment token or accept an arbitrary caller's identities. Attachment-only
+handoff retains the provider capability; provider replacement revokes it. Reject
+child-conversation callbacks. Prove A → B → A handoff, replacement and stale
+callbacks at the public hook boundary. No general process-control authority is
+added. Explicit adapter rebinding is not a second implementation path.
 
 Provider contract findings that survive either choice:
 
@@ -89,9 +94,13 @@ Provider contract findings that survive either choice:
   calls the transform before `handle.process`. Its
   [processor](https://github.com/anomalyco/opencode/blob/v1.18.33/packages/opencode/src/session/processor.ts)
   retries the resulting stream input internally. A callback identifier cannot
-  be labelled a provider request identity. The OpenCode adapter still needs an
-  explicit boundary/retry identity and a pinned protocol fixture; source inspection
-  alone proves no configured delivery.
+  be labelled a provider request identity. Use a locally generated adapter invocation
+  ID, explicitly named as such, for the delivery attempt. Session/publication
+  receipts, not a supposed provider request ID, prevent reselection. Internal
+  provider retries reuse the transformed input; a later callback does not append
+  an emitted publication again. A lost transform remains emitted/unconfirmed under
+  the reviewed retry policy. Pin that behavior in a protocol fixture; source
+  inspection alone proves no configured delivery.
 
 ## The demo
 
@@ -221,8 +230,9 @@ must retain uncertainty rather than manufacture confirmation from exit zero, ela
 time, another tool call or model-generated acknowledgement. Confirmed input never
 means the model understood or followed direction.
 
-Process replacement retains Session receipts. A stale attachment cannot emit or
-advance them. Reconcile prepared attempts using exact attempt/process evidence;
+Process replacement retains Session receipts. A stale attached client cannot emit
+or advance them; the surviving provider's scoped adapter uses the authority above.
+Reconcile prepared attempts using exact attempt/process evidence;
 age alone does not authorize another emitter. No background polling, Stop-hook
 continuation, auto-turn, replacement worker or terminal keystroke injection.
 
@@ -247,7 +257,7 @@ Documentation inspected October 11; these are adapter targets, not configured pr
 | --- | --- | --- |
 | Codex | Synchronous `PostToolUse` additional context; startup/resume/compact and ordinary user continuation share preparation | Documented tools include shell, edits and MCP; shell nonzero exit is covered. Prove nested code-mode visibility and actual enabled surface. Hook stdout alone is unconfirmed. |
 | Claude | `PostToolUse` and `PostToolUseFailure` additional context; startup/resume/compact and ordinary user continuation | Failure hooks exclude pre-execution validation rejection and cancellation. Next supported boundary remains pending. Parallel callbacks share reservations. |
-| OpenCode | Existing messages transform, before a model request after tools | No provider request ID is supplied. Specify boundary/retry identity against pinned 1.18.33 before implementation. Prove error coverage; an ephemeral transform is not durable confirmation. |
+| OpenCode | Existing messages transform, before a model request after tools | Use an adapter invocation ID, not a provider request ID; receipt selection prevents reinjection. Pin retry/error behavior against 1.18.33. An ephemeral transform is not durable confirmation. |
 
 Sources: [Codex hooks](https://learn.chatgpt.com/docs/hooks),
 [Claude hooks](https://code.claude.com/docs/en/hooks),
@@ -260,7 +270,8 @@ the reason and pending count. Already-open providers without the adapter remain 
 start installs the declaration. Codex attachment-only reconnect strips configuration
 overrides and cannot be treated as installation; no hot-reload or retroactive
 installation claim.
-Hooks validate their saved Session/AgentSession and current attachment, not cwd or
+Hooks validate their provider-bound capability and saved Session/AgentSession,
+then observe the current attachment under the shared lock, not from cwd or
 an arbitrary caller-supplied Session ID. Child provider conversations cannot consume
 their parent's receipts.
 
@@ -304,13 +315,13 @@ claiming remote exchange or already-open coverage from local fixture success.
 
 ## Internal slices
 
-1. Resolve the handoff authority amendment and OpenCode boundary/retry identity.
-2. Establish the publication/receipt transaction and released-frontier
+1. **This slice:** establish and test provider-bound emission and OpenCode adapter
+   invocation identity alongside the publication/receipt transaction and released-frontier
    migration; cut launch seeding over and delete old Flow/live-injection ownership
    together. Include minimal provider consumers so removal does not strand delivery.
-3. Complete all provider boundary adapters, exact trust and status/retry surfaces;
+2. Complete all provider boundary adapters, exact trust and status/retry surfaces;
    prove races, process replacement, backlog and bounded source access.
-4. Exercise public CLI/provider fixtures; update `docs/architecture/planning.md`,
+3. Exercise public CLI/provider fixtures; update `docs/architecture/planning.md`,
    `docs/architecture-reference.md` and steering/context command documentation.
    No separate PR or compatibility period between slices.
 

@@ -7,39 +7,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::work::edit::WorkEdit;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[non_exhaustive]
-pub enum PlanningKind {
-    Wave,
-    Project,
-    Task,
-    Comment,
-}
-
-impl PlanningKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Wave => "wave",
-            Self::Project => "project",
-            Self::Task => "task",
-            Self::Comment => "comment",
-        }
-    }
-
-    /// The portable allowlist deliberately excludes execution, paths and controls.
-    pub fn fields(self) -> Vec<&'static str> {
-        crate::work::edit::fields(self)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PlanningObject {
-    pub kind: PlanningKind,
-    pub id: String,
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlanningMutation {
@@ -96,7 +63,7 @@ impl PlanningSnapshot {
                 change.parents.iter().filter(|id| {
                     self.changes
                         .get(*id)
-                        .is_some_and(|parent| parent.edit.object() == change.edit.object())
+                        .is_some_and(|parent| parent.edit.key() == change.edit.key())
                 })
             })
             .collect();
@@ -128,10 +95,7 @@ impl PlanningSnapshot {
                     .ok_or(PlanningExchangeError::Invalid(
                         "missing planning predecessor",
                     ))?;
-                if previous.edit.object() != change.edit.object()
-                    || previous.edit.change.field() != change.edit.change.field()
-                    || previous.clock >= change.clock
-                {
+                if previous.edit.key() != change.edit.key() || previous.clock >= change.clock {
                     return Err(PlanningExchangeError::Invalid("invalid planning causality"));
                 }
             }
@@ -149,7 +113,7 @@ pub(crate) fn winning_heads<'a>(
     for (id, change) in heads {
         let priority = (change.clock, id);
         let winner = fields
-            .entry((change.edit.object(), change.edit.change.field()))
+            .entry(change.edit.key())
             .or_insert((priority, (id, change)));
         if priority > winner.0 {
             *winner = (priority, (id, change));

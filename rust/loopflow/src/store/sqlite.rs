@@ -25,8 +25,9 @@ mod children;
 mod ci_incidents;
 mod durable;
 mod flow_inventory;
+#[cfg(test)]
+mod linear_migration_tests;
 mod metrics;
-pub(crate) mod planning;
 pub(crate) mod planning_changes;
 pub(crate) mod planning_export;
 pub(crate) mod planning_order;

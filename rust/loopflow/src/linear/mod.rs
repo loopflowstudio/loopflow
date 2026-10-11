@@ -1,6 +1,7 @@
 //! Linear acquisition and delivery. Work owns local content; this adapter owns provider facts.
 
 pub(crate) mod acceptance;
+pub(crate) mod observations;
 
 use crate::work::project::{ProjectKR, ProjectStatus};
 use crate::work::wave::metrics::MetricTarget;

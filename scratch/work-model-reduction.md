@@ -9,7 +9,7 @@ approval from Jack. This is accepted scope, with conditional deletions identifie
 
 This audit and [design](work-on-another-machine-name.md) share one delivery scope.
 Canonical readers, concrete observation columns and private acquisition exist.
-Remaining: SQL addresses, receipt/projection reduction, ordinary follow-ups and one cron list. Concrete
+Remaining: Linear receipt/projection reduction, ordinary follow-ups and one cron list. Concrete
 bindings are implemented (§14). All precede Jack Heart's next
 review of PR #1491. Publication is review-only; landing, installation and export
 of actual Work to the public repository remain unauthorized.
@@ -166,18 +166,19 @@ independent object/field/JSON values. Import passes the retained typed edit dire
 Git validation no longer decodes through SQLite. CLI, Swift recovery display and
 the shared DTO fixture consume the same edit. No old wire decoder remains.
 
-**Still delete:** `PlanningKind` / `PlanningObject`, retained SQL kind/field decoding,
-receipt string-field translation and normalization, and the remaining provider
-projection hierarchy. `WorkValue::from_value` still decodes retained SQL columns
-and pending Linear values; moving the former PlanningEdit enum into its Work owner
-has not completed those cuts. The journal's SQL layout is unchanged, preserving
-mutation identities, clocks, parents, losing values and routing evidence.
+`PlanningKind`, `PlanningObject`, SQL field decoders and duplicated mutation
+columns are removed. SQLite retains the same serialized mutation as Git; generated
+target/field/clock indexes serve queries. Private writer-derived table names serve
+routing. Observed heads reference mutation IDs only. Typed reads replace JSON
+round trips; parent-first creation and per-record import savepoints remain.
+Causal parents, competing values, uncertain effects and routing evidence survive.
+Only the Task draft changed; released SQL remains immutable.
 
-Task/Project saves and Task refiling derive Linear receipts from the same typed
-values as the writer. Team/Initiative lists and comment authors remain typed.
-Creation reads typed values, never a reconstructed whole-model JSON field map.
-Released SQLite conversion must continue retaining relationships, authors and
-uncertain receipts; no unreleased draft or released SQL changed in this cut.
+**Still delete:** receipt string-field translation/normalization and creation's
+whole-model baseline. `WorkValue::with_value` remains solely for pending Linear
+receipt decoding; remove it with that cut. Team/Initiative lists and comment
+authors remain typed. Populated conversion and repeated import fixtures retain
+Session turns, claims, activity, capture reservations and cancellation uncertainty.
 
 Keep atomic disposition updates, comment identity, ownership validation, and the
 transaction boundary covering local changes/imports. Serialization at the actual
@@ -196,14 +197,12 @@ reconcile the typed edits passed to the common writer. An explicit Linear field
 mapping limits receipt settlement to supplied fields; provider models are no longer
 serialized, patched and reconstructed. Task membership uses canonical Project IDs.
 Composed prose proof is recorded above. `dac4cb1ba6` confines fetched-model
-acceptance to Linear; `06e95d98fe` removes the generic PM facade. The remaining
-SQLite observation/projection owner and duplicate receipt translation belong to
-the typed-writer cut; adapter confinement is no longer outstanding.
+acceptance to Linear; `06e95d98fe` removes the generic PM facade. Duplicate receipt translation remains; adapter confinement is complete.
+Observation, projection and accepted-revision checks now have concrete owners (§11).
 
 Remaining: remove parallel edit structures that only rename the same values
 (`name`, `issue_title`, `TaskTitle`, for example), receipt string-field addressing
-and duplicated normalization of provider IDs into local owners. The remaining SQL address/receipt
-conversion still owns those cuts.
+and duplicated normalization of provider IDs into local owners. The remaining Linear receipt conversion owns those cuts.
 
 Keep attempted values and their baselines: an acknowledgment of an older attempt
 cannot clear a newer local edit. Preserve conflict values, rebasing of edits not
@@ -215,11 +214,10 @@ is not permission to replace these rules with last-arrival-wins.
 **Locations:** `planning_exchange.rs`, `sqlite/planning_peers.rs`,
 `store/planning_peers.rs`, `planning_git.rs`.
 
-Delete `PlanningKind` / `PlanningObject` as a second public Work vocabulary and
-redundant mutation validation once typed edits define the wire payload. Simplify
-`import_peer_planning`'s generic object reconstruction through the common writer;
-remove transport-specific creation paths and repeated kind-based ownership SQL.
-Keep parent dependency handling, atomic application and failed projections.
+The public object/kind vocabulary and SQL mutation reconstruction are deleted.
+Import groups typed edits through the writer, derives completeness from typed
+reads, retries parent dependencies and retains failed projections. Equal raw IDs
+with distinct typed fields remain independent causal histories.
 
 **Conditional:** `enroll_repository` scans Wave/Project/Task/comment tables on
 use/import/export to populate `planning_members`; `planning_active` mirrors selected
@@ -240,7 +238,7 @@ constant-empty metadata and exclusive fictional fixture cases. Status returns th
 retained `PlanningMutation` map plus ranked candidate IDs; CLI/Desktop show these
 same entries. Values, causal parents, clocks and projection failures survive.
 Candidate means ranked, never applied or published. This is inspection, not another
-writer. The remaining SQL address/routing reduction in sections 6–8 is still required.
+writer. The conditional routing reduction in §8 still requires its preservation proof.
 
 Journal read failure already returns `StoreResult::Err`; WorkReading retains cached
 status and shows that failure. `pending_local` is therefore a required boolean on
@@ -284,10 +282,11 @@ duplicate field translation. Keep immutable creation inputs where an uncertain
 external effect really needs them. PlanningSync, store opening and Wave locks now belong to
 `ops/planning_sync.rs`; Linear observation no longer owns Git exchange.
 
-`store/sqlite/planning.rs` still combines observation invalidation, accepted-revision
-eligibility and retained-ID Work projection. Jack Heart expects this module to
-disappear too. Its responsibilities need concrete owners during the writer cut,
-with duplicate translation deleted; moving the file alone does not satisfy it.
+`store/sqlite/planning.rs` is deleted. Private accepted-Work projection belongs
+to `linear/acceptance.rs`; invalidation, evidence and revision parsing to
+`linear/observations.rs`; accepted-revision delivery eligibility to
+`sqlite/planning_changes.rs`. Receipt translation and creation baseline reduction
+remain; deleting the module does not finish the audit.
 
 Do not unify creation, comments, ordering, deletion and disposition into a new
 universal effect lifecycle merely for symmetry. Their existing receipts,
@@ -392,7 +391,7 @@ alignment in the same diff as public removals.
 
 ## Proof and stop conditions
 
-Remaining order: SQL addresses/receipts and provider projection; follow-ups and cron;
+Remaining order: Linear receipts and creation baselines; follow-ups and cron;
 gate and review. Each cut deletes its replaced paths in the same diff.
 
 Before dropping persistent state, inventory the released frontier and current

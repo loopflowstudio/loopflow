@@ -1402,23 +1402,18 @@ mod tests {
     }
 
     fn apply_project_content_cut(conn: &rusqlite::Connection) -> crate::store::StoreResult<()> {
-        if _draft_is_canonical("local_planning") {
-            apply_sqlite(conn)
-        } else {
-            super::_migration_transaction(conn, |conn| {
-                for draft in crate::build_info::migration_draft_manifest() {
-                    conn.execute_batch(draft.sql)?;
-                    super::seed_peer_planning(conn, draft.sql)?;
-                }
-                super::validate_persisted_json(conn)
-            })
-        }
+        super::_migration_transaction(conn, |conn| {
+            let sql = current_draft_sql("planning_peers");
+            conn.execute_batch(&sql)?;
+            super::seed_peer_planning(conn, &sql)?;
+            super::validate_persisted_json(conn)
+        })
     }
 
     #[test]
     fn structured_project_conversion_refuses_unreadable_criteria_without_losing_original() {
         let conn = open();
-        apply_before_current_draft(&conn, "local_planning");
+        apply_before_current_draft(&conn, "planning_peers");
         conn.execute_batch(include_str!(
             "../../tests/fixtures/migrations/project_content.sql"
         ))
@@ -1655,17 +1650,17 @@ mod tests {
         for (id, field, expected) in [
             (
                 "project-proof",
-                "planning_teams",
+                "project_teams",
                 serde_json::json!(["team-a", "team-b"]),
             ),
             (
                 "project-proof",
-                "planning_initiatives",
+                "project_initiatives",
                 serde_json::json!(["initiative-a"]),
             ),
             (
                 "comment-proof",
-                "content",
+                "comment_content",
                 serde_json::json!({
                     "body":"Keep attribution", "author":{"kind":"person","name":"Maya"}, "created_at":null
                 }),
@@ -1673,7 +1668,7 @@ mod tests {
         ] {
             let value: String = conn
                 .query_row(
-                    "SELECT value FROM planning_peer_changes WHERE object_id=?1 AND field=?2",
+                    "SELECT mutation -> '$.edit.change.value' FROM planning_peer_changes WHERE object_id=?1 AND field=?2",
                     [id, field],
                     |row| row.get(0),
                 )
@@ -1699,7 +1694,7 @@ mod tests {
     #[test]
     fn structured_project_content_preserves_released_work_and_pending_delivery() {
         let conn = open();
-        apply_before_current_draft(&conn, "local_planning");
+        apply_before_current_draft(&conn, "planning_peers");
         conn.execute_batch(include_str!(
             "../../tests/fixtures/migrations/project_content.sql"
         ))
@@ -1774,7 +1769,7 @@ mod tests {
         assert!(conn
             .prepare("SELECT project_prompt_context FROM projects")
             .is_err());
-        let captured: String = conn.query_row("SELECT value FROM planning_peer_changes WHERE object_id='retained-project' AND field='krs'", [], |r| r.get(0)).unwrap();
+        let captured: String = conn.query_row("SELECT mutation -> '$.edit.change.value' FROM planning_peer_changes WHERE object_id='retained-project' AND field='krs'", [], |r| r.get(0)).unwrap();
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(&captured).unwrap(),
             serde_json::from_str::<serde_json::Value>(&krs).unwrap()

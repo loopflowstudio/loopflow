@@ -596,7 +596,7 @@ struct DTOFixtureTests {
         #expect(statuses[0].publicationState == "unconfirmed")
         #expect(statuses[0].importedRevision == "retained-import")
         #expect(statuses[0].fetchedRevision == "newer-fetch")
-        #expect(statuses[0].conflicts[0].object.id == "retained-task")
+        #expect(statuses[0].conflicts[0].target == "retained-task")
         #expect(statuses[1].pendingLocal == true)
         #expect(statuses[1].active)
         #expect(statuses[1].changes["title-loser"]?.edit.change.value == .string("Retained title"))

@@ -617,7 +617,7 @@ acceptance remain at
 Jack Heart selected Linear, shared or default user-keyed Git per repository.
 One typed writer owns local/imported Work; outages buffer without fallback/election.
 Execution/attempts stay local; retain causal losers and uncertainty. Before review:
-finish typed journal, ordinary follow-ups and cron. The generic PM facade is removed;
+finish Linear receipts, ordinary follow-ups and cron. The generic PM facade is removed;
 Task edits/comments and planning exchange now have domain/planning owners.
 
 Canonical readers use Work and narrow retained claims. Delivery needs accepted
@@ -631,8 +631,8 @@ Ordering takes local IDs; new disposition receipts keep state evidence only. Rej
 membership must retain its dispute marker even when Work acceptance rolls back.
 Concrete Linear bindings are separate from repository transport selection.
 Populated fixtures prove stored Session/control preservation, not provider control.
-Typed values are not a typed journal; concrete owners must replace the remaining
-SQLite observation/projection module, not rename it.
+SQLite/Git share typed mutations; duplicate fields and object/kind types are gone.
+Linear owns observation/projection; receipt translation remains.
 Jack Heart excludes old-version support; an unshipped Git encoding needs no dual
 decoder. Released SQLite preservation and selected-format causal history remain
 separate obligations. No configured old-ref conversion need was established.

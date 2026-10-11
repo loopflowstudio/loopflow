@@ -13,11 +13,8 @@
     "pending_local": true,
     "conflicts": [
       {
-        "object": {
-          "kind": "task",
-          "id": "retained-task"
-        },
-        "reason": "retained projection conflict"
+        "reason": "retained projection conflict",
+        "target": "retained-task"
       }
     ],
     "changes": {

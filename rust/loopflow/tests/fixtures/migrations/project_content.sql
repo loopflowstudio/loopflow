@@ -32,8 +32,10 @@ Keep these bytes.
 INSERT INTO project_events(project_id,kind_json,created_at) VALUES('retained-project',
 '{"kind":"iteration_completed","iteration":3,"summary":"Keep judgment"}',7);
 INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,issue_title,issue_description,
-    created_at,updated_at,worktree,workspace_slug,pm_writeback_json)
+    created_at,updated_at,worktree,workspace_slug)
 VALUES('retained-task','retained-project','linear-task','PROOF-1','Retain Task','Keep the brief',1,7,
-    '/retained/task','proof','{"state":"pending","operation":"complete_task","error":"offline"}');
+    '/retained/task','proof');
+INSERT INTO task_state_deliveries(id,task_id,target,attempted,error)
+VALUES('retained-completion','retained-task','completed',1,'offline');
 INSERT INTO task_workflows(task_id,graph,node,updated_at)
 VALUES('retained-task','{"name":"review","nodes":[],"edges":[]}','review',7);

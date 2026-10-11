@@ -108,6 +108,23 @@ fn wait_for(mut condition: impl FnMut() -> bool) {
     }
 }
 
+// Execution fixtures seed SQL directly. Save through the ordinary writer before
+// exercising Git exchange, which publishes only the journal of accepted edits.
+fn save_fixture_task(home: &Path, task: &loopflow::work::task::Task) {
+    let store = loopflow::store::sqlite::SqliteStore::new(&home.join("loopflow.db")).unwrap();
+    let current = store.task(&task.id).unwrap().unwrap();
+    store
+        .edit_task(
+            &current.id,
+            current.revision,
+            &loopflow::work::task::TaskUpdate {
+                title: Some(current.title.clone()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+}
+
 fn status(runtime: &tokio::runtime::Runtime, store: &Store, repo: &str) -> PeerPlanningStatus {
     runtime
         .block_on(store.peer_planning_status(repo))
@@ -141,7 +158,7 @@ fn execution(conn: &Connection, task: &str) -> Vec<Vec<Vec<rusqlite::types::Valu
     .into_iter()
     .map(|table| {
         let (predicate, identity) = if table == "processes" {
-            ("lfid=?1", "00000000-0000-4000-8000-000000000001")
+            ("id=?1", "00000000-0000-4000-8000-000000000001")
         } else {
             ("task_id=?1", task)
         };
@@ -168,6 +185,7 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
     fs::write(left.path().join("config.yaml"), "user:\n  name: Maya\n").unwrap();
     fs::write(right.path().join("config.yaml"), "user:\n  name: Lee\n").unwrap();
     let fixture = support::register_task_with_pr(left.path(), &source, "main", &repo.head_sha());
+    save_fixture_task(left.path(), &fixture.task);
     loopflow::store::sqlite::SqliteStore::new(&left.path().join("loopflow.db"))
         .unwrap()
         .ensure_wave_project(source.to_str().unwrap(), "task-pr-tests")
@@ -201,7 +219,7 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
     });
     let conn = Connection::open(left.path().join("loopflow.db")).unwrap();
     conn.busy_timeout(Duration::from_secs(5)).unwrap();
-    conn.execute("INSERT INTO processes(lfid,trace_id,started_at) VALUES('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000002',1)", []).unwrap();
+    conn.execute("INSERT INTO processes(id,trace_id,started_at) VALUES('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000002',1)", []).unwrap();
     conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,interactive,input_published,cwd,task_id,wave_id)
         VALUES('retained-session','Retained','human',1,1,1,?1,?2,?3)",
         params![source_key,fixture.task.id.as_str(),fixture.task.wave_id.as_str()]).unwrap();
@@ -523,24 +541,14 @@ impl Agent {
         let bin = home.join("bin");
         fs::create_dir(&bin).unwrap();
         let provider = bin.join("claude");
-        fs::write(
-            &provider,
-            r#"#!/bin/sh
-printf 'launch\n' >> "$HOME/launches"
-for argument in "$@"; do
-  if [ "$argument" = --print ]; then cat > /dev/null; fi
-done
-printf 'ready\n' > "$HOME/ready.tmp"
-mv "$HOME/ready.tmp" "$HOME/ready"
-while [ ! -f "$HOME/stop" ]; do sleep 0.1; done
-printf '%s\n' '{"type":"result","subtype":"success","result":"done"}'
-"#,
-        )
-        .unwrap();
+        fs::write(&provider, include_str!("support/holding_provider.py")).unwrap();
         fs::set_permissions(&provider, fs::Permissions::from_mode(0o755)).unwrap();
         let child = command(repo, home)
             .process_group(0)
             .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+            .env("FIXTURE_STARTED", home.join("ready"))
+            .env("FIXTURE_STOP", home.join("stop"))
+            .env("FIXTURE_LAUNCHES", home.join("launches"))
             .args([if interactive { "-i" } else { "-b" }, "-a", "claude:sonnet"])
             .stdin(Stdio::null())
             .stdout(File::create(home.join("agent.stdout")).unwrap())
@@ -693,6 +701,7 @@ fn public_wave_reads_imported_planning_without_placing_or_changing_execution() {
     let source = repo.path().canonicalize().unwrap();
     let target = other.path().canonicalize().unwrap();
     let fixture = support::register_task_with_pr(left.path(), &source, "main", &repo.head_sha());
+    save_fixture_task(left.path(), &fixture.task);
     loopflow::store::sqlite::SqliteStore::new(&left.path().join("loopflow.db"))
         .unwrap()
         .ensure_wave_project(source.to_str().unwrap(), "task-pr-tests")
@@ -727,7 +736,7 @@ fn public_wave_reads_imported_planning_without_placing_or_changing_execution() {
         .is_empty());
     let wave_id = fixture.task.wave_id.as_str();
     let conn = Connection::open(right.path().join("loopflow.db")).unwrap();
-    conn.execute("INSERT INTO processes(lfid,trace_id,started_at) VALUES('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000002',1)", []).unwrap();
+    conn.execute("INSERT INTO processes(id,trace_id,started_at) VALUES('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000002',1)", []).unwrap();
     let retained_task = worker.task(&retained.parse().unwrap()).unwrap().unwrap();
     conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,interactive,input_published,cwd,task_id,wave_id)
         VALUES('retained-session','Retained','human',1,1,1,?1,?2,?3)", params![target_key, retained, retained_task.wave_id.as_str()]).unwrap();
@@ -841,7 +850,7 @@ fn planning_status_reads_retained_journal_without_inventing_recovery_records() {
         .iter()
         .find(|(_, change)| {
             change.edit.target == task
-                && change.edit.change.field() == "issue_title"
+                && change.edit.change.field() == "task_title"
                 && change.edit.change.value().unwrap() == "Same title"
         })
         .unwrap();
@@ -852,7 +861,7 @@ fn planning_status_reads_retained_journal_without_inventing_recovery_records() {
         .iter()
         .find(|(_, change)| {
             change.edit.target == task
-                && change.edit.change.field() == "issue_title"
+                && change.edit.change.field() == "task_title"
                 && change.edit.change.value().unwrap() == "Later title"
         })
         .unwrap();
@@ -872,7 +881,7 @@ fn planning_status_reads_retained_journal_without_inventing_recovery_records() {
     // or overwrite the bytes needed for repair. Work frames carry that read error.
     let conn = Connection::open(home.path().join("loopflow.db")).unwrap();
     conn.execute(
-        "UPDATE planning_peer_changes SET parents='[\"missing\"]' WHERE id=?1",
+        "UPDATE planning_peer_changes SET mutation=json_set(mutation,'$.parents',json('[\"missing\"]')) WHERE id=?1",
         [current_id],
     )
     .unwrap();
@@ -885,7 +894,7 @@ fn planning_status_reads_retained_journal_without_inventing_recovery_records() {
     assert!(String::from_utf8_lossy(&failed.stderr).contains("missing planning predecessor"));
     let retained: String = conn
         .query_row(
-            "SELECT parents FROM planning_peer_changes WHERE id=?1",
+            "SELECT mutation -> '$.parents' FROM planning_peer_changes WHERE id=?1",
             [current_id],
             |row| row.get(0),
         )

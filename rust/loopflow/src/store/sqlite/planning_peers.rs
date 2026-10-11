@@ -3,10 +3,9 @@ use super::{
     planning_write::{self, WriteOrigin},
     SqliteStore,
 };
-use crate::planning_exchange::{PlanningKind, PlanningMutation, PlanningObject, PlanningSnapshot};
+use crate::planning_exchange::{PlanningMutation, PlanningSnapshot};
 use crate::planning_git::PlanningDestination;
 use crate::store::{PeerPlanningStatus, PeerProjectionConflict, StoreError, StoreResult};
-use crate::work::edit::WorkEdit;
 use crate::work::edit::WorkValue;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use sha2::{Digest, Sha256};
@@ -210,32 +209,37 @@ impl SqliteStore {
             .map_err(invalid)?;
         for (id, change) in &incoming.changes {
             planning_write::retain(&tx, id, change)?;
-            tx.execute("INSERT OR IGNORE INTO planning_members(kind,object_id,repo,destination) VALUES(?1,?2,?3,?4)",params![change.edit.change.kind().as_str(),change.edit.target,repo,destination])?;
+            tx.execute("INSERT OR IGNORE INTO planning_members(kind,object_id,repo,destination) VALUES(?1,?2,?3,?4)",params![planning_write::table(&change.edit.change),change.edit.target,repo,destination])?;
         }
         let edits: Vec<_> = merged
             .winners()
             .map(|(_, change)| change.edit.clone())
             .collect();
         let grouped = planning_write::grouped(&edits);
-        let mut pending: Vec<_> = grouped.iter().collect();
+        let mut pending: Vec<_> = grouped
+            .iter()
+            .map(|(record, edits)| (*record, edits))
+            .collect();
         let mut conflicts = BTreeMap::new();
         while !pending.is_empty() {
             let mut retry = Vec::new();
             let mut progress = false;
             conflicts.clear();
-            for (object, edits) in pending {
+            for ((table, target), edits) in pending {
                 let save = tx.savepoint()?;
                 let result = (|| {
-                    if !object
-                        .kind
-                        .fields()
+                    planning_write::ensure_record(&save, repo, table, target, edits)?;
+                    if !planning_write::read(&save, table, target)?
                         .iter()
-                        .all(|field| edits.iter().any(|edit| edit.change.field() == *field))
+                        .all(|value| {
+                            edits
+                                .iter()
+                                .any(|edit| edit.change.field() == value.field())
+                        })
                     {
                         return Err(invalid("incomplete planning record"));
                     }
-                    planning_write::ensure_record(&save, repo, object, edits)?;
-                    require_repository(&save, repo, object)?;
+                    require_repository(&save, repo, table, target)?;
                     // Wave selection points to Projects inserted later in this import.
                     let selected: Vec<_> = edits
                         .iter()
@@ -243,8 +247,8 @@ impl SqliteStore {
                         .cloned()
                         .collect();
                     planning_write::write(&save, &selected, WriteOrigin::Import)?;
-                    require_repository(&save, repo, object)?;
-                    save.execute("INSERT OR IGNORE INTO planning_members(kind,object_id,repo,destination) VALUES(?1,?2,?3,?4)",params![object.kind.as_str(),object.id,repo,destination])?;
+                    require_repository(&save, repo, table, target)?;
+                    save.execute("INSERT OR IGNORE INTO planning_members(kind,object_id,repo,destination) VALUES(?1,?2,?3,?4)",params![table,target,repo,destination])?;
                     Ok::<_, StoreError>(())
                 })();
                 match result {
@@ -257,11 +261,11 @@ impl SqliteStore {
                     {
                         save.finish()?;
                         conflicts.insert(
-                            object.clone(),
+                            (table, target),
                             "Planning parent or identity conflicts with retained local work"
                                 .to_owned(),
                         );
-                        retry.push((object, edits));
+                        retry.push(((table, target), edits));
                     }
                     Err(error) => return Err(error),
                 }
@@ -271,8 +275,8 @@ impl SqliteStore {
             }
             pending = retry;
         }
-        for (object, edits) in &grouped {
-            if conflicts.contains_key(object) {
+        for (&(table, target), edits) in &grouped {
+            if conflicts.contains_key(&(table, target)) {
                 continue;
             }
             for edit in edits
@@ -288,42 +292,40 @@ impl SqliteStore {
                     {
                         save.finish()?;
                         conflicts.insert(
-                            object.clone(),
+                            (table, target),
                             "Selected Project is not available locally".into(),
                         );
                     }
                     Err(StoreError::InvalidAuthority(reason)) => {
                         save.finish()?;
-                        conflicts.insert(object.clone(), reason);
+                        conflicts.insert((table, target), reason);
                     }
                     Err(e) => return Err(e),
                 }
             }
-            {
-                for field in object.kind.fields() {
-                    if field == "current_project_id" && conflicts.contains_key(object) {
-                        continue;
-                    }
-                    planning_write::observe(
-                        &tx,
-                        object,
-                        field,
-                        merged
-                            .heads()
-                            .filter(|(_, c)| {
-                                c.edit.object() == *object && c.edit.change.field() == field
-                            })
-                            .map(|(id, _)| id),
-                    )?;
+            for edit in edits {
+                if matches!(edit.change, WorkValue::WaveProject(_))
+                    && conflicts.contains_key(&(table, target))
+                {
+                    continue;
                 }
+                planning_write::observe(
+                    &tx,
+                    edit,
+                    merged
+                        .heads()
+                        .filter(|(_, change)| change.edit.key() == edit.key())
+                        .map(|(id, _)| id),
+                )?;
             }
         }
+
         tx.execute(
             "UPDATE planning_peer_conflicts SET active=0 WHERE repo=?1",
             [repo],
         )?;
-        for (object, reason) in conflicts {
-            tx.execute("INSERT INTO planning_peer_conflicts(repo,kind,object_id,reason,active) VALUES(?1,?2,?3,?4,1) ON CONFLICT(kind,object_id,reason) DO UPDATE SET active=1",params![repo,object.kind.as_str(),object.id,reason])?;
+        for ((table, target), reason) in conflicts {
+            tx.execute("INSERT INTO planning_peer_conflicts(repo,kind,object_id,reason,active) VALUES(?1,?2,?3,?4,1) ON CONFLICT(kind,object_id,reason) DO UPDATE SET active=1",params![repo,table,target,reason])?;
         }
         tx.execute("INSERT INTO planning_peer_imports(repo,destination,revision) VALUES(?1,?2,?3) ON CONFLICT(repo,destination) DO UPDATE SET revision=excluded.revision WHERE revision IS NOT excluded.revision",params![repo,destination,revision])?;
         tx.commit()?;
@@ -365,29 +367,25 @@ impl SqliteStore {
             let selected_records = snapshot
                 .changes
                 .values()
-                .map(|change| change.edit.object())
+                .map(|change| {
+                    (
+                        planning_write::table(&change.edit.change),
+                        change.edit.target.as_str(),
+                    )
+                })
                 .collect::<BTreeSet<_>>()
                 .len() as u64;
             let candidates = snapshot.winners().map(|(id, _)| id.to_owned()).collect();
-            let mut conflicts=conn.prepare("SELECT kind,object_id,reason FROM planning_peer_conflicts WHERE repo=?1 AND active=1")?;
+            let mut conflicts = conn.prepare(
+                "SELECT object_id,reason FROM planning_peer_conflicts WHERE repo=?1 AND active=1",
+            )?;
             let conflicts = conflicts
-                .query_map([repo], |r| {
-                    Ok((
-                        r.get::<_, String>(0)?,
-                        r.get::<_, String>(1)?,
-                        r.get::<_, String>(2)?,
-                    ))
-                })?
-                .map(|row| {
-                    let (kind, id, reason) = row?;
+                .query_and_then([repo], |row| -> StoreResult<_> {
                     Ok(PeerProjectionConflict {
-                        object: PlanningObject {
-                            kind: serde_json::from_value(kind.into())?,
-                            id,
-                        },
-                        reason,
+                        target: row.get(0)?,
+                        reason: row.get(1)?,
                     })
-                })
+                })?
                 .collect::<StoreResult<Vec<_>>>()?;
             result.push(PeerPlanningStatus {
                 id,
@@ -426,62 +424,47 @@ fn require_destination(conn: &Connection, repo: &str, destination: &str) -> Stor
     }
     Ok(())
 }
-fn require_repository(conn: &Connection, repo: &str, object: &PlanningObject) -> StoreResult<()> {
-    let sql=match object.kind{PlanningKind::Wave=>"SELECT repo FROM waves WHERE id=?1",PlanningKind::Project=>"SELECT w.repo FROM projects p JOIN waves w ON w.id=p.wave_id WHERE p.id=?1",PlanningKind::Task=>"SELECT w.repo FROM tasks t JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id WHERE t.id=?1",PlanningKind::Comment=>"SELECT w.repo FROM task_comments c JOIN tasks t ON t.id=c.task_id JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id WHERE c.id=?1"};
-    let actual: String = conn.query_row(sql, [&object.id], |r| r.get(0))?;
+fn require_repository(conn: &Connection, repo: &str, table: &str, target: &str) -> StoreResult<()> {
+    let sql = match table {
+        "waves" => "SELECT repo FROM waves WHERE id=?1",
+        "projects" => "SELECT w.repo FROM projects p JOIN waves w ON w.id=p.wave_id WHERE p.id=?1",
+        "tasks" => "SELECT w.repo FROM tasks t JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id WHERE t.id=?1",
+        "task_comments" => "SELECT w.repo FROM task_comments c JOIN tasks t ON t.id=c.task_id JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id WHERE c.id=?1",
+        _ => return Err(invalid("unknown Work table")),
+    };
+    let actual: String = conn.query_row(sql, [target], |row| row.get(0))?;
     if actual != repo {
         return Err(invalid("planning record belongs to another repository"));
     }
     Ok(())
 }
+
 fn enroll_repository(conn: &Connection, repo: &str, destination: &str) -> StoreResult<()> {
-    let mut q=conn.prepare("SELECT 'wave',id FROM waves WHERE repo=?1 UNION ALL SELECT 'project',p.id FROM projects p JOIN waves w ON w.id=p.wave_id WHERE w.repo=?1 UNION ALL SELECT 'task',t.id FROM tasks t JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id WHERE w.repo=?1 UNION ALL SELECT 'comment',c.id FROM task_comments c JOIN tasks t ON t.id=c.task_id JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id WHERE w.repo=?1")?;
+    let mut q=conn.prepare("SELECT 'waves',id FROM waves WHERE repo=?1 UNION ALL SELECT 'projects',p.id FROM projects p JOIN waves w ON w.id=p.wave_id WHERE w.repo=?1 UNION ALL SELECT 'tasks',t.id FROM tasks t JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id WHERE w.repo=?1 UNION ALL SELECT 'task_comments',c.id FROM task_comments c JOIN tasks t ON t.id=c.task_id JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id WHERE w.repo=?1")?;
     let rows = q
         .query_map([repo], |r| {
             Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
         })?
         .collect::<Result<Vec<_>, _>>()?;
     for (kind, id) in rows {
-        let object = PlanningObject {
-            kind: serde_json::from_value(kind.clone().into())?,
-            id,
-        };
-        conn.execute("INSERT INTO planning_members(kind,object_id,repo,destination) VALUES(?1,?2,?3,?4) ON CONFLICT(kind,object_id) DO UPDATE SET destination=excluded.destination WHERE repo=excluded.repo AND destination IS NOT excluded.destination",params![kind,object.id,repo,destination])?;
+        conn.execute("INSERT INTO planning_members(kind,object_id,repo,destination) VALUES(?1,?2,?3,?4) ON CONFLICT(kind,object_id) DO UPDATE SET destination=excluded.destination WHERE repo=excluded.repo AND destination IS NOT excluded.destination",params![kind,id,repo,destination])?;
     }
     Ok(())
 }
 fn export_in(conn: &Connection, repo: &str, destination: &str) -> StoreResult<PlanningSnapshot> {
-    let mut q=conn.prepare("SELECT c.id,c.kind,c.object_id,c.field,c.value,c.clock,c.parents FROM planning_peer_changes c JOIN planning_members m ON m.kind=c.kind AND m.object_id=c.object_id WHERE m.repo=?1 AND m.destination=?2")?;
-    let rows = q.query_map(params![repo, destination], |r| {
-        Ok((
-            r.get::<_, String>(0)?,
-            r.get::<_, String>(1)?,
-            r.get::<_, String>(2)?,
-            r.get::<_, String>(3)?,
-            r.get::<_, String>(4)?,
-            r.get::<_, i64>(5)?,
-            r.get::<_, String>(6)?,
-        ))
-    })?;
-    let mut snapshot = PlanningSnapshot::default();
-    for row in rows {
-        let (id, kind, object, field, value, clock, parents) = row?;
-        snapshot.changes.insert(
-            id,
-            PlanningMutation {
-                edit: WorkEdit {
-                    target: object,
-                    change: WorkValue::from_value(
-                        serde_json::from_value(kind.into())?,
-                        &field,
-                        serde_json::from_str(&value)?,
-                    )?,
-                },
-                clock,
-                parents: serde_json::from_str(&parents)?,
-            },
-        );
-    }
+    let mut query = conn.prepare(
+        "SELECT c.id,c.mutation FROM planning_peer_changes c JOIN planning_members m
+         ON m.kind=c.record_table AND m.object_id=c.object_id WHERE m.repo=?1 AND m.destination=?2",
+    )?;
+    let changes = query
+        .query_and_then(params![repo, destination], |row| -> StoreResult<_> {
+            Ok((
+                row.get(0)?,
+                serde_json::from_str::<PlanningMutation>(&row.get::<_, String>(1)?)?,
+            ))
+        })?
+        .collect::<StoreResult<BTreeMap<_, _>>>()?;
+    let snapshot = PlanningSnapshot { changes };
     snapshot.validate().map_err(invalid)?;
     Ok(snapshot)
 }

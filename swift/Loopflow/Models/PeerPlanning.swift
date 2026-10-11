@@ -31,12 +31,7 @@ public struct PeerPlanningStatus: Decodable, Sendable, Equatable, Identifiable {
 }
 
 public struct PeerProjectionConflict: Decodable, Sendable, Equatable {
-    public struct Object: Decodable, Sendable, Equatable {
-        public let kind: String
-        public let id: String
-    }
-
-    public let object: Object
+    public let target: String
     public let reason: String
 }
 

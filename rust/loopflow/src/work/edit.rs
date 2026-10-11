@@ -1,5 +1,4 @@
 //! Shared Work values. Execution, Workflow positions, paths and controls are absent.
-use crate::planning_exchange::{PlanningKind, PlanningObject};
 use crate::store::{StoreError, StoreResult};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -24,11 +23,8 @@ impl WorkEdit {
             .collect()
     }
 
-    pub(crate) fn object(&self) -> PlanningObject {
-        PlanningObject {
-            kind: self.change.kind(),
-            id: self.target.clone(),
-        }
+    pub(crate) fn key(&self) -> (&str, &str) {
+        (&self.target, self.change.field())
     }
 }
 
@@ -47,99 +43,63 @@ pub struct CommentContent {
     pub created_at: Option<String>,
 }
 
-macro_rules! planning_fields {
-    ($(($kind:ident, $variant:ident, $column:literal, $value:ty)),* $(,)?) => {
+macro_rules! work_values {
+    ($(($variant:ident, $field:literal, $value:ty)),* $(,)?) => {
         #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-        #[serde(tag = "field", content = "value", rename_all = "snake_case", deny_unknown_fields)]
+        #[serde(tag = "field", content = "value", deny_unknown_fields)]
         pub enum WorkValue {
-            $($variant($value),)*
-            Workflow(String),
-            Krs(Vec<crate::work::project::ProjectKR>),
-            MetricTargets(Vec<crate::work::wave::metrics::MetricTarget>),
-            Disposition(Disposition),
-            CommentContent(CommentContent),
+            $(#[serde(rename = $field)] $variant($value),)*
         }
         impl WorkValue {
-            pub(crate) fn from_value(kind: PlanningKind, field: &str, value: Value) -> StoreResult<Self> {
-                let edit=match (kind, field) {
-                    $((PlanningKind::$kind, $column) => Self::$variant(serde_json::from_value(value)?),)*
-                    (PlanningKind::Project, "workflow") => Self::Workflow(serde_json::from_value(value)?),
-                    (PlanningKind::Project, "krs") => Self::Krs(serde_json::from_value(value)?),
-                    (PlanningKind::Project, "metric_targets") => Self::MetricTargets(serde_json::from_value(value)?),
-                    (PlanningKind::Task, "disposition") => Self::Disposition(serde_json::from_value(value)?),
-                    (PlanningKind::Comment, "content") => Self::CommentContent(serde_json::from_value(value)?),
-                    _ => return Err(StoreError::InvalidData("unknown planning field".into())),
-                };
-                edit.validate()?;
-                Ok(edit)
-            }
-            pub(crate) fn kind(&self) -> PlanningKind {
-                match self {
-                    $(Self::$variant(_) => PlanningKind::$kind,)*
-                    Self::Workflow(_) | Self::Krs(_) | Self::MetricTargets(_) => PlanningKind::Project,
-                    Self::Disposition(_) => PlanningKind::Task,
-                    Self::CommentContent(_) => PlanningKind::Comment,
-                }
-            }
+            /// The typed variant is also its portable conflict key.
             pub fn field(&self) -> &'static str {
-                match self {
-                    $(Self::$variant(_) => $column,)*
-                    Self::Workflow(_) => "workflow", Self::Krs(_) => "krs",
-                    Self::MetricTargets(_) => "metric_targets", Self::Disposition(_) => "disposition",
-                    Self::CommentContent(_) => "content",
-                }
+                match self { $(Self::$variant(_) => $field,)* }
             }
             pub fn value(&self) -> StoreResult<Value> {
-                Ok(match self {
-                    $(Self::$variant(v) => serde_json::to_value(v)?,)*
-                    Self::Workflow(v) => serde_json::to_value(v)?,
-                    Self::Krs(v) => serde_json::to_value(v)?,
-                    Self::MetricTargets(v) => serde_json::to_value(v)?,
-                    Self::Disposition(v) => serde_json::to_value(v)?,
-                    Self::CommentContent(v) => serde_json::to_value(v)?,
-                })
+                Ok(match self { $(Self::$variant(v) => serde_json::to_value(v)?,)* })
             }
-        }
-        pub(crate) fn fields(kind: PlanningKind) -> Vec<&'static str> {
-            let mut fields = Vec::new();
-            $(if kind == PlanningKind::$kind { fields.push($column); })*
-            fields.extend(match kind {
-                PlanningKind::Wave => &[][..],
-                PlanningKind::Project => &["workflow", "krs", "metric_targets"],
-                PlanningKind::Task => &["disposition"],
-                PlanningKind::Comment => &["content"],
-            });
-            fields
+            pub(crate) fn with_value(&self, value: Value) -> StoreResult<Self> {
+                let value: Self = serde_json::from_value(serde_json::json!({
+                    "field": self.field(), "value": value,
+                }))?;
+                value.validate()?;
+                Ok(value)
+            }
         }
     }
 }
-planning_fields! {
-    (Wave, WaveName, "name", String),
-    (Wave, WaveParent, "parent_wave_id", Option<String>),
-    (Wave, WaveProject, "current_project_id", Option<String>),
-    (Project, ProjectWave, "wave_id", String),
-    (Project, ProjectLinearId, "external_project_id", Option<String>),
-    (Project, ProjectSlug, "project_slug", Option<String>),
-    (Project, ProjectName, "project_name", Option<String>),
-    (Project, ProjectSummary, "project_summary", String),
-    (Project, ProjectDescription, "description", Option<String>),
-    (Project, ProjectStatus, "status", crate::work::project::ProjectStatus),
-    (Project, ProjectRank, "planning_rank", u32),
-    (Project, ProjectInitiatives, "planning_initiatives", Vec<String>),
-    (Project, ProjectTeams, "planning_teams", Vec<String>),
-    (Task, TaskProject, "project_id", String),
-    (Task, TaskLinearId, "external_issue_id", Option<String>),
-    (Task, TaskIdentifier, "issue_identifier", String),
-    (Task, TaskTitle, "issue_title", Option<String>),
-    (Task, TaskDescription, "issue_description", Option<String>),
-    (Task, TaskRank, "planning_rank", u32),
-    (Task, TaskAssignee, "planning_assignee", Option<String>),
-    (Task, TaskDueDate, "planning_due_date", Option<String>),
-    (Task, TaskDeletedAt, "planning_deleted_at", Option<i64>),
-    (Task, TaskUrl, "planning_url", Option<String>),
-    (Task, TaskBranch, "planning_branch_name", Option<String>),
-    (Task, TaskTeam, "planning_team_id", Option<String>),
-    (Comment, CommentTask, "task_id", String),
+work_values! {
+    (WaveName, "wave_name", String),
+    (WaveParent, "wave_parent", Option<String>),
+    (WaveProject, "wave_project", Option<String>),
+    (ProjectWave, "project_wave", String),
+    (ProjectLinearId, "project_linear_id", Option<String>),
+    (ProjectSlug, "project_slug", Option<String>),
+    (ProjectName, "project_name", Option<String>),
+    (ProjectSummary, "project_summary", String),
+    (ProjectDescription, "project_description", Option<String>),
+    (ProjectStatus, "project_status", crate::work::project::ProjectStatus),
+    (ProjectRank, "project_rank", u32),
+    (ProjectInitiatives, "project_initiatives", Vec<String>),
+    (ProjectTeams, "project_teams", Vec<String>),
+    (TaskProject, "task_project", String),
+    (TaskLinearId, "task_linear_id", Option<String>),
+    (TaskIdentifier, "task_identifier", String),
+    (TaskTitle, "task_title", Option<String>),
+    (TaskDescription, "task_description", Option<String>),
+    (TaskRank, "task_rank", u32),
+    (TaskAssignee, "task_assignee", Option<String>),
+    (TaskDueDate, "task_due_date", Option<String>),
+    (TaskDeletedAt, "task_deleted_at", Option<i64>),
+    (TaskUrl, "task_url", Option<String>),
+    (TaskBranch, "task_branch", Option<String>),
+    (TaskTeam, "task_team", Option<String>),
+    (CommentTask, "comment_task", String),
+    (Workflow, "workflow", String),
+    (Krs, "krs", Vec<crate::work::project::ProjectKR>),
+    (MetricTargets, "metric_targets", Vec<crate::work::wave::metrics::MetricTarget>),
+    (Disposition, "disposition", Disposition),
+    (CommentContent, "comment_content", CommentContent),
 }
 
 impl WorkValue {

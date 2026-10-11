@@ -1,16 +1,18 @@
 //! Accept fetched Linear facts and canonical Work atomically. Foreign observations,
 //! membership disputes and independent revisions belong to this adapter.
 
+use super::observations::revision_nanos;
 use super::LinearProject;
 use crate::durable::ProjectId;
 use crate::id::WaveId;
 use crate::linear::LinearIssue;
-use crate::store::sqlite::planning::{
-    associate_project, project_accepted_planning, require_accepted_initiative, revision_nanos,
-};
 use crate::store::sqlite::{self, SqliteStore};
+use crate::store::sqlite::{
+    planning_changes, planning_export, planning_write, task_state_delivery,
+};
 use crate::store::{run_planning_write, PlanningLocks, Store, StoreError, StoreResult};
-use rusqlite::{named_params, params, Connection, OptionalExtension};
+use crate::work::edit::{Disposition, WorkValue as Edit};
+use rusqlite::{named_params, params, Connection, OptionalExtension, Transaction};
 use std::sync::Arc;
 
 pub(crate) async fn accept_linear_inventory(
@@ -662,6 +664,294 @@ fn observe_order(
         observed.push(id);
     }
     sqlite::planning_order::observe_in(conn, repo, external, &project, observed)
+}
+
+// Both durable projections require the same confirmed Initiative/Wave association.
+// A partial read supplies that association without advancing full-Wave freshness.
+const ACCEPTED_WAVE_PROJECTS: &str = "
+    SELECT p.*,m.wave_id FROM pm_projects p
+    JOIN pm_wave_projects m ON m.project_id=p.id
+    LEFT JOIN pm_wave_sync sync ON sync.wave_id=m.wave_id AND sync.provider=p.provider
+    JOIN waves w ON w.id=m.wave_id AND w.repo=p.repo
+    WHERE p.repo=?1 AND p.provider=?2 AND p.archived=0 AND p.membership_unresolved=0
+    AND json_array_length(p.initiative_ids)=1
+    AND json_extract(p.initiative_ids,'$[0]')=
+        CASE WHEN m.wave_id=?4 THEN ?5 ELSE sync.initiative END";
+
+/// Inputs select IDs only; project their accepted rows inside the ingestion transaction.
+fn project_accepted_planning(
+    tx: &Transaction<'_>,
+    repo: &str,
+    projects: &[&str],
+    items: &[&str],
+    confirmed_wave: Option<(&WaveId, &str)>,
+) -> StoreResult<()> {
+    let (confirmed_wave, confirmed_initiative) = confirmed_wave.unzip();
+    let project_ids = serde_json::to_string(projects)?;
+    let item_ids = serde_json::to_string(items)?;
+    let mut query = tx.prepare(&format!(
+        "WITH accepted AS ({ACCEPTED_WAVE_PROJECTS})
+         SELECT id,observed_at,wave_id,revision,
+             slug,name,
+             summary,json_quote(status),
+             workflow,krs,
+             metric_targets,initiative_ids,
+             team_ids,
+             CASE WHEN description_revision IS revision THEN description END
+         FROM accepted WHERE id IN (SELECT value FROM json_each(?3))"
+    ))?;
+    let observations = query
+        .query_and_then(
+            params![
+                repo,
+                "linear",
+                project_ids,
+                confirmed_wave,
+                confirmed_initiative
+            ],
+            |row| -> StoreResult<_> {
+                let external: String = row.get(0)?;
+                let wave: WaveId = row.get(2)?;
+                let mut edits = vec![
+                    Edit::ProjectWave(wave.to_string()),
+                    Edit::ProjectLinearId(Some(external.clone())),
+                    Edit::ProjectSlug(Some(row.get(4)?)),
+                    Edit::ProjectName(Some(row.get(5)?)),
+                    Edit::ProjectSummary(row.get(6)?),
+                    Edit::ProjectStatus(serde_json::from_str(&row.get::<_, String>(7)?)?),
+                    Edit::Workflow(row.get(8)?),
+                    Edit::Krs(serde_json::from_str(&row.get::<_, String>(9)?)?),
+                    Edit::MetricTargets(serde_json::from_str(&row.get::<_, String>(10)?)?),
+                    Edit::ProjectInitiatives(serde_json::from_str(&row.get::<_, String>(11)?)?),
+                    Edit::ProjectTeams(serde_json::from_str(&row.get::<_, String>(12)?)?),
+                ];
+                if let Some(description) = row.get::<_, Option<String>>(13)? {
+                    edits.push(Edit::ProjectDescription(Some(description)));
+                }
+                Ok((
+                    external,
+                    row.get::<_, i64>(1)?,
+                    wave,
+                    row.get::<_, Option<String>>(3)?,
+                    edits,
+                ))
+            },
+        )?
+        .collect::<StoreResult<Vec<_>>>()?;
+    drop(query);
+    for (external, observed_at, wave_id, revision, mut edits) in observations {
+        planning_export::attach_in(tx, repo, true, &external, revision.as_deref(), &edits)?;
+        let existing: Option<(String, WaveId)> = tx
+            .query_row(
+                "SELECT id,wave_id FROM projects WHERE external_project_id=?1",
+                [&external],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        let id = match existing {
+            Some((_, owner)) if owner != wave_id => {
+                return Err(StoreError::InvalidData(format!(
+                    "Project {external} changed Wave ownership"
+                )));
+            }
+            Some((id, _)) => {
+                ProjectId::parse(&id).map_err(|error| StoreError::InvalidData(error.to_string()))
+            }?,
+            None => ProjectId::new(),
+        };
+        let rank: Option<u32> = tx
+            .query_row(
+                "SELECT position FROM pm_wave_projects WHERE wave_id=?1 AND project_id=?2",
+                params![wave_id, external],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if let Some(rank) = rank {
+            edits.push(Edit::ProjectRank(rank));
+        }
+        planning_changes::PlanningChanges::Project(&id).reconcile_edits(
+            tx,
+            revision.as_deref(),
+            &mut edits,
+        )?;
+        planning_write::create(
+            tx,
+            repo,
+            &crate::work::edit::WorkEdit::for_target(id.as_str(), &edits),
+        )?;
+        tx.execute("UPDATE projects SET pm_snapshot_synced_at=?2,planning_provider_revision=?3 WHERE id=?1",params![id.as_str(),observed_at,revision])?;
+    }
+    let mut query = tx.prepare(
+        "SELECT id,revision,name,description,assignee,project_id
+         FROM pm_items WHERE repo=?1 AND provider='linear' AND needs_refresh=0
+         AND id IN (SELECT value FROM json_each(?2))",
+    )?;
+    let observed = query
+        .query_map(params![repo, item_ids], |row| {
+            let mut edits = vec![
+                Edit::TaskTitle(Some(row.get(2)?)),
+                Edit::TaskDescription(Some(row.get(3)?)),
+                Edit::TaskAssignee(row.get(4)?),
+            ];
+            if let Some(project) = row.get::<_, Option<String>>(5)? {
+                edits.push(Edit::TaskProject(project));
+            }
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                edits,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    drop(query);
+    for (id, revision, edits) in observed {
+        planning_export::attach_in(tx, repo, false, &id, revision.as_deref(), &edits)?;
+    }
+    // Admission and refresh share one accepted observation. Existing Tasks retain
+    // their IDs, local order and pending disposition; new Tasks receive only Work.
+    let mut query = tx.prepare(&format!(
+        "WITH accepted AS ({ACCEPTED_WAVE_PROJECTS})
+         SELECT target.id,json_object('revision',i.revision,'state',i.state,'completed',json(CASE i.completed WHEN 1 THEN 'true' ELSE 'false' END),'completed_at',i.completed_at),i.observed_at,p.id,i.id,
+             i.revision,i.identifier,
+             i.name,i.description,
+             i.rank,i.url,
+             i.branch_name,i.team_id,
+             i.assignee,i.due_date,
+             i.state,i.completed,
+             i.completed_at FROM pm_items i
+         JOIN projects p ON p.external_project_id=i.project_id
+         JOIN accepted observed ON observed.id=i.project_id AND observed.wave_id=p.wave_id
+         LEFT JOIN tasks target ON target.external_issue_id=i.id
+         LEFT JOIN projects current ON current.id=target.project_id
+         WHERE i.repo=?1 AND i.provider=?2 AND i.needs_refresh=0
+         AND i.id IN (SELECT value FROM json_each(?3))
+         AND (target.id IS NULL OR current.wave_id=p.wave_id OR EXISTS(
+             SELECT 1 FROM task_changes c WHERE c.task_id=target.id AND c.field='project_id'
+             AND c.acknowledged=0 AND c.conflict_json IS NULL AND json_extract(c.value_json,'$')=current.id
+             AND c.seq=(SELECT max(seq) FROM task_changes WHERE task_id=target.id AND field='project_id')))
+         AND NOT EXISTS(SELECT 1 FROM task_deletions d
+             WHERE d.wave_id=COALESCE(current.wave_id,p.wave_id) AND d.issue_id=i.id)
+         AND NOT EXISTS(SELECT 1 FROM pm_issue_changes c WHERE c.issue_id=i.id
+             AND c.removed=1)"
+    ))?;
+    let observations = query
+        .query_map(
+            params![
+                repo,
+                "linear",
+                item_ids,
+                confirmed_wave,
+                confirmed_initiative
+            ],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    vec![
+                        Edit::TaskProject(row.get(3)?),
+                        Edit::TaskLinearId(Some(row.get(4)?)),
+                        Edit::TaskIdentifier(row.get(6)?),
+                        Edit::TaskTitle(Some(row.get(7)?)),
+                        Edit::TaskDescription(Some(row.get(8)?)),
+                        Edit::TaskRank(row.get(9)?),
+                        Edit::TaskUrl(row.get(10)?),
+                        Edit::TaskBranch(row.get(11)?),
+                        Edit::TaskTeam(row.get(12)?),
+                        Edit::TaskAssignee(row.get(13)?),
+                        Edit::TaskDueDate(row.get(14)?),
+                    ],
+                    Disposition {
+                        planning_state: row.get(15)?,
+                        planning_completed: i64::from(row.get::<_, bool>(16)?),
+                        planning_completed_at: row.get(17)?,
+                    },
+                ))
+            },
+        )?
+        .collect::<Result<Vec<_>, _>>()?;
+    drop(query);
+    for (existing, body, observed_at, external, revision, mut edits, disposition) in observations {
+        let id = existing.as_ref().map_or_else(
+            || crate::durable::TaskId::from_issue(&external),
+            crate::durable::TaskId::from_raw,
+        );
+        edits.push(Edit::Disposition(disposition.clone()));
+        if existing.is_some() {
+            task_state_delivery::reconcile_in(tx, &id, revision.as_deref(), &disposition, &body)?;
+            let pending: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM task_state_deliveries WHERE task_id=?1 AND settled=0
+                 AND seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=?1))",
+                [id.as_str()],
+                |row| row.get(0),
+            )?;
+            planning_changes::PlanningChanges::Task(&id).reconcile_edits(
+                tx,
+                revision.as_deref(),
+                &mut edits,
+            )?;
+            edits.retain(|edit| {
+                !matches!(edit, Edit::TaskRank(_))
+                    && (!pending || !matches!(edit, Edit::Disposition(_)))
+            });
+        }
+        planning_write::create(
+            tx,
+            repo,
+            &crate::work::edit::WorkEdit::for_target(id.as_str(), &edits),
+        )?;
+        tx.execute(
+            "UPDATE tasks SET planning_provider_revision=?2,pm_snapshot_synced_at=?3 WHERE id=?1",
+            params![id.as_str(), revision, observed_at],
+        )?;
+    }
+    Ok(())
+}
+
+fn associate_project(
+    tx: &Transaction<'_>,
+    repo: &str,
+    project_id: &str,
+    wave: &WaveId,
+    initiative: &str,
+) -> StoreResult<()> {
+    require_accepted_initiative(tx, repo, project_id, initiative)?;
+    let wave_repo: String = tx.query_row("SELECT repo FROM waves WHERE id=?1", [wave], |row| {
+        row.get(0)
+    })?;
+    if wave_repo != repo {
+        return Err(StoreError::InvalidData(
+            "confirmed Wave belongs to another repository".into(),
+        ));
+    }
+    tx.execute(
+        "INSERT INTO pm_wave_projects(wave_id,project_id,position)
+         VALUES(?1,?2,(SELECT COALESCE(MAX(position)+1,0) FROM pm_wave_projects WHERE wave_id=?1))
+         ON CONFLICT(wave_id,project_id) DO NOTHING",
+        params![wave, project_id],
+    )?;
+    Ok(())
+}
+
+fn require_accepted_initiative(
+    conn: &Connection,
+    repo: &str,
+    project_id: &str,
+    initiative: &str,
+) -> StoreResult<()> {
+    let initiatives: String = conn.query_row(
+        "SELECT initiative_ids FROM pm_projects WHERE repo=?1 AND provider=?2 AND id=?3",
+        params![repo, "linear", project_id],
+        |row| row.get(0),
+    )?;
+    if serde_json::from_str::<Vec<String>>(&initiatives)?.as_slice() != [initiative] {
+        return Err(StoreError::InvalidData(format!(
+            "accepted Project {project_id} does not belong to Initiative {initiative}"
+        )));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

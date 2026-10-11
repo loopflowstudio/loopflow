@@ -130,18 +130,15 @@ BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; EN
 -- Local-only Git planning. Linear effects keep their existing local owners.
 CREATE TABLE planning_peer_changes (
     id TEXT PRIMARY KEY,
-    kind TEXT NOT NULL CHECK(kind IN ('wave','project','task','comment')),
-    object_id TEXT NOT NULL,
-    field TEXT NOT NULL,
-    value TEXT NOT NULL CHECK(json_valid(value)),
-    clock INTEGER NOT NULL CHECK(clock>=0),
-    parents TEXT NOT NULL CHECK(json_valid(parents))
+    record_table TEXT NOT NULL CHECK(record_table IN ('waves','projects','tasks','task_comments')),
+    mutation TEXT NOT NULL CHECK(json_valid(mutation)),
+    object_id TEXT GENERATED ALWAYS AS (json_extract(mutation,'$.edit.target')) VIRTUAL NOT NULL,
+    field TEXT GENERATED ALWAYS AS (json_extract(mutation,'$.edit.change.field')) VIRTUAL NOT NULL,
+    clock INTEGER GENERATED ALWAYS AS (json_extract(mutation,'$.clock')) VIRTUAL NOT NULL CHECK(clock>=0)
 );
-CREATE INDEX planning_peer_changes_object ON planning_peer_changes(kind,object_id,field);
+CREATE INDEX planning_peer_changes_object ON planning_peer_changes(object_id,field);
 CREATE TABLE planning_peer_observed (
-    object_id TEXT NOT NULL,
-    id TEXT NOT NULL REFERENCES planning_peer_changes(id),
-    PRIMARY KEY(object_id,id)
+    id TEXT PRIMARY KEY REFERENCES planning_peer_changes(id)
 );
 CREATE TABLE planning_user (
     singleton INTEGER PRIMARY KEY CHECK(singleton=1),
@@ -166,7 +163,7 @@ CREATE TABLE planning_active (
     FOREIGN KEY(repo,destination) REFERENCES planning_destinations(repo,id)
 );
 CREATE TABLE planning_members (
-    kind TEXT NOT NULL CHECK(kind IN ('wave','project','task','comment')),
+    kind TEXT NOT NULL CHECK(kind IN ('waves','projects','tasks','task_comments')),
     object_id TEXT NOT NULL,
     repo TEXT NOT NULL,
     destination TEXT NOT NULL,

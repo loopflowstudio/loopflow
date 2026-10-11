@@ -46,7 +46,7 @@ struct PeerPlanningView: View {
             if let error = destination.publicationError { Text(error) }
             ForEach(destination.conflicts.indices, id: \.self) { index in
                 let conflict = destination.conflicts[index]
-                Text("Held \(conflict.object.kind) \(conflict.object.id): \(conflict.reason)")
+                Text("Held \(conflict.target): \(conflict.reason)")
             }
             ForEach(destination.changes.keys.sorted(), id: \.self) { id in
                 if let change = destination.changes[id] {

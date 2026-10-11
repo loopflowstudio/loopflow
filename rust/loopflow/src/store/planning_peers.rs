@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::planning_exchange::{PlanningMutation, PlanningObject};
+use crate::planning_exchange::PlanningMutation;
 
 use crate::planning_git::PlanningDestination;
 
@@ -8,7 +8,7 @@ use super::{run_sqlite, Store, StoreResult};
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PeerProjectionConflict {
-    pub object: PlanningObject,
+    pub target: String,
     pub reason: String,
 }
 

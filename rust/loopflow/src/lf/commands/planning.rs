@@ -125,17 +125,11 @@ async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
             println!("  {error}");
         }
         for conflict in destination.conflicts {
-            println!(
-                "  Held {} {}: {}",
-                conflict.object.kind.as_str(),
-                conflict.object.id,
-                conflict.reason
-            );
+            println!("  Held {}: {}", conflict.target, conflict.reason);
         }
         for (id, change) in destination.changes {
             println!(
-                "  {} {} {} [{}; {}]: {}",
-                change.edit.change.kind().as_str(),
+                "  {} {} [{}; {}]: {}",
                 change.edit.target,
                 change.edit.change.field(),
                 id,

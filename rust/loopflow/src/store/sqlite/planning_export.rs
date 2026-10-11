@@ -174,7 +174,7 @@ impl SqliteStore {
 
 // Called by every ingestion path before it can allocate a new local identity.
 // Only an attempted receipt can claim the exact generated UUID. Ordinary title matches do nothing.
-pub(super) fn attach_in(
+pub(crate) fn attach_in(
     conn: &Connection,
     repo: &str,
     project: bool,

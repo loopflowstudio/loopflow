@@ -1,7 +1,6 @@
 //! Field receipts share one protocol; each object's table retains its foreign key.
 
 use super::planning_write;
-use crate::planning_exchange::{PlanningKind, PlanningObject};
 use crate::work::edit::WorkValue as Edit;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::Value;
@@ -12,6 +11,43 @@ use crate::store::planning_sync::PlanningChange;
 use crate::store::{StoreError, StoreResult};
 
 impl SqliteStore {
+    /// Delivery requires the fetched revision to have reached this Task's Work row.
+    /// Retaining an observation (including a foreign or rejected one) is insufficient.
+    pub(crate) fn accepted_task_revision(
+        &self,
+        task: &crate::durable::TaskId,
+        issue: &str,
+        revision: Option<&str>,
+    ) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND external_issue_id=?2
+             AND planning_provider_revision=?3)",
+            params![task.as_str(), issue, revision],
+            |row| row.get(0),
+        )?)
+    }
+
+    /// Retained observations do not authorize delivery until accepted into Work.
+    pub(crate) fn accepted_project_revision(
+        &self,
+        project: &ProjectId,
+        external: &str,
+        revision: Option<&str>,
+    ) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM projects p
+             JOIN waves w ON w.id=p.wave_id
+             JOIN pm_projects observed ON observed.repo=w.repo
+                 AND observed.provider='linear' AND observed.id=p.external_project_id
+             WHERE p.id=?1 AND p.external_project_id=?2 AND p.planning_provider_revision=?3
+                 AND observed.archived=0 AND observed.membership_unresolved=0)",
+            params![project.as_str(), external, revision],
+            |row| row.get(0),
+        )?)
+    }
+
     pub(crate) fn planning_field_owners(
         &self,
         repo: &str,
@@ -98,8 +134,8 @@ impl SqliteStore {
             // Deletion competes with the whole issue. Only an explicitly active
             // issue at a newer revision can restore planning visibility.
             if baseline.is_some()
-                && super::planning::revision_nanos(Some(revision))?
-                    > super::planning::revision_nanos(baseline)?
+                && crate::linear::observations::revision_nanos(Some(revision))?
+                    > crate::linear::observations::revision_nanos(baseline)?
             {
                 tx.execute(
                     "UPDATE task_changes SET conflict_json=?2,error=NULL WHERE id=?1 AND conflict_json IS NULL",
@@ -129,8 +165,8 @@ impl SqliteStore {
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         if let Some(revision) = revision {
             let retained = PlanningChanges::Task(id).observed_revision(&tx)?;
-            if super::planning::revision_nanos(Some(revision))?
-                < super::planning::revision_nanos(retained.as_deref())?
+            if crate::linear::observations::revision_nanos(Some(revision))?
+                < crate::linear::observations::revision_nanos(retained.as_deref())?
             {
                 return Ok(false);
             }
@@ -177,15 +213,11 @@ impl<'a> PlanningChanges<'a> {
         if edits.is_empty() {
             return Ok(());
         }
-        let kind = match self {
-            Self::Task(_) => PlanningKind::Task,
-            Self::Project(_) => PlanningKind::Project,
+        let table = match self {
+            Self::Task(_) => "tasks",
+            Self::Project(_) => "projects",
         };
-        let object = PlanningObject {
-            kind,
-            id: self.owner().1.to_owned(),
-        };
-        let current = planning_write::read(conn, &object)?;
+        let current = planning_write::read(conn, table, self.owner().1)?;
         for edit in edits {
             let field = linear_field(edit)
                 .ok_or_else(|| StoreError::InvalidData("Edit has no Linear field".into()))?;
@@ -197,7 +229,7 @@ impl<'a> PlanningChanges<'a> {
         }
         planning_write::local(
             conn,
-            &crate::work::edit::WorkEdit::for_target(&object.id, edits),
+            &crate::work::edit::WorkEdit::for_target(self.owner().1, edits),
         )?;
         Ok(())
     }
@@ -224,8 +256,8 @@ impl<'a> PlanningChanges<'a> {
                 continue;
             };
             let remote = self.normalize(conn, &field, remote.clone())?;
-            if super::planning::revision_nanos(observed["revision"].as_str())?
-                < super::planning::revision_nanos(
+            if crate::linear::observations::revision_nanos(observed["revision"].as_str())?
+                < crate::linear::observations::revision_nanos(
                     base.as_ref().and_then(|b| b["revision"].as_str()),
                 )?
             {
@@ -412,7 +444,7 @@ impl<'a> PlanningChanges<'a> {
 
     /// Unchanged baselines preserve saves; observed conflicts retire their delivery.
     /// Both values remain in the receipt. Only attempted writes can be acknowledged.
-    pub(super) fn reconcile_edits(
+    pub(crate) fn reconcile_edits(
         self,
         conn: &Connection,
         revision: Option<&str>,
@@ -446,7 +478,7 @@ impl<'a> PlanningChanges<'a> {
                 )?;
             } else {
                 // Decode only the saved field, never reconstruct a provider model.
-                *edit = Edit::from_value(edit.kind(), edit.field(), change.value)?;
+                *edit = edit.with_value(change.value)?;
             }
         }
         Ok(())

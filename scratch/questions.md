@@ -33,7 +33,7 @@ misses stay on Git. Linear refresh retains unmapped local Projects without looku
 Populated migration/import fixtures now cover Session turns, capture reservations,
 attachment claims/activity and an uncertain local cancellation receipt. This proves
 stored preservation, not configured provider control.
-The typed local writer/journal now shares WorkEdit. SQL address/receipt reduction,
+The typed local writer/journal now shares WorkEdit. Linear receipt/creation baseline reduction,
 historical follow-through effects and cron conversion remain before gate/republication. Earlier acquisition/fixture review findings:
 `1930805f40:scratch/questions.md`; no installation or stopped-Flow replay occurred.
 
@@ -44,8 +44,8 @@ The moved `ops/task.rs::resolve_saved_task` now uses the shared fallible
 source readback confirms the repair. CLI admission can initialize a fresh registry,
 so the earlier finding never established a public cold-start failure.
 
-Jack Heart expects `planning.rs` to disappear with the model reduction. Root
-`src/planning.rs` is deleted; the remaining SQLite module combines Linear observation
-and accepted-Work projection. Give surviving responsibilities their concrete owners
-while deleting duplicate translation in the typed-writer cut; relocation alone is
-not completion.
+Both `planning.rs` modules are deleted. Linear acceptance owns projection,
+Linear observations own invalidation/evidence, and field delivery owns accepted
+revision eligibility. The journal stores typed mutations directly; receipt
+translation and generic creation baselines still need deletion. Module removal
+alone does not complete Jack Heart's audit.

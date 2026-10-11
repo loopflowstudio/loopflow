@@ -87,8 +87,8 @@ pub(crate) fn reconcile_in(
         attempted,
         ..
     } = delivery;
-    if super::planning::revision_nanos(observed_revision)?
-        < super::planning::revision_nanos(revision.as_deref())?
+    if crate::linear::observations::revision_nanos(observed_revision)?
+        < crate::linear::observations::revision_nanos(revision.as_deref())?
     {
         return Ok(false);
     }

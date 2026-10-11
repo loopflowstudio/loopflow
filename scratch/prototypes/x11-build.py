@@ -131,7 +131,7 @@ main = f'''
   <h2><code>lf</code>: the CLI for launching coding agents.</h2>
   <div class="halves">
     <article>
-      <p>Underneath Loopflow’s task-centered API is <code>lf</code>. It combines your agent sessions with the work between sessions, the worktree before and the pull request and merge after, so the whole thing is software engineering. One command says where an agent runs, on whose login, with which model, on which piece of work, and what it does.</p>
+      <p>Underneath Loopflow’s task-centered API is <code>lf</code>. Most of software engineering happens between agent sessions: cutting the branch, opening the pull request, getting it merged. <code>lf</code> does that part too. One command says where an agent runs, on whose login, with which model, on which piece of work, and what it does.</p>
       <p>It scales across your machines and your subscriptions: private, secure remote jobs and telemetry made easy through <code>ssh</code>, and multi-subscription balancing that moves to the next login when one runs out.</p>
       <p class="more"><a href="/cli">The CLI ↗</a><a href="/docs/authoring#flows">Skills and Graphs ↗</a></p>
     </article>

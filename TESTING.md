@@ -1231,3 +1231,6 @@ Headless shutdown checks run on Linux as well as macOS: fast provider exit must
 settle its owned lifeline watchdog without mistaking it for foreign work. Include
 `launch_nonzero_exit`, bare/default launch, mixed-provider Flow and headless resume;
 Session interactivity must not select an individual launch’s process-group policy.
+Changes to AgentProcess launch-mode recording also run the complete
+`session_record::runtime::tests` module: native refusal and headless cleanup
+fixtures must declare opposite launch modes, independent of Session defaults.

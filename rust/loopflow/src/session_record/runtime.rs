@@ -416,7 +416,7 @@ mod tests {
             let mut command = std::process::Command::new("/bin/sleep");
             command.env_clear().arg("60").process_group(0);
             store
-                .record_agent_process_launch("resume", &attachment, &command, false)
+                .record_agent_process_launch("resume", &attachment, &command, true)
                 .unwrap();
             let mut child = Child(command.spawn().unwrap());
             let pid = child.0.id();

@@ -702,3 +702,5 @@ strip links to its own site in a new tab.
 - Jack Heart: "coding agent launcher" → the `x11` CLI section opens "Underneath Loopflow's task-centered API is a coding agent launcher, `lf`." Claude applied it to that sentence; the section heading is unchanged.
 
 - Jack Heart: "the CLI for launching coding agents" → the `x11` CLI section heading is "`lf`: the CLI for launching coding agents."
+
+- Jack Heart: "Something that says we combine your agent sessions with the work between sessions to do software engineering or something" → the `x11` CLI section's first paragraph: "Underneath Loopflow's task-centered API is `lf`. It combines your agent sessions with the work between sessions, the worktree before and the pull request and merge after, so the whole thing is software engineering. One command says where an agent runs, on whose login, with which model, on which piece of work, and what it does." Placement and the middle clause are Claude's. "a coding agent launcher" and "Set it once in a Graph…" are dropped from the paragraph; the heading carries the launcher phrase.

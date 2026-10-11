@@ -27,16 +27,6 @@ public typealias RegistryRunner = @Sendable (_ lfArgs: [String], _ cwd: String?)
 /// for the command through its `RegistryRunner`.
 public typealias RegistryStarter = @Sendable (_ lfArgs: [String], _ cwd: String?) async throws -> Void
 
-/// Entry emitted by `lf list --json`.
-public struct DiscoveryEntry: Codable, Equatable, Sendable, Identifiable {
-    public let name: String
-    public let kind: String
-    public let source: String
-    public let description: String
-    public let invocation: String
-    public var id: String { name }
-}
-
 public struct RegistryQuery: Sendable {
     public private(set) var remoteMachine: String?
     private var run: RegistryRunner

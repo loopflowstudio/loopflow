@@ -229,8 +229,6 @@ extension WorkProjection {
         }
         return rows
     }
-
-
 }
 
 /// One exact Session's assignment confirmation, retained through a failed commit.
@@ -301,7 +299,6 @@ final class WorkNavigation {
     }
     var renaming: SessionRenameDraft?
     var binding: SessionBindingDraft?
-    var showsHeadlessSessions = false
     /// Flow drafts by planning Task id; they survive Task and Session navigation.
     var taskRunDrafts: [String: TaskRunDraft] = [:]
     var startingTaskSessions: Set<String> = []

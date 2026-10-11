@@ -286,8 +286,6 @@ struct WorkNavigationTests {
         let taskRow = try #require(outline.first { $0.id.work.id == "issue-review" })
         #expect(taskRow.inlineSessions.count == 3)
         #expect(!model.paletteRows.contains { $0.title == "idle" })
-        model.navigation.showsHeadlessSessions = true
-        #expect(model.visibleSessions.map(\.id) == ["idle", "active", "review", "background"])
         #expect(model.sessions.value?.count == 5)
     }
 

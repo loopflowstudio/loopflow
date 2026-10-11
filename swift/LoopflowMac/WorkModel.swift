@@ -481,15 +481,13 @@ final class WorkModel {
             if case .session = $0.content { return true }
             return false
         } ?? false
-        if retainedConversation {
-            openTaskDestination(wave: found.wave, task: found.task)
-            navigation.content = .terminals
-            return
-        }
-        if taskOpening?.status == .opening, taskLinkExpectedID == found.task.id, taskLinkConversation { return }
+        if !retainedConversation, taskOpening?.status == .opening,
+           taskLinkExpectedID == found.task.id, taskLinkConversation { return }
         openTaskDestination(wave: found.wave, task: found.task)
         navigation.content = .terminals
-        await openTaskLink(url, expectedTaskID: found.task.id, conversation: true)
+        if !retainedConversation {
+            await openTaskLink(url, expectedTaskID: found.task.id, conversation: true)
+        }
     }
 
     func openPaletteTask(_ id: String) async {
@@ -605,7 +603,7 @@ final class WorkModel {
     }
 
     func isSessionVisible(_ session: SessionRecord) -> Bool {
-        session.state != .closed && (navigation.showsHeadlessSessions || session.interactive)
+        session.state != .closed && session.interactive
     }
 
     var visibleWork: WorkProjection {
@@ -953,7 +951,7 @@ final class WorkModel {
         let shown = selection.flatMap { $0.kind == .task ? task(id: $0.id) : nil }
         return WorkScope(
             repo: repoPath,
-            headless: navigation.showsHeadlessSessions,
+            headless: false,
             task: shown?.task.task.identifier,
             wave: detailWaveId,
             activity: activityScope(for: selection))
@@ -1040,7 +1038,7 @@ final class WorkModel {
                 break
             }
             guard body.repo.normalizedFilePath == repoPath.normalizedFilePath,
-                  body.includesHeadless == navigation.showsHeadlessSessions else { return }
+                  !body.includesHeadless else { return }
             let remote = (sessions.value ?? []).filter { $0.workspace?.machineId != nil && $0.workspace?.machineId != frame.home }
             let next = WorkReading.available(body.entries + remote)
             if sessions != next { sessions = next }
@@ -1048,8 +1046,7 @@ final class WorkModel {
                 LaunchJournal.home.refreshed("sessions", ms: workOpened.elapsedMs, ok: true)
             }
             endLaunchWhenCurrent()
-            // Explicit history is read on request, never restored at launch.
-            if !body.includesHeadless, let page = frame.wire?.sessionPage {
+            if let page = frame.wire?.sessionPage {
                 cache?.saveSessions([page], repo: repoPath)
             }
         case .task(let body):
@@ -1412,16 +1409,14 @@ final class WorkModel {
         let initialIDs = Set((sessions.value ?? []).map(\.id))
         var records: [SessionRecord] = []
         var after: String?
-        let includingHeadless = navigation.showsHeadlessSessions
         let wire = WireCapture()
         let query = query.recording(wire.record)
         let started = ContinuousClock.now
         do {
             repeat {
-                let page = try await query.sessionPage(includingHeadless: includingHeadless, after: after, cwd: repoPath)
+                let page = try await query.sessionPage(includingHeadless: false, after: after, cwd: repoPath)
                 guard sessionsGeneration == generation, self.repoPath == repoPath,
                       repositoryReadingKey(repoPath) == key,
-                      navigation.showsHeadlessSessions == includingHeadless,
                       !Task.isCancelled else { return }
                 records += page.entries
                 let seen = Set(records.map(\.id))
@@ -1437,8 +1432,7 @@ final class WorkModel {
             savedSessionRepos.remove(repositoryReadingKey(repoPath))
             LaunchJournal.home.refreshed("sessions", ms: started.elapsedMs, ok: true)
             endLaunchWhenCurrent()
-            // Explicit history is read on request, never restored at launch.
-            if !includingHeadless { cache?.saveSessions(wire.texts, repo: repoPath) }
+            cache?.saveSessions(wire.texts, repo: repoPath)
         } catch {
             guard sessionsGeneration == generation, self.repoPath == repoPath,
                       repositoryReadingKey(repoPath) == key,

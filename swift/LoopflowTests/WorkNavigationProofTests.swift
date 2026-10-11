@@ -378,14 +378,10 @@ struct WorkNavigationProofTests {
         // Hidden headless Sessions stay selected, with the same native panes.
         try await named.headlessUnbound("first")
         await model.refreshSessions()
-        for visible in [true, false, true] {
-            model.navigation.showsHeadlessSessions = visible
-            await model.refreshSessions()
-            try await settle(window)
-            #expect(model.navigation.selectedSessionId == "first")
-            #expect(workspace.multiplexer.layout == layout)
-            #expect(terminals[0].surface == surfaces[0])
-        }
+        try await settle(window)
+        #expect(model.navigation.selectedSessionId == "first")
+        #expect(workspace.multiplexer.layout == layout)
+        #expect(terminals[0].surface == surfaces[0])
         try view.inspect().find(viewWithAccessibilityIdentifier: "session-bind").button().tap()
         model.navigation.binding?.selector = "W2-131"
         await model.previewSessionBinding()

@@ -260,7 +260,7 @@ struct SessionChromeProofTests {
         let inventory = PaletteSessionInventory(sessions)
         let query = RegistryQuery { args, _ in
             if args.prefix(2) == ["wave", "show"] { return roadmap }
-            if args.first == "session" { return try await inventory.read() }
+            if args.first == "session" { return await inventory.read() }
             if args.first == "flow" { return flows }
             if args.first == "wave" { return "[]" }
             throw RegistryQueryError("No launch or mutation authorized by palette inspection")
@@ -469,12 +469,9 @@ struct SessionChromeProofTests {
 }
 private actor PaletteSessionInventory {
     private var value: String
-    private var failed = false
     init(_ value: String) { self.value = value }
-    func replace(_ value: String) { self.value = value; failed = false }
-    func fail() { failed = true }
-    func read() throws -> String {
-        if failed { throw RegistryQueryError("Session read unavailable") }
+    func replace(_ value: String) { self.value = value }
+    func read() -> String {
         return #"{"entries":\#(value),"next":null}"#
     }
 }

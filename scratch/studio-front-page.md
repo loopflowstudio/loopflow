@@ -765,3 +765,5 @@ strip links to its own site in a new tab.
 - Jack Heart: "cut It cuts the branch, opens the pull request and gets it merged. One command says where an agent runs, on whose login, with which model, on which piece of work, and what it does." → removed from the `x12` CLI paragraph, which is now his one sentence.
 
 - Jack Heart: "can we also see some usage / telemetry in action", then "in the right hand" → the `x12` command card (right side) continues after `lf land --watch` with `lf account` showing three logins and what is left on each, `lf usage --wt slow-loop` with sessions, tokens and cost, and `lf --machine mini monitor` with running and waiting counts. The output lines are drawn for the page.
+
+- Jack Heart, on the closing line "Agents make software cheap. Loopflow makes it yours.": "kinda out of nowere now?" → yes; the section that set it up is gone. In `x12` the closing line is "Scale yourself." above the second Download, echoing the header.

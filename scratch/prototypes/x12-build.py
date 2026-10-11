@@ -173,7 +173,7 @@ main = f'''
   </ul>
 </section>
 <section class="belief">
-  <p>Agents make software cheap. Loopflow makes it yours.</p>
+  <p>Scale yourself.</p>
   <div class="get"><a class="button solid" href="/download">Download for Mac</a></div>
 </section>
 '''

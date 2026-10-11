@@ -203,7 +203,11 @@ fn prepend_test_bin(command: &mut Command, home: &Path) {
     command.env("PATH", std::env::join_paths(paths).expect("test PATH"));
 }
 
-fn seed_stale_project_work(home: &Path, abandon_stale_project: bool, current_task: bool) {
+fn seed_stale_project_work(
+    home: &Path,
+    abandon_stale_project: bool,
+    current_task: bool,
+) -> PmSnapshotRow {
     const STALE_WORK_ID: &str = "proj_e972b70272fbb5e91c096ebe657f9f9b";
     const STALE_PROJECT_ID: &str = "f56c583c-c360-4dc4-ba12-4b5a02268623";
     const STALE_TASK_WORK_ID: &str = "task_40fbeeaadfbca5367aa7391432ae84ff";
@@ -375,15 +379,15 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool, current_tas
             }
         ]
     });
-    store
-        .put_pm_snapshot(&PmSnapshotRow {
-            wave_id: wave.id().clone(),
-            provider: "linear".to_string(),
-            initiative: "initiative-product".to_string(),
-            synced_at: now.unix_timestamp(),
-            snapshot: serde_json::from_value(payload).expect("parse PM snapshot"),
-        })
-        .expect("seed PM snapshot");
+    let snapshot = PmSnapshotRow {
+        wave_id: wave.id().clone(),
+        provider: "linear".into(),
+        initiative: "initiative-product".into(),
+        synced_at: now.unix_timestamp(),
+        snapshot: serde_json::from_value(payload).unwrap(),
+    };
+    store.put_pm_snapshot(&snapshot).expect("seed PM snapshot");
+    snapshot
 }
 
 fn seed_persisted_merge_request_without_copy(home: &Path) {
@@ -1019,7 +1023,7 @@ fn exact_task_roadmap_retains_history_without_starting_work() {
 #[test]
 fn exact_task_roadmap_scopes_duplicate_identifiers_to_registered_repositories() {
     let home = tempfile::tempdir().unwrap();
-    seed_stale_project_work(home.path(), false, false);
+    let mut snapshot = seed_stale_project_work(home.path(), false, false);
     let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
     let original = store.list_waves(None).unwrap().remove(0);
     let other_repo = home.path().join("other-repo");
@@ -1031,7 +1035,6 @@ fn exact_task_roadmap_scopes_duplicate_identifiers_to_registered_repositories() 
         other_repo.display().to_string(),
     );
     store.create_wave(&other).unwrap();
-    let mut snapshot = store.pm_snapshot(original.id()).unwrap().unwrap();
     snapshot.snapshot.projects[0].id = "other-project".into();
     snapshot.snapshot.projects[0].initiative_ids = vec!["other-initiative".into()];
     snapshot.snapshot.items[0].id = "other-task".into();
@@ -1087,11 +1090,8 @@ fn exact_task_roadmap_scopes_duplicate_identifiers_to_registered_repositories() 
 #[test]
 fn ordinary_task_due_date_is_visible_before_checkout() {
     let home = tempfile::tempdir().unwrap();
-    seed_stale_project_work(home.path(), false, false);
+    let mut planning = seed_stale_project_work(home.path(), false, false);
     let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
-    let source_id = TaskId::parse(PERSISTED_TASK_ID).unwrap();
-    let source = store.task(&source_id).unwrap().unwrap();
-    let mut planning = store.pm_snapshot(&source.wave_id).unwrap().unwrap();
     let mut child = planning.snapshot.items[0].clone();
     child.id = "follow-up-issue".into();
     child.identifier = "W2-FOLLOW".into();

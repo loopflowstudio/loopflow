@@ -569,13 +569,7 @@ async fn explicit_sync_converts_legacy_flow_without_renaming_or_losing_content()
         provider.lock().await.projects["00000000-0000-4000-8000-000000000001"].clone();
     assert_ne!(observed.as_object_mut().unwrap().remove("updatedAt"), None);
     assert_eq!(observed, expected);
-    let snapshot = store.pm_snapshot(&task.wave_id).await.unwrap().unwrap();
-    let snapshot = snapshot.snapshot;
-    let synced = snapshot
-        .projects
-        .iter()
-        .find(|project| project.id == "00000000-0000-4000-8000-000000000001")
-        .unwrap();
+    let synced = store.get_project(&task.project_id).await.unwrap().unwrap();
     assert_eq!(synced.workflow, "custom");
     assert_eq!(synced.krs.len(), 1);
     assert_eq!(synced.krs[0].text, "Keep this KR");

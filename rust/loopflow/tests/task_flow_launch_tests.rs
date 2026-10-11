@@ -666,21 +666,27 @@ fn checkout_leaves_workflow_selection_to_the_first_run() {
     fixture.repo.push_new_branch("main");
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let store = &fixture.registered.store;
+    let scope = fixture
+        .repo
+        .path()
+        .canonicalize()
+        .unwrap()
+        .display()
+        .to_string();
     let sqlite =
         loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
             .unwrap();
-    let mut snapshot = runtime
-        .block_on(store.pm_snapshot(&fixture.registered.task.wave_id))
+    let mut observation = runtime
+        .block_on(store.pm_task_observation(&scope, "linear", &fixture.registered.task.identifier))
         .unwrap()
+        .record
         .unwrap();
-    let mut item = snapshot.snapshot.items[0].clone();
-    item.id = "unplaced-issue".into();
-    item.identifier = "INF-124".into();
-    item.name = "Workflow chosen at first run".into();
-    item.branch_name = None;
-    snapshot.snapshot.items.push(item);
+    observation.item.id = "unplaced-issue".into();
+    observation.item.identifier = "INF-124".into();
+    observation.item.name = "Workflow chosen at first run".into();
+    observation.item.branch_name = None;
     runtime
-        .block_on(store.put_pm_snapshot(snapshot, None))
+        .block_on(store.put_pm_task(&scope, "linear", observation, None, None))
         .unwrap();
     let task = runtime
         .block_on(store.get_task_by_issue("INF-124"))

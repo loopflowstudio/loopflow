@@ -292,6 +292,11 @@ impl<'a> PlanningChanges<'a> {
             .query_row(observation, [id], |row| row.get(0))
             .optional()?;
         let mut body: Option<Value> = body.map(|body| serde_json::from_str(&body)).transpose()?;
+        // An acquired issue is an active observation. Deletion competes with
+        // that whole issue revision, although the issue body has no `deleted` field.
+        if let (Self::Task(_), Some(Value::Object(body))) = (self, body.as_mut()) {
+            body.insert("deleted".into(), Value::Bool(false));
+        }
         if let (Self::Project(id), Some(body)) = (self, body.as_mut()) {
             let prose: Option<String> = conn.query_row(
                 "SELECT o.prose_json FROM projects p JOIN waves w ON w.id=p.wave_id

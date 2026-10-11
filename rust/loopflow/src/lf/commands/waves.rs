@@ -2648,9 +2648,16 @@ mod tests {
             items[0].status,
             crate::work::project::ProjectStatus::Started
         );
-        let mut unreadable = store.pm_snapshot(wave.id()).await.unwrap().unwrap();
-        unreadable.snapshot.projects.clear();
-        unreadable.snapshot.items.clear();
+        let unreadable = crate::store::PmSnapshotRow {
+            wave_id: wave.id().clone(),
+            provider: "linear".into(),
+            initiative: "initiative".into(),
+            synced_at: 3,
+            snapshot: crate::pm::PmSnapshot {
+                projects: vec![],
+                items: vec![],
+            },
+        };
         assert!(store.put_pm_snapshot(unreadable, None).await.is_err());
         assert!(matches!(
             super::project_planning(&store, &wave).await,
@@ -2765,7 +2772,10 @@ mod tests {
             &guard,
         )
         .unwrap();
-        let before = store.pm_snapshot(wave.id()).await.unwrap().unwrap();
+        let before = (
+            store.list_projects(Some(wave.id())).await.unwrap(),
+            store.list_tasks(Some(wave.id())).await.unwrap(),
+        );
         for _ in 0..2 {
             let current = crate::ops::project::current_project(&store, &wave).unwrap();
             assert_eq!(current.linear_id.as_ref().unwrap().as_str(), selected);
@@ -2811,9 +2821,11 @@ mod tests {
             );
             assert!(tasks.unavailable_tasks.is_empty());
         }
-        let after = store.pm_snapshot(wave.id()).await.unwrap().unwrap();
-        assert_eq!(before.snapshot, after.snapshot);
-        assert_eq!(before.synced_at, after.synced_at);
+        let after = (
+            store.list_projects(Some(wave.id())).await.unwrap(),
+            store.list_tasks(Some(wave.id())).await.unwrap(),
+        );
+        assert_eq!(before, after);
         // An unaccepted UUID cannot become a selection or silently pick another Project.
         assert!(
             crate::store::sqlite::project_selection::write_project_binding(

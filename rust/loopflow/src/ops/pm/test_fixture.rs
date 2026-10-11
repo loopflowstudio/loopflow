@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use rusqlite::OptionalExtension;
 use tempfile::TempDir;
 
 use super::PmTestContext;
@@ -29,6 +30,18 @@ impl Fixture {
             database,
             store,
         }
+    }
+
+    pub(super) fn wave_refresh_at(&self, wave: &Wave) -> Option<i64> {
+        rusqlite::Connection::open(&self.database)
+            .unwrap()
+            .query_row(
+                "SELECT synced_at FROM pm_wave_sync WHERE wave_id=?1",
+                [wave.id().as_str()],
+                |r| r.get(0),
+            )
+            .optional()
+            .unwrap()
     }
 
     pub(super) fn context(&self, graphql_url: &str) -> PmTestContext {

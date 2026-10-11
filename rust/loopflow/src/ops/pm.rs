@@ -936,7 +936,13 @@ pub(crate) async fn resolve_saved_task(
         ),
         None => None,
     };
-    if owner.repo() != canonical.to_string()
+    let locator = crate::work::wave::WaveLocator::new(canonical, owner.slug())
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    let scoped_owner = store
+        .get_wave_at(&locator)
+        .await
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    if scoped_owner.as_ref().map(|wave| wave.id()) != Some(owner.id())
         || expected_wave
             .as_ref()
             .is_some_and(|expected| expected.id() != owner.id())
@@ -3018,14 +3024,13 @@ mod tests {
                     assert!(pm.linear_initiative.is_some());
                     let locator = crate::work::wave::WaveLocator::discover(repo.path(), wave).unwrap();
                     let registered = resolved.store.get_wave_at(&locator).await.unwrap().unwrap();
-                    let planning = resolved
-                        .store
-                        .pm_snapshot(registered.id())
-                        .await
-                        .unwrap()
-                        .unwrap();
-                    assert_eq!(planning.snapshot.projects.len(), 1);
-                    assert_eq!(planning.snapshot.projects[0].team_ids, ["team-loo"]);
+                    let projects = resolved.store.list_projects(Some(registered.id())).await.unwrap();
+                    assert_eq!(projects.len(), 1);
+                    let teams: String = rusqlite::Connection::open(&database).unwrap().query_row(
+                        "SELECT json_extract(body,'$.team_ids') FROM pm_projects WHERE id=?1",
+                        [projects[0].linear_id.as_ref().unwrap().as_str()], |r| r.get(0)
+                    ).unwrap();
+                    assert_eq!(serde_json::from_str::<Vec<String>>(&teams).unwrap(), ["team-loo"]);
                 }
 
                 let requests = requests.lock().await;
@@ -3268,14 +3273,14 @@ mod tests {
                 } else {
                     assert_eq!(resumed.moves[0].new_identifier.as_deref(), Some("LOO-1"));
                 }
-                let planning = resolved
-                    .store
-                    .pm_snapshot(wave.id())
-                    .await
-                    .unwrap()
-                    .unwrap();
-                assert_eq!(planning.snapshot.projects[0].team_ids, ["team-loo"]);
-                assert_eq!(planning.snapshot.items[0].identifier, "LOO-1");
+                let projects = resolved.store.list_projects(Some(wave.id())).await.unwrap();
+                let teams: String = rusqlite::Connection::open(&database).unwrap().query_row(
+                        "SELECT json_extract(body,'$.team_ids') FROM pm_projects WHERE id=?1",
+                        [projects[0].linear_id.as_ref().unwrap().as_str()], |r| r.get(0)
+                    ).unwrap();
+                    assert_eq!(serde_json::from_str::<Vec<String>>(&teams).unwrap(), ["team-loo"]);
+                let tasks = resolved.store.list_tasks(Some(wave.id())).await.unwrap();
+                assert_eq!(tasks[0].identifier, "LOO-1");
                 assert!(legacy_pm_sentinels(repo.path()).unwrap().is_empty());
                 let requests = requests.lock().await;
                 assert_eq!(

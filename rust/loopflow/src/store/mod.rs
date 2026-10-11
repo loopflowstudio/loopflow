@@ -29,7 +29,7 @@ mod token_crypto;
 
 pub use planning_peers::{PeerPlanningStatus, PeerProjectionConflict};
 
-/// One Wave's planning view, assembled from shared entities and membership.
+/// One acquired Linear inventory. Input to ingestion, never a local Work reading.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PmSnapshotRow {
     pub wave_id: WaveId,
@@ -478,11 +478,6 @@ impl Store {
             store.deleted_task_issues(&wave_id)
         })
         .await
-    }
-
-    pub async fn pm_snapshot(&self, wave_id: &WaveId) -> StoreResult<Option<PmSnapshotRow>> {
-        let wave_id = wave_id.clone();
-        run_sqlite(&self.sqlite, move |store| store.pm_snapshot(&wave_id)).await
     }
 
     pub async fn list_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>> {
@@ -1553,6 +1548,19 @@ mod tests {
         }
     }
 
+    fn wave_refresh_at(directory: &std::path::Path, wave: &Wave) -> Option<i64> {
+        use rusqlite::OptionalExtension;
+        rusqlite::Connection::open(directory.join("registry.db"))
+            .unwrap()
+            .query_row(
+                "SELECT synced_at FROM pm_wave_sync WHERE wave_id=?1",
+                [wave.id().as_str()],
+                |r| r.get(0),
+            )
+            .optional()
+            .unwrap()
+    }
+
     async fn planning_store() -> (tempfile::TempDir, super::Store, Wave) {
         let directory = tempfile::tempdir().unwrap();
         let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
@@ -1585,6 +1593,7 @@ mod tests {
             store.put_pm_snapshot(snapshot, None).await.unwrap();
             let imported = store.get_task_by_issue("NEXT-9").await.unwrap().unwrap();
             task.id = imported.id;
+            task.revision = imported.revision;
             task.created_at = imported.created_at;
             task.updated_at = imported.updated_at;
             if !mapped {
@@ -1611,6 +1620,7 @@ mod tests {
             expected.identifier = "NEXT-9".into();
             expected.title = "Accepted title".into();
             expected.description = "Accepted direction".into();
+            expected.state = Some("unstarted".into());
             expected.pm_snapshot_synced_at = Some(17);
             assert!(accepted.updated_at >= task.updated_at);
             expected.updated_at = accepted.updated_at;
@@ -1934,11 +1944,12 @@ mod tests {
         let mut task = make_task(&wave, &project);
         task.worktree = Some(directory.path().join("checkout"));
         store.sqlite.seed_unplaced_task(&task);
-        let before = store.get_task(&task.id).await.unwrap().unwrap();
+        let mut before = store.get_task(&task.id).await.unwrap().unwrap();
         store
             .observe_pm_issue_change(task.linear_id.as_ref().unwrap().as_str(), None, true)
             .await
             .unwrap();
+        before.revision += 1; // Removal changes planning, never execution.
         let pr = make_task_pr(&task);
         let result = store
             .place_task(
@@ -2323,9 +2334,13 @@ mod tests {
         conflict.id = foreign.linear_id.as_ref().unwrap().as_str().to_string();
         response.snapshot.projects.push(conflict);
         assert!(store.put_pm_snapshot(response, None).await.is_err());
+        let retained_observation = store
+            .pm_task_observation(wave.repo(), "linear", &task.identifier)
+            .await
+            .unwrap();
         assert_eq!(
-            store.pm_snapshot(wave.id()).await.unwrap().unwrap(),
-            snapshot
+            retained_observation.record.unwrap().item,
+            snapshot.snapshot.items[0]
         );
         assert_eq!(store.get_task(&task.id).await.unwrap().unwrap(), retained);
         assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
@@ -2346,9 +2361,6 @@ mod tests {
         snapshot.snapshot.projects[0].revision = Some("2026-10-05T11:59:59Z".into());
         snapshot.snapshot.projects[0].name = "Older provider title".into();
         store.put_pm_snapshot(snapshot, None).await.unwrap();
-        let accepted = store.pm_snapshot(wave.id()).await.unwrap().unwrap();
-        assert_eq!(accepted.synced_at, 20);
-        assert_eq!(accepted.snapshot.projects[0], original);
         let projected = store.get_project(&project.id).await.unwrap().unwrap();
         assert_eq!(projected.name, original.name);
         assert_eq!(projected.pm_snapshot_synced_at, Some(10));
@@ -2364,9 +2376,9 @@ mod tests {
         let pr = make_task_pr(&task);
         store.seed_task(&task, &pr).await.unwrap();
         let old = task_planning_snapshot(&wave, &predecessor, &task);
-        store.put_pm_snapshot(old, None).await.unwrap();
-        // The first refresh has accepted and loaded its response, then pauses.
-        let delayed = store.pm_snapshot(wave.id()).await.unwrap().unwrap();
+        store.put_pm_snapshot(old.clone(), None).await.unwrap();
+        // The first refresh has fetched its response, then pauses.
+        let delayed = old;
         let predecessor_work = WorkRef::Project(predecessor.id.clone());
         let retained_placement = store.placement(&predecessor_work).await.unwrap();
         let next_home = crate::durable::MachineId::new();
@@ -2389,26 +2401,31 @@ mod tests {
         newer.snapshot.items[0].revision = Some("2026-10-05T12:00:01Z".into());
         newer.snapshot.projects.push(successor);
         store.put_pm_snapshot(newer, None).await.unwrap();
-        let accepted = store.pm_snapshot(wave.id()).await.unwrap().unwrap();
+        let accepted = store
+            .pm_task_observation(wave.repo(), "linear", &task.identifier)
+            .await
+            .unwrap();
         let transferred = store.get_task(&task.id).await.unwrap().unwrap();
         assert_ne!(transferred.project_id, predecessor.id);
         assert_eq!(
             store.placement(&predecessor_work).await.unwrap(),
             retained_placement
         );
-        assert_eq!(
-            store
-                .placement(&WorkRef::Project(transferred.project_id.clone()))
-                .await
-                .unwrap()
-                .machine_id,
-            next_home
-        );
+        // Acquiring a Project does not create a local execution placement.
+        assert!(store
+            .placement(&WorkRef::Project(transferred.project_id.clone()))
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("has no Machine placement"));
         // A delayed response omits the now-known successor. Rejection must
         // preserve both normalized facts and the durable Task transfer.
         assert!(store.put_pm_snapshot(delayed, None).await.is_err());
         assert_eq!(
-            store.pm_snapshot(wave.id()).await.unwrap().unwrap(),
+            store
+                .pm_task_observation(wave.repo(), "linear", &task.identifier)
+                .await
+                .unwrap(),
             accepted
         );
         assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
@@ -2426,7 +2443,7 @@ mod tests {
         select_project(&store, &project);
         let task = make_task(&wave, &project);
         let pr = make_task_pr(&task);
-        store.seed_task(&task, &pr).await.unwrap();
+        let task = store.seed_task(&task, &pr).await.unwrap();
         let mut snapshot = task_planning_snapshot(&wave, &project, &task);
         let mut observed_project = snapshot.snapshot.projects.remove(0);
         observed_project.initiative_ids = vec!["elsewhere".into()];
@@ -2451,7 +2468,7 @@ mod tests {
             )
             .await
             .unwrap();
-        assert!(store.pm_snapshot(wave.id()).await.unwrap().is_none());
+        assert_eq!(wave_refresh_at(_directory.path(), &wave), None);
         assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
         assert_eq!(store.get_project(&project.id).await.unwrap(), Some(project));
         assert_eq!(store.get_task(&task.id).await.unwrap(), Some(task));
@@ -2465,7 +2482,7 @@ mod tests {
         select_project(&store, &project);
         let task = make_task(&wave, &project);
         let pr = make_task_pr(&task);
-        store.seed_task(&task, &pr).await.unwrap();
+        let task = store.seed_task(&task, &pr).await.unwrap();
         let mut snapshot = task_planning_snapshot(&wave, &project, &task);
         let mut observed = snapshot.snapshot.projects.remove(0);
         observed.name = "Refreshed plan".into();
@@ -2491,6 +2508,8 @@ mod tests {
         let mut updated_task = store.get_task(&task.id).await.unwrap().unwrap();
         assert_eq!(updated_task.title, "Refreshed work");
         assert_eq!(updated_task.pm_snapshot_synced_at, Some(10));
+        assert_eq!(updated_task.state.as_deref(), Some("canceled"));
+        updated_task.state = task.state.clone();
         updated_task.revision = task.revision;
         updated_task.linear_id = task.linear_id.clone();
         updated_task.identifier = task.identifier.clone();
@@ -2499,7 +2518,7 @@ mod tests {
         updated_task.pm_snapshot_synced_at = task.pm_snapshot_synced_at;
         assert_eq!(updated_task, task);
         assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
-        assert!(store.pm_snapshot(wave.id()).await.unwrap().is_none());
+        assert_eq!(wave_refresh_at(_directory.path(), &wave), None);
     }
 
     #[tokio::test]
@@ -2531,7 +2550,7 @@ mod tests {
             .put_pm_project(wave.id(), "linear", &snapshot.initiative, &old, 20)
             .is_err());
         assert!(store.put_pm_snapshot(snapshot, None).await.is_err());
-        assert!(store.pm_snapshot(wave.id()).await.unwrap().is_none());
+        assert_eq!(wave_refresh_at(_directory.path(), &wave), None);
         assert!(store
             .list_projects(Some(wave.id()))
             .await
@@ -2570,9 +2589,18 @@ mod tests {
             .sqlite
             .put_pm_project(wave.id(), "linear", &snapshot.initiative, &confirmed, 10)
             .unwrap();
-        let accepted = store.pm_snapshot(wave.id()).await.unwrap().unwrap();
-        assert_eq!(accepted.synced_at, snapshot.synced_at);
-        assert_eq!(accepted.snapshot.projects, vec![confirmed.clone()]);
+        let accepted = store
+            .pm_task_observation(wave.repo(), "linear", &task.identifier)
+            .await
+            .unwrap();
+        assert_eq!(
+            accepted.record.as_ref().unwrap().project,
+            Some(confirmed.clone())
+        );
+        assert_eq!(
+            wave_refresh_at(_directory.path(), &wave),
+            Some(snapshot.synced_at)
+        );
         let durable = store.get_project(&project.id).await.unwrap().unwrap();
         assert_eq!(durable.pm_snapshot_synced_at, Some(10));
         assert_eq!(durable.metric_targets, confirmed.metric_targets);
@@ -2594,7 +2622,10 @@ mod tests {
             .is_empty());
         store.put_pm_snapshot(snapshot, None).await.unwrap();
         assert_eq!(
-            store.pm_snapshot(wave.id()).await.unwrap().unwrap(),
+            store
+                .pm_task_observation(wave.repo(), "linear", &task.identifier)
+                .await
+                .unwrap(),
             accepted
         );
         assert_eq!(
@@ -3015,7 +3046,7 @@ mod tests {
         select_project(&store, &project);
         let task = make_task(&wave, &project);
         let pr = make_task_pr(&task);
-        store.seed_task(&task, &pr).await.unwrap();
+        let task = store.seed_task(&task, &pr).await.unwrap();
         assert!(!store.sqlite.task_deleted(&task).unwrap());
         rusqlite::Connection::open(directory.path().join("registry.db"))
             .unwrap()
@@ -3210,6 +3241,7 @@ mod tests {
         snapshot.synced_at = expected.pm_snapshot_synced_at.unwrap();
         snapshot.snapshot.items[0].name = expected.title.clone();
         snapshot.snapshot.items[0].description = expected.description.clone();
+        expected.state = snapshot.snapshot.items[0].state.clone();
         store.put_pm_snapshot(snapshot, None).await.unwrap();
         let by_stable_id = store
             .get_task_by_issue(task.id.as_str())
@@ -3268,7 +3300,7 @@ mod tests {
         assert_eq!(stored_project.workflow, observed.workflow);
         assert_eq!(stored_project.status, observed.status);
         assert_eq!(stored_project.pm_snapshot_synced_at, Some(10));
-        assert!(store.pm_snapshot(wave.id()).await.unwrap().is_none());
+        assert_eq!(wave_refresh_at(dir.path(), &wave), None);
         assert_eq!(stored_task.revision, task.revision);
         assert_eq!(stored_task.linear_id, task.linear_id);
         assert_eq!(stored_task.identifier, task.identifier);
@@ -3721,41 +3753,6 @@ mod tests {
             .expect("get parent")
             .expect("parent exists");
         assert_eq!(root.parent_wave_id(), None);
-    }
-
-    #[tokio::test]
-    async fn pm_snapshot_replacement_is_atomic_per_wave() {
-        let db_path = env::temp_dir().join(format!("loopflow-test-{}.db", WaveId::new()));
-        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(db_path.clone()))
-            .await
-            .expect("store should open");
-        let wave = Wave::new(WaveId::new(), "product".to_string(), "/repo".to_string());
-        store.create_wave(&wave).await.expect("create Wave");
-        let mut snapshot = PmSnapshotRow {
-            wave_id: wave.id().clone(),
-            provider: "linear".to_string(),
-            initiative: "initiative-1".to_string(),
-            synced_at: 1,
-            snapshot: crate::pm::PmSnapshot {
-                projects: vec![],
-                items: vec![],
-            },
-        };
-        store
-            .put_pm_snapshot(snapshot.clone(), None)
-            .await
-            .expect("write snapshot");
-        snapshot.synced_at = 2;
-        store
-            .put_pm_snapshot(snapshot.clone(), None)
-            .await
-            .expect("replace snapshot");
-
-        assert_eq!(
-            store.pm_snapshot(wave.id()).await.expect("read snapshot"),
-            Some(snapshot)
-        );
-        let _ = std::fs::remove_file(db_path);
     }
 
     #[tokio::test]

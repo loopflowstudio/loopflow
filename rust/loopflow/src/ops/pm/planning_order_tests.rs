@@ -412,12 +412,23 @@ fn planning_order_equal_keys_preserve_groups_through_intermediate_moves() {
 fn planning_order_stale_list_cannot_undo_confirmed_reorder() {
     with_order(|runtime, fixture, repo, tasks, state| {
         runtime.block_on(async {
-            let stale = fixture
-                .store
-                .sqlite
-                .pm_snapshot(&tasks[0].wave_id)
-                .unwrap()
+            let ctx = crate::ops::pm::resolve_context(repo, "product")
+                .await
                 .unwrap();
+            let stale = crate::store::PmSnapshotRow {
+                wave_id: tasks[0].wave_id.clone(),
+                provider: "linear".into(),
+                initiative: ctx.initiative.clone(),
+                synced_at: time::OffsetDateTime::now_utc().unix_timestamp(),
+                snapshot: crate::ops::pm::fetch_pm_snapshot_with_store(
+                    repo,
+                    "product",
+                    &ctx,
+                    &fixture.store,
+                )
+                .await
+                .unwrap(),
+            };
             reorder(&fixture.store, &tasks[3], 0);
             deliver(&fixture.store, repo, &tasks[0]).await.unwrap();
             let expected = remote_order(&state).await;

@@ -4,7 +4,7 @@ use super::planning_write::{self, Disposition, PlanningEdit as Edit};
 use crate::id::WaveId;
 use crate::planning_exchange::PlanningKind;
 use crate::pm::linear::LinearProject;
-use crate::pm::{PmItem, PmSnapshot};
+use crate::pm::PmItem;
 use crate::store::sqlite::SqliteStore;
 use crate::store::{
     PlanningState, PmSnapshotRow, PmTaskObservation, PmTaskRecord, StoreError, StoreResult,
@@ -534,71 +534,6 @@ impl SqliteStore {
             }
         }
         Ok(())
-    }
-
-    pub fn pm_snapshot(&self, wave_id: &WaveId) -> StoreResult<Option<PmSnapshotRow>> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction()?;
-        let metadata = tx
-            .query_row(
-                "SELECT w.repo,s.provider,s.initiative,s.synced_at FROM pm_wave_sync s
-             JOIN waves w ON w.id=s.wave_id WHERE s.wave_id=?1",
-                [wave_id.as_str()],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, i64>(3)?,
-                    ))
-                },
-            )
-            .optional()?;
-        let Some((repo, provider, initiative, synced_at)) = metadata else {
-            return Ok(None);
-        };
-        let mut query = tx.prepare(
-            "SELECT p.body FROM pm_wave_projects m JOIN pm_projects p ON p.id=m.project_id
-             WHERE m.wave_id=?1 AND p.repo=?2 AND p.provider=?3 AND p.archived=0 AND p.membership_unresolved=0
-             ORDER BY m.position,p.id",
-        )?;
-        // Decode before membership filtering: malformed retained bodies are unavailable
-        // evidence, not an empty plan.
-        let mut projects = query
-            .query_map(params![wave_id, repo, provider], |row| {
-                row.get::<_, String>(0)
-            })?
-            .map(|row| Ok(serde_json::from_str::<LinearProject>(&row?)?))
-            .collect::<StoreResult<Vec<_>>>()?;
-        projects.retain(|project| project.initiative_ids.contains(&initiative));
-        let mut query = tx.prepare(
-            "SELECT i.body,json_extract(p.body,'$.slug') FROM pm_items i JOIN pm_wave_projects m ON m.project_id=i.project_id
-             JOIN pm_projects p ON p.id=i.project_id AND p.repo=i.repo AND p.provider=i.provider
-             WHERE m.wave_id=?1 AND i.repo=?2 AND i.provider=?3 AND i.needs_refresh=0
-             AND p.archived=0 AND p.membership_unresolved=0
-             AND EXISTS(SELECT 1 FROM json_each(p.body,'$.initiative_ids') WHERE value=?4)
-             AND NOT EXISTS(SELECT 1 FROM task_deletions d JOIN waves w ON w.id=d.wave_id
-                            WHERE w.repo=i.repo AND d.issue_id=i.id)
-             ORDER BY m.position,json_extract(i.body,'$.rank'),i.id",
-        )?;
-        let items = query
-            .query_map(params![wave_id, repo, provider, initiative], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })?
-            .map(|row| {
-                let (body, slug) = row?;
-                let mut item: PmItem = serde_json::from_str(&body)?;
-                item.project = Some(slug);
-                Ok(item)
-            })
-            .collect::<StoreResult<Vec<_>>>()?;
-        Ok(Some(PmSnapshotRow {
-            wave_id: wave_id.clone(),
-            provider,
-            initiative,
-            synced_at,
-            snapshot: PmSnapshot { projects, items },
-        }))
     }
 }
 
@@ -1382,7 +1317,7 @@ mod tests {
         // An already exact prefixed name also consumes the exception once.
         for historical_name in ["Customer requests", "Product — Customer requests"] {
             let mut conn = Connection::open_in_memory().unwrap();
-            crate::store::migrations::apply_before_current_draft(&conn, "project_readiness");
+            crate::store::migrations::apply_before_current_draft(&conn, "planning_peers");
             let snapshot: crate::pm::PmSnapshot = serde_json::from_str(include_str!(
                 "../../../../../tests/fixtures/dto/task_history_planning.json"
             ))
@@ -1398,8 +1333,13 @@ mod tests {
                 params![project.id, original],
             )
             .unwrap();
+            conn.execute(
+                "INSERT INTO pm_project_name_cutover(repo,provider,id,body,observed_at,archived,membership_unresolved)
+                 VALUES('/repo','linear',?1,?2,10,0,0)",
+                params![project.id, original],
+            ).unwrap();
             conn.execute_batch(&crate::store::migrations::current_draft_sql(
-                "project_readiness",
+                "planning_peers",
             ))
             .unwrap();
             project.name = "Product — Customer requests".into();
@@ -1437,13 +1377,16 @@ mod tests {
                 )
                 .unwrap();
             assert_eq!(evidence, (original, 10, Some(12)));
-            let accepted = serde_json::to_string(&project).unwrap();
+            let accepted = serde_json::to_value(&project).unwrap();
             project.name = "Another name".into();
             assert!(super::put_project(&conn, "/repo", "linear", 13, &project).is_err());
             let retained: String = conn
                 .query_row("SELECT body FROM pm_projects", [], |r| r.get(0))
                 .unwrap();
-            assert_eq!(retained, accepted);
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(&retained).unwrap(),
+                accepted
+            );
             project.id = "post-cutover".into();
             super::put_project(&conn, "/repo", "linear", 13, &project).unwrap();
             project.name = "Conflict on a new record".into();
@@ -1561,17 +1504,7 @@ mod tests {
             FrontierAdvance::Authorized,
         )
         .unwrap();
-        for name in [
-            "normalize_pm_planning",
-            "pm_issue_revisions",
-            "pm_project_evidence",
-            "project_readiness",
-            "task_flow_observations",
-            "local_planning",
-            "optional_task_pr",
-        ] {
-            sqlite.apply_migration_for_test(name).unwrap();
-        }
+        sqlite.apply_migration_for_test("planning_peers").unwrap();
         sqlite
             .place_work(
                 &crate::durable::WorkRef::Wave(wave.clone()),
@@ -1585,7 +1518,13 @@ mod tests {
             .unwrap();
         assert_eq!(observation.state, PlanningState::Available);
         let detail = observation.record.unwrap();
-        let list = store.pm_snapshot(&wave).await.unwrap().unwrap();
+        let list = crate::store::PmSnapshotRow {
+            wave_id: wave.clone(),
+            provider: "linear".into(),
+            initiative: "initiative".into(),
+            synced_at: 42,
+            snapshot: serde_json::from_value(snapshot).unwrap(),
+        };
         assert_eq!(detail.observed_at, 42);
         assert_eq!(detail.item, list.snapshot.items[0]);
         assert_eq!(detail.item.name, "Retained title");
@@ -1607,13 +1546,6 @@ mod tests {
             .unwrap();
         assert_eq!(removed.state, PlanningState::Removed);
         assert_eq!(removed.record, Some(detail));
-        assert!(store
-            .pm_snapshot(&wave)
-            .await
-            .unwrap()
-            .unwrap()
-            .snapshot
-            .items
-            .is_empty());
+        assert!(store.list_tasks(None).await.unwrap().is_empty());
     }
 }

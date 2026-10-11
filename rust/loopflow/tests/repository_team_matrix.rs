@@ -202,20 +202,21 @@ fn repository_team_matrix() {
             foreign_locator.repo().to_string(),
         ))
         .unwrap();
+    let survival_snapshot = snapshot(
+        "initiative-survival",
+        "project-survival",
+        "a-real-task",
+        "A real task reaches done",
+        "issue-survival",
+        "LOO-1",
+        true,
+    );
     put_snapshot(
         &store,
         &repo,
         "survival",
         "initiative-survival",
-        snapshot(
-            "initiative-survival",
-            "project-survival",
-            "a-real-task",
-            "A real task reaches done",
-            "issue-survival",
-            "LOO-1",
-            true,
-        ),
+        survival_snapshot.clone(),
     );
     put_snapshot(
         &store,
@@ -332,8 +333,14 @@ fn repository_team_matrix() {
         .get_wave_at(&WaveLocator::discover(&repo, "survival").unwrap())
         .unwrap()
         .unwrap();
-    let accepted = reopened.pm_snapshot(survival.id()).unwrap().unwrap();
-    let mut planning = accepted.clone();
+    let accepted = reopened.list_projects(Some(survival.id())).unwrap();
+    let mut planning = PmSnapshotRow {
+        wave_id: survival.id().clone(),
+        provider: "linear".into(),
+        initiative: "initiative-survival".into(),
+        synced_at: 2,
+        snapshot: survival_snapshot,
+    };
     planning.snapshot.projects.extend(ambiguous.projects);
     planning.snapshot.items.extend(ambiguous.items);
     let error = reopened.put_pm_snapshot(&planning).unwrap_err();
@@ -342,12 +349,8 @@ fn repository_team_matrix() {
         "{error}"
     );
     assert_eq!(
-        reopened
-            .pm_snapshot(survival.id())
-            .unwrap()
-            .unwrap()
-            .snapshot,
-        accepted.snapshot
+        reopened.list_projects(Some(survival.id())).unwrap(),
+        accepted
     );
     drop(reopened);
     for args in [
@@ -447,8 +450,16 @@ fn repository_team_matrix() {
     );
     let item: serde_json::Value =
         serde_json::from_str(&assert_success(&saved, "save local Task")).unwrap();
-    assert_eq!(item["name"], "Retain offline work");
-    assert!(String::from_utf8_lossy(&saved.stderr).contains("pending Linear sync"));
+    assert_eq!(item["title"], "Retain offline work");
+    let task: loopflow::work::task::Task = serde_json::from_value(item).unwrap();
+    assert!(task.linear_id.is_none());
+    assert_eq!(
+        SqliteStore::new(&home.join("loopflow.db"))
+            .unwrap()
+            .task(&task.id)
+            .unwrap(),
+        Some(task)
+    );
 
     // PRD-44 leaves the repository Team as the sole PM authority after the
     // provider migration verifies successfully.

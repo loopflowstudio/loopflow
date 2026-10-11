@@ -226,11 +226,10 @@ async fn pm_read_linear_oauth_invalid_grant() {
         let fixture = Fixture::new().await;
         std::env::set_var("LF_HOME", fixture.directory.path());
         let (repo, wave) = fixture.planning_repo().await;
-        let previous = if cached {
-            Some(fixture.seed_snapshot(&wave).await)
-        } else {
-            None
-        };
+        if cached {
+            fixture.seed_snapshot(&wave).await;
+        }
+        let previous = fixture.wave_refresh_at(&wave);
         let original = fixture.seed(now() - 1).await;
         let (oauth, exchanges) = test_server::spawn(vec![rejected("invalid_grant")]).await;
         let (graphql, requests) = test_server::spawn(vec![]).await;
@@ -244,10 +243,7 @@ async fn pm_read_linear_oauth_invalid_grant() {
         assert_eq!(exchanges.lock().await.len(), 1);
         assert!(requests.lock().await.is_empty());
         fixture.assert_token(&original).await;
-        assert_eq!(
-            fixture.store.pm_snapshot(wave.id()).await.unwrap(),
-            previous
-        );
+        assert_eq!(fixture.wave_refresh_at(&wave), previous);
     }
 }
 
@@ -550,7 +546,8 @@ async fn pm_read_linear_oauth_sqlite_contention_has_bounded_failure_and_recovers
     let fixture = Fixture::new().await;
     std::env::set_var("LF_HOME", fixture.directory.path());
     let (repo, wave) = fixture.planning_repo().await;
-    let previous = fixture.seed_snapshot(&wave).await;
+    fixture.seed_snapshot(&wave).await;
+    let previous = fixture.wave_refresh_at(&wave);
     let original = fixture.seed(now() - 1).await;
     let conn = rusqlite::Connection::open(&fixture.database).unwrap();
     conn.execute_batch("BEGIN IMMEDIATE").unwrap();
@@ -567,10 +564,7 @@ async fn pm_read_linear_oauth_sqlite_contention_has_bounded_failure_and_recovers
         .unwrap();
     conn.execute_batch("ROLLBACK").unwrap();
     fixture.assert_token(&original).await;
-    assert_eq!(
-        fixture.store.pm_snapshot(wave.id()).await.unwrap(),
-        Some(previous)
-    );
+    assert_eq!(fixture.wave_refresh_at(&wave), previous);
     drop(guard);
     assert!(fixture.resolve(&url).await.unwrap() == "A2");
 }

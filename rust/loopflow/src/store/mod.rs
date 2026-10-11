@@ -1541,7 +1541,6 @@ mod tests {
         snapshot.items[0].id = task.linear_id.as_ref().unwrap().as_str().to_string();
         snapshot.items[0].identifier = task.identifier.clone();
         snapshot.items[0].project_id = Some(snapshot.projects[0].id.clone());
-        snapshot.items[0].project = Some(snapshot.projects[0].slug.clone());
         snapshot.items[0].revision = Some("2026-10-05T12:00:00Z".into());
         PmSnapshotRow {
             wave_id: wave.id().clone(),
@@ -2421,7 +2420,6 @@ mod tests {
         successor.slug = "successor".into();
         successor.name = "Successor".into();
         newer.snapshot.items[0].project_id = Some(successor.id.clone());
-        newer.snapshot.items[0].project = Some(successor.slug.clone());
         newer.snapshot.items[0].revision = Some("2026-10-05T12:00:01Z".into());
         newer.snapshot.projects.push(successor);
         store.put_pm_snapshot(newer, None).await.unwrap();

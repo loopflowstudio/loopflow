@@ -1069,10 +1069,9 @@ pub(super) fn put_item(
             return Ok(false);
         }
         if revision == previous_revision {
-            // Rank comes from a list; the Project display name has its own revision.
+            // Detail observations do not determine list order.
             let mut comparable = item.clone();
             comparable.rank = previous.rank;
-            comparable.project = previous.project.clone();
             comparable.revision = previous.revision.clone();
             // Earlier observations did not request Linear's branch name.
             // Enrich unknown placement without accepting conflicting known facts.

@@ -37,7 +37,10 @@ Whole-file and whole-table deletions remain conditional where stated.
 
 ## 1. Domain wrappers and the missing fields
 
-**Remove:** `PmWave` / `PmProject` / `PmItem` as ordinary domain records.
+**Remove:** `PmProject` / `PmItem` as ordinary domain records.
+`PmWave` is deleted; setup consumes the existing private Initiative response.
+Issue observations no longer duplicate the Project display slug; list acquisition
+requires only its ID. `ProjectRef` and fixture display reconstruction are deleted.
 ProjectPlan, TaskPlan, live Project iteration and public ProjectContent are removed.
 ProjectKR, MetricTarget and domain TaskComment are implemented.
 

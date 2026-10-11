@@ -18,7 +18,7 @@ use crate::ops::progress::Progress;
 use crate::ops::util::normalize_wave_name;
 use crate::pm::linear::LinearClient;
 use crate::pm::linear::LinearProject;
-use crate::pm::{PmError, PmItem, PmSnapshot, PmWave};
+use crate::pm::{PmError, PmItem, PmSnapshot};
 use crate::provider_auth::{
     provider_token_refresh_due, refresh_stored_provider_token, Provider, TokenRefreshError,
 };
@@ -781,7 +781,7 @@ async fn pm_init_async(
         Some(id) => (id, false),
         None => {
             progress.status(&format!("looking for Linear Initiative `{title}`"));
-            match matching_wave_id(&client.list_waves().await.map_err(pm_to_ops)?, &title)? {
+            match matching_initiative_id(&client.initiatives().await.map_err(pm_to_ops)?, &title)? {
                 Some(id) => {
                     progress.status(&format!(
                         "linking wave/{wave} to existing Linear Initiative {id}"
@@ -1884,16 +1884,16 @@ async fn pm_sync_async(
             .map_err(pm_to_ops)?;
     }
     progress.status("checking Linear repository Initiatives, Projects, and Tasks");
-    let linear_waves = client.list_waves().await.map_err(pm_to_ops)?;
-    let linear_waves_by_id: BTreeMap<String, &crate::pm::PmWave> = linear_waves
+    let initiatives = client.initiatives().await.map_err(pm_to_ops)?;
+    let initiatives_by_id: BTreeMap<String, &crate::pm::linear::InitiativeNode> = initiatives
         .iter()
-        .map(|wave| (wave.id.clone(), wave))
+        .map(|initiative| (initiative.id.clone(), initiative))
         .collect();
-    for linear_wave in &linear_waves {
-        if !initiative_waves.contains_key(&linear_wave.id) {
+    for initiative in &initiatives {
+        if !initiative_waves.contains_key(&initiative.id) {
             diagnostics.push(format!(
                 "Linear Initiative `{}` ({}) is not linked by any local wave",
-                linear_wave.name, linear_wave.id
+                initiative.name, initiative.id
             ));
         }
     }
@@ -1920,7 +1920,7 @@ async fn pm_sync_async(
             continue;
         };
         let expected_initiative_name = title_case(wave);
-        let Some(actual) = linear_waves_by_id.get(&initiative_id) else {
+        let Some(actual) = initiatives_by_id.get(&initiative_id) else {
             let message =
                 format!("wave/{wave} points at missing Linear Initiative {initiative_id}");
             diagnostics.push(message.clone());
@@ -1928,7 +1928,8 @@ async fn pm_sync_async(
             continue;
         };
         let name = (actual.name != expected_initiative_name).then_some(expected_initiative_name);
-        let summary = (actual.summary != summary).then_some(summary);
+        let summary =
+            (actual.description.as_deref().unwrap_or_default() != summary).then_some(summary);
         if let Some(name) = &name {
             actions.push(format!(
                 "rename Linear Initiative `{}` ({initiative_id}) to `{name}` for wave/{wave}",
@@ -2259,15 +2260,21 @@ fn default_team_key(repository: &str) -> String {
     }
 }
 
-fn matching_wave_id(waves: &[PmWave], title: &str) -> OpsResult<Option<String>> {
-    let matches: Vec<_> = waves.iter().filter(|wave| wave.name == title).collect();
+fn matching_initiative_id(
+    initiatives: &[crate::pm::linear::InitiativeNode],
+    title: &str,
+) -> OpsResult<Option<String>> {
+    let matches: Vec<_> = initiatives
+        .iter()
+        .filter(|initiative| initiative.name == title)
+        .collect();
     match matches.as_slice() {
         [] => Ok(None),
-        [wave] => Ok(Some(wave.id.clone())),
+        [initiative] => Ok(Some(initiative.id.clone())),
         many => Err(OpsError::Message(format!(
             "multiple Linear Initiatives are named `{title}`: {}. Rename duplicates before running `lf repo connect`",
             many.iter()
-                .map(|wave| wave.id.as_str())
+                .map(|initiative| initiative.id.as_str())
                 .collect::<Vec<_>>()
                 .join(", ")
         ))),
@@ -3310,7 +3317,6 @@ mod tests {
         assert_eq!(result.projects.len(), 1);
         assert_eq!(result.items.len(), 1);
         assert_eq!(result.items[0].name, "First");
-        assert_eq!(result.items[0].project.as_deref(), Some("scan"));
         assert_eq!(
             requests.lock().await[1].authorization.as_deref(),
             Some("Bearer linear-secret")
@@ -3346,13 +3352,11 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(snapshot.items[0].project_id.as_deref(), Some("successor"));
-        assert_eq!(snapshot.items[0].project.as_deref(), Some("next-work"));
         assert_eq!(
             snapshot.items[0].revision.as_deref(),
             Some("2026-10-05T12:00:00Z")
         );
         assert_eq!(snapshot.items[1].project_id, None);
-        assert_eq!(snapshot.items[1].project, None);
         assert_eq!(
             snapshot.items[1].revision.as_deref(),
             Some("2026-10-05T12:00:01Z")

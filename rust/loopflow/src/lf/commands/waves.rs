@@ -2524,7 +2524,6 @@ mod tests {
             due_date: None,
             state: Some("unstarted".into()),
             project_id: Some("current".into()),
-            project: Some("current".into()),
             team_id: Some("team".into()),
             assignee: None,
         };
@@ -2735,7 +2734,6 @@ mod tests {
             due_date: None,
             state: Some("unstarted".into()),
             project_id: Some(predecessor.into()),
-            project: Some("Old ordinary plan".into()),
             team_id: Some("team".into()),
             assignee: None,
             branch_name: None,

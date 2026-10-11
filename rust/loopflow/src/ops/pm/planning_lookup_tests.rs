@@ -85,10 +85,6 @@ async fn fresh_lookup_and_wave_list_share_planning_without_execution() {
                 "Summer work — customer requests"
             );
             assert_eq!(
-                record.item.project.as_deref(),
-                Some("summer-work-customer-requests")
-            );
-            assert_eq!(
                 record.item.branch_name.as_deref(),
                 Some("dev/fix-1-existing")
             );
@@ -286,7 +282,6 @@ async fn projectless_task_is_inspectable_but_cannot_resolve_managed_ownership() 
                 .unwrap();
             assert!(record.project.is_none());
             assert!(record.item.project_id.is_none());
-            assert!(record.item.project.is_none());
             let error = crate::ops::pm::acquire_task(&repo, "FIX-1", PmRefresh::Never)
                 .await
                 .unwrap_err();
@@ -965,7 +960,6 @@ async fn project_revisions_order_shared_facts_and_unordered_membership_stays_unr
                 .await
                 .unwrap();
             assert_eq!(stored.project, newer.project);
-            assert_eq!(stored.item.project.as_deref(), Some("renamed-chapter"));
             assert_eq!(stored.observed_at, list.synced_at);
             let saved = fixture
                 .store

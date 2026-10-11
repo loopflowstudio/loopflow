@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use tokio::time::sleep;
 use tracing::warn;
 
-use crate::pm::{project_slug, PmError, PmItem, PmResult, PmWave, TeamBinding, RATE_LIMIT_RETRIES};
+use crate::pm::{project_slug, PmError, PmItem, PmResult, TeamBinding, RATE_LIMIT_RETRIES};
 
 use crate::work::task::comment::{TaskComment, TaskCommentAuthor};
 
@@ -193,10 +193,7 @@ const LIST_ITEMS_QUERY: &str = r#"query ListProjectIssues($projectId: String!, $
         state {
           type
         }
-        project {
-          id
-          name
-        }
+        project { id }
         team {
           id
         }
@@ -709,9 +706,9 @@ impl LinearClient {
         Ok(())
     }
 
-    pub async fn list_waves(&self) -> PmResult<Vec<PmWave>> {
+    pub(crate) async fn initiatives(&self) -> PmResult<Vec<InitiativeNode>> {
         let mut after = None;
-        let mut waves = Vec::new();
+        let mut initiatives = Vec::new();
         loop {
             let response: InitiativesData = self
                 .graphql(
@@ -723,13 +720,9 @@ impl LinearClient {
                 )
                 .await?;
             let page = response.initiatives;
-            waves.extend(page.nodes.into_iter().map(|initiative| PmWave {
-                id: initiative.id,
-                name: initiative.name,
-                summary: initiative.description.unwrap_or_default(),
-            }));
+            initiatives.extend(page.nodes);
             if !page.page_info.has_next_page {
-                return Ok(waves);
+                return Ok(initiatives);
             }
             after = page.page_info.end_cursor;
         }
@@ -1714,7 +1707,7 @@ struct CommentUser {
 
 #[derive(Deserialize)]
 #[serde(bound(deserialize = "P: Deserialize<'de>"))]
-struct IssueNode<P = ProjectRef> {
+struct IssueNode<P = IdNode> {
     #[serde(flatten)]
     fields: IssueFields,
     #[serde(deserialize_with = "Option::deserialize")]
@@ -1761,12 +1754,13 @@ struct IssueFields {
 
 impl IssueNode {
     fn into_pm_item(self, rank: u32) -> PmResult<PmItem> {
-        self.fields.into_pm_item(rank, self.project)
+        self.fields
+            .into_pm_item(rank, self.project.map(|project| project.id))
     }
 }
 
 impl IssueFields {
-    fn into_pm_item(self, rank: u32, project: Option<ProjectRef>) -> PmResult<PmItem> {
+    fn into_pm_item(self, rank: u32, project_id: Option<String>) -> PmResult<PmItem> {
         if let Some(date) = &self.completed_at {
             time::OffsetDateTime::parse(date, &time::format_description::well_known::Rfc3339)
                 .map_err(|error| {
@@ -1789,8 +1783,6 @@ impl IssueFields {
         } else {
             self.identifier
         };
-        let project_id = project.as_ref().map(|project| project.id.clone());
-        let project = project.map(|project| project_slug(&project.name));
         let team = self
             .team
             .ok_or_else(|| PmError::Message(format!("Linear issue {identifier} has no Team")))?;
@@ -1814,17 +1806,10 @@ impl IssueFields {
             due_date: self.due_date,
             state: self.state.map(|state| state.r#type),
             project_id,
-            project,
             team_id: Some(team.id),
             assignee: self.assignee.map(|assignee| assignee.id),
         })
     }
-}
-
-#[derive(Deserialize)]
-struct ProjectRef {
-    id: String,
-    name: String,
 }
 
 #[derive(Deserialize)]
@@ -1835,13 +1820,9 @@ struct IssueOwnershipData {
 
 impl IssueNode<ProjectNode> {
     fn into_ownership(self) -> PmResult<(PmItem, Option<LinearProject>)> {
-        let item = self.fields.into_pm_item(
-            0,
-            self.project.as_ref().map(|project| ProjectRef {
-                id: project.id.clone(),
-                name: project.name.clone(),
-            }),
-        )?;
+        let item = self
+            .fields
+            .into_pm_item(0, self.project.as_ref().map(|project| project.id.clone()))?;
         Ok((
             item,
             self.project
@@ -2099,12 +2080,11 @@ struct InitiativesConnection {
     page_info: PageInfo,
 }
 
-#[derive(Deserialize)]
-struct InitiativeNode {
-    id: String,
-    name: String,
-    #[serde(default)]
-    description: Option<String>,
+#[derive(Debug, Deserialize)]
+pub(crate) struct InitiativeNode {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -2653,7 +2633,7 @@ mod tests {
                                     "sortOrder": 10.0, "updatedAt":"2026-09-29T12:00:00.123Z",
                                     "assignee": { "id": "user-1" },
                                     "state": { "type": "unstarted" },
-                                    "project": { "id": "project-123", "name": "Scan" },
+                                    "project": { "id": "project-123" },
                                     "team": { "id": "team-9" }
                                 },
                                 {
@@ -2666,7 +2646,7 @@ mod tests {
                                     "completedAt": null, "dueDate": null, "prioritySortOrder": 0.0,
                                     "sortOrder": 0.0, "updatedAt":"2026-09-29T12:00:00.123Z",
                                     "state": { "type": "completed" },
-                                    "project": { "id": "project-123", "name": "Scan" },
+                                    "project": { "id": "project-123" },
                                     "team": { "id": "team-9" }
                                 }
                             ],
@@ -2692,6 +2672,9 @@ mod tests {
             .expect("list items succeeds");
 
         assert_eq!(items.len(), 2);
+        assert!(items
+            .iter()
+            .all(|item| item.project_id.as_deref() == Some("project-123")));
         assert_eq!(items[0].id, "issue-2");
         assert!(items[0].completed);
         assert_eq!(items[1].assignee.as_deref(), Some("user-1"));

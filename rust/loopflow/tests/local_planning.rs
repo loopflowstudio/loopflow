@@ -2369,7 +2369,6 @@ fn rotation_saves_membership_and_pending_effects_offline() {
             project.krs = successor_plan.krs;
             project.metric_targets = successor_plan.metric_targets;
             echo.item.project_id = Some(project.id.clone());
-            echo.item.project = Some(project.slug.clone());
             echo.item.revision = Some("2026-10-08T12:30:00Z".into());
             echo.observed_at = 22;
             store
@@ -3095,7 +3094,7 @@ fn planning_sync_tracks_creation_errors_uncertainty_conflicts_and_settlement() {
             .as_array()
             .unwrap()
             .iter()
-            .find(|p| p["work_id"] == project)
+            .find(|p| p["id"] == project)
             .unwrap()["sync"]
             .clone()
     };
@@ -3401,7 +3400,6 @@ fn observed_issue(id: &str, project: &str, title: &str, description: &str) -> lo
         name: title.into(),
         description: description.into(),
         project_id: Some(project.into()),
-        project: Some(project.into()),
         team_id: Some("fixture-team".into()),
         revision: None,
         branch_name: None,

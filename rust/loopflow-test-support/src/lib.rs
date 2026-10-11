@@ -225,13 +225,10 @@ pub fn retained_task_input_in<T: serde::de::DeserializeOwned>(
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .expect("retained fixture input");
-    let mut item: serde_json::Value = serde_json::from_str(&item).expect("issue input");
+    let item: serde_json::Value = serde_json::from_str(&item).expect("issue input");
     let project: serde_json::Value = project
         .map(|body| serde_json::from_str(&body).expect("project input"))
         .unwrap_or(serde_json::Value::Null);
-    if !project.is_null() {
-        item["project"] = project["slug"].clone();
-    }
     serde_json::from_value(
         serde_json::json!({"item":item,"project":project,"observed_at":observed_at}),
     )

@@ -376,10 +376,11 @@ Writer transport/causal proofs: `eda4a98097` in this plan.
   cut. Regenerate them after the entire accepted reduction, before review-only
   republication. No readiness or landing follows from this persistence checkpoint.
 
-Prior applicable writer, released-seeding, DTO, rotation and Swift checks remain at
-`9dbd6fc2d8` and `dfd3b80611` in this plan; admission/lookup/launch checks at `f025e9b7ab`.
-Full audit, affected gate, fresh HTML and republication remain pending.
+Prior checks: writer/seeding/DTO/rotation/Swift at `9dbd6fc2d8` and `dfd3b80611`;
+admission/lookup/launch at `f025e9b7ab`; acquisition at `dfa2cdafba`, all in this plan.
+Persistent hierarchy, typed journal, bindings, follow-ups, cron, gate and review
+remain required before republication.
 
-Checks: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo build -p loopflow --bin lf`, acquisition lib suite (19), SQL/migration/rollback cases (10), and `cargo test -p loopflow --test planning_lookup_tests` (1) pass; inherited LF authority cleared, stdin closed. Full gate deferred; context within limits.
+Checks: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, CLI build, acquisition (19), Linear list/setup/sync (14), local planning (21 + repaired canonical-ID case) pass with LF authority cleared and stdin closed; full gate deferred.
 
 Earlier transport evidence: `0181133849` in this plan.

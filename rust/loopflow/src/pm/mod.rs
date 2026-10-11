@@ -56,13 +56,6 @@ pub struct TeamBinding {
     pub created: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PmWave {
-    pub id: String,
-    pub name: String,
-    pub summary: String,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PmItem {
     /// Provider revision; absent only in historical planning.
@@ -85,8 +78,6 @@ pub struct PmItem {
     pub state: Option<String>,
     /// Stable owning Project id. Task-to-Wave resolution follows this edge.
     pub project_id: Option<String>,
-    /// Canonical Project slug for display only.
-    pub project: Option<String>,
     /// Stable owning repository Team id.
     pub team_id: Option<String>,
     /// Provider user ID of the assignee, if any.

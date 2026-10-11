@@ -11,17 +11,17 @@ use crate::store::{StoreError, StoreResult};
 
 use super::SqliteStore;
 
-/// The Flow whose driver recorded, as a step, the Process that captured session
+/// The Flow whose process recorded, as a step, the Process that captured session
 /// `s`'s current input. Sessions carry no Flow column of their own.
 macro_rules! session_flow {
     () => {
-        "(SELECT fs.flow_process_lfid FROM session_events captured JOIN flow_process_steps fs ON fs.process_lfid=captured.process_lfid WHERE captured.seq=s.current_capture)"
+        "(SELECT fs.flow_lf_process_id FROM session_events captured JOIN flow_process_steps fs ON fs.lf_process_id=captured.lf_process_id WHERE captured.seq=s.current_capture)"
     };
 }
-/// That step's node and loop counts, as its driver recorded them.
+/// That step's node and loop counts, as its Flow process recorded them.
 macro_rules! session_step {
     ($column:literal) => {
-        concat!("(SELECT fs.", $column, " FROM session_events captured JOIN flow_process_steps fs ON fs.process_lfid=captured.process_lfid WHERE captured.seq=s.current_capture)")
+        concat!("(SELECT fs.", $column, " FROM session_events captured JOIN flow_process_steps fs ON fs.lf_process_id=captured.lf_process_id WHERE captured.seq=s.current_capture)")
     };
 }
 pub(super) const SESSION_FLOW: &str = session_flow!();
@@ -61,7 +61,7 @@ fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<LfSessi
                 .map(|id| crate::id::WaveId::parse(&id))
                 .transpose()
                 .map_err(invalid)?,
-            flow_process_lfid: row.get(12)?,
+            flow_lf_process_id: row.get(12)?,
             work_source: row
                 .get::<_, Option<String>>(13)?
                 .map(|source| serde_json::from_value(serde_json::Value::String(source)))
@@ -102,17 +102,17 @@ pub(super) fn session_in(conn: &Connection, id: &str) -> StoreResult<Option<LfSe
     .transpose()
 }
 
-/// Reported status wins within the provider generation; otherwise use the
-/// current driver's input/hand-back/quiet reading. Filter before pagination.
+/// Reported status wins for the current AgentProcess; otherwise use the
+/// current attachment's input/hand-back/quiet reading. Filter before pagination.
 fn waiting_sql(session: &str, now: i64) -> String {
     format!(
         "EXISTS(SELECT 1 FROM session_activity act WHERE act.session_id={session}.id
-            AND {session}.completed_at IS NULL AND act.provider_generation={session}.provider_generation
+            AND {session}.completed_at IS NULL AND act.agent_process_id IS {session}.agent_process_id
             AND CASE WHEN act.program_status IS NOT NULL THEN
                 EXISTS(SELECT 1 FROM json_each(act.program_status,'$.records') r
                     WHERE json_extract(r.value,'$.state')='blocked'
                     OR ({session}.interactive=1 AND json_extract(r.value,'$.state')='idle'))
-            ELSE act.driver_generation={session}.driver_generation
+            ELSE act.attachment_token=(SELECT attachment_token FROM processes WHERE id={session}.agent_process_id)
                 AND (act.pending_input>0 OR (act.open_tools=0 AND (({session}.interactive=1 AND act.yielded=1)
                     OR {now}-act.observed_at>={quiet}))) END)",
         quiet = crate::session::WAITING_QUIET_SECONDS
@@ -200,28 +200,29 @@ const MEMBERSHIP_KIND: &str = "CASE WHEN json_valid(payload) THEN CASE WHEN json
 fn summary_query(page: &str, by_id: bool, now: i64) -> String {
     let waiting = waiting_sql("a", now);
     let order = if by_id { "s.id" } else { "s.title,s.id" };
-    // A Flow is the driver Process above the step that captured the current input.
+    // A Flow is the Flow process above the step that captured the current input.
     format!("WITH page AS MATERIALIZED ({page})
-        SELECT s.*,driver.lfid,flow.flow,driver.outcome,driver.completed_at,step.started_at,
-        (fs.seq=(SELECT MAX(later.seq) FROM flow_process_steps later WHERE later.flow_process_lfid=fs.flow_process_lfid)),
+        SELECT s.*,flow_process.id,flow.flow,flow_process.outcome,flow_process.completed_at,step.started_at,
+        (fs.seq=(SELECT MAX(later.seq) FROM flow_process_steps later WHERE later.flow_lf_process_id=fs.flow_lf_process_id)),
         w.slug,t.issue_identifier,
         ((SELECT {MEMBERSHIP_KIND} FROM session_events INDEXED BY session_input_membership
          WHERE session_id=s.id AND captured_event=s.current_capture
          AND kind='observed' AND substr(receipt_key,-14)=':manifest.json')='independent'),
         (SELECT json_group_array(id) FROM ({})),
         a.primary_scope,
-        (SELECT CASE WHEN json_valid(e.payload) THEN json_extract(e.payload,'$.outcome') END FROM session_events e INDEXED BY session_driver_exit
-            WHERE e.session_id=s.id AND e.receipt_key='driver:'||(a.driver_generation-1)||':exit' AND e.kind='observed'),
+        (SELECT CASE WHEN json_valid(e.payload) THEN json_extract(e.payload,'$.outcome') END FROM session_events e
+            WHERE e.session_id=s.id AND e.seq=(SELECT attachment_exit_seq FROM processes WHERE id=a.agent_process_id) AND e.kind='observed'),
         {waiting},
         COALESCE(({task_state}) IN ('done','abandoned'),0),
         EXISTS(SELECT 1 FROM tasks p WHERE p.primary_session_id=s.id),
-        (SELECT act.program_status FROM session_activity act WHERE act.session_id=s.id AND act.provider_generation=a.provider_generation),a.provider_generation
+        (SELECT act.program_status FROM session_activity act WHERE act.session_id=s.id AND act.agent_process_id IS a.agent_process_id),a.agent_process_id
         FROM page s JOIN agent_sessions a ON a.id=s.id
+        LEFT JOIN processes p ON p.id=a.agent_process_id
         LEFT JOIN session_events captured ON captured.seq=s.current_capture
-        LEFT JOIN flow_process_steps fs ON fs.process_lfid=captured.process_lfid
-        LEFT JOIN flow_processes flow ON flow.process_lfid=fs.flow_process_lfid
-        LEFT JOIN processes step ON step.lfid=fs.process_lfid
-        LEFT JOIN processes driver ON driver.lfid=fs.flow_process_lfid
+        LEFT JOIN flow_process_steps fs ON fs.lf_process_id=captured.lf_process_id
+        LEFT JOIN flow_processes flow ON flow.lf_process_id=fs.flow_lf_process_id
+        LEFT JOIN processes step ON step.id=fs.lf_process_id
+        LEFT JOIN processes flow_process ON flow_process.id=fs.flow_lf_process_id
         LEFT JOIN wave_addresses w ON w.id=s.wave_id
         LEFT JOIN tasks t ON t.id=s.task_id
         ORDER BY {order}", super::task_work::session_tasks("a"),
@@ -243,13 +244,13 @@ fn read_summary(
             .transpose()
             .map_err(invalid)?;
         let flow = match row.get::<_, Option<String>>(17)? {
-            Some(driver) => {
+            Some(flow_process) => {
                 let completed: Option<i64> = row.get(20)?;
                 let name: String = row.get(18)?;
                 Some(crate::session::FlowProcessSummary {
-                    id: driver,
+                    id: flow_process,
                     name,
-                    state: crate::session::FlowProcessSummaryState::of_driver(
+                    state: crate::session::FlowProcessSummaryState::of_process(
                         row.get::<_, Option<String>>(19)?.as_deref(),
                         completed,
                     ),
@@ -266,13 +267,13 @@ fn read_summary(
         Ok(crate::session::SessionSummary {
             task_ids: serde_json::from_str(&row.get::<_, String>(26)?)?,
             primary_scope: row.get(27)?,
-            driver_outcome: row.get(28)?,
+            attachment_outcome: row.get(28)?,
             waiting: row.get(29)?,
             program_status: row
                 .get::<_, Option<String>>(32)?
                 .map(|json| serde_json::from_str(&json))
                 .transpose()?,
-            provider_generation: row.get(33)?,
+            agent_process_id: row.get(33)?,
             task_terminal: row.get(30)?,
             task_primary: row.get(31)?,
             captured: row.get(16)?,
@@ -286,7 +287,7 @@ fn read_summary(
             interactive: row.get(6)?,
             task_id,
             wave_id,
-            flow_process_lfid: row.get(9)?,
+            flow_lf_process_id: row.get(9)?,
             cwd: row.get::<_, String>(10)?.into(),
             skill: row.get(11)?,
             provider: row.get(12)?,
@@ -527,10 +528,14 @@ impl SqliteStore {
         input: Option<&str>,
     ) -> StoreResult<(Vec<crate::session_record::SessionHistory>, bool)> {
         // An input has ended once its terminal record, its turns' completions or
-        // its driver's exit says so: a turn left open by an exited driver is over.
+        // its attachment's exit says so: a turn left open at exit is over.
         let inputs = {
             let conn = self.conn.lock().expect("store mutex poisoned");
-            let mut query = conn.prepare("WITH inputs AS (
+            let mut query = conn.prepare("WITH attachment_exits AS NOT MATERIALIZED (
+                SELECT session_id,seq,observed_at FROM session_events
+                WHERE kind='observed' AND substr(receipt_key,-5)=':exit'
+                    AND receipt_key>='attachment:' AND receipt_key<'attachment;'
+            ), inputs AS (
                 SELECT i.seq AS captured,i.receipt_key AS input_id,i.session_id,json_extract(i.payload,'$.caller_key') AS caller_input_id,
                     COALESCE(m.observed_at,i.observed_at) AS started,
                     CASE WHEN m.seq IS NOT NULL THEN m.task_id ELSE i.task_id END AS task_id,
@@ -545,13 +550,13 @@ impl SqliteStore {
                             SELECT 1 FROM session_events done WHERE done.session_id=origin.session_id
                             AND done.provider_thread=origin.provider_thread AND done.provider_turn=origin.provider_turn
                             AND done.kind='completed')
-                        AND NOT EXISTS (SELECT 1 FROM session_events x WHERE x.session_id=s.id AND x.kind='observed' AND x.receipt_key>='driver:' AND x.receipt_key<'driver;' AND substr(x.receipt_key,-5)=':exit' AND x.seq>origin.seq)) THEN NULL ELSE
+                        AND NOT EXISTS (SELECT 1 FROM attachment_exits x WHERE x.session_id=s.id AND x.seq>origin.seq)) THEN NULL ELSE
                         COALESCE(terminal.observed_at,(
                             SELECT MAX(done.observed_at) FROM session_events origin JOIN session_events done
                             ON done.session_id=origin.session_id AND done.provider_thread=origin.provider_thread
                             AND done.provider_turn=origin.provider_turn AND done.kind='completed'
                             WHERE origin.session_id=s.id AND origin.captured_event=i.seq AND origin.kind='started'),(
-                            SELECT MIN(x.observed_at) FROM session_events x WHERE x.session_id=s.id AND x.kind='observed' AND x.receipt_key>='driver:' AND x.receipt_key<'driver;' AND substr(x.receipt_key,-5)=':exit' AND x.seq>i.seq)) END AS ended, NULL AS thread, NULL AS turn
+                            SELECT MIN(x.observed_at) FROM attachment_exits x WHERE x.session_id=s.id AND x.seq>i.seq)) END AS ended, NULL AS thread, NULL AS turn
                 FROM session_events i JOIN agent_sessions s ON s.id=i.session_id
                 LEFT JOIN session_events m ON m.session_id=s.id AND m.kind='observed'
                     AND m.receipt_key=i.receipt_key||':manifest.json'
@@ -564,7 +569,7 @@ impl SqliteStore {
                 UNION ALL
                 SELECT NULL,NULL,e.session_id,NULL,MIN(e.observed_at),origin.task_id,origin.wave_id,
                     COALESCE(MAX(CASE WHEN e.kind='completed' THEN e.observed_at END),(
-                        SELECT MIN(x.observed_at) FROM session_events x WHERE x.session_id=e.session_id AND x.kind='observed' AND x.receipt_key>='driver:' AND x.receipt_key<'driver;' AND substr(x.receipt_key,-5)=':exit' AND x.seq>MIN(e.seq))),e.provider_thread,e.provider_turn
+                        SELECT MIN(x.observed_at) FROM attachment_exits x WHERE x.session_id=e.session_id AND x.seq>MIN(e.seq))),e.provider_thread,e.provider_turn
                 FROM session_events e LEFT JOIN session_events origin
                     ON origin.session_id=e.session_id AND origin.provider_thread=e.provider_thread
                     AND origin.provider_turn=e.provider_turn AND origin.kind='started'
@@ -775,7 +780,7 @@ impl SqliteStore {
     pub fn create_session(
         &self,
         session: LfSession,
-        caller_process: Option<&crate::id::ProcessLfid>,
+        caller_process: Option<&crate::id::LfProcessId>,
     ) -> StoreResult<LfSession> {
         let _admission = self.lock_session_checkouts(&session)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
@@ -797,7 +802,7 @@ impl SqliteStore {
         scope: &PrimaryScope,
         replacing: Option<&str>,
         session: LfSession,
-        caller_process: Option<&crate::id::ProcessLfid>,
+        caller_process: Option<&crate::id::LfProcessId>,
     ) -> StoreResult<LfSession> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -947,47 +952,40 @@ impl SqliteStore {
         replace_input_in(
             &tx,
             &mut session,
-            crate::journal::current_process_lfid().as_ref(),
+            crate::journal::current_lf_process_id().as_ref(),
         )?;
         let session = session_in(&tx, &session.id)?.ok_or(StoreError::NotFound)?;
         tx.commit()?;
         Ok(session)
     }
 
-    /// Reserve the next input and its driver together; a losing claimant changes neither.
+    /// Reserve the next input and its attachment together; a losing claimant changes neither.
     pub(crate) fn claim_session_input(
         &self,
         mut next: LfSession,
-        expected_driver: Option<&crate::process::SessionDriver>,
-        process: &crate::id::ProcessLfid,
-        replace_provider: bool,
-    ) -> StoreResult<(LfSession, crate::process::SessionDriver)> {
+        expected: Option<&crate::process::SessionAttachment>,
+        process: &crate::id::LfProcessId,
+        close: impl FnOnce() -> StoreResult<bool>,
+    ) -> StoreResult<(LfSession, crate::process::SessionAttachment)> {
         let _admission = self.lock_session_checkouts(&next)?;
-        let _dispatch = self.lock_session_driver(&next.id)?;
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let previous = session_in(&tx, &next.id)?.ok_or(StoreError::NotFound)?;
-        if previous.captured != next.captured
-            || previous.completed_at.is_some()
-            || previous.cwd != next.cwd
-            || previous.task_id != next.task_id
-            || previous.wave_id != next.wave_id
-        {
-            return Err(StoreError::InvalidAuthority(
-                "conversation changed before input admission".into(),
-            ));
-        }
-        replace_input_in(&tx, &mut next, Some(process))?;
-        let driver = super::processes::claim_driver_in(
-            &tx,
-            &next.id,
-            expected_driver,
-            process,
-            replace_provider,
-        )?;
-        let next = session_in(&tx, &next.id)?.ok_or(StoreError::NotFound)?;
-        tx.commit()?;
-        Ok((next, driver))
+        let session = next.id.clone();
+        self.with_session_resume(&session, expected, close, |tx| {
+            let previous = session_in(tx, &next.id)?.ok_or(StoreError::NotFound)?;
+            if previous.captured != next.captured
+                || previous.completed_at.is_some()
+                || previous.cwd != next.cwd
+                || previous.task_id != next.task_id
+                || previous.wave_id != next.wave_id
+            {
+                return Err(StoreError::InvalidAuthority(
+                    "conversation changed before input admission".into(),
+                ));
+            }
+            replace_input_in(tx, &mut next, Some(process))?;
+            let attachment = super::processes::attach_in(tx, &next.id, expected, process, true)?;
+            let next = session_in(tx, &next.id)?.ok_or(StoreError::NotFound)?;
+            Ok((next, attachment))
+        })
     }
 
     /// Choose the agent of an unpublished capture. A published capture keeps
@@ -1158,7 +1156,7 @@ pub(super) fn retain_history_in(
 pub(super) fn reserve_session_in(
     conn: &Transaction<'_>,
     mut session: LfSession,
-    caller: Option<&crate::id::ProcessLfid>,
+    caller: Option<&crate::id::LfProcessId>,
 ) -> StoreResult<LfSession> {
     resolve_ancestry_in(conn, &mut session)?;
     insert_session_in(conn, &mut session, caller)?;
@@ -1189,10 +1187,10 @@ fn resolve_ancestry_in(conn: &Connection, session: &mut LfSession) -> StoreResul
 fn require_current_actor_in(conn: &Connection, id: &str) -> StoreResult<()> {
     if let Some(caller) = crate::journal::agent_caller().filter(|caller| caller.session_id == id) {
         let current: bool = conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM agent_sessions WHERE id=?1
-                AND provider_generation=?2 AND provider_process_lfid=?3
-                AND driver_process_lfid IS NOT NULL)",
-            params![id, caller.provider_generation, caller.origin_process_lfid],
+            "SELECT EXISTS(SELECT 1 FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1
+                AND p.id=?2 AND p.parent_lf_process_id=?3
+                AND p.attached_lf_process_id IS NOT NULL)",
+            params![id, caller.agent_process_id, caller.origin_lf_process_id],
             |row| row.get(0),
         )?;
         if !current {
@@ -1247,7 +1245,7 @@ fn capture_in(
     conn: &Connection,
     session: &LfSession,
     observed_at: i64,
-    process: Option<&crate::id::ProcessLfid>,
+    process: Option<&crate::id::LfProcessId>,
 ) -> StoreResult<i64> {
     let saved: Option<(i64, String, Option<String>)> = conn
         .query_row(
@@ -1268,7 +1266,7 @@ fn capture_in(
     let payload = serde_json::json!({"artifact_key":session.artifact_key,
         "caller_key":session.caller_artifact_key,"cwd":session.cwd,"skill":session.skill,
         "provider":session.provider,"model":session.model,"work_source":session.work_source});
-    conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,process_lfid,task_id,wave_id,observed_at,payload)
+    conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,lf_process_id,task_id,wave_id,observed_at,payload)
         VALUES(?1,'captured',?2,?3,?4,?5,?6,?7)",
         params![session.id,session.artifact_key,process,session.task_id.as_ref().map(TaskId::as_str),
             session.wave_id.as_ref().map(crate::id::WaveId::as_str),observed_at,serde_json::to_string(&payload)?])?;
@@ -1278,7 +1276,7 @@ fn capture_in(
 fn insert_session_in(
     conn: &Connection,
     session: &mut LfSession,
-    process: Option<&crate::id::ProcessLfid>,
+    process: Option<&crate::id::LfProcessId>,
 ) -> StoreResult<()> {
     conn.execute(
         "INSERT INTO agent_sessions(id,title,title_source,completed_at,
@@ -1329,7 +1327,7 @@ fn insert_session_in(
 pub(super) fn replace_input_in(
     conn: &Transaction<'_>,
     session: &mut LfSession,
-    process: Option<&crate::id::ProcessLfid>,
+    process: Option<&crate::id::LfProcessId>,
 ) -> StoreResult<()> {
     // Workspace admission owns location; replacing input cannot move Task membership.
     session.cwd = conn
@@ -1394,7 +1392,7 @@ impl SqliteStore {
                 iterations: None,
                 task_id: None,
                 wave_id: None,
-                flow_process_lfid: None,
+                flow_lf_process_id: None,
                 work_source: None,
                 bound_at: None,
                 interactive: true,
@@ -1598,7 +1596,8 @@ mod metadata_tests {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         let input = crate::session_record::new_artifact_key();
-        let driver = store.test_flow("retained", "/unavailable", &[("implement", None)], None);
+        let flow_process =
+            store.test_flow("retained", "/unavailable", &[("implement", None)], None);
         {
             let conn = store.conn.lock().unwrap();
             conn.execute(
@@ -1610,10 +1609,10 @@ mod metadata_tests {
             .unwrap();
             // The step Process captured this conversation's input.
             conn.execute(
-                "INSERT INTO session_events(session_id,kind,receipt_key,process_lfid,observed_at,payload)
-                 VALUES('session','captured',?1,(SELECT lfid FROM processes WHERE parent_process_lfid=?2),1,
+                "INSERT INTO session_events(session_id,kind,receipt_key,lf_process_id,observed_at,payload)
+                 VALUES('session','captured',?1,(SELECT id FROM processes WHERE parent_lf_process_id=?2),1,
                     json_object('artifact_key',?1))",
-                params![input, driver],
+                params![input, flow_process],
             )
             .unwrap();
             conn.execute(
@@ -1633,7 +1632,10 @@ mod metadata_tests {
             .session_summaries(&SessionFilter::default(), 0)
             .unwrap();
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].flow_process_lfid.as_deref(), Some(driver.as_str()));
+        assert_eq!(
+            rows[0].flow_lf_process_id.as_deref(),
+            Some(flow_process.as_str())
+        );
         let flow = rows[0].flow.as_ref().unwrap();
         assert_eq!(
             (flow.name.as_str(), flow.state),
@@ -1645,9 +1647,9 @@ mod metadata_tests {
                 .session("session")
                 .unwrap()
                 .unwrap()
-                .flow_process_lfid
+                .flow_lf_process_id
                 .as_deref(),
-            Some(driver.as_str())
+            Some(flow_process.as_str())
         );
         assert!(
             store.input_events(&input).is_err(),
@@ -1658,8 +1660,8 @@ mod metadata_tests {
             .lock()
             .unwrap()
             .execute(
-                "UPDATE processes SET outcome='succeeded',completed_at=2 WHERE lfid=?1",
-                params![driver],
+                "UPDATE processes SET outcome='succeeded',completed_at=2 WHERE id=?1",
+                params![flow_process],
             )
             .unwrap();
         let flow = store

@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::process::Command;
 
-use crate::engine::git::current_branch;
+use crate::git::current_branch;
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
 

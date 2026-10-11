@@ -60,7 +60,7 @@ pub(crate) fn render_task_context(
 
 fn render_wave_context(repo: &Path, wave: &str, metric_context: &str) -> String {
     // Authored goals and memory enter once through the prompt document gatherer.
-    let flows = match crate::engine::available_flow_names(repo) {
+    let flows = match crate::flow::available_flow_names(repo) {
         Ok(names) => names
             .iter()
             .map(|flow| format!("- {flow}"))
@@ -232,7 +232,7 @@ async fn bind_selected_work(
     let cwd = if crate::repository::CanonicalRepo::discover(Path::new(wave.repo()))
         .is_ok_and(|canonical| canonical.contains(repo))
     {
-        crate::engine::git::worktree_root(repo).unwrap_or_else(|_| repo.to_path_buf())
+        crate::git::worktree_root(repo).unwrap_or_else(|_| repo.to_path_buf())
     } else {
         PathBuf::from(wave.repo())
     };
@@ -261,7 +261,7 @@ pub async fn resolve_execution_binding(
     let checkout = selected.source == crate::session::WorkSource::Checkout;
     let mut binding = bind_selected_work(store, cwd, selected).await?;
     binding.cwd = if checkout {
-        crate::engine::git::worktree_root(cwd).unwrap_or_else(|_| cwd.to_path_buf())
+        crate::git::worktree_root(cwd).unwrap_or_else(|_| cwd.to_path_buf())
     } else {
         cwd.to_path_buf()
     };
@@ -658,31 +658,20 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let _home =
             crate::lf::commands::flow::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
-        let store =
-            crate::store::sqlite::SqliteStore::open_ephemeral(&home.path().join("loopflow.db"))
-                .unwrap();
         let tmp = loopflow_test_support::TestRepo::new();
         std::fs::create_dir_all(tmp.path().join("wave/release")).unwrap();
         let goal = "---\ncrons: []\n---\n## Objective\nShip a reliable release.\n\n## Bounds\nKeep rollback available.\n";
         std::fs::write(tmp.path().join("wave/release/GOAL.md"), goal).unwrap();
-        store
-            .ensure_wave(
-                &crate::repository::CanonicalRepo::discover(tmp.path())
-                    .unwrap()
-                    .to_string(),
-                "release",
-            )
-            .unwrap();
         let seed = super::render_wave_context(tmp.path(), "release", "");
         for message in [None, Some(seed)] {
-            let prepared = crate::engine::process_prompt::prepare_process_prompt(
-                &crate::engine::config::Config {
+            let prepared = crate::prompt::process::prepare_process_prompt(
+                &crate::config::Config {
                     diff_files: false,
                     diff: false,
                     paste: false,
                     ..Default::default()
                 },
-                crate::engine::process_prompt::ProcessPromptInput {
+                crate::prompt::process::ProcessPromptInput {
                     repo_root: tmp.path().to_path_buf(),
                     wave: Some("release".into()),
                     docs: vec!["wave/release/GOAL.md".into()],
@@ -691,15 +680,17 @@ mod tests {
                 },
             )
             .unwrap();
-            assert_eq!(
-                prepared.prompt.matches("Ship a reliable release.").count(),
-                1
-            );
-            assert_eq!(
-                prepared.prompt.matches("Keep rollback available.").count(),
-                1
-            );
-            assert!(prepared.config.system_prompt.contains(goal));
+            let block = prepared
+                .config
+                .conversation_context
+                .as_ref()
+                .unwrap()
+                .block(crate::context_block::ContextMoment::Start)
+                .unwrap()
+                .text;
+            assert_eq!(block.matches("Ship a reliable release.").count(), 1);
+            assert_eq!(block.matches("Keep rollback available.").count(), 1);
+            assert!(!prepared.config.system_prompt.contains(goal));
             let context = crate::lf::commands::run::attributed_context(
                 &prepared.components,
                 &prepared.config.system_prompt,
@@ -718,7 +709,7 @@ mod tests {
                         asset.source_path.as_deref() == Some("wave/release/GOAL.md")
                     })
                     .count(),
-                1
+                0
             );
             assert!(context.decisions.iter().any(|decision| {
                 decision.source_path.as_deref() == Some("wave/release/GOAL.md")
@@ -776,6 +767,17 @@ mod tests {
                 )
                 .await
                 .unwrap();
+                // Registry relocation preserves bytes; authoring moves the directory.
+                assert!(repo
+                    .path()
+                    .join("wave/infrastructure/release/GOAL.md")
+                    .is_file());
+                assert!(!repo.path().join("wave/infra").exists());
+                std::fs::rename(
+                    repo.path().join("wave/infrastructure"),
+                    repo.path().join("wave/infra"),
+                )
+                .unwrap();
             } else if address == "product/release" {
                 crate::work::wave::ensure_wave_row(&store, repo.path(), "product")
                     .await
@@ -788,6 +790,13 @@ mod tests {
                     Some(address),
                 )
                 .await
+                .unwrap();
+                assert!(repo.path().join("wave/infra/release/GOAL.md").is_file());
+                assert!(!repo.path().join("wave/product/release").exists());
+                std::fs::rename(
+                    repo.path().join("wave/infra/release"),
+                    repo.path().join("wave/product/release"),
+                )
                 .unwrap();
             }
             let discovered = store.get_wave(release.id()).await.unwrap().unwrap();
@@ -811,7 +820,7 @@ mod tests {
                 store.get_task(&task.id).await.unwrap().unwrap().wave_id,
                 *release.id()
             );
-            let components = crate::engine::gather_context(&crate::engine::GatherContextOpts {
+            let components = crate::prompt::gather_context(&crate::prompt::GatherContextOpts {
                 repo_root: binding.cwd,
                 wave: Some(binding.wave_name),
                 include_diff: false,
@@ -819,7 +828,13 @@ mod tests {
                 ..Default::default()
             })
             .unwrap();
-            let prompt = crate::engine::format_prompt(&components);
+            // Source discovery preserves ancestry; diagnostics no longer inline bodies.
+            let prompt = components
+                .docs
+                .iter()
+                .map(|doc| doc.content.as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
             let ancestor = if address.starts_with("product/") {
                 "Product memory"
             } else {
@@ -835,11 +850,8 @@ mod tests {
                 "Parent memory"
             }));
         }
-        assert!(repo
-            .path()
-            .join("wave/infrastructure/release/GOAL.md")
-            .exists());
-        assert!(!repo.path().join("wave/infra").exists());
+        assert!(repo.path().join("wave/product/release/GOAL.md").is_file());
+        assert!(!repo.path().join("wave/infra/release").exists());
     }
 
     #[tokio::test]
@@ -1005,14 +1017,21 @@ mod tests {
             let history = crate::session_record::read_provider_session(&capture.artifact_dir())
                 .unwrap()
                 .unwrap();
-            let resumed = crate::lf::commands::util::resume_session(
-                "codex",
-                None,
-                repo.path(),
-                &capture.artifact_key(),
-                &history,
+            // The resuming invocation and its capture share this fixture's store.
+            let resumed = crate::journal::with_test_ledger(
+                crate::store::database_path_from_env().unwrap(),
+                || {
+                    crate::lf::commands::util::resume_session(
+                        "codex",
+                        None,
+                        repo.path(),
+                        &capture.artifact_key(),
+                        &history,
+                    )
+                },
             );
-            assert!(resumed.unwrap_err().to_string().contains("was deleted"));
+            let error = resumed.unwrap_err().to_string();
+            assert!(error.contains("was deleted"), "{error}");
             assert!(
                 crate::session_record::read_provider_clients(&capture.artifact_dir())
                     .unwrap()
@@ -1077,7 +1096,7 @@ mod tests {
                 }),
                 task_id,
                 wave_id: None,
-                flow_process_lfid: None,
+                flow_lf_process_id: None,
                 bound_at: None,
                 interactive: false,
                 repo: None,

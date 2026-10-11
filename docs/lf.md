@@ -144,7 +144,7 @@ lf flow list                             # autonomous Flow definitions
 lf flow customize pursue                 # print its local source path
 ```
 
-A Flow whose driver died leaves its Processes as history. No command resumes it. To change direction or recover:
+A Flow whose process died leaves its Processes as history. No command resumes it. To change direction or recover:
 
 ```bash
 lf task interrupt EXP-12             # end the active provider turn
@@ -153,14 +153,16 @@ lf flow show ID --processes --json    # one Flow's steps, by its Flow process ID
 lf -b task run EXP-12       # run fresh work
 ```
 
-Claude and Codex terminal launches load the complete assembled context from a
-system instructions file. The first user message is a short execution request;
-Wave memory, scratch, diffs, clipboard, skills and Task briefs stay out of the
-command-line argument. Provider refusals remain visible in the native terminal.
+The first turn contains the skill followed by the request and tagged clipboard
+text. Loopflow adds fixed instructions without replacing the provider's native prompt or repo guide.
+Startup and compaction deliver current Wave memory and scratch as a capped
+conversation block: whole files, marked start excerpts and readable source paths.
+Compaction also restores the saved active skill. Task direction and summaries
+remain complete private reference files. Terminal first turns use argv; only a
+first turn exceeding the argument cap is refused before spawning the provider.
 
-Selected Wave goals are supplied once as complete `GOAL.md` documents. Repeated
-requests for the same document do not repeat its contents; distinct memory files
-remain separate even when their text matches.
+Wave goals use the same whole-file, excerpt and listing rules as memory.
+Distinct source files remain separate even when their text matches.
 
 Launching a Flow for an existing Task uses valid cached planning regardless of age.
 Known invalidation, removal, terminal state or ownership changes still block.
@@ -179,11 +181,12 @@ lf task run <id> research
 
 Without a selected Wave, explicit creation uses `inbox`. A Task gets its
 identity before placement; creation starts no agent and requires no Linear login.
-Goals, memory, Projects and comments stay in SQLite. Reads create nothing.
+Projects and comments stay in SQLite; Wave goals and memory live in the checkout.
+Reads create nothing.
 
 ```bash
 lf wave ensure parser
-lf wave edit parser --goal /tmp/goal.md --memory /tmp/memory.md
+# Edit wave/parser/GOAL.md and wave/parser/MEMORY.md directly.
 lf task create --wave parser --title "Retain escaped quotes"
 ```
 
@@ -224,10 +227,12 @@ Readback cannot protect against unseen concurrent provider writes.
 Ranks are zero-based within a Project. Selected workflow definitions stay in SQLite
 for every Wave; Desktop’s Customize and Edit controls use the same editor. Stored
 definitions are imported by `lf wave ensure`; builtin definitions remain available.
-Nested Waves use names such as `parser/tokenizer`; renaming retains their IDs,
-descendants and saved documents. `lf wave ensure` imports existing Markdown and
-Workflow sources without changing them. Repeating it preserves stored edits.
-`lf wave edit` saves to SQLite in both connection modes.
+Nested Waves use names such as `parser/tokenizer`. Edit `wave/<name>/GOAL.md`
+and `wave/<name>/MEMORY.md` like any other file; the next launch reads that
+checkout's files, including ancestor context. Creation writes missing files without
+overwriting existing content. Registry renaming retains IDs and descendants;
+move the authored directory separately to match its new address. Workflow imports
+remain independent of goal and memory files.
 
 Placement, native Sessions, workflow skills and GitHub delivery use the same Task
 identity. `lf land` requests merge; `lf pr reconcile` observes delivery. After
@@ -389,14 +394,14 @@ An open conversation keeps the instructions it launched with; `replace` it
 after an upgrade.
 
 Monitor keeps live processes, recorded outcomes and missing observations distinct.
-A process has a durable `lfid` and an optional Unix `pid`. Inspect by LFID; PIDs
-can be reused. `parent_process_lfid` names the recorded parent, and historical
+A process has a durable `id` and an optional Unix `pid`. Inspect by `id`; PIDs
+can be reused. `parent_lf_process_id` names the recorded parent, and historical
 rows without PID evidence keep `pid: null`.
 Its overview explains each item's state and next action. A mechanical Process has
 no provider conclusion. JSON reads emit one document; the active watch emits
 newline-delimited snapshots. Progress and errors go to stderr.
 
-`lf context` previews local launch input; [configure context budgets](config.md#context-budgets)
+`lf context` measures authored memory and scratch against size targets; [configure context budgets](config.md#context-budgets)
 in existing personal, repository or Wave settings.
 
 ## Publish and finish
@@ -822,7 +827,7 @@ lf session list --task LOO-358 --interactive all --history
 `--waiting` narrows that selection to conversations waiting on you. In Desktop,
 a program's OSC 7501 report takes precedence: any blocked record means Waiting,
 as does idle for an interactive Session. Working, done, error and explicit clear
-suppress the quiet-time inference for that provider generation. A blocked child
+suppress the quiet-time inference for that AgentProcess. A blocked child
 still counts when its parent reports working.
 
 Without reports, the existing provider stream supplies questions, hand-back and
@@ -861,7 +866,7 @@ workspace; enter its printed path before editing.
 Primary conversations reuse their respective worktrees, including after replacement.
 They display a workspace without gaining Task membership. Moved checkouts are
 rediscovered; missing checkouts recover committed branch state. Live conversations
-keep their placement until an idle driver boundary.
+keep their placement until their attached LfProcess is idle.
 
 Persistent workspaces retain scratch locally through commit, sync, publication and
 landing. Selected-path commits preserve unrelated staged edits. Publication pushes

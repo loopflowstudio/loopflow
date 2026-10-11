@@ -55,6 +55,9 @@ async fn serve(
 // Stateful provider evidence for planning fields, state, membership, and comments.
 #[derive(Default)]
 struct PlanningState {
+    wave_summary: String,
+    reject_wave_update: bool,
+    wave_updates: usize,
     export_mode: bool,
     creation_writes: usize,
     attachment_writes: usize,
@@ -145,8 +148,17 @@ async fn planning_graphql(
     let data = if query.contains("query ListTeams") {
         json!({"teams":{"nodes":[{"id":"team-1","name":"Fixture","key":"FIX",
             "description":"<!-- loopflow-repository: loopflowstudio/fixture -->"}]}})
+    } else if query.contains("mutation UpdateInitiative") {
+        state.wave_updates += 1;
+        if state.reject_wave_update {
+            return axum::Json(json!({"errors":[{"message":"summary update refused"}]}));
+        }
+        if let Some(summary) = vars["input"]["description"].as_str() {
+            state.wave_summary = summary.into();
+        }
+        json!({"initiativeUpdate":{"success":true,"initiative":{"id":vars["id"]}}})
     } else if query.contains("query ListInitiatives") {
-        json!({"initiatives":page(vec![json!({"id":"initiative-1", "name":"Product", "description":""})])})
+        json!({"initiatives":page(vec![json!({"id":"initiative-1", "name":"Product", "description":state.wave_summary})])})
     } else if query.contains("query ListInitiativeProjects") {
         if !state.issues.is_empty() && state.fail_snapshot {
             state.fail_snapshot = false;
@@ -604,13 +616,23 @@ fn task_deletion_active_sync_reconnect_retains_execution_and_history() {
             rusqlite::params![task.id.as_str(), repo.to_str().unwrap()],
         )
         .unwrap();
-        conn.execute("INSERT INTO processes(lfid,trace_id,command,cwd,started_at) VALUES('11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222','lf run code',?1,2)",[repo.to_str().unwrap()]).unwrap();
-        conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,cwd,task_id,wave_id,driver_process_lfid,provider_thread,input_published) VALUES('session-retained','Conversation','human',2,?1,?2,?3,'11111111-1111-4111-8111-111111111111','native-retained',1)",rusqlite::params![repo.to_str().unwrap(),task.id.as_str(),task.wave_id.as_str()]).unwrap();
+        conn.execute("INSERT INTO processes(id,trace_id,command,cwd,started_at) VALUES('11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222','lf run code',?1,2)",[repo.to_str().unwrap()]).unwrap();
+        conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,cwd,task_id,wave_id,provider_thread,input_published) VALUES('session-retained','Conversation','human',2,?1,?2,?3,'native-retained',1)",rusqlite::params![repo.to_str().unwrap(),task.id.as_str(),task.wave_id.as_str()]).unwrap();
+        fixture
+            .store
+            .sqlite
+            .claim_session_attachment(
+                "session-retained",
+                None,
+                &crate::id::LfProcessId::parse("11111111-1111-4111-8111-111111111111").unwrap(),
+                true,
+            )
+            .unwrap();
         conn.execute("INSERT INTO task_prs(id,task_id,sequence,slug,branch,base_commit,created_at,updated_at) VALUES('pr-retained',?1,1,'task','retain/branch','retained-base',1,7)",[task.id.as_str()]).unwrap();
         let graph = json!({"name":"code", "nodes":[{"name":"review","skill":"review","description":null}],
             "edges":[{"from":"start","to":"review","flow":"implement"},{"from":"review","to":"end","flow":null}]});
-        conn.execute("INSERT INTO task_workflows(task_id,graph,node,edge,process_lfid,updated_at) VALUES(?1,?2,'start',0,'11111111-1111-4111-8111-111111111111',3)",rusqlite::params![task.id.as_str(),graph.to_string()]).unwrap();
-        conn.execute("INSERT INTO task_workflow_moves(task_id,workflow,kind,from_node,to_node,edge,process_lfid,note,at) VALUES(?1,'code','chose','start','review',0,'11111111-1111-4111-8111-111111111111','Original choice',3)",[task.id.as_str()]).unwrap();
+        conn.execute("INSERT INTO task_workflows(task_id,graph,node,edge,lf_process_id,updated_at) VALUES(?1,?2,'start',0,'11111111-1111-4111-8111-111111111111',3)",rusqlite::params![task.id.as_str(),graph.to_string()]).unwrap();
+        conn.execute("INSERT INTO task_workflow_moves(task_id,workflow,kind,from_node,to_node,edge,lf_process_id,note,at) VALUES(?1,'code','chose','start','review',0,'11111111-1111-4111-8111-111111111111','Original choice',3)",[task.id.as_str()]).unwrap();
         let rows = || {
             [
                 "processes",
@@ -1435,13 +1457,16 @@ fn task_completion_late_acknowledgement_preserves_explicit_reopening() {
             .unwrap();
         assert!(fixture.store.sqlite.attempt_task_state(&completed).unwrap());
         let process = crate::process::LfProcess {
-            lfid: crate::id::ProcessLfid::new(),
+            kind: crate::process::ProcessKind::Lf,
+            agent_session_id: None,
+            os_started_at: None,
+            id: crate::id::LfProcessId::new(),
             pid: None,
             trace_id: crate::id::TraceId::new(),
-            parent_process_lfid: None,
+            parent_lf_process_id: None,
             via_agent: None,
             caller_session_id: None,
-            caller_provider_generation: None,
+            caller_agent_process_id: None,
             command: Some("task move start".into()),
             repo: None,
             cwd: None,
@@ -1456,7 +1481,7 @@ fn task_completion_late_acknowledgement_preserves_explicit_reopening() {
         fixture
             .store
             .sqlite
-            .set_workflow_node(&task.id, "start", &process.lfid, Some("New scope"))
+            .set_workflow_node(&task.id, "start", &process.id, Some("New scope"))
             .unwrap();
         assert_eq!(
             fixture
@@ -1789,7 +1814,7 @@ exit 0
                 .unwrap();
             let workflow = fixture.store.sqlite.workflow(&task.id).unwrap();
             let other_workflow = fixture.store.sqlite.workflow(&other.id).unwrap();
-            let process = crate::engine::agent::ProcessConfig {
+            let process = crate::agent::ProcessConfig {
                 auto,
                 task_input: Some(crate::ops::task_input::TaskInput::new(
                     fixture.store.clone(),
@@ -1803,7 +1828,7 @@ exit 0
                 )),
                 ..Default::default()
             };
-            let launch = crate::engine::agent::AgentConfig {
+            let launch = crate::agent::AgentConfig {
                 agent: Some(agent.into()),
                 cwd: Some(repo.to_path_buf()),
                 env: std::collections::BTreeMap::from([
@@ -1814,14 +1839,17 @@ exit 0
                 ..Default::default()
             };
             let context = PM_TEST_CONTEXT.with(Clone::clone);
+            let database = fixture.database.clone();
             runtime.block_on(async {
-                let running = tokio::task::spawn_blocking(move || {
-                    PM_TEST_CONTEXT.sync_scope(context, || {
-                        crate::engine::agent::run_agent(
-                            &launch,
-                            &process,
-                            &crate::engine::agent::AgentCapabilities::default(),
-                        )
+                let mut running = tokio::task::spawn_blocking(move || {
+                    crate::journal::with_test_ledger(database, || {
+                        PM_TEST_CONTEXT.sync_scope(context, || {
+                            crate::agent::run_agent(
+                                &launch,
+                                &process,
+                                &crate::agent::AgentCapabilities::default(),
+                            )
+                        })
                     })
                 });
                 let observed = tokio::time::timeout(std::time::Duration::from_secs(45), async {
@@ -1835,7 +1863,12 @@ exit 0
                         {
                             break;
                         }
-                        assert!(!running.is_finished(), "provider exited during outage");
+                        if running.is_finished() {
+                            panic!(
+                                "provider exited during outage: {:?}",
+                                (&mut running).await.unwrap()
+                            );
+                        }
                         tokio::time::sleep(std::time::Duration::from_millis(25)).await;
                     }
                     assert_eq!(
@@ -2457,8 +2490,8 @@ fi
                 project_id: project.id,
                 worktree: Some(repo.clone()),
                 workspace_slug: "completion".into(),
-                branch: crate::engine::git::current_branch(&repo).unwrap().unwrap(),
-                base_commit: crate::engine::git::rev_parse(&repo, "HEAD").unwrap(),
+                branch: crate::git::current_branch(&repo).unwrap().unwrap(),
+                base_commit: crate::git::rev_parse(&repo, "HEAD").unwrap(),
                 parent_pr_id: None,
                 abandon_intent: None,
                 created_at: timestamp,
@@ -2471,8 +2504,8 @@ fi
                 task_id: task.id.clone(),
                 sequence: 1,
                 slug: "completion".into(),
-                branch: crate::engine::git::current_branch(&repo).unwrap().unwrap(),
-                base_commit: crate::engine::git::rev_parse(&repo, "HEAD").unwrap(),
+                branch: crate::git::current_branch(&repo).unwrap().unwrap(),
+                base_commit: crate::git::rev_parse(&repo, "HEAD").unwrap(),
                 parent_pr_id: None,
                 publication: None,
                 merge_commit: None,
@@ -2612,9 +2645,7 @@ fi
             1
         );
         assert_eq!(
-            crate::engine::worktrees::list_worktrees(&repo)
-                .unwrap()
-                .len(),
+            crate::git::worktrees::list_worktrees(&repo).unwrap().len(),
             1
         );
     });
@@ -2908,6 +2939,26 @@ fn foreign_projects_do_not_block_sweep_refresh_or_sync() {
     std::env::set_var("LF_HOME", fixture.directory.path());
     let (repo, wave) = runtime.block_on(planning_repo(&fixture));
     runtime.block_on(fixture.seed(now() + 86_400));
+    for args in [
+        vec!["branch", "-M", "main"],
+        vec!["add", "."],
+        vec![
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "-qm",
+            "merged goals",
+        ],
+    ] {
+        assert!(std::process::Command::new("git")
+            .args(args)
+            .current_dir(&repo)
+            .status()
+            .unwrap()
+            .success());
+    }
     let foreign = json!({
         "id":"foreign-project", "name":"Other Repository — Technical Architecture",
         "description":"", "content":"", "status":{"type":"started"},
@@ -4196,3 +4247,147 @@ fn planning_export_removal_during_uncertain_creation_retains_identity() {
 
 #[path = "planning_order_tests.rs"]
 mod planning_order_tests;
+
+#[test]
+fn wave_summary_sync_reads_committed_default_branch() {
+    let _lock = crate::journal::test_env_lock();
+    let _restore = PlanningEnvironment::isolate();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let fixture = runtime.block_on(Fixture::new());
+    std::env::set_var("LF_HOME", fixture.directory.path());
+    let (repo, _) = runtime.block_on(planning_repo(&fixture));
+    runtime.block_on(fixture.seed(now() + 86_400));
+    let git = |repo: &Path, args: &[&str]| {
+        let output = std::process::Command::new("git")
+            .args(args)
+            .current_dir(repo)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    git(&repo, &["branch", "-M", "trunk"]);
+    git(
+        &repo,
+        &[
+            "symbolic-ref",
+            "refs/remotes/origin/HEAD",
+            "refs/remotes/origin/trunk",
+        ],
+    );
+    let commit = |repo: &Path| {
+        git(repo, &["add", "."]);
+        git(
+            repo,
+            &[
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "commit",
+                "-qm",
+                "fixture goal",
+            ],
+        );
+    };
+    commit(&repo);
+    let checkout = fixture.directory.path().join("checkout");
+    git(
+        &repo,
+        &[
+            "worktree",
+            "add",
+            "-qb",
+            "summary",
+            checkout.to_str().unwrap(),
+        ],
+    );
+    let goal = repo.join("wave/product/GOAL.md");
+    let write = |text: &str| {
+        std::fs::write(
+            &goal,
+            format!("---\npm:\n  linear_initiative: initiative-1\n---\n\n## Objective\n\n{text}\n"),
+        )
+        .unwrap();
+    };
+    let state = Arc::new(tokio::sync::Mutex::new(PlanningState::default()));
+    let (url, server) = runtime.block_on(serve(state.clone()));
+    PM_TEST_CONTEXT.sync_scope(fixture.context(&url), || {
+        let sync = |plan| {
+            crate::lf::commands::ops::sync_planning(&checkout, Some("product"), false, plan, false)
+        };
+        std::fs::write(
+            checkout.join("wave/product/GOAL.md"),
+            "---\npm:\n  linear_initiative: initiative-1\n---\n\n## Objective\n\nEdited directly.\n",
+        ).unwrap();
+        commit(&checkout);
+        sync(false).unwrap();
+        assert_eq!(
+            runtime.block_on(async { state.lock().await.wave_summary.clone() }),
+            "Keep working."
+        );
+        // Even a dirty default checkout must not publish unmerged text.
+        write("Edited directly.");
+        sync(false).unwrap();
+        assert_eq!(
+            runtime.block_on(async { state.lock().await.wave_summary.clone() }),
+            "Keep working."
+        );
+        commit(&repo);
+        sync(false).unwrap();
+        assert_eq!(
+            runtime.block_on(async { state.lock().await.wave_summary.clone() }),
+            "Edited directly."
+        );
+        // No duplicate provider effect for unchanged normalized text.
+        sync(false).unwrap();
+        assert_eq!(
+            runtime.block_on(async { state.lock().await.wave_updates }),
+            2
+        );
+        write("Plan only.");
+        commit(&repo);
+        sync(true).unwrap();
+        assert_eq!(
+            runtime.block_on(async { state.lock().await.wave_summary.clone() }),
+            "Edited directly."
+        );
+        std::fs::remove_file(&goal).unwrap();
+        commit(&repo);
+        assert!(sync(false).unwrap_err().to_string().contains("missing"));
+        assert_eq!(
+            runtime.block_on(async { state.lock().await.wave_updates }),
+            2
+        );
+        write("Rejected update.");
+        commit(&repo);
+        runtime.block_on(async { state.lock().await.reject_wave_update = true });
+        assert!(sync(false)
+            .unwrap_err()
+            .to_string()
+            .contains("summary update refused"));
+        assert_eq!(
+            runtime.block_on(async { state.lock().await.wave_summary.clone() }),
+            "Edited directly."
+        );
+        assert_eq!(
+            runtime.block_on(async { state.lock().await.wave_updates }),
+            3
+        );
+        runtime.block_on(async { state.lock().await.reject_wave_update = false });
+        write("");
+        commit(&repo);
+        sync(false).unwrap();
+        assert_eq!(
+            runtime.block_on(async { state.lock().await.wave_summary.clone() }),
+            ""
+        );
+        assert!(std::fs::read_to_string(checkout.join("wave/product/GOAL.md"))
+            .unwrap()
+            .contains("Edited directly."));
+    });
+    server.abort();
+}

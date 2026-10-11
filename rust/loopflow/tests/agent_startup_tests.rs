@@ -193,7 +193,8 @@ read -r finish
         .nth(1)
         .unwrap();
     let context = fs::read_to_string(context_file).unwrap();
-    assert!(context.contains("<lf:skill:default>"));
+    assert!(!context.contains("<lf:skill:default>"));
+    assert!(args.contains("<lf:skill:default>"));
     let native = args
         .lines()
         .skip_while(|arg| *arg != "--session-id")

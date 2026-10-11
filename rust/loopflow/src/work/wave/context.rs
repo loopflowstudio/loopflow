@@ -5,7 +5,7 @@
 //! repository; the UUID remains durable identity across locator changes.
 //!
 //! Registry resolution uses the canonical repository. Authored Wave files are
-//! gathered by the prompt engine from the executing checkout.
+//! gathered by prompt assembly from the executing checkout.
 
 use crate::id::WaveId;
 use crate::work::wave::{Wave, WaveLocator};

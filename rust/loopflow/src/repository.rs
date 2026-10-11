@@ -24,7 +24,7 @@ pub struct CanonicalRepoError {
 impl CanonicalRepo {
     pub fn discover(path: &Path) -> Result<Self, CanonicalRepoError> {
         let main =
-            crate::engine::worktrees::main_repo_root(path).unwrap_or_else(|_| path.to_path_buf());
+            crate::git::worktrees::main_repo_root(path).unwrap_or_else(|_| path.to_path_buf());
         let canonical = main.canonicalize().map_err(|error| CanonicalRepoError {
             path: main,
             message: error.to_string(),

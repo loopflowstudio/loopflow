@@ -12,7 +12,7 @@ use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio_tungstenite::{client_async, tungstenite::Message, WebSocketStream};
 
 use super::{AuthCompletion, AuthError, AuthFlowHandle, AuthFlowResponse, Provider};
-use crate::engine::process::ProcessGroupGuard;
+use crate::os_process::ProcessGroupGuard;
 
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const DAEMON_TIMEOUT: Duration = Duration::from_secs(5);

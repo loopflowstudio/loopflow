@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::{block_on_task, lock_task_pr_mutation, task_error, task_for_checkout, task_store};
-use crate::engine::git::{rev_parse, worktree_root};
-use crate::engine::worktrees::git_common_dir;
+use crate::git::worktrees::git_common_dir;
+use crate::git::{rev_parse, worktree_root};
 use crate::ops::error::OpsResult;
 use crate::work::task::{Task, TaskId};
 

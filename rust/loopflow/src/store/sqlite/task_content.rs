@@ -195,7 +195,7 @@ fn validate_refile(
          AND NOT EXISTS(SELECT 1 FROM task_workflows WHERE task_id=?1)
          AND NOT EXISTS(SELECT 1 FROM task_prs WHERE task_id=?1)
          AND NOT EXISTS({}) FROM tasks WHERE id=?1",
-            super::task_work::process_lfids("?1")
+            super::task_work::lf_process_ids("?1")
         ),
         [id.as_str()],
         |row| row.get(0),

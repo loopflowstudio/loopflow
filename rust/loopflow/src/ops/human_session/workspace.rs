@@ -54,7 +54,7 @@ impl WorkspaceResolver {
         // retained Sessions can share the same retired path within this page.
         self.roots
             .entry(path.to_path_buf())
-            .or_insert_with(|| crate::engine::git::worktree_root(path).ok())
+            .or_insert_with(|| crate::git::worktree_root(path).ok())
             .clone()
     }
 

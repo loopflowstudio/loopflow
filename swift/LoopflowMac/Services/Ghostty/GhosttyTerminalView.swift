@@ -251,7 +251,7 @@ final class GhosttySurfacePool {
                 if let record = records.first(where: {
                     $0.id == id && $0.workspace?.machineId == view.terminal.machineId
                 }) {
-                    view.programStatus.associate(sessionId: id, terminalId: marker, generation: record.providerGeneration)
+                    view.programStatus.associate(sessionId: id, terminalId: marker, provider: SessionProviderReading(agentProcessId: record.agentProcessId))
                 }
                 continue
             }
@@ -262,7 +262,7 @@ final class GhosttySurfacePool {
             view.programStatus.associate(
                 sessionId: matches.count == 1 ? matches[0].id : nil,
                 terminalId: matches.count == 1 ? marker : nil,
-                generation: matches.count == 1 ? matches[0].providerGeneration : nil
+                provider: matches.count == 1 ? SessionProviderReading(agentProcessId: matches[0].agentProcessId) : nil
             )
         }
     }
@@ -466,7 +466,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         self.terminal = terminal
         super.init(frame: frameRect)
         if case .session(let id, _) = terminal {
-            programStatus.associate(sessionId: id, terminalId: terminalMarker, generation: nil)
+            programStatus.associate(sessionId: id, terminalId: terminalMarker, provider: nil)
         }
         setupView()
     }

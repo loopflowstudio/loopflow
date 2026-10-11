@@ -27,11 +27,20 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
         SessionCommand::ObserveStatus {
             id,
             terminal,
-            generation,
+            agent_process,
         } => {
             let store = open_shared_store().await?;
-            crate::ops::human_session::observe_program_status(&store, id, terminal, *generation)
-                .await
+            let agent_process = agent_process
+                .as_deref()
+                .map(crate::id::LfProcessId::parse)
+                .transpose()?;
+            crate::ops::human_session::observe_program_status(
+                &store,
+                id,
+                terminal,
+                agent_process.as_ref(),
+            )
+            .await
         }
         SessionCommand::Resume { id, message } => {
             anyhow::ensure!(

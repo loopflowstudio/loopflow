@@ -39,7 +39,7 @@ pub fn serve(repo: &Path, wave: &str) -> Result<()> {
     if !channel_id.bytes().all(|byte| byte.is_ascii_digit()) || channel_id.is_empty() {
         return Err(anyhow!("Discord channel_id must be a numeric channel id"));
     }
-    let token = std::env::var(crate::engine::process::DISCORD_TOKEN_ENV)
+    let token = std::env::var(crate::os_process::DISCORD_TOKEN_ENV)
         .context("set LF_DISCORD_TOKEN through Doppler")?;
     let mut authorization = header::HeaderValue::from_str(&format!("Bot {token}"))
         .map_err(|_| anyhow!("invalid Discord token"))?;

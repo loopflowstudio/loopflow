@@ -5,8 +5,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use base64::Engine;
+use base64::prelude::*;
 use serde_json::json;
 
 fn command(home: &Path) -> Command {
@@ -63,7 +62,7 @@ fn receive_registers_one_native_login_and_rejects_wrong_machine_without_exposing
         .unwrap();
     assert_success(&identity);
     let machine = String::from_utf8(identity.stdout).unwrap();
-    let claims = URL_SAFE_NO_PAD
+    let claims = BASE64_URL_SAFE_NO_PAD
         .encode(json!({"email":"person@example.com","sub":"person-123"}).to_string());
     let native = json!({"tokens":{"access_token":"fixture-private-access","refresh_token":"fixture-private-refresh","id_token":format!("header.{claims}.sig")}}).to_string();
     let payload = serde_json::to_vec(&json!({"provider":"codex","login":"person@example.com","subject":"person-123","credential":native})).unwrap();

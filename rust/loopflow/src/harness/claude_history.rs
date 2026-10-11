@@ -1,19 +1,17 @@
 //! Stream input UUIDs, echoed by Claude, correlate each native result.
 use crate::id::AgentSessionId;
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde_json::{json, Value};
 
-use crate::process::SessionDriver;
 use crate::session::SessionEventKind;
-use crate::store::sqlite::SqliteStore;
 
 #[derive(Debug)]
 pub(super) struct History {
-    pub owner: Option<(SqliteStore, String, SessionDriver)>,
-    pub requests: Arc<Mutex<HashSet<String>>>,
+    pub owner: super::agent_process::AttachmentOwner,
+    pub requests: Arc<Mutex<HashMap<String, crate::session::SessionTurnOrigin>>>,
     pub pending: VecDeque<(AgentSessionId, String)>,
     pub attention: super::attention::Attention,
 }
@@ -23,36 +21,24 @@ impl History {
         let Ok(value) = serde_json::from_str::<Value>(line) else {
             return Ok(());
         };
-        let Some((store, session, driver)) = &self.owner else {
-            return Ok(());
-        };
+        let (store, session, attachment) = &self.owner;
         self.attention
-            .record(store, session, driver, super::attention::claude(&value));
+            .record(store, session, attachment, super::attention::claude(&value));
         if value["type"] == "user" {
             let (Some(thread), Some(turn)) = (value["session_id"].as_str(), value["uuid"].as_str())
             else {
                 return Ok(());
             };
             let thread = AgentSessionId::from(thread);
-            if !self
+            let Some(origin) = self
                 .requests
                 .lock()
                 .expect("Claude request lock poisoned")
                 .remove(turn)
-            {
+            else {
                 return Ok(());
-            }
-            let process = driver
-                .process_lfid
-                .as_ref()
-                .context("Claude request has no driving Process")?;
-            store.record_session_turn_origin(
-                session,
-                &thread,
-                turn,
-                driver.provider_generation,
-                process,
-            )?;
+            };
+            store.record_session_turn_origin(&thread, turn, &origin)?;
             self.pending.push_back((thread.to_owned(), turn.to_owned()));
         } else if value["type"] == "result" {
             let Some((thread, turn)) = self.pending.front() else {
@@ -110,7 +96,7 @@ impl History {
 mod tests {
     use super::History;
 
-    use crate::id::ProcessLfid;
+    use crate::id::LfProcessId;
     use crate::session::SessionEventKind;
     use crate::store::sqlite::SqliteStore;
     use serde_json::json;
@@ -122,18 +108,23 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&path).unwrap();
         let conn = rusqlite::Connection::open(&path).unwrap();
         store.test_session("conversation", "run_00000000000000000000000000000001");
-        let process = ProcessLfid::new();
+        let process = LfProcessId::new();
         conn.execute(
-            "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
+            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
             [&process],
         )
         .unwrap();
-        let driver = store
-            .claim_session_driver("conversation", None, &process, false)
+        let attachment = store
+            .claim_session_attachment("conversation", None, &process, false)
+            .unwrap();
+        let origin = store
+            .session_turn_origin("conversation", &attachment)
             .unwrap();
         let mut history = History {
-            owner: Some((store.clone(), "conversation".into(), driver)),
-            requests: std::sync::Arc::new(std::sync::Mutex::new(["request".to_string()].into())),
+            owner: (store.clone(), "conversation".into(), attachment),
+            requests: std::sync::Arc::new(std::sync::Mutex::new(
+                [("request".to_string(), origin)].into(),
+            )),
             pending: Default::default(),
             attention: Default::default(),
         };
@@ -149,6 +140,12 @@ mod tests {
                 event.kind,
                 SessionEventKind::Captured | SessionEventKind::Observed
             )));
+        let original = store.session("conversation").unwrap().unwrap();
+        let mut next = original.clone();
+        next.artifact_key = crate::session_record::new_artifact_key();
+        let next = store
+            .replace_session_input(original.captured, next)
+            .unwrap();
         history
             .record(&json!({"type":"user","uuid":"request","session_id":"thread"}).to_string())
             .unwrap();
@@ -171,6 +168,10 @@ mod tests {
             .all(|e| e.provider_turn.as_deref() == Some("request")));
         assert_eq!(events[1].kind, SessionEventKind::Output);
         assert_eq!(events[1].payload["value"], value);
+        assert!(store
+            .input_final_answer(&next.artifact_key)
+            .unwrap()
+            .is_none());
         let answer = store
             .input_final_answer(
                 &crate::session_record::parse_artifact_key("run_00000000000000000000000000000001")

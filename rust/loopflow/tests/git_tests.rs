@@ -1,6 +1,6 @@
 use std::process::Command;
 
-use loopflow::engine::git::{
+use loopflow::git::{
     commit, create_branch, current_branch, get_default_branch, is_ancestor, is_clean, merge,
     sync_main,
 };

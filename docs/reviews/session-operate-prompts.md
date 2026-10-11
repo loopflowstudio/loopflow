@@ -13,7 +13,7 @@ whose Flow ended before landing waits on Jack.
 
 | Scenario | What the operator does | Boundary kept | Governing text |
 | --- | --- | --- | --- |
-| Idle runnable work: started Task, Flow steps left, no live driver | `lf --task <issue> flow start`, then rereads `lf task status`; reports **acted** | No second driver; no Flow chosen for the Task | "A defined Flow proceeds" |
+| Idle runnable work: started Task, Flow steps left, no live Flow process | `lf --task <issue> flow start`, then rereads `lf task status`; reports **acted** | No second Flow process; no Flow chosen for the Task | "A defined Flow proceeds" |
 | Live worker | Reports **moving** with the observed worker; leaves it alone | No interrupt, restart or duplicate launch | Disposition table |
 | Recoverable failure | Reads status, the failed step's log and `lf top`/`lf ps --json`; repairs through supported controls; retries with `--reason` | An unchanged failure is reported with its evidence, not retried again | "Recover before reporting a blocker" |
 | Unresolved liveness | Reports **unknown**, naming the missing read | Unknown is not idle; nothing is started | Disposition table |

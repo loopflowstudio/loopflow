@@ -32,19 +32,20 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crate::agent::checkout_execution_boundary;
 use crate::child::ChildRef;
+use crate::config::{load_config_or_default, parse_agent};
 use crate::durable::{TaskState, WorkStatus};
-use crate::engine::agent::checkout_execution_boundary;
-use crate::engine::config::{load_config_or_default, parse_agent};
-use crate::engine::git::{
-    current_branch, fetch, get_default_branch, is_clean, merge_base, ref_exists, rev_parse,
-};
-use crate::engine::naming::sanitize_for_branch;
-use crate::engine::workflow::{END, START};
-use crate::engine::worktrees::{
+use crate::flow::compile_flow;
+use crate::flow::load_flow;
+use crate::flow::ConcreteStep;
+use crate::git::worktrees::{
     plan_branch_placement, PlacementPlan, PlacementStrategy, WorktreeSegment,
 };
-use crate::engine::{compile_flow, load_flow, ConcreteStep};
+use crate::git::{
+    current_branch, fetch, get_default_branch, is_clean, merge_base, ref_exists, rev_parse,
+};
+use crate::naming::sanitize_for_branch;
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::task_actions::{derive_task_actions, TaskActionEvidence, TaskActionModel};
 use crate::ops::workflow::WorkflowPosition;
@@ -59,6 +60,7 @@ use crate::work::task::{
     TaskEventKind, TaskPr, TaskPrId,
 };
 use crate::work::wave::Wave;
+use crate::workflow::{END, START};
 use fs2::FileExt;
 use sha2::{Digest, Sha256};
 use time::format_description::well_known::Rfc3339;
@@ -650,7 +652,7 @@ async fn traverse_workflow(
     let issue = &task.plan.identifier;
     let name = &workflow.definition.name;
     let edge = workflow.definition.edges[index as usize].clone();
-    let process = crate::journal::current_process_lfid()
+    let process = crate::journal::current_lf_process_id()
         .ok_or_else(|| task_error("a workflow move requires a registered Process"))?;
     if take_up {
         store
@@ -686,7 +688,7 @@ async fn traverse_workflow(
 /// its target. A Task moved elsewhere in the meantime stays where it was put.
 /// Arrival is retained when the completion trigger fails.
 pub fn workflow_arrive(task: &Task) -> OpsResult<()> {
-    let Some(process) = crate::journal::current_process_lfid() else {
+    let Some(process) = crate::journal::current_lf_process_id() else {
         return Ok(());
     };
     block_on_task(async {
@@ -740,7 +742,7 @@ pub fn workflow_set(issue: &str, node: &str, note: Option<&str>) -> OpsResult<St
         validate_workflow_move(workflow.as_ref(), issue, node)?;
         let workflow = workflow.expect("nonterminal move requires a captured Workflow");
         let definition = &workflow.definition;
-        let process = crate::journal::current_process_lfid()
+        let process = crate::journal::current_lf_process_id()
             .ok_or_else(|| task_error("a workflow move requires a registered Process"))?;
         if !store
             .sqlite
@@ -820,7 +822,7 @@ fn prepare_task(repo: &Path, issue: &str, options: TaskProcessOptions) -> OpsRes
     options.validate_directive(None)?;
     block_on_task(async {
         let store = task_store().await?;
-        let main = crate::engine::worktrees::main_repo_root(repo).map_err(task_error)?;
+        let main = crate::git::worktrees::main_repo_root(repo).map_err(task_error)?;
         let saved = super::planning_peer::find_task(&store, &main.to_string_lossy(), issue).await?;
         let acquired = saved.is_none();
         let task = match saved {
@@ -919,9 +921,9 @@ fn validate_preparation_status(task: &Task, status: WorkStatus) -> OpsResult<()>
 
 async fn restore_task_checkout(store: &SharedStore, task: &Task) -> OpsResult<()> {
     let wave = owning_wave(store, task).await?;
-    let repo = crate::engine::worktrees::main_repo_root(Path::new(wave.repo()))?;
+    let repo = crate::git::worktrees::main_repo_root(Path::new(wave.repo()))?;
     let worktree = task.worktree()?;
-    let _lease = crate::engine::git::acquire_worktree_lease(&repo, worktree, "Task checkout")?;
+    let _lease = crate::git::acquire_worktree_lease(&repo, worktree, "Task checkout")?;
     if worktree.join(".git").try_exists()? {
         return finish_task_checkout(store, task).await;
     }
@@ -929,7 +931,7 @@ async fn restore_task_checkout(store: &SharedStore, task: &Task) -> OpsResult<()
     let mut args = vec!["worktree".to_string(), "add".into(), "--force".into()];
     // --force replaces only the stale registration at this absent exact path.
     // A different registered path was rejected above; no branch is reset.
-    if !crate::engine::worktrees::branch_exists(&repo, &task.branch)? {
+    if !crate::git::worktrees::branch_exists(&repo, &task.branch)? {
         let remote = format!("refs/remotes/origin/{}", task.branch);
         if !ref_exists(&repo, &remote)?
             && store
@@ -985,7 +987,7 @@ fn validate_checkout_restoration(store: &SharedStore, task: &Task, repo: &Path) 
             worktree.display()
         )));
     }
-    let checkouts = crate::engine::worktrees::list_worktrees(repo)?;
+    let checkouts = crate::git::worktrees::list_worktrees(repo)?;
     let destination = crate::store::canonicalize_with_missing_tail(worktree)?;
     for other in checkouts
         .iter()
@@ -1357,7 +1359,7 @@ pub fn task_create(
     report: Option<String>,
 ) -> OpsResult<crate::pm::PmItem> {
     let input = resolve_task_create_input(title.as_deref(), report.as_deref())?;
-    let main = crate::engine::worktrees::main_repo_root(repo).map_err(task_error)?;
+    let main = crate::git::worktrees::main_repo_root(repo).map_err(task_error)?;
     block_on_task(async {
         let store = super::pm::pm_store().await?;
         if let Some(name) = wave {
@@ -1369,19 +1371,17 @@ pub fn task_create(
                 .map_err(task_error)?
                 .is_none()
             {
-                super::project::ensure(&main, name).await?;
+                super::project::ensure(repo, name).await?;
             }
         }
         let selected = select_task_creation_wave(&store, &main, wave).await?;
         let wave = match selected {
             Some(wave) => wave,
             None => {
-                let canonical =
-                    crate::repository::CanonicalRepo::discover(&main).map_err(task_error)?;
                 let name = wave.unwrap_or("inbox");
                 let project = store
                     .sqlite
-                    .ensure_wave_project(&canonical.to_string(), name)
+                    .ensure_wave_project(&repo.to_string_lossy(), name)
                     .map_err(task_error)?;
                 store
                     .get_wave(&project.wave_id)
@@ -1466,13 +1466,9 @@ fn truncate_task_title(value: &str, max_chars: usize) -> String {
 pub(crate) fn resolve_task_agent(
     worktree: &Path,
     agent: Option<&str>,
-    skill: Option<&crate::engine::Skill>,
+    skill: Option<&crate::flow::Skill>,
 ) -> String {
-    crate::engine::process_prompt::resolve_agent(
-        agent,
-        skill,
-        &load_config_or_default(Some(worktree)),
-    )
+    crate::prompt::process::resolve_agent(agent, skill, &load_config_or_default(Some(worktree)))
 }
 
 async fn select_task_agent(
@@ -1492,7 +1488,7 @@ async fn select_task_agent(
     Ok(())
 }
 
-fn task_configuration_refusal(task: &Task, skill: Option<&crate::engine::Skill>) -> Option<String> {
+fn task_configuration_refusal(task: &Task, skill: Option<&crate::flow::Skill>) -> Option<String> {
     let worktree = task.worktree.as_deref()?;
     checkout_execution_boundary(
         worktree,
@@ -1632,7 +1628,7 @@ fn derive_workspace_slug(title: &str) -> OpsResult<WorktreeSegment> {
 pub(crate) async fn task_for_checkout(store: &SharedStore, repo: &Path) -> OpsResult<Option<Task>> {
     // Branch names are not checkout identity: another clone can use the same
     // branch. Never probe a remote Machine's recorded path on this Machine.
-    let Ok(root) = crate::engine::git::worktree_root(repo) else {
+    let Ok(root) = crate::git::worktree_root(repo) else {
         return Ok(None);
     };
     let local = store.local_machine().await.map_err(task_error)?.id;
@@ -1644,11 +1640,7 @@ pub(crate) async fn task_for_checkout(store: &SharedStore, repo: &Path) -> OpsRe
             }
             continue;
         }
-        if crate::engine::git::worktree_root(&checkout.worktree)
-            .ok()
-            .as_ref()
-            == Some(&root)
-        {
+        if crate::git::worktree_root(&checkout.worktree).ok().as_ref() == Some(&root) {
             if id.is_some() {
                 return Err(task_error("Multiple Tasks claim this checkout"));
             }
@@ -1803,7 +1795,7 @@ pub(crate) fn request_task_pr_publication(repo: &Path, title: &str, body: &str) 
                 .unwrap_or(0)
                 + 1;
         }
-        let branch = crate::engine::git::current_branch(repo)?
+        let branch = crate::git::current_branch(repo)?
             .ok_or_else(|| task_error("Task worktree is not on a branch"))?;
         if pr.branch != branch {
             return Err(task_error(format!(
@@ -2038,7 +2030,7 @@ pub(crate) struct TaskPrMutationGuard {
 }
 
 pub(crate) fn lock_task_pr_mutation(repo: &Path) -> OpsResult<TaskPrMutationGuard> {
-    let path = crate::engine::git::absolute_git_dir(repo)?.join("lf-pr-mutation.lock");
+    let path = crate::git::absolute_git_dir(repo)?.join("lf-pr-mutation.lock");
     let file = OpenOptions::new()
         .create(true)
         .read(true)
@@ -2192,7 +2184,7 @@ fn has_remote(repo: &Path) -> OpsResult<bool> {
 }
 
 pub(crate) fn fetch_task_refs(repo: &Path) -> OpsResult<()> {
-    if crate::engine::git::has_origin(repo)? {
+    if crate::git::has_origin(repo)? {
         git_output(
             repo,
             &[
@@ -2418,7 +2410,7 @@ async fn verify_task_pr_range_mode(
     let identifier = &task.plan.identifier;
     let short = |sha: &str| sha.chars().take(12).collect::<String>();
 
-    let merge_base = crate::engine::git::merge_base(repo, &upstream, &head).map_err(|_| {
+    let merge_base = crate::git::merge_base(repo, &upstream, &head).map_err(|_| {
         task_error(format!(
             "Task {identifier} branch {branch:?} shares no history with {base_ref}; \
              re-cut the branch from {base_ref} before publishing"
@@ -2435,9 +2427,7 @@ async fn verify_task_pr_range_mode(
     // that branch: what it carries is the PR's published work. Either way, heal
     // the recorded base to the true fork point so lf diff --files and the
     // durable evidence report the minimal M..HEAD range.
-    if crate::engine::git::is_ancestor(repo, base, &merge_base)?
-        || was_published_tip(repo, &branch, base)
-    {
+    if crate::git::is_ancestor(repo, base, &merge_base)? || was_published_tip(repo, &branch, base) {
         if stale_base == StaleBaseAction::Accept {
             return Ok(());
         }
@@ -2453,7 +2443,7 @@ async fn verify_task_pr_range_mode(
         return Ok(());
     }
 
-    if crate::engine::git::is_ancestor(repo, &merge_base, base)? {
+    if crate::git::is_ancestor(repo, &merge_base, base)? {
         // M < B: the recorded base carries commits not on the upstream — the
         // foreign ancestry that contaminated #877/#882. Refuse before push.
         let range = format!("{merge_base}..{base}");
@@ -3555,7 +3545,7 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
         let local_machine = store.local_machine().await.map_err(task_error)?;
         let worktree = task.worktree.as_ref().map(|path| {
             if machine_id.as_ref() == Some(&local_machine.id) {
-                crate::engine::git::worktree_root(path)
+                crate::git::worktree_root(path)
                     .ok()
                     .and_then(|root| root.canonicalize().ok())
                     .unwrap_or_else(|| path.clone())
@@ -3775,7 +3765,7 @@ pub(crate) fn task_workspace_context(task: &Task) -> OpsResult<String> {
         .map_err(|error| task_error(format!("failed to encode Task changes: {error}")))?;
     let include_patch = !diff.binary
         && !diff.truncated
-        && crate::engine::prompt::count_tokens(&diff.patch) < MAX_PATCH_TOKENS;
+        && crate::prompt::count_tokens(&diff.patch) < MAX_PATCH_TOKENS;
     let patch = if include_patch {
         diff.patch.as_str()
     } else {
@@ -4262,7 +4252,7 @@ pub(crate) fn append_task_comment(
             super::pm::TaskCommentAuthor::Integration,
         )
     } else {
-        let name = crate::engine::config::participant_name().map_err(task_error)?;
+        let name = crate::config::participant_name().map_err(task_error)?;
         let requester = name
             .as_ref()
             .map(|name| {
@@ -4439,13 +4429,16 @@ mod tests {
             )
             .unwrap();
         let process = crate::process::LfProcess {
-            lfid: crate::id::ProcessLfid::new(),
+            kind: crate::process::ProcessKind::Lf,
+            agent_session_id: None,
+            os_started_at: None,
+            id: crate::id::LfProcessId::new(),
             pid: None,
             trace_id: crate::id::TraceId::new(),
-            parent_process_lfid: None,
+            parent_lf_process_id: None,
             via_agent: None,
             caller_session_id: None,
-            caller_provider_generation: None,
+            caller_agent_process_id: None,
             command: Some("historical diagnostic".into()),
             repo: None,
             cwd: Some(repo.path().to_string_lossy().into_owned()),
@@ -4491,7 +4484,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(blockers.len(), 1, "{blockers:?}");
-        assert!(blockers[0].contains(&format!("lf history show {}", process.lfid)));
+        assert!(blockers[0].contains(&format!("lf history show {}", process.id)));
         let gate = runtime
             .block_on(super::task_completion_gate(&fixture.store, &fixture.task))
             .unwrap();
@@ -4504,11 +4497,11 @@ mod tests {
         let receipt = crate::journal::ProcessReceipt {
             schema_version: 1,
             trace_id: process.trace_id.to_string(),
-            process_lfid: process.lfid.to_string(),
+            lf_process_id: process.id.to_string(),
             pid,
             started_at: crate::journal::process_started_at(pid).unwrap().unwrap(),
         };
-        let receipt_path = root.join(format!("{}.json", process.lfid));
+        let receipt_path = root.join(format!("{}.json", process.id));
         let receipt_bytes = serde_json::to_vec(&receipt).unwrap();
         std::fs::write(&receipt_path, &receipt_bytes).unwrap();
         assert!(runtime
@@ -4541,7 +4534,7 @@ mod tests {
             WorkStatus::Done
         );
         assert_eq!(
-            fixture.store.sqlite.process(&process.lfid).unwrap(),
+            fixture.store.sqlite.process(&process.id).unwrap(),
             Some(process)
         );
         assert_eq!(fixture.store.sqlite.session(&session.id).unwrap(), before);
@@ -4600,11 +4593,11 @@ mod tests {
                 .unwrap();
             let checkout = repo.path().join("reserved-checkout");
             let prepared = |path| super::TaskPlacement {
-                plan: crate::engine::worktrees::PlacementPlan {
+                plan: crate::git::worktrees::PlacementPlan {
                     base_ref: repo.head_sha(),
                     branch: "retained-branch".into(),
                     worktree_path: path,
-                    strategy: crate::engine::worktrees::PlacementStrategy::UseExistingWorktree,
+                    strategy: crate::git::worktrees::PlacementStrategy::UseExistingWorktree,
                 },
                 workspace_slug: "reserved-checkout".into(),
                 stack_parent: None,
@@ -4763,7 +4756,7 @@ mod tests {
     }
 
     #[test]
-    fn a_dead_flow_is_history_while_a_live_driver_retains_the_checkout() {
+    fn a_dead_flow_is_history_while_a_live_flow_process_retains_the_checkout() {
         let _ledger = crate::journal::TestLedgerGuard::new();
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let fixture = runtime.block_on(task_fixture("WORK-1"));
@@ -4789,7 +4782,7 @@ mod tests {
         );
         assert!(
             blockers().is_empty(),
-            "a Flow whose driver exited is history"
+            "a Flow whose process exited is history"
         );
         let live = fixture
             .store
@@ -4809,13 +4802,16 @@ mod tests {
         // A reboot proves stale execution exited without settling the Flow.
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
         let process = crate::process::LfProcess {
-            lfid: crate::id::ProcessLfid::new(),
+            kind: crate::process::ProcessKind::Lf,
+            agent_session_id: None,
+            os_started_at: None,
+            id: crate::id::LfProcessId::new(),
             pid: None,
             trace_id: crate::id::TraceId::new(),
-            parent_process_lfid: None,
+            parent_lf_process_id: None,
             via_agent: None,
             caller_session_id: None,
-            caller_provider_generation: None,
+            caller_agent_process_id: None,
             command: Some("implement".into()),
             repo: None,
             cwd: Some(
@@ -4860,10 +4856,10 @@ mod tests {
         crate::journal::set_test_machine_booted_at(None);
         // The stalled Session's unanswered turn is history, not execution.
         assert_eq!(unresolved.len(), 1, "{unresolved:?}");
-        assert!(unresolved[0].contains(process.lfid.as_str()));
+        assert!(unresolved[0].contains(process.id.as_str()));
         assert!(after_boot.is_empty(), "{after_boot:?}");
         assert_eq!(
-            fixture.store.sqlite.process(&process.lfid).unwrap(),
+            fixture.store.sqlite.process(&process.id).unwrap(),
             Some(process)
         );
         assert_eq!(
@@ -5570,8 +5566,7 @@ mod tests {
                 rusqlite::params![task.id.as_str(), pr.branch],
             )
             .unwrap();
-        let landed_head =
-            crate::engine::git::rev_parse(task.worktree.as_ref().unwrap(), "HEAD").unwrap();
+        let landed_head = crate::git::rev_parse(task.worktree.as_ref().unwrap(), "HEAD").unwrap();
         pr.publication = Some(PrPublication {
             requested_at: now,
             presentation: Some(PrPresentation {
@@ -5954,7 +5949,7 @@ mod tests {
             assert!(error.to_string().contains(message), "{error}");
         }
         assert_eq!(
-            crate::engine::worktrees::list_worktrees(repo.path())
+            crate::git::worktrees::list_worktrees(repo.path())
                 .unwrap()
                 .len(),
             1
@@ -6020,9 +6015,7 @@ mod tests {
         .unwrap();
         assert_eq!(prepared.plan.base_ref, upstream);
         assert_eq!(
-            crate::engine::git::current_branch(repo.path())
-                .unwrap()
-                .as_deref(),
+            crate::git::current_branch(repo.path()).unwrap().as_deref(),
             Some("local-feature")
         );
         assert_eq!(
@@ -6051,14 +6044,13 @@ mod tests {
         repo.commit("Advance the remote after preparation");
         repo.push();
         assert_ne!(
-            crate::engine::git::rev_parse(repo.path(), "origin/main").unwrap(),
+            crate::git::rev_parse(repo.path(), "origin/main").unwrap(),
             original
         );
 
         let placement =
-            crate::engine::worktrees::create_from_placement_plan(repo.path(), &prepared.plan)
-                .unwrap();
-        let placed_head = crate::engine::git::rev_parse(&placement.path, "HEAD").unwrap();
+            crate::git::worktrees::create_from_placement_plan(repo.path(), &prepared.plan).unwrap();
+        let placed_head = crate::git::rev_parse(&placement.path, "HEAD").unwrap();
         let has_later_file = placement.path.join("later.txt").exists();
         std::fs::remove_dir_all(&placement.path).unwrap();
 
@@ -6099,7 +6091,7 @@ mod tests {
             "{error}"
         );
         assert_eq!(
-            crate::engine::worktrees::list_worktrees(repo.path())
+            crate::git::worktrees::list_worktrees(repo.path())
                 .unwrap()
                 .len(),
             1

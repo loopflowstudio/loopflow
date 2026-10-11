@@ -315,7 +315,7 @@ fn failed_sync_push_does_not_advance_the_recorded_task_base() {
         "expected the push failure, got: {error}"
     );
     assert!(
-        loopflow::engine::git::is_ancestor(repo.path(), &target, &repo.head_sha()).unwrap(),
+        loopflow::git::is_ancestor(repo.path(), &target, &repo.head_sha()).unwrap(),
         "the local sync must complete before the rejected push"
     );
 
@@ -417,7 +417,7 @@ fn sync_onto_main_recovers_a_base_recorded_at_the_prs_own_remote_tip() {
 
     assert_eq!(recorded_base(&task), advanced);
     assert!(
-        loopflow::engine::git::is_ancestor(repo.path(), &head_before, &repo.head_sha()).unwrap(),
+        loopflow::git::is_ancestor(repo.path(), &head_before, &repo.head_sha()).unwrap(),
         "recovery must keep every commit the branch had"
     );
     let files = git_out(

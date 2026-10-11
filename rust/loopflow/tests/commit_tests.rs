@@ -103,9 +103,9 @@ fn persistent_selection_preserves_scratch_and_unrelated_index() {
     repo.create_file("scratch/.gitkeep", "");
     repo.stage_all();
     repo.commit("existing scratch");
-    let persistent = loopflow::engine::worktrees::ensure_agent_worktree(
+    let persistent = loopflow::git::worktrees::ensure_agent_worktree(
         repo.path(),
-        loopflow::engine::worktrees::WorktreeSegment::parse("repo").unwrap(),
+        loopflow::git::worktrees::WorktreeSegment::parse("repo").unwrap(),
     )
     .unwrap();
     // Use local HEAD as the fixture base rather than the older remote.

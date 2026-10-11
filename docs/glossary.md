@@ -21,7 +21,8 @@ first, then the engineering words it borrows.
 | **LfSession**, **Session** | One continuable agent conversation, interactive or headless, with identity, feedback and native history. |
 | **Run** | What the product calls a headless Session; an interactive one is a Session. |
 | **Waiting** | A conversation that asked a question, handed its turn back, or went quiet with no tool call outstanding. |
-| **LfProcess**, **Process** | One actual lf process: durable `lfid`, optional Unix `pid`, causal parent and observed command outcome. |
+| **LfProcess**, **Process** | One actual lf process: durable `id`, optional Unix `pid`, causal parent and observed command outcome. |
+| **AgentProcess** | The provider's OS process Loopflow started for a Session; it keeps running when another lf process attaches. |
 | **Machine** | One OS user’s Loopflow authority in one data directory; two users on one host have separate identities. |
 | **Data directory** | Local Loopflow state in `~/.lf` by default; explicit `LF_HOME` selects a disposable experiment. |
 | **Steer** | A message you send to work that is already running, to change its direction. |

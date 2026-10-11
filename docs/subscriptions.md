@@ -346,9 +346,9 @@ lf session history 0199a213-81c0-7800-8aa1-bbab2a035a53
 
 Connecting to a conversation plain Codex started brings it in as a Session with
 no Task. Normal batch completion and closing the current connected interface
-close its Codex engine, leaving saved history available to plain `codex resume`.
+close its Codex process, leaving saved history available to plain `codex resume`.
 `lf session connect` takes over a running conversation without restarting it;
-the old driver's exit cannot close the new owner's engine. Codex allows one
+the old attachment's exit cannot close the new owner's Codex process. Codex allows one
 writer per conversation, so use `lf session connect` while it is still running.
 
 `lf account route --json` reports `isolated` and `active_account` per provider.

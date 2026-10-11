@@ -124,7 +124,7 @@ When writing CLI code with Typer:
 - Pass args through to underlying tools rather than re-implementing
 - Default to sensible behavior (e.g., whole repo as context)
 
-When editing builtin skills (`engine/builtins/**`):
+When editing builtin skills (`builtins/**`):
 - Skills must be self-contained: never reference repo-relative docs or files —
   the skill runs in repos that don't have them. Inline the compressed guidance;
   the long form lives in this repo's docs for readers.
@@ -149,6 +149,7 @@ When changing the SQLite schema:
 - Keep one draft per Task: `uv run python scripts/new_migration.py <name>` creates it or prints the one the branch already has
 - Edit that draft in place until landing; never add a draft that alters or drops what an unreleased draft created
 - Test the released frontier against the finished draft, not the steps between
+- Seed a released schema from SQL under `rust/loopflow/tests/fixtures/migrations/`; test sources name only current columns
 
 When editing `*.rs` files:
 - Run `cargo fmt` before committing; CI enforces it
@@ -162,7 +163,7 @@ When editing `*.rs` files:
 - Conversion methods: `as_` (cheap/borrowed), `to_` (allocates), `into_` (consumes self)
 - No `get_` prefix on getters: `fn name(&self)` not `fn get_name(&self)`
 - Return `Option<T>` for "not found", `Result<T, E>` for "something went wrong"
-- Newtypes for domain concepts: `struct ProcessLfid(String)` not `type ProcessLfid = String`
+- Newtypes for domain concepts: `struct LfProcessId(String)` not `type LfProcessId = String`
 - Every `unsafe` block requires a `// SAFETY:` comment explaining invariants
 - When a name conflicts with a keyword: use `r#type` or `type_`, not `typ`
 - Use `#[non_exhaustive]` on public enums that may grow
@@ -174,6 +175,9 @@ When editing Rust tests:
 - Use `#[test]` for unit tests in the same file
 - Integration tests go in `tests/` directory
 - Mock via closures or `#[cfg(test)]`, not factory traits or extra abstractions
+- Pin fixture `LF_BIN` inside the network boundary; the runner clears inherited `LF_*`. Never let an installed provider outrank a stand-in.
+- From an lf-launched shell, run `cargo test` with inherited `LF_*` unset and `< /dev/null`: capture fixtures follow `LF_HOME`, and `lf task create` reads a piped report from open stdin.
+- Native library fixtures use `TestLedgerGuard` so invocation and capture share a store. Pin blocking workers with `journal::with_test_ledger`; thread-local fixture selection does not follow `LF_HOME`.
 
 # Goals
 
@@ -233,8 +237,8 @@ fixed when taken up. `lf task run` chooses an edge, starts its Flow as a child
 succeeds; a stopped Flow leaves the Task on its edge;
 `lf task move` sets a node. Each move is appended to the Task's history. It
 executes nothing, and no command approves or completes a node.
-Taskless execution uses the same driver. A Flow is one lf process and the step
-Processes it starts; its id is the Flow process ID. The driver holds the cursor and
+Taskless execution uses the same Flow runner. A Flow is one lf process and the step
+Processes it starts; its id is the Flow process ID. The Flow process holds the cursor and
 return counts in memory and writes FlowProcess, append-only: the Flow's name and
 compiled graph at launch, then each step's Process, node and iteration counts.
 Every Flow process gets one; none is primary for a Task. A step is the plain command
@@ -250,10 +254,13 @@ and execution. Preserve unreviewed backlog until explicit disposition; missing e
 Current navigation stays Wave → Task and Linear retains past Projects.
 
 LfProcess is one actual lf process, including direct and agent-issued nested commands.
-Its `lfid` is durable Loopflow identity; `pid` is the optional Unix PID and may
-collide across history. References use `process_lfid` and `parent_process_lfid`.
+Its `id`, an `LfProcessId`, is durable Loopflow identity; `pid` is only the optional
+Unix PID and may collide across history. References are `<role>_lf_process_id`:
+`lf_process_id`, `parent_lf_process_id`. AgentProcess is the provider's OS process
+Loopflow started: one `processes` row of kind `agent`, with its parent LfProcess,
+the attached LfProcess and a fresh attachment token. It survives attachment handoff.
 LfSession is one Loopflow-owned durable conversation, interactive or headless; identity,
-name, feedback and native history survive driver replacement. Product text says
+name, feedback and native history survive takeover. Product text says
 Session for interactive and Run for headless work. AgentSession is the provider-owned
 conversation, represented by an opaque AgentSessionId used for resume, native
 turn keys and account attribution. An LfSession selects one AgentSession at a
@@ -272,9 +279,9 @@ including to done/landed Tasks. Prospective attribution preserves earlier usage 
 owns that single choice. Actual work
 reservation sets Started once; logging an inspection Process does not. Every
 denormalization is removed or validated on writes. Causal ancestry grants neither
-process control nor Flow settlement. Current driver and provider generations
-are separate: an unchanged engine survives driver handoff while old clients lose
-write authority. Passive display acquires no claim.
+process control nor Flow settlement. Attachment claims and provider identity
+are separate: a fresh claim token fences every attachment and release, including
+A → B → A, while an unchanged provider survives handoff. Passive display acquires no claim.
 
 The full contract and current cutover status live in
 [Architecture Reference](docs/architecture-reference.md#core-models-and-apis).

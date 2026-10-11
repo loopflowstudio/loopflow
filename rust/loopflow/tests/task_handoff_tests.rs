@@ -4,7 +4,7 @@ use std::fs;
 use std::path::Path;
 use std::process::{Command, Output};
 
-use loopflow::engine::worktrees::git_common_dir;
+use loopflow::git::worktrees::git_common_dir;
 use loopflow::work::task::{GithubPr, PrPublication, Task};
 use loopflow_test_support::TestRepo;
 use serde_json::Value;

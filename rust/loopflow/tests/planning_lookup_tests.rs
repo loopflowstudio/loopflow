@@ -124,7 +124,7 @@ fn task_status_reads_projectless_planning_without_allocating_execution() {
         .unwrap()
         .is_empty());
     assert_eq!(
-        loopflow::engine::worktrees::list_worktrees(repo.path())
+        loopflow::git::worktrees::list_worktrees(repo.path())
             .unwrap()
             .len(),
         1

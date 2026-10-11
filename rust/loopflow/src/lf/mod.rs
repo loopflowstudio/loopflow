@@ -61,7 +61,7 @@ pub struct Cli {
     #[arg(long, hide = true)]
     pub skill_input: Option<std::path::PathBuf>,
     #[arg(skip)]
-    pub resolved_invocation: Option<crate::engine::skill_invocation::SkillInvocation>,
+    pub resolved_invocation: Option<crate::skills::invocation::SkillInvocation>,
 
     /// Prefer this managed provider login before the normal route. Repeat to
     /// select provider-qualified preferences such as `claude=jack@`.
@@ -356,6 +356,14 @@ pub enum Commands {
     /// Internal provider callback that records one native interactive session.
     #[command(name = "__provider-session", hide = true)]
     ProviderSession,
+    /// Internal conversation context for native startup/compaction hooks.
+    #[command(name = "__context-block", hide = true)]
+    ContextBlock {
+        #[arg(long)]
+        delivery: std::path::PathBuf,
+        #[arg(long, value_enum)]
+        moment: crate::context_block::ContextMoment,
+    },
     /// Native provider naming callback.
     #[command(name = "__session-title", hide = true)]
     SessionTitle {
@@ -424,19 +432,16 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: TaskCommand,
     },
-    /// Show context budgets from local sources
+    /// Show memory and scratch size targets, their sources, and current usage
     Context {
         #[arg(long)]
         json: bool,
         /// Inspect a Wave's local authored context
         #[arg(long, conflicts_with = "task")]
         wave: Option<String>,
-        /// Inspect a Task's checkout and locally stored goal
+        /// Inspect a Task's checkout and Wave context
         #[arg(long)]
         task: Option<String>,
-        /// Skill to include in the launch preview
-        #[arg(long, default_value = "realign")]
-        skill: String,
     },
     /// Internal: render the repository maintainer scorecard for telemetry-daily
     #[command(name = "__telemetry-scorecard", hide = true)]
@@ -651,7 +656,7 @@ pub enum WaveWorkflowCommand {
     },
     /// List Workflow definitions, including unavailable local files
     List {
-        /// Include this Wave's stored definitions
+        /// Include this Project's stored Wave Workflow definitions
         #[arg(long)]
         wave: Option<String>,
         #[arg(long)]
@@ -738,9 +743,9 @@ pub enum SessionCommand {
         /// The terminal marker in the current provider client receipt
         #[arg(long)]
         terminal: String,
-        /// Provider generation from the Session reading
+        /// AgentProcess from the Session reading; omit when it reported none
         #[arg(long)]
-        generation: i64,
+        agent_process: Option<String>,
     },
     /// Resume a conversation by ID, or the last interactive Session in this worktree
     Resume {
@@ -889,14 +894,6 @@ pub enum WaveCommand {
         summary: Option<String>,
     },
 
-    /// Replace stored Wave documents without modifying repository files
-    Edit {
-        wave: String,
-        #[arg(long, required_unless_present = "memory")]
-        goal: Option<PathBuf>,
-        #[arg(long)]
-        memory: Option<PathBuf>,
-    },
     /// Rotate this Wave using its exact destination in a retained chapter plan
     NewChapter {
         wave: String,

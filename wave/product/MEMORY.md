@@ -189,8 +189,9 @@ Jack Heart accepted LOO-427 for queue then Task-completing shipping on October 1
 owns broader explanations/discovery; LOO-391 native Work-tab/input/read, configured
 remote panes and running-Flow exchange proof; LOO-416 relaunch persistence;
 LOO-452 richer keys; LOO-453 readiness/events. The comparison owns full allocations.
-LOO-412's configured-transport dependency still needs integration; neither committed
-code nor Jack's shipping approval proves a combined-tree gate. No installation,
+Jack's updated October 10 brief accepts the earlier LOO-412 baseline. Its unmerged
+configured-transport replacement stays with LOO-412, not a shipping prerequisite.
+Main conflicts/failures still need repair; final gate remains. No installation,
 live migration/publication or provider-account use is authorized.
 
 ## Task delivery boundary (LOO-418, reconciled 2026-10-09)

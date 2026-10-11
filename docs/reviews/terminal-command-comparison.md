@@ -17,7 +17,11 @@ implementation, not native or multi-Machine proof.
 
 LOO-412's current direction selects one configured planning transport per
 repository; mixed Linear/Git exchange and manual per-Wave enrollment are superseded.
-`lf planning status` remains. Shared first-start refusal remains until LOO-414
+`lf planning status` remains. This accepted diff implements the earlier enrollment
+baseline, not that newer configuration path. Jack Heart’s updated October 10 brief
+leaves the unmerged transport/domain replacement with LOO-412; it is not a shipping
+prerequisite. Actual main conflicts and failing checks still require repair.
+Shared first-start refusal remains until LOO-414
 establishes admission; no missing checkout or negative peer read authorizes start.
 
 
@@ -416,9 +420,9 @@ screen and command receipts do not meet the chapter's sustained-use KRs.
 ## Implementation scope and existing owners
 
 LOO-427 delivers the identity → arrange → observe/input path in one PR;
-premature LOO-430/431/432 are folded back. Jack Heart authorized advancement
-through the demo review boundary. Jack subsequently selected cursor insertion into
-existing drafts, with Enter separate. On October 9 Jack accepted nearest-explicit-
+premature LOO-430/431/432 are folded back. Jack Heart’s October 10 shipping
+approval supersedes the earlier demo-only boundary, with proof owners listed above.
+Jack selected cursor insertion into existing drafts, with Enter separate. On October 9 Jack accepted nearest-explicit-
 ancestor delegation for unstarted Tasks, with narrower Task/sub-Wave overrides;
 started Tasks stay on their recorded Machine. Unknown historical assignment
 provenance stays unknown. Current transport, command spelling and implementation

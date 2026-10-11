@@ -624,8 +624,9 @@ SQLite claims. Task status, admission and acquisition read narrow
 Linear evidence; ordinary provider readback is deleted. Delivery needs
 accepted revision plus archive/membership eligibility; foreign facts grant no ownership.
 Missing issue content cannot hide a canonical parent's archive or membership
-dispute. Narrow SQL reads still depend on retained provider JSON; deleting display
-models does not prove persistence conversion. Independent observations retain their ages. Typed values alone
+dispute. Projection and receipt baselines now consume typed fields; ingestion still
+compares whole observations and narrow readers still extract retained provider JSON.
+Consumer deletion does not prove persistent conversion. Independent observations retain their ages. Typed values alone
 are not a typed journal: field-addressed mutations still require reduction.
 Jack Heart excludes old-version support; an unshipped Git encoding needs no dual
 decoder. Released SQLite preservation and selected-format causal history remain
@@ -935,18 +936,22 @@ runs prove no firing, and old gaps do not keep later telemetry red.
   time.
 - **Installation tests need OS-account isolation.** Jack Heart’s October 5 steer forbids the three LOO-370 host checks named in TESTING.md: getpwuid bypasses HOME/LF_HOME. PR #1444 supplies disposable-account proofs; until integrated, isolated CI owns them. Ordinary fixtures also scrub inherited LF_* authority.
 - **Concurrent editing corrupts a file; concurrent rebasing corrupts history.** Two agents sharing one worktree shared its `rebase-merge` state dir: conflicts resolved themselves between commands and `done` advanced 6→22 with no `--continue` from the losing session. Check for a live agent before working — or rebasing — a wave worktree; the agent that owns the worktree owns its `.git` sequencer.
-- **Linear Project UUIDs survive renames; derived slugs do not.** Project content
-  lives in Linear and the local SQLite snapshot, with no `projects/*.md` cache.
-  Use stable IDs when reconciling current names with captured historical plans.
+- **Linear Project UUIDs survive renames; derived slugs do not.** Canonical local
+  Project fields own content; optional Linear bindings and observations retain
+  integration evidence. No `projects/*.md` cache. Reconcile history by stable IDs.
 - **Environment configures a process; it must never decide what the process is.** An earlier runtime chose between booting a listener and being a resident from inherited environment, so a promoted wave could attach to its parent's listener with the parent's token. The current `lf wave` surface keeps that role explicit.
-- **Current PM truth and durable Work history have different lifetimes** (learned 2026-07-21). A terminal Project omitted from the current PM snapshot can still own non-terminal historical Task Work. Wave reads must render the current PM hierarchy and classify the stranded Project/Task separately as Wave-owned degraded evidence; they must not fail the whole join, delete history, or synthesize a PM Project. Preserve stable identity when the historical checkout is absent. LOO-305 removes the old local-only `work abandon` recovery command; inspect retained facts with explicit `lf task status <task-id>`. Missing Project evidence alone never authorizes provider deletion.
-- **Terminal Task state and current PM routing are authorization boundaries**
-  (learned 2026-07-21). An open Linear issue, inherited direction, or sibling
-  completion is evidence, never permission to reopen `Done` or `Abandoned`
-  Work. Recovery from abandonment requires explicit User authority. When
-  Linear moves an issue, historical Task Runs retain their evidence but lose
-  automated PR and completion authority; fail closed before side effects and
-  preserve the full Work, Run, Steer, and PR history for remediation.
+- **Provider omission cannot erase canonical Work.** A Project absent from a
+  current inventory can still own unfinished Tasks. Read canonical content with
+  separate acquisition validity/age; missing or contradictory observations neither
+  synthesize ownership nor authorize deletion. Preserve identity and history even
+  when a checkout is absent. Earlier provider-hierarchy guidance is superseded by
+  LOO-406/412; exact counterexamples: `3d8b939495:wave/infrastructure/MEMORY.md`, Gotchas.
+- **Shared disposition and local execution have different authority.** LOO-406's
+  accepted Linear conflict policy permits observed reopening, retaining losing
+  values. It grants no Workflow movement, process control or checkout cleanup.
+  Membership changes preserve historical execution and require current ownership
+  evidence before external effects. Earlier blanket refusal of provider reopening
+  is superseded, not evidence that configured continuity passed.
 - **Historical continuity blocked daily telemetry** on August 23. LOO-241's
   original eight-gap failure remains at `ec126964d:wave/infrastructure/MEMORY.md`
   under Gotchas; current continuity judges the latest due interval, as recorded

@@ -262,20 +262,21 @@ Harness errors retain failed-result text for retries. CI owns the full matrix.
 Jack Heart accepted Session-only delivery, repository/Work wrappers, downward
 propagation, independent receipts, bounded launch seeding and idle staying idle;
 he renewed pursuit after the provider gaps. Replace old paths together in one PR.
-The design selects a private provider-bound capability across Codex handoff and
-local OpenCode invocation IDs, never fabricated provider request IDs. Child
-callbacks and replaced providers retain no authority; emission is not confirmation.
+Provider-bound capability survives Codex handoff; OpenCode uses local invocation
+IDs, never fabricated provider request IDs. Child callbacks and replaced providers
+retain no authority; emission is not confirmation.
 
 Claude 2.1.296's exclusive startup-hook/input cycle wrote only 512 of 131,133
 bytes in two seconds. Shared dispatch plus exclusive takeover resolves it.
 `0d04805ab3` preserves oversized launch/resume, handoff, replacement/child rejection
 and OpenCode retry protocol proofs, not configured model acceptance. Old injection
 paths are deleted; the withdrawn-cut feedback no longer describes current source.
-`27ce387bdc` removes the unread subscription snapshot; receipts and callback
-activation retain observed state. Reserving a capability proves no installation.
-Release's operation-entry lesson applies: store proofs cannot replace public
-launch proofs, and protocol stand-ins cannot prove model acceptance. The design
-retains contrary evidence and gate/CI's broader/configured acceptance:
+`27ce387bdc` removes unread subscription state. `cd2c38184f` reconciles membership
+on Session reads/callbacks, removing publication-time scans; cancelled mixed batches
+retain unaffected pending direction. `f96a7d2378` labels capabilities reserved,
+not installed. Release's operation-entry lesson applies: store proofs cannot
+replace public launch proofs; protocol stand-ins cannot prove model acceptance.
+Contrary evidence and gate/CI's broader/configured acceptance remain in
 `scratch/session-steer-subscriptions.md`.
 
 ## Process-owned liveness (LOO-451, 2026-10-10)

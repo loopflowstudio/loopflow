@@ -135,9 +135,10 @@ lf pr reconcile                                      # check recorded deliveries
 lf ci watch                                          # watch PR checks; start a ci-fix when a landing fails
 ```
 
-Task comments in Linear also reach the Task's running Flow. Steering never starts
-an idle Task or broadcasts to independent conversations. A stopped Flow is
-history: `task run` never continues it, so inspect `lf task status` first.
+Acquired Task comments from Linear also become direction for each associated
+Session, with independent delivery at its next supported provider boundary.
+Steering leaves idle Sessions idle. A stopped Flow is history: `task run` never
+continues it, so inspect `lf task status` first.
 
 Turn a reviewed design into work without another planning subsystem:
 

@@ -399,9 +399,10 @@ LOO-462 removes the generic picker/composer and Debug/Orphan/palette inventory,
 not Session history or missing-Work evidence. Primary owners supply repo/Task
 conversations without Workflow launch or takeover. **Current is not empty:** the
 Work stream and roster exclude historical Waves; first-use entry must also read
-full repository Wave history. Errors preserve uncertainty. Native/provider and
-persisted-primary composition remain unproved. Cleanup still needs exact reviewed
-candidates and a restorable backup; unknown/interrupted records are not debris.
+full repository Wave history. Errors preserve uncertainty. A shared Rust/Swift
+capture proves configured primary reuse and retained Work, not native/provider
+usability. Cleanup needs reviewed candidates and a restorable backup;
+unknown/interrupted records are not debris.
 
 ## Session working set and Waiting (2026-10-03, revised 2026-10-06)
 
@@ -494,8 +495,8 @@ Flow reviews remain their own conversations. Jack’s October 1 correction makes
 all conversations in a Task checkout Task Sessions, regardless of attention or
 Flow membership. Repo and Wave Sessions retain their explicit scopes and are
 excluded. Any number of Task Sessions is allowed. `session list --orphan` filters
-Sessions without Task association; it provides no creation opt-out. Desktop keeps
-that diagnostic inventory under Debug → Sessions, outside ordinary navigation.
+Sessions without Task association; it provides no creation opt-out. LOO-462 removes
+its Desktop navigation.
 
 Earlier primary-runtime planning selected eager repo/Wave Sessions and a Task
 conversation on launch. The October 1 correction supersedes any interpretation

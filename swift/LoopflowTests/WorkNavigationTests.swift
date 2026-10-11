@@ -1,5 +1,6 @@
 #if os(macOS)
 import Foundation
+import SwiftUI
 import Testing
 import ViewInspector
 @testable import Loopflow
@@ -8,6 +9,91 @@ import ViewInspector
 @Suite("Unified Work and Session navigation")
 @MainActor
 struct WorkNavigationTests {
+    @Test("Persisted repo entry survives partial reads, hide-all and Work navigation")
+    func composedWorkFirstEntry() async throws {
+        let path = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("tests/fixtures/dto/work_first_entry.json")
+        let capture = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: path)) as? [String: Any])
+        func data(_ key: String) throws -> Data {
+            try JSONSerialization.data(withJSONObject: #require(capture[key]))
+        }
+        let primary = try JSONDecoder().decode(SessionRecord.self, from: data("primary"))
+        let reopened = try JSONDecoder().decode(SessionRecord.self, from: data("reopened"))
+        let taskPrimary = try JSONDecoder().decode(SessionRecord.self, from: data("task_primary"))
+        let inventory = try JSONDecoder().decode([SessionRecord].self, from: data("sessions"))
+        let empty = try JSONDecoder().decode(RoadmapSnapshot.self, from: data("empty"))
+        let populated = try JSONDecoder().decode(RoadmapSnapshot.self, from: data("roadmap"))
+        let repo = try #require(populated.waves.first).wave.repo
+        let machine = try #require(primary.workspace).machineId
+        let primaryJSON = String(decoding: try data("primary"), as: UTF8.self)
+        let query = RegistryQuery { args, _ in
+            if args == ["wave", "list", "--json"] { return "[]" }
+            if args == ["session", "ensure", "--json"] || args == ["session", "connect", primary.id, "--json"] { return primaryJSON }
+            throw RegistryQueryError("Unexpected operation: \(args)")
+        }
+        let model = WorkModel(query: query, repoPath: repo)
+        let registry = SessionsWorkspaceRegistry(localMachineId: machine)
+        let view = SessionsContentView(model: model, repoPath: repo, workspaces: registry,
+                                       machineId: machine, repository: "repo", query: query)
+        let root = try #require(registry.retained(model.workspaceKey(for: nil, repository: "repo")))
+        let originalLayout = root.multiplexer.layout
+        // Exercise the actual repository-entry lifecycle callback, without a display.
+        for reading: WorkReading<RoadmapSnapshot> in [.loading, .unavailable(lastGood: empty, reason: "Offline")] {
+            model.applyFixture(roadmap: reading, waves: .available([]), workActivity: .loading, repos: [], fixed: true)
+            try view.body.inspect().callOnChange(oldValue: false, newValue: model.repositoryEntryReady)
+            #expect(!root.didConsiderRepositoryEntry)
+            #expect(root.multiplexer.layout == originalLayout)
+        }
+        model.applyFixture(roadmap: .available(empty), waves: .available([]), workActivity: .loading, repos: [], fixed: true)
+        try view.body.inspect().callOnChange(oldValue: false, newValue: model.repositoryEntryReady)
+        let deadline = ContinuousClock.now + .seconds(5)
+        while root.presentation.selectedSessionId == nil && ContinuousClock.now < deadline { await Task.yield() }
+        #expect(root.presentation.selectedSessionId == primary.id)
+        #expect(root.conversationError == nil)
+        #expect(primary.id == reopened.id)
+        #expect(primary.provider == "opencode")
+        let pane = try #require(root.multiplexer.pane(forSessionId: primary.id))
+        registry.hide(root.key)
+        try view.body.inspect().callOnChange(oldValue: false, newValue: true)
+        await Task.yield()
+        #expect(registry.selectedWork == nil)
+        #expect(registry.openWork.isEmpty)
+        #expect(root.multiplexer.pane(forSessionId: primary.id)?.id == pane.id)
+        registry.open(root.key, title: "Repository", location: primary.workspace?.identity)
+        await root.openRepositoryConversation(store: root.sessionStore(repoPath: repo, query: query), registry: registry)
+        #expect(root.multiplexer.pane(forSessionId: primary.id)?.id == pane.id)
+
+        model.applyFixture(roadmap: .available(populated), waves: .available([]), workActivity: .loading, repos: [], fixed: true)
+        let wave = try #require(populated.waves.first)
+        let task = try #require(wave.tasks.items.first)
+        model.select(.task(id: task.id))
+        let taskKey = try #require(registry.selectedWork)
+        let workspace = try #require(registry.retained(taskKey))
+        registry.revealSession(taskPrimary, in: workspace)
+        workspace.multiplexer.show(.files(taskId: task.id))
+        let files = workspace.files(taskId: task.id, issue: task.task.identifier, cwd: taskPrimary.cwd)
+        let document = files.document("draft.md")
+        document.editor.string = "unfinished idea"
+        let layout = workspace.multiplexer.layout
+        let header = TaskWorkflowHeader(model: model, task: task, wave: wave.wave, work: .loading)
+        #expect(try !header.inspect().find(ViewType.DisclosureGroup.self).isExpanded())
+        model.select(.wave(id: wave.wave.id))
+        model.applyFixture(roadmap: .unavailable(lastGood: populated, reason: "Offline"), waves: .available([]), workActivity: .loading, repos: [])
+        try view.body.inspect().callOnChange(oldValue: true, newValue: model.repositoryEntryReady)
+        model.select(.task(id: task.id))
+        #expect(registry.retained(taskKey) === workspace)
+        #expect(workspace.multiplexer.layout == layout)
+        #expect(files.document("draft.md") === document)
+        #expect(document.editor.string == "unfinished idea")
+        let projection = WorkProjection(roadmaps: populated.waves, sessions: inventory)
+        let rows = projection.outline(presentation: .full, collapsed: [], search: "", planningReadable: true)
+        #expect(inventory.count == 3)
+        #expect(rows.contains { $0.id.work == .wave(id: wave.wave.id) })
+        #expect(rows.allSatisfy { $0.id.work.kind == .wave || $0.id.work.kind == .task })
+        #expect(!rows.flatMap(\.inlineSessions).contains { $0.id == primary.id })
+    }
+
     @Test("Only fresh empty current planning permits a first-use check")
     func emptyRepositoryEntry() throws {
         let empty = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data("{\"generated_at\":\"2026-10-10T00:00:00Z\",\"waves\":[]}".utf8))

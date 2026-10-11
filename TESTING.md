@@ -96,6 +96,13 @@ launch an installed version. Regenerate its wire capture with
 then run `cargo test -p loopflow --test dto_fixtures composed_lifecycle` and
 `swift test --package-path swift --filter 'composedTaskLifecycle|composedLifecycleDelivery'`.
 
+The Work-first entry capture comes from isolated repository-primary admission,
+reopening and mixed Session history. Regenerate it with
+`LOOPFLOW_UPDATE_WORK_FIRST_FIXTURE=1 TMPDIR=/private/tmp uv run python scripts/test_network.py cargo test -p loopflow --test session_lifecycle_tests work_first_repository_entry < /dev/null`.
+`scripts/test_desktop.sh --filter 'WorkNavigationTests/composedWorkFirstEntry' -Xswiftc -gnone`
+consumes that capture through the repository-entry callback and retained Work owners.
+This checks configuration and identity, not a mounted provider or native usability.
+
 Provider fixtures must read the launch's actual context channel. When a final
 sync adds fixtures that inspect a changed transport, run those focused tests
 before arming; the earlier gate did not cover the newly combined behavior.

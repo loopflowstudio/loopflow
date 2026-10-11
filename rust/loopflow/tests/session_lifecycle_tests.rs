@@ -220,6 +220,113 @@ const PATIENCE: Duration = Duration::from_secs(180);
 const LAUNCH: [&str; 5] = ["-i", "--agent", "opencode", ":", "Review the parser"];
 
 #[test]
+fn work_first_repository_entry_preserves_primary_and_mixed_inventory() {
+    let fixture = Fixture::new(false);
+    fixture
+        .repo
+        .create_file(".lf/config.yaml", "agent: opencode:opencode/test-model\n");
+    fixture.repo.stage_all();
+    fixture.repo.commit("Configure repository conversation");
+    let preview = fixture.json(&["skill", "repo/session", "--context", "--json"]);
+    let prompt = preview["task_prompt"].as_str().unwrap();
+    assert!(prompt.contains("What do you want to work on?"));
+    assert!(prompt.contains("do not require a Wave, Task, setup checklist or operating pass first"));
+    assert!(prompt.contains("When Work exists, apply it"));
+    let empty = fixture.json(&["wave", "show", "--all", "--json"]);
+    let primary = fixture.json(&["session", "ensure", "--json"]);
+    let again = fixture.json(&["session", "ensure", "--json"]);
+    assert_eq!(primary["id"], again["id"]);
+    assert_eq!(fixture.count("agent_sessions"), 1);
+    let configured: (String, String) = fixture
+        .db()
+        .query_row(
+            "SELECT provider, model FROM agent_sessions WHERE id=?1",
+            [primary["id"].as_str().unwrap()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        configured,
+        ("opencode".into(), "opencode/test-model".into())
+    );
+
+    // Ordinary unscoped history and Task conversations survive the navigation cut.
+    let unscoped = fixture.repo.create_named_worktree("unscoped");
+    assert!(fixture
+        .command(&LAUNCH)
+        .current_dir(unscoped)
+        .output()
+        .unwrap()
+        .status
+        .success());
+    let task = support::register_task_without_pr(
+        fixture.home.path(),
+        fixture.repo.path(),
+        "work-first",
+        &fixture.repo.head_sha(),
+    );
+    let task_primary = fixture.json(&["session", "ensure", "--task", "INF-123", "--json"]);
+    let population = serde_json::json!({
+        "empty": empty,
+        "primary": primary,
+        "reopened": again,
+        "task_primary": task_primary,
+        "sessions": fixture.json(&["session", "list", "--history", "--all", "--json"]),
+        "roadmap": fixture.json(&["wave", "show", "--all", "--json"]),
+    });
+    assert_eq!(fixture.count("agent_sessions"), 3);
+    assert_eq!(fixture.count("flow_processes"), 0);
+    assert!(task.task.worktree.is_some());
+    assert_work_first_capture(&population);
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures/dto/work_first_entry.json");
+    if std::env::var_os("LOOPFLOW_UPDATE_WORK_FIRST_FIXTURE").is_some() {
+        std::fs::write(
+            path,
+            serde_json::to_string_pretty(&population).unwrap() + "\n",
+        )
+        .unwrap();
+    } else {
+        let saved = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        assert_work_first_capture(&saved);
+    }
+}
+
+fn assert_work_first_capture(capture: &Value) {
+    use loopflow::lf::commands::waves::RoadmapSnapshot;
+
+    assert_eq!(capture["primary"]["id"], capture["reopened"]["id"]);
+    assert_eq!(capture["primary"]["primary_scope"], "repository");
+    assert_eq!(capture["primary"]["provider"], "opencode");
+    assert_eq!(capture["empty"]["waves"], serde_json::json!([]));
+    let _: RoadmapSnapshot = serde_json::from_value(capture["roadmap"].clone()).unwrap();
+    let sessions = capture["sessions"].as_array().unwrap();
+    assert_eq!(sessions.len(), 3);
+    assert_eq!(
+        sessions
+            .iter()
+            .filter(|row| row["id"] == capture["primary"]["id"])
+            .count(),
+        1
+    );
+    assert_eq!(
+        sessions
+            .iter()
+            .filter(|row| row["id"] == capture["task_primary"]["id"])
+            .count(),
+        1
+    );
+    assert_eq!(
+        sessions
+            .iter()
+            .filter(|row| row["primary_scope"].is_null()
+                && row["task_ids"].as_array().unwrap().is_empty())
+            .count(),
+        1
+    );
+}
+
+#[test]
 fn personal_task_launch_resume_and_skill_workflow_keep_native_identity() {
     let fixture = Fixture::new(false);
     let codex = fixture.home.path().join("bin/codex");

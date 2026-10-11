@@ -109,6 +109,19 @@ the endpoint. Live cmux workspace/tab rename passed with a stand-in
 and symlinks; rendered host/shim/herdr and Jack's installation remain unproved.
 Plan: `scratch/every-lf-session-in-cmux.md`.
 
+October 11 hook repair: Jack Heart requested autonomous publication for review,
+not landing. A held WAL writer reproduced a callback exceeding six seconds
+before naming; ordinary Process admission permits a 15-second receipt wait.
+Optional prompt hooks need bounded observation as well as bounded ownership
+reads: lock waits and history scans are separate costs. Preserve best-effort
+Process recording, reuse the bounded connection for parent reads, and never
+retry failed early observation at exit with the ordinary budget. Unavailable
+ownership leaves names unchanged. Implementation decisions, not approvals.
+Lock fixtures and interrupted history scans
+prove source behavior; installed concurrent-Flow acceptance remains unproved.
+The slow status/ensure observations and unattributed records-read report have
+no established common cause. Plan: `scratch/stop-the-session-title-hook.md`.
+
 ## Program Status direction (LOO-398, 2026-10-07)
 
 Jack Heart selected every-pane Desktop reading, unchanged native passthrough and
@@ -414,28 +427,19 @@ reacquire after dropping the parent's shared handle. Parent death and elapsed
 wait grant neither mutation nor deletion authority. Main-reset/stash helpers can
 replace a held lock inode; explicit source selection avoids that failure class.
 
-Historical same-Home overlap/interruption proofs and #1457's installer-isolation
-boundary remain at `30a4d48c8:wave/infrastructure/MEMORY.md`, this heading and its
-linked receipts. They preserve due ownership, candidate, uncertain publication,
-caller edits and child-held leases; simulated passes establish neither public
-container/macOS acceptance nor configured automatic settlement.
+Historical overlap, installer-isolation and telemetry repair proofs remain at
+`058f02eedf:wave/infrastructure/MEMORY.md`, this heading and its linked receipts.
+Jack Heart authorized telemetry publication; recovery after LOO-382 remains
+with its operator. Those source proofs establish no automatic settlement.
 
-October 6 telemetry's retired metric producer failed; the repaired checkout passed
-35 rows and twelve tests, not automatic settlement. Jack Heart authorized
-publication; the operator owns recovery after LOO-382. Original receipts, repair
-ownership and exact evidence: `85490d96ec:wave/infrastructure/MEMORY.md`, this heading.
-
-Release's September 28 incident proves entry points need operation-level recovery:
-an agent reported failure successfully, producing a misleading green cron receipt.
-Jack's later steer records v0.12.24 publication/install and skill-to-Flow activation
-at unchanged 10:00. That supersedes the child's dated pending-activation evidence,
-without proving this accounting branch is installed or either qualifying outcome.
-Release-specific detail remains in [release memory](release/MEMORY.md).
-October 5 child evidence records repaired installed jobs using the machine gate
-at unchanged 09:00/10:00 schedules. Ownership remains Infrastructure; the child
-is not registered. History exposed three unresolved opportunities with unknown
-timezone provenance, zero executions and no qualifying pair. Schedule repair
-cannot backfill that evidence or count as an unattended settlement.
+Release's entry-point lesson: a successful failure report can produce a green
+cron receipt; the operation must own recovery and exit status. Jack's v0.12.24
+activation steer supersedes the child's pending-activation account. October 5
+installed jobs use the machine gate at unchanged 09:00/10:00 schedules under
+Infrastructure; the child remains unregistered. Three historical opportunities
+retain unknown timezone provenance, zero executions and no qualifying pair.
+Neither schedule repair nor manual publication backfills unattended settlement.
+Details remain in [release memory](release/MEMORY.md).
 
 All 36 telemetry failures, including the original 35, remain dated counterevidence
 from September 24. The missing `agent_turns` diagnosis is historical: integrated

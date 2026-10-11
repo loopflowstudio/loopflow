@@ -172,6 +172,7 @@ extra = '''
 .home-page .pair h2{max-width:900px}.home-page .pair .halves .more{margin:0;border:0;padding:0}
 .home-page .works .under{margin:22px 0 0;font:500 14px var(--font-mono)}.home-page .works .under a{color:var(--text);text-decoration:underline;text-decoration-color:#b9b1a6;text-underline-offset:4px}.home-page .works .under a:hover{color:var(--wine)}
 .home-page .reading.closing{padding-top:8px}
+.home-page .home-hero .rotating{background:linear-gradient(180deg,#fdf9fa,#f8eef1);box-shadow:inset 0 0 0 1px #722f3714,0 10px 24px -20px #722f3740}
 .home-page .rotating span{animation:rotate-five 10s cubic-bezier(.3,.7,.2,1) infinite}.home-page .rotating span:nth-child(5){animation-delay:8s}@keyframes rotate-five{0%{opacity:0;transform:translateY(.45em)}4%,17%{opacity:1;transform:none}20%,100%{opacity:0;transform:translateY(-.45em)}}.home-page .home-hero h1:has(.rotating){line-height:1.18}@media (max-width:700px){.home-page .home-hero h1 br.wide{display:none}}
 .home-page .trio h2{grid-column:1/-1;font-size:clamp(30px,3.2vw,42px);margin:0}
 .home-page .works{padding-bottom:0}.home-page .belief{padding:84px 0 96px}.home-page .belief p{font:400 clamp(34px,4vw,54px)/1.08 var(--font-serif);letter-spacing:-.02em;color:var(--burgundy);margin:0;max-width:900px}.home-page .belief .get{margin-top:28px}

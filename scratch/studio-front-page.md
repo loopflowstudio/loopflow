@@ -741,3 +741,5 @@ strip links to its own site in a new tab.
 - Jack Heart: "move study to last" → the `x12` header cycles scale, design, implement, demo, release, study.
 
 - Jack Heart: "Loopflow is how you scale yourself and [   ] ? (no scale)" → the `x12` header is "Loopflow is how you scale yourself and [design | implement | demo | release | study] software with agents.", on two lines at desktop width. "Scale" is no longer a cycling word.
+
+- Jack Heart: "maybe the bubble could be a little lighter" → the cycling word's background in `x12` is a paler pink with a softer edge and shadow.

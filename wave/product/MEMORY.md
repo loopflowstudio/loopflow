@@ -404,6 +404,13 @@ capture proves configured primary reuse and retained Work, not native/provider
 usability. Cleanup needs reviewed candidates and a restorable backup;
 unknown/interrupted records are not debris.
 
+October 11: first-use acquisition is considered once per retained repository
+workspace; refresh and hide-all never repeat it. Delayed ensure results populate
+the originating Work without selecting it. Task rows/palette prepare conversations;
+bare links and Flow-log inspection stay passive. Reusing the asynchronous Task
+entry for logs had redirected the companion into prior Work; keep log selection
+synchronous. Overview disclosure is an implementation choice awaiting native review.
+
 ## Session working set and Waiting (2026-10-03, revised 2026-10-06)
 
 Jack Heart requested unfinished interactive participation in ordinary API and
@@ -622,15 +629,10 @@ issue read. No Task was filed or changed by these records.
 
 ## Workspace redesign decisions (2026-09-26)
 
-Jack rejected the first native build of the calmer workspace on sight: "It just
-looks a lot worse than the mocks. Plus I bet we can even improve on the mocks."
-The retro found the build structurally faithful to direction D and tonally
-unfaithful: neutral ink where the mock was warm, a shadow halo under every
-panel, chrome no mock ever had (July's `WaveLensView`, system buttons, a rose
-tab strip, a blue-grey pane header, a green Complete capsule), and a sidebar
-assembled from four passes with no reconciliation. LOO-291 implements the fix as
-four slices: warm token ramp and surface ladder; one sidebar row component;
-one Session toolbar; the seven-step type ramp on Wave and Task pages.
+Jack rejected September 26's native calmer-workspace build: structural fidelity
+missed the mocks' warmth and accumulated inconsistent chrome. LOO-291 addressed
+tokens, rows, toolbar and typography. Diagnosis:
+`8f95d9e4e6:wave/product/MEMORY.md`, this heading.
 
 Decisions that outlive the branch (Jack's, verbatim where quoted):
 
@@ -641,7 +643,7 @@ Decisions that outlive the branch (Jack's, verbatim where quoted):
   even simpler"); a needs-you dot may return later.
 - Rust derives Task grouping from checkout identity, including previously
   unbound Sessions; Swift consumes it without rewriting Run attribution. The
-  global Session browser is diagnostic.
+  former diagnostic Session browser is removed by LOO-462.
 - One universal bind from the room, ⌘K and Task rows ("worth making the
   design and architecture simple and universal if it takes a little extra").
   Bind changes a Run's Task, never its name, panes or Flow membership.
@@ -739,8 +741,9 @@ preserve the failed attempts and superseded proposals. Current usage lives in
 
 ## Accepted calmer workspace (2026-09-25)
 
-Repo → Wave → Task → named Session is the public hierarchy. Project is internal
-chapter ownership. Optimize one repository: connected header/sidebar, started
+Repo → Wave → Task is current navigation (LOO-462); conversations live inside
+retained Work. Project owns chapters. Optimize one repository: connected
+header/sidebar, started
 Tasks only, bottom search. Starting work is durable evidence, independent of
 Session/process liveness; inspection never starts Task execution. The accepted
 September 30 desktop discovery operation ensures primary repo/Wave conversations;
@@ -759,9 +762,9 @@ by October 4's correction. Its details remain at
 `9d72242ce:wave/product/MEMORY.md` under this heading. Retain exact graph
 occurrences and independent return counts, including nested loops.
 
-New session sits beside the Task title, independently prepares its checkout and
-opens a conversation without starting its Flow. One open Session enters directly;
-several lead to named choices. Session names seed from the invoked skill or the
+LOO-462 replaces the old Task-title New Session/choice entry with retained primary
+conversation opening, without starting a Flow; pane-owned new conversations remain.
+Session names seed from the invoked skill or the
 recovered magical-musical generator (history had no animal list); inline rename
 and later agent suggestions preserve human names. Session view omits Description.
 Exact membership distinguishes current, earlier, past, independent and unknown;

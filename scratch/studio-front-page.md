@@ -749,3 +749,5 @@ strip links to its own site in a new tab.
 - Jack Heart: "work-centered API instead of task-centered? or wave-and-task-centered?" → `x12` says "Underneath Loopflow's work-centered API is `lf`." (Claude's pick of his two.)
 
 - Jack Heart wrote the CLI section's opening: "Underneath Loopflow's work-centered API is lf, the best way to bring a universal interface to your sessions across multiple different agent providers." Set in `x12` as written.
+
+- Jack Heart: "lf, a universal interface to..." → `x12`: "Underneath Loopflow's work-centered API is `lf`, a universal interface to your sessions across agent providers."

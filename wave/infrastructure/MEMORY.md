@@ -227,21 +227,31 @@ Process `ef54b06d-9896-467f-a920-f8d4648f9d8b`, and interrupted research Process
 closure is not yet observed. LOO-378 is explicitly paused with substantial
 unpublished code retained, without deletion or delivery authorization.
 
-## AgentProcess (LOO-443, 2026-10-09)
+## AgentProcess (LOO-443/447, 2026-10-10)
 
-Jack Heart requested one inventory; #1512/#1516/#1499 integrated. Unknown stays visible; retry retains history.
-`82b5d90d5` separates attachment/provenance and relay/upstream; stand-ins
-prove takeover rejection (A → B → A), not configured relay.
-Client exit never settles its provider, nor provider death an unknown attachment.
+Jack Heart accepted #1519 (`71741bd4`).
+LOO-447 owns Claude/OpenCode takeover/stop; Jack excluded removal timing,
+historical orphans and configured-provider runs.
 
-Reaper and Codex close share group judgment: leader death is insufficient;
-failed descendant inventory refuses before signaling.
+Headless launch requires attachment. AgentProcess replaces generation;
+released counters stay unread, old callers stale. Client/provider death differs;
+leader death or unknown descendants grants no signaling.
+`82b5d90d5` proves A → B → A rejection with stand-ins, not configured relay.
+CI: `be4a2b2af:wave/infrastructure/MEMORY.md`, this heading.
 
-Headless launch refuses a missing attachment. AgentProcess identity replaced
-provider generation; released counters stay unread, pre-upgrade callers read stale.
-Jack's `71741bd4` accepted #1519 as it stands: LOO-447 owns Claude/OpenCode
-takeover and stop; two-second removal, the three orphans and live-provider runs
-are accepted unproven. FIFO is Codex-only; reaping covers noninteractive providers.
+Jack Heart's October 10 decision `fd830a3f` supersedes live takeover for Claude
+and OpenCode: stop through the AgentProcess record, resume the same native
+conversation, and publish. Codex live handoff removal belongs to separate work;
+retain its generations, fences and saved connection here. Jack later approved
+#1524, gate/landing and completion after verified merge (`55bc3fcd`).
+Delete Claude replay and OpenCode relay/recovery preparation, including the shared
+named-lifeline rewrite. Preserve exact stop, foreground exclusion, native history
+and uncertain turns. `f2096ffce`'s public stop/resume and frozen-authority fixtures
+pass. Gate repaired stale refusal and socket-server lifetime fixtures. Published
+checkpoint CI skipped tests; Linux/installed acceptance remains unproved.
+Prior live-takeover evidence: `5e95ce9a4:wave/infrastructure/MEMORY.md`, this heading.
+Plan: `scratch/stop-and-take-over-claude.md`.
+
 Drafts must `depends_on` unreleased parents; name order broke materialized fixtures.
 Scratch-bearing PRs defer tests; TESTING.md owns gating.
 
@@ -388,12 +398,10 @@ still requires two adjacent original configured dues, two automatic executions,
 at least one artifact publication, required verification and no manual repair.
 Collapsed misses supply accounting coverage, never additional settlements.
 
-At `fe36937fa`, main's Session/Exec/Home/Flow and release recovery are integrated.
-Exact saved-candidate inspection permits replacement only with affirmative
-unpublished evidence, preserving rejected candidate/proof and original due owner.
-Unknown or partial publication blocks replacement. CI-repair children now retain
-release target and checkout ownership. Reported focused passes and merged source
-are not a full affected gate, configured publication or Task completion.
+Earlier saved-candidate and CI-repair source proofs:
+`07dc2e34f:wave/infrastructure/MEMORY.md`, this heading. Replacement still
+requires affirmative unpublished evidence; unknown/partial publication blocks.
+Preserve rejected candidates and original due ownership. Source is not settlement.
 
 Separate durable facts: physical cron exit, product settlement, publisher stages,
 public artifact proof and dated repair ownership. Assigning a closed opportunity
@@ -583,21 +591,15 @@ Jack Heart selected one editable draft per Task and immutable released SQL.
 Mechanics: [MIGRATIONS.md](../../rust/loopflow/src/store/MIGRATIONS.md).
 Unshipped branch evidence: `986be7988:wave/infrastructure/MEMORY.md`.
 
-## One main Home (LOO-342, curated 2026-10-07)
+## One main Home (LOO-342, curated 2026-10-10)
 
-Jack Heart approved the one-Home cutover: ordinary commands, Task workers and
-Flow steps use installed `lf` and `~/.lf`; explicit `LF_HOME` experiments need a
-fresh directory after schema changes. PR #1381 merged as `6c73356074c4`; installed
-v0.12.31 acceptance passed and LOO-342 is done. Current mechanics:
-[CLI docs](../../docs/lf.md#use-one-machine) and
-[Machines](../../docs/architecture/machines.md#one-main-machine).
-
-Jack authorized legacy retirement on October 4. All 37 identified processes
-exited after SIGTERM; retained databases and exact signal/path receipts remain
-under `~/.lf-retired/20261004T161815Z/`, earlier snapshots under
-`~/.lf-retired/20261002T191224Z/worktrees/`. Main identity stayed unchanged.
-Release recovery, acceptance and retirement details:
-`173d649cf:wave/infrastructure/MEMORY.md` under “One main Home.”
+Jack Heart approved installed `lf` and `~/.lf` for ordinary commands, Task
+workers and Flow steps. Explicit `LF_HOME` experiments need a fresh directory
+after schema changes. PR #1381 shipped; installed v0.12.31 acceptance closed
+LOO-342. Jack authorized legacy retirement; 37 identified processes exited,
+retained databases/receipts survived and main identity stayed unchanged.
+Exact retirement paths, release evidence and current-document links:
+`b1a50a7dc:wave/infrastructure/MEMORY.md`, this heading.
 
 ## Worktree listing and fenced dispatch (LOO-375, reconciled 2026-10-07)
 

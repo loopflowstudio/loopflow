@@ -102,9 +102,9 @@ blockers.
 
 Headless Claude, Codex and OpenCode prepare their lifeline before spawning. The child
 establishes its process group, waits for watchdog readiness, then asks a parent
-thread to run its recording callback before exec. For an attached Session, this
-persists OS identity in the AgentProcess row; without an attachment it writes
-nothing. The shared harness launch holds the attachment fence through recording
+thread to run its recording callback before exec. This persists OS identity in the
+required AgentProcess record. The shared harness launch holds the attachment fence
+through recording
 and saves failed spawns on the record. Admission is synchronous so async cancellation
 cannot discard an admitted child before the harness receives it. Failed recording refuses exec;
 a failed exec retains any recorded identity without claiming provider execution.
@@ -123,6 +123,23 @@ foreground orphan cleanup remains unfinished.
 Fresh native launches and saved-history resumes share invocation admission and
 attachment settlement. A recorded client move is an intentional command exit,
 not provider failure; it does not establish a successful provider turn.
+
+### Headless stop and resume
+
+Claude and OpenCode connect stop the recorded headless AgentProcess, then reopen
+its saved native conversation (Claude `--resume`, OpenCode `--session`). This is
+not live takeover. Missing native identity refuses before stopping. Session identity,
+native history and unfinished turns survive; group death is not turn completion.
+
+Harness stop and resume use common exact-identity group close under the frozen
+attachment fence. Superseded callers, unknown identity and duplicate OS owners
+cannot signal. Foreground providers are excluded even after exit. Leader death
+alone cannot settle surviving helpers. Codex retains its live connection machinery
+and its refusal to close a server hosting unrelated conversations.
+
+OpenCode abort uses its existing fenced HTTP writer, without write retries. New
+sessions receive permission rules on creation, not through an unsupported PATCH.
+There is no OpenCode native relay or Claude result-replay transport.
 
 Scheduled settlement reads unfinished AgentProcess rows, but live-orphan
 termination covers noninteractive providers only: Codex app-server, OpenCode

@@ -2036,7 +2036,7 @@ impl CaptureHandle {
         next.input_published = false;
         let (next, attachment) =
             store.claim_session_input(next, expected.as_ref(), &lf_process_id, || {
-                runtime::close_session_agent_process(&store, session)
+                crate::harness::agent_process::close_session_agent_process(&store, session)
             })?;
         // Continue the Session's attribution; the manifest still describes the
         // actual process cwd supplied by the caller.
@@ -2429,7 +2429,7 @@ impl CaptureHandle {
             );
         }
         let next = store.replace_session_agent_process(session, expected, resume_thread, || {
-            runtime::close_session_agent_process(&store, session)
+            crate::harness::agent_process::close_session_agent_process(&store, session)
         })?;
         capture.attachment = Some((session.clone(), next));
         if let Err(error) = capture.fail_and_begin_attempt(provider, model, account_id) {
@@ -2836,7 +2836,7 @@ pub(crate) fn resume_session_agent_process(
 ) -> StoreResult<crate::process::SessionAttachment> {
     let expected = store.session_attachment(session)?;
     store.resume_session_attachment(session, expected.as_ref(), lf_process_id, || {
-        runtime::close_session_agent_process(store, session)
+        crate::harness::agent_process::close_session_agent_process(store, session)
     })
 }
 
@@ -4242,6 +4242,14 @@ mod tests {
     fn resume_refuses_live_agent_that_cannot_be_ended() {
         let ledger = crate::journal::TestLedgerGuard::new();
         let (store, attachment, mut process, next) = attached_session(&ledger);
+        store
+            .record_session_connection(
+                "conversation",
+                &attachment,
+                ledger.home().join("absent.sock").to_str().unwrap(),
+                &"saved-thread".into(),
+            )
+            .unwrap();
         // A provider outside a group of its own is never signalled.
         let mut provider = std::process::Command::new("sleep")
             .arg("30")
@@ -4257,18 +4265,19 @@ mod tests {
         process.wait().unwrap();
 
         let error = super::resume_session_agent_process(&store, "conversation", &next).unwrap_err();
-        assert!(
-            error.to_string().contains("has no observed exit"),
-            "{error}"
-        );
-        assert!(provider.try_wait().unwrap().is_none());
-        assert_eq!(
-            store.session_attachment("conversation").unwrap(),
-            Some(attachment.clone())
-        );
-
+        let remained_alive = provider.try_wait().unwrap().is_none();
+        let retained_attachment = store.session_attachment("conversation").unwrap();
         provider.kill().unwrap();
         provider.wait().unwrap();
+        assert!(
+            error
+                .to_string()
+                .contains("does not lead its own process group"),
+            "{error}"
+        );
+        assert!(remained_alive);
+        assert_eq!(retained_attachment, Some(attachment.clone()));
+
         let replacement =
             super::resume_session_agent_process(&store, "conversation", &next).unwrap();
         assert_ne!(replacement.agent_process_id, attachment.agent_process_id);

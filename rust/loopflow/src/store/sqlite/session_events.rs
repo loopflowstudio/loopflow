@@ -4,7 +4,7 @@ use sha2::{Digest, Sha256};
 
 use crate::id::AgentSessionId;
 use crate::session::{SessionEvent, SessionEventKind};
-use crate::session_record::{FinalAnswer, ProviderSessionRef};
+use crate::session_record::ProviderSessionRef;
 use crate::store::{StoreError, StoreResult};
 
 use super::SqliteStore;
@@ -52,7 +52,7 @@ impl SqliteStore {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
-    pub(crate) fn input_final_answer(&self, input: &str) -> StoreResult<Option<FinalAnswer>> {
+    pub(crate) fn input_final_answer(&self, input: &str) -> StoreResult<Option<String>> {
         let native: Option<String> = {
             let conn = self.conn.lock().expect("store mutex poisoned");
             conn.query_row(
@@ -76,10 +76,9 @@ impl SqliteStore {
                     })?
                     .to_owned(),
             };
-            return Ok(Some(FinalAnswer { text, exact: true }));
+            return Ok(Some(text));
         }
-        crate::session_record::final_answer(self.input_events(input)?)
-            .map_err(|error| StoreError::InvalidData(error.to_string()))
+        Ok(None)
     }
 
     pub(crate) fn retain_session_observation(

@@ -48,6 +48,9 @@ pub struct Cli {
     /// Captured skill and arguments supplied by the invoking Flow process.
     #[arg(long, hide = true)]
     pub skill_input: Option<std::path::PathBuf>,
+    /// Native final-answer schema supplied by a deciding step.
+    #[arg(long, hide = true, value_parser = |text: &str| serde_json::from_str::<serde_json::Value>(text))]
+    pub output_schema: Option<serde_json::Value>,
     #[arg(skip)]
     pub resolved_invocation: Option<crate::skills::invocation::SkillInvocation>,
 
@@ -229,6 +232,9 @@ impl Cli {
                 input.to_string_lossy().into_owned(),
             ]);
         }
+        if let Some(schema) = &self.output_schema {
+            args.extend(["--output-schema".to_string(), schema.to_string()]);
+        }
         if let Some(turns) = self.max_turns {
             args.extend(["--max-turns".to_string(), turns.to_string()]);
         }
@@ -247,6 +253,7 @@ impl Cli {
             clipboard: self.clipboard,
             agent: self.agent.clone(),
             skill_input: self.skill_input.clone(),
+            output_schema: self.output_schema.clone(),
             resolved_invocation: self.resolved_invocation.clone(),
             account: self.account.clone(),
             only_account: self.only_account.clone(),

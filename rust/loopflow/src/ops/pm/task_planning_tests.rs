@@ -3587,9 +3587,10 @@ fn planning_fields_project_content_preserves_prose_and_task_assignee_can_be_clea
     with_planning_task(|runtime, fixture, repo, task, state| {
         runtime.block_on(async {
             let mut provider = planning_project("project-1", "project-1");
-            provider["content"] = json!(
-                "Keep the introduction.\n\nworkflow: feature\n\n## Notes\nKeep these notes.\n"
-            );
+            let example = "## Example\n```yaml\nworkflow: review\nflow: example\n```\n";
+            provider["content"] = json!(format!(
+                "Keep the introduction.\n\nworkflow: feature\n\n{example}## Notes\nKeep these notes.\n"
+            ));
             mark_issue_updated(&mut provider);
             state.lock().await.project_fields = Some(provider);
             fixture
@@ -3624,6 +3625,7 @@ fn planning_fields_project_content_preserves_prose_and_task_assignee_can_be_clea
                 .as_str()
                 .unwrap()
                 .to_owned();
+            assert!(content.contains(example));
             assert!(content.contains("Keep the introduction."));
             assert!(content.contains("## Notes\nKeep these notes."));
             let parsed = crate::pm::parse_project_content(&content).unwrap();

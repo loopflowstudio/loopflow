@@ -773,15 +773,15 @@ fn convert_project_content(conn: &rusqlite::Connection) -> StoreResult<()> {
         })?
         .collect::<Result<Vec<_>, _>>()?;
     for (id, body) in rows {
-        let content = crate::pm::parse_project_content(&body)
+        let document = crate::pm::parse_project_document(&body)
             .map_err(|error| StoreError::InvalidData(format!("Project {id}: {error}")))?;
         conn.execute(
             "UPDATE projects SET description=?2,krs=?3,metric_targets=?4 WHERE id=?1",
             rusqlite::params![
                 id,
-                crate::pm::project_prose(&body),
-                serde_json::to_string(&content.krs)?,
-                serde_json::to_string(&content.metric_targets)?
+                document.rewrite(None, ""),
+                serde_json::to_string(&document.content.krs)?,
+                serde_json::to_string(&document.content.metric_targets)?
             ],
         )?;
     }
@@ -1467,7 +1467,7 @@ mod tests {
             |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?))).unwrap();
         assert_eq!(
             description,
-            "Authored purpose.\n\nThis preamble is authored prose.\n## Notes\nKeep these bytes.\n"
+            "Authored purpose.\n\n## Example\n````markdown\n```yaml\nworkflow: example\nflow: legacy-example\n```\n## KRs\n- [x] Example only\n````\nTarget rationale.\nTarget note.\nThis preamble is authored prose.\n## Notes\nKeep these bytes.\n"
         );
         assert_eq!(workflow, "saved-selection");
         assert_eq!(revision, 7);

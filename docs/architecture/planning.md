@@ -62,7 +62,9 @@ reads and the shared typed writer never parse or regenerate Markdown. Conversion
 reads the released Markdown once inside the migration transaction, preserves saved
 workflow selection and observation age, and seeds Git history only after conversion.
 Prompt assembly and Linear delivery render at their boundaries; malformed legacy
-content refuses the migration rather than discarding criteria.
+content refuses the migration rather than discarding criteria. Extraction and Linear
+edits recognize fenced examples as prose and replace only owned field ranges;
+unrecognized paragraphs survive even inside managed sections.
 `ProjectKR` is an explicit judgment. `MetricTarget` names a metric and a numeric
 `Threshold`, independently of the Wave's observations. Project iteration is no longer
 live state; its stored values and historical judgment events remain readable evidence.

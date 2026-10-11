@@ -310,95 +310,122 @@ pub fn project_slug(name: &str) -> String {
     slug
 }
 
-/// Preserve authored bytes outside the managed Linear sections.
-pub(crate) fn project_prose(content: &str) -> String {
-    let mut targets = false;
-    let mut krs = false;
-    let mut criterion = false;
-    let mut prose = String::new();
-    for line in content.split_inclusive('\n') {
-        let trimmed = line.trim();
-        if trimmed.starts_with("workflow:") || trimmed.starts_with("flow:") {
-            continue;
-        }
-        if trimmed.starts_with('#') {
-            targets = trimmed == "## Metric targets";
-            krs = trimmed == "## KRs";
-            criterion = false;
-            if targets || krs {
-                continue;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProjectContentField {
+    Workflow,
+    Krs,
+    Targets,
+}
+
+/// A Linear Markdown boundary, not a stored Project or another planning owner.
+#[derive(Debug)]
+pub(crate) struct ProjectDocument<'a> {
+    pub content: ProjectContent,
+    source: &'a str,
+    fields: Vec<(std::ops::Range<usize>, ProjectContentField)>,
+}
+
+impl ProjectDocument<'_> {
+    pub fn rewrite(&self, field: Option<ProjectContentField>, replacement: &str) -> String {
+        let mut result = String::new();
+        let mut start = 0;
+        let mut pending = Some(replacement);
+        for (range, owner) in &self.fields {
+            if field.is_none_or(|field| field == *owner) {
+                result.push_str(&self.source[start..range.start]);
+                if let Some(replacement) = pending.take() {
+                    result.push_str(replacement);
+                }
+                start = range.end;
             }
         }
-        // Text preceding the first KR is not consumed by the criterion parser.
-        // It is authored prose even when it sits under the managed heading.
-        if krs && trimmed.starts_with("- ") {
-            criterion = true;
+        result.push_str(&self.source[start..]);
+        if let Some(replacement) = pending.filter(|replacement| !replacement.is_empty()) {
+            result.push_str("\n\n");
+            result.push_str(replacement);
         }
-        if !targets && !(krs && criterion) {
-            prose.push_str(line);
-        }
+        result
     }
-    prose
 }
 
 pub fn parse_project_content(content: &str) -> PmResult<ProjectContent> {
-    enum Section {
-        None,
-        Targets,
-        Krs,
-    }
+    Ok(parse_project_document(content)?.content)
+}
 
-    let mut section = Section::None;
+pub(crate) fn parse_project_document(source: &str) -> PmResult<ProjectDocument<'_>> {
+    use ProjectContentField::{Krs, Targets, Workflow};
+    let mut section = None;
+    let mut fields = Vec::new();
+    let mut fence: Option<(char, usize, bool)> = None;
+    let mut fenced_targets = false;
     let mut targets = Vec::new();
+    let mut raw_targets = Vec::new();
     let mut workflow = String::new();
     let mut authored_as_flow = String::new();
     let mut krs = Vec::new();
     let mut current_kr: Option<ProjectKR> = None;
-    for line in content.lines() {
+    let mut offset = 0;
+    for line in source.split_inclusive('\n') {
+        let range = offset..offset + line.len();
+        offset = range.end;
         let trimmed = line.trim();
+        if let Some((marker, length, managed)) = fence {
+            let closing = trimmed.chars().take_while(|ch| *ch == marker).count() >= length
+                && trimmed.trim_matches(marker).is_empty();
+            if managed {
+                fields.push((range, Targets));
+                if !closing {
+                    targets.push(line);
+                }
+            }
+            if closing {
+                fence = None;
+            }
+            continue;
+        }
+        if let Some(marker @ ('`' | '~')) = trimmed.chars().next() {
+            let length = trimmed.chars().take_while(|ch| *ch == marker).count();
+            if length >= 3 {
+                let language = trimmed[length..].trim();
+                let managed = section == Some(Targets) && matches!(language, "" | "json");
+                if managed {
+                    fenced_targets = true;
+                    fields.push((range, Targets));
+                }
+                if let Some(kr) = current_kr.take() {
+                    krs.push(kr);
+                }
+                fence = Some((marker, length, managed));
+                continue;
+            }
+        }
         if let Some(value) = trimmed.strip_prefix("workflow:") {
             workflow = value.trim().to_string();
+            fields.push((range, Workflow));
             continue;
         }
-        // Projects written before the line was renamed; the next write
-        // through `lf` renders `workflow:`.
         if let Some(value) = trimmed.strip_prefix("flow:") {
             authored_as_flow = value.trim().to_string();
+            fields.push((range, Workflow));
             continue;
         }
-        match trimmed {
-            "## Metric targets" => {
-                if let Some(kr) = current_kr.take() {
-                    krs.push(kr);
-                }
-                section = Section::Targets;
-                continue;
-            }
-            "## KRs" => {
-                if let Some(kr) = current_kr.take() {
-                    krs.push(kr);
-                }
-                section = Section::Krs;
-                continue;
-            }
-            _ => {}
-        }
-
         if trimmed.starts_with('#') {
             if let Some(kr) = current_kr.take() {
                 krs.push(kr);
             }
-            section = Section::None;
+            section = match trimmed {
+                "## Metric targets" => Some(Targets),
+                "## KRs" => Some(Krs),
+                _ => None,
+            };
+            if let Some(section) = section {
+                fields.push((range, section));
+            }
             continue;
         }
-
         match section {
-            Section::Targets => {
-                if !trimmed.starts_with("```") {
-                    targets.push(line);
-                }
-            }
-            Section::Krs => {
+            Some(Targets) => raw_targets.push((line, range)),
+            Some(Krs) => {
                 let item = if let Some(text) = trimmed.strip_prefix("- [x] ") {
                     Some((true, text))
                 } else if let Some(text) = trimmed.strip_prefix("- [X] ") {
@@ -408,36 +435,53 @@ pub fn parse_project_content(content: &str) -> PmResult<ProjectContent> {
                 } else {
                     trimmed.strip_prefix("- ").map(|text| (false, text))
                 };
-
                 if let Some((holds, text)) = item {
                     if let Some(kr) = current_kr.take() {
                         krs.push(kr);
                     }
                     if !text.trim().is_empty() {
                         current_kr = Some(ProjectKR {
-                            text: text.trim().to_string(),
+                            text: text.trim().into(),
                             holds,
                         });
+                        fields.push((range, Krs));
                     }
-                } else if !trimmed.is_empty() {
-                    if let Some(kr) = current_kr.as_mut() {
-                        kr.text.push(' ');
-                        kr.text.push_str(trimmed);
+                } else if trimmed.is_empty() {
+                    // A new paragraph is prose, not a continuation of the last KR.
+                    if let Some(kr) = current_kr.take() {
+                        krs.push(kr);
                     }
+                } else if let Some(kr) = current_kr.as_mut() {
+                    kr.text.push(' ');
+                    kr.text.push_str(trimmed);
+                    fields.push((range, Krs));
                 }
             }
-            Section::None => {}
+            _ => {}
         }
     }
     if let Some(kr) = current_kr {
         krs.push(kr);
     }
+    if fence.is_some_and(|(_, _, managed)| managed) {
+        return Err(PmError::Message(
+            "unterminated Project metric targets fence".into(),
+        ));
+    }
+    if !fenced_targets {
+        for (line, range) in raw_targets {
+            targets.push(line);
+            if !line.trim().is_empty() {
+                fields.push((range, Targets));
+            }
+        }
+    }
 
     let metric_targets = if targets.iter().all(|line| line.trim().is_empty()) {
         Vec::new()
     } else {
-        serde_json::from_str(&targets.join("\n"))
-            .map_err(|error| PmError::Message(format!("invalid chapter metric targets: {error}")))?
+        serde_json::from_str(&targets.concat())
+            .map_err(|error| PmError::Message(format!("invalid Project metric targets: {error}")))?
     };
     if workflow.is_empty() {
         workflow = authored_as_flow;
@@ -448,7 +492,12 @@ pub fn parse_project_content(content: &str) -> PmResult<ProjectContent> {
         krs,
     };
     content.validate()?;
-    Ok(content)
+    fields.sort_unstable_by_key(|(range, _)| range.start);
+    Ok(ProjectDocument {
+        content,
+        source,
+        fields,
+    })
 }
 
 impl ProjectContent {

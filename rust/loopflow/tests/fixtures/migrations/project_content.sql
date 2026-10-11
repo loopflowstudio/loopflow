@@ -5,11 +5,22 @@ INSERT INTO projects(id,wave_id,external_project_id,created_at,updated_at,projec
 VALUES('retained-project','retained-wave','linear-project',1,7,'proof','Proof',
 'Authored purpose.
 
+## Example
+````markdown
+```yaml
+workflow: example
+flow: legacy-example
+```
+## KRs
+- [x] Example only
+````
 workflow: obsolete-prose-selection
 ## Metric targets
+Target rationale.
 ```json
 [{"metric_id":"recovery","target":{"kind":"at_least","value":1.0}}]
 ```
+Target note.
 ## KRs
 This preamble is authored prose.
 - [x] Retain this

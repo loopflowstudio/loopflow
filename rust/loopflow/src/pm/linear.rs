@@ -1969,58 +1969,37 @@ struct ProjectNode {
 
 // Replace only the selected planning field, retaining unrelated provider prose.
 fn patch_project_field(content: &str, field: &str, value: &Value) -> PmResult<String> {
-    let mut parsed = serde_json::to_value(parse_project_content(content)?)
-        .map_err(|e| PmError::Message(e.to_string()))?;
-    parsed[field] = value.clone();
-    let parsed: crate::pm::ProjectContent =
-        serde_json::from_value(parsed).map_err(|e| PmError::Message(e.to_string()))?;
-    parsed.validate()?;
-    let (header, replacement) = match field {
-        "workflow" => (None, format!("workflow: {}\n", parsed.workflow)),
-        "krs" => (Some("## KRs"), format!("{}\n", super::render_krs(&parsed))),
-        "metric_targets" => (
-            Some("## Metric targets"),
-            format!("{}\n", super::render_metric_targets(&parsed)),
-        ),
+    use super::ProjectContentField::{Krs, Targets, Workflow};
+    let mut document = super::parse_project_document(content)?;
+    let owner = match field {
+        "workflow" => {
+            document.content.workflow = serde_json::from_value(value.clone())
+                .map_err(|e| PmError::Message(e.to_string()))?;
+            Workflow
+        }
+        "krs" => {
+            document.content.krs = serde_json::from_value(value.clone())
+                .map_err(|e| PmError::Message(e.to_string()))?;
+            Krs
+        }
+        "metric_targets" => {
+            document.content.metric_targets = serde_json::from_value(value.clone())
+                .map_err(|e| PmError::Message(e.to_string()))?;
+            Targets
+        }
         _ => {
             return Err(PmError::Message(format!(
                 "unsupported content field {field}"
             )))
         }
     };
-    let mut result = String::new();
-    let mut section = false;
-    let mut replaced = false;
-    for line in content.split_inclusive('\n') {
-        let trimmed = line.trim();
-        let workflow = trimmed.starts_with("workflow:") || trimmed.starts_with("flow:");
-        if header.is_none() && workflow {
-            if !replaced {
-                result.push_str(&replacement);
-                replaced = true;
-            }
-            continue;
-        }
-        if trimmed.starts_with('#') {
-            section = header == Some(trimmed);
-            if section {
-                if !replaced {
-                    result.push_str(&replacement);
-                    replaced = true;
-                }
-                continue;
-            }
-        }
-        // Workflow lines are parsed independently of their Markdown section.
-        if !section || workflow {
-            result.push_str(line);
-        }
-    }
-    if !replaced {
-        result.push_str("\n\n");
-        result.push_str(&replacement);
-    }
-    Ok(result)
+    document.content.validate()?;
+    let replacement = match owner {
+        Workflow => format!("workflow: {}", document.content.workflow),
+        Krs => super::render_krs(&document.content),
+        Targets => super::render_metric_targets(&document.content),
+    };
+    Ok(document.rewrite(Some(owner), &format!("{replacement}\n\n")))
 }
 
 fn convert_legacy_project_content(content: &str) -> PmResult<String> {
@@ -2262,6 +2241,50 @@ fn first_meaningful_paragraph(description: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn project_markdown_edits_preserve_examples_and_unknown_prose() {
+        for example in [
+            "````markdown\n```yaml\nworkflow: example\nflow: legacy\n```\n## KRs\n- [x] Example only\n````\n",
+            "~~~yaml\nworkflow: example\n## Metric targets\nnot JSON\n~~~\n",
+        ] {
+            let source = format!("## Example\n{example}\nworkflow: actual\n## Metric targets\nTarget rationale.\n```json\n[]\n```\nTarget note.\n## KRs\nKR preamble.\n- [ ] Original criterion\n\nParagraph after the criterion.\n{example}## Notes\nKeep these bytes.\n");
+            let before = super::parse_project_content(&source).unwrap();
+            assert_eq!(before.workflow, "actual");
+            assert_eq!(before.krs.len(), 1);
+            assert_eq!(before.krs[0].text, "Original criterion");
+            assert!(before.metric_targets.is_empty());
+            for (field, value) in [
+                ("workflow", serde_json::json!("review")),
+                ("krs", serde_json::json!([{"text":"New criterion","holds":true}])),
+                ("metric_targets", serde_json::json!([{"metric_id":"proof","target":{"kind":"at_least","value":1.0}}])),
+            ] {
+                let after = super::patch_project_field(&source, field, &value).unwrap();
+                assert_eq!(after.matches(example).count(), 2, "{field}: {after}");
+                for prose in ["Target rationale.\n", "Target note.\n", "KR preamble.\n", "Paragraph after the criterion.\n", "## Notes\nKeep these bytes.\n"] {
+                    assert!(after.contains(prose), "{field}: {after}");
+                }
+                let mut expected = serde_json::to_value(&before).unwrap();
+                expected[field] = value;
+                assert_eq!(serde_json::to_value(super::parse_project_content(&after).unwrap()).unwrap(), expected);
+            }
+        }
+    }
+
+    #[test]
+    fn project_markdown_edits_keep_unfenced_targets_separate_from_kr_prose() {
+        let source = "## Metric targets\n[]\n## KRs\nPreamble.\n- [ ] Existing proof\n";
+        let after = super::patch_project_field(
+            source,
+            "krs",
+            &serde_json::json!([{"text":"New proof","holds":true}]),
+        )
+        .unwrap();
+        assert!(after.contains("Preamble.\n"));
+        let content = super::parse_project_content(&after).unwrap();
+        assert!(content.metric_targets.is_empty());
+        assert_eq!(content.krs[0].text, "New proof");
+    }
+
     use super::*;
     use crate::pm::test_server::{self, json_response};
     use axum::http::StatusCode;

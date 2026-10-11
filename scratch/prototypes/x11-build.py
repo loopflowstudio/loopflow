@@ -72,17 +72,17 @@ main = f'''
   <p class="slot"><span>Loopflow for Mac</span><span>Video goes here · a mock stands in</span></p>
   <div class="win">
     <aside class="side">
-      <h4>Your App</h4>
-      <p class="on">Exports</p>
-      <ul><li class="wait">Add CSV export</li><li>Filter exports by date</li><li class="wait">Schedule a weekly export</li><li>Export to Google Sheets</li></ul>
-      <p>Onboarding</p>
-      <ul><li>Invite a teammate</li><li>First-run checklist</li></ul>
-      <p>Billing</p>
-      <ul><li>Annual plans</li></ul>
+      <h4>Kata</h4>
+      <p class="on">Ear</p>
+      <ul><li class="wait">Loop a phrase at half speed</li><li>Split a recording into stems</li><li class="wait">Shift a passage into your register</li><li>Bring recordings in from anywhere</li></ul>
+      <p>Theory</p>
+      <ul><li>Annotate a score</li><li>Select notes from a PDF</li></ul>
+      <p>Teacher</p>
+      <ul><li>Assign a practice</li></ul>
     </aside>
     <div class="pane">
-      <h2>Exports</h2>
-      <p class="obj">People can get their data out of the app in the form they need it, without asking us.</p>
+      <h2>Ear</h2>
+      <p class="obj">Learn a piece by ear, from the recording itself.</p>
       <p class="lab">Workflow · <code>feature</code></p>
       <ol class="wf" aria-label="The feature workflow: start, design, demo, end">
         <li class="cap">start</li>
@@ -100,11 +100,11 @@ main = f'''
       </ol>
       <p class="lab">tasks · 5</p>
       <ol class="tasks t6">
-        <li><div><b>Add CSV export</b></div><span class="pos w">demo · waiting on you</span><span class="id">EXP-12</span></li>
-        <li><div><b>Schedule a weekly export</b></div><span class="pos w">design · waiting on you</span><span class="id">EXP-15</span></li>
-        <li><div><b>Filter exports by date</b></div><span class="pos">pursue · implement</span><span class="id">EXP-14</span></li>
-        <li><div><b>Export to Google Sheets</b></div><span class="pos">start</span><span class="id">EXP-16</span></li>
-        <li class="done"><div><b>Fix the timezone in exported dates</b></div><span class="pos ok">landed</span><span class="id">EXP-9</span></li>
+        <li><div><b>Loop a phrase at half speed</b></div><span class="pos w">demo · waiting on you</span><span class="id">EAR-12</span></li>
+        <li><div><b>Shift a passage into your register</b></div><span class="pos w">design · waiting on you</span><span class="id">EAR-15</span></li>
+        <li><div><b>Split a recording into stems</b></div><span class="pos">pursue · implement</span><span class="id">EAR-14</span></li>
+        <li><div><b>Bring recordings in from anywhere</b></div><span class="pos">start</span><span class="id">EAR-16</span></li>
+        <li class="done"><div><b>Keep a loop when its recording is replaced</b></div><span class="pos ok">landed</span><span class="id">EAR-9</span></li>
       </ol>
     </div>
   </div>
@@ -130,30 +130,30 @@ main = f'''
     <p class="slot"><span>Loopflow in your terminal</span><span>Screenshot of cmux goes here · a sketch stands in</span></p>
     <div class="muxwin">
       <aside>
-        <h5>Exports <small>wave</small></h5>
+        <h5>Ear <small>wave</small></h5>
         <ul>
-          <li class="on"><i class="w"></i>EXP-12 Add CSV export<small>demo · waiting on you</small></li>
-          <li><i class="w"></i>EXP-15 Schedule a weekly export<small>design · waiting on you</small></li>
-          <li><i class="r"></i>EXP-14 Filter exports by date<small>pursue · implement</small></li>
+          <li class="on"><i class="w"></i>EAR-12 Loop a phrase at half speed<small>demo · waiting on you</small></li>
+          <li><i class="w"></i>EAR-15 Shift a passage into your register<small>design · waiting on you</small></li>
+          <li><i class="r"></i>EAR-14 Split a recording into stems<small>pursue · implement</small></li>
         </ul>
-        <h5>Onboarding <small>wave</small></h5>
-        <ul><li><i></i>ONB-4 Invite a teammate<small>start</small></li></ul>
+        <h5>Theory <small>wave</small></h5>
+        <ul><li><i></i>THE-4 Annotate a score<small>start</small></li></ul>
       </aside>
       <div class="panes">
         <div class="pane">
-          <p class="bar"><b>EXP-12</b> Add CSV export<span>task session · claude</span></p>
-          <p class="a">Pull request #84 is open. Try it: open any table and press Export.</p>
-          <p class="u">tried it. dates come out in UTC, should be the account’s timezone</p>
-          <p class="a">Fixed and rebuilt. Dates now use the account’s timezone. Ready to try again.</p>
+          <p class="bar"><b>EAR-12</b> Loop a phrase at half speed<span>task session · claude</span></p>
+          <p class="a">Pull request #84 is open. Try it: open a recording, drag over a phrase, press Loop.</p>
+          <p class="u">tried it. at half speed the loop clicks where it wraps around</p>
+          <p class="a">Fixed and rebuilt. The loop now crossfades at the seam. Ready to try again.</p>
           <p class="u cur">works. ship it</p>
           <p class="foot">start → design → pursue → <b>demo</b> → ship → end</p>
         </div>
         <div class="pane">
-          <p class="bar"><b>Exports</b><span>wave session · codex</span></p>
-          <p class="u">people keep asking for google sheets too</p>
-          <p class="a">Filed EXP-16, Export to Google Sheets, under Exports. It starts at design.</p>
+          <p class="bar"><b>Ear</b><span>wave session · codex</span></p>
+          <p class="u">i want to pull recordings in from voice memos too</p>
+          <p class="a">Filed EAR-16, Bring recordings in from anywhere, under Ear. It starts at design.</p>
           <p class="u">what’s waiting on me</p>
-          <p class="a">Two tasks: EXP-12 at demo, EXP-15 at design.</p>
+          <p class="a">Two tasks: EAR-12 at demo, EAR-15 at design.</p>
           <p class="foot">4 open tasks · 2 waiting on you</p>
         </div>
       </div>
@@ -170,13 +170,13 @@ main = f'''
       <p class="more"><a href="/cli">The CLI ↗</a><a href="/docs/authoring#flows">Skills and Graphs ↗</a></p>
     </article>
     <article>
-<pre tabindex="0" aria-label="lf commands" class="term"><span class="p">$</span> <b>lf</b> wt create csv-export     <span class="c"># a worktree and a branch</span>
+<pre tabindex="0" aria-label="lf commands" class="term"><span class="p">$</span> <b>lf</b> wt create slow-loop      <span class="c"># a worktree and a branch</span>
 
 <span class="p">$</span> <b>lf</b> --machine mini \\         <span class="c"># where it runs</span>
      --account claude=you@ \\  <span class="c"># whose login pays</span>
      -a claude:opus \\         <span class="c"># which agent and model</span>
-     --wt csv-export \\        <span class="c"># in which worktree</span>
-     --docs docs/api.md \\     <span class="c"># what it reads first</span>
+     --wt slow-loop \\         <span class="c"># in which worktree</span>
+     --docs docs/audio.md \\   <span class="c"># what it reads first</span>
      -b \\                     <span class="c"># headless, or -i to talk</span>
      graph pursue             <span class="c"># Skills in sequence: a Graph</span>
 

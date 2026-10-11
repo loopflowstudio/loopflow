@@ -109,11 +109,11 @@ main = f'''
   </div>
 </section>
 <section class="pair system">
-  <h2>Loopflow: a system for arranging coding sessions around clearly defined goals at all levels of abstraction.</h2>
+  <h2>Loopflow: a system for arranging coding sessions around long-lived objectives and concrete outcomes.</h2>
   <div class="halves">
     <article>
       <p>Coding agents can do amazing things for you, but they ask a lot of focus from you. How can you, a human with a single locus of attention, stay in sync with an entire parallel agent swarm? Shipping tens of thousands of lines is the easy part. Making them lines worth keeping — lines you don’t revert next month — is the hard part.</p>
-      <p>Loopflow arranges your agent sessions around the work: long-lived objectives and concrete outcomes. You don’t have to keep every session window open for fear of it disappearing, or remember why you wanted this massive change in the first place. Each task follows a workflow you choose, and each session you come to is one where your input really matters. Every task ends shipped.</p>
+      <p>You don’t have to keep every session window open for fear of it disappearing, or remember why you wanted this massive change in the first place. Each task follows a workflow you choose, and each session you come to is one where your input really matters. Every task ends shipped.</p>
       <p class="more"><a href="/docs/waves">Tasks and Waves ↗</a><a href="/docs/authoring#workflows">Write a workflow ↗</a></p>
     </article>
     <article>

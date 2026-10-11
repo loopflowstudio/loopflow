@@ -136,7 +136,7 @@ mod tests {
             "workflow":"", "krs":[], "metric_targets":[], "status":"started", "initiative_ids":["initiative"], "team_ids":["team"]
         })).unwrap();
         store
-            .put_pm_project(wave.id(), "linear", "initiative", &observed, 17)
+            .accept_linear_project(wave.id(), "initiative", &observed, 17)
             .unwrap();
         let project = store.list_projects(Some(wave.id())).unwrap().remove(0);
         store
@@ -193,7 +193,7 @@ mod tests {
             "workflow":"", "krs":[], "metric_targets":[], "status":"started", "initiative_ids":["initiative"], "team_ids":["team"]
         })).unwrap();
         store
-            .put_pm_project(wave.id(), "linear", "initiative", &observed, 1)
+            .accept_linear_project(wave.id(), "initiative", &observed, 1)
             .unwrap();
         let project = store.list_projects(Some(wave.id())).unwrap().remove(0);
         store
@@ -206,7 +206,7 @@ mod tests {
         assert_eq!(change.base, None);
         observed.description = Some(String::new());
         store
-            .put_pm_project(wave.id(), "linear", "initiative", &observed, 2)
+            .accept_linear_project(wave.id(), "initiative", &observed, 2)
             .unwrap();
         assert_eq!(store.project(&project.id).unwrap().unwrap().description, "");
         let conn = store.conn.lock().unwrap();
@@ -238,14 +238,14 @@ mod tests {
             "workflow":"", "krs":[], "metric_targets":[], "status":"started", "initiative_ids":["initiative"], "team_ids":["team"]
         })).unwrap();
         store
-            .put_pm_project(wave.id(), "linear", "initiative", &observed, 17)
+            .accept_linear_project(wave.id(), "initiative", &observed, 17)
             .unwrap();
         let project = store.list_projects(Some(wave.id())).unwrap().remove(0);
         observed.description = None;
         observed.revision = Some("2026-10-10T12:01:00Z".into());
         observed.summary = "New summary".into();
         store
-            .put_pm_project(wave.id(), "linear", "initiative", &observed, 29)
+            .accept_linear_project(wave.id(), "initiative", &observed, 29)
             .unwrap();
         let saved = store.project(&project.id).unwrap().unwrap();
         assert_eq!(saved.description, "Baseline");
@@ -277,7 +277,7 @@ mod tests {
         );
         observed.description = Some("Baseline".into());
         store
-            .put_pm_project(wave.id(), "linear", "initiative", &observed, 30)
+            .accept_linear_project(wave.id(), "initiative", &observed, 30)
             .unwrap();
         assert_eq!(
             store.project(&project.id).unwrap().unwrap().description,

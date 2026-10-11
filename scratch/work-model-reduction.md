@@ -99,10 +99,11 @@ capture state evidence rather than a reconstructed issue.
 
 **Removed:** `PmSnapshot`, `PmSnapshotRow`, `PmTaskRecord`,
 `Store::put_pm_snapshot`/`put_pm_task` and both production snapshot builders.
-Inventory/detail acceptance now takes concrete Linear fields, without a provider
-selector; the adapter collects Project issues directly. Captured test inputs live
-only in `tests/support/linear_input.rs`. Transactions and the blocking writer's
-Wave-lock lifetime are unchanged, including cancellation.
+Inventory/detail acceptance takes concrete Linear fields; all acceptance, reteam,
+archival and ordering paths now remove the provider-selector argument. Projection
+consumes IDs and batches retained-row receipt attachment, without fetched models.
+Captured inputs stay in `tests/support/linear_input.rs`; transactions and the
+blocking writer's cancellation-safe Wave-lock lifetime remain unchanged.
 
 **Delete — do not maintain:** escaping `PmItem`/`LinearProject`, public concrete
 acceptance methods and the remaining generic PM/provider hierarchy. Adapter
@@ -114,7 +115,7 @@ canonical Work must not absorb foreign input.
 `pm_project_name_cutover` retain independent evidence, not ordinary Work content.
 
 `require_accepted_initiative`, membership validation, revision ordering and
-`reconcile_pm_project_teams` remain acquisition responsibilities. Explicit reteam
+`reconcile_linear_project_teams` remain acquisition responsibilities. Explicit reteam
 changes Team relationships without replacing independently newer entity facts.
 Repository alias repair and revision triggers still operate on the surviving
 observation rows. No ordinary reader reconstructs the removed JSON body.

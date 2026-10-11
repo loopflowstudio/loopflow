@@ -1281,9 +1281,8 @@ async fn accept_reteam_project(
     }
     resolved
         .store
-        .reconcile_pm_project_teams(
+        .reconcile_linear_project_teams(
             wave.id(),
-            "linear",
             &project.initiative_ids[0],
             confirmed,
             observed_at,

@@ -29,7 +29,7 @@ async fn planning_repo(fixture: &Fixture) -> (PathBuf, crate::work::wave::Wave) 
     fixture
         .store
         .sqlite
-        .put_pm_project(wave.id(), "linear", "initiative-1", &project, now())
+        .accept_linear_project(wave.id(), "initiative-1", &project, now())
         .unwrap();
     crate::store::sqlite::project_selection::write_project_binding(
         &fixture.store.sqlite,
@@ -3755,7 +3755,7 @@ fn planning_fields_deliver_project_activation_and_task_membership_without_execut
             fixture
                 .store
                 .sqlite
-                .put_pm_project(&task.wave_id, "linear", "initiative-1", &destination, now())
+                .accept_linear_project(&task.wave_id, "initiative-1", &destination, now())
                 .unwrap();
             let destination = fixture
                 .store
@@ -4685,9 +4685,8 @@ fn project_field_delivery_requires_revision_accepted_into_work() {
                         fixture
                             .store
                             .sqlite
-                            .confirm_pm_project_archival(
+                            .confirm_linear_project_archival(
                                 &repo.to_string_lossy(),
-                                "linear",
                                 &observed,
                                 now(),
                             )
@@ -4703,13 +4702,7 @@ fn project_field_delivery_requires_revision_accepted_into_work() {
                         assert!(fixture
                             .store
                             .sqlite
-                            .put_pm_project(
-                                &task.wave_id,
-                                "linear",
-                                "initiative-1",
-                                &observed,
-                                now(),
-                            )
+                            .accept_linear_project(&task.wave_id, "initiative-1", &observed, now(),)
                             .is_err());
                         // Re-reading the original entity revision cannot order the
                         // disputed Team relation or authorize delivery.

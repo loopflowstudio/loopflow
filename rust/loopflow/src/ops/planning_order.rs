@@ -34,7 +34,7 @@ pub(super) async fn sync_order(
         let items = issues.iter().map(|i| i.item.clone()).collect::<Vec<_>>();
         if !store
             .sqlite
-            .put_pm_project_order(&repo.to_string_lossy(), external, &items)
+            .accept_linear_project_order(&repo.to_string_lossy(), external, &items)
             .map_err(message)?
         {
             return Err(message(

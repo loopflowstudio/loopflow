@@ -1156,7 +1156,7 @@ fn project_creation_binding_and_activation_save_offline() {
                 }))
                 .unwrap();
                 store
-                    .put_pm_project(wave.id(), "linear", "initiative", &incoming, 20)
+                    .accept_linear_project(wave.id(), "initiative", &incoming, 20)
                     .unwrap();
                 assert!(store
                     .pending_project_changes(&id)
@@ -1449,7 +1449,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
             team_ids: vec!["fixture-team".into()],
         };
         store
-            .put_pm_project(wave.id(), "linear", "initiative", &project, 17)
+            .accept_linear_project(wave.id(), "initiative", &project, 17)
             .unwrap();
         let id = store.list_projects(Some(wave.id())).unwrap()[0].id.clone();
         // Selection is shared planning too: seed it through the typed writer,
@@ -1593,7 +1593,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
             incoming.revision = Some("2026-10-08T11:00:00Z".into());
             incoming.krs[0].holds = true;
             store
-                .put_pm_project(wave.id(), "linear", "initiative", &incoming, 18)
+                .accept_linear_project(wave.id(), "initiative", &incoming, 18)
                 .unwrap();
             let read = lf(
                 repo.path(),
@@ -1628,7 +1628,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
             incoming.workflow = "review".into();
             incoming.revision = Some("2026-10-08T12:00:00Z".into());
             store
-                .put_pm_project(wave.id(), "linear", "initiative", &incoming, 19)
+                .accept_linear_project(wave.id(), "initiative", &incoming, 19)
                 .unwrap();
             let read = lf(
                 repo.path(),
@@ -1697,7 +1697,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
             incoming.revision = Some("2026-10-08T13:00:00Z".into());
             incoming.krs[0].text = "Keep the concurrent provider plan".into();
             store
-                .put_pm_project(wave.id(), "linear", "initiative", &incoming, 20)
+                .accept_linear_project(wave.id(), "initiative", &incoming, 20)
                 .unwrap();
             let read = lf(
                 repo.path(),
@@ -1761,7 +1761,7 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             team_ids: vec!["fixture-team".into()],
         };
         store
-            .put_pm_project(wave.id(), "linear", "initiative", &project, 17)
+            .accept_linear_project(wave.id(), "initiative", &project, 17)
             .unwrap();
         let project_id = store.list_projects(Some(wave.id())).unwrap()[0].id.clone();
         let conn = rusqlite::Connection::open(&path).unwrap();
@@ -2520,7 +2520,7 @@ fn refiling_saves_membership_offline_and_retains_inbound_changes() {
                     revision: None,
                 };
                 store
-                    .put_pm_project(wave.id(), "linear", name, &observed, 1)
+                    .accept_linear_project(wave.id(), name, &observed, 1)
                     .unwrap();
                 observations.push(observed);
             }
@@ -3270,7 +3270,7 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
         "krs":[], "metric_targets":[], "initiative_ids":["initiative"], "team_ids":["team"], "revision":null
     })).unwrap();
     store
-        .put_pm_project(&task.wave_id, "linear", "initiative", &observed, 17)
+        .accept_linear_project(&task.wave_id, "initiative", &observed, 17)
         .unwrap();
     let db = rusqlite::Connection::open(&path).unwrap();
     db.execute(

@@ -4,8 +4,7 @@
 
 The current goal includes implementation of both this existing pass and the accepted
 [deletion audit](work-model-reduction.md), in that order, then verification and a
-fresh +/- PR review. Jack Heart explicitly confirmed the audit is part of the
-delivery outcome. The exact WorkEdit shape is delegated to implementation. No
+fresh +/- PR review. The exact WorkEdit shape is delegated to implementation. No
 publication of a partial reduction establishes readiness.
 
 Jack Heart requested implementation of the model review and another published
@@ -245,18 +244,17 @@ unrelated checkout edits. Connect selects repository Linear even with personal G
 ordinary explicit Git saves no longer print misleading Linear pending notices.
 Historical SQL/input remain intact. This does not complete adapter confinement.
 
-The current cut deletes production `PmSnapshot`/`PmSnapshotRow`/`PmTaskRecord`,
-`put_pm_snapshot`/`put_pm_task` and both snapshot builders. Concrete Linear
-acceptance preserves the transaction and cancellation-safe lock lifetime; only
-fixtures retain captured input bundles. Review retained detail-rank preservation,
-independent Project/issue revisions, deletion filtering and pre-fetch acquisition
-age. No schema or execution-control change is included.
+`1d0bda8d7f` removed snapshot/detail envelopes and builders, retaining transaction
+and cancellation-safe lock lifetime, detail rank and independent revision/age.
+Linear acceptance now removes provider-selector arguments from Project, issue,
+reteam, archival, ordering and projection paths. Projection takes IDs and batches
+receipt attachment from accepted rows; fetched models supply no Work values.
+Released storage discriminators and observation evidence remain intact.
 
 Still required: private adapter observations/acceptance APIs and PM hierarchy,
 target-bearing edits/journal, ordinary follow-ups/comments and one cron list.
-The 43 focused passes below do not establish the full affected gate, Session-turn
-and live-control preservation, or final review readiness. Those and a fresh +/-
-HTML review still precede review-only republication.
+Full gate, Session-turn/live-control preservation and fresh +/- HTML review precede
+review-only republication. This cut does not establish that boundary.
 
 Main #1522 entered at `7d9bf0a4d8`, adding Claude recorded-answer Flow settlement.
 That merge establishes no fresh planning gate acceptance and grants no replay of
@@ -385,6 +383,6 @@ Earlier focused proof: `9dbd6fc2d8`, `dfd3b80611`, `f025e9b7ab`,
 `dfa2cdafba`, `09709a05cc` in this plan. Adapter confinement, typed journal,
 follow-ups, cron, gate and review still precede republication.
 
-Checks: October 11 `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo build --bin lf`, 42 focused acquisition/preservation lib tests and `cargo test --test planning_lookup_tests` (1 public CLI test) pass with inherited LF authority cleared and stdin closed; earlier conversion/rollback evidence remains applicable, full gate follows the audit.
+Checks: October 11 `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo build --bin lf`, `cargo test -p loopflow --lib store::sqlite::planning::tests` (8), `--lib store::tests::` (50) and `--test local_planning` (22) pass with LF authority cleared/stdin closed; prior acquisition/CLI checks: `0e0b347231` at this path. Full gate follows the audit.
 
 Transport evidence: `0181133849` at this path.

@@ -1,3 +1,8 @@
+//! Linear observations retain claims that canonical Work cannot own, including
+//! rejected membership and foreign records. Acceptance and projection share a
+//! transaction; the released `provider` columns remain storage discriminators,
+//! not a choice exposed by the ingestion API.
+
 use rusqlite::{named_params, params, Connection, OptionalExtension, Transaction};
 
 use super::planning_write::{self, Disposition, PlanningEdit as Edit};
@@ -48,10 +53,9 @@ impl SqliteStore {
     }
 
     /// Accept one confirmed Project without claiming a complete Wave refresh.
-    pub fn put_pm_project(
+    pub fn accept_linear_project(
         &self,
         wave: &WaveId,
-        provider: &str,
         initiative: &str,
         project: &LinearProject,
         observed_at: i64,
@@ -68,15 +72,14 @@ impl SqliteStore {
                 project.id
             )));
         }
-        validate_project_membership(&conn, &repo, provider, project)?;
+        validate_project_membership(&conn, &repo, project)?;
         let tx = conn.transaction()?;
-        put_project(&tx, &repo, provider, observed_at, project)?;
-        associate_project(&tx, &repo, provider, &project.id, wave, initiative)?;
+        put_project(&tx, &repo, observed_at, project)?;
+        associate_project(&tx, &repo, &project.id, wave, initiative)?;
         project_accepted_planning(
             &tx,
             &repo,
-            provider,
-            std::slice::from_ref(project),
+            &[project.id.as_str()],
             &[],
             Some((wave, initiative)),
         )?;
@@ -84,10 +87,9 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub(crate) fn reconcile_pm_project_teams(
+    pub(crate) fn reconcile_linear_project_teams(
         &self,
         wave: &WaveId,
-        provider: &str,
         initiative: &str,
         project: &LinearProject,
         observed_at: i64,
@@ -108,7 +110,7 @@ impl SqliteStore {
         let previous: Option<String> = tx
             .query_row(
                 "SELECT initiative_ids FROM pm_projects WHERE repo=?1 AND provider=?2 AND id=?3",
-                params![repo, provider, project.id],
+                params![repo, "linear", project.id],
                 |row| row.get(0),
             )
             .optional()?;
@@ -125,19 +127,18 @@ impl SqliteStore {
                  WHERE repo=?1 AND provider=?2 AND id=?3",
                 params![
                     repo,
-                    provider,
+                    "linear",
                     project.id,
                     serde_json::to_string(&project.team_ids)?
                 ],
             )?;
         }
-        put_project(&tx, &repo, provider, observed_at, project)?;
-        associate_project(&tx, &repo, provider, &project.id, wave, initiative)?;
+        put_project(&tx, &repo, observed_at, project)?;
+        associate_project(&tx, &repo, &project.id, wave, initiative)?;
         project_accepted_planning(
             &tx,
             &repo,
-            provider,
-            std::slice::from_ref(project),
+            &[project.id.as_str()],
             &[],
             Some((wave, initiative)),
         )?;
@@ -153,52 +154,49 @@ impl SqliteStore {
         observed_at: i64,
         confirmed_wave: Option<(&WaveId, &str)>,
     ) -> StoreResult<()> {
-        let provider = "linear";
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         if let Some(project) = project {
-            validate_project_membership(&conn, repo, provider, project)?;
+            validate_project_membership(&conn, repo, project)?;
         }
         let tx = conn.transaction()?;
         let mut item = issue.clone();
         // Detail queries do not observe relative list order.
         if let Some(rank) = tx.query_row(
             "SELECT rank FROM pm_items WHERE repo=?1 AND provider=?2 AND id=?3 AND project_id IS ?4",
-            params![repo,provider,item.id,item.project_id], |row| row.get::<_,u32>(0),
+            params![repo,"linear",item.id,item.project_id], |row| row.get::<_,u32>(0),
         ).optional()? {
             item.rank = rank;
         }
         // Project revisions are independent of the issue revision and request age.
         if let Some(project) = project {
-            put_project(&tx, repo, provider, observed_at, project)?;
+            put_project(&tx, repo, observed_at, project)?;
         }
-        if put_item(&tx, repo, provider, observed_at, &item)? {
+        if put_item(&tx, repo, observed_at, &item)? {
             tx.execute(
                 "UPDATE pm_items SET needs_refresh=0 WHERE repo=?1 AND provider=?2 AND id=?3",
-                params![repo, provider, issue.id],
+                params![repo, "linear", issue.id],
             )?;
         }
         if let Some((wave, initiative)) = confirmed_wave {
             let project_id = issue.project_id.as_deref().ok_or_else(|| {
                 StoreError::InvalidData("confirmed Wave requires a Project association".into())
             })?;
-            associate_project(&tx, repo, provider, project_id, wave, initiative)?;
+            associate_project(&tx, repo, project_id, wave, initiative)?;
         }
         project_accepted_planning(
             &tx,
             repo,
-            provider,
-            project.map(std::slice::from_ref).unwrap_or_default(),
-            std::slice::from_ref(issue),
+            project.map(|project| project.id.as_str()).as_slice(),
+            &[issue.id.as_str()],
             confirmed_wave,
         )?;
         tx.commit()?;
         Ok(())
     }
 
-    pub fn confirm_pm_project_archival(
+    pub fn confirm_linear_project_archival(
         &self,
         repo: &str,
-        provider: &str,
         project: &LinearProject,
         observed_at: i64,
     ) -> StoreResult<()> {
@@ -206,15 +204,15 @@ impl SqliteStore {
         let tx = conn.transaction()?;
         let exists: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM pm_projects WHERE repo=?1 AND provider=?2 AND id=?3)",
-            params![repo, provider, project.id],
+            params![repo, "linear", project.id],
             |row| row.get(0),
         )?;
         if !exists {
-            put_project(&tx, repo, provider, observed_at, project)?;
+            put_project(&tx, repo, observed_at, project)?;
         }
         tx.execute(
             "UPDATE pm_projects SET archived=1 WHERE repo=?1 AND provider=?2 AND id=?3",
-            params![repo, provider, project.id],
+            params![repo, "linear", project.id],
         )?;
         tx.commit()?;
         Ok(())
@@ -398,7 +396,6 @@ impl SqliteStore {
         issues: &[PmItem],
         observed_at: i64,
     ) -> StoreResult<()> {
-        let provider = "linear";
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let repo: String = conn.query_row(
             "SELECT repo FROM waves WHERE id=?1",
@@ -406,7 +403,7 @@ impl SqliteStore {
             |row| row.get(0),
         )?;
         for project in projects {
-            validate_project_membership(&conn, &repo, provider, project)?;
+            validate_project_membership(&conn, &repo, project)?;
         }
         let tx = conn.transaction()?;
         let known = {
@@ -415,7 +412,7 @@ impl SqliteStore {
                  WHERE m.wave_id=?1 AND p.repo=?2 AND p.provider=?3 AND p.archived=0"
             )?;
             let rows = query
-                .query_map(params![wave, repo, provider], |row| row.get::<_, String>(0))?
+                .query_map(params![wave, repo, "linear"], |row| row.get::<_, String>(0))?
                 .collect::<Result<Vec<_>, _>>()?;
             rows
         };
@@ -428,11 +425,11 @@ impl SqliteStore {
             )));
         }
         for project in projects {
-            put_project(&tx, &repo, provider, observed_at, project)?;
-            require_accepted_initiative(&tx, &repo, provider, &project.id, initiative)?;
+            put_project(&tx, &repo, observed_at, project)?;
+            require_accepted_initiative(&tx, &repo, &project.id, initiative)?;
         }
         for item in issues {
-            put_item(&tx, &repo, provider, observed_at, item)?;
+            put_item(&tx, &repo, observed_at, item)?;
         }
         tx.execute(
             "INSERT INTO pm_wave_sync(wave_id,provider,initiative,synced_at) VALUES(?1,?2,?3,?4)
@@ -440,7 +437,7 @@ impl SqliteStore {
              initiative=excluded.initiative,synced_at=MAX(pm_wave_sync.synced_at,excluded.synced_at)",
             params![
                 wave,
-                provider,
+                "linear",
                 initiative,
                 observed_at
             ],
@@ -452,12 +449,17 @@ impl SqliteStore {
                 params![wave, project.id, position as i64],
             )?;
         }
-        project_accepted_planning(&tx, &repo, provider, projects, issues, None)?;
+        project_accepted_planning(
+            &tx,
+            &repo,
+            &projects.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
+            &issues.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(),
+            None,
+        )?;
         for project in projects {
             super::planning_order::observe_in(
                 &tx,
                 &repo,
-                provider,
                 &project.id,
                 &issues
                     .iter()
@@ -470,7 +472,7 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub(crate) fn put_pm_project_order(
+    pub(crate) fn accept_linear_project_order(
         &self,
         repo: &str,
         project: &str,
@@ -480,10 +482,16 @@ impl SqliteStore {
         let tx = conn.transaction()?;
         let now = super::super::rows::now_unix();
         for item in items {
-            put_item(&tx, repo, "linear", now, item)?;
+            put_item(&tx, repo, now, item)?;
         }
-        project_accepted_planning(&tx, repo, "linear", &[], items, None)?;
-        let accepted = super::planning_order::observe_in(&tx, repo, "linear", project, items)?;
+        project_accepted_planning(
+            &tx,
+            repo,
+            &[],
+            &items.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(),
+            None,
+        )?;
+        let accepted = super::planning_order::observe_in(&tx, repo, project, items)?;
         tx.commit()?;
         Ok(accepted)
     }
@@ -642,14 +650,13 @@ const ACCEPTED_WAVE_PROJECTS: &str = "
 fn project_accepted_planning(
     tx: &Transaction<'_>,
     repo: &str,
-    provider: &str,
-    projects: &[LinearProject],
-    items: &[PmItem],
+    projects: &[&str],
+    items: &[&str],
     confirmed_wave: Option<(&WaveId, &str)>,
 ) -> StoreResult<()> {
     let (confirmed_wave, confirmed_initiative) = confirmed_wave.unzip();
-    let project_ids = serde_json::to_string(&projects.iter().map(|p| &p.id).collect::<Vec<_>>())?;
-    let item_ids = serde_json::to_string(&items.iter().map(|i| &i.id).collect::<Vec<_>>())?;
+    let project_ids = serde_json::to_string(projects)?;
+    let item_ids = serde_json::to_string(items)?;
     let mut query = tx.prepare(&format!(
         "WITH accepted AS ({ACCEPTED_WAVE_PROJECTS})
          SELECT id,observed_at,wave_id,revision,
@@ -665,7 +672,7 @@ fn project_accepted_planning(
         .query_and_then(
             params![
                 repo,
-                provider,
+                "linear",
                 project_ids,
                 confirmed_wave,
                 confirmed_initiative
@@ -738,36 +745,31 @@ fn project_accepted_planning(
         planning_write::create(tx, repo, PlanningKind::Project, id.as_str(), &edits)?;
         tx.execute("UPDATE projects SET pm_snapshot_synced_at=?2,planning_provider_revision=?3 WHERE id=?1",params![id.as_str(),observed_at,revision])?;
     }
-    for item in items {
-        let observed = tx
-            .query_row(
-                "SELECT revision,name,
-                description,assignee,project_id
-             FROM pm_items WHERE repo=?1 AND provider=?2 AND id=?3 AND needs_refresh=0",
-                params![repo, provider, item.id],
-                |row| {
-                    let mut edits = vec![
-                        Edit::TaskTitle(Some(row.get(1)?)),
-                        Edit::TaskDescription(Some(row.get(2)?)),
-                        Edit::TaskAssignee(row.get(3)?),
-                    ];
-                    if let Some(project) = row.get::<_, Option<String>>(4)? {
-                        edits.push(Edit::TaskProject(project));
-                    }
-                    Ok((row.get::<_, Option<String>>(0)?, edits))
-                },
-            )
-            .optional()?;
-        if let Some((revision, edits)) = observed {
-            super::planning_export::attach_in(
-                tx,
-                repo,
-                false,
-                &item.id,
-                revision.as_deref(),
-                &edits,
-            )?;
-        }
+    let mut query = tx.prepare(
+        "SELECT id,revision,name,description,assignee,project_id
+         FROM pm_items WHERE repo=?1 AND provider='linear' AND needs_refresh=0
+         AND id IN (SELECT value FROM json_each(?2))",
+    )?;
+    let observed = query
+        .query_map(params![repo, item_ids], |row| {
+            let mut edits = vec![
+                Edit::TaskTitle(Some(row.get(2)?)),
+                Edit::TaskDescription(Some(row.get(3)?)),
+                Edit::TaskAssignee(row.get(4)?),
+            ];
+            if let Some(project) = row.get::<_, Option<String>>(5)? {
+                edits.push(Edit::TaskProject(project));
+            }
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                edits,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    drop(query);
+    for (id, revision, edits) in observed {
+        super::planning_export::attach_in(tx, repo, false, &id, revision.as_deref(), &edits)?;
     }
     // Admission and refresh share one accepted observation. Existing Tasks retain
     // their IDs, local order and pending disposition; new Tasks receive only Work.
@@ -794,13 +796,13 @@ fn project_accepted_planning(
          AND NOT EXISTS(SELECT 1 FROM task_deletions d
              WHERE d.wave_id=COALESCE(current.wave_id,p.wave_id) AND d.issue_id=i.id)
          AND NOT EXISTS(SELECT 1 FROM pm_issue_changes c WHERE c.issue_id=i.id
-             AND (target.id IS NULL OR i.provider='linear') AND c.removed=1)"
+             AND c.removed=1)"
     ))?;
     let observations = query
         .query_map(
             params![
                 repo,
-                provider,
+                "linear",
                 item_ids,
                 confirmed_wave,
                 confirmed_initiative
@@ -881,12 +883,11 @@ fn same_ids(left: &[String], right: &[String]) -> bool {
 fn associate_project(
     tx: &Transaction<'_>,
     repo: &str,
-    provider: &str,
     project_id: &str,
     wave: &WaveId,
     initiative: &str,
 ) -> StoreResult<()> {
-    require_accepted_initiative(tx, repo, provider, project_id, initiative)?;
+    require_accepted_initiative(tx, repo, project_id, initiative)?;
     let wave_repo: String = tx.query_row("SELECT repo FROM waves WHERE id=?1", [wave], |row| {
         row.get(0)
     })?;
@@ -907,13 +908,12 @@ fn associate_project(
 fn require_accepted_initiative(
     conn: &Connection,
     repo: &str,
-    provider: &str,
     project_id: &str,
     initiative: &str,
 ) -> StoreResult<()> {
     let initiatives: String = conn.query_row(
         "SELECT initiative_ids FROM pm_projects WHERE repo=?1 AND provider=?2 AND id=?3",
-        params![repo, provider, project_id],
+        params![repo, "linear", project_id],
         |row| row.get(0),
     )?;
     if serde_json::from_str::<Vec<String>>(&initiatives)?.as_slice() != [initiative] {
@@ -927,7 +927,6 @@ fn require_accepted_initiative(
 fn validate_project_membership(
     conn: &Connection,
     repo: &str,
-    provider: &str,
     project: &LinearProject,
 ) -> StoreResult<()> {
     // Run before the ingestion transaction: disputed ownership must remain
@@ -937,7 +936,7 @@ fn validate_project_membership(
             "SELECT revision,initiative_ids,
                     team_ids
              FROM pm_projects WHERE repo=?1 AND provider=?2 AND id=?3",
-            params![repo, provider, project.id],
+            params![repo, "linear", project.id],
             |row| {
                 Ok((
                     row.get::<_, Option<String>>(0)?,
@@ -964,7 +963,7 @@ fn validate_project_membership(
         &serde_json::from_str::<Vec<String>>(&teams)?,
     ) {
         conn.execute("UPDATE pm_projects SET membership_unresolved=1 WHERE repo=?1 AND provider=?2 AND id=?3",
-            params![repo, provider, project.id])?;
+            params![repo, "linear", project.id])?;
         return Err(StoreError::InvalidData(format!(
             "Project {} membership changed without relationship ordering evidence",
             project.id
@@ -976,7 +975,6 @@ fn validate_project_membership(
 fn put_project(
     conn: &Connection,
     repo: &str,
-    provider: &str,
     observed_at: i64,
     project: &LinearProject,
 ) -> StoreResult<()> {
@@ -986,7 +984,7 @@ fn put_project(
     let team_ids = serde_json::to_string(&project.team_ids)?;
     let status = project.status.as_str();
     let values = named_params! {
-        ":repo": repo, ":provider": provider, ":id": &project.id,
+        ":repo": repo, ":provider": "linear", ":id": &project.id,
         ":observed_at": observed_at,
         ":slug": &project.slug,
         ":name": &project.name,
@@ -1003,7 +1001,7 @@ fn put_project(
     let pending_name_cutover: bool = conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM pm_project_name_cutover
          WHERE repo=?1 AND provider=?2 AND id=?3 AND converted_at IS NULL)",
-        params![repo, provider, project.id],
+        params![repo, "linear", project.id],
         |row| row.get(0),
     )?;
     let previous = conn
@@ -1014,7 +1012,7 @@ fn put_project(
             OR (description_revision IS revision AND description IS NOT NULL
                 AND :description IS NOT NULL AND description IS NOT :description),krs,metric_targets
          FROM pm_projects WHERE repo=:repo AND provider=:provider AND id=:id",
-            named_params! { ":repo": repo, ":provider": provider, ":id": &project.id,
+            named_params! { ":repo": repo, ":provider": "linear", ":id": &project.id,
             ":slug": &project.slug, ":name": &project.name, ":summary": &project.summary,
             ":workflow": &project.workflow, ":status": &status, ":description": &project.description },
             |row| {
@@ -1090,7 +1088,7 @@ fn put_project(
         conn.execute(
             "UPDATE pm_project_name_cutover SET converted_at=?4
              WHERE repo=?1 AND provider=?2 AND id=?3 AND converted_at IS NULL",
-            params![repo, provider, project.id, observed_at],
+            params![repo, "linear", project.id, observed_at],
         )?;
     }
     Ok(())
@@ -1115,28 +1113,25 @@ pub(super) fn revision_nanos(revision: Option<&str>) -> StoreResult<Option<i64>>
 pub(super) fn put_item(
     conn: &Connection,
     repo: &str,
-    provider: &str,
     observed_at: i64,
     item: &PmItem,
 ) -> StoreResult<bool> {
     let revision = revision_nanos(item.revision.as_deref())?;
-    if provider == "linear" {
-        let change: Option<(Option<i64>, bool)> = conn
-            .query_row(
-                "SELECT revision_ns,removed FROM pm_issue_changes WHERE issue_id=?1",
-                [&item.id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional()?;
-        if change.is_some_and(|(floor, removed)| removed || revision < floor) {
-            return Ok(false);
-        }
+    let change: Option<(Option<i64>, bool)> = conn
+        .query_row(
+            "SELECT revision_ns,removed FROM pm_issue_changes WHERE issue_id=?1",
+            [&item.id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    if change.is_some_and(|(floor, removed)| removed || revision < floor) {
+        return Ok(false);
     }
     let previous = conn.query_row(
         "SELECT revision,observed_at,identifier IS NOT :identifier OR claimed_project_id IS NOT :project_id OR url IS NOT :url OR name IS NOT :name OR description IS NOT :description OR completed IS NOT :completed OR state IS NOT :state OR team_id IS NOT :team_id OR assignee IS NOT :assignee OR (branch_name IS NOT NULL AND branch_name IS NOT :branch_name) OR (completed_at_observed AND completed_at IS NOT :completed_at) OR (due_date_observed AND due_date IS NOT :due_date),
             state IS NOT :state OR completed IS NOT :completed
          FROM pm_items WHERE repo=:repo AND provider=:provider AND id=:id",
-        named_params! { ":repo": repo, ":provider": provider, ":id": &item.id,
+        named_params! { ":repo": repo, ":provider": "linear", ":id": &item.id,
             ":identifier": &item.identifier,
             ":project_id": &item.project_id,
             ":branch_name": &item.branch_name,
@@ -1176,7 +1171,7 @@ pub(super) fn put_item(
          ON CONFLICT(repo,provider,id) DO UPDATE SET observed_at=excluded.observed_at,
          identifier=excluded.identifier,project_id=excluded.project_id,revision=excluded.revision,branch_name=excluded.branch_name,url=excluded.url,name=excluded.name,description=excluded.description,rank=excluded.rank,completed=excluded.completed,completed_at=excluded.completed_at,due_date=excluded.due_date,state=excluded.state,team_id=excluded.team_id,assignee=excluded.assignee,
          claimed_project_id=excluded.claimed_project_id,completed_at_observed=1,due_date_observed=1,project_id_observed=1,assignee_observed=1",
-        named_params! { ":repo": repo, ":provider": provider, ":id": &item.id,
+        named_params! { ":repo": repo, ":provider": "linear", ":id": &item.id,
             ":observed_at": observed_at, ":rank": item.rank, ":revision": &item.revision,
             ":identifier": &item.identifier,
             ":project_id": &item.project_id,
@@ -1557,8 +1552,8 @@ mod tests {
 
             let mut conflict = project.clone();
             conflict.summary.push_str("conflict");
-            assert!(super::put_project(&conn, "/repo", "linear", 11, &conflict).is_err());
-            super::put_project(&conn, "/repo", "linear", 9, &project).unwrap();
+            assert!(super::put_project(&conn, "/repo", 11, &conflict).is_err());
+            super::put_project(&conn, "/repo", 9, &project).unwrap();
             let retained: String = conn
                 .query_row("SELECT name FROM pm_projects", [], |r| r.get(0))
                 .unwrap();
@@ -1566,7 +1561,7 @@ mod tests {
             // Failed outer work cannot spend the one-time exception.
             {
                 let tx = conn.transaction().unwrap();
-                super::put_project(&tx, "/repo", "linear", 11, &project).unwrap();
+                super::put_project(&tx, "/repo", 11, &project).unwrap();
             }
             let pending: Option<i64> = conn
                 .query_row(
@@ -1577,7 +1572,7 @@ mod tests {
                 .unwrap();
             assert_eq!(pending, None);
             let tx = conn.transaction().unwrap();
-            super::put_project(&tx, "/repo", "linear", 12, &project).unwrap();
+            super::put_project(&tx, "/repo", 12, &project).unwrap();
             tx.commit().unwrap();
             let evidence: (String, i64, Option<i64>) = conn
                 .query_row(
@@ -1589,15 +1584,15 @@ mod tests {
             assert_eq!(evidence, (original, 10, Some(12)));
             let accepted = project.name.clone();
             project.name = "Another name".into();
-            assert!(super::put_project(&conn, "/repo", "linear", 13, &project).is_err());
+            assert!(super::put_project(&conn, "/repo", 13, &project).is_err());
             let retained: String = conn
                 .query_row("SELECT name FROM pm_projects", [], |r| r.get(0))
                 .unwrap();
             assert_eq!(retained, accepted);
             project.id = "post-cutover".into();
-            super::put_project(&conn, "/repo", "linear", 13, &project).unwrap();
+            super::put_project(&conn, "/repo", 13, &project).unwrap();
             project.name = "Conflict on a new record".into();
-            assert!(super::put_project(&conn, "/repo", "linear", 14, &project).is_err());
+            assert!(super::put_project(&conn, "/repo", 14, &project).is_err());
         }
     }
 
@@ -1624,7 +1619,7 @@ mod tests {
             "planning_peers",
         ))
         .unwrap();
-        assert!(!super::put_item(&conn, "/repo", "linear", 16, item).unwrap());
+        assert!(!super::put_item(&conn, "/repo", 16, item).unwrap());
         let read = || {
             conn.query_row(
                 "SELECT project_id,claimed_project_id,observed_at FROM pm_items",
@@ -1647,7 +1642,7 @@ mod tests {
                 17
             )
         );
-        assert!(super::put_item(&conn, "/repo", "linear", 18, item).unwrap());
+        assert!(super::put_item(&conn, "/repo", 18, item).unwrap());
         assert_eq!(
             read(),
             (item.project_id.clone(), item.project_id.clone(), 18)
@@ -1684,19 +1679,19 @@ mod tests {
             "planning_peers",
         ))
         .unwrap();
-        assert!(super::put_item(&conn, "/repo", "linear", 2, &item).unwrap());
+        assert!(super::put_item(&conn, "/repo", 2, &item).unwrap());
         let observed: Option<String> = conn
             .query_row("SELECT completed_at FROM pm_items", [], |row| row.get(0))
             .unwrap();
         assert_eq!(observed, item.completed_at);
         item.completed_at = None;
-        assert!(super::put_item(&conn, "/repo", "linear", 3, &item).is_err());
+        assert!(super::put_item(&conn, "/repo", 3, &item).is_err());
         item.revision = Some("2026-10-01T12:00:00Z".into());
-        assert!(!super::put_item(&conn, "/repo", "linear", 4, &item).unwrap());
+        assert!(!super::put_item(&conn, "/repo", 4, &item).unwrap());
         item.revision = Some("2026-10-03T12:00:00Z".into());
-        assert!(super::put_item(&conn, "/repo", "linear", 5, &item).unwrap());
+        assert!(super::put_item(&conn, "/repo", 5, &item).unwrap());
         item.completed_at = Some("2026-10-01T12:00:00Z".into());
-        assert!(super::put_item(&conn, "/repo", "linear", 6, &item).is_err());
+        assert!(super::put_item(&conn, "/repo", 6, &item).is_err());
     }
 
     #[test]
@@ -1720,17 +1715,17 @@ mod tests {
         ))
         .unwrap();
         item.due_date = Some("2026-10-08".into());
-        assert!(super::put_item(&conn, "/repo", "linear", 2, &item).unwrap());
+        assert!(super::put_item(&conn, "/repo", 2, &item).unwrap());
         let observed: Option<String> = conn
             .query_row("SELECT due_date FROM pm_items", [], |row| row.get(0))
             .unwrap();
         assert_eq!(observed, item.due_date);
         item.due_date = None;
-        assert!(super::put_item(&conn, "/repo", "linear", 3, &item).is_err());
+        assert!(super::put_item(&conn, "/repo", 3, &item).is_err());
         item.id = "observed-null".into();
-        assert!(super::put_item(&conn, "/repo", "linear", 4, &item).unwrap());
+        assert!(super::put_item(&conn, "/repo", 4, &item).unwrap());
         item.due_date = Some("2026-10-09".into());
-        assert!(super::put_item(&conn, "/repo", "linear", 5, &item).is_err());
+        assert!(super::put_item(&conn, "/repo", 5, &item).is_err());
     }
 
     #[tokio::test]

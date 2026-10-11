@@ -191,9 +191,8 @@ async fn observe(
             }
             store
                 .sqlite
-                .put_pm_project(
+                .accept_linear_project(
                     wave,
-                    "linear",
                     &export.initiative,
                     &project,
                     time::OffsetDateTime::now_utc().unix_timestamp(),

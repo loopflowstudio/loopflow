@@ -172,13 +172,7 @@ impl SqliteStore {
             )
             .optional()?;
         let Some(repo) = repo else { return Ok(false) };
-        if !super::planning::put_item(
-            &tx,
-            &repo,
-            "linear",
-            super::super::rows::now_unix(),
-            observed,
-        )? {
+        if !super::planning::put_item(&tx, &repo, super::super::rows::now_unix(), observed)? {
             return Ok(false);
         }
         let pending = reconcile_in(

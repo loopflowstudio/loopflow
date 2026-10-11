@@ -1048,9 +1048,8 @@ async fn project_revisions_order_shared_facts_and_unordered_membership_stays_unr
             );
             fixture
                 .store
-                .confirm_pm_project_archival(
+                .confirm_linear_project_archival(
                     &repo.to_string_lossy(),
-                    "linear",
                     newer.project.unwrap(),
                     original.observed_at,
                 )

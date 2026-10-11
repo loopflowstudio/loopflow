@@ -162,13 +162,9 @@ pub(crate) fn include_members(desired: &[String], observed: &[String]) -> Vec<St
 pub(super) fn observe_in(
     conn: &Connection,
     repo: &str,
-    provider: &str,
     external: &str,
     items: &[PmItem],
 ) -> StoreResult<bool> {
-    if provider != "linear" {
-        return Ok(false);
-    }
     let project: Option<String> = conn.query_row("SELECT p.id FROM projects p JOIN waves w ON w.id=p.wave_id WHERE p.external_project_id=?1 AND w.repo=?2", params![external,repo], |row| row.get(0)).optional()?;
     let Some(project) = project.map(ProjectId::from_raw) else {
         return Ok(false);
@@ -182,7 +178,7 @@ pub(super) fn observe_in(
             "SELECT t.id,i.revision,i.rank,i.project_id
              FROM pm_items i JOIN tasks t ON t.external_issue_id=i.id
              WHERE i.repo=?1 AND i.provider=?2 AND i.id=?3 AND i.needs_refresh=0 AND t.project_id=?4 AND t.planning_deleted_at IS NULL",
-            params![repo,provider,item.id,project.as_str()], |row| Ok((
+            params![repo,"linear",item.id,project.as_str()], |row| Ok((
                 row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?,
                 row.get::<_, u32>(2)?, row.get::<_, Option<String>>(3)?,
             ))).optional()?;
@@ -205,7 +201,7 @@ pub(super) fn observe_in(
     }
     conn.execute(
         "UPDATE pm_projects SET task_order_json=?4 WHERE repo=?1 AND provider=?2 AND id=?3",
-        params![repo, provider, external, serde_json::to_string(&observed)?],
+        params![repo, "linear", external, serde_json::to_string(&observed)?],
     )?;
     let observation = json!({"value":observed}).to_string();
     let mut pending = deliveries(conn, &project)?;

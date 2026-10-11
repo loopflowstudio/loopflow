@@ -305,9 +305,8 @@ async fn observe(
                 .ok_or_else(|| message("Wave has no Linear Initiative"))?;
             store
                 .sqlite
-                .put_pm_project(
+                .accept_linear_project(
                     &project.wave_id,
-                    "linear",
                     &initiative,
                     &observed,
                     time::OffsetDateTime::now_utc().unix_timestamp(),

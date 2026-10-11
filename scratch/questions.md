@@ -27,14 +27,13 @@ creates no cleanup commit. Exact source proofs and prior counterevidence:
 
 ## Next implementation boundary — October 11
 
-Persistence conversion is checkpointed at `fbc9c60e62`. The next source cut
-removes production snapshot/detail envelopes and generic-provider acceptance APIs;
-43 focused preservation/CLI checks pass. Concrete acceptance methods and
-`PmItem`/`LinearProject` still escape the adapter. Confine those inputs and delete
-the remaining PM hierarchy before the typed-edit/journal, follow-up, cron and
-review obligations. The accepted HTML permits private Linear responses; moving
-or renaming public models alone is insufficient. Broader independent/delayed
-observations, Session turns and live-control preservation remain for gate.
+`1d0bda8d7f` removed snapshot/detail envelopes; `9a0da6823d` removed acquisition
+provider selectors and projects Work from retained observation IDs. Next remains
+adapter confinement: public `Store::accept_linear_inventory`, `accept_linear_issue`
+and archival inputs still expose `PmItem`/`LinearProject`. The PM hierarchy,
+target-bearing writer/journal, follow-ups and cron remain in this delivery scope.
+The design retains applicable checks and outstanding gate/review evidence;
+moving or renaming public models alone does not complete the accepted cut.
 
 Conversion review repairs: confirming refresh compares the retained claim;
 membership/assignee receipt baselines preserve omitted versus explicit null.

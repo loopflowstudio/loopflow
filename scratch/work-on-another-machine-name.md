@@ -246,13 +246,16 @@ Historical SQL/input remain intact. This does not complete adapter confinement.
 
 `1d0bda8d7f` removed snapshot/detail envelopes and builders, retaining transaction
 and cancellation-safe lock lifetime, detail rank and independent revision/age.
-Linear acceptance now removes provider-selector arguments from Project, issue,
+`9a0da6823d` removes provider-selector arguments from Project, issue,
 reteam, archival, ordering and projection paths. Projection takes IDs and batches
 receipt attachment from accepted rows; fetched models supply no Work values.
 Released storage discriminators and observation evidence remain intact.
 
-Still required: private adapter observations/acceptance APIs and PM hierarchy,
+Still required: adapter-owned acquisition replacing public Store inventory, issue
+and archival methods that expose `PmItem`/`LinearProject`, then PM hierarchy,
 target-bearing edits/journal, ordinary follow-ups/comments and one cron list.
+Acceptance commits observations and Work together; contradictory membership is
+deliberately marked before that transaction so rejection cannot erase the dispute.
 Full gate, Session-turn/live-control preservation and fresh +/- HTML review precede
 review-only republication. This cut does not establish that boundary.
 
@@ -383,6 +386,6 @@ Earlier focused proof: `9dbd6fc2d8`, `dfd3b80611`, `f025e9b7ab`,
 `dfa2cdafba`, `09709a05cc` in this plan. Adapter confinement, typed journal,
 follow-ups, cron, gate and review still precede republication.
 
-Checks: October 11 `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo build --bin lf`, `cargo test -p loopflow --lib store::sqlite::planning::tests` (8), `--lib store::tests::` (50) and `--test local_planning` (22) pass with LF authority cleared/stdin closed; prior acquisition/CLI checks: `0e0b347231` at this path. Full gate follows the audit.
+Checks: October 11 `9a0da6823d`: fmt, all-target Clippy, CLI build, SQLite planning (8), Store (50), local_planning (22) pass with LF authority cleared/stdin closed; exact commands retained there, earlier acquisition/CLI checks at `0e0b347231`. Prose-only realign: `git diff --check` passes; `lf context` within limits. Full gate follows the audit.
 
 Transport evidence: `0181133849` at this path.

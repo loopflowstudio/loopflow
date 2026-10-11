@@ -619,15 +619,15 @@ One typed writer owns local/imported Work; outages buffer without fallback/elect
 Execution/attempts stay local; retain causal losers and uncertainty. Before review:
 finish private observations, typed journal, ordinary follow-ups and cron.
 
-`e3a3479df7` removes public snapshot reads; portfolio ownership reads use
-SQLite claims. Task status, admission and acquisition read narrow
-Linear evidence; ordinary provider readback is deleted. Delivery needs
-accepted revision plus archive/membership eligibility; foreign facts grant no ownership.
+Canonical readers use Work and narrow retained claims. Delivery needs accepted
+revision plus archive/membership eligibility; foreign facts grant no ownership.
 Missing issue content cannot hide a canonical parent's archive or membership
 dispute. Projection, receipts and acquisition now read concrete observation columns;
 whole Project/issue bodies are removed by the Task draft. Partial fields retain
 presence and prose age. Public snapshot/detail envelopes and generic-provider
 acceptance APIs are removed; concrete observations still need adapter confinement.
+Projection uses accepted observation IDs, never fetched-model values. Rejected
+membership must retain its dispute marker even when Work acceptance rolls back.
 Concrete Linear bindings are separate from repository transport selection.
 Populated conversion and rollback proof belongs to the plan. Typed values alone
 are not a typed journal: field-addressed mutations still require reduction.

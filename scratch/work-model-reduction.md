@@ -7,8 +7,8 @@ approval from Jack. This is accepted scope, with conditional deletions identifie
 
 ## Scope and outcome
 
-This audit and [the pursuit design](work-on-another-machine-name.md) are one
-accepted delivery scope. Canonical readers and narrow acquisition evidence are implemented; provider bodies now have concrete observation columns; adapter confinement remains,
+This audit and [design](work-on-another-machine-name.md) share one delivery scope.
+Canonical readers and concrete observation columns exist; adapter confinement remains,
 followed by typed edits/journal, ordinary follow-ups and one cron list. Concrete
 bindings are implemented (§14). All precede Jack Heart's next
 review of PR #1491. Publication is review-only; landing, installation and export
@@ -105,9 +105,11 @@ consumes IDs and batches retained-row receipt attachment, without fetched models
 Captured inputs stay in `tests/support/linear_input.rs`; transactions and the
 blocking writer's cancellation-safe Wave-lock lifetime remain unchanged.
 
-**Delete — do not maintain:** escaping `PmItem`/`LinearProject`, public concrete
-acceptance methods and the remaining generic PM/provider hierarchy. Adapter
-confinement is unfinished. Retain foreign/unmapped facts, contradictory ownership,
+**Delete — do not maintain:** escaping `PmItem`/`LinearProject`, public Store
+inventory/issue acceptance and archival inputs, and the remaining PM hierarchy.
+Adapter confinement is unfinished. Rejected membership stays marked outside the
+acceptance transaction; cancellation retains its writer lock. Retain foreign/unmapped
+facts, contradictory ownership,
 partial inventories, independent membership/removal and original ages. Whole-table
 removal remains conditional on another existing owner retaining every fact;
 canonical Work must not absorb foreign input.
@@ -391,10 +393,8 @@ alignment in the same diff as public removals.
 
 ## Proof and stop conditions
 
-Implement in dependency order: canonical Work persistence/reads; direct acquisition
-and concrete observations; shared typed edits and journal conversion; projections
-and remaining deletion. This ordering follows the existing passes rather than
-starting a competing pursuit. Each cut deletes its replaced paths in the same diff.
+Remaining order: adapter confinement; typed writer/journal; follow-ups and cron;
+gate and review. Each cut deletes its replaced paths in the same diff.
 
 Before dropping persistent state, inventory the released frontier and current
 Task-owned draft. Main merged at `db36f20ba8` materialized LOO-406 and optional
@@ -422,5 +422,4 @@ Required behavioral evidence:
    repetition and preserves existing dirty targets. CLI/DTO/headless Desktop
    agree about identity, available cached content and synchronization failures.
 
-Use the pursuit design’s isolated CLI checks and delivery boundary. This audit
-claims no new verification or installed acceptance.
+The pursuit design owns checks and delivery limits.

@@ -1,82 +1,46 @@
-# v0.13.11
+# v0.13.12
 
 <!-- loopflow:release-notes=narrative;gate=safe -->
 
-v0.13.11 makes planning usable without Linear and separates finishing a Task from finishing its Workflow. Agent launches put the request first, refresh checkout context instead of freezing it at startup, and give conversations recognizable names. Provider-process tracking also becomes more explicit, with compatibility changes and remaining acceptance limits worth checking before upgrading a running installation.
+v0.13.12 makes unattended work easier to follow and resume: Flows can read Claude’s completed answers, dead agents stop appearing available, and headless Claude and OpenCode conversations gain a supported stop-and-resume path. The release connects conversation history to process status without treating an interrupted turn as successful work. It also fixes selected scratch commits and makes installation checks more resilient to registry throttling.
 
-## Keep planning when Linear is unavailable
+## Let Claude answers move a Flow forward
 
-Waves, Projects and Tasks save locally, so creating, editing and starting work no longer requires Linear. Planning identity and Workflow definitions live in SQLite; Wave goals and memory are read directly from the selected checkout, not from stored document copies.
+Headless Claude now records answers through the shared harness, making them available to the Flow runner. Deciding steps can advance from a valid answer or request a correction in the same conversation while preserving skill input, context and native resume identity.
 
-- Create a Task with `lf task create --title "Fix the parser" --json`, edit it by its returned ID, then prepare it with `lf task checkout <id>`. IDs exist before checkout, and unique prefixes resolve saved Tasks.
-- Local edits, comments, ordering, refiling and chapter rotation retain delivery records for optional Linear synchronization. Repository-wide synchronization runs while a CLI or Desktop foreground connection is active.
-- CLI and Desktop projections expose pending changes, uncertain attempts, errors and retained conflicting values. Observed Linear conflicts win without moving local Workflows or controlling running Processes.
-- Edit `wave/<name>/GOAL.md` or `MEMORY.md` directly. Status and context read fresh checkout files, including ancestor Markdown. Missing files are created without overwriting existing content; registry renames leave authored directories in place.
+- Flow decisions and final answers come from correlated, successfully completed native turns. Retained transcript prose remains readable but cannot substitute for a final answer.
+- Native JSON schemas carry through launch, correction turns and replay. Claude failure messages remain available for retry classification.
+- Claude, Codex and OpenCode use their harnesses; unknown providers return an error. Obsolete batch launch and answer-recovery paths are removed.
+- Headless output prints assistant text without the former tool summaries or cost/time footer. Historical captures remain intact.
 
-Linear synchronization is not conflict-free replication: an unseen concurrent edit can still be overwritten. Initiative summaries use one committed local default-branch revision, leaving dirty and unmerged edits local. Sync does not fetch; missing goals or a missing default-branch ref block mutation, and descriptions retain the 255-character limit.
+## See whether an agent is still available
 
-## Finish one Task and carry remaining work forward
+CLI and Desktop Session status now follows the recorded agent process and its exact operating-system identity. Stale client files, attachment events and saved sockets can no longer keep a dead agent looking active or Waiting.
 
-Tasks now support zero or one PR. Completion records the outcome independently of Workflow position, while accepted obligations after a merge become linked follow-up Tasks rather than additional PRs on the original Task.
+- Waiting requires a live agent, checked before pagination. Work-watch refreshes on process changes and a two-second operating-system check, so agent death can appear without a database write.
+- Saved connections are offered only for live agents. A failed connection does not authorize launching a replacement.
+- Older Sessions without recorded process identity remain Unknown. Uncertain evidence never ages into permission to replace an agent or clean up its checkout.
+- Terminal placement belongs to the attached Loopflow process; terminal updates and Move reject stale attachments. Captured-input completion follows the latest turn’s process while retaining provider outcomes separately from process death.
 
-- Use `lf task complete` and `lf task reopen` without moving the Workflow or rewriting Process history. Reaching Workflow `end` requests completion; a failed request can retry without replaying the Flow.
-- Finish work without publishing a PR while retaining files and commits. Use stacked Tasks for dependent changes; `--design` transfers the child brief without overwriting later edits.
-- Merged Tasks remain open until follow-through files or links remaining obligations, or records why none are needed. Filing retries preserve the follow-up's identity and destination Project.
-- The `ship` Flow waits with `lf land --wait-and-fix`, then performs follow-through. Interrupted finishing work can resume without repeating gate or re-arming a merged PR.
-- CLI and Desktop projections show delivery state, follow-up links and completion retry reasons. Historical multi-PR records remain read-only history.
+## Continue background conversations interactively
 
-Follow-up dates do not install schedules; due work returns on the owning Wave's next pass. Optional Linear delivery continues independently after source completion.
+Run `lf session connect SESSION` to stop a headless Claude or OpenCode process group and open the same saved native conversation. Session identity and history survive the transition.
 
-## Start with the request, keep context current
-
-The skill, request and clipboard now arrive in the first turn instead of being buried in a large instructions payload. Provider hooks separate fixed instructions from refreshable conversation context across Claude, Codex and OpenCode.
-
-- Startup and compaction reread checkout Wave documents, ancestor documents and scratch within 10,000 UTF-8 bytes. Whole files or marked opening excerpts retain references to complete sources; compaction restores the saved active skill.
-- Documentation and branch changes arrive as references for inspection rather than preloaded bodies. Memory and scratch budgets become authoring targets, not launch gates.
-- New Sessions take short names from the requested work, with Task identifiers first when bound. Interactive launches set an initial terminal title; cmux workspace and tab names follow Session renames. Other terminals pick up changed names on reconnect.
-- Codex capture uses a temporary profile that preserves terminal-wrapper hooks and saved configuration. Missing capture is reported without attaching unrelated history, and optional missing capture payloads no longer discard native resume identity.
-- Flow output emphasizes step labels and agent messages. Context accounting and INFO diagnostics move behind `-v` / `--verbose`, which propagates through steps; retained prompt files no longer collide when launched within the same second.
-
-Native naming hooks cover plain Claude launches and trusted shared-server Codex TUI launches in Loopflow repositories. Embedded Codex TUI and `codex exec` naming remain unsupported. The cmux rename demonstration used a provider stand-in; rendered host acceptance and the installed setup remain unverified.
-
-Context-delivery observations cover Codex headless and Claude headless/interactive launches. End-to-end interactive Codex, compaction, resume and OpenCode acceptance remain unverified.
-
-## Run a Flow from the conversation
-
-Skill synchronization exports Flows as readable native chat recipes: headless work runs through Loopflow, while reviews and loop decisions stay in the current conversation.
-
-- Recipes include commands, loops, branches and conversational review steps. Re-sync skills after editing a Flow or adding repository overrides.
-- Exact literal names resolve before normalized fallbacks. Slash and dash definitions remain distinct; Claude gives an explicit dashed definition its literal name.
-- Flow exports have no prefix and skip names already owned by Loopflow or third-party skills, preserving native controls and existing bundles.
-
-Automated checks cover recipe generation and execution contracts; native Claude/Codex selection and adherence have not been demonstrated.
-
-## Inspect and clean up the processes that own work
-
-Provider processes now share a durable inventory used by activity views, Task cleanup and orphan cleanup. An unanswered historical turn is no longer enough to block checkout cleanup, but a Process that is not provably dead still can.
-
-- Each AgentProcess records its launching process, Session, PID and birth time before provider code executes. Replacement preserves earlier records.
-- Fresh attachment tokens prevent stale clients from writing or stopping a provider after handoff, including when an earlier owner reconnects.
-- Cleanup uses recorded identity and fresh operating-system evidence. Unresolved processes stay visible as Unknown; failed observation reports an error rather than inventing completion.
-- Loopflow-owned conversations and processes are named `LfSession` and `LfProcess`. Opaque provider conversation IDs use `AgentSessionId` across resume, history and account attribution, preserving earlier selections in immutable history.
-
-The provider lifecycle cutover is incomplete. Reaping covers noninteractive providers; the reusable FIFO lifeline is Codex-only. Claude/OpenCode takeover and stop behavior, configured native connections and installed live-provider cleanup still need verification. Earlier orphan-cleanup work does not establish those broader guarantees.
+- Missing native conversation identity refuses the connection before stopping useful work.
+- Shutdown requires the current attachment, excludes foreground providers and waits for surviving helpers before settling the process group.
+- Interrupted turns remain unfinished. This is stop-and-resume; Codex retains its live connection behavior and protections for servers hosting unrelated conversations.
+- OpenCode receives permission rules when a new session is created, and uncertain writes are no longer automatically retried.
 
 ## Operational notes
 
-Several interfaces change in this release; update scripts and account for live runtime artifacts before upgrading.
+Installation verification now separates image-download failures from the checks themselves, making transient registry throttling recoverable and exhausted acquisition visible as an infrastructure failure.
 
-- Durable process identity is `LfProcess.id` / `LfProcessId`, with references such as `parent_lf_process_id`; `pid` remains the Unix process ID. JSON fields and runtime artifact names change without old-name readers. Stored IDs, outcomes and history are preserved by migrations, but earlier builds' live journal receipts and Codex lifelines are not adopted.
-- `lf wave edit` is removed; edit checkout documents directly. Retired goal/input budget settings and `lf context --skill` are removed. Terminal first turns reaching 122,880 bytes fail before provider startup with a size/cap error.
-- `--tui` is removed. Direct terminal launches remain interactive, `-i` forces interactive execution, and `-b` remains headless, including Flow steps using the default skill.
-- `lf account codex use` reconciles the shared Codex app-server even when the saved login already matches. It installs the login before waiting, allows running turns up to five minutes, then warns and may interrupt remaining turns when restarting. An unreadable daemon login returns an error without restarting; failure leaves the selected login installed for retry.
-- Loopflow Codex terminals launch with `--no-daemon` and retain their own login until restarted. This flag was verified with codex-cli 0.161.0; older versions without it reject launches. Launch-time account switches leave the shared daemon alone. The final grace-period behavior still needs a configured-provider walkthrough.
+- The harness reuses cached images, including explicit `--image` selections. Refresh mutable tags with an explicit `docker pull`.
+- Recognized throttling retries after 15, 30 and 60 seconds within one five-minute download budget, separate from container startup. Other pull errors fail immediately; installation checks themselves are not retried.
 
-The included evidence does not establish a passing full release matrix. Outstanding checks include installed migration and provider acceptance; recorded branch suites also retain install-retention, checkout-watch and planning-identity migration failures.
+Recorded checks cover Flow decisions and corrections, process-death updates, stop-before-resume and unfinished history using provider stand-ins. Configured-provider and installed acceptance remain unverified, including a real Task reaching publication through Claude’s decision. Cached-image installation paths passed locally; recovery from actual throttling on a cold hosted runner remains unverified. The included evidence does not establish a passing full release matrix.
 
 ## Small changes
 
-- Agent startup avoids redundant provider probes, unnecessary ambient Wave resolution and repeated directory resolution. Paired warm bare-launch measurements showed median gains of 41 ms for Claude and 24 ms for Codex from the first two changes; final all-change native and cold-cache gains are not established.
-- macOS installation distinguishes unrelated running development CLIs whose binaries were deleted from actual upgrade targets. Ambiguous targets still block promotion, and unresolved-target errors include the launch path.
-- The homepage now presents conducting agents, Waves, Tasks and built-in Workflows, with Mac download and CLI installation together. Some examples remain ahead of the product: `lf graph`, `lf usage --wt` and illustrated account, usage and monitor output are not delivered by the page redesign.
-- Dependency updates include shlex 2.0.1, uuid 1.27.0, libc 0.2.190 and Ruff 0.16.10.
+- `lf commit` can commit selected `scratch/` files in ordinary Task worktrees while preserving unrelated staged content and working edits. Persistent workspaces continue to exclude scratch and explain how to save durable notes elsewhere.
+- Empty commit selections explain what needs to change. Failed Git commands retain stderr and stdout, or report the exit status when neither contains diagnostics.

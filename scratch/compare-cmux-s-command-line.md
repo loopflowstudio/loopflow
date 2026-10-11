@@ -7,7 +7,7 @@ implemented locally. `9cc0707b0`/`92d95edfe` add owner observation and shared
 Task/Desktop location explanations; `faebb042e`–`5d55957c6` compose remote Task
 links through the existing Session/Files owners. Passive reads use the published, checksum-verified lf3
 fixed-buffer reader with exact pane/surface validation; native proof remains.
-Local checks establish neither native acceptance nor delivery.
+Native acceptance and delivery remain.
 
 LOO-418/#1499 is integrated; completion/checkout previews and creation receipts are reconciled.
 LOO-406/#1503 and LOO-412 through `96f714bd6` are composed locally;
@@ -41,29 +41,26 @@ No live planning migration is authorized.
 ## Work tabs — accepted October 10; THIS SLICE
 
 **Build:** one retained workspace per repository, Wave or Task, shown as a tab
-named for that Work inside its repository window. Product owns this internal
-LOO-427 slice; the consolidated change still ships as one PR. Jack Heart accepted
-this model and implementation after this design contribution, not the resulting
-native experience. This section supersedes checkout-led presentation below;
+named for that Work inside its repository window. Jack Heart accepted this internal LOO-427 slice in one PR, not its native experience. This section supersedes checkout-led presentation below;
 existing execution/location safeguards remain. Admission is independent and
 unresolved, not a prerequisite for these tabs.
 
 **October 10 correction:** Jack Heart selected Split → shell, with no empty-pane
 option (comment `ff61b6bc-f40c-4545-a203-82ced3afd335`). Implemented through the
 existing shell-location owner for CLI, shortcuts and pane menus; missing remote
-location refuses before layout mutation. Work-keyed tabs, non-shell locations, outer-layout deletion and inspection/DTO
-cutover remain unimplemented.
+location refuses before layout mutation. Work-keyed tabs, Flow-log query routing, outer-layout deletion and inspection/DTO
+cutover remain unimplemented. Files now resolves remote content directly, without link priming.
 
-**Content locations:** `d6640b8c68` puts shell Machine/path in content. Session
-content now captures its record's Machine/path too; observation, rendering and
-Split use it. Fresh readings renew changed occurrences, including Undo, without
-focus changes; absent rows retain locations. Unknown refuses. Remote shell command
-construction still uses workspace `executionLocation`; Files/log queries, registry
-rekeying and DTOs remain for the Work-keyed cutover. Neither content cut implements tabs.
+**Content locations:** `94d5195497` makes terminal identity content-owned.
+`cf77ee325a` remote shell construction consumes the addressed content's retained owner
+observation, not workspace `executionLocation` (deleted). Session refresh keeps
+that observation only at the same location; shells and companion splits retain
+it through arrangement/Undo without replaying launch commands. Missing owners
+refuse. Flow-log readers, Work-keyed registry/tabs and exact-target DTOs remain
+checkout-led. Files consumes its recorded owner directly; local panes now capture their Task placement at opening. This is partial implementation, not Work-tab completion or native proof.
 
-**Passive entry deletion:** `a1dfa07833` removes implicit primary-Session acquisition
-from Task navigation/refresh and bare links; explicit Session/Changes requests
-survive. `1e5b958d86` simplifies inventory selection. Neither implements Work tabs.
+**Passive entry:** `a1dfa07833`/`1e5b958d86` remove implicit Task Session
+acquisition and simplify inventory; explicit Session/Changes survives.
 
 ### Experience and boundaries
 
@@ -95,7 +92,19 @@ LOO-416, not a second persistence system here.
 
 ### Current owners → minimal cutover
 
-Registry still keys by checkout; preserve surfaces, multiplexer and documents.
+Registry remains checkout-keyed.
+`retainedPane` still requires content location to equal the enclosing checkout;
+`reconcileMembership` removes Sessions by path change, not Work membership.
+Both must change with the registry/DTO cutover, not survive as Work-tab rules.
+Files consumes content-owned `TaskLocationObservation` through the pinned query;
+first open no longer depends on `prepareLinkedFiles` (deleted). Session-only links
+retain the owner without allocating Files. `d86e32d466` reuses retained transports
+for same-owner refreshes; changed owners refuse rather than redirect drafts.
+`b295ffba2f` makes `TaskFilesStore` own remote observation and await one cleanup
+path on disconnect, stale frames or owner loss; release cancels observation.
+Tab hide must retain that store, not cancel it or recreate its transport. Local Files now retains its opening location through layout/Undo and missing planning; its CLI reads still use Task-owned placement. Flow log still ignores content location and reads through the window model. Finish Flow-log routing with the Work-key cutover. Empty-pane
+shell creation also still uses checkout identity; bare unplaced Work cannot inherit
+that fallback. Preserve explicit preparation without making navigation acquire it.
 Owner inventory: `31ec76b01:scratch/compare-cmux-s-command-line.md`, this heading.
 
 **Proposed API:**
@@ -117,9 +126,8 @@ with the workspace; derive global breadcrumb/actions from the selected entry,
 not another independent selected-Session variable. Titles come from Work readings;
 retain last-known titles with truthful unavailable state if planning is missing.
 
-Move execution location out of workspace identity: Session panes derive
-Machine/checkout from their records; shell panes retain their creation location;
-Files/log panes retain the exact Task/location query. Reuse `WorkspaceIdentity`
+Finish removing execution location from workspace identity. Session/shell contents
+retain Machine/path and the exact recorded Task/repository observation for shell construction. Files/log panes retain their Task/location query. Reuse `WorkspaceIdentity`
 as a location value, not a tab key, and existing `TaskLocationObservation`,
 `TerminalIdentity` and pinned query owners. Shell exit callbacks locate the exact
 pane across retained entries; they must not close a different same-path Work.
@@ -182,10 +190,7 @@ key chords including Ctrl-C. Neither is part of this slice.
    owners; adapt existing headless fixtures and docs. This is the same UI slice,
    not permission to postpone its deletion or wire consumers to another PR.
 3. Demonstrate the rendered Work/tab/pane experience at the existing demo review
-   boundary. Native judgment is separate from passing model tests.
-
-Sections 2–5 remain independent obligations; neither admission nor rendering
-blocks this UI’s headless implementation.
+   boundary. Native judgment remains separate.
 
 ### Checks and demo acceptance
 
@@ -224,140 +229,66 @@ without stopping the owned children. Native replies and visible draft retention,
 not command success alone, establish acceptance. Clean up owned fixture processes
 explicitly afterward. No rendering or demo acceptance is claimed by this design.
 
-## Command map — October 8 review
+## Command map — accepted October 8; remaining composition
 
-**Accepted for implementation, October 8.** After reviewing this command map and
-Desktop/cmux comparison, Jack Heart requested “lets queue implementation for this.”
-This remains one PR through demo review, not merge approval. LOO-397's Clap-derived
-discovery owns routing. Open questions remain explicit; no follow-up Tasks.
+Jack Heart authorized implementation through demo review, not merge. The current
+command tree and examples belong in [the CLI guide](../docs/lf.md#discover-commands)
+and generated reference, not a second scratch specification. The complete reviewed
+map, flag table, repository-lookup decisions and prior fixture references remain at
+`26593ce39f:scratch/compare-cmux-s-command-line.md`, **Command map — October 8 review**.
+The [comparison](../docs/reviews/terminal-command-comparison.md) retains behavioral
+judgments and external-host evidence. LOO-397 owns deeper command discovery.
 
-### Target public tree
+Preserve the implemented cut during the Work-tab replacement:
 
-```text
-lf
-├── wave        list / show / workflow / chapter operations
-├── task        create / list / show / edit / run / move / …
-├── session     list / connect / resume / rename / …
-├── skill NAME  explicit skill invocation
-├── flow NAME   explicit Flow invocation; definition/execution reads remain
-├── NAME        convenient unambiguous skill/Flow invocation
-├── : PROMPT    inline agent request
-├── monitor     ps / top / work / active
-├── history     feed (default) / list / show / replay / usage
-├── desktop     open / list / focus / split / move / resize / zoom
-│               hide / restore / shell / files / flow-log / read / text / key
-├── wt / commit / sync / pr
-├── machine / account / config / repo / self
-└── list / help
-```
+- Wave owns current/historical planning, Workflow selection and chapter editing;
+  internal Project IDs, KRs and captured Workflows survive. Root Project/roadmap
+  and duplicate run dispatch stay deleted. Explicit skill/Flow launches do not
+  advance a Task Workflow. A separate cross-Wave backlog surface is optional.
+- History owns the chronological feed, Process detail/replay and aggregate usage,
+  reusing existing records and retaining capture IDs, input/results, filters and
+  paging. Replay starts new execution; native history stays under Session.
+- Desktop open/list own opening/inspection; Session uses connect. Bare open is
+  ambiguous with PR opening. Exact commands win; ambiguous shortcuts have no
+  effects. Skill/Flow shorthand collisions remain open. Discord is unchanged.
+- Repository/execution selection, Work selection, context inputs, agent/account
+  selection and execution settings remain independent. Shared selection resolves
+  explicit and inferred subjects; contradictions never silently retarget.
+  Max-turns/no-loopflow stay deleted. Steer cursors filter each node's repeated
+  input, not later drivers: retain
+  `a_repeated_node_receives_only_task_direction_newer_than_its_last_run`'s
+  inclusion/omission/later-direction assertions. Its earlier inspection was not
+  a test run (`859c414d1`, **Flags: three independent concerns**).
 
-Unique descendant commands omit parents:
-`lf ps` → `lf monitor ps`, `lf top` → `lf monitor top`. `open` is ambiguous
-between Desktop and PR (Sessions use `connect`); use `lf desktop open`. Exact owner commands win;
-ambiguous shortcuts name their choices and perform nothing. `list`/`show` generally require an owner. Explicit
-`skill`/`flow` resolve naming collisions; the shorthand collision policy remains
-open.
+### Effect-free preview
 
-Jack selected Wave-owned planning. Locally, `wave show [WAVE]` reads current and
-historical chapter plans; `wave workflow` selects future take-up, and `wave edit-plan`
-edits chapter name/summary. Project IDs, KRs, history and stored Workflow definitions
-survive. Root `project`/`roadmap` and duplicate `run` dispatch are removed. Task run
-still advances the captured Workflow; explicit skill/Flow invocation does not.
-A separate cross-Wave backlog surface is optional, not implied by the old command.
+`--context` shares launch assembly and Work enrichment; non-agent commands refuse
+it before effects. Flow preview shares compilation/native arguments and exposes
+only initial skill/router input. Future/repeated input stays unavailable, and no
+predecessor executes. Main's October 10 refreshable context supersedes frozen
+input and budget gates: checkout Wave/ancestor Markdown and scratch refresh;
+Work direction remains a launch reference. Preview shows current system/first-turn
+input and reference contents, never promises future hook bytes. Docs selects
+references, not documentation generation; account/permission behavior is unchanged.
 
-Jack accepted combining activity and history (October 8): `lf history` is the
-chronological feed, with execution details and replay underneath. Remove the
-separate activity command; preserve event coverage, exact capture IDs, inputs/results,
-filters and paging. Recorded `monitor list/show` and top-level `replay` move here.
-Replay starts a new execution. Session-native history stays under Session.
-Jack accepted `history usage` for aggregate views of tokens, cost and time.
-Reuse existing records; no second store.
+`--explain` reads invocation selection/actions before admission or preparation,
+including JSON and explicitly addressed Machines. It creates no Work/checkouts,
+claims, sync, login, publication, logs or agents. Missing facts stay unavailable;
+execution re-resolves them. Help describes syntax, not current eligibility.
+Broader action explanation remains in §3; complete-path checks remain in §5.
 
-`desktop open/list` own opening and actual-window inspection, with short forms
-through normal resolution. JSON retains freshness, exact targets, capabilities and
-legal actions. Opening/usable/failed are distinct: layout mutation is not a rendered
-endpoint. Remote viewing stays separate from execution placement.
+### Machine-local repository lookup
 
-Jack deferred Discord changes; leave it unchanged.
-
-### Flags: three independent concerns
-
-| Scope | Flags | Contract |
-|---|---|---|
-| General command behavior | `--explain` (new), `--json`, `--verbose`, `--help` | Explain the selected invocation without performing its effects; structured output where defined; diagnostics; static usage. Current JSON/flag placement is not uniformly global. |
-| Repository/execution selection | `--repo`, `--machine` | Select a repository on the execution Machine; never rewrite saved defaults. |
-| Work/checkout selection | `--task`, `--wave`, `--wt` | Apply only to operations that consume that scope. Explicit subjects and inferred checkout use one resolver; contradictory selections produce an explanation, never silent retargeting. |
-| Agent launch | `--context` (new), `--agent`, `--docs`, `--clipboard`, `--diff`, `--interactive`/`--batch`, `--account`/`--only-account`, `--isolate`/`--shared`, `--chrome`, `--yolo`, `--steers-after` | Applies to agent launches, inline requests and appropriate Flow steps; account/permission behavior stays unchanged. |
-
-Within launch flags, context inputs are `--docs`/`--clipboard`/`--diff`;
-agent/account selection is separate from execution settings `--chrome`/`--yolo`.
-The accepted cut removes `--max-turns` and `--no-loopflow`; both public switches
-are removed locally while normal operating guidance remains.
-Keep `--steers-after`: Jack recalled context-budget blowups. Flow records a cursor
-per node, passed through `Cli::step_args` to `task_input::read_seed`. Preserve
-`a_repeated_node_receives_only_task_direction_newer_than_its_last_run`'s inclusion,
-omission and later-direction assertions when removing `--no-loopflow`. The fixture
-was inspected, not rerun; fresh drivers reset cursors, so this is not cross-restart
-deduplication. Prior trace: `859c414d1`, this section.
-
-Jack explicitly proposes `--context` as “show me the context that would be used
-here, dont actually launche”; `--explain` applies to more commands. Neither claim
-is an account of existing usage. Examples of intended behavior:
-
-```sh
-lf task run LOO-427 --explain          # resolve Work, Machine, action, impediments
-lf implement --context                # print assembled agent input, no launch
-lf implement --context --explain      # input plus why each source was selected
-lf --repo loopflow --machine mini ps  # observe that repository on Mini
-```
-
-Explain may read local facts and explicitly addressed peers using existing
-transport, but never creates Tasks/checkouts, claims clients, syncs plans, logs in,
-publishes or launches agents. Missing evidence stays unavailable. The result is
-an observation, not a reservation: execution re-resolves changing facts. Help
-explains syntax; explain describes this invocation. Unsupported combinations
-fail before effects. `--context` on a non-agent command is invalid; Flow preview shows the compiled graph and labeled node inputs: only the initial
-skill/router has current-snapshot input. Future and repeat input stays unavailable;
-commands have no agent prompt. It never executes predecessors.
-
-`--docs` selects reference files; it does not generate documentation. Main's
-October 10 context design supersedes frozen launch snapshots and input-budget
-gates: Wave/scratch context refreshes; Work direction remains a launch reference.
-#1521 reads Wave Markdown and ancestors from this checkout, not stored document
-copies; planning records and captured Workflows retain their existing owners. `--context` previews system/first-turn input and current reference
-contents without writing logs or launching. It does not promise future hook bytes.
-Memory/scratch size targets remain advisory; provenance stays explicit.
-
-### Repository lookup
-
-**Implemented locally October 9.** `--repo NAME` resolves `<repo_root>/NAME`;
-Machine-local `~/.lf/config.yaml` owns `repo_root` (default `~/src`). Explicit
-absolute, `./`, `../` and quoted `~/` paths retain the selected checkout; existing
-common-directory identity recognizes symlinks/worktrees. No remembered-name
-registry, recursive scan, auto-registration or checkout creation is added.
-Explicit `--machine` forwards the selector unchanged and bypasses its saved
-repository; names/home expansion happen there. Automatic Task routing replaces
-the caller's path with the resolved repository plan ID. Neither changes saved
-defaults or joins/publishes plans. Existing opaque `--repository ID` remains the
-Work transport's identity selector, distinct from filesystem lookup.
-
-Scoped full Task/parent IDs survive dispatch and Task Flow launch; canonical
-repository checks reject foreign Tasks before preparation. Read-only registry
-lookup distinguishes absent from unreadable. Root/path, no-registration,
-foreign-repository and transport fixtures are recorded at
-`debc66a7c:scratch/compare-cmux-s-command-line.md`, **Repository lookup**;
-configured remote execution remains unproved.
-
-### Cutover and acceptance
-
-Local skill/inline `--context` shares launch assembly and Work enrichment; Flow
-previews share compilation and initial input, including native arguments. Read-only
-`--explain` precedes admission/preparation and supports JSON and explicit Machines.
-Broader action explanation and complete-path composition remain unfinished.
-
-Gate separates discovery, wire shape and routing/preview behavior (§5), including
-effect-free reads, selected-Machine repository lookup and current-input fidelity.
-Exact-target fixtures do not prove the composed usable endpoint.
+`--repo NAME` resolves under Machine-local `repo_root` (default `~/src`); explicit
+paths retain the selected checkout and existing common-directory identity.
+Explicit Machine routing forwards the selector unchanged; automatic Task routing
+uses repository plan ID. Opaque `--repository ID` is identity, not a path. No
+remembered-name registry, scanning, registration, checkout creation, changed
+Machine defaults or implicit plan joining/publication is added. Remembered names
+remain Jack Heart's open choice; reversible path rules remain in questions.md.
+Scoped full Task/parent IDs and repository checks survive dispatch. Read-only
+lookup distinguishes absence from unreadability. Configured remote execution and
+the composed usable endpoint remain unproved by lookup/wire fixtures.
 
 ## Architecture and ownership
 

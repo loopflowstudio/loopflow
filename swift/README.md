@@ -83,7 +83,8 @@ Closing the pane keeps its drafts in this window.
 shows the draft comparison read-only. Task headers show the recorded checkout;
 terminal and files follow that Task without a separate worktree selector.
 Changing Work assignment leaves the recorded checkout Machine and path intact.
-Files panes route through their recorded owner, including a first open without a Session link.
+Files panes retain their opening location through Close/Undo, including a first open
+without a Session link. A shell split beside Files uses that same location.
 Unknown or changed owners stay unavailable without redirecting retained drafts.
 Remote paths are never opened or watched on the presentation Mac. Filesystem events
 on the execution Machine refresh retained documents, including hidden drafts. Disconnects

@@ -46,9 +46,9 @@ dispatch; an unscoped ambiguous prefix still fails.
 
 ## Context budget
 
-Generated Work input exceeds 16,000 tokens because it includes retained steers and
-inventory (34,964 at reconciliation). Historical direction is not rewritten to fit;
-`lf context` reports the changing overage. Authored scratch and memory fit.
+Generated Work input is 34,955 tokens (18,955 over its 16,000-token limit at
+compression), from retained steers and workspace inventory. Authored scratch/memory fit. Editing them cannot shorten generated historical
+direction; the remaining goal overage needs its input owner. No limit was raised.
 
 ## Admission authority — October 9, unresolved
 
@@ -166,3 +166,8 @@ The arbitration binding's establishment, associated identity and recovery remain
 unresolved. They block shared first start, not this UI slice. Rich key chords are
 LOO-452; CLI-build versus running-app capability discovery is LOO-397. No new
 Task filing or claim of their implementation follows from this plan.
+
+Files-owner choice (October 10): a changed retained owner is unavailable rather
+than silently redirecting an existing document/Undo buffer. Repeated readings of
+the same owner reuse it; request nonce/time do not create another store. This
+reversible presentation limit is not Task transfer or first-start authority.

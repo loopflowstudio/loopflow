@@ -18,13 +18,22 @@ public enum PaneContent: Codable, Sendable, Equatable {
     /// Every Flow process of a Task.
     case flowLog(taskId: String, execution: TaskLocationObservation? = nil)
     /// A Task's worktree files.
-    case files(taskId: String, execution: TaskLocationObservation? = nil)
+    case files(taskId: String, location: WorkspaceIdentity? = nil, execution: TaskLocationObservation? = nil)
+
+    public var fileLocation: WorkspaceIdentity? {
+        guard case .files(_, let location, let execution) = self else { return nil }
+        if let execution {
+            guard case .recorded(_, let checkout?) = execution.location else { return nil }
+            return WorkspaceIdentity(machineId: execution.machineID, worktree: checkout)
+        }
+        return location
+    }
 
     /// The exact observed owner travels with the content, never the enclosing workspace.
     public var executionLocation: TaskLocationObservation? {
         switch self {
         case .session(_, _, let execution), .shell(_, let execution),
-             .files(_, let execution), .flowLog(_, let execution): execution
+             .files(_, _, let execution), .flowLog(_, let execution): execution
         case .empty: nil
         }
     }

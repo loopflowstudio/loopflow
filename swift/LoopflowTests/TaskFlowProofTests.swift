@@ -328,7 +328,7 @@ struct TaskFlowTests {
         // The same menu adds the Task's files as a pane.
         try find("work-add-files").button().tap()
         try await settle()
-        #expect(panes.focusedPane.content == .files(taskId: task.id))
+        #expect(panes.focusedPane.content == .files(taskId: task.id, location: task.reference.workspace?.identity))
         panes.close(panes.focusedPaneId)
         try await settle()
 

@@ -31,6 +31,43 @@ struct TaskFilesTests {
                          content: text, state: .text, revision: revision ?? text, readOnlyReason: nil, sizeBytes: UInt64(text.utf8.count))
     }
 
+    @Test func localFilesKeepTheirContentLocationAndDraftWithoutPlanning() async throws {
+        let location = WorkspaceIdentity(machineId: "local", worktree: "/task/checkout")
+        let workspace = SessionsWorkspace(identity: .init(machineId: "local", worktree: "/other/work"))
+        let query = RegistryQuery { _, _ in throw RegistryQueryError("Offline") }
+        let content = PaneContent.files(taskId: "task-files", location: location)
+        let pane = try #require(workspace.multiplexer.show(content))
+        let files = try workspace.files(for: content, task: nil, query: query)
+        #expect(files.cwd == location.worktree)
+        files.autosave = false
+        let document = files.document("note.txt")
+        await document.reconcile(snapshot("original"))
+        document.editor.insertText("draft", replacementRange: NSRange(location: 0, length: 0))
+        let draft = document.text
+        #expect(document.dirty)
+        // The shell beside Files follows its content, never the enclosing Work.
+        let shell = try #require(try workspace.split(pane.id, axis: .vertical))
+        #expect(shell.shellLocation == location)
+        workspace.multiplexer.close(pane.id)
+        workspace.multiplexer.undoClose()
+        let reopened = try #require(workspace.multiplexer.layout.pane(for: pane.id))
+        #expect(reopened.content == content)
+        #expect(try workspace.files(for: reopened.content, task: nil, query: query) === files)
+        #expect(document.text == draft)
+        #expect(throws: RegistryQueryError.self) {
+            try workspace.files(for: .files(taskId: "task-files"), task: nil, query: query)
+        }
+        #expect(throws: RegistryQueryError.self) {
+            try workspace.files(for: .files(taskId: "task-files", location: .init(machineId: "local", worktree: "/replacement")),
+                task: nil, query: query)
+        }
+        #expect(throws: RegistryQueryError.self) {
+            try workspace.files(for: content, task: nil, query: query.onMachine("peer", repository: "plan"))
+        }
+        #expect(files.document("note.txt") === document)
+        #expect(document.text == draft)
+    }
+
     @Test func filePaneRoutesWithoutLinkedSessionPrimingAndRetainsDrafts() async throws {
         let peer = RemoteFilesFixture()
         let query = RegistryQuery { args, cwd in try await peer.read(args, cwd: cwd) }

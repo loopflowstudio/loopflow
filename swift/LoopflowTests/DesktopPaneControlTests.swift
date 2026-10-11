@@ -407,7 +407,7 @@ struct DesktopPaneControlTests {
             #expect(store.layout.pane(for: created.pane) != nil)
         }
         #expect(store.layout.allPanes.count == 4)
-        let files = try #require(store.layout.allPanes.first { $0.content == .files(taskId: task.id) })
+        let files = try #require(store.layout.allPanes.first { $0.content == .files(taskId: task.id, location: identity) })
         store.setCollapsed(paneId: files.id, collapsed: true)
         _ = try router.controlPane(.init(target: source, action: .files(task: task.id)))
         #expect(!store.collapsedPaneIds.contains(files.id))

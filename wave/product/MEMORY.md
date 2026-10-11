@@ -169,13 +169,13 @@ and LOO-453 (readiness/events); research:
 Jack Heart (October 10) accepted Work-named repository/Wave/Task tabs; close hides.
 Passive Task navigation/bare remote links acquire no Sessions; explicit
 Session/Changes survives. `ff61b6bc` selects shell-default Split, no empty option.
-`cf77ee325a` makes terminal/shell location content-owned;
-Undo retains location, never launch replay. Unknown refuses.
-`d10d5e9a69`/`d86e32d466` route Files without priming, reusing same-owner
-transports and retaining drafts when owners change. Nonces are not document
-identity. `b295ffba2f`: retained Files owns observation; release cancels it through
-one awaited cleanup path. Hide must retain the store. Stream fixtures prove release. Local Files uses placement; Work tabs,
-Flow-log routing, registry and targets remain unfinished. Native proof remains.
+`cf77ee325a` makes terminal/shell location content-owned; Undo never replays launch.
+Unknown refuses. `d10d5e9a69`/`d86e32d466` route Files without priming, reusing
+same-owner transports and retaining drafts on owner changes. Nonces are not document
+identity. `b295ffba2f`: retained Files owns observation and one awaited cleanup;
+Hide retains Files. Local panes retain location through Undo and absent planning;
+Split follows it. CLI reads still resolve Task placement. Tabs, Flow-log routing,
+registry and exact targets remain unfinished; native acceptance remains.
 
 **Confirmation cannot elect execution.** `4c43550c2`: divergent revisions and
 independent refs both confirm, not Task allocation. `42990dea3` shares membership

@@ -140,7 +140,7 @@ public struct DesktopLayoutInspection: Codable, Sendable, Equatable {
             case .empty: content = "empty"; subject = nil
             case .shell: content = "shell"; subject = nil
             case .session(let id, _, _): content = "session"; subject = id
-            case .files(let id, _): content = "files"; subject = id
+            case .files(let id, _, _): content = "files"; subject = id
             case .flowLog(let id, _): content = "flow_log"; subject = id
             }
         case .split(let splitAxis, let first, let second, let splitRatio):

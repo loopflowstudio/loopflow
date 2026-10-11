@@ -339,7 +339,7 @@ final class WorkModel {
         if let sessionPane { panes.append(sessionPane) }
         if destination.showsChanges,
            let pane = layout.allPanes.first(where: {
-               if case .files(let task, _) = $0.content { return task == destination.task.id }
+               if case .files(let task, _, _) = $0.content { return task == destination.task.id }
                return false
            }) { panes.append(pane) }
         guard panes.count == (destination.showsChanges ? 2 : 1) else {

@@ -199,7 +199,7 @@ public final class MultiplexerStore {
     public func show(_ content: PaneContent, beside paneId: String? = nil, focus: Bool = true) -> PaneState? {
         let existing = layout.allPanes.first { pane in
             switch (pane.content, content) {
-            case (.files(let current, _), .files(let requested, _)),
+            case (.files(let current, _, _), .files(let requested, _, _)),
                  (.flowLog(let current, _), .flowLog(let requested, _)):
                 return current == requested
             default: return pane.content == content
@@ -208,7 +208,7 @@ public final class MultiplexerStore {
         if let pane = existing {
             // A fresh observation can replace the captured owner, but missing
             // evidence cannot discard the retained remote location or draft.
-            if content.executionLocation != nil, pane.content != content {
+            if content.executionLocation != nil || content.fileLocation != nil, pane.content != content {
                 layout = layout.replacingContent(of: pane.id, with: content)
                 closedState = nil
             }

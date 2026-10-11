@@ -70,7 +70,12 @@ final class SessionsWorkspace {
                 throw RegistryQueryError("Terminal location is unavailable; no shell was opened.")
             }
             return (location, pane.executionLocation)
-        case .files, .flowLog:
+        case .files:
+            guard let location = pane.content.fileLocation else {
+                throw RegistryQueryError("Task file location is unavailable; no shell was opened.")
+            }
+            return (location, pane.executionLocation)
+        case .flowLog:
             if let execution = pane.executionLocation {
                 guard case .recorded(_, let checkout?) = execution.location else {
                     throw RegistryQueryError("Task location is unavailable; no shell was opened.")
@@ -105,7 +110,7 @@ final class SessionsWorkspace {
     }
     /// Resolve Files from its content, not the selected checkout or a previous link.
     func files(for content: PaneContent, task: RoadmapTask?, query: RegistryQuery) throws -> TaskFilesStore {
-        guard case .files(let taskId, let execution) = content else {
+        guard case .files(let taskId, let location, let execution) = content else {
             throw RegistryQueryError("The addressed pane is not Files.")
         }
         let issue: String
@@ -120,11 +125,14 @@ final class SessionsWorkspace {
             issue = ownerTask
             checkout = path
         } else {
-            guard let recorded = task?.reference.workspace?.identity,
-                  recorded.machineId == localMachineId else {
+            guard let recorded = location, recorded.machineId == localMachineId,
+                  query.remoteMachine == nil else {
                 throw RegistryQueryError("Task file location is unavailable. Reopen the Task; no local fallback was used.")
             }
-            issue = task?.runtime?.workId ?? task?.task.identifier ?? taskId
+            if let current = task?.reference.workspace?.identity, current != recorded {
+                throw RegistryQueryError("The Task file location changed. Its previous drafts are retained, not redirected.")
+            }
+            issue = task?.runtime?.workId ?? taskId
             checkout = recorded.worktree
         }
         if let entry = taskFiles[taskId] {
@@ -233,7 +241,7 @@ final class SessionsWorkspaceRegistry {
         let workspace = workspace(for: identity)
         workspace.multiplexer.updateSessionLocation(destination.record.id, location: identity, execution: destination.location)
         guard destination.showsChanges else { return nil }
-        let content = PaneContent.files(taskId: destination.task.id, execution: destination.location)
+        let content = PaneContent.files(taskId: destination.task.id, location: identity, execution: destination.location)
         let files = try workspace.files(for: content, task: destination.task, query: query)
         files.showsChanges = true
         workspace.multiplexer.show(content, focus: false)
@@ -291,7 +299,7 @@ final class SessionsWorkspaceRegistry {
                 throw RegistryQueryError("The Task is not associated with this checkout. Inspect its recorded workspace; no pane was changed.")
             }
             let content: PaneContent = if case .files = request.action {
-                .files(taskId: projection.task.id, execution: pane.executionLocation)
+                .files(taskId: projection.task.id, location: identity, execution: pane.executionLocation)
             } else {
                 .flowLog(taskId: projection.task.id, execution: pane.executionLocation)
             }
@@ -884,7 +892,7 @@ struct SessionsContentView: View {
             Button("New shell", systemImage: "terminal") { newShell(in: workspace) }
                 .accessibilityIdentifier("work-add-shell")
             if let task = fileTask?.task.id {
-                Button("Files", systemImage: "doc") { multiplexer.show(.files(taskId: task, execution: multiplexer.focusedPane.executionLocation)) }
+                Button("Files", systemImage: "doc") { multiplexer.show(.files(taskId: task, location: taskIdentity, execution: multiplexer.focusedPane.executionLocation)) }
                     .accessibilityIdentifier("work-add-files")
                 Button("Flow processes", systemImage: "list.bullet.rectangle") { multiplexer.show(.flowLog(taskId: task, execution: multiplexer.focusedPane.executionLocation)) }
                     .accessibilityIdentifier("work-add-flow-log")
@@ -1665,7 +1673,7 @@ private struct SessionPaneView: View {
             FlowProcessLog(model: model, taskId: taskId)
                 .background(PaneFocusTarget(isFocused: isFocused))
                 .simultaneousGesture(TapGesture().onEnded { store.setFocusedPane(pane.id) })
-        case .files(let taskId, _):
+        case .files(let taskId, _, _):
             let task = model.task(id: taskId)?.task
             switch Result(catching: { try workspace.files(for: pane.content, task: task, query: sessions.query) }) {
             case .success(let files):

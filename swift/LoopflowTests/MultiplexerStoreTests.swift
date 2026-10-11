@@ -6,6 +6,32 @@ import Testing
 @Suite("Multiplexer store")
 @MainActor
 struct MultiplexerStoreTests {
+    @Test("Files retain location through hide and Undo; replacement invalidates exact targets")
+    func fileLocationSurvivesLayoutChanges() throws {
+        let store = MultiplexerStore()
+        let first = WorkspaceIdentity(machineId: "local", worktree: "/first")
+        let second = WorkspaceIdentity(machineId: "local", worktree: "/second")
+        let content = PaneContent.files(taskId: "task", location: first)
+        let files = try #require(store.show(content))
+        let shell = try #require(store.newShell(location: first))
+        store.setCollapsed(paneId: files.id, collapsed: true)
+        store.setZoom(shell.id, enabled: true)
+        store.close(files.id)
+        store.undoClose()
+        let restored = try #require(store.layout.pane(for: files.id))
+        #expect(restored.content == content)
+        #expect(restored.incarnation != files.incarnation)
+        #expect(store.show(.files(taskId: "task"), focus: false)?.content == content)
+        let replacement = try #require(store.show(.files(taskId: "task", location: second), focus: false))
+        #expect(replacement.id == files.id)
+        #expect(replacement.incarnation != restored.incarnation)
+        #expect(replacement.content.fileLocation == second)
+        #expect(store.focusedPaneId == shell.id)
+        #expect(store.zoomedPaneId == shell.id)
+        let decoded = try JSONDecoder().decode(LayoutNode.self, from: JSONEncoder().encode(store.layout))
+        #expect(decoded == store.layout)
+    }
+
     @Test("Session location travels through layout and Undo; a new reading fences old targets")
     func sessionLocationSurvivesLayoutChanges() throws {
         let store = MultiplexerStore()

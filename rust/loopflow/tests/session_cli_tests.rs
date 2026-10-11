@@ -755,6 +755,15 @@ printf '%s\n' '{"type":"result","session_id":"fixture-native","subtype":"success
 
 #[test]
 fn waiting_lists_only_conversations_waiting_on_a_person() {
+    struct Child(std::process::Child);
+    impl Drop for Child {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let provider = Child(Command::new("/bin/sleep").arg("60").spawn().unwrap());
+    let started = time::OffsetDateTime::now_utc().unix_timestamp();
     let home = tempfile::tempdir().unwrap();
     let cwd = home.path().join("work");
     std::fs::create_dir(&cwd).unwrap();
@@ -770,9 +779,14 @@ fn waiting_lists_only_conversations_waiting_on_a_person() {
     )
     .unwrap();
     for (id, pending) in [(&working, 0), (&asked, 1)] {
-        store
+        let attachment = store
             .claim_session_attachment(id, None, &parent, true)
             .unwrap();
+        db.execute(
+            "UPDATE processes SET pid=?2,os_started_at=?3 WHERE id=?1",
+            rusqlite::params![attachment.agent_process_id, provider.0.id(), started],
+        )
+        .unwrap();
         db.execute(
             "INSERT INTO session_activity(session_id,attachment_token,agent_process_id,observed_at,open_tools,pending_input,yielded)
              SELECT s.id,p.attachment_token,p.id,unixepoch(),1,?2,0 FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1",

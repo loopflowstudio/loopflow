@@ -249,12 +249,12 @@ frontier fixtures in the materialized run only. PR CI defers every job while
 ## Process-owned liveness (LOO-451, 2026-10-10)
 
 Jack Heart removed client-file compatibility (`5228ab69`); launches record an
-AgentProcess before exec. Unknown stays unknown, granting no Waiting or cleanup.
-Terminals follow attachment. Completion outranks sockets;
-OS death needs watch rereads. Input completion follows its latest turn's LfProcess,
-not an ended creator; native outcomes remain history, not life evidence.
-Release's entry-point lesson applies: reducer tests do not prove the composed
-kill/reconnect path. Kill/reconnect acceptance remains unproved.
+AgentProcess before exec. Unknown grants no Waiting or cleanup. Terminals follow
+attachment; completion outranks sockets. Inputs follow the latest turn's LfProcess,
+not an ended creator; native outcomes remain history. Jack approved #1523 and
+shipping (`5df94b2c`). Materialized Rust/Swift proofs include
+Work-watch detecting OS death without writes, not configured kill/reconnect or
+installed acceptance.
 
 ## Execution vocabulary (LOO-441/442/446, 2026-10-10)
 

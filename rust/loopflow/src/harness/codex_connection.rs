@@ -1,7 +1,7 @@
-//! A native client may keep displaying a conversation after driver transfer.
+//! A native client may keep displaying a conversation after attachment transfer.
 //! Its writes must still pass the Session fence at dispatch, including approval
-//! replies. Connections relay to the existing engine. Driver exit also uses
-//! this transport to inspect and close its engine under the ownership fence.
+//! replies. The same transport relays to the existing AgentProcess and inspects
+//! it during attachment settlement, under the ownership fence.
 
 use crate::id::AgentSessionId;
 use std::path::Path;
@@ -13,48 +13,51 @@ use serde_json::{json, Value};
 use tokio::net::UnixStream;
 use tokio_tungstenite::{accept_async, client_async, tungstenite::Message, WebSocketStream};
 
-use crate::process::SessionDriver;
+use crate::process::SessionAttachment;
 use crate::store::sqlite::SqliteStore;
 use crate::store::{StoreError, StoreResult};
 
-/// Called under the Session driver lock, so takeover cannot race the provider
-/// shutdown. Saved history and the provider thread ID survive. `serving` is
-/// the recorded endpoint and thread; an engine that also serves an unrelated
+/// Called under the Session attachment lock, so takeover cannot race the provider
+/// shutdown. Saved history and the provider thread ID survive. The endpoint and thread
+/// must come from the record; an AgentProcess that also serves an unrelated
 /// conversation is left running, and that is an error.
-pub(crate) fn close_engine(
-    serving: Option<(&str, &AgentSessionId)>,
+pub(crate) fn close_agent_process(
+    (endpoint, thread): (&str, &AgentSessionId),
     pid: u32,
     started: i64,
 ) -> Result<()> {
     let same_process = || -> Result<bool> {
-        Ok(crate::journal::process_started_at(pid)?
-            .is_some_and(|actual| (actual - started).abs() <= 3))
+        match crate::journal::process_identity_evidence(pid, started) {
+            crate::journal::ProcessIdentityEvidence::Live => Ok(true),
+            crate::journal::ProcessIdentityEvidence::Dead => Ok(false),
+            crate::journal::ProcessIdentityEvidence::Unknown => {
+                Err(anyhow!("AgentProcess OS identity is unavailable"))
+            }
+        }
     };
     if !same_process()? {
         return Ok(());
     }
-    if let Some((endpoint, thread)) = serving {
-        // Use a separate runtime: exit is also reached from synchronous capture
-        // settlement and signal cleanup, sometimes inside an existing runtime.
-        std::thread::scope(|scope| {
-            scope
-                .spawn(|| {
-                    tokio::runtime::Builder::new_current_thread()
-                        .enable_all()
-                        .build()?
-                        .block_on(async {
-                            tokio::time::timeout(
-                                Duration::from_secs(3),
-                                inspect_engine_threads(endpoint, thread),
-                            )
-                            .await
-                            .map_err(|_| anyhow!("engine inspection timed out"))?
-                        })
-                })
-                .join()
-                .map_err(|_| anyhow!("engine close worker panicked"))?
-        })?;
-    }
+    // Use a separate runtime: exit is also reached from synchronous capture
+    // settlement and signal cleanup, sometimes inside an existing runtime.
+    std::thread::scope(|scope| {
+        scope
+            .spawn(|| {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()?
+                    .block_on(async {
+                        tokio::time::timeout(
+                            Duration::from_secs(3),
+                            inspect_agent_threads(endpoint, thread),
+                        )
+                        .await
+                        .map_err(|_| anyhow!("AgentProcess inspection timed out"))?
+                    })
+            })
+            .join()
+            .map_err(|_| anyhow!("AgentProcess close worker panicked"))?
+    })?;
     if !same_process()? {
         return Ok(());
     }
@@ -75,31 +78,16 @@ pub(crate) fn close_engine(
             "recorded process does not lead its own process group"
         ));
     }
-    for signal in [libc::SIGTERM, libc::SIGKILL] {
-        // SAFETY: the PID/start pair and group ownership were checked above;
-        // the Session transaction excludes driver transfer throughout close.
-        if unsafe { libc::kill(-group, signal) } != 0 {
-            let error = std::io::Error::last_os_error();
-            if error.raw_os_error() != Some(libc::ESRCH) {
-                return Err(error.into());
-            }
-        }
-        for _ in 0..40 {
-            // SAFETY: WNOHANG only reaps our child if it has already exited.
-            // A reconnected driver is not its parent and gets ECHILD instead.
-            unsafe {
-                libc::waitpid(group, std::ptr::null_mut(), libc::WNOHANG);
-            }
-            if !same_process()? {
-                return Ok(());
-            }
-            std::thread::sleep(Duration::from_millis(25));
-        }
+    // The leader may exit before its helpers. Use the same group-wide death
+    // judgment as scheduled settlement rather than ending on leader death.
+    if crate::os_process::terminate_process_group(pid) {
+        Ok(())
+    } else {
+        Err(anyhow!("AgentProcess group {pid} death is unresolved"))
     }
-    Err(anyhow!("process {pid} did not exit"))
 }
 
-async fn inspect_engine_threads(endpoint: &str, thread: &AgentSessionId) -> Result<()> {
+async fn inspect_agent_threads(endpoint: &str, thread: &AgentSessionId) -> Result<()> {
     let socket = match UnixStream::connect(endpoint).await {
         Ok(socket) => socket,
         Err(error)
@@ -142,13 +130,15 @@ async fn inspect_engine_threads(endpoint: &str, thread: &AgentSessionId) -> Resu
                 }
                 let detail =
                     rpc_request(&mut upstream, "thread/read", json!({"threadId":current})).await?;
-                // Codex's own subagents are part of this engine's work. A
+                // Codex's own subagents are part of this AgentProcess's work. A
                 // separately started conversation must survive this exit.
                 current = detail
                     .pointer("/thread/parentThreadId")
                     .and_then(Value::as_str)
                     .ok_or_else(|| {
-                        anyhow!("engine still serves another conversation; leaving it running")
+                        anyhow!(
+                            "AgentProcess still serves another conversation; leaving it running"
+                        )
                     })?
                     .to_owned();
             }
@@ -166,22 +156,22 @@ async fn inspect_engine_threads(endpoint: &str, thread: &AgentSessionId) -> Resu
     Ok(())
 }
 
-/// One already selected conversation. `driver=None` is a passive display;
+/// One already selected conversation. `attachment=None` is a passive display;
 /// accepting its connection does not acquire a claim.
 #[derive(Debug, Clone)]
 pub struct CodexConnection {
     pub store: SqliteStore,
     pub session_id: String,
     pub thread_id: AgentSessionId,
-    pub driver: Option<SessionDriver>,
+    pub attachment: Option<SessionAttachment>,
 }
 
 impl CodexConnection {
     /// Read all native turn pages before displaying the conversation. This
-    /// connection never subscribes, answers approvals, or acquires a driver.
-    pub async fn recover_history(&self, engine: &Path) -> Result<()> {
+    /// connection never subscribes, answers approvals, or acquires an attachment.
+    pub async fn recover_history(&self, endpoint: &Path) -> Result<()> {
         let (mut upstream, _) =
-            client_async("ws://localhost", UnixStream::connect(engine).await?).await?;
+            client_async("ws://localhost", UnixStream::connect(endpoint).await?).await?;
         rpc_request(
             &mut upstream,
             "initialize",
@@ -230,10 +220,10 @@ impl CodexConnection {
         Ok(())
     }
 
-    pub async fn serve(&self, client: UnixStream, engine: &Path) -> Result<()> {
+    pub async fn serve(&self, client: UnixStream, endpoint: &Path) -> Result<()> {
         let mut client = accept_async(client).await?;
         let (mut upstream, _) =
-            client_async("ws://localhost", UnixStream::connect(engine).await?).await?;
+            client_async("ws://localhost", UnixStream::connect(endpoint).await?).await?;
         let mut history = super::codex_history::History::default();
         loop {
             tokio::select! {
@@ -261,7 +251,7 @@ impl CodexConnection {
                         }
                         _ => false,
                     };
-                    history.request(&rpc);
+                    history.request(&rpc, self.attachment.as_ref().map(|attachment| (&self.store,self.session_id.as_str(),attachment)))?;
                     let message = Message::Text(serde_json::to_string(&rpc)?.into());
                     if passive {
                         upstream.send(message).await?;
@@ -285,7 +275,7 @@ impl CodexConnection {
                             let rpc: Value = serde_json::from_str(&text)?;
                             super::dispatch::off_reactor(|| {
                                 history.record(&self.store, &self.session_id,
-                                    self.driver.as_ref(), Some(&self.thread_id), &rpc)
+                                    self.attachment.as_ref(), Some(&self.thread_id), &rpc)
                             })?;
                             client.send(Message::Text(text)).await?;
                         }
@@ -302,21 +292,21 @@ impl CodexConnection {
         mut upstream: WebSocketStream<UnixStream>,
         message: Message,
     ) -> Result<(WebSocketStream<UnixStream>, StoreResult<()>)> {
-        let Some(driver) = self.driver.clone() else {
+        let Some(attachment) = self.attachment.clone() else {
             return Ok((
                 upstream,
                 Err(StoreError::InvalidAuthority(
-                    "Passive display has no driver claim".into(),
+                    "Passive display has no attachment claim".into(),
                 )),
             ));
         };
         let store = self.store.clone();
         let session = self.session_id.clone();
-        // A second connection can transfer the driver in another process.
-        // Keep the driver comparison and bounded socket dispatch under the
+        // A second connection can transfer the attachment in another process.
+        // Keep the attachment comparison and bounded socket dispatch under the
         // Session lock. History and other Sessions can still use the database.
         tokio::task::spawn_blocking(move || {
-            let outcome = store.with_session_driver(&session, &driver, || {
+            let outcome = store.with_session_attachment(&session, &attachment, || {
                 super::dispatch::send_fenced(&mut upstream, message)
             });
             (upstream, outcome)
@@ -378,4 +368,63 @@ async fn reject(client: &mut WebSocketStream<UnixStream>, rpc: &Value, reason: &
             .await?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::{BufRead, BufReader};
+    use std::os::unix::process::CommandExt;
+    use std::process::{Child, Command, Stdio};
+
+    struct Group(Child);
+
+    impl Drop for Group {
+        fn drop(&mut self) {
+            crate::os_process::terminate_process_group(self.0.id());
+            let _ = self.0.wait();
+        }
+    }
+
+    #[test]
+    fn close_waits_for_helpers_after_the_leader_exits() {
+        let home = tempfile::tempdir().unwrap();
+        let mut group = Group(
+            Command::new("/bin/sh")
+                .env_clear()
+                .args([
+                    "-c",
+                    "trap 'exit 0' TERM; /bin/sh -c 'trap \"\" TERM; printf \"%s\\n\" $$; exec /bin/sleep 60' & wait",
+                ])
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .process_group(0)
+                .spawn()
+                .unwrap(),
+        );
+        // The helper has installed its TERM handler before close can signal it.
+        let mut ready = String::new();
+        BufReader::new(group.0.stdout.take().unwrap())
+            .read_line(&mut ready)
+            .unwrap();
+        let helper: u32 = ready.trim().parse().unwrap();
+        let leader = crate::journal::OsProcess::read(group.0.id())
+            .unwrap()
+            .unwrap();
+        let child = crate::journal::OsProcess::read(helper).unwrap().unwrap();
+        super::close_agent_process(
+            (
+                home.path().join("absent.sock").to_str().unwrap(),
+                &"saved".into(),
+            ),
+            leader.pid,
+            leader.started_at,
+        )
+        .unwrap();
+        assert!(!crate::journal::OsProcess::group_is_alive(leader.pid).unwrap());
+        assert_eq!(
+            crate::journal::process_identity_evidence(helper, child.started_at),
+            crate::journal::ProcessIdentityEvidence::Dead
+        );
+    }
 }

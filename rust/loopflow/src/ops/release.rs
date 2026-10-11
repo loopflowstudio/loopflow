@@ -13,27 +13,25 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::engine::command::{run_command, CommandError};
-use crate::engine::config::{
-    load_config_or_default, Config, ReleaseCompletion, ReleaseTargetConfig,
+use crate::command::{run_command, CommandError};
+use crate::config::{load_config_or_default, Config, ReleaseCompletion, ReleaseTargetConfig};
+use crate::git::worktrees::{
+    branch_exists, create_named_worktree, list_porcelain, main_repo_root, worktree_path,
+    CreateWorktreeResult,
 };
-use crate::engine::git::{
+use crate::git::{
     acquire_worktree_lease, acquire_worktree_lease_wait, current_branch,
     delete_local_branch_inheriting, fetch_inheriting, get_default_branch, is_clean, ref_exists,
     rev_parse, worktree_remove_owned, WorktreeLease,
 };
-use crate::engine::naming::{git_user, sanitize_for_branch};
-use crate::engine::prompt::write_prompt_log;
-use crate::engine::worktrees::{
-    branch_exists, create_named_worktree, list_porcelain, main_repo_root, worktree_path,
-    CreateWorktreeResult,
-};
+use crate::naming::{git_user, sanitize_for_branch};
 use crate::ops::commit::{commit_workflow, CommitOptions};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::land::{finish_arm_after_sync, LandOptions};
 use crate::ops::pr::{current_pr, merge_gate_state, PrCopy};
 use crate::ops::progress::Progress;
 use crate::ops::util::command_exists;
+use crate::prompt::write_prompt_log;
 
 const RELEASE_QUEUE_PR_LIMIT: usize = 200;
 const RELEASE_QUERY_PR_LIMIT: usize = 1000;
@@ -2791,7 +2789,7 @@ fn fetch_release_branch(
     let remote_ref = format!("refs/remotes/origin/{branch}");
     let refspec = format!("+refs/heads/{branch}:{remote_ref}");
     fetch_inheriting(repo, "origin", &refspec, &|command| lock.inherit(command))?;
-    let remote_head = crate::engine::git::rev_parse(repo, &remote_ref)?;
+    let remote_head = crate::git::rev_parse(repo, &remote_ref)?;
     if remote_head != expected_head {
         return Err(OpsError::Message(format!(
             "release PR head changed while recovery was fetching it: expected {expected_head}, found {remote_head}"
@@ -3496,7 +3494,7 @@ fn cleanup_release_worktree(
         };
         worktree_remove_owned(main_repo, wt_path, &lease, &inherit)?;
         let _ = delete_local_branch_inheriting(main_repo, branch, &inherit);
-        Ok::<_, crate::engine::error::GitError>(())
+        Ok::<_, crate::error::GitError>(())
     })();
     if let Err(err) = removal {
         progress.error(&format!(

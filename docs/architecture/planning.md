@@ -28,15 +28,22 @@ lf checkout <id>
 
 Wave, Project and Task planning use one local SQLite owner with optional
 repository-wide Linear synchronization. Creation without a Wave uses `inbox`.
-Wave provisioning imports existing Markdown and repository Workflow definitions,
-preserving stable authored IDs and source bytes. Saved documents, including ancestor
-context, serve both connection modes. Reads never provision or fall back to files.
+Wave goals, memory and other Markdown live only in `wave/<name>/` in the
+checkout. Edit them like any other file; context and summaries read them directly.
+Ancestor context uses the same checkout. Linear Initiative creation uses that
+checkout; explicit planning sync reads GOAL.md at the committed local default-branch
+tip, never unmerged branch edits or dirty working files. Default-branch selection
+uses origin/HEAD (main when unset); sync does not fetch or move refs.
+Both use the same 255-character description limit.
+Sync writes only changed fields; plan-only sends nothing. A missing default-branch
+ref or GOAL.md blocks mutation instead of clearing the provider summary.
+Creation preserves authored IDs and bytes and writes missing GOAL.md/MEMORY.md
+files. Reads never provision. Registry relocation changes addresses without moving authored files.
+Workflow definitions remain separately stored: provisioning and the draft migration
+import `.lf/workflows/`, and Project workflow selection updates the stored definition.
 Imported Waves remain readable without execution placement: Wave list, status
 and roadmap emit `machine: null` and display “unplaced,” not a fabricated local
 Machine. Desktop consumes the same optional placement.
-Explicit edits and relocation change stored planning without rewriting the checkout.
-The released-frontier migration imports available registered definitions; unavailable
-sources can be imported later with `lf wave ensure`.
 
 Task deletion atomically records local removal and a stable pending field receipt.
 It preserves Workflow, Session, Process, PR and checkout state, including completed
@@ -384,18 +391,18 @@ or infer that its uncertain effects settled.
 
 ```bash
 lf flow build
-lf flow show DRIVER_PROCESS --processes --json
+lf flow show FLOW_PROCESS --processes --json
 ```
 
-A Flow is one lf process and the step processes it starts; its ID is the driver
-Process's. Starting one compiles its definition, including every router and
-alternative, into a graph the driver holds in memory. One cursor and its return
+A Flow is one lf process and the step processes it starts; its ID is the Flow
+process's. Starting one compiles its definition, including every router and
+alternative, into a graph the Flow process holds in memory. One cursor and its return
 counters identify loop passes. Subflows and passes are display lenses over the
-step processes, with no separate record or driver.
+step processes, with no separate record or process.
 
 Every Flow naming a Task, or run in its checkout, is equally that Task's
 work; none is selected or privileged. Taskless and Task execution share the
-driver. Each `task run` starts a fresh Flow as a child `lf run`, and a fresh
+Flow runner. Each `task run` starts a fresh Flow as a child `lf run`, and a fresh
 one again when that Flow process fails. Flows hold autonomous
 steps only: launching one with a `human: true` step is rejected. Finishing
 retains history and chooses no successor; Flow completion alone does not
@@ -482,19 +489,19 @@ new attempt errors and confirmations. Composed CLI/Desktop reconnect remains unp
 
 Each executed skill or operation runs in its own child lf Process as the plain
 command: `lf -b skill <name> [message]`, or the operation's own command. The
-step is told nothing about its Flow. The driver owns navigation and the Flow's
+step is told nothing about its Flow. The Flow process owns navigation and the Flow's
 record, FlowProcess: the Flow's name and graph as compiled at launch, then one
 appended row per step with its Process, graph node key and per-edge iterations.
 Nothing reads it back to resume. A step's result is how its process exited; a
 deciding or routing step also answers through the final answer of the Session
-turn its Process captured. After an operation the driver stops the Flow when a
+turn its Process captured. After an operation the Flow process stops the Flow when a
 landing of its checkout is still being watched: neither failed.
 
 A deciding step's message asks for a JSON `decision`: `advance` or `iterate`
 with a nonempty `summary`, or `blocked` with a nonempty `reason`; the unused
 field is null. A router's message asks for a JSON object containing `path`, one
 of the branch's path names. The contract travels in the message, not as a
-provider schema, and the driver accepts the value inside prose or a code fence.
+provider schema, and the Flow process accepts the value inside prose or a code fence.
 Session history retains the native output and completion separately. An invalid
 answer is corrected by `lf -b session resume ID MESSAGE` in the same
 conversation, at most twice, then the Flow fails; provider failure remains
@@ -509,14 +516,14 @@ or resumes a stopped Flow.
 
 ```bash
 lf task status INF-124
-lf flow show DRIVER_PROCESS --processes --json
+lf flow show FLOW_PROCESS --processes --json
 lf task interrupt INF-124
 lf task run INF-124 --reason "take the smaller approach"
 ```
 
-A killed driver leaves its Processes and FlowProcess rows as history; the last step
+A killed Flow process leaves its Processes and FlowProcess rows as history; the last step
 row shows where it stood. Nothing restarts or resumes it. A Flow is `current` while its
-driver has no recorded exit, `completed` when the driver succeeded and `stopped`
+Flow process has no recorded exit, `completed` when it succeeded and `stopped`
 when it exited before the last step. Crash recovery
 belongs to the caller, normally the Task conversation: inspect the Session,
 process and effect receipts, then launch fresh work. Observation does not replay
@@ -551,7 +558,7 @@ conversation or releases a Flow. The caller inspects outcomes and effects
 before selecting further work; pane closure and provider exit grant no authority.
 
 Saved handoffs retain executable, Machine and database together. Renaming, binding
-and driver replacement retain conversation identity and feedback. Desktop reads
+and takeover retain conversation identity and feedback. Desktop reads
 the same record and keys its terminal surface on LfSession identity.
 
 ## Work, steering and execution

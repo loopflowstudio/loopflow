@@ -9,7 +9,7 @@ use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use loopflow::engine::git::{current_branch, worktree_remove};
+use loopflow::git::{current_branch, worktree_remove};
 use loopflow::ops::{
     commit_workflow, release_publish, release_tag, CommitOptions, NullProgress, OpsError,
 };
@@ -1389,7 +1389,7 @@ esac
                 git(&["checkout", "main"]);
                 git(&["branch", "-D", &branch]);
             }
-            let checkout = loopflow::engine::worktrees::worktree_path(
+            let checkout = loopflow::git::worktrees::worktree_path(
                 repo.path(),
                 branch.strip_prefix("jack/").unwrap(),
             );
@@ -1525,7 +1525,7 @@ fn source_creation_mismatch_preserves_surviving_hook_and_its_work() {
     let caller_branch = git(&["branch", "--show-current"]);
     let index = fs::read(repo.path().join(".git/index")).unwrap();
     let name = format!("verify-default-{source}");
-    let checkout = loopflow::engine::worktrees::worktree_path(repo.path(), &name);
+    let checkout = loopflow::git::worktrees::worktree_path(repo.path(), &name);
     let branch = format!("jack/{name}");
     let mutation = blocking_mutation(
         state.path(),
@@ -1963,7 +1963,7 @@ esac
     let head = git_output(&repo, &["rev-parse", "HEAD"]);
     let branch = format!(
         "{}/release-default-v0-9-2",
-        loopflow::engine::naming::git_user(repo.path()).unwrap()
+        loopflow::naming::git_user(repo.path()).unwrap()
     );
     git(
         &repo,

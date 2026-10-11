@@ -2,7 +2,7 @@ use std::path::Path;
 
 use sha2::{Digest, Sha256};
 
-use crate::engine::git;
+use crate::git;
 pub use crate::migration_drafts::MigrationDraft;
 
 include!(concat!(env!("OUT_DIR"), "/migration_draft_manifest.rs"));

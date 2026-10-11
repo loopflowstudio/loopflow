@@ -107,7 +107,7 @@ struct TaskHistoryView: View {
                 if let step = context?.steps.first(where: { $0.input == (input.artifactKey ?? input.sessionId) }) {
                     contextLine(
                         Self.summary(step),
-                        flagged: step.overAssembledBudget || step.sources.contains(where: \.overBudget)
+                        flagged: step.sources.contains(where: \.overBudget)
                     )
                     .padding(.bottom, 5)
                     .accessibilityIdentifier("task-history-input-context-\(input.id)")
@@ -139,7 +139,7 @@ struct TaskHistoryView: View {
     static func summary(_ step: StepContext) -> String {
         var parts = [sources(step.sources) ?? "context not recorded"]
         if let assembled = step.assembledTokens {
-            parts.append("assembled \(tokenCount(assembled))\(step.overAssembledBudget ? "!" : "")")
+            parts.append("assembled \(tokenCount(assembled))")
         }
         if let peak = step.peakRequestTokens {
             parts.append("peak \(tokenCount(peak))")

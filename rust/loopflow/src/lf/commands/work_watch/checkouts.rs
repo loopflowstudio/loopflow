@@ -17,7 +17,7 @@ pub(super) struct Checkouts {
     changed: Arc<Mutex<BTreeSet<PathBuf>>>,
     asked_on: Option<Instant>,
     #[cfg(target_os = "macos")]
-    stream: Option<crate::engine::fs_events::Stream>,
+    stream: Option<crate::platform::fs_events::Stream>,
 }
 
 /// A linked worktree keeps its index and HEAD outside the checkout.
@@ -58,7 +58,7 @@ impl Checkouts {
             let (changed, all) = (self.changed.clone(), self.watched.clone());
             let watch = roots.clone();
             self.stream = None;
-            self.stream = crate::engine::fs_events::Stream::start(
+            self.stream = crate::platform::fs_events::Stream::start(
                 &roots
                     .iter()
                     .map(|(root, _)| root.as_path())

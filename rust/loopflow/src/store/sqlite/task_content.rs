@@ -1,7 +1,7 @@
 //! Task fields and their delivery evidence commit together, before provider I/O.
 
 use super::planning_write::{self, PlanningEdit as Edit};
-use crate::engine::planning_exchange::PlanningKind;
+use crate::planning_exchange::PlanningKind;
 use rusqlite::TransactionBehavior;
 use serde_json::Value;
 
@@ -78,7 +78,7 @@ impl SqliteStore {
              AND NOT EXISTS(SELECT 1 FROM agent_sessions WHERE task_id=?1)
              AND NOT EXISTS(SELECT 1 FROM task_workflows WHERE task_id=?1)
              AND NOT EXISTS(SELECT 1 FROM task_prs WHERE task_id=?1)
-             AND NOT EXISTS({}))", super::task_work::process_lfids("?1")),
+             AND NOT EXISTS({}))", super::task_work::lf_process_ids("?1")),
             [id.as_str()],|r|r.get(0))?;
         if !available {
             return Err(StoreError::InvalidAuthority(

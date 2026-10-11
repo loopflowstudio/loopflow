@@ -6,12 +6,6 @@ ALTER TABLE project_transitions ADD COLUMN export_json TEXT CHECK(export_json IS
 ALTER TABLE project_transitions ADD COLUMN export_attempted INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE project_transitions ADD COLUMN export_link_attempted INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE project_transitions ADD COLUMN export_error TEXT;
-CREATE TABLE wave_documents (
-    wave_id TEXT NOT NULL REFERENCES waves(id) ON DELETE RESTRICT,
-    name TEXT NOT NULL,
-    content TEXT NOT NULL,
-    PRIMARY KEY(wave_id,name)
-);
 CREATE TABLE wave_workflows (
     wave_id TEXT NOT NULL REFERENCES waves(id) ON DELETE RESTRICT,
     name TEXT NOT NULL,
@@ -321,15 +315,6 @@ UPDATE tasks SET planning_deleted_at=COALESCE(planning_deleted_at,updated_at,cre
 WHERE EXISTS(SELECT 1 FROM pm_issue_changes c WHERE c.issue_id=tasks.external_issue_id AND c.removed=1);
 
 PRAGMA legacy_alter_table = OFF;
-
-CREATE TRIGGER store_revision_wave_documents_insert AFTER INSERT ON wave_documents
-BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
-
-CREATE TRIGGER store_revision_wave_documents_update AFTER UPDATE ON wave_documents
-BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
-
-CREATE TRIGGER store_revision_wave_documents_delete AFTER DELETE ON wave_documents
-BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
 
 CREATE TRIGGER store_revision_wave_workflows_insert AFTER INSERT ON wave_workflows
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;

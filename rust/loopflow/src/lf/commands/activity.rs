@@ -52,7 +52,7 @@ pub enum WorkActivityFact {
         session_id: String,
         captured: Option<i64>,
         reference: crate::session_record::ProviderHistoryReference,
-        process_lfid: Option<crate::id::ProcessLfid>,
+        lf_process_id: Option<crate::id::LfProcessId>,
         status: Option<String>,
     },
     PrStarted {
@@ -192,7 +192,7 @@ pub(crate) fn build_snapshot(
                         session_id: snapshot.session_id.clone(),
                         captured: snapshot.captured,
                         reference: provider.reference.clone(),
-                        process_lfid: provider.process_lfid.clone(),
+                        lf_process_id: provider.lf_process_id.clone(),
                         status: if phase == "completed" {
                             provider.outcome.clone()
                         } else {

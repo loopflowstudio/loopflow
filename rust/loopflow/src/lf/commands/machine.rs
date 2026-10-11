@@ -59,7 +59,7 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             let label = label.clone().unwrap_or_else(|| default_label(target));
             let repo = match repo {
                 Some(repo) => repo.clone(),
-                None => crate::engine::machine_route::resolve_home_relative_repo(
+                None => crate::machine_route::resolve_home_relative_repo(
                     &crate::lf::commands::util::find_repo_root().context(
                         "use --repo to name the remote repository outside a local checkout",
                     )?,
@@ -293,7 +293,7 @@ pub(super) async fn probe(target: &str, forward_agent: bool) -> anyhow::Result<P
     let mut child = tokio::process::Command::new("ssh");
     child
         .env("LC_ALL", "C")
-        .args(crate::engine::machine_route::bounded_ssh_args(
+        .args(crate::machine_route::bounded_ssh_args(
             target,
             forward_agent,
         )?)
@@ -372,9 +372,7 @@ async fn install_remote(target: &str) -> anyhow::Result<()> {
     let command =
         format!("{REMOTE_PATH}; if ! command -v lf >/dev/null 2>&1; then {INSTALL_COMMAND}; fi");
     let status = tokio::process::Command::new("ssh")
-        .args(crate::engine::machine_route::bounded_ssh_args(
-            target, false,
-        )?)
+        .args(crate::machine_route::bounded_ssh_args(target, false)?)
         .arg(command)
         .stdin(Stdio::null())
         .stdout(Stdio::inherit())

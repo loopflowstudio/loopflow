@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use crate::engine::git::{is_clean, rev_parse};
+use crate::git::{is_clean, rev_parse};
 use crate::id::WaveId;
 use crate::ops::{OpsError, OpsResult};
 use crate::pm::{PmItem, PmProject, ProjectContent, ProjectStatus};
@@ -85,7 +85,7 @@ pub fn new_chapter(
         .map_err(error)?
         .block_on(rotate(repo, &plan, wave, dry_run))?;
     if !dry_run
-        && crate::engine::config::load_config_or_default(Some(repo))
+        && crate::config::load_config_or_default(Some(repo))
             .pm
             .and_then(|pm| pm.linear_team)
             .is_some()

@@ -531,8 +531,10 @@ pub(crate) async fn wave_snapshots(
         .map_err(|err| anyhow!("failed to read wave registry: {err}"))?;
     let waves = scope_waves_to_repo(waves, all)?;
     let mut snapshots = Vec::with_capacity(waves.len());
+    let mut repositories = HashMap::new();
     for wave in waves {
-        let snapshot = snapshot_wave(store, &wave).await?;
+        let checkout = wave_repository(&wave, &mut repositories)?;
+        let snapshot = snapshot_wave(store, &wave, &checkout).await?;
         if !current || current_wave(&snapshot) {
             snapshots.push(snapshot);
         }
@@ -571,7 +573,8 @@ pub(crate) async fn wave_detail(store: &SharedStore, wave: &Wave) -> Result<Wave
         .map_err(|err| anyhow!("failed to read repository Waves: {err}"))?;
     let mut repositories = HashMap::new();
     validate_pm_portfolio(store, &repository_waves, &mut repositories).await?;
-    let snapshot = snapshot_wave(store, wave).await?;
+    let checkout = wave_repository(wave, &mut repositories)?;
+    let snapshot = snapshot_wave(store, wave, &checkout).await?;
     let shared = SharedTaskReads::read(store).await?;
     let task_snapshots = wave_tasks(store, wave, true, None, &shared).await?;
     let metric_portfolio = crate::ops::metrics::wave_metric_portfolio(store, wave, now()).await?;
@@ -699,7 +702,8 @@ async fn roadmap_snapshot(
     let shared = SharedTaskReads::read(store).await?;
     let mut roadmaps = Vec::with_capacity(waves.len());
     for wave in &waves {
-        let snapshot = snapshot_wave(store, wave).await?;
+        let checkout = wave_repository(wave, &mut repositories)?;
+        let snapshot = snapshot_wave(store, wave, &checkout).await?;
         if !include_history && !current_wave(&snapshot) {
             continue;
         }
@@ -769,7 +773,7 @@ impl SharedTaskReads {
 /// so the details find them waiting; any other process would only ask twice.
 fn ask_checkouts_ahead(checkouts: &[crate::store::sqlite::TaskCheckout]) {
     const AT_ONCE: usize = 8;
-    if !crate::engine::git::retains_reads() {
+    if !crate::git::retains_reads() {
         return;
     }
     let existing = checkouts
@@ -785,10 +789,10 @@ fn ask_checkouts_ahead(checkouts: &[crate::store::sqlite::TaskCheckout]) {
                     existing.get(next.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
                 {
                     // The answers are kept by Git's reader; failures are the details' to report.
-                    let _ = crate::engine::git::is_clean(worktree);
-                    let _ = crate::engine::git::rev_parse(worktree, "HEAD");
-                    let _ = crate::engine::git::worktree_root(worktree);
-                    let _ = crate::engine::worktrees::git_common_dir(worktree);
+                    let _ = crate::git::is_clean(worktree);
+                    let _ = crate::git::rev_parse(worktree, "HEAD");
+                    let _ = crate::git::worktree_root(worktree);
+                    let _ = crate::git::worktrees::git_common_dir(worktree);
                 }
             });
         }
@@ -940,18 +944,30 @@ fn now() -> time::OffsetDateTime {
 
 // Resolve each recorded repository once per read. Sharing across validation and
 // display avoids one Git process per Wave without retaining facts across reads.
-fn wave_repository(wave: &Wave, repositories: &mut HashMap<String, PathBuf>) -> PathBuf {
-    repositories
-        .entry(wave.repo().to_string())
-        .or_insert_with(|| {
-            crate::engine::worktrees::main_repo_root(Path::new(wave.repo()))
-                .unwrap_or_else(|_| Path::new(wave.repo()).to_path_buf())
-        })
-        .clone()
+fn wave_repository(wave: &Wave, repositories: &mut HashMap<String, PathBuf>) -> Result<PathBuf> {
+    if let Some(checkout) = repositories.get(wave.repo()) {
+        return Ok(checkout.clone());
+    }
+    let checkout = wave_checkout(wave)?;
+    repositories.insert(wave.repo().to_string(), checkout.clone());
+    Ok(checkout)
+}
+
+// A registry address identifies the repository, not the checkout's document bytes.
+fn wave_checkout(wave: &Wave) -> Result<PathBuf> {
+    if let Some(checkout) = crate::repo::discover_repo_root(&std::env::current_dir()?)? {
+        if crate::repository::CanonicalRepo::discover(&checkout)?.contains(Path::new(wave.repo())) {
+            return Ok(checkout);
+        }
+    }
+    Ok(
+        crate::git::worktrees::main_repo_root(Path::new(wave.repo()))
+            .unwrap_or_else(|_| PathBuf::from(wave.repo())),
+    )
 }
 
 /// Read planning and optional placement without allocating execution.
-pub(crate) async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<WaveSnapshot> {
+async fn snapshot_wave(store: &SharedStore, wave: &Wave, checkout: &Path) -> Result<WaveSnapshot> {
     let repo = wave.repo().to_string();
     let tasks = store
         .list_tasks(Some(wave.id()))
@@ -984,12 +1000,7 @@ pub(crate) async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<Wa
         id: wave.id().to_string(),
         name: wave.slug().to_string(),
         status,
-        goal: store
-            .sqlite
-            .wave_document(wave.id(), "GOAL.md")?
-            .as_deref()
-            .map(crate::work::wave::config::wave_summary)
-            .unwrap_or_else(|| wave.slug().to_string()),
+        goal: crate::work::wave::config::read_wave_summary(checkout, wave.slug())?,
         repo,
         active_tasks,
         created_at: wave.created_at().and_then(format_time),
@@ -1008,8 +1019,8 @@ fn snapshot_task_runtime(
     completion_pending: Option<String>,
     started: bool,
 ) -> TaskRuntimeSnapshot {
-    let config = crate::engine::config::load_config_or_default(task.worktree.as_deref());
-    let (provider, _) = crate::engine::config::parse_agent(config.agent());
+    let config = crate::config::load_config_or_default(task.worktree.as_deref());
+    let (provider, _) = crate::config::parse_agent(config.agent());
     TaskRuntimeSnapshot {
         work_id: task.id.to_string(),
         reason: if status.is_terminal() {
@@ -1032,7 +1043,7 @@ async fn validate_pm_portfolio(
 ) -> Result<()> {
     let mut ownership = std::collections::HashMap::<_, PmPortfolioValidator>::new();
     for wave in waves {
-        let repo = wave_repository(wave, repositories);
+        let repo = wave_repository(wave, repositories)?;
         let repo = std::fs::canonicalize(&repo).unwrap_or(repo);
         let row = match store.pm_snapshot(wave.id()).await {
             Ok(Some(row)) => row,
@@ -1511,7 +1522,7 @@ fn inspect_task_local_progress(
             reason: Some(format!("Task worktree is missing: {}", worktree.display())),
         };
     }
-    let dirty = match crate::engine::git::is_clean(worktree) {
+    let dirty = match crate::git::is_clean(worktree) {
         Ok(clean) => !clean,
         Err(error) => {
             return LocalProgressEvidence {
@@ -1525,7 +1536,7 @@ fn inspect_task_local_progress(
         }
     };
     let authored_commits = match active_pr_base {
-        Some(base) => match crate::engine::git::rev_parse(worktree, "HEAD") {
+        Some(base) => match crate::git::rev_parse(worktree, "HEAD") {
             Ok(head) => Some(head != base),
             Err(error) => {
                 return LocalProgressEvidence {
@@ -1656,7 +1667,7 @@ fn task_reference(
         let local = machine_id.as_ref() == Some(local_machine);
         // A removed checkout has no root to resolve.
         let worktree = if local && task_worktree.is_dir() {
-            crate::engine::git::worktree_root(task_worktree)
+            crate::git::worktree_root(task_worktree)
                 .ok()
                 .and_then(|root| root.canonicalize().ok())
                 .unwrap_or_else(|| task_worktree.clone())
@@ -1683,11 +1694,11 @@ fn task_pr_empty(task: &Task, pr: &TaskPr) -> Option<bool> {
     if !worktree.exists() {
         return None;
     }
-    let clean = crate::engine::git::is_clean(worktree).ok()?;
+    let clean = crate::git::is_clean(worktree).ok()?;
     if !clean {
         return Some(false);
     }
-    let head = crate::engine::git::rev_parse(worktree, "HEAD").ok()?;
+    let head = crate::git::rev_parse(worktree, "HEAD").ok()?;
     Some(head == pr.base_commit)
 }
 
@@ -2533,7 +2544,7 @@ mod tests {
             "proof".into(),
             alias.display().to_string(),
         );
-        let resolve = || super::wave_repository(&wave, &mut Default::default());
+        let resolve = || super::wave_repository(&wave, &mut Default::default()).unwrap();
         assert_eq!(resolve(), alias);
         std::os::unix::fs::symlink(first.path(), &alias).unwrap();
         assert_eq!(resolve(), first.path().canonicalize().unwrap());

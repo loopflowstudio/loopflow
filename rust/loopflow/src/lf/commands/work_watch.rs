@@ -471,7 +471,7 @@ impl Reader {
         // Every one is asked again, not only up to the first that differs.
         let mut differs = false;
         for worktree in &changed {
-            differs |= crate::engine::git::reread_retained(worktree);
+            differs |= crate::git::reread_retained(worktree);
         }
         if differs {
             for part in [Part::Planning, Part::Wave] {
@@ -639,7 +639,7 @@ impl Reader {
                         let (process, entry) = store
                             .sqlite
                             .flow_process(id)?
-                            .ok_or_else(|| anyhow!("Flow {id} has no driver record"))?;
+                            .ok_or_else(|| anyhow!("Flow {id} has no Flow process record"))?;
                         flow_processes.push(process.detail(entry));
                     }
                     let comments = store.sqlite.task_comments(&task)?;
@@ -804,7 +804,7 @@ pub(super) fn run(watch: bool) -> Result<()> {
         .into_owned();
     if watch {
         // Every reading asks Git the same questions about the same checkouts.
-        crate::engine::git::retain_reads();
+        crate::git::retain_reads();
     }
     let shared: Shared = Arc::new((Mutex::new(Mailbox::default()), Condvar::new()));
     let mut reader = Reader {
@@ -1021,7 +1021,6 @@ mod tests {
                 schema_version: 1,
                 observed_at,
                 nodes: Vec::new(),
-                provider_processes: Vec::new(),
             }))
         };
         assert_eq!(

@@ -1582,7 +1582,7 @@ lf CLI --&gt; Skill discovery --&gt; prompt --&gt; provider route --&gt; harness
                                                + immutable input/output artifacts
 </code></pre>
 <p>Before the provider starts, the current Machine has the conversation reservation
-and its immutable input. SQLite owns identity, attribution, driver authority and
+and its immutable input. SQLite owns identity, attribution, attachment authority and
 history references; payload files retain large captured inputs and output.
 Admission failure stops before provider launch. General command logging has a
 different boundary: unavailable/bootstrap stores leave explicitly unrecorded
@@ -1609,12 +1609,12 @@ defines these ownership boundaries.</p>
 </tr>
 <tr>
 <td>Find the Skill</td>
-<td><a href="https://github.com/loopflowstudio/loopflow/blob/main/rust/loopflow/src/engine/skill_catalog.rs"><code>engine/skill_catalog.rs</code></a></td>
+<td><a href="https://github.com/loopflowstudio/loopflow/blob/main/rust/loopflow/src/skills/catalog.rs"><code>skills/catalog.rs</code></a></td>
 <td>One selected Skill source</td>
 </tr>
 <tr>
 <td>Assemble context</td>
-<td><a href="https://github.com/loopflowstudio/loopflow/blob/main/rust/loopflow/src/engine/prompt.rs"><code>engine/prompt.rs</code></a></td>
+<td><a href="https://github.com/loopflowstudio/loopflow/blob/main/rust/loopflow/src/prompt/mod.rs"><code>prompt/mod.rs</code></a></td>
 <td>System and task prompts</td>
 </tr>
 <tr>
@@ -1704,12 +1704,12 @@ task
 
 ops/chapter.rs                deterministic chapter rotation
 ops/task.rs                   Task launch: a fresh Flow in the Task checkout
-lf/commands/flow.rs           Flow driver: one process per Flow
+lf/commands/flow.rs           Flow process: one process per Flow
 
-execution kernel: engine/ + harness/ + command and conversation history
+execution kernel: flow/ + agent/ + prompt/ + harness/ + command and conversation history
 composition surfaces: lf/ + bin/
 </code></pre>
-<p><code>work</code> never imports the Flow driver. The execution kernel works without either
+<p><code>work</code> never imports the Flow runner. The execution kernel works without either
 layer and never loads Work. CLI callers resolve Work identity and Wave memory,
 then pass ordinary launch inputs into the kernel.</p>
 <p>Release delivery also separates proof from authority:</p>
@@ -1772,10 +1772,10 @@ ledger.</p>
               `-- Task        identity, worktree, PR and every Flow process for it
 
 Process                          one actual lf process; immutable causal parent
-LfSession                  one conversation; nullable current driver Process
+LfSession                  one conversation; nullable attached LfProcess
   `-- history                 provider starts, outcomes, retries and usage
 Flow                          one lf process; cursor in its memory, graph in FlowProcess
-  `-- step processes              plain commands; the driver records each one's node
+  `-- step processes              plain commands; the Flow process records each one's node
 </code></pre>
 <table tabindex="0">
 <thead>
@@ -1803,13 +1803,13 @@ Flow                          one lf process; cursor in its memory, graph in Flo
 </tr>
 <tr>
 <td>LfSession</td>
-<td>An interactive or headless conversation across drivers and native reconnection</td>
+<td>An interactive or headless conversation across attachments and native reconnection</td>
 <td><code>agent_sessions</code>, subordinate history and provider-native conversation</td>
 </tr>
 <tr>
 <td>Running Flow</td>
-<td>One driver process and the steps it starts, including taskless execution</td>
-<td>The driver Process and its child step processes in <code>processes</code></td>
+<td>One Flow process and the steps it starts, including taskless execution</td>
+<td>The Flow process and its child step processes in <code>processes</code></td>
 </tr>
 <tr>
 <td>Wave</td>
@@ -1853,26 +1853,26 @@ command process changes. Its <code>interactive</code> field is independent of pu
 Flow membership and completion. Default conversation views show interactive
 Sessions; explicit filters expose headless and completed history. Large captured
 payloads remain files, but readers select and page rows before opening them.</p>
-<p>Connect uses the live engine when possible. Passive display acquires no claim.
-Transferring the conversation driver revokes the old client's ability to start
+<p>Connect uses the live AgentProcess when possible. Passive display acquires no claim.
+Transferring the attachment revokes the old client's ability to start
 or steer turns and mutate Session state, including queued writes. It does not
-replace the provider generation or interrupt an existing turn. Client replacement
-leaves the engine alive and never authorizes killing a shared engine
-for one thread. Engine PID, client PID and conversation driver are distinct.</p>
+replace the AgentProcess or interrupt an existing turn. Client replacement
+leaves the AgentProcess alive and never authorizes killing a shared one
+for one thread. AgentProcess PID, client PID and attached LfProcess are distinct.</p>
 <p>Process ancestry records the actual lf caller. A direct child names its parent's
 Process; an agent-issued child also records <code>via_agent</code> and LfSession provenance.
-The provider's generation resolves to the current driver at child admission.
+The provider's AgentProcess resolves to its attached LfProcess at child admission.
 A delayed command from a replaced provider retains historical provenance; old
 Process parents are never rewritten. Causal ancestry grants no control authority.</p>
 <p>Every Flow naming a Task, or run in its checkout, is equally its work;
 none is privileged. <code>task run</code> always runs a fresh one.
-Taskless and Task-owned Flows use the same driver. It holds the compiled graph
+Taskless and Task-owned Flows use the same Flow runner. The Flow process holds the compiled graph
 and cursor in memory; template composition compiles into the graph, and loop
 passes are positions in it. Each step is a real child Process whose argv carries
 the Flow name, launch sequence and position. A step's result is how its process
 exited; a deciding or routing step also answers through the Session turn its
 Process captured. Mechanical work creates no agent conversation. A Session reaches
-its Flow through the step Process that captured its input. A killed driver leaves
+its Flow through the step Process that captured its input. A killed Flow process leaves
 its Processes as history; nothing resumes it, and its caller launches fresh work.</p>
 <p>Task implies Wave. Constructors fill omitted ancestors and reject mismatches.
 Bind fills an unassigned conversation's Task once. CLI states the permanent

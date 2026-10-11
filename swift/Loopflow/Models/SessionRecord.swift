@@ -36,7 +36,7 @@ public enum SessionTitleSource: String, Codable, Sendable, Hashable {
 /// this from the Flow position or the Session's recorded capture; Swift never
 /// infers it from Task, checkout, provider, or skill.
 public enum SessionFlowMembership: Codable, Sendable, Hashable {
-    case step(flow: String, flowProcessLfid: String, step: String, node: UInt32?, iterations: [[UInt32]]?,
+    case step(flow: String, flowLfProcessId: String, step: String, node: UInt32?, iterations: [[UInt32]]?,
               occurrence: SessionFlowOccurrence)
     case independent
     case unknown(reason: String)
@@ -45,7 +45,7 @@ public enum SessionFlowMembership: Codable, Sendable, Hashable {
 
     enum CodingKeys: String, CodingKey {
         case kind, flow, step, iterations, occurrence, reason
-        case flowProcessLfid = "flow_process_lfid"
+        case flowLfProcessId = "flow_lf_process_id"
         case node
     }
 
@@ -55,7 +55,7 @@ public enum SessionFlowMembership: Codable, Sendable, Hashable {
         case .step:
             self = .step(
                 flow: try container.decode(String.self, forKey: .flow),
-                flowProcessLfid: try container.decode(String.self, forKey: .flowProcessLfid),
+                flowLfProcessId: try container.decode(String.self, forKey: .flowLfProcessId),
                 step: try container.decode(String.self, forKey: .step),
                 node: try container.decodeIfPresent(UInt32.self, forKey: .node),
                 iterations: try container.decodeIfPresent([[UInt32]].self, forKey: .iterations),
@@ -71,10 +71,10 @@ public enum SessionFlowMembership: Codable, Sendable, Hashable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
-        case let .step(flow, flowProcessLfid, step, node, iterations, occurrence):
+        case let .step(flow, flowLfProcessId, step, node, iterations, occurrence):
             try container.encode(Kind.step, forKey: .kind)
             try container.encode(flow, forKey: .flow)
-            try container.encode(flowProcessLfid, forKey: .flowProcessLfid)
+            try container.encode(flowLfProcessId, forKey: .flowLfProcessId)
             try container.encode(step, forKey: .step)
             try container.encode(node, forKey: .node)
             try container.encode(iterations, forKey: .iterations)
@@ -156,7 +156,8 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     public let primaryScope: String?
     public let attention: SessionAttention?
     public let programStatus: ProgramStatusRecords?
-    public let providerGeneration: Int64
+    /// The provider's current AgentProcess; absent when Loopflow never launched one.
+    public let agentProcessId: String?
     /// Its Task names it as the Task's primary conversation.
     public let taskPrimary: Bool
     public let taskIds: [String]
@@ -198,7 +199,7 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case id, interactive, work, workspace, title, detail, provider, cwd, state, attention
         case programStatus = "program_status"
-        case providerGeneration = "provider_generation"
+        case agentProcessId = "agent_process_id"
         case primaryScope = "primary_scope"
         case taskPrimary = "task_primary"
         case waveId = "wave_id"

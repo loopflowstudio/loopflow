@@ -2,7 +2,7 @@ mod support;
 
 use std::process::Command;
 
-use base64::Engine;
+use base64::prelude::*;
 use loopflow::store::{
     CredentialState, ProviderAccount, ProviderAccountId, RoutingState, StorageConfig,
 };
@@ -676,7 +676,7 @@ fn cached_auth_records_its_process_without_creating_account_state() {
 
 fn write_identity(home: &std::path::Path, email: &str, subject: &str) {
     std::fs::create_dir_all(home).unwrap();
-    let claims = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(
+    let claims = BASE64_URL_SAFE_NO_PAD.encode(
         serde_json::json!({"email":email,"sub":subject,"https://api.openai.com/auth":{"chatgpt_account_id":"shared-team"}}).to_string());
     std::fs::write(
         home.join("auth.json"),
@@ -977,7 +977,7 @@ done
     let _env = EnvGuard::with_lf_home(&[("codex", script)], home.path());
     let native = home.path().join("accounts/codex/active");
     std::fs::create_dir_all(&native).unwrap();
-    let claims = base64::engine::general_purpose::URL_SAFE_NO_PAD
+    let claims = BASE64_URL_SAFE_NO_PAD
         .encode(serde_json::json!({"email":"active@example.com","sub":"active-user"}).to_string());
     std::fs::write(
         native.join("auth.json"),
@@ -1072,7 +1072,7 @@ done
     assert_eq!(recovered["outcome"], "alreadyRedeemed");
     assert_eq!(recovered["after"]["reset_credits"]["availableCount"], 1);
     // Changed native identity refuses the spend even though the service still reports active@.
-    let wrong = base64::engine::general_purpose::URL_SAFE_NO_PAD
+    let wrong = BASE64_URL_SAFE_NO_PAD
         .encode(serde_json::json!({"email":"wrong@example.com","sub":"wrong-user"}).to_string());
     std::fs::write(
         native.join("auth.json"),

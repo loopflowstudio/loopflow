@@ -16,10 +16,10 @@ use crate::store::{SharedStore, Store};
 use crate::work::task::Task;
 
 pub(crate) fn connected(repo: &str) -> bool {
-    crate::engine::config::load_config(Some(std::path::Path::new(repo))).is_ok_and(|config| {
+    crate::config::load_config(Some(std::path::Path::new(repo))).is_ok_and(|config| {
         matches!(
             config.unwrap_or_default().planning_transport(),
-            crate::engine::config::PlanningConfig::Linear {}
+            crate::config::PlanningConfig::Linear {}
         )
     })
 }
@@ -446,8 +446,8 @@ pub(crate) fn comment_requester(body: &str, author_name: Option<&str>) -> Option
     };
     requester
         .as_deref()
-        .and_then(crate::engine::config::normalize_user_name)
-        .or_else(|| author_name.and_then(crate::engine::config::normalize_user_name))
+        .and_then(crate::config::normalize_user_name)
+        .or_else(|| author_name.and_then(crate::config::normalize_user_name))
 }
 
 pub(crate) fn render_comment(

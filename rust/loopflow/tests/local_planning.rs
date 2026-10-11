@@ -2450,27 +2450,22 @@ fn refiling_saves_membership_offline_and_retains_inbound_changes() {
                 // identity as SQLite, rather than restoring a pre-binding journal.
                 project.linear_id = Some(loopflow::planning::LinearProjectId::new(name).unwrap());
                 store.insert_project(&project).unwrap();
-                let observed = store
-                    .put_pm_project(
-                        wave.id(),
-                        "linear",
-                        name,
-                        &loopflow::pm::linear::LinearProject {
-                            id: name.into(),
-                            slug: project.slug.clone(),
-                            name: project.name.clone(),
-                            summary: project.summary.clone(),
-                            description: Some(project.description.clone()),
-                            workflow: project.workflow.clone(),
-                            status: project.status,
-                            krs: project.krs.clone(),
-                            metric_targets: project.metric_targets.clone(),
-                            initiative_ids: vec![name.into()],
-                            team_ids: vec!["fixture-team".into()],
-                            revision: None,
-                        },
-                        1,
-                    )
+                let observed = loopflow::pm::linear::LinearProject {
+                    id: name.into(),
+                    slug: project.slug.clone(),
+                    name: project.name.clone(),
+                    summary: project.summary.clone(),
+                    description: Some(project.description.clone()),
+                    workflow: project.workflow.clone(),
+                    status: project.status,
+                    krs: project.krs.clone(),
+                    metric_targets: project.metric_targets.clone(),
+                    initiative_ids: vec![name.into()],
+                    team_ids: vec!["fixture-team".into()],
+                    revision: None,
+                };
+                store
+                    .put_pm_project(wave.id(), "linear", name, &observed, 1)
                     .unwrap();
                 observations.push(observed);
             }

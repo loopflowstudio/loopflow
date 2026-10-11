@@ -631,10 +631,10 @@ Jack requires the full accepted deletion audit before review: Work, private
 observations, typed journal, bindings, ordinary follow-ups and one cron list.
 Renames are insufficient; gate/install unproved.
 
-`96607a9a46`: canonical status/create and CLI/Swift acquisition evidence.
-Availability/age, admission and delivery differ. Foreign observations grant no
-ownership; omission is not deletion. Delivery requires accepted Work revision; `plan_read` is deleted.
-Snapshot confinement remains.
+`96607a9a46`: canonical status/create and CLI/Swift acquisition proof.
+Delivery requires accepted Work revision; archive/disputed membership still refuse
+it. `plan_read` and Project ingestion return projections are deleted; snapshot
+confinement remains. Foreign observations grant no ownership.
 
 Jack assigned LOO-427 here (`bd295866bb`); stack order is unresolved. Preserve
 tabs, Machine ownership/admission; adapt delegation to the writer/released frontier.

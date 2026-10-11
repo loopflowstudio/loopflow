@@ -305,7 +305,7 @@ async fn observe(
                 .ok_or_else(|| message("Project Wave is missing"))?;
             let initiative = super::pm::read_initiative(repo, wave.slug())
                 .ok_or_else(|| message("Wave has no Linear Initiative"))?;
-            let accepted = store
+            store
                 .sqlite
                 .put_pm_project(
                     &project.wave_id,
@@ -315,9 +315,13 @@ async fn observe(
                     time::OffsetDateTime::now_utc().unix_timestamp(),
                 )
                 .map_err(message)?;
-            if accepted.revision != observed.revision {
+            if !store
+                .sqlite
+                .accepted_project_revision(id, &external, observed.revision.as_deref())
+                .map_err(message)?
+            {
                 return Err(message(
-                    "Newer Linear Project observation retained; field delivery deferred",
+                    "Newer or unresolved Linear Project planning retained; field delivery deferred",
                 ));
             }
             Ok((external, content, observed.revision))

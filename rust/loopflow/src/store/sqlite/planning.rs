@@ -29,6 +29,26 @@ impl SqliteStore {
         )?)
     }
 
+    /// Retained observations do not authorize delivery until accepted into Work.
+    pub(crate) fn accepted_project_revision(
+        &self,
+        project: &ProjectId,
+        external: &str,
+        revision: Option<&str>,
+    ) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM projects p
+             JOIN waves w ON w.id=p.wave_id
+             JOIN pm_projects observed ON observed.repo=w.repo
+                 AND observed.provider='linear' AND observed.id=p.external_project_id
+             WHERE p.id=?1 AND p.external_project_id=?2 AND p.planning_provider_revision=?3
+                 AND observed.archived=0 AND observed.membership_unresolved=0)",
+            params![project.as_str(), external, revision],
+            |row| row.get(0),
+        )?)
+    }
+
     /// Accept one confirmed Project without claiming a complete Wave refresh.
     pub fn put_pm_project(
         &self,
@@ -37,7 +57,7 @@ impl SqliteStore {
         initiative: &str,
         project: &LinearProject,
         observed_at: i64,
-    ) -> StoreResult<LinearProject> {
+    ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let repo: String = conn.query_row(
             "SELECT repo FROM waves WHERE id=?1",
@@ -53,7 +73,7 @@ impl SqliteStore {
         validate_project_membership(&conn, &repo, provider, project)?;
         let tx = conn.transaction()?;
         put_project(&tx, &repo, provider, observed_at, project)?;
-        let accepted = associate_project(&tx, &repo, provider, &project.id, wave, initiative)?;
+        associate_project(&tx, &repo, provider, &project.id, wave, initiative)?;
         project_accepted_planning(
             &tx,
             &repo,
@@ -63,7 +83,7 @@ impl SqliteStore {
             Some((wave, initiative)),
         )?;
         tx.commit()?;
-        Ok(accepted)
+        Ok(())
     }
 
     pub(crate) fn reconcile_pm_project_teams(
@@ -740,8 +760,8 @@ fn associate_project(
     project_id: &str,
     wave: &WaveId,
     initiative: &str,
-) -> StoreResult<LinearProject> {
-    let accepted = require_accepted_initiative(tx, repo, provider, project_id, initiative)?;
+) -> StoreResult<()> {
+    require_accepted_initiative(tx, repo, provider, project_id, initiative)?;
     let wave_repo: String = tx.query_row("SELECT repo FROM waves WHERE id=?1", [wave], |row| {
         row.get(0)
     })?;
@@ -756,7 +776,7 @@ fn associate_project(
          ON CONFLICT(wave_id,project_id) DO NOTHING",
         params![wave, project_id],
     )?;
-    Ok(accepted)
+    Ok(())
 }
 
 fn require_accepted_initiative(
@@ -765,7 +785,7 @@ fn require_accepted_initiative(
     provider: &str,
     project_id: &str,
     initiative: &str,
-) -> StoreResult<LinearProject> {
+) -> StoreResult<()> {
     let body: String = conn.query_row(
         "SELECT body FROM pm_projects WHERE repo=?1 AND provider=?2 AND id=?3",
         params![repo, provider, project_id],
@@ -777,7 +797,7 @@ fn require_accepted_initiative(
             "accepted Project {project_id} does not belong to Initiative {initiative}"
         )));
     }
-    Ok(accepted)
+    Ok(())
 }
 
 fn validate_project_membership(

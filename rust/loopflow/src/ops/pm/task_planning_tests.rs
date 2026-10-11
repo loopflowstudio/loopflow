@@ -4660,8 +4660,8 @@ fn project_prose_older_acknowledgement_preserves_successor() {
 }
 
 #[test]
-fn project_prose_rejects_stale_and_foreign_observations_without_settling() {
-    for foreign in [false, true] {
+fn project_field_delivery_requires_revision_accepted_into_work() {
+    for rejection in ["stale", "foreign", "archived", "unresolved", "unversioned"] {
         with_planning_task(|runtime, fixture, repo, task, state| {
             runtime.block_on(async {
                 let work = crate::durable::WorkRef::Project(task.project_id.clone());
@@ -4682,12 +4682,54 @@ fn project_prose_rejects_stale_and_foreign_observations_without_settling() {
                     .sqlite
                     .pending_project_changes(&task.project_id)
                     .unwrap();
-                provider["content"] = json!("Rejected prose\n\nworkflow: changed\n");
-                if foreign {
-                    provider["initiatives"] = json!({"nodes":[{"id":"foreign"}]});
-                    provider["updatedAt"] = json!("2026-10-10T12:01:00Z");
-                } else {
-                    provider["updatedAt"] = json!("2026-10-10T11:59:00Z");
+                let saved_task = fixture.store.sqlite.task(&task.id).unwrap();
+                let workflow = fixture.store.sqlite.workflow(&task.id).unwrap();
+                match rejection {
+                    "stale" => provider["updatedAt"] = json!("2026-10-10T11:59:00Z"),
+                    "foreign" => {
+                        provider["initiatives"] = json!({"nodes":[{"id":"foreign"}]});
+                        provider["updatedAt"] = json!("2026-10-10T12:01:00Z");
+                    }
+                    "archived" => {
+                        let client = super::linear_client(repo).await.unwrap();
+                        let (observed, _) = client
+                            .project_content_observation("project-1")
+                            .await
+                            .unwrap();
+                        fixture
+                            .store
+                            .sqlite
+                            .confirm_pm_project_archival(
+                                &repo.to_string_lossy(),
+                                "linear",
+                                &observed,
+                                now(),
+                            )
+                            .unwrap();
+                    }
+                    "unresolved" => {
+                        let client = super::linear_client(repo).await.unwrap();
+                        let (mut observed, _) = client
+                            .project_content_observation("project-1")
+                            .await
+                            .unwrap();
+                        observed.team_ids = vec!["another-team".into()];
+                        assert!(fixture
+                            .store
+                            .sqlite
+                            .put_pm_project(
+                                &task.wave_id,
+                                "linear",
+                                "initiative-1",
+                                &observed,
+                                now(),
+                            )
+                            .is_err());
+                        // Re-reading the original entity revision cannot order the
+                        // disputed Team relation or authorize delivery.
+                    }
+                    "unversioned" => provider["updatedAt"] = json!(null),
+                    _ => unreachable!(),
                 }
                 state.lock().await.project_fields = Some(provider);
                 assert!(
@@ -4711,7 +4753,18 @@ fn project_prose_rejects_stale_and_foreign_observations_without_settling() {
                         .unwrap(),
                     pending
                 );
-                assert_eq!(state.lock().await.field_writes, 0);
+                assert_eq!(state.lock().await.field_writes, 0, "{rejection}");
+                assert_eq!(fixture.store.sqlite.task(&task.id).unwrap(), saved_task);
+                assert_eq!(fixture.store.sqlite.workflow(&task.id).unwrap(), workflow);
+                let attempted: bool = rusqlite::Connection::open(&fixture.database)
+                    .unwrap()
+                    .query_row(
+                        "SELECT attempted FROM project_changes WHERE id=?1",
+                        [&pending[0].id],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                assert!(!attempted, "{rejection}");
             });
         });
     }

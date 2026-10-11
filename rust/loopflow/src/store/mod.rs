@@ -369,24 +369,6 @@ impl Store {
         .await
     }
 
-    pub async fn put_pm_project(
-        &self,
-        wave: &WaveId,
-        provider: &str,
-        initiative: &str,
-        project: crate::pm::linear::LinearProject,
-        observed_at: i64,
-        acquisition: Option<Arc<PlanningLocks>>,
-    ) -> StoreResult<crate::pm::linear::LinearProject> {
-        let wave = wave.clone();
-        let provider = provider.to_string();
-        let initiative = initiative.to_string();
-        run_planning_write(&self.sqlite, acquisition, move |store| {
-            store.put_pm_project(&wave, &provider, &initiative, &project, observed_at)
-        })
-        .await
-    }
-
     pub(crate) async fn reconcile_pm_project_teams(
         &self,
         wave: &WaveId,
@@ -2545,8 +2527,8 @@ mod tests {
             .await
             .unwrap();
         assert!(store
-            .put_pm_project(wave.id(), "linear", &snapshot.initiative, old, 20, None)
-            .await
+            .sqlite
+            .put_pm_project(wave.id(), "linear", &snapshot.initiative, &old, 20)
             .is_err());
         assert!(store.put_pm_snapshot(snapshot, None).await.is_err());
         assert!(store.pm_snapshot(wave.id()).await.unwrap().is_none());
@@ -2585,15 +2567,8 @@ mod tests {
         });
         confirmed.revision = Some("2026-10-05T12:00:01Z".into());
         store
-            .put_pm_project(
-                wave.id(),
-                "linear",
-                &snapshot.initiative,
-                confirmed.clone(),
-                10,
-                None,
-            )
-            .await
+            .sqlite
+            .put_pm_project(wave.id(), "linear", &snapshot.initiative, &confirmed, 10)
             .unwrap();
         let accepted = store.pm_snapshot(wave.id()).await.unwrap().unwrap();
         assert_eq!(accepted.synced_at, snapshot.synced_at);
@@ -2605,15 +2580,8 @@ mod tests {
         let other = Wave::new(WaveId::new(), "other".into(), wave.repo().into());
         store.create_wave(&other).await.unwrap();
         assert!(store
-            .put_pm_project(
-                other.id(),
-                "linear",
-                &snapshot.initiative,
-                confirmed,
-                20,
-                None
-            )
-            .await
+            .sqlite
+            .put_pm_project(other.id(), "linear", &snapshot.initiative, &confirmed, 20)
             .is_err());
         assert_eq!(
             store.get_project(&project.id).await.unwrap().unwrap(),
@@ -3284,22 +3252,15 @@ mod tests {
         store.create_project(&project).await.unwrap();
         select_project(&store, &project);
         let task = make_task(&wave, &project);
-        store.seed_task(&task, &make_task_pr(&task)).await.unwrap();
+        let task = store.seed_task(&task, &make_task_pr(&task)).await.unwrap();
 
         let mut snapshot = task_planning_snapshot(&wave, &project, &task);
         let mut observed = snapshot.snapshot.projects.remove(0);
         observed.workflow = "incident".into();
         observed.status = crate::work::project::ProjectStatus::Completed;
         store
-            .put_pm_project(
-                wave.id(),
-                "linear",
-                &snapshot.initiative,
-                observed.clone(),
-                10,
-                None,
-            )
-            .await
+            .sqlite
+            .put_pm_project(wave.id(), "linear", &snapshot.initiative, &observed, 10)
             .unwrap();
 
         let stored_project = store.get_project(&project.id).await.unwrap().unwrap();

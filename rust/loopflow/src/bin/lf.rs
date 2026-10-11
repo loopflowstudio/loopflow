@@ -1051,11 +1051,10 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             } else {
                 println!("{} · {}", issue.id, issue.title);
             }
-            if loopflow::config::load_config_or_default(Some(repo))
-                .pm
-                .and_then(|pm| pm.linear_team)
-                .is_some()
-            {
+            if matches!(
+                loopflow::config::load_config_or_default(Some(repo)).planning_transport(),
+                loopflow::config::PlanningConfig::Linear {}
+            ) {
                 eprintln!("Saved locally; pending Linear sync.");
             }
             Ok(())
@@ -1253,11 +1252,10 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
         TaskCommand::Delete { issue } => {
             let identifier = loopflow::ops::task::task_delete(repo, issue)?;
             println!("{identifier}: removed locally; execution history retained");
-            if loopflow::config::load_config_or_default(Some(repo))
-                .pm
-                .and_then(|pm| pm.linear_team)
-                .is_some()
-            {
+            if matches!(
+                loopflow::config::load_config_or_default(Some(repo)).planning_transport(),
+                loopflow::config::PlanningConfig::Linear {}
+            ) {
                 println!("Pending Linear sync");
             }
             Ok(())

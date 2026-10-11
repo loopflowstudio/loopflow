@@ -12,7 +12,6 @@ use std::time::{Duration, Instant};
 
 use futures_util::future::try_join_all;
 
-use crate::config::load_repo_config;
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
 use crate::ops::util::normalize_wave_name;
@@ -29,7 +28,7 @@ use crate::store::{
 };
 use crate::work::task::comment::TaskComment;
 use crate::work::task::Task;
-use crate::work::wave::config::{read_wave_config, update_wave_goal_config, WavePmConfig};
+use crate::work::wave::config::{read_wave_config, update_wave_goal_config};
 use crate::work::wave::Wave;
 
 // ── Options and results ─────────────────────────────────────────────
@@ -181,49 +180,23 @@ impl std::ops::Deref for PmContext {
     }
 }
 
-fn read_wave_pm_config(repo: &Path, wave: &str) -> Option<WavePmConfig> {
-    read_wave_config(repo, wave).and_then(|config| config.pm)
-}
-
 pub(crate) fn resolve_wave(wave: Option<&str>) -> OpsResult<String> {
     wave.and_then(normalize_wave_name)
         .ok_or_else(|| OpsError::Message("cannot determine wave; pass --wave <name>".to_string()))
 }
 
-fn require_linear_provider(value: &str) -> OpsResult<()> {
-    if value.trim().eq_ignore_ascii_case("linear") {
-        return Ok(());
-    }
-    Err(OpsError::Message(format!(
-        "unsupported PM provider {:?}; expected \"linear\"",
-        value.trim().to_ascii_lowercase()
-    )))
-}
-
-fn require_linear_config(repo: &Path) -> OpsResult<()> {
-    let config = load_repo_config(repo)
-        .map_err(|error| OpsError::Message(format!("failed to read .lf/config.yaml: {error}")))?
-        .unwrap_or_default();
-    if let Some(provider) = config
-        .pm
-        .as_ref()
-        .and_then(|pm| pm.provider.as_deref())
-        .filter(|provider| !provider.trim().is_empty())
-    {
-        require_linear_provider(provider)?;
-    }
-    Ok(())
-}
-
 pub(super) fn read_initiative(repo: &Path, wave: &str) -> Option<String> {
-    read_wave_pm_config(repo, wave)?
-        .linear_initiative
+    read_wave_config(repo, wave)?
+        .linear?
+        .initiative
         .filter(|initiative| !initiative.trim().is_empty())
 }
 
-fn read_repository_team(repo: &Path) -> OpsResult<Option<String>> {
+pub(crate) fn selected_linear_team(repo: &Path) -> OpsResult<Option<String>> {
     let config = crate::config::load_config(Some(repo))
-        .map_err(|error| OpsError::Message(format!("failed to read .lf/config.yaml: {error}")))?
+        .map_err(|error| {
+            OpsError::Message(format!("failed to read planning configuration: {error}"))
+        })?
         .unwrap_or_default();
     if !matches!(
         config.planning_transport(),
@@ -231,101 +204,26 @@ fn read_repository_team(repo: &Path) -> OpsResult<Option<String>> {
     ) {
         return Ok(None);
     }
-    Ok(config
-        .pm
-        .and_then(|pm| pm.linear_team)
+    Ok(crate::config::load_repo_config(repo)
+        .map_err(|error| OpsError::Message(format!("failed to read .lf/config.yaml: {error}")))?
+        .unwrap_or_default()
+        .linear
+        .team
         .filter(|team| !team.trim().is_empty()))
 }
 
-fn require_repository_team(repo: &Path) -> OpsResult<String> {
-    read_repository_team(repo)?.ok_or_else(|| {
+pub(crate) fn repository_team_id(repo: &Path) -> OpsResult<String> {
+    selected_linear_team(repo)?.ok_or_else(|| {
         OpsError::Message(
-            ".lf/config.yaml has no repository `pm.linear_team`. \
+            ".lf/config.yaml has no repository `linear.team`. \
              Run `lf repo connect <wave> --team-key <KEY>` before creating or mutating work."
                 .to_string(),
         )
     })
 }
 
-fn wave_has_pm_initiative(repo: &Path, wave: &str) -> bool {
-    require_linear_config(repo).is_ok() && read_initiative(repo, wave).is_some()
-}
-
-fn legacy_pm_sentinels(repo: &Path) -> OpsResult<Vec<String>> {
-    let config = load_repo_config(repo)
-        .map_err(|error| OpsError::Message(format!("failed to read .lf/config.yaml: {error}")))?
-        .unwrap_or_default();
-    let mut sentinels = Vec::new();
-    if config.linear.team.is_some() {
-        sentinels.push(".lf/config.yaml `linear.team`".to_string());
-    }
-    for wave in list_local_waves(repo)? {
-        let Some(pm) = read_wave_pm_config(repo, &wave) else {
-            continue;
-        };
-        if pm.provider.is_some() {
-            sentinels.push(format!("wave/{wave}/GOAL.md `pm.provider`"));
-        }
-        if pm.linear_team.is_some() {
-            sentinels.push(format!("wave/{wave}/GOAL.md `pm.linear_team`"));
-        }
-    }
-    Ok(sentinels)
-}
-
-pub(crate) fn require_repository_pm_ready(repo: &Path) -> OpsResult<()> {
-    let sentinels = legacy_pm_sentinels(repo)?;
-    if sentinels.is_empty() {
-        return Ok(());
-    }
-    Err(OpsError::Message(format!(
-        "repository PM migration is required before this mutation; legacy authority remains at {}. \
-         Run `lf repo reteam` to inspect the repository-wide plan, then `lf repo reteam --apply`. \
-         Loopflow's live migration is owned by PRD-44.",
-        sentinels.join(", ")
-    )))
-}
-
-pub(crate) fn repository_team_id(repo: &Path) -> OpsResult<String> {
-    require_repository_pm_ready(repo)?;
-    require_linear_config(repo)?;
-    require_repository_team(repo)
-}
-
-/// Expected Team for strict cached reads after migration. During the deliberate
-/// PRD-43/PRD-44 mixed state, legacy snapshots remain inspectable and validate
-/// their own singular Team rather than pretending they already carry the new one.
-pub(crate) fn repository_team_for_snapshot_validation(
-    repo: &Path,
-    store: &Store,
-) -> OpsResult<Option<String>> {
-    let config = load_repo_config(repo)
-        .map_err(|error| OpsError::Message(error.to_string()))?
-        .unwrap_or_default();
-    if config.linear.team.is_some() {
-        return Ok(None);
-    }
-    let canonical = crate::repository::CanonicalRepo::discover(repo)
-        .map_err(|error| OpsError::Message(error.to_string()))?;
-    for wave in store
-        .sqlite
-        .list_waves(Some(&canonical.to_string()))
-        .map_err(|error| OpsError::Message(error.to_string()))?
-    {
-        let Some(definition) = crate::work::wave::config::try_read_wave_config(repo, wave.slug())
-            .map_err(|error| OpsError::Message(error.to_string()))?
-        else {
-            continue;
-        };
-        if definition
-            .pm
-            .is_some_and(|pm| pm.provider.is_some() || pm.linear_team.is_some())
-        {
-            return Ok(None);
-        }
-    }
-    require_linear_config(repo)?;
-    read_repository_team(repo)
+fn wave_has_linear_initiative(repo: &Path, wave: &str) -> bool {
+    read_initiative(repo, wave).is_some()
 }
 
 async fn build_client(team: Option<String>) -> OpsResult<LinearClient> {
@@ -347,9 +245,7 @@ fn repository_id(repo: &Path) -> OpsResult<RepoId> {
 }
 
 async fn resolve_repository_context(repo: &Path) -> OpsResult<RepositoryPmContext> {
-    require_repository_pm_ready(repo)?;
-    require_linear_config(repo)?;
-    let team_id = require_repository_team(repo)?;
+    let team_id = repository_team_id(repo)?;
     let repo_id = repository_id(repo)?;
     let client = build_client(Some(team_id.clone())).await?;
     client
@@ -369,8 +265,7 @@ pub async fn linear_client(repo: &Path) -> OpsResult<LinearClient> {
 }
 
 /// A Task already names its linked issue; comment access needs no team discovery.
-pub(crate) async fn issue_client(repo: &Path) -> OpsResult<LinearClient> {
-    require_linear_config(repo)?;
+pub(crate) async fn issue_client() -> OpsResult<LinearClient> {
     build_client(None).await
 }
 
@@ -378,7 +273,7 @@ pub(crate) async fn resolve_context(repo: &Path, wave: &str) -> OpsResult<PmCont
     let repository = resolve_repository_context(repo).await?;
     let initiative = read_initiative(repo, wave).ok_or_else(|| {
         OpsError::Message(format!(
-            "wave/{wave}/GOAL.md has no `pm.linear_initiative`. \
+            "wave/{wave}/GOAL.md has no `linear.initiative`. \
              Run `lf repo connect {wave}` to connect its Linear Initiative."
         ))
     })?;
@@ -741,10 +636,15 @@ async fn pm_init_async(
         .await
         .map_err(|cause| OpsError::Message(cause.to_string()))?;
 
-    require_linear_config(repo)?;
     let repo_id = repository_id(repo)?;
     let existing_initiative = read_initiative(repo, &wave);
-    let existing_team = read_repository_team(repo)?;
+    // Connecting selects a transport; it must first preserve the existing binding.
+    let existing_team = crate::config::load_repo_config(repo)
+        .map_err(|error| OpsError::Message(format!("failed to read .lf/config.yaml: {error}")))?
+        .unwrap_or_default()
+        .linear
+        .team
+        .filter(|team| !team.trim().is_empty());
 
     let summary = crate::work::wave::config::read_wave_summary(repo, &wave)?;
     let title = title_case(&wave);
@@ -773,7 +673,6 @@ async fn pm_init_async(
             .await
             .map_err(pm_to_ops)?,
     };
-    let team_changed = existing_team.as_deref() != Some(team.id.as_str());
 
     // Initiative: keep an existing binding, else find or create it.
     let initiative_missing = existing_initiative.is_none();
@@ -804,11 +703,9 @@ async fn pm_init_async(
     if initiative_missing {
         write_initiative_to_goal(repo, &wave, &initiative_id)?;
     }
-    if team_changed {
-        write_repository_pm_config(repo, &team.id)?;
-    }
+    let connection_changed = write_repository_linear_config(repo, &team.id)?;
 
-    if initiative_missing || team_changed {
+    if initiative_missing || connection_changed {
         let _ = crate::ops::commit_workflow(
             repo,
             &crate::ops::CommitOptions {
@@ -1075,7 +972,7 @@ async fn link_pr_with_client(
 pub fn list_pm_waves(repo: &Path) -> OpsResult<Vec<String>> {
     Ok(list_local_waves(repo)?
         .into_iter()
-        .filter(|wave| wave_has_pm_initiative(repo, wave))
+        .filter(|wave| wave_has_linear_initiative(repo, wave))
         .collect())
 }
 
@@ -1093,7 +990,6 @@ pub(crate) async fn inspect_task_planning_async(
     let scope = crate::repository::CanonicalRepo::discover(repo)
         .map_err(|error| OpsError::Message(error.to_string()))?
         .to_string();
-    require_linear_config(repo)?;
     let store = pm_store().await?;
     let existing = store
         .linear_issue_evidence(&scope, issue)
@@ -1305,7 +1201,6 @@ pub(crate) fn singular_project_initiative(project: &LinearProject) -> OpsResult<
 }
 
 pub(crate) fn wave_for_initiative(repo: &Path, initiative_id: &str) -> OpsResult<String> {
-    require_linear_config(repo)?;
     let matches = list_local_waves(repo)?
         .into_iter()
         .filter(|wave| read_initiative(repo, wave).as_deref() == Some(initiative_id))
@@ -1352,10 +1247,9 @@ fn reteam_comment_body(old_identifier: &str, team_key: &str) -> String {
 }
 
 async fn resolve_reteam_context(repo: &Path) -> OpsResult<ResolvedReteamContext> {
-    require_linear_config(repo)?;
-    let team_id = read_repository_team(repo)?.ok_or_else(|| {
+    let team_id = selected_linear_team(repo)?.ok_or_else(|| {
         OpsError::Message(
-            ".lf/config.yaml has no repository `pm.linear_team`. \
+            ".lf/config.yaml has no repository `linear.team`. \
              Run `lf repo connect <wave> --team-key <KEY>` to establish the migration target."
                 .to_string(),
         )
@@ -1501,12 +1395,6 @@ async fn apply_or_plan_repository_reteam(
     if waves.is_empty() {
         return Err(OpsError::Message(
             "repository has no Waves linked to Linear Initiatives".to_string(),
-        ));
-    }
-    if apply && repo.join(".git").exists() && !crate::git::is_clean(repo)? {
-        return Err(OpsError::Message(
-            "`lf repo reteam --apply` requires a clean Git checkout so its repository PM config and Wave bindings can commit atomically; commit or stash existing changes, then rerun the dry-run"
-                .to_string(),
         ));
     }
 
@@ -1746,8 +1634,7 @@ async fn apply_or_plan_repository_reteam(
             .await?;
         }
 
-        // Re-fetch and validate the complete repository before deleting any
-        // migration sentinel. A crash before cleanup remains loudly resumable.
+        // Confirm the complete inventory after moving issues and narrowing Teams.
         for wave in &waves {
             let initiative =
                 read_initiative(repo, wave).expect("preflight required every Initiative");
@@ -1757,21 +1644,6 @@ async fn apply_or_plan_repository_reteam(
             };
             let (registered, acquisition) = &locked_waves[wave];
             refresh_pm_snapshot_locked(repo, registered, &ctx, store, acquisition.clone()).await?;
-        }
-        remove_legacy_pm_sentinels(repo, &waves)?;
-        if repo.join(".git").exists() {
-            let _ = crate::ops::commit_workflow(
-                repo,
-                &crate::ops::CommitOptions {
-                    add: true,
-                    message: Some(
-                        "lf repo reteam: migrate repository to one Linear Team".to_string(),
-                    ),
-                    ..crate::ops::CommitOptions::for_task("pm")
-                },
-                progress,
-                &|_| {},
-            )?;
         }
     }
 
@@ -1811,8 +1683,7 @@ async fn pm_sync_async(
     let mut actions = Vec::new();
     let mut diagnostics = Vec::new();
     let mut blocking = Vec::new();
-    require_linear_config(repo)?;
-    let team_id = read_repository_team(repo)?;
+    let team_id = selected_linear_team(repo)?;
 
     if let Some(store) = open_existing_store().await {
         let origin = crate::work::wave::context::wave_origin(repo);
@@ -1839,16 +1710,8 @@ async fn pm_sync_async(
         }
     }
 
-    for sentinel in legacy_pm_sentinels(repo)? {
-        diagnostics.push(format!(
-            "legacy PM authority remains at {sentinel}; run repository-wide `lf repo reteam`"
-        ));
-    }
-    if !options.plan {
-        require_repository_pm_ready(repo)?;
-    }
     if team_id.is_none() {
-        let message = ".lf/config.yaml has no repository `pm.linear_team`; run `lf repo connect <wave> --team-key <KEY>`".to_string();
+        let message = ".lf/config.yaml has no repository `linear.team`; run `lf repo connect <wave> --team-key <KEY>`".to_string();
         diagnostics.push(message.clone());
         blocking.push(message);
     }
@@ -2121,23 +1984,23 @@ pub fn list_local_waves(repo: &Path) -> OpsResult<Vec<String>> {
 
 fn write_initiative_to_goal(repo: &Path, wave: &str, initiative_id: &str) -> OpsResult<()> {
     update_wave_goal_config(repo, wave, |map| {
-        let pm_key = serde_yaml_ng::Value::String("pm".to_string());
-        let mut pm_map = map
-            .get(&pm_key)
+        let linear_key = serde_yaml_ng::Value::String("linear".to_string());
+        let mut linear_map = map
+            .get(&linear_key)
             .and_then(serde_yaml_ng::Value::as_mapping)
             .cloned()
             .unwrap_or_default();
-        pm_map.insert(
-            serde_yaml_ng::Value::String("linear_initiative".to_string()),
+        linear_map.insert(
+            serde_yaml_ng::Value::String("initiative".to_string()),
             serde_yaml_ng::Value::String(initiative_id.to_string()),
         );
-        map.insert(pm_key, serde_yaml_ng::Value::Mapping(pm_map));
+        map.insert(linear_key, serde_yaml_ng::Value::Mapping(linear_map));
         Ok(())
     })
     .map_err(OpsError::Message)
 }
 
-fn write_repository_pm_config(repo: &Path, team_id: &str) -> OpsResult<()> {
+fn write_repository_linear_config(repo: &Path, team_id: &str) -> OpsResult<bool> {
     let path = repo.join(".lf/config.yaml");
     let mut root = match std::fs::read_to_string(&path) {
         Ok(content) if !content.trim().is_empty() => {
@@ -2154,68 +2017,7 @@ fn write_repository_pm_config(repo: &Path, team_id: &str) -> OpsResult<()> {
         }
         Err(error) => return Err(error.into()),
     };
-    let root_map = root.as_mapping_mut().ok_or_else(|| {
-        OpsError::Message(format!(
-            "repository config {} must be a YAML mapping",
-            path.display()
-        ))
-    })?;
-    let pm_key = serde_yaml_ng::Value::String("pm".to_string());
-    let mut pm = root_map
-        .get(&pm_key)
-        .and_then(serde_yaml_ng::Value::as_mapping)
-        .cloned()
-        .unwrap_or_default();
-    pm.insert(
-        serde_yaml_ng::Value::String("provider".to_string()),
-        serde_yaml_ng::Value::String("linear".to_string()),
-    );
-    pm.insert(
-        serde_yaml_ng::Value::String("linear_team".to_string()),
-        serde_yaml_ng::Value::String(team_id.to_string()),
-    );
-    root_map.insert(pm_key, serde_yaml_ng::Value::Mapping(pm));
-    std::fs::create_dir_all(path.parent().expect("config path has parent"))?;
-    std::fs::write(
-        &path,
-        serde_yaml_ng::to_string(&root).map_err(|error| {
-            OpsError::Message(format!("failed to encode {}: {error}", path.display()))
-        })?,
-    )?;
-    Ok(())
-}
-
-fn remove_legacy_pm_sentinels(repo: &Path, waves: &[String]) -> OpsResult<()> {
-    for wave in waves {
-        update_wave_goal_config(repo, wave, |root| {
-            let pm_key = serde_yaml_ng::Value::String("pm".to_string());
-            let Some(mut pm) = root
-                .get(&pm_key)
-                .and_then(serde_yaml_ng::Value::as_mapping)
-                .cloned()
-            else {
-                return Ok(());
-            };
-            pm.remove(serde_yaml_ng::Value::String("provider".to_string()));
-            pm.remove(serde_yaml_ng::Value::String("linear_team".to_string()));
-            if pm.is_empty() {
-                root.remove(&pm_key);
-            } else {
-                root.insert(pm_key, serde_yaml_ng::Value::Mapping(pm));
-            }
-            Ok(())
-        })
-        .map_err(OpsError::Message)?;
-    }
-
-    let path = repo.join(".lf/config.yaml");
-    let content = std::fs::read_to_string(&path)?;
-    let mut root: serde_yaml_ng::Value = serde_yaml_ng::from_str(&content).map_err(|error| {
-        OpsError::Message(format!(
-            "invalid repository config {}: {error}",
-            path.display()
-        ))
-    })?;
+    let previous = root.clone();
     let root_map = root.as_mapping_mut().ok_or_else(|| {
         OpsError::Message(format!(
             "repository config {} must be a YAML mapping",
@@ -2223,25 +2025,32 @@ fn remove_legacy_pm_sentinels(repo: &Path, waves: &[String]) -> OpsResult<()> {
         ))
     })?;
     let linear_key = serde_yaml_ng::Value::String("linear".to_string());
-    if let Some(mut linear) = root_map
+    let mut linear = root_map
         .get(&linear_key)
         .and_then(serde_yaml_ng::Value::as_mapping)
         .cloned()
-    {
-        linear.remove(serde_yaml_ng::Value::String("team".to_string()));
-        if linear.is_empty() {
-            root_map.remove(&linear_key);
-        } else {
-            root_map.insert(linear_key, serde_yaml_ng::Value::Mapping(linear));
-        }
+        .unwrap_or_default();
+    linear.insert(
+        serde_yaml_ng::Value::String("team".to_string()),
+        serde_yaml_ng::Value::String(team_id.to_string()),
+    );
+    root_map.insert(linear_key, serde_yaml_ng::Value::Mapping(linear));
+    root_map.insert(
+        "planning".into(),
+        serde_yaml_ng::to_value(crate::config::PlanningConfig::Linear {})
+            .map_err(|error| OpsError::Message(error.to_string()))?,
+    );
+    if root == previous {
+        return Ok(false);
     }
+    std::fs::create_dir_all(path.parent().expect("config path has parent"))?;
     std::fs::write(
         &path,
         serde_yaml_ng::to_string(&root).map_err(|error| {
             OpsError::Message(format!("failed to encode {}: {error}", path.display()))
         })?,
     )?;
-    Ok(())
+    Ok(true)
 }
 
 /// A default team key (Task prefix) derived from the repository name: the first three
@@ -2726,16 +2535,109 @@ mod tests {
     }
 
     #[test]
+    fn connect_overrides_personal_git_without_rebinding_the_repository() {
+        with_pm_home(|home, runtime| {
+            std::fs::write(home.path().join("config.yaml"),
+                "planning:\n  provider: git\n  remote: personal\n  shared: private\nlinear:\n  team: personal-team\n").unwrap();
+            runtime.block_on(async {
+                let fixture = test_fixture::Fixture::new().await;
+                let (repo, wave) = fixture.planning_repo().await;
+                fixture.seed(test_fixture::now() + 3600).await;
+                let team = json!({"data": {"teams": {"nodes": [{
+                    "id": "team-1", "name": "Retained work", "key": "OLD",
+                    "description": "<!-- loopflow-repository: loopflowstudio/fixture -->"
+                }, {
+                    "id": "other-team", "name": "Fixture", "key": "FIX",
+                    "description": "<!-- loopflow-repository: loopflowstudio/fixture -->"
+                }]}}});
+                let (url, _) = test_server::spawn(vec![
+                    json_response(StatusCode::OK, team.clone()),
+                    json_response(StatusCode::OK, team.clone()),
+                    json_response(StatusCode::OK, team.clone()),
+                    projects_response(json!([])),
+                    json_response(StatusCode::OK, team.clone()),
+                    json_response(StatusCode::OK, team.clone()),
+                    json_response(StatusCode::OK, team),
+                    projects_response(json!([])),
+                ])
+                .await;
+                PM_TEST_CONTEXT
+                    .scope(fixture.context(&url), async {
+                        let options = PmInitOptions {
+                            wave: Some("product".into()),
+                            ..Default::default()
+                        };
+                        for _ in 0..2 {
+                            let result =
+                                pm_init_async(&repo, &options, &NullProgress).await.unwrap();
+                            assert_eq!(result.team_id, "team-1");
+                            assert_eq!(result.initiative_id, "initiative-1");
+                            assert!(!result.created && !result.team_created);
+                        }
+                        let config = crate::config::load_config(Some(&repo)).unwrap().unwrap();
+                        assert_eq!(
+                            config.planning_transport(),
+                            crate::config::PlanningConfig::Linear {}
+                        );
+                        assert_eq!(
+                            selected_linear_team(&repo).unwrap().as_deref(),
+                            Some("team-1")
+                        );
+                        assert_eq!(
+                            fixture.store.list_waves(None).await.unwrap()[0].id(),
+                            wave.id()
+                        );
+                        assert!(fixture
+                            .store
+                            .list_tasks(Some(wave.id()))
+                            .await
+                            .unwrap()
+                            .is_empty());
+                    })
+                    .await;
+            });
+        });
+    }
+
+    #[test]
+    fn connection_selects_linear_and_preserves_unrelated_authored_content() {
+        let repo = tempfile::tempdir().unwrap();
+        write_repo_config(
+            repo.path(),
+            "agent: codex\nplanning:\n  provider: git\n  shared: colleagues\n",
+        );
+        write_goal(repo.path(), "product", "agent: claude\n");
+        let goal = repo.path().join("wave/product/GOAL.md");
+
+        write_repository_linear_config(repo.path(), "team-product").unwrap();
+        write_initiative_to_goal(repo.path(), "product", "initiative-product").unwrap();
+        let config = crate::config::load_repo_config(repo.path())
+            .unwrap()
+            .unwrap();
+        assert_eq!(config.linear.team.as_deref(), Some("team-product"));
+        assert_eq!(
+            config.planning_transport(),
+            crate::config::PlanningConfig::Linear {}
+        );
+        assert_eq!(config.agent.as_deref(), Some("codex"));
+        let updated = std::fs::read_to_string(goal).unwrap();
+        assert!(updated.ends_with("---\nDrive the work.\n"));
+        let wave = read_wave_config(repo.path(), "product").unwrap();
+        assert_eq!(wave.agent.as_deref(), Some("claude"));
+        assert_eq!(
+            wave.linear.unwrap().initiative.as_deref(),
+            Some("initiative-product")
+        );
+    }
+
+    #[test]
     fn repository_team_config_is_the_only_normal_authority() {
         with_pm_home(|repo, runtime| {
-            write_repo_config(
-                repo.path(),
-                "pm:\n  provider: linear\n  linear_team: team-loo\n",
-            );
+            write_repo_config(repo.path(), "linear:\n  team: team-loo\n");
             write_goal(
                 repo.path(),
                 "product",
-                "pm:\n  linear_initiative: initiative-product\n",
+                "linear:\n  initiative: initiative-product\n",
             );
 
             runtime.block_on(async {
@@ -2749,43 +2651,13 @@ mod tests {
                     .unwrap();
             });
             assert_eq!(
-                read_repository_team(repo.path()).unwrap().as_deref(),
+                selected_linear_team(repo.path()).unwrap().as_deref(),
                 Some("team-loo")
             );
             assert_eq!(
                 read_initiative(repo.path(), "product").as_deref(),
                 Some("initiative-product")
             );
-            assert!(legacy_pm_sentinels(repo.path()).unwrap().is_empty());
-        });
-    }
-
-    #[test]
-    fn legacy_wave_team_authority_blocks_mutations_with_prd_44_recovery() {
-        with_pm_home(|repo, runtime| {
-            write_repo_config(
-                repo.path(),
-                "pm:\n  provider: linear\n  linear_team: team-loo\nlinear:\n  team: team-old\n",
-            );
-            write_goal(
-                repo.path(),
-                "product",
-                "pm:\n  provider: linear\n  linear_initiative: initiative-product\n  linear_team: team-old\n",
-            );
-
-            runtime.block_on(async {
-                let store = crate::store::open_ephemeral_store(
-                    &crate::store::StorageConfig::sqlite(repo.path().join("loopflow.db")),
-                )
-                .await
-                .unwrap();
-                crate::work::wave::ensure_wave_row(&store, repo.path(), "product")
-                    .await
-                    .unwrap();
-            });
-            let error = require_repository_pm_ready(repo.path()).unwrap_err();
-            assert!(error.to_string().contains("lf repo reteam --apply"));
-            assert!(error.to_string().contains("PRD-44"));
         });
     }
 
@@ -2816,24 +2688,29 @@ mod tests {
     }
 
     #[test]
-    fn repository_team_reteam_migrates_open_and_completed_issues_before_cleanup() {
-        with_pm_home(|repo, runtime| {
+    fn repository_team_reteam_moves_open_and_completed_issues() {
+        with_pm_home(|_home, runtime| {
+            let repo = loopflow_test_support::TestRepo::new();
             runtime.block_on(async {
                 write_repo_config(
                     repo.path(),
-                    "pm:\n  provider: linear\n  linear_team: team-loo\nlinear:\n  team: team-old\n",
+                    "linear:\n  team: team-loo\n",
                 );
                 write_goal(
                     repo.path(),
                     "survival",
-                    "pm:\n  provider: linear\n  linear_initiative: initiative-survival\n  linear_team: team-old\n",
+                    "linear:\n  initiative: initiative-survival\n",
                 );
                 write_goal(
                     repo.path(),
                     "survival/infrastructure",
-                    "pm:\n  provider: linear\n  linear_initiative: initiative-infrastructure\n  linear_team: team-old\n",
+                    "linear:\n  initiative: initiative-infrastructure\n",
                 );
 
+                repo.stage_all();
+                repo.commit("Bind fixture repository and Waves");
+                let retained_head = repo.head_sha();
+                repo.create_file("unrelated.txt", "Keep this local edit.\n");
                 let database = repo.path().join("loopflow.db");
                 let store = crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
                     database.clone(),
@@ -2979,6 +2856,8 @@ mod tests {
                     .unwrap();
 
                 assert!(result.applied);
+                assert_eq!(repo.head_sha(), retained_head);
+                assert_eq!(std::fs::read_to_string(repo.path().join("unrelated.txt")).unwrap(), "Keep this local edit.\n");
                 assert_eq!(result.moves.len(), 2);
                 let identifiers = result
                     .moves
@@ -2986,16 +2865,13 @@ mod tests {
                     .filter_map(|item| item.new_identifier.as_deref())
                     .collect::<BTreeSet<_>>();
                 assert_eq!(identifiers, BTreeSet::from(["LOO-1", "LOO-2"]));
-                assert!(legacy_pm_sentinels(repo.path()).unwrap().is_empty());
+
                 assert_eq!(
-                    read_repository_team(repo.path()).unwrap().as_deref(),
+                    selected_linear_team(repo.path()).unwrap().as_deref(),
                     Some("team-loo")
                 );
                 for wave in ["survival", "survival/infrastructure"] {
-                    let pm = read_wave_pm_config(repo.path(), wave).unwrap();
-                    assert!(pm.provider.is_none());
-                    assert!(pm.linear_team.is_none());
-                    assert!(pm.linear_initiative.is_some());
+                    assert!(read_initiative(repo.path(), wave).is_some());
                     let locator = crate::work::wave::WaveLocator::discover(repo.path(), wave).unwrap();
                     let registered = resolved.store.get_wave_at(&locator).await.unwrap().unwrap();
                     let projects = resolved.store.list_projects(Some(registered.id())).await.unwrap();
@@ -3060,12 +2936,12 @@ mod tests {
             runtime.block_on(async {
                 write_repo_config(
                     repo.path(),
-                    "pm:\n  provider: linear\n  linear_team: team-loo\nlinear:\n  team: team-old\n",
+                    "linear:\n  team: team-loo\n",
                 );
                 write_goal(
                     repo.path(),
                     "survival",
-                    "pm:\n  provider: linear\n  linear_initiative: initiative-survival\n  linear_team: team-old\n",
+                    "linear:\n  initiative: initiative-survival\n",
                 );
 
                 let database = repo.path().join("loopflow.db");
@@ -3237,7 +3113,7 @@ mod tests {
                         .contains(&format!("{interruption} interrupted")),
                     "{first}"
                 );
-                assert!(!legacy_pm_sentinels(repo.path()).unwrap().is_empty());
+
 
                 let resumed = run_reteam_fixture(&resolved, repo.path(), &database)
                     .await
@@ -3255,7 +3131,7 @@ mod tests {
                     assert_eq!(serde_json::from_str::<Vec<String>>(&teams).unwrap(), ["team-loo"]);
                 let tasks = resolved.store.list_tasks(Some(wave.id())).await.unwrap();
                 assert_eq!(tasks[0].identifier, "LOO-1");
-                assert!(legacy_pm_sentinels(repo.path()).unwrap().is_empty());
+
                 let requests = requests.lock().await;
                 assert_eq!(
                     requests

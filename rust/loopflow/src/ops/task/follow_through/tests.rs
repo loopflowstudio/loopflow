@@ -422,13 +422,13 @@ fn fixture(
     std::fs::create_dir_all(repo.path().join(".lf")).unwrap();
     std::fs::write(
         repo.path().join(".lf/config.yaml"),
-        "pm:\n  provider: linear\n  linear_team: team-1\n",
+        "linear:\n  team: team-1\n",
     )
     .unwrap();
     std::fs::create_dir_all(repo.path().join("wave/product")).unwrap();
     std::fs::write(
         repo.path().join("wave/product/GOAL.md"),
-        "---\npm:\n  linear_initiative: initiative-1\n---\nProduct\n",
+        "---\nlinear:\n  initiative: initiative-1\n---\nProduct\n",
     )
     .unwrap();
     repo.create_file(

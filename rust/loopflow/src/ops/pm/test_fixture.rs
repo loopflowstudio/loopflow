@@ -90,15 +90,11 @@ impl Fixture {
                 .unwrap()
                 .success());
         }
-        std::fs::write(
-            repo.join(".lf/config.yaml"),
-            "pm:\n  provider: linear\n  linear_team: team-1\n",
-        )
-        .unwrap();
+        std::fs::write(repo.join(".lf/config.yaml"), "linear:\n  team: team-1\n").unwrap();
         std::fs::create_dir_all(repo.join("wave/product")).unwrap();
         std::fs::write(
             repo.join("wave/product/GOAL.md"),
-            "---\npm:\n  linear_initiative: initiative-1\n---\nKeep working.\n",
+            "---\nlinear:\n  initiative: initiative-1\n---\nKeep working.\n",
         )
         .unwrap();
         let repo = std::fs::canonicalize(repo).unwrap();

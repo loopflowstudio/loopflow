@@ -252,15 +252,17 @@ planning:
 ```yaml
 planning:
   provider: linear
-pm:
-  linear_team: <team-id>
+linear:
+  team: <team-id>
 ```
 
 Repository `planning` replaces the personal selection as a whole. Omit `shared`
 for `refs/loopflow/planning/users/<user-key>`; shared names use
-`refs/loopflow/planning/shared/<name>`. Existing `pm.linear_team` selects Linear
+`refs/loopflow/planning/shared/<name>`. Existing `linear.team` selects Linear
 when `planning` is omitted. Every machine uses the selected transport independently.
 Linear unavailability leaves saves buffered locally; it never switches to Git.
+`lf repo connect <wave>` saves the repository Team and selects Linear, overriding
+a personal Git preference.
 
 ```bash
 lf planning status --json

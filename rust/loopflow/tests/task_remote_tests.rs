@@ -35,6 +35,7 @@ fn source(branch: &str, commit: &str) -> String {
 fn machine_selector_acquires_unknown_planning_and_reuses_the_pushed_checkout() {
     let repo = TestRepo::new();
     repo.create_file("wave/task-pr-tests/GOAL.md", "Keep work.\n");
+    repo.create_file("wave/task-pr-tests/MEMORY.md", "Retain fixture context.\n");
     repo.stage_all();
     repo.commit("Author local-only planning intent");
     repo.push();
@@ -201,9 +202,10 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"inspected"
         let output = invoke(selector, task);
         assert!(
             output.status.success(),
-            "stdout: {}\nstderr: {}",
+            "stdout: {}\nstderr: {}\nsource status: {}",
             String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
+            String::from_utf8_lossy(&output.stderr),
+            git(repo.path(), &["status", "--short"])
         );
     }
     assert_eq!(
@@ -329,10 +331,7 @@ fn missing_remote_branch_or_commit_is_named_without_creating_a_task() {
 #[test]
 fn machine_selector_names_unpushed_source_work_before_connecting_and_keeps_legacy_identity() {
     let repo = TestRepo::new();
-    repo.create_file(
-        ".lf/config.yaml",
-        "pm:\n  provider: linear\n  linear_team: team-task-pr-tests\n",
-    );
+    repo.create_file(".lf/config.yaml", "linear:\n  team: team-task-pr-tests\n");
     repo.stage_all();
     repo.commit("Planning config");
     repo.push();

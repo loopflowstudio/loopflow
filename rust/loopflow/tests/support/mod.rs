@@ -307,13 +307,10 @@ impl Drop for EnvGuard {
 
 #[allow(dead_code)] // Shared helper compiled into integration tests that do not need Task state.
 pub fn bind_task_planning(repo: &TestRepo) {
-    repo.create_file(
-        ".lf/config.yaml",
-        "pm:\n  provider: linear\n  linear_team: team-task-pr-tests\n",
-    );
+    repo.create_file(".lf/config.yaml", "linear:\n  team: team-task-pr-tests\n");
     repo.create_file(
         "wave/task-pr-tests/GOAL.md",
-        "---\npm:\n  linear_initiative: initiative-task-pr-tests\n---\nKeep work.\n",
+        "---\nlinear:\n  initiative: initiative-task-pr-tests\n---\nKeep work.\n",
     );
     repo.stage_all();
     repo.commit("Bind fixture planning before creating Task checkouts");

@@ -1017,7 +1017,7 @@ async fn validate_linear_ownership(
             .push((wave.id(), wave.slug()));
     }
     for (repo, waves) in ownership {
-        let expected_team = crate::ops::pm::repository_team_for_snapshot_validation(&repo, store)
+        let expected_team = crate::ops::pm::selected_linear_team(&repo)
             .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()));
         store
             .sqlite

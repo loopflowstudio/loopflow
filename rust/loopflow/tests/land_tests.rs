@@ -2133,7 +2133,7 @@ fn waited_task_landing_repairs_without_a_watcher_and_preserves_other_work() {
     let worktree = repo.path().canonicalize().unwrap();
     for (path, contents) in [
         ("feature.txt", "keep the feature"),
-        (".lf/config.yaml", "agent: codex\npm:\n  provider: linear\n  linear_team: team-task-pr-tests\n"),
+        (".lf/config.yaml", "agent: codex\nlinear:\n  team: team-task-pr-tests\n"),
         (".lf/workflows/delivery-proof.yaml", "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, flow: delivery-proof}\n  - {from: review, to: end}\n"),
         (".lf/flows/delivery-proof.yaml", "- cmd: flow show ship\n- cmd: pr land --wait-and-fix --strict --title waited-repair --body Repair-without-Desktop\n- cmd: task follow-up INF-123 --none fixture-has-no-later-obligations\n"),
     ] {

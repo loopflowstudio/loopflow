@@ -311,7 +311,7 @@ async fn prepare_abandon(
 }
 
 async fn require_known_prs(repo: &Path, pr: Option<&TaskPr>, issue: &str) -> OpsResult<()> {
-    for url in crate::ops::pm::issue_client(repo)
+    for url in crate::ops::pm::issue_client()
         .await?
         .item_attachment_urls(issue)
         .await

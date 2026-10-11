@@ -89,10 +89,10 @@ pub fn new_chapter(
         .map_err(error)?
         .block_on(rotate(repo, &plan, wave, dry_run))?;
     if !dry_run
-        && crate::config::load_config_or_default(Some(repo))
-            .pm
-            .and_then(|pm| pm.linear_team)
-            .is_some()
+        && matches!(
+            crate::config::load_config_or_default(Some(repo)).planning_transport(),
+            crate::config::PlanningConfig::Linear {}
+        )
     {
         eprintln!("Saved locally; pending Linear sync.");
     }

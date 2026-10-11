@@ -246,7 +246,7 @@ async fn sync_follow_through_relations(store: &Store, repo: &Path) -> OpsResult<
             continue;
         };
         let attempt = async {
-            super::pm::issue_client(repo)
+            super::pm::issue_client()
                 .await?
                 .ensure_follow_up_relation(
                     &relation.source_issue_id,

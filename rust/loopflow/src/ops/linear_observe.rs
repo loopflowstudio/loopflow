@@ -63,7 +63,7 @@ pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> O
     if !connected(wave.repo()) {
         return Ok(());
     }
-    let client = super::pm::issue_client(std::path::Path::new(wave.repo())).await?;
+    let client = super::pm::issue_client().await?;
     let observation = client
         .observe_issue(issue.as_str())
         .await
@@ -306,7 +306,7 @@ pub(crate) async fn sync_task_state(store: &Store, task: &Task) -> OpsResult<()>
         if !connected(wave.repo()) {
             return Ok(());
         }
-        let client = super::pm::issue_client(std::path::Path::new(wave.repo())).await?;
+        let client = super::pm::issue_client().await?;
         let (observed, _) = client
             .issue_ownership(issue.as_str())
             .await
@@ -407,7 +407,7 @@ pub(crate) async fn sync_task_comments(store: &Store, task: &Task) -> OpsResult<
     if !connected(wave.repo()) {
         return Ok(());
     }
-    let client = super::pm::issue_client(std::path::Path::new(wave.repo())).await?;
+    let client = super::pm::issue_client().await?;
     for comment in comments {
         let result = tokio::time::timeout(
             std::time::Duration::from_secs(5),

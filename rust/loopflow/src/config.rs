@@ -161,14 +161,6 @@ pub struct LinearConfig {
     pub team: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
-pub struct PmConfig {
-    #[serde(default)]
-    pub provider: Option<String>,
-    #[serde(default)]
-    pub linear_team: Option<String>,
-}
-
 /// One synchronization destination for the repository's local planning.
 /// Repository configuration overrides the personal default as one value.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -200,12 +192,7 @@ impl Default for PlanningConfig {
 impl Config {
     pub fn planning_transport(&self) -> PlanningConfig {
         self.planning.clone().unwrap_or_else(|| {
-            if self
-                .pm
-                .as_ref()
-                .and_then(|pm| pm.linear_team.as_ref())
-                .is_some()
-            {
+            if self.linear.team.is_some() {
                 PlanningConfig::Linear {}
             } else {
                 PlanningConfig::default()
@@ -291,13 +278,9 @@ pub struct Config {
     #[serde(default)]
     pub release: ReleaseConfig,
 
-    /// Linear configuration for PM integration spikes.
+    /// Repository binding used by Linear synchronization.
     #[serde(default)]
     pub linear: LinearConfig,
-
-    /// PM provider selection.
-    #[serde(default)]
-    pub pm: Option<PmConfig>,
 
     /// Run provider conversations in the selected account's own home rather
     /// than the provider's native one. `--shared` overrides it per launch.
@@ -353,7 +336,6 @@ impl Default for Config {
             summary_tokens: default_summary_tokens(),
             release: ReleaseConfig::default(),
             linear: LinearConfig::default(),
-            pm: None,
             isolate: false,
         }
     }
@@ -486,8 +468,8 @@ fn global_config_path() -> PathBuf {
 
 /// Load only the repository-owned config, without inheriting user-global values.
 ///
-/// PM identity uses this path because a global Team binding must never become a
-/// repository's authority implicitly.
+/// Linear Team bindings use this path; personal transport defaults do not assign
+/// a repository to a Team.
 pub fn load_repo_config(repo_root: &Path) -> Result<Option<Config>, LoadError> {
     let Some(value) = load_yaml_file(&repo_root.join(".lf/config.yaml"))? else {
         return Ok(None);
@@ -944,20 +926,18 @@ supported_harnesses:
     }
 
     #[test]
-    fn load_repo_config_reads_repository_pm_authority() {
+    fn load_repo_config_reads_linear_team() {
         let temp = tempfile::tempdir().expect("create temp dir");
         let config_dir = temp.path().join(".lf");
         std::fs::create_dir_all(&config_dir).expect("create .lf dir");
         std::fs::write(
             config_dir.join("config.yaml"),
-            "pm:\n  provider: linear\n  linear_team: team-loo\n",
+            "linear:\n  team: team-loo\n",
         )
         .expect("write config");
 
         let config = load_repo_config(temp.path()).unwrap().unwrap();
-        let pm = config.pm.unwrap();
-        assert_eq!(pm.provider.as_deref(), Some("linear"));
-        assert_eq!(pm.linear_team.as_deref(), Some("team-loo"));
+        assert_eq!(config.linear.team.as_deref(), Some("team-loo"));
     }
 }
 
@@ -977,7 +957,7 @@ mod planning_config_tests {
                 .unwrap();
         assert_eq!(config.planning_transport(), PlanningConfig::Linear {});
         let selected: Config = serde_yaml_ng::from_str(
-            "pm:\n  linear_team: team\nplanning:\n  provider: git\n  shared: employees\n",
+            "linear:\n  team: team\nplanning:\n  provider: git\n  shared: employees\n",
         )
         .unwrap();
         assert_eq!(

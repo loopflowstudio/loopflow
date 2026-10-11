@@ -1,8 +1,7 @@
 # Implementation choices — LOO-412
 
-[Design](work-on-another-machine-name.md). Earlier choices:
-`ae96102580e442fe582dd17ce5e6fef9b8cee69d:scratch/questions.md`; full October 10
-prose/sync evidence: `eab40bad8c:scratch/questions.md`.
+[Design](work-on-another-machine-name.md). Earlier choices/proofs:
+`17314daeb5:scratch/questions.md`.
 
 - Personal keys need recovery on fresh Machines; automatic account pairing is absent.
   Repository configuration grants shared-ref permission, not Machine membership.
@@ -19,22 +18,35 @@ prose/sync evidence: `eab40bad8c:scratch/questions.md`.
   migration retains bytes. Partial observations retain field revision/age. These
   choices have no UX approval.
 
-## Repaired findings — f025e9b7ab
+Repaired admission, selectors and Git decoding: `17314daeb5:scratch/questions.md`.
+Jack Heart requires removal, not just renaming the hierarchy.
 
-Admission and repository-scoped selector repairs are proved locally, not installed.
-Exact IDs retain their repository; conflicting explicit Wave scope refuses.
-Details and counterexamples: `1ac2bf694d:scratch/questions.md`.
-Jack Heart requires removing `planning.rs`, not merely renaming its hierarchy.
+Connect now selects repository Linear and retains its Team; repeated-operation
+fixture passes (history 1824734). Git-miss routing also uses the selected transport;
+the public CLI regression passes (1824996), retaining zero Tasks/issue observations.
+These prove no live Linear/SSH or installed result. Earlier traces:
+`/tmp/loo412-questions-before-routing-recheck.md`.
 
-## Git decoding repair — October 11
-
-Unshipped compatibility decoding is removed; causal history and released SQLite
-preservation remain required. Evidence: `1ac2bf694d:scratch/questions.md`.
+Reteam no longer commits sentinel cleanup or requires a clean checkout. Its
+operation fixture preserves an unrelated edit and the original Git commit.
 
 ## Next implementation boundary — October 11
 
-Persistent-provider conversion and its consumers form the next unit in audit §§1–4;
-narrower SQL extraction is preparatory. Acquisition rollback already compares Work,
-provider input and Wave age, but populated released-0.13.11 conversion, independent
-observations and delayed updates remain unproved. The design owns this boundary
-and the subsequent journal, bindings, follow-up, cron, gate and review obligations.
+Persistence conversion is checkpointed at `fbc9c60e62`; its
+released-0.13.11 fixture covers the seeded records listed below. Broader
+independent/delayed observations remain for gate. Next confine acquisition and
+delivery to concrete Linear inputs; remove generic public PM store APIs and
+envelopes. The accepted HTML permits private `LinearProject` responses. Renaming
+`PmItem`/snapshot wrappers while retaining a parallel public hierarchy is insufficient.
+Typed-edit/journal, follow-up, cron and review obligations remain.
+
+Conversion review repairs: confirming refresh compares the retained claim;
+membership/assignee receipt baselines preserve omitted versus explicit null.
+Released-frontier Rust regressions pass (Session history events 1823411/1823459).
+Wrong scalar types now reject conversion; original rows/schema survive rollback.
+Independent SQL rechecks: `/tmp/loo412-membership-comparison-recheck.json` and
+`/tmp/loo412-observation-type-conversion-recheck.json`; neither is public CLI proof.
+Counterexamples remain in the corresponding `-proof.json` files.
+The populated migration fixture retains Task/Workflow/Process and uncertain
+receipts; it does not seed Session turns or live controls. Final gate retains those
+preservation obligations and the complete deletion audit.

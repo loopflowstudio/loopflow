@@ -804,11 +804,20 @@ fn prepare_task(repo: &Path, issue: &str, options: TaskProcessOptions) -> OpsRes
         let acquired = saved.is_none();
         let task = match saved {
             Some(task) => task,
-            None => {
-                // An unknown provider alias needs acquisition once. All saved Tasks
-                // then use their stored identity and the same placement transaction.
-                super::pm::acquire_task(&main, issue, super::pm::PmRefresh::Auto).await?
-            }
+            None => match crate::config::load_config(Some(&main))
+                .map_err(task_error)?
+                .unwrap_or_default()
+                .planning_transport()
+            {
+                crate::config::PlanningConfig::Linear {} => {
+                    super::pm::acquire_task(&main, issue, super::pm::PmRefresh::Auto).await?
+                }
+                crate::config::PlanningConfig::Git { .. } => {
+                    return Err(task_error(format!(
+                        "Task {issue:?} not found in selected Git planning"
+                    )));
+                }
+            },
         };
         let wave = owning_wave(&store, &task).await?;
         let canonical = crate::repository::CanonicalRepo::discover(&main).map_err(task_error)?;
@@ -4097,11 +4106,10 @@ pub fn task_refile(repo: &Path, issue: &str, wave: &str) -> OpsResult<super::pm:
             .sqlite
             .refile_unplaced_task(&task.id, &task.project_id, &project.id)
             .map_err(task_error)?;
-        if load_config_or_default(Some(repo))
-            .pm
-            .and_then(|pm| pm.linear_team)
-            .is_some()
-        {
+        if matches!(
+            load_config_or_default(Some(repo)).planning_transport(),
+            crate::config::PlanningConfig::Linear {}
+        ) {
             eprintln!("Saved locally; pending Linear sync.");
         }
         drop(guards);

@@ -4364,7 +4364,7 @@ fn wave_summary_sync_reads_committed_default_branch() {
     let write = |text: &str| {
         std::fs::write(
             &goal,
-            format!("---\npm:\n  linear_initiative: initiative-1\n---\n\n## Objective\n\n{text}\n"),
+            format!("---\nlinear:\n  initiative: initiative-1\n---\n\n## Objective\n\n{text}\n"),
         )
         .unwrap();
     };
@@ -4376,8 +4376,9 @@ fn wave_summary_sync_reads_committed_default_branch() {
         };
         std::fs::write(
             checkout.join("wave/product/GOAL.md"),
-            "---\npm:\n  linear_initiative: initiative-1\n---\n\n## Objective\n\nEdited directly.\n",
-        ).unwrap();
+            "---\nlinear:\n  initiative: initiative-1\n---\n\n## Objective\n\nEdited directly.\n",
+        )
+        .unwrap();
         commit(&checkout);
         sync(false).unwrap();
         assert_eq!(
@@ -4440,9 +4441,11 @@ fn wave_summary_sync_reads_committed_default_branch() {
             runtime.block_on(async { state.lock().await.wave_summary.clone() }),
             ""
         );
-        assert!(std::fs::read_to_string(checkout.join("wave/product/GOAL.md"))
-            .unwrap()
-            .contains("Edited directly."));
+        assert!(
+            std::fs::read_to_string(checkout.join("wave/product/GOAL.md"))
+                .unwrap()
+                .contains("Edited directly.")
+        );
     });
     server.abort();
 }

@@ -117,7 +117,7 @@ installation or real planning export to the public repository.
 
 ## Current transport configuration and experience
 
-Published baseline; Linear-binding spellings still await conversion.
+Current source configuration:
 
 ```yaml
 # .lf/config.yaml, or ~/.lf/config.yaml for a personal default
@@ -131,7 +131,7 @@ Omitting `shared` selects `refs/loopflow/planning/users/<key>`; the first connec
 creates the key. Recover the same key on a fresh second Machine with
 `lf planning key --recover <uuid>`. Shared refs need no personal key. Repository
 `planning` replaces the personal value as a whole. `planning: {provider: linear}`
-selects Linear; `pm.linear_team` supplies its Team. An existing Team binding selects
+selects Linear; `linear.team` supplies its Team. An existing Team binding selects
 Linear when explicit `planning` is absent. Configuration selects the whole repository
 plan and its retained history; ref separation is not access control.
 
@@ -193,39 +193,19 @@ disposition owners and the repaired fixture that bypassed the writer.
 
 ### Canonical readers and retained provider persistence — October 11
 
-`18520565d6`, `96607a9a46` and `eda4a98097` establish canonical Task
-creation/status/acquisition and Wave/roadmap/Work-frame summaries. Local IDs,
-explicit Linear bindings and separate acquisition validity/age survive. Saved
-content uses Work; acquisition validity and admission still depend on provider evidence.
-`planning_task`, `plan_read`, `ResolvedTask`, `ops/task_pm.rs`, `planning_wave`,
-`PmTaskSummary` and `task_planning_item` are deleted. CLI creation reloads after
-foreground exchange. Cold placement, comments, PR ownership and sweep use saved
-identity; provider branch/URL metadata remain explicit.
+Canonical Project/Task/status/roadmap/Work-frame readers preserve local identity,
+optional Linear bindings, shared ordering and independent acquisition validity/age.
+Creation reloads saved Work after exchange; rotation/export retain uncertain inputs
+and later saves. Ordinary provider reconstruction, `planning_task`, `plan_read`,
+`ResolvedTask`, `task_pm`, `planning_wave`, `PmTaskSummary` and
+`task_planning_item` are deleted. Exact reader and receipt evidence remains at
+`17314daeb5:scratch/work-on-another-machine-name.md`, this heading.
 
-Project ingestion no longer returns a `LinearProject`; its unused async Store
-forwarder and association/validation return plumbing are deleted. Field delivery
-checks the fetched non-null revision against the canonical Project binding and
-accepted revision, retaining independent archive/membership evidence. A provider
-observation with the same revision can still be ineligible: confirmed archival or
-unresolved Team membership must refuse delivery without consuming the local save.
-Task delivery already uses its accepted-into-Work revision fence. The preservation
-fixture now compares against the Task returned by insertion, not its unsaved
-constructor revision.
-
-**Delete — do not maintain:** escaping `PmTaskRecord`, the duplicate provider
-hierarchy and typed journal vocabularies in the audit. Public snapshot inventory
-reads and ordinary Task provider reconstruction are deleted. Next come bindings, ordinary
-follow-ups, cron and the remaining audit. No partial publication or readiness.
-Earlier reader tracing, fixture corrections and exact proof limits remain at
-`dc0d82caa2:scratch/work-on-another-machine-name.md`, the two canonical-reader
-headings. Outage/completion fixtures retain captured Workflow; stale and foreign
-observations grant no delivery or execution authority.
-
-Rotation and export use canonical Work and typed saves, retaining dates,
-prose, bindings, uncertain inputs and later saves. Offline rotation fixtures
-cover both transports/mapping states and retry preservation. Exact evidence:
-`1d97aa98b2:scratch/work-on-another-machine-name.md`; the provider hierarchy
-remains.
+Delivery requires a revision accepted into Work and independent eligibility:
+same-revision archival or unresolved membership still refuses delivery without
+consuming the local save. Foreign observations grant no ownership or execution
+authority. Persistence, typed journal, bindings, ordinary follow-ups and cron
+remain one delivery scope before gate and review.
 
 ### Reconciled acquisition boundary
 
@@ -235,38 +215,39 @@ rejection. `94cb65b569` deleted `pm_show`, `load_show_snapshot` and `read_pm_sna
 `1d97aa98b2` removed planning-only placement restrictions without changing execution
 admission or sorted locks. Proof detail: `f9f9da7d3a` in this plan.
 
-**Ownership reading cut — October 11.** `e0f716aa54` moved status/roadmap
-ownership checks into one SQLite read transaction, deleting `PmPortfolioValidator`
-and portfolio reconstruction. Contradictory Initiative/Team claims, invalidation,
-archival, membership removal and confirmed deletion retain their meaning. Malformed
-Wave observations do not hide readable siblings or refresh ages. Scoped roadmap
-reads follow the repaired Wave address. Evidence: `f9f9da7d3a` in this plan.
+Ownership and acquisition cuts retain contradictory claims, malformed sibling
+isolation, foreign/unmapped facts, invalidation, archival, independent removal and
+original ages. Pending membership affects display, never admission. Revision-fenced
+absence and cancellation retain their Wave-lock lifetime. Projection and receipts
+read typed fields; no ordinary reader reconstructs a provider model. Work-watch
+includes planning cadence. Exact cuts/proof limits: `fbc9c60e62` in this plan,
+this heading, including the retained `e0f716aa54` through `f0932031e5` references.
 
-`e3a3479df7` removed the public snapshot reader. `f025e9b7ab` removes
-`children.rs` status/admission reconstruction: narrow SQL reads retained membership,
-Team, invalidation, removal and age. Unrelated malformed content cannot erase those
-facts. Review repaired the canonical Project join: a missing issue cannot hide
-independent archival or unresolved membership. Pending membership only affects display.
-Populated released-frontier and stale-response tests cover this boundary.
-`dfa2cdafba` makes Task acquisition return Work using narrow Linear ownership/age.
-`PmTaskObservation`, `pm_task_observation_in` and `read_task_planning_async` are
-deleted. Revision-fenced absence, cancellation and foreign/unmapped facts survive;
-fixtures replay retained inputs directly. Rollback proof now includes canonical
-Project, provider input and Wave acquisition age. The persistent hierarchy, typed
-journal, bindings, follow-ups and cron still precede gate and review.
-`09709a05cc` removes provider Wave and Project display reconstruction.
-`621b4b851b` makes accepted projection, creation attachment and disposition
-reconciliation consume typed fields. `f0932031e5` removes receipt-baseline object
-reconstruction, preserving independent prose revisions and active-issue deletion
-baselines. Work-watch includes the planning cadence.
+The current persistence cut removes `pm_projects.body` and `pm_items.body` in
+`planning_peers.sql`, replacing live whole-object decoding with field comparisons
+and direct column readers. Prose retains separate revision/age; omitted issue
+membership and dates retain presence separately from observed null. Foreign and
+unmapped observations remain unowned; archive, invalidation, independent removal,
+Wave membership/order and original ages retain their owners. Historical receipts
+keep their original bytes. New disposition conflicts record the supplied state
+fields instead of reconstructing a whole issue. Review found that membership
+comparison and receipt baselines must use the retained provider claim, not its
+index; confirming-refresh and absent/null receipt fixtures cover that correction.
+Conversion refuses unsupported scalar types before dropping source evidence;
+compound fields retain JSON encoding. Arrays-as-names and boolean ranks cannot
+silently become valid Work; failure rolls back schema and original rows.
 
-The next unit is persistent conversion together with its consumers (audit §§1–4):
-`linear_issue_evidence`, `project_accepted_planning` and receipt baselines still
-extract retained JSON; `put_project`/`put_item` still compare whole observations.
-Concrete Linear evidence must retain foreign/unmapped facts, contradictory ownership,
-independent membership/removal, partial fields and original ages without another
-writable Work hierarchy. Populated released-0.13.11 conversion, delayed updates and
-rollback remain unproved. Narrower readers alone do not complete this unit.
+Concrete bindings now use repository `linear.team` and Wave `linear.initiative`.
+The redundant provider selector, legacy rejection/cleanup and mixed-authority
+validation are removed. Reteam confirms remote ownership without committing
+unrelated checkout edits. Connect selects repository Linear even with personal Git;
+ordinary explicit Git saves no longer print misleading Linear pending notices.
+Historical SQL/input remain intact. This does not complete adapter confinement.
+
+Deletion still remaining: adapter ingestion envelopes and PM APIs,
+target-bearing typed edits/journal, ordinary follow-ups/comments and one cron list.
+The full affected gate and fresh +/- HTML review still precede republication.
+The source cut and focused checks do not establish full-design readiness.
 
 Main #1522 entered at `7d9bf0a4d8`, adding Claude recorded-answer Flow settlement.
 That merge establishes no fresh planning gate acceptance and grants no replay of
@@ -358,7 +339,7 @@ format; realign removed the unshipped string-format compatibility decoder and it
 fixture under Jack Heart's no-old-version constraint. Released SQLite conversion
 and causal/losing values remain required. Record creation no longer
 reconstructs a generic JSON field map. The target-bearing edit/journal, provider
-hierarchy, bindings configuration, follow-ups and cron cuts remain required.
+hierarchy, follow-ups and cron cuts remain required.
 
 Cron conversion must retain the installed owner independently of file location.
 Release's October 5 memory records both jobs installed under Infrastructure,
@@ -389,9 +370,9 @@ Writer transport/causal proofs: `eda4a98097` in this plan.
   follows the entire reduction and affected gate, before review-only republication.
 
 Earlier focused proof: `9dbd6fc2d8`, `dfd3b80611`, `f025e9b7ab`,
-`dfa2cdafba`, `09709a05cc` in this plan. Persistence conversion, typed journal,
-bindings, follow-ups, cron, gate and review still precede republication.
+`dfa2cdafba`, `09709a05cc` in this plan. Adapter confinement, typed journal,
+follow-ups, cron, gate and review still precede republication.
 
-Checks: `git diff --check` and `lf context` pass October 11; memory/scratch fit both limits. Formatting, Clippy, CLI build and focused baseline/reteam/acquisition/planning passes remain at `3d8b939495` in this plan; unchanged source, no rerun. Full gate remains.
+Checks: October 11 `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, source CLI build, PM operation tests (14), and planning/setup/ownership/remote CLI tests (13) pass after binding simplification. Earlier conversion/rollback/receipt and prose checks remain applicable (`fbc9c60e62` at this path); full gate remains after the audit.
 
 Transport evidence: `0181133849` at this path.

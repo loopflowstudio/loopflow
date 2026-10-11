@@ -202,9 +202,9 @@ def _exercise(lf: Path, root: Path, selection: dict, server: LinearServer) -> li
         ["remote", "add", "origin", "https://github.com/loopflowstudio/fixture.git"],
     ]:
         assert _run(["git", *args], cwd=repo).returncode == 0
-    (repo / ".lf/config.yaml").write_text("pm:\n  provider: linear\n  linear_team: team-1\n")
+    (repo / ".lf/config.yaml").write_text("linear:\n  team: team-1\n")
     (repo / "wave/product/GOAL.md").write_text(
-        "---\npm:\n  linear_initiative: initiative-1\n---\nKeep working.\n"
+        "---\nlinear:\n  initiative: initiative-1\n---\nKeep working.\n"
     )
     key = AESGCM.generate_key(bit_length=256)
     key_path = root / "fixture.key"

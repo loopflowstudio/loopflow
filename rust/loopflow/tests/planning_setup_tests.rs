@@ -119,7 +119,7 @@ fn unavailable_linear_saves_locally_without_publishing_a_git_plan() {
     std::fs::create_dir_all(repo.path().join(".lf")).unwrap();
     std::fs::write(
         repo.path().join(".lf/config.yaml"),
-        "planning:\n  provider: linear\npm:\n  linear_team: unavailable-fixture\n",
+        "planning:\n  provider: linear\nlinear:\n  team: unavailable-fixture\n",
     )
     .unwrap();
     let output = invoke_lf(
@@ -161,4 +161,38 @@ fn unavailable_linear_saves_locally_without_publishing_a_git_plan() {
         .unwrap();
     assert!(refs.status.success());
     assert!(refs.stdout.is_empty());
+}
+
+#[test]
+fn git_checkout_miss_does_not_fall_back_to_retained_linear_bindings() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    initialize(home.path());
+    repo.create_file(
+        ".lf/config.yaml",
+        "planning:\n  provider: git\n  shared: fixture\nlinear:\n  team: retained-team\n",
+    );
+    repo.create_file(
+        "wave/product/GOAL.md",
+        "---\nlinear:\n  initiative: retained-initiative\n---\nRetain work.\n",
+    );
+    let output = invoke_lf(repo.path(), home.path(), &["checkout", "MISSING-1"]);
+    assert!(!output.status.success());
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        error.contains("not found in selected Git planning"),
+        "{error}"
+    );
+    let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    assert_eq!(
+        conn.query_row("SELECT count(*) FROM tasks", [], |row| row.get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        conn.query_row("SELECT count(*) FROM pm_items", [], |row| row
+            .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
 }

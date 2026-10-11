@@ -1087,7 +1087,7 @@ async fn cold_detail_resolves_configured_wave_before_projecting() {
             std::fs::create_dir_all(repo.join("wave/other")).unwrap();
             std::fs::write(
                 repo.join("wave/other/GOAL.md"),
-                "---\npm:\n  linear_initiative: elsewhere\n---\nOther work.\n",
+                "---\nlinear:\n  initiative: elsewhere\n---\nOther work.\n",
             )
             .unwrap();
             fixture

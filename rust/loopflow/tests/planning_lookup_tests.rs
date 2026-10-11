@@ -11,7 +11,7 @@ fn task_status_reads_projectless_planning_without_allocating_execution() {
     std::fs::create_dir_all(repo.path().join(".lf")).unwrap();
     std::fs::write(
         repo.path().join(".lf/config.yaml"),
-        "planning:\n  provider: linear\npm:\n  linear_team: team-1\n",
+        "planning:\n  provider: linear\nlinear:\n  team: team-1\n",
     )
     .unwrap();
     let home = tempfile::tempdir().unwrap();

@@ -8,9 +8,9 @@ approval from Jack. This is accepted scope, with conditional deletions identifie
 ## Scope and outcome
 
 This audit and [the pursuit design](work-on-another-machine-name.md) are one
-accepted delivery scope. Canonical readers and narrow acquisition evidence are implemented; persistent
-provider-hierarchy reduction comes next, followed by typed edits/journal, concrete
-bindings, ordinary follow-ups and one cron list. All precede Jack Heart's next
+accepted delivery scope. Canonical readers and narrow acquisition evidence are implemented; provider bodies now have concrete observation columns; adapter confinement remains,
+followed by typed edits/journal, ordinary follow-ups and one cron list. Concrete
+bindings are implemented (§14). All precede Jack Heart's next
 review of PR #1491. Publication is review-only; landing, installation and export
 of actual Work to the public repository remain unauthorized.
 
@@ -88,46 +88,37 @@ create another generic reader framework simply to replace these functions.
 
 ## 3. Collapse accepted-provider-to-Work projection
 
-**Shrink with persistence conversion:** `store/sqlite/planning.rs::project_accepted_planning`.
-`621b4b851b` reads eligible Project/Task fields into typed edits,
-without reconstructing `LinearProject` or `PmItem`. Creation attachment consumes
-those edits; disposition reconciliation takes the observed disposition/revision
-and retains the exact conflicting input. Ownership and order checks read only
-their required facts. Identity, partial prose, pending disposition and membership
-fences remain. This removes object reconstruction, not the retained JSON hierarchy:
-`put_project`/`put_item` still compare whole observations, and secondary readers
-still extract their fields. The persistent conversion below remains required.
+**Implemented persistence cut:** `planning_peers.sql` replaces `pm_projects.body`
+and `pm_items.body` with concrete observation columns. `put_project`/`put_item`
+compare fields; projection, receipt baselines, ordering, acquisition, admission and
+selection read those columns. Prose keeps independent revision/age. Issue membership
+and date presence distinguish omitted facts from observed null. Historical cutover
+and uncertain-effect receipts retain their original bytes; new disposition conflicts
+capture state evidence rather than a reconstructed issue.
 
-**Persistent candidates:** duplicated accepted content in `pm_projects`, `pm_items`,
-`pm_wave_projects` and snapshot serialization through `PmSnapshot` /
-`PmSnapshotRow`. `pm_wave_sync`, `pm_issue_changes`, relation observations and
-`pm_project_name_cutover` also need explicit disposition, not blanket deletion.
-
-**Important limit:** these tables retain foreign/unmapped records, partial
-inventories, independent relation revisions, invalidation and removal evidence.
-An observation cannot become owned Work merely because it was fetched. Preserve
-necessary concrete Linear observations/bindings until association is established;
-do not recreate the same second hierarchy under new names. Whole-table deletion
-is conditional on a populated migration proving every retained fact has an owner.
+**Delete — do not maintain:** escaping `PmItem`, `LinearProject`, `PmTaskRecord`,
+`PmSnapshot` and `PmSnapshotRow` ingestion envelopes and the generic PM/provider
+hierarchy. Concrete observations remain necessary for foreign/unmapped records,
+partial inventories, contradictory claims, independent membership/removal and
+original ages. Removing a whole table remains conditional on proving another
+existing owner retains every fact; canonical Work must not absorb foreign input.
+`pm_wave_sync`, `pm_wave_projects`, `pm_issue_changes`, relation observations and
+`pm_project_name_cutover` retain independent evidence, not ordinary Work content.
 
 `require_accepted_initiative`, membership validation, revision ordering and
-`reconcile_pm_project_teams` embody real rules. Relocate their responsibilities
-into acquisition; do not drop checks for stale independent Team/Initiative facts.
+`reconcile_pm_project_teams` remain acquisition responsibilities. Explicit reteam
+changes Team relationships without replacing independently newer entity facts.
+Repository alias repair and revision triggers still operate on the surviving
+observation rows. No ordinary reader reconstructs the removed JSON body.
 
-## 4. Remove cache joins from secondary SQL readers
+## 4. Preserve secondary-reader evidence
 
-`f0932031e5` deletes `PlanningChanges::observation`. Receipts read only their field baseline
-and revision; prose keeps its independent revision, deletion captures `deleted=false`,
-and membership normalizes to local identity. Reteam updates only Team evidence;
-issue invalidation reads revision without decoding unrelated content.
-
-**Delete — do not maintain:** retained JSON hierarchy and whole-observation
-comparisons in §3; remaining cache joins in `planning_order`,
-`task_state_delivery`, `project_selection`, `children` and acquisition. Convert
-`repair_wave_repo` and revision triggers together with their persistence owners.
-Same-revision archival/disputed membership must still refuse delivery. Preserve
-foreign/unmapped input, independent relation/removal facts and original ages.
-Populated released-frontier conversion remains.
+`PlanningChanges::observation` is deleted; receipts read their selected column and
+revision. Prose keeps its independent revision, deletion captures `deleted=false`,
+and membership normalizes to local identity. Unrelated malformed ordering evidence
+cannot prevent a name receipt. Same-revision archival/disputed membership still
+refuses delivery. Populated released-0.13.11 conversion and rollback fixtures cover
+the current columns; the pursuit design owns the current check result.
 
 ## 5. Delete the internal Markdown storage round trip
 
@@ -260,7 +251,7 @@ are deleted; actual acquisition failure retains its error.
 store checks narrow retained ownership claims directly; no inventory leaves it.
 `e3a3479df7` removed the public `pm_snapshot` reader and all callers. Fixtures
 read canonical Work or concrete retained evidence and replay fetched inputs;
-private acquisition inventory and persistent provider hierarchy remain required cuts.
+private acquisition inventory and provider hierarchy remain required cuts.
 
 `PmResolvedTask`, both `pm_resolve_task` wrappers and `ResolvedTask` are deleted;
 `ops/task_pm.rs` is removed. Acquisition validates concrete Linear ownership and
@@ -351,12 +342,16 @@ are required proof, not executed results. Full source review:
 
 ## 14. Config, cron, naming and public documentation
 
-`config.rs::PmConfig` and `work/wave/config.rs::WavePmConfig` must stop duplicating
-transport selection. Keep one Git/Linear choice, explicit Linear Team and Initiative
-bindings, and the default user-keyed ref. Company repository configuration can
-select a shared ref or Linear. Rename integration-specific APIs where appropriate;
-remove obsolete provider selectors and generic PM scaffolding instead of carrying
-aliases. Update config fixtures and Wave frontmatter consumers together.
+**Implemented binding cut:** `PmConfig`, `WavePmConfig`, the duplicate provider
+selector, legacy-authority gate/cleanup and mixed-authority validation path are
+removed. Repository `linear.team` and Wave `linear.initiative` are concrete
+bindings; `planning.provider` alone selects transport. Configuration, commands,
+current docs, authored goals and surviving fixtures use those fields. Historical
+SQL/captures and the one-time `pm.linear_project` selection import retain bytes.
+Reteam still confirms remote ownership and preserves delayed observations, but no
+longer commits unrelated checkout edits to remove obsolete configuration sentinels.
+Provider-shaped acquisition APIs and the remaining PM hierarchy are still required
+cuts; this binding deletion does not establish adapter confinement.
 
 The existing pass owns cron unification: one list of ordinary scheduled commands,
 existing parser for scope filtering, no parallel Wave-specific cron interpretation.

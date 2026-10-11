@@ -356,18 +356,18 @@ measurement lives in reviewed `wave/<wave>/metrics/*.md` contracts, not a
 |-------|-------------|
 | `agent` | Preferred agent harness/model |
 | `crons` | Flow schedules installed through `lf cron sync` |
-| `pm.linear_initiative` | Linear Initiative id backing the wave (written by `lf repo connect`) |
+| `linear.initiative` | Linear Initiative id backing the wave (written by `lf repo connect`) |
 
-The repository owns PM provider and Team authority in `.lf/config.yaml`:
+Bind the repository to a Linear Team in `.lf/config.yaml`:
 
 ```yaml
-pm:
-  provider: linear
-  linear_team: "stable-team-uuid"
+linear:
+  team: "stable-team-uuid"
 ```
 
-Do not copy provider or Team bindings into Wave frontmatter. Every Wave reuses
-the repository Team and owns only its Initiative.
+Every Wave uses the repository Team and binds only its Initiative. Select the
+synchronization transport with `planning.provider`; a Team binding selects Linear
+when that choice is omitted.
 
 Execution placement is durable state: use `lf wave place <wave-id> <machine-id>`.
 Placement does not edit the goal, launch work or stop existing conversations.

@@ -617,6 +617,16 @@ impl SqliteStore {
     // transaction across provider I/O. Do not unlink lock files: another process
     // may already have the inode open. Process exit releases ownership.
     pub(super) fn lock_session_attachment(&self, session: &str) -> StoreResult<File> {
+        self.lock_session_fence(session, false)
+    }
+
+    /// Independent transport writers may progress together, but neither may
+    /// cross a provider stop, replacement or attachment handoff.
+    pub(super) fn lock_session_dispatch(&self, session: &str) -> StoreResult<File> {
+        self.lock_session_fence(session, true)
+    }
+
+    fn lock_session_fence(&self, session: &str, shared: bool) -> StoreResult<File> {
         let database = self
             .conn
             .lock()
@@ -643,7 +653,12 @@ impl SqliteStore {
         // reactor it might be driving. This bound uses the OS clock, not Tokio.
         let deadline = Instant::now() + Duration::from_secs(15);
         loop {
-            match file.try_lock_exclusive() {
+            let locked = if shared {
+                FileExt::try_lock_shared(&file)
+            } else {
+                file.try_lock_exclusive()
+            };
+            match locked {
                 Ok(()) => return Ok(file),
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                     if Instant::now() >= deadline {
@@ -667,6 +682,23 @@ impl SqliteStore {
         write: impl FnOnce() -> StoreResult<T>,
     ) -> StoreResult<T> {
         let _dispatch = self.lock_session_attachment(session)?;
+        {
+            let conn = self.conn.lock().expect("store mutex poisoned");
+            require_attachment_in(&conn, session, expected)?;
+        }
+        write()
+    }
+
+    /// The transport owns serialization of its writes. Hold shared exclusion
+    /// through the bounded write so synchronous provider hooks can also emit
+    /// before the provider drains its input.
+    pub(crate) fn with_session_dispatch<T>(
+        &self,
+        session: &str,
+        expected: &SessionAttachment,
+        write: impl FnOnce() -> StoreResult<T>,
+    ) -> StoreResult<T> {
+        let _dispatch = self.lock_session_dispatch(session)?;
         {
             let conn = self.conn.lock().expect("store mutex poisoned");
             require_attachment_in(&conn, session, expected)?;

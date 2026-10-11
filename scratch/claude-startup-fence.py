@@ -1,9 +1,11 @@
 """Reproduce startup-hook/input fencing with Claude and a disposable home.
 
 Run with `uv run python scratch/claude-startup-fence.py`.
-No complete input is sent while the hook holds: the model endpoint is loopback.
+Add `--shared` to exercise compatible hook/input exclusion.
+The model endpoint is an unavailable loopback port; no real account is used.
 """
 
+import argparse
 import fcntl
 import json
 import os
@@ -18,6 +20,10 @@ import time
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--shared", action="store_true")
+    arguments = parser.parse_args()
+    mode = "LOCK_SH" if arguments.shared else "LOCK_EX"
     executable = shutil.which("claude")
     if executable is None:
         raise RuntimeError("Claude is unavailable; no configured probe ran")
@@ -32,7 +38,7 @@ def main() -> None:
             "import fcntl\nfrom pathlib import Path\n"
             f"Path({str(marker)!r}).touch()\n"
             f"with open({str(lock)!r}, 'w') as lock:\n"
-            " fcntl.flock(lock, fcntl.LOCK_EX)\n print('{}')\n"
+            f" fcntl.flock(lock, fcntl.{mode})\n print('{{}}')\n"
         )
         settings.write_text(json.dumps({"hooks": {"SessionStart": [{"hooks": [{
             "type": "command", "command": f"{shlex.quote(sys.executable)} {shlex.quote(str(hook))}", "timeout": 10,
@@ -46,7 +52,7 @@ def main() -> None:
             "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
         }
         with lock.open("w") as fence, (root / "out").open("w") as out, (root / "err").open("w") as err:
-            fcntl.flock(fence, fcntl.LOCK_EX)
+            fcntl.flock(fence, getattr(fcntl, mode))
             process = subprocess.Popen(
                 [executable, "--print", "--input-format", "stream-json",
                  "--output-format", "stream-json", "--verbose", "--settings", str(settings)],
@@ -73,13 +79,13 @@ def main() -> None:
                     except BlockingIOError:
                         select.select([], [process.stdin], [], 0.02)
                 print(json.dumps({
-                    "provider": version, "startup_hook_before_stdin": True,
+                    "provider": version, "fence": mode, "startup_hook_before_stdin": True,
                     "input_bytes": len(payload), "sent_bytes": sent,
                     "completed_within_two_second_dispatch_deadline": sent == len(payload),
                 }))
             finally:
-                # Stop the owned process group before releasing the hook, so no
-                # complete request proceeds to even the loopback model endpoint.
+                # Stop only the disposable provider group; its model endpoint
+                # is loopback and has no server or real credentials.
                 if process.poll() is None:
                     os.killpg(process.pid, 15)
                     try:

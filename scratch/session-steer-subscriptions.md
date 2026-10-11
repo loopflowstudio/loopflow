@@ -80,6 +80,29 @@ removal. Its public fixture must force startup to overlap a first input larger t
 the pipe buffer, preserve the complete seed, and test takeover during each side of
 that exchange. The complete one-PR replacement remains required.
 
+## Shared startup exclusion — implementation evidence, 2026-10-11
+
+The working change separates shared transport exclusion from exclusive provider
+lifetime changes. Claude owns its stdin through `&mut self`; Codex's writer queue
+and connection proxy each own their socket. Their bounded writes now use
+`with_session_dispatch`; spawn, stop, replacement and attachment changes keep
+`with_session_attachment` and its exclusive fence. OpenCode's HTTP writer still
+needs its adapter integration audit before changing its fence.
+
+The public `session_steers` launch fixture invokes an external Claude skill with
+150,000 UTF-8 bytes of clipboard context. Its stand-in waits for input to become
+readable without draining it, then takes shared hook exclusion and invokes the
+real context command. It verifies the complete non-query context, correlated
+query, native identity and retained answer. This is a protocol transport proof:
+the fixture supplies hook exclusion; production provider-bound hook authority and
+replacement activation remain to be implemented. It proves no steer receipt.
+The dispatch race fixture proves takeover waits for both shared writers and the
+former claim cannot dispatch afterward.
+
+The configured Claude 2.1.296 probe with `--shared` accepted all 131,133 bytes
+within the existing two-second bound; the original exclusive counterexample
+remains recorded above. Neither probe contacts a real model endpoint.
+
 ## What to build
 
 Deliver authored repository, Wave, Task and direct Session direction through one
@@ -407,4 +430,4 @@ if the status shape crosses that boundary. Configured provider probes use isolat
 homes and headless fake endpoints; unavailable probes are explicitly deferred to
 capable CI, never recorded as passes.
 
-Check: `git diff --check` and `lf context` — pass for prose-only reconciliation; prior startup counterexample retained without rerun; public startup and provider acceptance remain for implementation/gate.
+Check: `session_steers` public startup fixture, shared-dispatch race, isolated Claude `--shared` probe, `cargo fmt`, and `cargo clippy --all-targets -- -D warnings` pass; provider authority, publication/receipt cutover and broader gate acceptance remain unfinished.

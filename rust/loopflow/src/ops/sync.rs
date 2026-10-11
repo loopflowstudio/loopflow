@@ -527,13 +527,8 @@ fn validate_fork_base(repo: &Path, fork_base: Option<&str>) -> OpsResult<()> {
     if crate::git::is_ancestor(repo, base, "HEAD")? {
         return Ok(());
     }
-    let merge_base =
-        crate::git::merge_base(repo, base, "HEAD").unwrap_or_else(|_| base.to_string());
-    let commits =
-        git(repo, &["log", "--oneline", &format!("{merge_base}..HEAD")]).unwrap_or_default();
     Err(OpsError::UnsafeSyncBase {
         base: base.to_string(),
-        commits,
     })
 }
 

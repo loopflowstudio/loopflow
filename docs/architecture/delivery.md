@@ -98,6 +98,15 @@ lf ci watch                            # repair failed landings while it runs
 The publishing intent is durable before the remote call, so retries resolve the
 same PR. Reopening a Task or closed PR never grants a second PR slot.
 
+`open` and `publish` resolve the comparison base from HEAD's current
+merge-base with the selected upstream. A reset, rebase or rewritten main cannot
+make an old base veto publication. All branch commits remain intact, including
+inherited dependencies; the PR shows GitHub's actual range. Publication does not
+trim commits based on a saved Task boundary. Unrelated histories and empty ranges
+still cannot form a PR. Root Tasks save the resolved base; stacked Tasks retain
+their integration fork until explicit sync so squash-parent comparison preserves
+child edits.
+
 `arm` and `land` merge current main, clear merge-time scratch state, verify once,
 and push the exact head. Branch commits and merge resolutions retain their identities.
 GitHub squash-merges the final PR tree into one commit on main. `arm` and `land` request

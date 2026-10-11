@@ -48,10 +48,9 @@ dispatch; an unscoped ambiguous prefix still fails.
 
 ## Context budget
 
-`lf context --skill implement` reports generated Work input at about 34,985/16,000
-tokens (109,885 bytes). Stored steers/inventory exceed the token target; authored
-scratch and memory fit. No historical inputs or limits were changed. Source:
-`.lf/tmp/context/51cdd42b2d506f7788c9aae49fa9c75815dc637d470bed7bc6c904013108f4f9.md`.
+Generated Work input remains about 35,000/16,000 tokens from retained steers and
+inventory. No historical requests or limits were altered to shrink generated input.
+Authored scratch and memory are curated separately.
 
 ## Admission authority — October 9, unresolved
 

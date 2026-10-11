@@ -386,8 +386,13 @@ Cleanup independently reacquires its lease: terminal receipts can precede
 descriptor closure. This proves neither the loss cause nor recovered evidence.
 Release owns re-entry leases, transfer deadlines and pending-version lessons.
 
-#1459's exact-reflog PR-base repair shipped in v0.13.5; #1456 merged October 6.
-Absent evidence and foreign ancestry refuse. Evidence: `cad03fe6d:wave/infrastructure/MEMORY.md`, this heading and its references.
+#1459's exact-reflog repair shipped in v0.13.5; history:
+`cad03fe6d:wave/infrastructure/MEMORY.md`. October 11 lf-cb9012a supersedes
+its ancestry veto in source: Jack Heart requested repair through publication,
+without landing. Current Git ancestry owns PR comparison; saved placement cannot
+classify commits as foreign. Preserve every commit. Stack forks still own squash-parent sync;
+refreshing them during publication can restore files main deleted. Disposable
+CLI proofs pass; installed Etude and hosted acceptance remain unproved.
 
 ## Scheduled release accounting (LOO-285, source reconciliation October 2)
 

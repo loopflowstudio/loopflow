@@ -753,3 +753,5 @@ strip links to its own site in a new tab.
 - Jack Heart: "lf, a universal interface to..." → `x12`: "Underneath Loopflow's work-centered API is `lf`, a universal interface to your sessions across agent providers."
 
 - Jack Heart: "lf: a universal interface for agent sessions across providers and software the engineering process between the sessions" → set as the `x12` CLI section heading: "`lf`: a universal interface for agent sessions across providers, and the software engineering process between the sessions." (word order fixed). The paragraph under it is shortened so it does not repeat the heading: "It sits underneath Loopflow's work-centered API. Between sessions it cuts the branch, opens the pull request and gets it merged. One command says…".
+
+- Jack Heart: "or does that go better in pargraph" → yes. The `x12` CLI heading is back to "`lf`: the CLI for launching coding agents." and his line opens the paragraph: "Underneath Loopflow's work-centered API is `lf`: a universal interface for agent sessions across providers, and the software engineering process between the sessions."

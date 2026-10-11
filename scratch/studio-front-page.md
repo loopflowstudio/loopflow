@@ -664,3 +664,5 @@ strip links to its own site in a new tab.
 - Jack Heart revised the heading: "Loopflow: Arrange coding sessions around long-lived waves and short-lived tasks". Set in `x11` as written, with no full stop.
 
 - Jack Heart, on the waves-and-tasks section: "Here, we maybe replace the grph of a screenshot of someone in cmux task or wave session" → in `x11` the three-flows card is replaced by a labelled slot for that screenshot. The screenshot is not taken. The flows card is no longer on the page.
+
+- Jack Heart: "or we can have both visuals" → in `x11` the three-flows card is back beside the paragraphs, and the cmux screenshot slot runs full width under them.

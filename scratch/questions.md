@@ -1,11 +1,7 @@
 # Open assumptions
 
-- 2026-10-10, LOO-451: Unknown remains unknown indefinitely and cannot authorize
-  replacement or cleanup. Jack Heart has not selected a timeout; a timeout would
-  risk adopting a second process or deleting a live checkout. Waiting requires
-  positive live evidence. This conservative choice needs review, not a timer.
-
-- Context: the generated launch goal includes the full branch diff and exceeds
-  16,000 tokens (17,248 after plan reconciliation). Scratch and memory fit; reducing them
-  cannot cure this separate limit. Required implementation/test evidence remains
-  intact rather than deleting coverage to shorten the generated patch.
+- 2026-10-10, LOO-451: Jack Heart left unknown unchanged (`5228ab69`): no
+  timeout, Waiting or replacement authority is inferred. A bounded-time product
+  rule remains undecided.
+- Terminal placement is a nullable field on the attached LfProcess, not a new
+  client lifecycle. Old client files are ignored, never imported or deleted.

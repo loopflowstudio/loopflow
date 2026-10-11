@@ -221,7 +221,7 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
         {waiting},
         COALESCE(({task_state}) IN ('done','abandoned'),0),
         EXISTS(SELECT 1 FROM tasks p WHERE p.primary_session_id=s.id),
-        (SELECT act.program_status FROM session_activity act WHERE act.session_id=s.id AND act.agent_process_id IS a.agent_process_id),a.agent_process_id,p.completed_at,p.pid,p.os_started_at
+        (SELECT act.program_status FROM session_activity act WHERE act.session_id=s.id AND act.agent_process_id IS a.agent_process_id),a.agent_process_id,p.completed_at,p.pid,p.os_started_at,(SELECT terminal_id FROM processes WHERE id=p.attached_lf_process_id AND completed_at IS NULL)
         FROM page s JOIN agent_sessions a ON a.id=s.id
         LEFT JOIN processes p ON p.id=a.agent_process_id
         LEFT JOIN session_events captured ON captured.seq=s.current_capture
@@ -283,6 +283,7 @@ fn read_summary(
         };
         let live = agent_process_evidence == Some(crate::journal::ProcessIdentityEvidence::Live);
         Ok(crate::session::SessionSummary {
+            terminal_id: row.get::<_, Option<String>>(36)?.filter(|_| live),
             task_ids: serde_json::from_str(&row.get::<_, String>(26)?)?,
             primary_scope: row.get(27)?,
             agent_process_evidence,

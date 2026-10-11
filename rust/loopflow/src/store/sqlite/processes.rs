@@ -714,6 +714,23 @@ impl SqliteStore {
         Ok(true)
     }
 
+    /// Terminal placement is owned by the current attached lf, not by provider receipts.
+    pub(crate) fn record_session_terminal(
+        &self,
+        session: &str,
+        expected: &SessionAttachment,
+        terminal: Option<&str>,
+    ) -> StoreResult<()> {
+        self.with_session_attachment(session, expected, || {
+            let conn = self.conn.lock().expect("store mutex poisoned");
+            conn.execute(
+                "UPDATE processes SET terminal_id=?2 WHERE id=?1 AND kind='lf'",
+                params![expected.lf_process_id, terminal],
+            )?;
+            Ok(())
+        })
+    }
+
     pub fn session_attachment(&self, session: &str) -> StoreResult<Option<SessionAttachment>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         attachment_in(&conn, session)
@@ -961,13 +978,15 @@ impl SqliteStore {
             "UPDATE processes SET attached_lf_process_id=NULL,attachment_token=?3,
                 attachment_exit_seq=?4,endpoint=CASE WHEN ?2 THEN NULL ELSE endpoint END,
                 completed_at=CASE WHEN ?2 THEN COALESCE(completed_at,?5) ELSE completed_at END,
-                spawn_state=CASE WHEN ?2 THEN 'exited' ELSE spawn_state END WHERE id=?1",
+                spawn_state=CASE WHEN ?2 THEN 'exited' ELSE spawn_state END,
+                outcome=CASE WHEN ?2 AND ?6='interrupted' THEN ?6 ELSE outcome END WHERE id=?1",
             params![
                 expected.agent_process_id,
                 closed,
                 AttachmentToken::new(),
                 exit_seq,
-                now
+                now,
+                outcome
             ],
         )?;
         tx.commit()?;
@@ -1864,6 +1883,19 @@ mod attachment_tests {
         assert_eq!(history(), before);
         conn.execute_batch(&current_draft_sql("lf_process_ids"))
             .unwrap();
+        conn.execute_batch(&current_draft_sql("process_terminal"))
+            .unwrap();
+        let terminal: Option<String> = conn
+            .query_row(
+                "SELECT terminal_id FROM processes WHERE id='parent'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(
+            terminal.is_none(),
+            "migration does not invent terminal ownership"
+        );
         let renamed = history();
         assert_eq!(renamed[0].2, "attachment:7:exit");
         assert_eq!(

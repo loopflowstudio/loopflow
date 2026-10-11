@@ -240,10 +240,10 @@ frontier fixtures in the materialized run only. PR CI defers every job while
 
 ## Process-owned liveness (LOO-451, 2026-10-10)
 
-Jack Heart requested process-backed judgment. Indefinite unknown is conservative,
-not accepted timeout policy; it grants no Waiting or cleanup authority.
-Process completion outranks sockets/events. OS death needs watch rereads without
-commits. Kill/reconnect acceptance remains unproved.
+Jack Heart removed client-file compatibility (`5228ab69`); launches record an
+AgentProcess before exec. Unknown stays unknown, granting no Waiting or cleanup.
+Terminals follow attachment. Completion outranks sockets;
+OS death needs watch rereads. Kill/reconnect acceptance remains unproved.
 
 ## Execution vocabulary (LOO-441/442/446, 2026-10-10)
 

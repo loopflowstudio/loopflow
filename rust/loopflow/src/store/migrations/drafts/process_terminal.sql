@@ -1,0 +1,3 @@
+-- depends_on: lf_process_ids
+-- Terminal placement belongs to the attached lf process, never a client-file lifecycle.
+ALTER TABLE processes ADD COLUMN terminal_id TEXT;

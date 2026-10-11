@@ -246,7 +246,9 @@ the attached LfProcess's latest stream reading and an optional terminal-reported
 A recorded AgentProcess alone decides whether its Session is active: completed
 means closed; otherwise exact PID/birth evidence is live, dead or unknown. Unknown
 is never Waiting and never ages into replacement or checkout-cleanup authority.
-Client files determine state only for conversations without an AgentProcess.
+Every owned launch records an AgentProcess before exec, including native terminals.
+Sessions without one remain unknown; client files are not read. Terminal placement
+belongs to the attached LfProcess, fenced by its attachment.
 Saved sockets are offered only for live records; a live endpoint's connection
 failure is an error, not permission to start another agent. Input completion uses
 its latest turn's LfProcess completion (the capture owner before any turn), not

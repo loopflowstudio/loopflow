@@ -1,5 +1,5 @@
 mod os_process;
-pub(crate) use os_process::{elapsed_seconds, OsProcess};
+pub(crate) use os_process::OsProcess;
 
 use std::cell::RefCell;
 use std::fs::{self, File, OpenOptions};

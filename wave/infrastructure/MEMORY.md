@@ -632,19 +632,18 @@ owns local/imported fields; execution/attempts stay local. Preserve causality,
 losers and uncertainty. Gate/installation remain unproved.
 
 Jack accepted the full One Work audit: direct fields, typed criteria/comments,
-Linear boundaries, ordinary Task follow-ups and one cron list. Retention needs
-evidence; partial reduction is not review-ready.
-Canonical Projects preserve IDs, Linear bindings and rank. Task/provider projections
-and prose acquisition remain.
-Git recovery reads the journal directly. Candidates prove neither projection nor
-publication; read errors retain Desktop's cached reading.
+Linear boundaries, ordinary follow-ups and one cron list. Partial work is not
+review-ready; retention needs evidence.
+Canonical Projects retain IDs, bindings and rank; Task/provider projections remain.
+Linear content acquisition loses prose; omission is not emptiness or settlement.
+Inbound prose/partial-observation proof remains.
+Git recovery reads the journal. Candidates prove no application/publication; read
+errors retain cached Desktop content.
 
-Cron preserves installed ownership and failure exits regardless of file location
-([evidence](release/MEMORY.md)).
+Cron retains installed ownership and failure exits ([evidence](release/MEMORY.md)).
 [Remaining work](../../scratch/work-on-another-machine-name.md). Republish #1491
 after full reduction, for review only. No landing, installation,
-live schedule activation or real Work export. Historical transport/recovery proofs:
-`41378adacf:wave/infrastructure/MEMORY.md`, this heading.
+live schedule activation or real Work export. Prior proofs: `41378adacf:wave/infrastructure/MEMORY.md`.
 
 ## Planning and launch preservation (curated 2026-10-02)
 

@@ -191,13 +191,32 @@ Readiness also returns local identity. The surviving reader orders by shared ran
 creation time and ID rather than edit time. Provider adapters compare explicit
 bindings. Rotation retains original receipt bytes and local execution is unchanged.
 
-Linear description acquisition is still missing: `PmProject` lacks authored
-prose and `project_accepted_planning` emits no `ProjectDescription` edit. Local
-prose reading and boundary-aware provider Markdown replacement prove neither
-inbound prose nor partial-observation handling. The remaining `plan_read.rs`
-projection is internal to Task observations and `planning_wave`; removing it belongs
-to the canonical Task/snapshot cut, not another public Project read wrapper.
-Acquisition must preserve omitted fields and pending baselines through typed edits.
+Linear description acquisition is the next incomplete Project cut. At `4f103559be`,
+`ProjectNode.description` supplies the short summary; authored prose belongs to
+`content`. `into_pm_project` parses only workflow/KRs/targets from that content,
+`PmProject` cannot carry the remaining prose, and `project_accepted_planning`
+emits no `ProjectDescription`. The released-content conversion already obtains
+prose with `ProjectDocument::rewrite(None, "")`; the adapter can reuse that
+boundary rather than adding another parser or another public Project wrapper.
+
+The acquisition cut needs end-to-end evidence for full content, explicit empty/null
+content, and omitted content. Current `ProjectNode` requires the JSON keys but
+accepts null, then normalizes it to empty; omission is a decode failure, not an
+observed empty document. Preserve this distinction in concrete observations and
+never let partial evidence clear saved prose/criteria or settle pending fields.
+Prove an unchanged baseline retains a local save, an older acknowledgment cannot
+clear its successor, and an observed conflict retains both values under the
+selected Linear-wins policy. Assertions must read canonical Project IDs/content
+and retained receipts, not only the adapter's parsed result. No inbound prose or
+partial-observation acceptance is claimed by the existing local/Git fidelity tests.
+
+The public canonical Project reader cut is already implemented (`52e7da7f35`);
+it is not another pending wrapper replacement. Remaining `plan_read.rs` projections
+serve Task observations and `planning_wave`, owned by the later Task/snapshot cut.
+After acquisition, the earlier pass still requires concrete Linear bindings,
+ordinary Task/comment follow-ups and cron unification before the rest of the audit.
+The `4f103559be` sync brought website/architecture presentation changes, not these
+missing behaviors; it does not reopen the completed reader cut.
 
 Compression removes the fabricated Git recovery record/value hierarchy: status and
 CLI/Desktop now inspect retained journal mutations directly, with candidate IDs
@@ -253,12 +272,17 @@ Earlier baseline detail: `c8fe4628a:scratch/work-on-another-machine-name.md`.
 
 Checks: `cargo build -p loopflow --bin lf`, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, focused `cargo test -p loopflow` selectors (`--test dto_fixtures peer_planning`, `--test planning_foreground_tests planning_status_reads_retained_journal`, `--lib rejected_selection_retains_history`), and `scripts/test_desktop.sh -Xswiftc -gnone --filter 'peerPlanning|roadmapPeerPlanning'` pass (4 headless Swift tests); prior Project proofs: `52e7da7f35:scratch/work-on-another-machine-name.md`; gate owns the affected/materialized matrix.
 
-Context: authored memory/scratch fit. The generated Task seed/steers and workspace
-manifest remain separately over budget: 19,408 tokens, 3,408 over before this cut.
-The complete source is
-`.lf/tmp/context/8e8a53810c8e6dbf6354277faade2b63eda47d0fc0b8989a616e5e95e35b3187.md`;
-its decisions and manifest were inspected. Authored-note trimming cannot reduce
-that source; retained direction and limits are unchanged.
+Context: authored memory/scratch fit. `lf context --skill realign` reports the
+assembled Task seed/steers and workspace manifest at 19,400 tokens (3,400 over its
+16,000-token limit). The complete prior source
+`.lf/tmp/context/8e8a53810c8e6dbf6354277faade2b63eda47d0fc0b8989a616e5e95e35b3187.md`
+and current launch source
+`.lf/tmp/context/5975419587a83d95ef771a46ffafac88fb87fcb93782c2e0cbb29d8ca3535e49.md`
+were inspected. This generated source cannot be reduced by trimming authored notes;
+retained direction and limits are unchanged.
+
+Realign check: `git diff --check` passes; source inspection confirms the acquisition
+gap and completed reader/journal cuts; no product code changed or suites rerun.
 
 ## Delete — do not maintain
 

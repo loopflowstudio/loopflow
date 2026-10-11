@@ -630,12 +630,13 @@ Ordering takes local IDs; new disposition receipts keep state evidence only. Rej
 membership must retain its dispute marker even when Work acceptance rolls back.
 Concrete Linear bindings are separate from repository transport selection.
 Populated fixtures prove stored Session/control preservation, not provider control.
-SQLite/Git share typed mutations; duplicate fields and object/kind types are gone.
-Linear owns observation/projection. Creation baselines retain captured values,
-never current Work: later saves and changed readbacks must not rewrite an attempt.
-Jack Heart excludes old-version support; an unshipped Git encoding needs no dual
-decoder. Released SQLite preservation and selected-format causal history remain
-separate obligations. No configured old-ref conversion need was established.
+SQLite, Git and Linear field receipts share typed Work values. Creation retains
+captured inputs; older acknowledgments cannot clear later saves. Explicit null
+membership differs from omission; acquisition resolves provider IDs before receipt
+comparison. Journal routes replace membership/active inventories, retaining moved,
+missing and rejected Work; configuration selects status. Source proofs at `47b5edb701`
+include headless refresh, not installation. Released SQLite preservation remains
+required; Jack Heart excludes old-version Git decoders.
 
 Jack's `19116a1b`: stack 427 on 412; land afterward. No 412 landing authority.
 Default-Git enrollment conflicts with 427's conservative first-start

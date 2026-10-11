@@ -175,7 +175,7 @@ no longer acquire Sessions; explicit Session/Changes survives. `ff61b6bc` select
 shell-default Split, no empty option. `d6640b8c68` retains shell Machine/path through
 layout/Undo; unknown refuses.
 `94d5195497`: content owns terminal identity; Session moves fence targets/Undo.
-Shells use content's recorded owner; same-path/Undo checks exclude
+Shells use content's owner; same-path/Undo checks exclude
 launch replay. Registry/membership remain checkout-keyed. Tabs, Files/log readers
 and DTO cutover remain; no native acceptance or admission decision.
 

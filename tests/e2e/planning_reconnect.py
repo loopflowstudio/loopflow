@@ -472,14 +472,31 @@ def main() -> None:
     bin_dir = root / "bin"
     bin_dir.mkdir()
     provider = bin_dir / "claude"
-    provider.write_text("""#!/bin/sh
-: > "$HOME/provider-started"
-i=0
-while [ ! -e "$HOME/provider-stop" ] && [ "$i" -lt 900 ]; do
-  sleep 0.1
-  i=$((i+1))
-done
-printf '%s\\n' '{"type":"result","subtype":"success","result":"Done"}'
+    provider.write_text("""#!/usr/bin/env python3
+import json
+import os
+import sys
+import time
+from pathlib import Path
+
+if "--version" in sys.argv:
+    print("claude test")
+    sys.exit(0)
+root = Path(os.environ["HOME"])
+for line in sys.stdin:
+    message = json.loads(line)
+    if message.get("type") != "user":
+        continue
+    message["session_id"] = "reconnect-thread"
+    print(json.dumps(message), flush=True)
+    (root / "provider-started").touch()
+    for _ in range(900):
+        if (root / "provider-stop").exists():
+            break
+        time.sleep(0.1)
+    print(json.dumps({"type": "result", "uuid": message["uuid"],
+        "session_id": "reconnect-thread", "subtype": "success",
+        "result": "Done"}), flush=True)
 """)
     provider.chmod(0o755)
     for name in ["codex", "gh", "opencode"]:

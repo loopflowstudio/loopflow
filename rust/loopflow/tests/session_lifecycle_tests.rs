@@ -1618,10 +1618,16 @@ fn taskless_structured_output_correction_is_bounded_and_preserves_the_conversati
             )
             .unwrap();
         for correction in &steps[2..] {
+            let args = correction["argv"].as_array().unwrap();
+            assert_eq!(args[0], "--batch");
+            assert_eq!(args[1], "--output-schema");
+            let schema: serde_json::Value =
+                serde_json::from_str(args[2].as_str().unwrap()).unwrap();
             assert_eq!(
-                correction["argv"].as_array().unwrap()[..4],
-                ["--batch", "session", "resume", conversation.as_str()]
+                schema["properties"]["decision"]["enum"],
+                serde_json::json!(["advance", "iterate", "blocked"])
             );
+            assert_eq!(args[3..6], ["session", "resume", conversation.as_str()]);
             assert_eq!(correction["key"], decision["key"]);
             assert_eq!(correction["iterations"], decision["iterations"]);
         }

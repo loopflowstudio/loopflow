@@ -1774,15 +1774,7 @@ fn native_runner_reconnects_planning_without_another_turn() {
             let executable = bin.join(agent);
             std::fs::write(
                 &executable,
-                r#"#!/bin/sh
-: > "$FIXTURE_STARTED"
-i=0
-while [ ! -e "$FIXTURE_STOP" ] && [ "$i" -lt 600 ]; do
-    /bin/sleep 0.1
-    i=$((i+1))
-done
-exit 0
-"#,
+                include_str!("../../../tests/support/holding_provider.py"),
             )
             .unwrap();
             std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();

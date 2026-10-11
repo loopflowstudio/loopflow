@@ -250,7 +250,6 @@ async fn list(
                     SessionState::Unknown => "unknown",
                     SessionState::Active => "active",
                     SessionState::Closed => "closed",
-                    SessionState::Interrupted => "interrupted",
                 },
                 session.work_path.as_deref().unwrap_or("Repository"),
                 session.title

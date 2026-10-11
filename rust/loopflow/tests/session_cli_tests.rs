@@ -755,6 +755,15 @@ printf '%s\n' '{"type":"result","session_id":"fixture-native","subtype":"success
 
 #[test]
 fn waiting_lists_only_conversations_waiting_on_a_person() {
+    struct Child(std::process::Child);
+    impl Drop for Child {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let provider = Child(Command::new("/bin/sleep").arg("60").spawn().unwrap());
+    let started = time::OffsetDateTime::now_utc().unix_timestamp();
     let home = tempfile::tempdir().unwrap();
     let cwd = home.path().join("work");
     std::fs::create_dir(&cwd).unwrap();
@@ -770,9 +779,14 @@ fn waiting_lists_only_conversations_waiting_on_a_person() {
     )
     .unwrap();
     for (id, pending) in [(&working, 0), (&asked, 1)] {
-        store
+        let attachment = store
             .claim_session_attachment(id, None, &parent, true)
             .unwrap();
+        db.execute(
+            "UPDATE processes SET pid=?2,os_started_at=?3 WHERE id=?1",
+            rusqlite::params![attachment.agent_process_id, provider.0.id(), started],
+        )
+        .unwrap();
         db.execute(
             "INSERT INTO session_activity(session_id,attachment_token,agent_process_id,observed_at,open_tools,pending_input,yielded)
              SELECT s.id,p.attachment_token,p.id,unixepoch(),1,?2,0 FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1",
@@ -1565,18 +1579,9 @@ fn program_status_cli_observes_waiting_without_completing_work() {
         }
     }
     let home = tempfile::tempdir().unwrap();
-    let (id, _, dir) = prepare_conversation(home.path(), home.path(), "sleep", "Status fixture");
+    let (id, _, _) = prepare_conversation(home.path(), home.path(), "sleep", "Status fixture");
     let mut provider = Child(Command::new("/bin/sleep").arg("60").spawn().unwrap());
     let now = time::OffsetDateTime::now_utc();
-    std::fs::create_dir_all(dir.join("provider-clients")).unwrap();
-    std::fs::write(
-        dir.join("provider-clients")
-            .join(format!("{}.json", provider.0.id())),
-        serde_json::json!({"schema_version":1,"pid":provider.0.id(),"terminal_id":"fixture-pane",
-            "started_at":now.format(&time::format_description::well_known::Rfc3339).unwrap()})
-        .to_string(),
-    )
-    .unwrap();
     let store =
         loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
     let lf_process_id = loopflow::id::LfProcessId::new();
@@ -1586,8 +1591,23 @@ fn program_status_cli_observes_waiting_without_completing_work() {
         [&lf_process_id],
     )
     .unwrap();
-    // A native conversation needs no lf attachment for passive display: the
-    // reading reports no AgentProcess, so the observer names none.
+    let attachment = store
+        .claim_session_attachment(&id, None, &lf_process_id, true)
+        .unwrap();
+    conn.execute(
+        "UPDATE processes SET pid=?2,os_started_at=?3 WHERE id=?1",
+        rusqlite::params![
+            attachment.agent_process_id,
+            provider.0.id(),
+            now.unix_timestamp()
+        ],
+    )
+    .unwrap();
+    conn.execute(
+        "UPDATE processes SET terminal_id='fixture-pane' WHERE id=?1",
+        [&lf_process_id],
+    )
+    .unwrap();
     let mut observer = Child(
         command(
             home.path(),
@@ -1597,6 +1617,8 @@ fn program_status_cli_observes_waiting_without_completing_work() {
                 &id,
                 "--terminal",
                 "fixture-pane",
+                "--agent-process",
+                attachment.agent_process_id.as_str(),
             ],
         )
         .stdin(Stdio::piped())
@@ -1662,10 +1684,6 @@ fn program_status_cli_observes_waiting_without_completing_work() {
     let page: serde_json::Value = serde_json::from_slice(&page.stdout).unwrap();
     assert_eq!(page["entries"][0]["id"], id);
     for state in ["working", "done"] {
-        if state == "done" {
-            provider.0.kill().unwrap();
-            provider.0.wait().unwrap();
-        }
         writeln!(input, "{}", records(state)).unwrap();
         assert!(wait_for(state)["attention"].is_null());
     }
@@ -1685,6 +1703,19 @@ fn program_status_cli_observes_waiting_without_completing_work() {
         wait_for("done")["program_status"]["records"][0]["state"],
         "done"
     );
+    provider.0.kill().unwrap();
+    provider.0.wait().unwrap();
+    let output = run(home.path(), &["session", "list", "--json", "--all"]);
+    let items: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let ended = items
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == id)
+        .unwrap();
+    assert_eq!(ended["state"], "closed");
+    assert!(ended["program_status"].is_null());
+    assert!(ended["attention"].is_null());
     let attachment = store.session_attachment(&id).unwrap();
     store
         .claim_session_attachment(&id, attachment.as_ref(), &lf_process_id, true)

@@ -624,3 +624,5 @@ strip links to its own site in a new tab.
 - Jack Heart: "cut the lf has no servers" → the `x11` closing paragraph is one sentence: "Private, secure remote jobs and telemetry made easy through `ssh`."
 
 - Jack Heart, on the line under Download at the top of `x11`: "Just: Free and open source (MIT)" → set. The statement that the coding agent has its own cost is no longer on the page; the growth memory rule that "Free" sits next to it is overridden here by Jack.
+
+- Jack Heart: "i feel like Private, secure remote jobs and telemetry made easy through ssh. might want to be higher in the product pitch" → moved in `x11` from the closing section to the "Stay engaged *and* scale the swarm." section, as its third paragraph. The closing section keeps only the requirements.

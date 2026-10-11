@@ -118,6 +118,7 @@ main = f'''
     <article>
       <p>A workflow says how a Task gets from an idea to shipped, and where you come in: early on in the design, later on to try the change, both, or neither. Stay close while the work is new, and drop a stop once you trust how it goes. You can zoom in and you can zoom out.</p>
       <p>Workflows are files in your repository. Use these three, change them, or write your own, and each project picks the one its Tasks follow, so hands-on work and hands-off work run side by side.</p>
+      <p>Private, secure remote jobs and telemetry made easy through <code>ssh</code>.</p>
       <p class="more"><a href="/docs/waves">Tasks and Waves ↗</a><a href="/docs/authoring#workflows">Write a workflow ↗</a></p>
     </article>
     <article>
@@ -140,7 +141,6 @@ main = f'''
 </section>
 <section id="yours" class="reading">
   <h2>Free and open source (MIT).</h2>
-  <p class="say">Private, secure remote jobs and telemetry made easy through <code>ssh</code>.</p>
   <p class="say req">Currently requires:</p>
   <ul class="reqs"><li><code>claude</code>, <code>codex</code> or <code>opencode</code></li><li><code>github</code></li></ul>
   <p class="say"><code>linear</code> is an optional integration. Plays nicely with <code>herdr</code> and <code>cmux</code>.</p>

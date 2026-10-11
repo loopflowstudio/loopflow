@@ -168,15 +168,15 @@ and LOO-453 (readiness/events); research:
 [the comparison](../../docs/reviews/terminal-command-comparison.md#rex-composition-and-discoverability-2026-10-10).
 
 Jack Heart (October 10) accepted Work-named repository/Wave/Task tabs; close hides.
-Passive Task navigation/bare remote links acquire no Sessions; explicit
-Session/Changes survives. `ff61b6bc` selects shell-default Split, no empty option.
-`cf77ee325a` makes terminal/shell location content-owned; Undo never replays launch.
-Unknown refuses. `d10d5e9a69`/`d86e32d466` route Files without priming, reusing
-same-owner transports and retaining drafts on owner changes. Nonces are not document
-identity. `b295ffba2f`: retained Files owns observation and one awaited cleanup;
-Hide retains Files. Local panes retain location through Undo and absent planning;
-Split follows it. CLI reads still resolve Task placement. Tabs, Flow-log routing,
-registry and exact targets remain unfinished; native acceptance remains.
+`ff61b6bc` selects shell-default Split, no empty option. Bare Task navigation
+acquires no Session; explicit Session/Changes survives. Content owns location and Undo never replays launch (`cf77ee325a`). Files reuses
+same-owner transports, refusing changed owners without redirecting drafts
+(`d10d5e9a69`/`d86e32d466`). Hide retains observation (`b295ffba2f`); missing
+planning retains local Files/Split location. CLI reads still resolve placement.
+`5727532b1d`/`5af9451cf8` delete outer layout/inspection and Session rows,
+retaining conversation menus/diagnostics. Tabs remain unbuilt: registry/targets
+are checkout-keyed; Flow logs ignore location. Location is not membership;
+rekeying must preserve one native occurrence. No native acceptance.
 
 **Confirmation cannot elect execution.** `4c43550c2`: divergent revisions and
 independent refs both confirm, not Task allocation. `42990dea3` shares membership

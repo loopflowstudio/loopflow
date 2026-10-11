@@ -118,8 +118,7 @@ retain conversation menus; Compact keeps Waves with conversations. Missing
 planning stays reachable through Debug → Sessions, without fabricated ancestry.
 Deleted flat-row benchmarks/disambiguation; native retention fixtures use
 diagnostics. Benchmark population versions distinguish the changed endpoints.
-An initial identifier-search assertion included the ancestor's roll-up; it now
-checks the matching Task menu. Work tabs, Flow-log routing and exact-target DTOs remain unfinished; no native
+The initial search assertion included ancestor roll-up; the repair checks the Task menu. Work tabs, Flow-log routing and exact-target DTOs remain unfinished; no native
 acceptance or admission decision.
 
-Check: `scripts/test_desktop.sh --filter WorkNavigationTests -Xswiftc -gnone --no-parallel` — PASS (29 tests); native: demo; full Work cutover: implement.
+Check: `scripts/test_desktop.sh --filter WorkNavigationTests -Xswiftc -gnone --no-parallel` — PASS (29 tests, unchanged evidence reused); native: demo; Work cutover: implement.

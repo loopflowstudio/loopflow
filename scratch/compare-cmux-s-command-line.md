@@ -94,14 +94,13 @@ October 10 deletion cut: `WorktreeLayout`/store/view, checkout picker and
 Navigation now renders the selected contents through the existing multiplexer;
 New Session selects repository content rather than an alternate checkout route.
 The registry still keys workspaces by `WorkspaceIdentity`; Flow log still ignores
-its content location. This is an internal deletion checkpoint, not implemented
+its content location. `5af9451cf8` removes Session rows, retaining menus/diagnostics. This is an internal deletion checkpoint, not implemented
 Work tabs. Rekeying, tab retention/navigation and exact-target DTOs remain together.
 The October 9 review is historical:
 `scratch/pr-review.html` (retained local artifact, not tracked in Git). Its stopped-pursuit account, mutation-wide
 inspection replies and pre-caller-inference examples are superseded; it is not
 the current demo or a reason to defer the independent tab implementation.
 
-Registry remains checkout-keyed.
 `retainedPane` still requires content location to equal the enclosing checkout;
 `reconcileMembership` removes Sessions by path change, not Work membership.
 Both must change with the registry/DTO cutover, not survive as Work-tab rules.
@@ -114,7 +113,7 @@ path on disconnect, stale frames or owner loss; release cancels observation.
 Tab hide must retain that store, not cancel it or recreate its transport. Local Files now retains its opening location through layout/Undo and missing planning; its CLI reads still use Task-owned placement. Flow log still ignores content location and reads through the window model. Finish Flow-log routing with the Work-key cutover. Empty-pane
 shell creation also still uses checkout identity; bare unplaced Work cannot inherit
 that fallback. Preserve explicit preparation without making navigation acquire it.
-Owner inventory: `31ec76b01:scratch/compare-cmux-s-command-line.md`, this heading.
+`inspectLayouts()` is deleted; `workspaces.inspect()` remains checkout-keyed.
 
 **Proposed API:**
 

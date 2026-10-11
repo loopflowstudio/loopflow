@@ -42,30 +42,32 @@ October 10 UI work does not resolve them.
 
 ## Work-tab design review — October 10
 
-Source inspection at `e4a324636` found a concrete mismatch: the registry keys inner
-workspaces by Machine/checkout and keeps a second outer worktree layout. Adding a
-tab bar alone would merge repository/Wave contents sharing a checkout. The design
-instead replaces the outer tree and rekeys the existing registry by Work, retaining
-one multiplexer and the window's existing surface pool. Workspace-wide Machine
-state must move to contents; stale targeting and shell-exit lookup change with it.
+Inspection at `e4a324636` found checkout-keyed workspaces plus an outer layout:
+tabs alone would merge distinct Work sharing a path. The plan replaces that tree,
+rekeys the retained registry and moves location to contents. A multiply associated
+Session still has one native presentation occurrence; relocation changes neither
+client nor membership. Closing a tab hides it. These are design findings, not
+implemented tabs or native proof.
 
-Review also caught that a multiply associated Session cannot mount its NSView in
-two tabs. The plan records a single retained presentation occurrence, with explicit
-relocation rather than another client or changed membership. Tab closing is hide,
-not process/window shutdown. No code, native demo or new runtime proof is claimed.
+## Split and passive-entry deletions — October 10
 
-## Split correction — October 10
+Shell-by-default split remains implemented. Earlier failed fixture assumptions and
+passing reruns: `270e29bdc:scratch/findings.md`, **Split correction**. Merge checks:
+`7a36df4ea2:scratch/findings.md`, same heading.
 
-Jack Heart selected shell-by-default splitting. Native controls and exact-target
-CLI dispatch resolve shell location before layout mutation; an alert exposes remote
-refusal even on occupied panes. Commands publish with their leaves. Failed old
-empty-split/count assumptions, the unnamed local-Machine fixture and passing
-reruns remain at `270e29bdc:scratch/findings.md`, this heading.
+The Task view's selection/refresh hooks still ensured or connected a primary Session,
+and a remote bare Task link entered the Session-opening branch solely because it
+had an execution location. Both implicit paths are deleted. Explicit Session and
+Changes requests still connect through the existing owner. Model fixtures prove
+local/remote bare links await page readiness without Session acquisition; they do
+not prove rendered navigation or tabs. The Work-keyed registry, per-pane locations,
+outer-tree deletion and DTO cutover remain unfinished.
 
-Compression replaces duplicate horizontal/vertical rectangle construction in the
-surviving multiplexer with CoreGraphics division. Focus/close coverage exercises
-both axes and hidden panes. The Work-keyed registry, per-pane locations, outer-tree
-deletion, navigation and DTO cutover remain unimplemented; no predecessor layout
-was extended. Native acceptance remains with demo.
+Opening now chooses retained inventory or a complete enumeration in one branch,
+instead of initializing and repeatedly clearing the same records. Ensured Sessions
+still force enumeration; explicit retained targets avoid it. Prior focused result:
+`a1dfa07833` plus `/tmp/loo427-compress-preserved/findings.md`;
+`1e5b958d86` is the inventory simplification. Registry and Desktop targets still use Machine/checkout;
+Work tabs require the planned coherent cutover.
 
-Check: merge Rust compile/Clippy, 15 preview/planning checks and 60 Swift checks PASS (renamed fixture repaired); native proof: demo. Logs: `/tmp/loo427-merge-*`.
+Check: `scripts/test_desktop.sh --filter WorkDestinationTests -Xswiftc -gnone --no-parallel` PASS (build, 49 tests); native: demo, cutover suites: gate after implementation.

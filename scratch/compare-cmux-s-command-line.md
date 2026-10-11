@@ -7,7 +7,7 @@ implemented locally. `9cc0707b0`/`92d95edfe` add owner observation and shared
 Task/Desktop location explanations; `faebb042e`–`5d55957c6` compose remote Task
 links through the existing Session/Files owners. Passive reads use the published, checksum-verified lf3
 fixed-buffer reader with exact pane/surface validation; native proof remains.
-Focused local Rust and model evidence establish neither native acceptance nor delivery.
+Local checks establish neither native acceptance nor delivery.
 
 LOO-418/#1499 is integrated; completion/checkout previews and creation receipts are reconciled.
 LOO-406/#1503 and LOO-412 through `96f714bd6` are composed locally;
@@ -52,8 +52,13 @@ unresolved, not a prerequisite for these tabs.
 option (comment `ff61b6bc-f40c-4545-a203-82ced3afd335`). Implemented through the
 existing shell-location owner for CLI, shortcuts and pane menus; missing remote
 location refuses before layout mutation. Work-keyed tabs, per-pane locations,
-outer-layout deletion and inspection/DTO cutover remain unimplemented. This
-checkpoint completes only the split correction, not the Work-tab slice.
+outer-layout deletion and inspection/DTO cutover remain unimplemented. This is not Work tabs.
+
+**Passive entry deletion (`a1dfa07833`):** ordinary Task navigation no longer ensures/connects a
+primary Session on selection or inventory refresh. Bare local/remote Task links
+wait for the Task page, not Session preparation. Explicit Session/Changes requests
+retain their connection path. `1e5b958d86` simplifies complete Session inventory
+selection, not workspace identity. Registry, tabs, locations and DTO cutover remain.
 
 ### Experience and boundaries
 
@@ -85,11 +90,10 @@ LOO-416, not a second persistence system here.
 
 ### Current owners → minimal cutover
 
+Registry still keys by checkout; preserve surfaces, multiplexer and documents.
 Owner inventory: `31ec76b01:scratch/compare-cmux-s-command-line.md`, this heading.
-The registry still keys by checkout. Preserve scene/surface lifetimes, inner
-multiplexer and documents; cut navigation/inspection/opening over together.
 
-**Target values and operations (proposed implementation names):**
+**Proposed API:**
 
 `WorkWorkspaceKey(repositoryID, subject)` uses the resolved repository plan ID
 and a repository/Wave/Task subject with a canonical stable ID. Adapt the existing
@@ -313,8 +317,9 @@ commands have no agent prompt. It never executes predecessors.
 
 `--docs` selects reference files; it does not generate documentation. Main's
 October 10 context design supersedes frozen launch snapshots and input-budget
-gates: Wave/scratch context refreshes, while captured Work direction remains a
-launch reference. `--context` previews system/first-turn input and current reference
+gates: Wave/scratch context refreshes; Work direction remains a launch reference.
+#1521 reads Wave Markdown and ancestors from this checkout, not stored document
+copies; planning records and captured Workflows retain their existing owners. `--context` previews system/first-turn input and current reference
 contents without writing logs or launching. It does not promise future hook bytes.
 Memory/scratch size targets remain advisory; provenance stays explicit.
 
@@ -534,8 +539,9 @@ or remote arrival acknowledgement.
 ### 3. One repository window and command explanation
 
 **Local mechanics and remote Task opening composed; native proof remains.**
-Missing recorded remote checkouts still refuse. A remote link without a Session
-selects the existing primary-Session owner; it never prepares first start.
+Missing recorded remote checkouts still refuse. Bare remote Task links open the
+Task page without acquiring a Session; explicit Changes requests without a Session
+still use the primary-Session owner.
 `desktop open/list` own launch/inspection; `--explain` reads local Work selection,
 Task-run actions/impediments and Session connection intent. Startup,
 restoration, menu opening and Task links use repository-keyed windows. Per-repository
@@ -642,9 +648,8 @@ fixtures, with dependency evidence in slice 2. LOO-427 still
 needs mixed Git-exchange and Desktop-selection coverage, including selection
 changes during foreground sync; no second reconnect harness is needed.
 
-Demo: one repository window shows two Tasks on different Machines. Explain their
-identity/delegation, open them, add shell/Files panes, retain an unfinished draft,
-change focus, target a harmless command, read output, hide/restore, and verify the
-original input target and draft survive. Demo owns native usability; preserve comparison evidence and use no real accounts or live user terminals.
+Demo follows **Work tabs → Checks and demo acceptance**, including remote-location
+explanation and exact input/readback; no real accounts or live user terminals.
 
-Check: `cargo test` (desktop/PTY, cli_discovery, Desktop DTOs, documented_commands), `cargo fmt`, Clippy `--all-targets -D warnings`, and `scripts/test_desktop.sh --filter 'DesktopPaneControlTests|DTOFixtureTests|WorkDestinationTests' -Xswiftc -gnone` — PASS; native: demo, broader checks: gate/CI.
+Prior checks: `7a36df4ea2:scratch/compare-cmux-s-command-line.md`, §5.
+Current focused result: [findings](findings.md).

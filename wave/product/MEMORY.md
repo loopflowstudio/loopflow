@@ -894,9 +894,9 @@ mechanics remain at `b1e3f623a:wave/product/MEMORY.md`, this heading.
   boundary, with navigation owned by the following decider. There is no agent
   exchange row, answer lane,
   or dedicated answer controller.
-- **LOO-406 supersedes file-only memory in source.** Saved Wave definitions
-  provide ancestor context; files are explicit import sources. This integration
-  authorizes no live migration. Recent Wave Chat is not ambient Task context.
+- **#1521 replaces stored Wave documents.** Checkout
+  `wave/<name>/*.md` owns goals, memory and ancestor context; Workflow records
+  stay stored. Reads never provision. Recent Wave Chat is not ambient Task context.
 - **Environment configures a process; it never decides what the process is.**
   Work identity comes from durable state; execution and signal authority must
   be established at their owning boundary, never inferred from a Run id,

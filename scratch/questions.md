@@ -61,10 +61,10 @@ dispatch; an unscoped ambiguous prefix still fails.
 
 ## Context budget
 
-`lf context --skill compress` reports the generated Work seed at 35,087/16,000
-tokens (19,087 over). It includes stored steers and inventory, not authored scratch.
-The complete launch source is `.lf/tmp/context/597148829112ee8ab26eeb619fd725e98db8550675d963aeade69b2ec91270f3.md`.
-Deleting local notes cannot repair that source; limits and historical steers stay unchanged.
+`lf context --skill realign` reports generated Work input at 34,897/16,000
+tokens (109,634 bytes). Stored steers/inventory exceed the token target; authored
+scratch and memory fit. No historical inputs or limits were changed. Source:
+`.lf/tmp/context/51cdd42b2d506f7788c9aae49fa9c75815dc637d470bed7bc6c904013108f4f9.md`.
 
 ## Admission authority — October 9, unresolved
 
@@ -138,10 +138,8 @@ endpoint definition leaves native usability and remote composition unproved.
 
 ## Reversible Flow preview presentation — October 9
 
-Preview is a fresh graph, not a running cursor: only its initial skill/router
-has current input; future/repeat input is unavailable and commands never execute.
-Native arguments remain separate from router instructions. Original details:
-`e4a324636:scratch/questions.md`, this heading. No complete-PR acceptance follows.
+Fresh-graph preview and separate native arguments remain in the plan; prior details:
+`7a36df4ea2:scratch/questions.md`, this heading. Preview grants no execution.
 
 ## Portable assignment choice — October 9
 
@@ -158,8 +156,8 @@ work; conflicting positives refuse. Unavailable other peers do not invalidate th
 positive record, but missing/negative evidence can never admit first start. The
 receiving command re-resolves Work and retains admission checks. Unknown or removed
 connections do not turn delegation into a fallback. Remote Task opening now consumes these observations through existing view owners.
-A remote link without `--session` opens its primary Session, rather than presenting
-local-only execution details. Peer files now consume request-bound filesystem invalidations; disconnects retain drafts. Shell creation rechecks the recorded owner/path. No automatic shell replay on disconnect or Close/Undo is added. No local watcher
+A bare remote link now opens the Task page without acquiring a Session; explicit
+Changes requests without `--session` retain primary-Session preparation. Peer files now consume request-bound filesystem invalidations; disconnects retain drafts. Shell creation rechecks the recorded owner/path. No automatic shell replay on disconnect or Close/Undo is added. No local watcher
 or recovery-folder opener may interpret a peer path. These are reversible presentation
 choices, not native acceptance or a change to first-start admission.
 

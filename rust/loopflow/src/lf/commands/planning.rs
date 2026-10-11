@@ -112,20 +112,15 @@ async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
                 .publication_revision
                 .as_deref()
                 .unwrap_or("none"),
-            match destination.pending_local {
-                Some(true) => "; local changes pending",
-                Some(false) => "",
-                None => "; local changes unknown",
+            if destination.pending_local {
+                "; local changes pending"
+            } else {
+                ""
             }
         );
-        for error in [
-            destination.local_error,
-            destination.acquisition_error,
-            destination.publication_error,
-            destination.recovery_error,
-        ]
-        .into_iter()
-        .flatten()
+        for error in [destination.acquisition_error, destination.publication_error]
+            .into_iter()
+            .flatten()
         {
             println!("  {error}");
         }
@@ -137,53 +132,20 @@ async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
                 conflict.reason
             );
         }
-        for record in destination.records {
+        for (id, change) in destination.changes {
             println!(
-                "  {} {} — {}",
-                record.object.kind.as_str(),
-                record.object.id,
-                match record.destination.as_deref() {
-                    Some(id) if id == destination.id => "configured here".to_string(),
-                    Some(id) => format!("not selected here; selected in {id}"),
-                    None => "local only; not selected".to_string(),
-                }
+                "  {} {} {} [{}; {}]: {}",
+                change.object.kind.as_str(),
+                change.object.id,
+                change.field,
+                id,
+                if destination.candidates.contains(&id) {
+                    "candidate, not confirmed"
+                } else {
+                    "retained alternative"
+                },
+                change.value
             );
-            if record.local_id != record.object.id {
-                println!(
-                    "    Resolves to {} (execution stays local)",
-                    record.local_id
-                );
-            }
-            for reference in record.references {
-                println!(
-                    "    Retained reference: {} {}",
-                    reference.kind.as_str(),
-                    reference.id
-                );
-            }
-            for value in record.values {
-                let author = match value.author {
-                    Some(crate::work::task::comment::TaskCommentAuthor::Person { name }) => {
-                        name.unwrap_or_else(|| "Unknown person".into())
-                    }
-                    Some(crate::work::task::comment::TaskCommentAuthor::Integration) => {
-                        "Integration".into()
-                    }
-                    None => "Unknown".into(),
-                };
-                println!(
-                    "    {} [{}; {}; author: {}]: {}",
-                    value.field,
-                    value.id,
-                    if value.candidate {
-                        "candidate, not confirmed"
-                    } else {
-                        "retained alternative"
-                    },
-                    author,
-                    value.value_json
-                );
-            }
         }
     }
     println!("Copy a retained value into an ordinary edit to save it again. Import retention is not publication.");

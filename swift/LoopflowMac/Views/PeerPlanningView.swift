@@ -38,54 +38,30 @@ struct PeerPlanningView: View {
             Text("Destination: \(destination.id)")
             if destination.active { Text("Configured for this repository") }
             Text("\(destination.selectedRecords) planning records")
-            switch destination.pendingLocal {
-            case true?: Text("Local changes pending")
-            case false?: Text("No pending local changes")
-            case nil: Text("Local changes unknown")
-            }
+            Text(destination.pendingLocal ? "Local changes pending" : "No pending local changes")
             Text("Publication: \(destination.publicationState ?? "not attempted") (\(destination.publicationRevision ?? "none"))")
             Text("Fetched: \(destination.fetchedRevision ?? "none")")
             Text("Retained import: \(destination.importedRevision ?? "none")")
-            if let error = destination.localError { Text(error) }
             if let error = destination.acquisitionError { Text(error) }
             if let error = destination.publicationError { Text(error) }
-            if let error = destination.recoveryError { Text(error) }
             ForEach(destination.conflicts.indices, id: \.self) { index in
                 let conflict = destination.conflicts[index]
                 Text("Held \(conflict.object.kind) \(conflict.object.id): \(conflict.reason)")
             }
-            ForEach(destination.records) { record in
-                recovery(record, destination: destination.id)
+            ForEach(destination.changes.keys.sorted(), id: \.self) { id in
+                if let change = destination.changes[id] {
+                    DisclosureGroup("\(change.object.kind) \(change.object.id): \(change.field)") {
+                        VStack(alignment: .leading, spacing: Spacing.xs) {
+                            Text(destination.candidates.contains(id) ? "Candidate, not confirmed" : "Retained alternative")
+                            Text(change.valueText)
+                            Text("Mutation: \(id)")
+                        }
+                    }
+                    .accessibilityIdentifier("peer-recovery-\(id)")
+                }
             }
+            Text("Inspection changes nothing. Copy a retained value into an ordinary edit to save it again.")
         }
         .accessibilityIdentifier("peer-planning-\(destination.id)")
-    }
-
-    private func recovery(_ record: PeerPlanningRecord, destination: String) -> some View {
-        DisclosureGroup("\(record.object.kind) \(record.object.id)") {
-            VStack(alignment: .leading, spacing: Spacing.xs) {
-                if let selected = record.destination {
-                    Text(selected == destination ? "Selected here" : "Not selected here; selected in \(selected)")
-                } else {
-                    Text("Local only; not selected")
-                }
-                if record.localID != record.object.id {
-                    Text("Resolves to \(record.localID) (execution stays local)")
-                }
-                ForEach(record.references.indices, id: \.self) { index in
-                    let reference = record.references[index]
-                    Text("Retained reference: \(reference.kind) \(reference.id)")
-                }
-                ForEach(record.values) { value in
-                    VStack(alignment: .leading, spacing: Spacing.xs) {
-                        Text("\(value.field): \(value.candidate ? "candidate, not confirmed" : "retained alternative")")
-                        Text(value.valueJSON)
-                        Text("Mutation: \(value.id); author: \(value.authorLabel)")
-                    }
-                }
-                Text("Inspection changes nothing. Copy a retained value into an ordinary edit to save it again. Repository configuration selects which ref receives retained history.")
-            }
-        }
-        .accessibilityIdentifier("peer-recovery-\(record.object.id)")
     }
 }

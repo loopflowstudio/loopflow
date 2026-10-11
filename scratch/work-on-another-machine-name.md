@@ -199,6 +199,13 @@ projection is internal to Task observations and `planning_wave`; removing it bel
 to the canonical Task/snapshot cut, not another public Project read wrapper.
 Acquisition must preserve omitted fields and pending baselines through typed edits.
 
+Compression removes the fabricated Git recovery record/value hierarchy: status and
+CLI/Desktop now inspect retained journal mutations directly, with candidate IDs
+separate from projection failures and publication receipts. Failed journal reads
+use the existing read error and cached WorkReading; successful reads have definite
+pending state. No persistent state or import policy changes. The accepted typed
+edit/journal rewrite and preceding acquisition/cron/follow-up work remain open.
+
 The earlier pass still includes acquisition, concrete Linear bindings, ordinary
 Task/comment follow-ups and cron unification. The full deletion audit then removes
 remaining provider hierarchy, whole-model patching, duplicate edit/journal
@@ -244,14 +251,14 @@ Earlier baseline detail: `c8fe4628a:scratch/work-on-another-machine-name.md`.
   cut. Regenerate them after the entire accepted reduction, before review-only
   republication. No readiness or landing follows from this persistence checkpoint.
 
-Checks: `cargo build -p loopflow --bin lf`, focused lib selection/stored-workflow and `local_planning` Project/order/rotation tests, `dto_fixtures wave`, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and headless Swift `--filter 'DTOFixtureTests|WorkModelTests|RegistryQueryTests'` pass (65 Swift tests); gate retains the affected/materialized matrix.
+Checks: `cargo build -p loopflow --bin lf`, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, focused `cargo test -p loopflow` selectors (`--test dto_fixtures peer_planning`, `--test planning_foreground_tests planning_status_reads_retained_journal`, `--lib rejected_selection_retains_history`), and `scripts/test_desktop.sh -Xswiftc -gnone --filter 'peerPlanning|roadmapPeerPlanning'` pass (4 headless Swift tests); prior Project proofs: `52e7da7f35:scratch/work-on-another-machine-name.md`; gate owns the affected/materialized matrix.
 
-Context: authored memory/scratch fit. The generated Task seed/steers remain a
-separate over-budget source (19,523 tokens, 3,523 over on the October 10 query).
-Its complete decision text and manifest were inspected at
-`.lf/tmp/context/6b60a500c477acf7b267bec95a8fce724c619d83866109ad12228ce43c8d2ac0.md`.
-Authored-note trimming cannot reduce that generated source; no historical direction
-or configured limit is rewritten to conceal it.
+Context: authored memory/scratch fit. The generated Task seed/steers and workspace
+manifest remain separately over budget: 19,408 tokens, 3,408 over before this cut.
+The complete source is
+`.lf/tmp/context/8e8a53810c8e6dbf6354277faade2b63eda47d0fc0b8989a616e5e95e35b3187.md`;
+its decisions and manifest were inspected. Authored-note trimming cannot reduce
+that source; retained direction and limits are unchanged.
 
 ## Delete — do not maintain
 

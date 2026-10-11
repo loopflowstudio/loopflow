@@ -5,10 +5,7 @@ use super::{
 };
 use crate::planning_exchange::{PlanningKind, PlanningMutation, PlanningObject, PlanningSnapshot};
 use crate::planning_git::PlanningDestination;
-use crate::store::{
-    PeerPlanningRecord, PeerPlanningStatus, PeerPlanningValue, PeerProjectionConflict, StoreError,
-    StoreResult,
-};
+use crate::store::{PeerPlanningStatus, PeerProjectionConflict, StoreError, StoreResult};
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -370,30 +367,14 @@ impl SqliteStore {
                 imported_revision,
             ) = row?;
             let snapshot = export_in(&conn, repo, &id)?;
-            let pending_local =
-                Some(digest.as_deref() != Some(planning_digest(&snapshot)?.as_str()));
-            let mut records = BTreeMap::new();
-            let winners: BTreeSet<_> = snapshot.winners().map(|(id, _)| id).collect();
-            for (change_id, change) in &snapshot.changes {
-                let record =
-                    records
-                        .entry(change.object.clone())
-                        .or_insert_with(|| PeerPlanningRecord {
-                            object: change.object.clone(),
-                            local_id: change.object.id.clone(),
-                            destination: Some(id.clone()),
-                            references: Vec::new(),
-                            values: Vec::new(),
-                        });
-                record.values.push(PeerPlanningValue {
-                    id: change_id.clone(),
-                    field: change.field.clone(),
-                    value_json: serde_json::to_string(&change.value)?,
-                    candidate: winners.contains(change_id.as_str()),
-                    author: None,
-                    observed_at: None,
-                });
-            }
+            let pending_local = digest.as_deref() != Some(planning_digest(&snapshot)?.as_str());
+            let selected_records = snapshot
+                .changes
+                .values()
+                .map(|change| &change.object)
+                .collect::<BTreeSet<_>>()
+                .len() as u64;
+            let candidates = snapshot.winners().map(|(id, _)| id.to_owned()).collect();
             let mut conflicts=conn.prepare("SELECT kind,object_id,reason FROM planning_peer_conflicts WHERE repo=?1 AND active=1")?;
             let conflicts = conflicts
                 .query_map([repo], |r| {
@@ -418,7 +399,7 @@ impl SqliteStore {
                 id,
                 reference,
                 active: active.unwrap_or(false),
-                selected_records: records.len() as u64,
+                selected_records,
                 imported_revision,
                 fetched_revision,
                 acquisition_error,
@@ -426,10 +407,9 @@ impl SqliteStore {
                 publication_state,
                 publication_error,
                 pending_local,
-                local_error: None,
                 conflicts,
-                records: records.into_values().collect(),
-                recovery_error: None,
+                changes: snapshot.changes,
+                candidates,
             });
         }
         Ok(result)

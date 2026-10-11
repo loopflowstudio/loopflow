@@ -726,12 +726,10 @@ mod tests {
             .unwrap();
         let exported = store.export_peer_planning("/repo", &route.id()).unwrap();
         assert_eq!(exported.changes["rejected"], incoming.changes["rejected"]);
-        assert_eq!(
-            store.peer_planning_status("/repo").unwrap()[0]
-                .conflicts
-                .len(),
-            1
-        );
+        let status = store.peer_planning_status("/repo").unwrap().remove(0);
+        assert_eq!(status.conflicts.len(), 1);
+        assert_eq!(status.changes, exported.changes);
+        assert!(status.candidates.contains("rejected"));
         let mut conn = store.conn.lock().unwrap();
         let values = super::read(&conn, &object).unwrap();
         assert!(values.contains(&Edit::WaveName("Renamed".into())));

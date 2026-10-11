@@ -1014,7 +1014,7 @@ fn peer_planning_receipts_reach_open_desktop_without_refresh() {
     let statuses = read(&|statuses| statuses.iter().any(|status| status.active));
     assert_eq!(statuses.len(), 1);
     assert_eq!(statuses[0].id, id);
-    assert_eq!(statuses[0].pending_local, Some(true));
+    assert!(statuses[0].pending_local);
     assert!(statuses[0].selected_records > 0);
 
     home.raw()
@@ -1030,7 +1030,7 @@ fn peer_planning_receipts_reach_open_desktop_without_refresh() {
     assert_eq!(statuses[0].fetched_revision.as_deref(), Some("fetched"));
     assert_eq!(statuses[0].publication_error.as_deref(), Some("reply lost"));
     assert_eq!(statuses[0].imported_revision, None);
-    assert_eq!(statuses[0].pending_local, Some(true));
+    assert!(statuses[0].pending_local);
     home.store.use_peer_planning(repo, None).unwrap();
     let statuses = read(&|statuses| !statuses[0].active);
     assert_eq!(

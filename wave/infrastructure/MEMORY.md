@@ -626,24 +626,25 @@ acceptance remain at
 
 ## Tasks across machines (LOO-412, 2026-10-10)
 
-Jack Heart selected repository-configured Linear, shared Git or default user-keyed
-Git. Outages buffer locally without fallback or publisher election. One typed
-writer owns local/imported fields; execution and attempts stay local. Preserve Git
-causality, losers and uncertain effects. Gate/installation remain unproved.
+Jack Heart selected Linear, shared Git or default user-keyed Git per repository.
+Outages buffer locally, without fallback/publisher election. One typed writer
+owns local/imported fields; execution/attempts stay local. Preserve causality,
+losers and uncertainty. Gate/installation remain unproved.
 
-Jack accepted the One Work audit: direct fields, Linear boundaries, typed
-criteria/comments, Tasks/comments replacing FollowThrough and one cron list.
-Conditional retention needs evidence; partial reduction is not review-ready.
-Canonical Project operations/rotation and CLI/Desktop retain local IDs, Linear
-bindings and shared rank, not edit-time order. Provider/Task projections remain;
-`PmProject` lacks description acquisition.
+Jack accepted the full One Work audit: direct fields, typed criteria/comments,
+Linear boundaries, ordinary Task follow-ups and one cron list. Retention needs
+evidence; partial reduction is not review-ready.
+Canonical Projects preserve IDs, Linear bindings and rank. Task/provider projections
+and prose acquisition remain.
+Git recovery reads the journal directly. Candidates prove neither projection nor
+publication; read errors retain Desktop's cached reading.
 
-Release's memory requires cron conversion to preserve installed ownership and
-operation failure exits, independently of authored location.
-The [design](../../scratch/work-on-another-machine-name.md) owns remaining work.
-Republish #1491 only after the full reduction, for review; no landing, installation,
-live schedule activation or real Work export. Historical recovery and transport
-proofs: `41378adacf:wave/infrastructure/MEMORY.md`, this heading.
+Cron preserves installed ownership and failure exits regardless of file location
+([evidence](release/MEMORY.md)).
+[Remaining work](../../scratch/work-on-another-machine-name.md). Republish #1491
+after full reduction, for review only. No landing, installation,
+live schedule activation or real Work export. Historical transport/recovery proofs:
+`41378adacf:wave/infrastructure/MEMORY.md`, this heading.
 
 ## Planning and launch preservation (curated 2026-10-02)
 

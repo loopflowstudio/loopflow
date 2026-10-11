@@ -213,10 +213,7 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
     .unwrap();
     let before = execution(&conn, fixture.task.id.as_str());
     let placement = fixture.task.worktree.clone();
-    assert_eq!(
-        status(&runtime, &fixture.store, source_key).pending_local,
-        Some(true)
-    );
+    assert!(status(&runtime, &fixture.store, source_key).pending_local);
     // Short commands exchange without a watcher, and identical create requests
     // remain different intentions, unlike repeated delivery of the same journal.
     let first = create(&source, left.path(), "task-pr-tests");
@@ -332,14 +329,8 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
             .acquisition_error
             .is_some()
     });
-    assert_eq!(
-        status(&runtime, &worker, target_key).pending_local,
-        Some(true)
-    );
-    assert_eq!(
-        status(&runtime, &fixture.store, source_key).pending_local,
-        Some(true)
-    );
+    assert!(status(&runtime, &worker, target_key).pending_local);
+    assert!(status(&runtime, &fixture.store, source_key).pending_local);
     let lock_path = left
         .path()
         .join("locks/planning-peers")
@@ -394,8 +385,8 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
     wait_for(|| {
         let a = status(&runtime, &fixture.store, source_key);
         let b = status(&runtime, &worker, target_key);
-        a.pending_local == Some(false)
-            && b.pending_local == Some(false)
+        !a.pending_local
+            && !b.pending_local
             && a.publication_state.as_deref() == Some("confirmed")
             && b.publication_state.as_deref() == Some("confirmed")
     });
@@ -661,16 +652,16 @@ fn taskless_terminal_and_headless_sessions_keep_planning_live() {
         right.path(),
         &["task", "edit", &id, "--notes", "Target offline"],
     );
-    assert_eq!(status(&runtime, &a, source_key).pending_local, Some(true));
-    assert_eq!(status(&runtime, &b, target_key).pending_local, Some(true));
+    assert!(status(&runtime, &a, source_key).pending_local);
+    assert!(status(&runtime, &b, target_key).pending_local);
     fs::rename(&disconnected, remote).unwrap();
     wait_for(|| {
         let source = runtime.block_on(a.get_task(&task_id)).unwrap().unwrap();
         let target = runtime.block_on(b.get_task(&task_id)).unwrap().unwrap();
         source.description == "Target offline"
             && target.title == "Source offline"
-            && status(&runtime, &a, source_key).pending_local == Some(false)
-            && status(&runtime, &b, target_key).pending_local == Some(false)
+            && !status(&runtime, &a, source_key).pending_local
+            && !status(&runtime, &b, target_key).pending_local
     });
     source_agent.finish();
     target_agent.finish();
@@ -814,4 +805,94 @@ fn configure(repo: &Path, binding: &PlanningDestination) {
         format!("planning:\n  provider: git\n  remote: plans\n  shared: {shared}\n"),
     )
     .unwrap();
+}
+
+#[test]
+fn planning_status_reads_retained_journal_without_inventing_recovery_records() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let source = repo.path().canonicalize().unwrap();
+    let task = create(&source, home.path(), "");
+    run(
+        &source,
+        home.path(),
+        &["task", "edit", &task, "--title", "Later title"],
+    );
+    let status: serde_json::Value = serde_json::from_str(&run(
+        &source,
+        home.path(),
+        &["planning", "status", "--json"],
+    ))
+    .unwrap();
+    let destinations: Vec<PeerPlanningStatus> =
+        serde_json::from_value(status["destinations"].clone()).unwrap();
+    let active = destinations
+        .iter()
+        .find(|destination| destination.active)
+        .unwrap();
+    let store =
+        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let journal = store
+        .export_peer_planning(source.to_str().unwrap(), &active.id)
+        .unwrap();
+    assert_eq!(active.changes, journal.changes);
+    let (old_id, old) = active
+        .changes
+        .iter()
+        .find(|(_, change)| {
+            change.object.id == task
+                && change.field == "issue_title"
+                && change.value == "Same title"
+        })
+        .unwrap();
+    assert!(!active.candidates.contains(old_id));
+    assert_eq!(old.value, "Same title");
+    let (current_id, current) = active
+        .changes
+        .iter()
+        .find(|(_, change)| {
+            change.object.id == task
+                && change.field == "issue_title"
+                && change.value == "Later title"
+        })
+        .unwrap();
+    assert!(active.candidates.contains(current_id));
+    assert!(current.parents.contains(old_id));
+    let text = run(&source, home.path(), &["planning", "status"]);
+    assert!(text.contains("retained alternative]: \"Same title\""));
+    assert!(text.contains("candidate, not confirmed]: \"Later title\""));
+    assert_eq!(
+        store
+            .export_peer_planning(source.to_str().unwrap(), &active.id)
+            .unwrap(),
+        journal
+    );
+
+    // An unreadable journal fails the read; it must not fabricate an empty plan
+    // or overwrite the bytes needed for repair. Work frames carry that read error.
+    let conn = Connection::open(home.path().join("loopflow.db")).unwrap();
+    conn.execute(
+        "UPDATE planning_peer_changes SET parents='[\"missing\"]' WHERE id=?1",
+        [current_id],
+    )
+    .unwrap();
+    let failed = command(&source, home.path())
+        .args(["planning", "status", "--json"])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(!failed.status.success());
+    assert!(String::from_utf8_lossy(&failed.stderr).contains("missing planning predecessor"));
+    let retained: String = conn
+        .query_row(
+            "SELECT parents FROM planning_peer_changes WHERE id=?1",
+            [current_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(retained, "[\"missing\"]");
+    assert_eq!(
+        store.task(&task.parse().unwrap()).unwrap().unwrap().title,
+        "Later title"
+    );
 }

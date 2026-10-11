@@ -173,7 +173,10 @@ Session/Process records and checkout paths never enter the Git document.
 
 `PlanningSyncStatus` presents local Linear delivery evidence; `peer_planning` Work
 frames and `lf planning status` present Git acquisition/publication and retained
-alternatives. Foreground CLI, headless Session and Desktop connections own exchange
+alternatives directly from the retained mutation journal. Ranked candidate IDs are
+not applied or published evidence; rejected projections retain their failure reasons.
+Journal read failures fail the status read; Desktop keeps its last reading with the
+error, rather than inventing an empty plan. Foreground CLI, headless Session and Desktop connections own exchange
 for their lifetimes. A short save attempts exchange before returning. No resident,
 whole-store callback, scheduler or implicit turn/Flow replay is involved.
 

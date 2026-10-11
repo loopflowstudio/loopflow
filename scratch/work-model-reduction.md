@@ -206,18 +206,19 @@ remote/ref identity, publication readback, cancellation-safe locks and bounded
 network collection. Preserve retained Git documents/history without inventing
 cross-version negotiation or silently selecting a fresh ref.
 
-## 9. Remove the extra Git recovery record hierarchy
+## 9. Git recovery reads the journal directly
 
-**Locations:** `store/planning_peers.rs::{PeerPlanningRecord,PeerPlanningValue,
-PeerProjectionConflict,PeerPlanningStatus}` and `sqlite/planning_peers.rs`'s status
-builder, CLI/Swift mirrors and fixtures.
+Removed `PeerPlanningRecord` / `PeerPlanningValue`, their reconstructed inventory,
+constant-empty metadata and exclusive fictional fixture cases. Status returns the
+retained `PlanningMutation` map plus ranked candidate IDs; CLI/Desktop show these
+same entries. Values, causal parents, clocks and projection failures survive.
+Candidate means ranked, never applied or published. This is inspection, not another
+writer. The typed edit/journal conversion in sections 6–8 remains outstanding.
 
-The current builder copies `object.id` into `local_id`, always creates empty
-`references`, emits `author: None` and `observed_at: None`, and leaves `local_error`
-and `recovery_error` empty. Verify all constructors, then delete unsupported fields
-and the reconstructed record inventory where journal entries plus Work references
-can serve the same inspection. Retain useful conflict/recovery views; they must
-show losing values and failures without becoming another editable object model.
+Journal read failure already returns `StoreResult::Err`; WorkReading retains cached
+status and shows that failure. `pending_local` is therefore a required boolean on
+successful reads, not an invented partial-read state. Publication and acquisition
+errors keep their distinct owners. No schema or historical evidence is removed.
 
 ## 10. Unify selectors and acquisition orchestration
 

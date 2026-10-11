@@ -491,7 +491,7 @@ struct WorkModelStreamTests {
         await feed.send(try fixture.planningFrame(sequence: 1, answers: scope.id))
         await feed.send(try peers(2, scope.id, repo: "/src/loopflow", statuses: statuses))
         try await eventually { model.peerPlanning.value?.count == 2 }
-        #expect(model.peerPlanning.value?[0].pendingLocal == nil)
+        #expect(model.peerPlanning.value?[0].pendingLocal == true)
         #expect(model.peerPlanning.value?[1].active == true)
         #expect(model.roadmap.value != nil)
 

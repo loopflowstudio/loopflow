@@ -1,17 +1,16 @@
 [
   {
-    "id": "unreadable-plan",
+    "id": "held-plan",
     "reference": "refs/loopflow/planning/shared/review",
     "active": false,
-    "selected_records": 3,
+    "selected_records": 1,
     "imported_revision": "retained-import",
     "fetched_revision": "newer-fetch",
     "acquisition_error": null,
     "publication_revision": "attempted-publication",
     "publication_state": "unconfirmed",
     "publication_error": "reply lost",
-    "pending_local": null,
-    "local_error": "Local planning journal is invalid; pending changes and sharing holds are unknown. Retained plans and sync receipts are unchanged.",
+    "pending_local": true,
     "conflicts": [
       {
         "object": {
@@ -21,14 +20,27 @@
         "reason": "retained projection conflict"
       }
     ],
-    "records": [],
-    "recovery_error": "Recovery values unavailable: retained planning is invalid; nothing changed."
+    "changes": {
+      "held-title": {
+        "object": {
+          "kind": "task",
+          "id": "retained-task"
+        },
+        "field": "issue_title",
+        "value": "Held title",
+        "clock": 1,
+        "parents": []
+      }
+    },
+    "candidates": [
+      "held-title"
+    ]
   },
   {
     "id": "healthy-plan",
     "reference": "refs/loopflow/planning/shared/team",
     "active": true,
-    "selected_records": 1,
+    "selected_records": 2,
     "imported_revision": null,
     "fetched_revision": null,
     "acquisition_error": null,
@@ -36,69 +48,59 @@
     "publication_state": null,
     "publication_error": null,
     "pending_local": true,
-    "local_error": null,
     "conflicts": [],
-    "records": [
-      {
+    "changes": {
+      "title-loser": {
         "object": {
           "kind": "task",
-          "id": "private-task"
+          "id": "retained-task"
         },
-        "local_id": "private-task",
-        "destination": null,
-        "references": [
-          {
-            "kind": "project",
-            "id": "private-parent"
-          }
-        ],
-        "values": [
-          {
-            "id": "title-loser",
-            "field": "issue_title",
-            "value_json": "\"Retained private title\"",
-            "candidate": false,
-            "author": null,
-            "observed_at": null
-          },
-          {
-            "id": "assignee-head",
-            "field": "planning_assignee",
-            "value_json": "\"Maya\"",
-            "candidate": true,
-            "author": null,
-            "observed_at": null
-          }
+        "field": "issue_title",
+        "value": "Retained title",
+        "clock": 1,
+        "parents": []
+      },
+      "title-head": {
+        "object": {
+          "kind": "task",
+          "id": "retained-task"
+        },
+        "field": "issue_title",
+        "value": "Current title",
+        "clock": 2,
+        "parents": [
+          "title-loser"
         ]
       },
-      {
+      "assignee-head": {
+        "object": {
+          "kind": "task",
+          "id": "retained-task"
+        },
+        "field": "planning_assignee",
+        "value": "Maya",
+        "clock": 3,
+        "parents": []
+      },
+      "comment-head": {
         "object": {
           "kind": "comment",
-          "id": "private-comment"
+          "id": "retained-comment"
         },
-        "local_id": "private-comment",
-        "destination": null,
-        "references": [
-          {
-            "kind": "task",
-            "id": "private-task"
-          }
-        ],
-        "values": [
-          {
-            "id": "comment-loser",
-            "field": "content",
-            "value_json": "{\"body\":\"Private direction\",\"author\":\"{\\\"kind\\\": \\\"person\\\", \\\"name\\\": \\\"Maya\\\"}\",\"created_at\":null}",
-            "candidate": false,
-            "author": {
-              "kind": "person",
-              "name": "Maya"
-            },
-            "observed_at": 42
-          }
-        ]
+        "field": "content",
+        "value": {
+          "body": "Direction",
+          "author": "{\"kind\": \"person\", \"name\": \"Maya\"}",
+          "created_at": "2026-10-10T12:00:00Z"
+        },
+        "clock": 4,
+        "parents": []
       }
-    ],
-    "recovery_error": null
+    },
+    "candidates": [
+      "assignee-head",
+      "comment-head",
+      "title-head"
+    ]
   }
 ]

@@ -1,4 +1,6 @@
-use crate::planning_exchange::PlanningObject;
+use std::collections::{BTreeMap, BTreeSet};
+
+use crate::planning_exchange::{PlanningMutation, PlanningObject};
 
 use crate::planning_git::PlanningDestination;
 
@@ -24,34 +26,12 @@ pub struct PeerPlanningStatus {
     pub publication_revision: Option<String>,
     pub publication_state: Option<String>,
     pub publication_error: Option<String>,
-    /// None when the local journal cannot be read; never inferred from publication.
-    pub pending_local: Option<bool>,
-    pub local_error: Option<String>,
+    pub pending_local: bool,
     pub conflicts: Vec<PeerProjectionConflict>,
-    pub records: Vec<PeerPlanningRecord>,
-    pub recovery_error: Option<String>,
-}
-
-/// Local recovery view, never an export document or an instruction to restore.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct PeerPlanningRecord {
-    pub object: PlanningObject,
-    pub local_id: String,
-    pub destination: Option<String>,
-    pub references: Vec<PlanningObject>,
-    pub values: Vec<PeerPlanningValue>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct PeerPlanningValue {
-    pub id: String,
-    pub field: String,
-    /// Lossless JSON, including null and grouped disposition/comment values.
-    pub value_json: String,
-    /// Ranked journal candidate, not evidence of successful projection or delivery.
-    pub candidate: bool,
-    pub author: Option<crate::work::task::comment::TaskCommentAuthor>,
-    pub observed_at: Option<i64>,
+    /// Retained journal entries, including losing values and rejected projections.
+    pub changes: BTreeMap<String, PlanningMutation>,
+    /// Ranked mutations, not evidence of successful projection or publication.
+    pub candidates: BTreeSet<String>,
 }
 
 impl Store {

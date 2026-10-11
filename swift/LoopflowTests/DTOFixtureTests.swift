@@ -577,22 +577,22 @@ struct DTOFixtureTests {
         #expect(decoded == session)
     }
 
-    @Test("Peer planning retains unknown pending state and independent receipts")
+    @Test("Peer planning retains journal values and independent receipts")
     func peerPlanningStatus() throws {
         let data = try loadFixtureData("peer_planning_status.json")
         let statuses = try JSONDecoder().decode([PeerPlanningStatus].self, from: data)
-        #expect(statuses[0].pendingLocal == nil)
+        #expect(statuses[0].pendingLocal)
         #expect(statuses[0].publicationState == "unconfirmed")
         #expect(statuses[0].importedRevision == "retained-import")
         #expect(statuses[0].fetchedRevision == "newer-fetch")
         #expect(statuses[0].conflicts[0].object.id == "retained-task")
         #expect(statuses[1].pendingLocal == true)
         #expect(statuses[1].active)
-        #expect(statuses[1].records[0].destination == nil)
-        #expect(!statuses[1].records[0].values[0].candidate)
-        #expect(statuses[1].records[1].values[0].author == .person(name: "Maya"))
-        #expect(statuses[1].records[1].values[0].observedAt == 42)
-        for field in ["conflicts", "records"] {
+        #expect(statuses[1].changes["title-loser"]?.value == .string("Retained title"))
+        #expect(!statuses[1].candidates.contains("title-loser"))
+        #expect(statuses[1].changes["title-head"]?.parents == ["title-loser"])
+        #expect(statuses[1].changes["comment-head"]?.clock == 4)
+        for field in ["conflicts", "changes", "candidates", "pending_local"] {
             var object = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])[1]
             object.removeValue(forKey: field)
             #expect(throws: (any Error).self) {

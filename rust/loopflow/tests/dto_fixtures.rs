@@ -766,32 +766,37 @@ fn planning_sync_preserves_delivery_and_losing_values() {
 }
 
 #[test]
-fn peer_planning_status_keeps_unknown_local_state_and_retained_receipts() {
+fn peer_planning_status_keeps_journal_and_independent_receipts() {
     let value: serde_json::Value = serde_json::from_str(include_str!(
         "../../../tests/fixtures/dto/peer_planning_status.json"
     ))
     .unwrap();
     let statuses: Vec<loopflow::store::PeerPlanningStatus> =
         serde_json::from_value(value.clone()).unwrap();
-    assert_eq!(statuses[0].pending_local, None);
+    assert!(statuses[0].pending_local);
     assert_eq!(
         statuses[0].publication_state.as_deref(),
         Some("unconfirmed")
     );
     assert_eq!(statuses[0].conflicts.len(), 1);
-    assert_eq!(statuses[1].pending_local, Some(true));
-    let private = &statuses[1].records[0];
-    assert_eq!(private.destination, None);
-    assert!(!private.values[0].candidate);
-    assert_eq!(private.values[0].value_json, "\"Retained private title\"");
-    assert_eq!(
-        statuses[1].records[1].values[0].author,
-        Some(loopflow::work::task::comment::TaskCommentAuthor::Person {
-            name: Some("Maya".into())
-        })
-    );
+    assert!(statuses[1].pending_local);
+    assert_eq!(statuses[1].changes["title-loser"].value, "Retained title");
+    assert!(!statuses[1].candidates.contains("title-loser"));
+    assert!(statuses[1].changes["title-head"]
+        .parents
+        .contains("title-loser"));
+    for status in &statuses {
+        let journal = loopflow::planning_exchange::PlanningSnapshot {
+            changes: status.changes.clone(),
+        };
+        journal.validate().unwrap();
+        assert_eq!(
+            status.candidates,
+            journal.winners().map(|(id, _)| id.to_owned()).collect()
+        );
+    }
     assert_eq!(serde_json::to_value(&statuses).unwrap(), value);
-    for field in ["conflicts", "records"] {
+    for field in ["conflicts", "changes", "candidates", "pending_local"] {
         let mut missing = value[1].clone();
         missing.as_object_mut().unwrap().remove(field);
         assert!(serde_json::from_value::<loopflow::store::PeerPlanningStatus>(missing).is_err());

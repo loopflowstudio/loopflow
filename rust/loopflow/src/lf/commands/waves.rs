@@ -564,15 +564,13 @@ pub fn comment(wave: Option<&str>, message: &str) -> Result<()> {
             crate::config::participant_name()?.unwrap_or_else(|| "attribution unresolved".into());
         let publication = if let Some(wave) = wave {
             let wave = resolve_status_wave(&store, Some(wave)).await?;
-            store
-                .sqlite
-                .publish_wave_steer(wave.id(), &author, message)?
+            store.sqlite.save_wave_steer(wave.id(), &author, message)?
         } else {
             let root = crate::repo::find_repo_root()?;
             let repo = crate::repository::CanonicalRepo::discover(&root)?;
             store
                 .sqlite
-                .publish_repository_steer(&repo, &author, message)?
+                .save_repository_steer(&repo, &author, message)?
         };
         println!(
             "Saved {} locally; shared planning exchange for this scope is unavailable",
@@ -1741,7 +1739,7 @@ async fn current_direction(
     task_id: &crate::work::task::TaskId,
 ) -> Result<Option<DirectionSnapshot>> {
     let steers = store
-        .task_direction(task_id)
+        .task_steers(task_id)
         .await
         .map_err(|err| anyhow!("failed to read Task comments: {err}"))?;
     let text = crate::durable::render_steers(&steers);

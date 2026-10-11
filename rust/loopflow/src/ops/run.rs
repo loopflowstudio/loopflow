@@ -629,7 +629,7 @@ mod tests {
         let task = task(&store, &wave, &project, worktree.clone()).await;
 
         store
-            .publish_direction(
+            .save_steer(
                 &WorkRef::Task(task.id.clone()),
                 crate::durable::Author::User,
                 "ADVANCER ONLY",
@@ -651,7 +651,7 @@ mod tests {
         assert_eq!(prompts.work, WorkRef::Task(task.id.clone()));
         assert!(!runtime.context.contains("ADVANCER ONLY"));
         assert!(!prompts.context.contains("ADVANCER ONLY"));
-        assert_eq!(store.task_direction(&task.id).await.unwrap().len(), 1);
+        assert_eq!(store.task_steers(&task.id).await.unwrap().len(), 1);
     }
 
     #[tokio::test]

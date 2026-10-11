@@ -600,9 +600,9 @@ impl SessionMode {
 
 #[derive(Subcommand, Debug)]
 pub enum SessionCommand {
-    /// Save direction for this Session without starting a turn
+    /// Save a steer for this Session without starting a turn
     Steer { id: String, message: String },
-    /// Inspect delivery evidence or explicitly retry a publication
+    /// Inspect steer delivery or retry delivery
     Steers {
         id: String,
         #[arg(long)]
@@ -613,7 +613,7 @@ pub enum SessionCommand {
         after: i64,
         #[arg(long, default_value_t = 32)]
         limit: usize,
-        /// Read one complete immutable source
+        /// Read the complete steer
         #[arg(long)]
         source: Option<String>,
     },
@@ -747,7 +747,7 @@ pub enum SessionCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum WaveCommand {
-    /// Save direction for subscribed Sessions without starting a turn
+    /// Save a steer for associated Sessions without starting a turn
     Comment {
         wave: String,
         message: String,
@@ -1076,7 +1076,7 @@ pub enum TaskCommand {
     Comment {
         issue: String,
         message: Option<String>,
-        /// Deliver new direction even when publishing from an agent Session
+        /// Save a steer even when commenting from an agent Session
         #[arg(long, requires = "message")]
         steer: bool,
         #[arg(short = 'w', long)]
@@ -1443,7 +1443,7 @@ pub enum CiCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum RepoCommand {
-    /// Save direction for subscribed Sessions without starting a turn
+    /// Save a steer for associated Sessions without starting a turn
     Comment {
         message: String,
         #[arg(long, required = true)]

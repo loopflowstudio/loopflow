@@ -1958,7 +1958,8 @@ fn record_context_script() -> &'static str {
 import json, pathlib, shlex, subprocess, sys
 requests = json.load(sys.stdin)
 hook = requests[0]["params"]["config"]["hooks"]["SessionStart"][0]["hooks"][0]["command"]
-block = json.loads(subprocess.check_output(hook, shell=True))["hookSpecificOutput"]["additionalContext"]
+event = {"session_id": requests[1]["params"]["threadId"], "hook_event_name": "SessionStart", "source": "startup"}
+block = json.loads(subprocess.check_output(hook, shell=True, input=json.dumps(event).encode()))["hookSpecificOutput"]["additionalContext"]
 args = shlex.split(hook)
 delivery = json.loads(pathlib.Path(args[args.index("--delivery") + 1]).read_text())
 references = "\n".join(pathlib.Path(path).read_text() for path in delivery["references"])

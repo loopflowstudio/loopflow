@@ -268,7 +268,7 @@ impl super::SqliteStore {
                 ts.created_at,
                 EXISTS (
                     SELECT 1 FROM task_events event
-                    JOIN steer_publications direction ON direction.id=json_extract(event.kind_json, '$.publication_id')
+                    JOIN steers direction ON direction.id=json_extract(event.kind_json, '$.steer_id')
                     WHERE event.task_id=ci.task_id
                       AND json_extract(event.kind_json, '$.kind')='steer'
                       AND json_extract(direction.author, '$.kind') IN ('user','named')

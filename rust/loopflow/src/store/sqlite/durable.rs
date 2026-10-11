@@ -1,9 +1,10 @@
+use crate::steer::Steer;
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use time::OffsetDateTime;
 
 use crate::child::ChildRef;
 use crate::durable::{
-    AbandonReceipt, Author, Machine, MachineId, Placement, ProjectId, Steer, SteerComment, TaskId,
+    AbandonReceipt, Author, Machine, MachineId, Placement, ProjectId, SteerComment, TaskId,
     TaskState, ToolResponseId, ToolResponseReceipt, ToolResponseWrite, WorkRef, WorkStatus,
 };
 use crate::id::WaveId;
@@ -235,65 +236,49 @@ impl SqliteStore {
         work_for_child_in(&conn, target)
     }
 
-    pub fn task_direction(&self, task_id: &TaskId) -> StoreResult<Vec<Steer>> {
+    pub fn task_steers(&self, task_id: &TaskId) -> StoreResult<Vec<Steer>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(
-            "SELECT seq,author,text FROM steer_publications WHERE task_id=?1 ORDER BY seq",
-        )?;
-        let result = query
-            .query_and_then([task_id.as_str()], |row| {
-                Ok(Steer {
-                    id: row.get(0)?,
-                    author: serde_json::from_str(&row.get::<_, String>(1)?)?,
-                    text: row.get(2)?,
-                })
-            })
-            .map_err(StoreError::from)?
-            .collect();
-        result
+        let mut query = conn.prepare(&format!(
+            "SELECT {} FROM steers p WHERE task_id=?1 ORDER BY seq",
+            super::steers::COLUMNS
+        ))?;
+        let steers = query
+            .query_map([task_id.as_str()], super::steers::read_steer)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(steers)
     }
 
-    pub fn direction_since(&self, since: i64) -> StoreResult<Vec<SteerComment>> {
+    pub fn steers_since(&self, since: i64) -> StoreResult<Vec<SteerComment>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare("SELECT seq,author,text,task_id,project_id,created_at FROM steer_publications
-            WHERE created_at>=?1 AND (task_id IS NOT NULL OR project_id IS NOT NULL) ORDER BY created_at,seq")?;
+        let mut query = conn.prepare(&format!("SELECT {},task_id,project_id,created_at FROM steers p
+            WHERE created_at>=?1 AND (task_id IS NOT NULL OR project_id IS NOT NULL) ORDER BY created_at,seq", super::steers::COLUMNS))?;
         let result = query
-            .query_and_then([since], |row| {
-                let task: Option<String> = row.get(3)?;
+            .query_map([since], |row| {
+                let task: Option<String> = row.get(6)?;
                 let work = match task {
                     Some(task) => WorkRef::Task(TaskId::from_raw(task)),
-                    None => WorkRef::Project(ProjectId::from_raw(row.get::<_, String>(4)?)),
+                    None => WorkRef::Project(ProjectId::from_raw(row.get::<_, String>(7)?)),
                 };
                 Ok(SteerComment {
                     work,
-                    steer: Steer {
-                        id: row.get(0)?,
-                        author: serde_json::from_str(&row.get::<_, String>(1)?)?,
-                        text: row.get(2)?,
-                    },
-                    issued_at: crate::store::rows::unix_to_datetime(row.get(5)?),
+                    steer: super::steers::read_steer(row)?,
+                    issued_at: crate::store::rows::unix_to_datetime(row.get(8)?),
                 })
-            })
-            .map_err(StoreError::from)?
-            .collect();
-        result
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(result)
     }
 
     #[cfg(test)]
-    pub fn publish_direction(
-        &self,
-        work: &WorkRef,
-        author: &Author,
-        text: &str,
-    ) -> StoreResult<Steer> {
+    pub fn save_steer(&self, work: &WorkRef, author: &Author, text: &str) -> StoreResult<Steer> {
         let WorkRef::Task(task) = work else {
             return Err(StoreError::InvalidData(
-                "only Tasks take test direction".into(),
+                "only Tasks take test steers".into(),
             ));
         };
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
-        let steer = Self::publish_task_direction_in(
+        let steer = Self::save_task_steer_in(
             &tx,
             task,
             author,
@@ -305,7 +290,7 @@ impl SqliteStore {
         Ok(steer)
     }
 
-    pub(crate) fn publish_task_direction_in(
+    pub(crate) fn save_task_steer_in(
         tx: &Transaction<'_>,
         task: &TaskId,
         author: &Author,
@@ -313,20 +298,16 @@ impl SqliteStore {
         source: &str,
         revision: &str,
     ) -> StoreResult<Steer> {
-        let publication =
-            super::steers::publish_in(tx, ("task", task.as_str()), source, revision, author, text)?;
+        let steer =
+            super::steers::save_in(tx, ("task", task.as_str()), source, revision, author, text)?;
         super::children::insert_task_event_in(
             tx,
             task,
             &TaskEventKind::Steer {
-                publication_id: publication.id,
+                steer_id: steer.id.clone(),
             },
         )?;
-        Ok(Steer {
-            id: publication.sequence,
-            author: author.clone(),
-            text: publication.text,
-        })
+        Ok(steer)
     }
 
     /// Record an interrupt request as a durable comment on the Work's event

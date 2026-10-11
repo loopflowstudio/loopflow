@@ -18,8 +18,8 @@ fn claude_startup_preserves_large_combined_seed_and_correlated_answer() {
     fs::write(account_home.join(".credentials.json"), &credential).unwrap();
     let store =
         loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
-    let publication = store
-        .publish_repository_steer(
+    let steer = store
+        .save_repository_steer(
             &loopflow::repository::CanonicalRepo::discover(repo.path()).unwrap(),
             "Fixture author",
             &format!("STARTUP_DIRECTION {}", "界<&>".repeat(20_000)),
@@ -171,15 +171,15 @@ sys.stdin.read()
         )
         .unwrap();
     let receipts = store.session_steers(&session, 0, 32).unwrap();
-    assert_eq!(receipts.items[0].publication.id, publication.id);
+    assert_eq!(receipts.items[0].steer.id, steer.id);
     assert_eq!(receipts.items[0].evidence, "emitted");
     assert_eq!(receipts.items[0].excerpted, Some(true));
     assert_eq!(
         store
-            .session_steer_source(&session, &publication.id)
+            .session_steer_source(&session, &steer.id)
             .unwrap()
             .text,
-        publication.text
+        steer.text
     );
     let resumed = Command::new(env!("CARGO_BIN_EXE_lf"))
         .env_clear()
@@ -338,7 +338,7 @@ while not (home / 'finish').exists() and time.monotonic() < deadline:
         hook.wait_with_output().unwrap()
     };
     let direction = store
-        .publish_session_steer(session, "Fixture author", "HANDOFF_DIRECTION")
+        .save_session_steer(session, "Fixture author", "HANDOFF_DIRECTION")
         .unwrap();
     let payload = serde_json::json!({"session_id":"handoff-native", "hook_event_name":"PostToolUse", "tool_use_id":"handoff-tool", "turn_id":"native-turn"});
     let received = hook(payload.clone());
@@ -353,7 +353,7 @@ while not (home / 'finish').exists() and time.monotonic() < deadline:
         "emitted"
     );
     let pending = store
-        .publish_session_steer(session, "Fixture author", "NEXT_DIRECTION")
+        .save_session_steer(session, "Fixture author", "NEXT_DIRECTION")
         .unwrap();
     let mut nested = payload.clone();
     nested["agent_id"] = serde_json::json!("child");
@@ -422,7 +422,7 @@ assert.equal(child.messages[0].parts.length,0);
     assert_eq!(
         page.items
             .iter()
-            .find(|row| row.publication.id == pending.id)
+            .find(|row| row.steer.id == pending.id)
             .unwrap()
             .evidence,
         "emitted"
@@ -430,13 +430,13 @@ assert.equal(child.messages[0].parts.length,0);
     assert_eq!(
         page.items
             .iter()
-            .find(|row| row.publication.id == direction.id)
+            .find(|row| row.steer.id == direction.id)
             .unwrap()
             .attempt,
         0
     );
     store
-        .publish_session_steer(session, "Fixture author", "FAILED_TOOL_DIRECTION")
+        .save_session_steer(session, "Fixture author", "FAILED_TOOL_DIRECTION")
         .unwrap();
     let failed = hook(serde_json::json!({"session_id":"handoff-native",
         "hook_event_name":"PostToolUseFailure","tool_use_id":"failed-tool"}));
@@ -458,7 +458,7 @@ assert.equal(child.messages[0].parts.length,0);
 }
 
 #[test]
-fn public_publication_commands_save_direction_without_launching_providers() {
+fn public_commands_save_steers_without_launching_providers() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     let task =
@@ -535,15 +535,9 @@ fn public_publication_commands_save_direction_without_launching_providers() {
     ]))
     .unwrap();
     assert_eq!(rest["items"].as_array().unwrap().len(), 2);
-    let publication = rest["items"][1]["publication"]["id"].as_str().unwrap();
-    let source: serde_json::Value = serde_json::from_str(&run(&[
-        "session",
-        "steers",
-        "idle",
-        "--source",
-        publication,
-    ]))
-    .unwrap();
+    let steer = rest["items"][1]["steer"]["id"].as_str().unwrap();
+    let source: serde_json::Value =
+        serde_json::from_str(&run(&["session", "steers", "idle", "--source", steer])).unwrap();
     assert_eq!(source["text"], "DIRECT_DIRECTION");
     let provider_count: i64 = conn
         .query_row(

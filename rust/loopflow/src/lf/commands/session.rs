@@ -31,10 +31,10 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
                 .context("Session not found")?;
             let author = crate::config::participant_name()?
                 .unwrap_or_else(|| "attribution unresolved".into());
-            let publication = store
+            let steer = store
                 .sqlite
-                .publish_session_steer(&session.id, &author, message)?;
-            println!("Saved {}", publication.id);
+                .save_session_steer(&session.id, &author, message)?;
+            println!("Saved {}", steer.id);
             Ok(())
         }
         SessionCommand::Steers {
@@ -49,18 +49,16 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
             let session = crate::ops::human_session::session_by_id(&store, id)
                 .await?
                 .context("Session not found")?;
-            if let Some(publication) = retry {
-                store.sqlite.retry_session_steer(
-                    &session.id,
-                    &crate::id::SteerPublicationId::parse(publication)?,
-                )?;
+            if let Some(steer) = retry {
+                store
+                    .sqlite
+                    .retry_session_steer(&session.id, &crate::id::SteerId::parse(steer)?)?;
             }
             if let Some(source) = source {
-                let publication = store.sqlite.session_steer_source(
-                    &session.id,
-                    &crate::id::SteerPublicationId::parse(source)?,
-                )?;
-                println!("{}", serde_json::to_string_pretty(&publication)?);
+                let steer = store
+                    .sqlite
+                    .session_steer_source(&session.id, &crate::id::SteerId::parse(source)?)?;
+                println!("{}", serde_json::to_string_pretty(&steer)?);
                 return Ok(());
             }
             let status = store.sqlite.session_steers(&session.id, *after, *limit)?;
@@ -72,7 +70,7 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
                     println!("Next page: --after {after}");
                 }
                 for row in status.items {
-                    println!("{} {}", row.publication.id, row.evidence);
+                    println!("{} {}", row.steer.id, row.evidence);
                 }
             }
             Ok(())

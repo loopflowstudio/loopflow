@@ -2767,18 +2767,21 @@ mod tests {
         let target = ChildRef::Task(task.id.clone());
         let work = store.work_for_child(&target).await.unwrap();
         let first = store
-            .publish_direction(&work, Author::User, "inspect the failing test")
+            .save_steer(&work, Author::User, "inspect the failing test")
             .await
             .unwrap();
         let second = store
-            .publish_direction(&work, Author::User, "preserve the public behavior")
+            .save_steer(&work, Author::User, "preserve the public behavior")
             .await
             .unwrap();
 
-        let steers = store.task_direction(&task.id).await.unwrap();
+        let steers = store.task_steers(&task.id).await.unwrap();
         assert_eq!(
-            steers.iter().map(|steer| steer.id).collect::<Vec<_>>(),
-            [first.id, second.id]
+            steers
+                .iter()
+                .map(|steer| steer.id.clone())
+                .collect::<Vec<_>>(),
+            [first.id.clone(), second.id.clone()]
         );
         assert_eq!(
             steers
@@ -2789,20 +2792,20 @@ mod tests {
         );
 
         // The cross-Work `lf activity` timeline reads the same comments through
-        // `direction_since`, attributed to their Work and ordered by time. Stamp the
+        // `steers_since`, attributed to their Work and ordered by time. Stamp the
         // two events so the `since` filter has something to bite on.
         let conn = rusqlite::Connection::open(&database_path).unwrap();
         conn.execute(
-            "UPDATE task_events SET created_at=1700000001 WHERE id=?1",
+            "UPDATE steers SET created_at=1700000001 WHERE id=?1",
             [first.id],
         )
         .unwrap();
         conn.execute(
-            "UPDATE task_events SET created_at=1700000021 WHERE id=?1",
-            [second.id],
+            "UPDATE steers SET created_at=1700000021 WHERE id=?1",
+            [second.id.clone()],
         )
         .unwrap();
-        let timeline = store.direction_since(0).await.unwrap();
+        let timeline = store.steers_since(0).await.unwrap();
         assert_eq!(
             timeline
                 .iter()
@@ -2813,7 +2816,7 @@ mod tests {
         assert!(timeline.iter().all(|comment| comment.work == work));
         assert_eq!(
             store
-                .direction_since(1_700_000_010)
+                .steers_since(1_700_000_010)
                 .await
                 .unwrap()
                 .into_iter()
@@ -2866,7 +2869,7 @@ mod tests {
             .await
             .unwrap();
         store
-            .publish_direction(
+            .save_steer(
                 &WorkRef::Task(task.id.clone()),
                 Author::User,
                 "try the flaky test again",
@@ -3075,7 +3078,7 @@ mod tests {
         };
         assert_eq!(durable_child_rows(&database_path), (1, 0, 0));
 
-        let child_steers = store.task_direction(&task.id).await.unwrap();
+        let child_steers = store.task_steers(&task.id).await.unwrap();
         assert!(child_steers.is_empty());
         assert_eq!(
             store
@@ -3139,7 +3142,7 @@ mod tests {
             target_status
         );
         assert_eq!(store.task_prs(&target.id).await.unwrap(), target_prs);
-        assert!(store.task_direction(&target.id).await.unwrap().is_empty());
+        assert!(store.task_steers(&target.id).await.unwrap().is_empty());
     }
 
     #[tokio::test]

@@ -142,17 +142,12 @@ pub fn emit_block(
                     adapter,
                     thread,
                     &boundary,
-                    |batch, publications, remaining| {
-                        let (prefix, excerpts) = render_steers(
-                            &delivery,
-                            &adapter.session,
-                            batch,
-                            publications,
-                            remaining,
-                        )
-                        .map_err(|error| {
-                            crate::store::StoreError::InvalidData(error.to_string())
-                        })?;
+                    |batch, steers, remaining| {
+                        let (prefix, excerpts) =
+                            render_steers(&delivery, &adapter.session, batch, steers, remaining)
+                                .map_err(|error| {
+                                    crate::store::StoreError::InvalidData(error.to_string())
+                                })?;
                         Ok(crate::steer::SteerContext {
                             text: render(&prefix)?,
                             excerpts,
@@ -184,36 +179,36 @@ fn render_steers(
     delivery: &crate::context_block::ContextDelivery,
     session: &str,
     batch: &str,
-    publications: &[crate::steer::SteerPublication],
+    steers: &[crate::steer::Steer],
     remaining: usize,
-) -> Result<(String, Vec<crate::id::SteerPublicationId>)> {
+) -> Result<(String, Vec<crate::id::SteerId>)> {
     let mut excerpts = Vec::new();
     let mut text = format!("<lf:steers batch=\"{batch}\">\n");
-    for publication in publications {
+    for steer in steers {
         let path = crate::prompt::write_prompt_log(
             &delivery.repo,
-            &serde_json::to_string_pretty(publication)?,
+            &serde_json::to_string_pretty(steer)?,
             "steer",
             None,
         )?;
         let path = path.strip_prefix(&delivery.repo).unwrap_or(&path);
         let mut item = format!(
-            "Publication {}. Source {} revision {}; author {}. Complete source: {}\n",
-            publication.id,
-            serde_json::to_string(excerpt(&publication.source, 96))?,
-            serde_json::to_string(excerpt(&publication.revision, 64))?,
-            serde_json::to_string(excerpt(&publication.author.to_string(), 96))?,
+            "Steer {}. Source {} revision {}; author {}. Complete source: {}\n",
+            steer.id,
+            serde_json::to_string(excerpt(&steer.source, 96))?,
+            serde_json::to_string(excerpt(&steer.revision, 64))?,
+            serde_json::to_string(excerpt(&steer.author.to_string(), 96))?,
             serde_json::to_string(path)?
         );
-        let mut body = excerpt(&publication.text, 400);
+        let mut body = excerpt(&steer.text, 400);
         while !body.is_empty()
             && item.len() + crate::prompt::render_reference(body).len() + 32 > 1024
         {
             body = excerpt(body, body.len() - 1);
         }
         item.push_str(&crate::prompt::render_reference(body));
-        if body.len() != publication.text.len() {
-            excerpts.push(publication.id.clone());
+        if body.len() != steer.text.len() {
+            excerpts.push(steer.id.clone());
             item.push_str(" [excerpt; full source above]");
         }
         item.push('\n');

@@ -669,7 +669,7 @@ pub enum TaskEventKind {
     },
     /// Historical authored direction; the immutable publication owns its text.
     Steer {
-        publication_id: crate::id::SteerPublicationId,
+        steer_id: crate::id::SteerId,
     },
     /// A request to end the Task's current turn so the next one re-reads its
     /// direction immediately. A live run acts on interrupts issued after it

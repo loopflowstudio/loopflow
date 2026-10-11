@@ -7,7 +7,7 @@ CREATE TABLE steer_adapters (
     activated_at INTEGER
 );
 
-CREATE TABLE steer_publications (
+CREATE TABLE steers (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
     id TEXT NOT NULL UNIQUE,
     repo TEXT,
@@ -24,14 +24,14 @@ CREATE TABLE steer_publications (
            (project_id IS NOT NULL)+(session_id IS NOT NULL)=1),
     UNIQUE(source, revision)
 );
-CREATE INDEX steer_publications_task ON steer_publications(task_id, seq);
-CREATE INDEX steer_publications_wave ON steer_publications(wave_id, seq);
+CREATE INDEX steers_task ON steers(task_id, seq);
+CREATE INDEX steers_wave ON steers(wave_id, seq);
 CREATE TABLE session_steers (
     session_id TEXT NOT NULL REFERENCES agent_sessions(id),
-    publication_id TEXT NOT NULL REFERENCES steer_publications(id),
+    steer_id TEXT NOT NULL REFERENCES steers(id),
     attempt INTEGER NOT NULL DEFAULT 0,
     applicable INTEGER NOT NULL DEFAULT 1 CHECK(applicable IN (0,1)),
-    PRIMARY KEY(session_id, publication_id)
+    PRIMARY KEY(session_id, steer_id)
 );
 CREATE TABLE steer_batches (
     id TEXT PRIMARY KEY,
@@ -47,39 +47,52 @@ CREATE TABLE steer_batches (
 CREATE UNIQUE INDEX steer_batches_boundary ON steer_batches(agent_process_id,boundary) WHERE evidence != 'cancelled';
 CREATE TABLE steer_deliveries (
     session_id TEXT NOT NULL,
-    publication_id TEXT NOT NULL,
+    steer_id TEXT NOT NULL,
     attempt INTEGER NOT NULL,
     batch_id TEXT NOT NULL REFERENCES steer_batches(id),
     excerpted INTEGER CHECK(excerpted IN (0,1)),
-    PRIMARY KEY(session_id, publication_id, attempt),
-    FOREIGN KEY(session_id, publication_id) REFERENCES session_steers(session_id, publication_id)
+    PRIMARY KEY(session_id, steer_id, attempt),
+    FOREIGN KEY(session_id, steer_id) REFERENCES session_steers(session_id, steer_id)
 );
-INSERT INTO steer_publications(id,task_id,source,revision,author,text,created_at)
+INSERT INTO steers(id,task_id,source,revision,author,text,created_at)
 SELECT lower(hex(randomblob(4)))||'-'||lower(hex(randomblob(2)))||'-4'||substr(lower(hex(randomblob(2))),2)||'-8'||substr(lower(hex(randomblob(2))),2)||'-'||lower(hex(randomblob(6))),task_id,'task-event-'||id,'1',
        json_extract(kind_json,'$.author'),json_extract(kind_json,'$.text'),created_at
 FROM task_events WHERE json_extract(kind_json,'$.kind')='steer' ORDER BY id;
-INSERT INTO steer_publications(id,project_id,source,revision,author,text,created_at)
+INSERT INTO steers(id,project_id,source,revision,author,text,created_at)
 SELECT lower(hex(randomblob(4)))||'-'||lower(hex(randomblob(2)))||'-4'||substr(lower(hex(randomblob(2))),2)||'-8'||substr(lower(hex(randomblob(2))),2)||'-'||lower(hex(randomblob(6))),project_id,'project-event-'||id,'1',
        json_extract(kind_json,'$.author'),json_extract(kind_json,'$.text'),created_at
 FROM project_events WHERE json_extract(kind_json,'$.kind')='steer' ORDER BY id;
 -- TaskObserved retains its event identity; orphaned historical copies retain
 -- their complete source under the surviving Project rather than losing text.
-INSERT INTO steer_publications(id,project_id,source,revision,author,text,created_at)
+INSERT INTO steers(id,project_id,source,revision,author,text,created_at)
 SELECT lower(hex(randomblob(4)))||'-'||lower(hex(randomblob(2)))||'-4'||substr(lower(hex(randomblob(2))),2)||'-8'||substr(lower(hex(randomblob(2))),2)||'-'||lower(hex(randomblob(6))),e.project_id,'project-observed-'||e.id,'1',
        json_extract(e.kind_json,'$.event.author'),json_extract(e.kind_json,'$.event.text'),e.created_at
 FROM project_events e
 WHERE json_extract(e.kind_json,'$.kind')='task_observed'
   AND json_extract(e.kind_json,'$.event.kind')='steer'
-  AND NOT EXISTS(SELECT 1 FROM steer_publications p
+  AND NOT EXISTS(SELECT 1 FROM steers p
       WHERE p.source='task-event-'||json_extract(e.kind_json,'$.task_event_id'));
 UPDATE project_events SET kind_json=json_set(kind_json,'$.event',json_object(
-    'kind','steer','publication_id',COALESCE(
-        (SELECT p.id FROM steer_publications p
+    'kind','steer','steer_id',COALESCE(
+        (SELECT p.id FROM steers p
          WHERE p.source='task-event-'||json_extract(project_events.kind_json,'$.task_event_id')),
-        (SELECT p.id FROM steer_publications p WHERE p.source='project-observed-'||project_events.id))))
+        (SELECT p.id FROM steers p WHERE p.source='project-observed-'||project_events.id))))
 WHERE json_extract(kind_json,'$.kind')='task_observed'
   AND json_extract(kind_json,'$.event.kind')='steer';
-UPDATE task_events SET kind_json=json_object('kind','steer','publication_id',(SELECT p.id FROM steer_publications p WHERE p.source='task-event-'||task_events.id))
+UPDATE task_events SET kind_json=json_object('kind','steer','steer_id',(SELECT p.id FROM steers p WHERE p.source='task-event-'||task_events.id))
 WHERE json_extract(kind_json,'$.kind')='steer';
-UPDATE project_events SET kind_json=json_object('kind','steer','publication_id',(SELECT p.id FROM steer_publications p WHERE p.source='project-event-'||project_events.id))
+UPDATE project_events SET kind_json=json_object('kind','steer','steer_id',(SELECT p.id FROM steers p WHERE p.source='project-event-'||project_events.id))
 WHERE json_extract(kind_json,'$.kind')='steer';
+
+CREATE TRIGGER store_revision_steers_insert AFTER INSERT ON steers
+BEGIN
+    UPDATE store_revisions SET revision = revision + 1 WHERE domain = 'planning';
+END;
+CREATE TRIGGER store_revision_steers_update AFTER UPDATE ON steers
+BEGIN
+    UPDATE store_revisions SET revision = revision + 1 WHERE domain = 'planning';
+END;
+CREATE TRIGGER store_revision_steers_delete AFTER DELETE ON steers
+BEGIN
+    UPDATE store_revisions SET revision = revision + 1 WHERE domain = 'planning';
+END;

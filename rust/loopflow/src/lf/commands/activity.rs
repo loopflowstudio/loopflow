@@ -205,7 +205,7 @@ pub(crate) fn build_snapshot(
     }
 
     let steers = store
-        .direction_since(since)
+        .steers_since(since)
         .map_err(|error| anyhow!("failed to read Steers: {error}"))?;
     for comment in steers {
         if let Some(work) = catalog.owners.get(&comment.work) {
@@ -395,7 +395,7 @@ fn steer_entry(comment: &SteerComment, work: &WorkOwner) -> WorkActivityEntry {
         format!("Steered: {}", comment.steer.text),
         work,
         WorkActivityFact::SteerIssued {
-            id: comment.steer.id,
+            id: comment.steer.sequence,
             author: comment.steer.author.clone(),
         },
     )
@@ -518,8 +518,11 @@ mod tests {
         let second = task_owner("W2-2", "control", "live");
         let comment = |work: WorkRef| SteerComment {
             work,
-            steer: crate::durable::Steer {
-                id: 1,
+            steer: crate::steer::Steer {
+                id: crate::id::SteerId::new(),
+                sequence: 1,
+                source: "fixture".into(),
+                revision: "1".into(),
                 author: Author::User,
                 text: "direction".to_string(),
             },

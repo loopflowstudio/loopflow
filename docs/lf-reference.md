@@ -477,7 +477,7 @@ Inspect and continue Sessions
 
 ## lf session steer
 
-Save direction for this Session without starting a turn
+Save a steer for this Session without starting a turn
 
 | Argument | What it does |
 |---|---|
@@ -488,7 +488,7 @@ Save direction for this Session without starting a turn
 
 ## lf session steers
 
-Inspect delivery evidence or explicitly retry a publication
+Inspect steer delivery or retry delivery
 
 | Argument | What it does |
 |---|---|
@@ -497,7 +497,7 @@ Inspect delivery evidence or explicitly retry a publication
 | `--retry` | retry |
 | `--after` | after Default: 0. |
 | `--limit` | limit Default: 32. |
-| `--source` | Read one complete immutable source |
+| `--source` | Read the complete steer |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
@@ -751,7 +751,7 @@ Repository releases, source measurement, CI evidence, and provider administratio
 
 ## lf repo comment
 
-Save direction for subscribed Sessions without starting a turn
+Save a steer for associated Sessions without starting a turn
 
 | Argument | What it does |
 |---|---|
@@ -1240,7 +1240,7 @@ Manage Wave identity, placement and planning
 
 ## lf wave comment
 
-Save direction for subscribed Sessions without starting a turn
+Save a steer for associated Sessions without starting a turn
 
 | Argument | What it does |
 |---|---|
@@ -1863,7 +1863,7 @@ Read the thread or publish a comment; agent comments default to progress
 |---|---|
 | `<issue>` | issue |
 | `<message>` | message |
-| `--steer` | Deliver new direction even when publishing from an agent Session Default: false. |
+| `--steer` | Save a steer even when commenting from an agent Session Default: false. |
 | `--wave / -w` | wave |
 | `--json` | json Default: false. |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |

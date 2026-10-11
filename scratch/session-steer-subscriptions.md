@@ -18,14 +18,13 @@ needed in this reconciliation.
 
 ## Remaining work
 
-- Gate runs affected suites and automated acceptance once. Configured
+- Affected local gates and focused repairs are complete. Configured
   Codex/OpenCode and native-model acceptance remain unproved. Protocol stand-ins
   establish transport and receipt behavior, never model acceptance.
 - Review/demo exercises the experience below. No follow-up Tasks or separate
   cutover PRs are selected. Repository/Wave exchange remains explicitly unavailable;
   existing remote routing selects the destination Machine's Session store.
-- SwiftPM's nested sandbox could not start in the previous step. The changed
-  author model compiled and round-tripped independently; CI owns the full suite.
+- The headless Swift DTO suite passes (28 tests). CI retains the full Desktop matrix.
 
 ## Vocabulary decision — 2026-10-11
 
@@ -42,10 +41,12 @@ Retain distinctions that express different evidence: saving a steer, writing it
 to a provider and observing acceptance are not interchangeable. Vocabulary reduction
 does not approve acknowledgements, automatic retries or source-level status UX.
 
-README and usage prose use this vocabulary. CLI help and internal type/schema names
-still contain the older terms; aligning those is remaining implementation work.
-Prefer `Steer` over `SteerPublication` where they name the same message; preserve
-historical migration bytes and actual delivery evidence rather than renaming facts.
+Jack Heart authorized the vocabulary update followed by landing PR #1535.
+README, usage prose, CLI help and the message model now use this vocabulary.
+One `Steer` with `SteerId` replaces `SteerPublication` and the older numeric-ID
+projection. JSON uses `steer`; the same unreleased migration now creates `steers`
+and `steer_id` references. Released migrations and distinct delivery evidence remain
+unchanged. Gate repairs are complete; no new acknowledgement or source-status UX is selected.
 
 ## Concept review — 2026-10-11, proposed
 
@@ -139,8 +140,8 @@ lf repo comment "retain source attribution" --steer
 lf session steer SESSION "inspect the last failure"
 lf session steers SESSION --json --limit 32
 lf session steers SESSION --after 42 --json
-lf session steers SESSION --source PUBLICATION
-lf session steers SESSION --retry PUBLICATION
+lf session steers SESSION --source STEER_ID
+lf session steers SESSION --retry STEER_ID
 ```
 
 The existing `lf comment` Task shorthand survives the scoped commands.
@@ -149,7 +150,7 @@ explicitly report Machine-local persistence and unavailable shared exchange.
 Remote Session commands use existing destination routing; claims and receipts
 never enter shared planning transport. No new cross-machine bus is authorized.
 
-`SteerPublication` owns UUID, local sequence, source/revision key, author and exact
+`Steer` owns UUID, local sequence, source/revision key, author and exact
 text. Unique source/revision prevents reacquisition echoes; equal text or time
 is not identity. A correction supersedes pending older revisions of its source;
 already emitted revisions remain history and the correction is new direction.
@@ -330,4 +331,4 @@ Headless fixtures use disposable stores, cleared inherited `LF_*` and fixture
 routing, unavailable/untrusted/open-provider cases and configured acceptance;
 review owns the real experience. Never report unavailable checks as passes.
 
-Check (October 11): `git diff --check` and `lf context` pass; prose-only reconciliation reuses the prior `uv run python scripts/test_network.py cargo test -p loopflow --lib store::sqlite::steers < /dev/null` (8), `--test session_steers < /dev/null` (3), `cargo fmt --all -- --check` and `cargo clippy --all-targets -- -D warnings` passes; gate/CI retains full Swift, broader suites and configured-provider acceptance.
+Check (October 11): network-isolated Rust lib run: 1,718 passed, 9 ignored, 2 failures repaired with passing focused reruns (account isolation and revision coverage); 91 CLI/integration tests pass after hook-fixture repairs; final steer-store (8) and revision (6) tests pass; Swift DTO (28), architecture coverage, fmt, Clippy and diff checks pass. Configured-provider acceptance and the full platform matrix remain with CI/review.

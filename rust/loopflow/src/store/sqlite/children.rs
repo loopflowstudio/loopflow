@@ -710,7 +710,7 @@ impl SqliteStore {
                  Title: {}\n\n{}",
                 observation.title, observation.description,
             );
-            Self::publish_task_direction_in(
+            Self::save_task_steer_in(
                 &transaction,
                 task_id,
                 &Author::User,
@@ -1281,7 +1281,7 @@ fn ingest_linear_comment(
         params![id, task_id], |row| row.get(0),
     )?;
     if inserted == 1 && !own_echo {
-        let steer = SqliteStore::publish_task_direction_in(
+        let steer = SqliteStore::save_task_steer_in(
             conn,
             &TaskId::from_raw(task_id),
             &author_name
@@ -1293,7 +1293,7 @@ fn ingest_linear_comment(
                 .split_once('@')
                 .map_or("local", |(_, revision)| revision),
         )?;
-        Ok(Some(steer.id))
+        Ok(Some(steer.sequence))
     } else {
         Ok(None)
     }

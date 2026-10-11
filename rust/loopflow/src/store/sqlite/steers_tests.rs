@@ -1,6 +1,6 @@
 use rusqlite::params;
 
-use super::{publish_in, SqliteStore};
+use super::{save_in, SqliteStore};
 use crate::durable::Author;
 use crate::id::LfProcessId;
 use crate::steer::{SteerAdapter, SteerContext};
@@ -40,8 +40,8 @@ fn fixture() -> (tempfile::TempDir, SqliteStore, SteerAdapter) {
 #[test]
 fn emitted_direction_is_not_replayed_and_retry_is_explicit() {
     let (_home, store, adapter) = fixture();
-    let publication = store
-        .publish_session_steer("session", "Named author", "Change direction")
+    let steer = store
+        .save_session_steer("session", "Named author", "Change direction")
         .unwrap();
     store
         .emit_session_steers(
@@ -49,7 +49,7 @@ fn emitted_direction_is_not_replayed_and_retry_is_explicit() {
             "native",
             "tool:one",
             |_, items, remaining| {
-                assert_eq!(items, std::slice::from_ref(&publication));
+                assert_eq!(items, std::slice::from_ref(&steer));
                 assert_eq!(remaining, 0);
                 Ok(rendered("payload"))
             },
@@ -72,9 +72,7 @@ fn emitted_direction_is_not_replayed_and_retry_is_explicit() {
             |_| panic!("compaction wrote"),
         )
         .unwrap();
-    store
-        .retry_session_steer("session", &publication.id)
-        .unwrap();
+    store.retry_session_steer("session", &steer.id).unwrap();
     assert_eq!(store.session_steers("session", 0, 32).unwrap().pending, 1);
     store
         .emit_session_steers(
@@ -95,7 +93,7 @@ fn emitted_direction_is_not_replayed_and_retry_is_explicit() {
 fn prewrite_failure_releases_but_write_failure_retains_uncertainty() {
     let (_home, store, adapter) = fixture();
     store
-        .publish_session_steer("session", "Author", "Direction")
+        .save_session_steer("session", "Author", "Direction")
         .unwrap();
     assert!(store
         .emit_session_steers(
@@ -136,7 +134,7 @@ fn concurrent_boundaries_reserve_independent_bounded_pages() {
     let (_home, store, adapter) = fixture();
     for n in 0..20 {
         store
-            .publish_session_steer("session", "Author", &format!("Direction {n}"))
+            .save_session_steer("session", "Author", &format!("Direction {n}"))
             .unwrap();
     }
     let other = store.clone();
@@ -186,14 +184,14 @@ fn concurrent_boundaries_reserve_independent_bounded_pages() {
     let next = store
         .session_steers("session", first.next_after.unwrap(), 3)
         .unwrap();
-    assert!(next.items[0].publication.sequence > first.items[2].publication.sequence);
+    assert!(next.items[0].steer.sequence > first.items[2].steer.sequence);
 }
 
 #[test]
 fn only_abandoned_prewrite_reservations_return_to_pending() {
     let (_home, store, adapter) = fixture();
     let direction = store
-        .publish_session_steer("session", "Author", "Direction")
+        .save_session_steer("session", "Author", "Direction")
         .unwrap();
     let crashed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         store.emit_session_steers(
@@ -207,7 +205,7 @@ fn only_abandoned_prewrite_reservations_return_to_pending() {
     assert!(crashed.is_err());
     let status = store.session_steers("session", 0, 32).unwrap();
     assert_eq!(status.pending, 1);
-    assert_eq!(status.items[0].publication.id, direction.id);
+    assert_eq!(status.items[0].steer.id, direction.id);
     store
         .emit_session_steers(
             &adapter,
@@ -227,7 +225,7 @@ fn only_abandoned_prewrite_reservations_return_to_pending() {
 fn source_revisions_supersede_only_pending_and_keep_complete_sources() {
     let (_home, store, adapter) = fixture();
     let publish = |revision: &str, body: &str| {
-        publish_in(
+        save_in(
             &store.conn.lock().unwrap(),
             ("session", "session"),
             "comment:immutable-id",
@@ -242,7 +240,7 @@ fn source_revisions_supersede_only_pending_and_keep_complete_sources() {
     let edited = publish("edited", "Correction");
     let page = store.session_steers("session", 0, 32).unwrap();
     assert_eq!(page.items.len(), 1);
-    assert_eq!(page.items[0].publication, edited);
+    assert_eq!(page.items[0].steer, edited);
     store
         .emit_session_steers(
             &adapter,
@@ -300,7 +298,7 @@ fn scopes_flow_downward_and_idle_peers_keep_independent_pending_receipts() {
             [&root],
         )
         .unwrap();
-        publish_in(
+        save_in(
             &conn,
             ("repository", "/repo"),
             "repo",
@@ -309,7 +307,7 @@ fn scopes_flow_downward_and_idle_peers_keep_independent_pending_receipts() {
             "Repository direction",
         )
         .unwrap();
-        publish_in(
+        save_in(
             &conn,
             ("wave", root.as_str()),
             "wave",
@@ -318,7 +316,7 @@ fn scopes_flow_downward_and_idle_peers_keep_independent_pending_receipts() {
             "Parent direction",
         )
         .unwrap();
-        publish_in(
+        save_in(
             &conn,
             ("task", "task"),
             "task",
@@ -329,7 +327,7 @@ fn scopes_flow_downward_and_idle_peers_keep_independent_pending_receipts() {
         .unwrap();
     }
     store
-        .publish_session_steer("session", "Author", "Direct direction")
+        .save_session_steer("session", "Author", "Direct direction")
         .unwrap();
     for (session, count) in [
         ("session", 4),
@@ -385,15 +383,15 @@ fn migration_preserves_released_event_copies_and_planning_receipts() {
         .unwrap();
     let body: String = conn
         .query_row(
-            "SELECT p.text FROM task_events e JOIN steer_publications p
-        ON p.id=json_extract(e.kind_json,'$.publication_id') WHERE e.id=11",
+            "SELECT p.text FROM task_events e JOIN steers p
+        ON p.id=json_extract(e.kind_json,'$.steer_id') WHERE e.id=11",
             [],
             |row| row.get(0),
         )
         .unwrap();
     assert_eq!(body, "Historical 界 direction");
-    let copies = conn.prepare("SELECT e.id,p.text FROM project_events e JOIN steer_publications p
-        ON p.id=COALESCE(json_extract(e.kind_json,'$.event.publication_id'),json_extract(e.kind_json,'$.publication_id'))
+    let copies = conn.prepare("SELECT e.id,p.text FROM project_events e JOIN steers p
+        ON p.id=COALESCE(json_extract(e.kind_json,'$.event.steer_id'),json_extract(e.kind_json,'$.steer_id'))
         ORDER BY e.id").unwrap().query_map([], |row| Ok((row.get::<_,i64>(0)?,row.get::<_,String>(1)?)))
         .unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();
     assert_eq!(
@@ -433,7 +431,7 @@ fn migration_preserves_released_event_copies_and_planning_receipts() {
 #[test]
 fn correction_during_render_cancels_the_superseded_batch_before_write() {
     let (_home, store, adapter) = fixture();
-    publish_in(
+    save_in(
         &store.conn.lock().unwrap(),
         ("session", "session"),
         "source",
@@ -443,7 +441,7 @@ fn correction_during_render_cancels_the_superseded_batch_before_write() {
     )
     .unwrap();
     let retained = store
-        .publish_session_steer("session", "Author", "Independent direction")
+        .save_session_steer("session", "Author", "Independent direction")
         .unwrap();
     store
         .emit_session_steers(
@@ -451,7 +449,7 @@ fn correction_during_render_cancels_the_superseded_batch_before_write() {
             "native",
             "one",
             |_, _, _| {
-                publish_in(
+                save_in(
                     &store.conn.lock().unwrap(),
                     ("session", "session"),
                     "source",
@@ -467,8 +465,8 @@ fn correction_during_render_cancels_the_superseded_batch_before_write() {
         .unwrap();
     let page = store.session_steers("session", 0, 32).unwrap();
     assert_eq!(page.pending, 2);
-    assert_eq!(page.items[0].publication, retained);
-    assert_eq!(page.items[1].publication.text, "Correction");
+    assert_eq!(page.items[0].steer, retained);
+    assert_eq!(page.items[1].steer.text, "Correction");
     store
         .emit_session_steers(
             &adapter,

@@ -565,11 +565,11 @@ pending sync, including comments on unmapped Tasks;
 a foreground Task Session or Desktop repository connection delivers saved comments and
 acquires incoming comments independently. Lost replies are resolved by exact UUID,
 issue and body. Incoming comments enter the same thread without echoing locally
-saved direction. Comments and adopted definition revisions publish immutable
-source revisions. Each Session derives its subscription from checkout/explicit
-Task associations, Wave ancestors and repository. Provider callbacks offer bounded
-direction at startup, continuation and tool boundaries; the Task brief reloads
-independently of consumed direction. Idle steering starts no Flow. Local emission
+saved steers. Comments and adopted definition revisions save immutable
+steers. Each Session selects steers from checkout/explicit Task associations, Wave
+ancestors and repository. Provider callbacks deliver bounded batches at startup,
+continuation and tool boundaries; the Task brief reloads independently of consumed
+steers. Idle steering starts no Flow. Local emission
 remains unconfirmed and does not prove the model followed a correction. Wave
 planning uses ordinary finite LfSessions.
 

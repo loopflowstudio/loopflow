@@ -21,8 +21,8 @@ impl std::fmt::Debug for SteerAdapter {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SteerPublication {
-    pub id: crate::id::SteerPublicationId,
+pub struct Steer {
+    pub id: crate::id::SteerId,
     pub sequence: i64,
     pub source: String,
     pub revision: String,
@@ -32,7 +32,7 @@ pub struct SteerPublication {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionSteerStatus {
-    pub publication: SteerPublication,
+    pub steer: Steer,
     pub attempt: i64,
     pub evidence: String,
     pub batch_id: Option<crate::id::SteerBatchId>,
@@ -54,5 +54,5 @@ pub struct SessionSteerPage {
 #[derive(Debug)]
 pub(crate) struct SteerContext {
     pub text: String,
-    pub excerpts: Vec<crate::id::SteerPublicationId>,
+    pub excerpts: Vec<crate::id::SteerId>,
 }

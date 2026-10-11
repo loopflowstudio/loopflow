@@ -94,7 +94,7 @@ macro_rules! uuid_id {
 uuid_id!(WaveId);
 uuid_id!(TraceId);
 uuid_id!(LfProcessId);
-uuid_id!(SteerPublicationId);
+uuid_id!(SteerId);
 uuid_id!(SteerBatchId);
 
 // One claim, not a Process identity. Never reused after attachment transfer.

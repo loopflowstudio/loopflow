@@ -47,7 +47,7 @@ pub enum ProjectEventKind {
     },
     /// Historical authored direction; the immutable publication owns its text.
     Steer {
-        publication_id: crate::id::SteerPublicationId,
+        steer_id: crate::id::SteerId,
     },
     /// A request to end the Project's current turn so the next re-reads its
     /// direction immediately. Acted on only by a live run, and not a report out.

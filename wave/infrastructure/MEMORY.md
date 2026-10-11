@@ -257,11 +257,18 @@ approving landing with quieter output. Fenced native answers, replay/schema and
 fake-Flow proofs pass, not configured Task-to-publication or installation.
 Harness errors retain failed-result text for retries. CI owns the full matrix.
 
-## Session steer subscriptions (lf-9c03797, 2026-10-11)
+## Session steers (lf-9c03797, 2026-10-11)
 
 Jack Heart accepted Session-only delivery, repository/Work wrappers, downward
 propagation, independent receipts, bounded launch seeding and idle staying idle;
 he renewed pursuit after the provider gaps. Replace old paths together in one PR.
+Jack Heart then selected the vocabulary “steer” and “delivery” and authorized
+the naming update followed by landing PR #1535. `Steer`/`SteerId` replace the
+duplicate message projections; JSON uses `steer`, and the single draft stores
+`steers` with `steer_id` references. Released migration history remains unchanged.
+Source-level delivery inspection and agent acknowledgement were review proposals,
+not selected work. Keep explicit retry and honest unconfirmed delivery; no new
+acknowledgement lifecycle or follow-up Task is implied by vocabulary reduction.
 Provider-bound capability survives Codex handoff; OpenCode uses local invocation
 IDs, never fabricated provider request IDs. Child callbacks and replaced providers
 retain no authority; emission is not confirmation.
@@ -276,8 +283,16 @@ on Session reads/callbacks, removing publication-time scans; cancelled mixed bat
 retain unaffected pending direction. `f96a7d2378` labels capabilities reserved,
 not installed. Release's operation-entry lesson applies: store proofs cannot
 replace public launch proofs; protocol stand-ins cannot prove model acceptance.
-Contrary evidence and gate/CI's broader/configured acceptance remain in
-`scratch/session-steer-subscriptions.md`.
+The shared-dispatch counterexample and protocol limits remain in
+`0d04805ab35f2ba0ee4d72dec3cc9caa1d1aa051:scratch/session-steer-subscriptions.md`.
+Configured-provider acceptance remains unproved; current semantics and limitations
+live in `docs/architecture-reference.md` under Durable communication.
+Gate found missing planning revision triggers for saved steers; the same draft now
+adds them. Explicit delivery diagnostics do not drive workspace refreshes.
+The launch fixtures select hooks by moment and supply the native Session identity;
+the account fixture isolates native Claude state. Focused repairs, receipt/migration
+proofs, CLI/integration checks and 28 headless Swift DTO tests pass. The broader
+library run had 1,718 passes and 9 ignores; both failures passed focused repairs.
 
 ## Process-owned liveness (LOO-451, 2026-10-10)
 

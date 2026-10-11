@@ -2069,6 +2069,26 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
     }
 }
 
+fn place_wave_on_remote(
+    store: &loopflow::store::sqlite::SqliteStore,
+    db: &rusqlite::Connection,
+    wave: &loopflow::id::WaveId,
+) -> loopflow::durable::Placement {
+    let machine = loopflow::durable::MachineId::new();
+    store
+        .add_machine(&machine, machine.as_str(), machine.as_str(), "/remote/repo")
+        .unwrap();
+    db.execute(
+        "INSERT INTO work_placements(wave_id,machine_id,enabled,placed_at) VALUES(?1,?2,1,7)
+         ON CONFLICT(wave_id) DO UPDATE SET machine_id=excluded.machine_id,placed_at=excluded.placed_at",
+        rusqlite::params![wave.as_str(), machine.as_str()],
+    )
+    .unwrap();
+    store
+        .placement(&loopflow::durable::WorkRef::Wave(wave.clone()))
+        .unwrap()
+}
+
 #[test]
 fn rotation_saves_membership_and_pending_effects_offline() {
     use loopflow::durable::TaskId;
@@ -2162,6 +2182,29 @@ fn rotation_saves_membership_and_pending_effects_offline() {
                 })
                 .unwrap();
         }
+        db.execute("INSERT INTO processes(id,trace_id,command,cwd,started_at) VALUES('11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222','lf run code','/retained/task',2)", []).unwrap();
+        db.execute("INSERT INTO task_workflows(task_id,graph,node,edge,lf_process_id,updated_at) VALUES(?1,?2,'review',0,'11111111-1111-4111-8111-111111111111',7)", rusqlite::params![active.id.as_str(),serde_json::json!({"name":"review","nodes":[],"edges":[{"from":"review","to":"end","flow":"implement"}]}).to_string()]).unwrap();
+        let retained_execution = || {
+            [
+                ("task_workflows", "task_id", active.id.as_str()),
+                ("processes", "id", "11111111-1111-4111-8111-111111111111"),
+            ]
+            .map(|(table, key, id)| {
+                let mut query = db
+                    .prepare(&format!("SELECT * FROM {table} WHERE {key}=?1"))
+                    .unwrap();
+                let columns = query.column_count();
+                query
+                    .query_row([id], |row| {
+                        (0..columns)
+                            .map(|column| row.get::<_, rusqlite::types::Value>(column))
+                            .collect::<rusqlite::Result<Vec<_>>>()
+                    })
+                    .unwrap()
+            })
+        };
+        let execution = retained_execution();
+        let placement = place_wave_on_remote(&store, &db, wave.id());
         let successor = loopflow::durable::ProjectId::new();
         let file = home.path().join("rotation.json");
         let plan = serde_json::json!({"name":"Next", "waves":[{"wave_id":wave.id(),"successor_id":successor,"create":true,"project_name":"Next", "workflow":"","metric_targets":[],"krs":[{"text":"Preserve work","holds":false}]}]});
@@ -2411,6 +2454,13 @@ fn rotation_saves_membership_and_pending_effects_offline() {
                 loopflow::store::PlanningState::Available
             );
         }
+        assert_eq!(
+            store
+                .placement(&loopflow::durable::WorkRef::Wave(wave.id().clone()))
+                .unwrap(),
+            placement
+        );
+        assert_eq!(retained_execution(), execution);
         assert!(repo.path().join("wave").exists());
     }
 }
@@ -2432,6 +2482,7 @@ fn refiling_saves_membership_offline_and_retains_inbound_changes() {
         let db = rusqlite::Connection::open(&path).unwrap();
         let mut projects = Vec::new();
         let mut observations = Vec::new();
+        let mut placements = Vec::new();
         for name in ["source", "destination", "competing"] {
             let wave = loopflow::work::wave::Wave::new(
                 loopflow::id::WaveId::new(),
@@ -2469,6 +2520,10 @@ fn refiling_saves_membership_offline_and_retains_inbound_changes() {
                     .unwrap();
                 observations.push(observed);
             }
+            placements.push((
+                wave.id().clone(),
+                place_wave_on_remote(&store, &db, wave.id()),
+            ));
             projects.push(project);
         }
         let task = store
@@ -2633,6 +2688,14 @@ fn refiling_saves_membership_offline_and_retains_inbound_changes() {
             projects[if mapped { 2 } else { 1 }].id
         );
         assert_eq!(store.pending_task_changes(&task.id).unwrap(), pending);
+        for (wave, placement) in placements {
+            assert_eq!(
+                store
+                    .placement(&loopflow::durable::WorkRef::Wave(wave))
+                    .unwrap(),
+                placement
+            );
+        }
         assert!(repo.path().join("wave").exists());
     }
 }

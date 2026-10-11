@@ -264,8 +264,8 @@ Linear setup, OAuth, Team/Initiative mapping and reteam are real integration
 operations. Keep them concrete. A local lookup cannot infer that another Machine
 has never started work; this rewrite grants no distributed execution authority.
 Remote admission must still fetch pushed code and retain dirty or divergent targets.
-The pursuit design records the remaining `require_planning_home` mismatch in Task
-refiling and chapter rotation: shared editing must not require local execution placement.
+The planning-only `require_planning_home` restriction is deleted from Task refiling
+and chapter rotation; execution admission and sorted planning locks remain.
 
 ## 11. Keep necessary delivery evidence without a generic hierarchy
 

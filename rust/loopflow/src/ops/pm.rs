@@ -13,7 +13,6 @@ use std::time::{Duration, Instant};
 use futures_util::future::try_join_all;
 
 use crate::config::load_repo_config;
-use crate::durable::WorkRef;
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
 use crate::ops::util::normalize_wave_name;
@@ -681,26 +680,6 @@ async fn fetch_pm_snapshot_for_projects(
         projects,
         items: project_items.into_iter().flatten().collect(),
     })
-}
-
-pub(crate) async fn require_planning_home(store: &Store, wave: &Wave) -> OpsResult<()> {
-    let placement = store
-        .placement(&WorkRef::Wave(wave.id().clone()))
-        .await
-        .map_err(|error| OpsError::Message(error.to_string()))?;
-    let local = store
-        .local_machine()
-        .await
-        .map_err(|error| OpsError::Message(error.to_string()))?;
-    if placement.machine_id != local.id {
-        return Err(OpsError::Message(format!(
-            "Wave {} is placed on {}; run this command with `lf --machine {}`",
-            wave.slug(),
-            placement.machine_id,
-            placement.machine_id
-        )));
-    }
-    Ok(())
 }
 
 pub(crate) async fn lock_wave_planning(wave: &Wave) -> OpsResult<Arc<crate::store::PlanningLocks>> {

@@ -624,25 +624,24 @@ acceptance remain at
 
 ## Tasks across machines (LOO-412, 2026-10-10)
 
-Jack Heart selected one repository transport: Linear, shared or default user-keyed
-Git. One typed writer owns local/imported Work; outages buffer without fallback or election.
-Execution/attempts stay local; preserve causal losers and uncertainty.
-Jack requires the full accepted deletion audit before review: Work, private
-observations, typed journal, bindings, ordinary follow-ups and one cron list.
-Renames are insufficient; gate/install unproved.
+Jack Heart selected Linear, shared or default user-keyed Git per repository.
+One typed writer owns local/imported Work; outages buffer without fallback/election.
+Execution/attempts stay local; retain causal losers and uncertainty. Before review:
+finish Work, private observations, typed journal, bindings, ordinary follow-ups
+and one cron list. Gate/install unproved.
 
-The unused `pm_show` inventory is deleted; private snapshots remain.
-Delivery requires accepted Work revision plus archive/membership eligibility.
-Foreign facts grant no ownership.
-Shared refiling/rotation still reject nonlocal Wave placement; source finding,
-not reproduced or repaired. Planning writes must not inherit execution admission.
+`pm_show` is deleted; the provider hierarchy remains. Delivery needs accepted Work
+revision and archive/membership eligibility; foreign facts grant no ownership.
+Refiling/rotation omit local Wave placement admission; fixtures preserve placement,
+Workflow and unknown Process.
 
-Jack assigned LOO-427 here (`bd295866bb`); stack order remains unresolved. Preserve
-Machine admission and tabs; adapt to the surviving writer/released frontier.
+Jack's `19116a1b` resolves LOO-427's stack hold:
+prepare 427 on committed 412 now; land 427 only after 412. No 412 landing request.
+Preserve Machine admission/tabs and adapt to the surviving writer/released frontier.
 [Design and audit](../../scratch/work-on-another-machine-name.md) own remaining work.
-Release child memory was read: cron conversion must retain installed ownership,
-lock/child-descriptor identity and dues, not infer them from file location. Operation
-failure stays nonzero. No landing, installation, activation or real export.
+Release child memory requires cron conversion to retain installed ownership,
+lock/child-descriptor identity and dues, not infer them from file location;
+operation failure stays nonzero. No installation, activation or real export.
 Prior proofs: `41378adacf:wave/infrastructure/MEMORY.md`.
 
 ## Planning and launch preservation (curated 2026-10-02)

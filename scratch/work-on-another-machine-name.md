@@ -254,14 +254,13 @@ OAuth and archived-predecessor fixtures assert saved Work and retained history.
 contradictions and independently unavailable Waves remain required. This cut does
 not complete snapshot confinement or remove private persistent observations.
 
-A separate source-confirmed mismatch remains in `require_planning_home`: both
-`task_refile` and chapter rotation reject a remotely placed Wave before their
-planning locks. Shared edits must work locally regardless of execution placement.
-This belongs with the acquisition/LOO-427 boundary, retaining sorted Wave locks,
-checkout locks, backlog eligibility and execution admission. Required proof covers
-both operations with nonlocal assignment and unchanged placement, Workflow and
-Processes. Source finding only. Original review:
-`1f6ee6485b:scratch/planning-placement-review.md`.
+`require_planning_home` and both callers are deleted. Refiling and chapter rotation
+no longer require this Machine to own the Wave's execution placement. Sorted Wave
+locks, checkout locks, backlog eligibility and execution admission remain unchanged.
+Public offline fixtures cover both transport configurations and mapping states with
+nonlocal Wave placement; rotation also retains a captured Workflow and unknown
+Process. This is source-fixture evidence, not installed or cross-Machine acceptance.
+Original finding: `1f6ee6485b:scratch/planning-placement-review.md`.
 
 ### Released migration frontier — October 10
 
@@ -276,12 +275,13 @@ Source materialization proves no installation.
 
 ### LOO-427 integration coordination — October 10
 
-Jack Heart requested the combined reduction in LOO-412. LOO-427's clean gate-repaired
-boundary is `bd295866bb`; its ship Flow stopped before landing. The provisional
-427-first order was superseded by unresolved stack direction after Jack's
-“probably worth stacking on 412 then” (`a4d374b5-9853-4aa8-aebc-ada0598351fe`).
-No stack mutation or landing is selected here. Provide a pinned coherent commit
-and remaining scope, not dirty code or a readiness claim.
+Jack Heart's October 10 comment `19116a1b-456b-47c4-a2ed-2ee9da13ef62`
+resolves the stack hold: prepare LOO-427 on a pinned committed LOO-412 head now;
+427 lands only after 412. Jack will integrate in the 427 checkout, leaving this
+checkout's dirty work untouched. The inspected boundary was `94cb65b569`;
+427's earlier gate-repaired boundary is `bd295866bb`. Preserve canonical Work,
+configured transport and Desktop/delegation behavior. This authorizes no 412
+landing and does not waive its full-reduction review boundary.
 
 Preserve Work-keyed Desktop tabs, content-owned Machine locations, nearest-ancestor
 delegation for unstarted Tasks, recorded-owner admission before checkout preparation,
@@ -390,10 +390,11 @@ still governs; no execution or delivery-attempt exchange is authorized.
   cut. Regenerate them after the entire accepted reduction, before review-only
   republication. No readiness or landing follows from this persistence checkpoint.
 
-Checks: `cargo build -p loopflow --bin lf`, fmt, all-target Clippy, three OAuth refresh tests and archived-predecessor test pass with LF_* cleared; gate owns broader verification.
+Checks: `cargo build -p loopflow --bin lf`, fmt, all-target Clippy and two `local_planning` refiling/rotation tests pass with LF_* cleared; gate owns broader verification.
 
-Context: authored memory/scratch fit. The generated Task seed/steers/workspace
-exceeds 16,000 tokens; authored edits cannot remove it. No limit was raised.
+Context: authored memory/scratch fit. `lf context` reports the generated Task
+seed/steers/workspace 5,605 tokens over its 16,000-token limit; authored edits
+cannot remove it. No limit was raised.
 
 Earlier transport evidence: `ae96102580e:scratch/work-on-another-machine-name.md`.
 The mixed model is superseded; its synthetic proofs establish no installed acceptance.

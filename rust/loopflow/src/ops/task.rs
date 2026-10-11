@@ -4084,7 +4084,6 @@ pub fn task_refile(repo: &Path, issue: &str, wave: &str) -> OpsResult<super::pm:
         waves.dedup_by(|a, b| a.id() == b.id());
         let mut guards = Vec::new();
         for wave in &waves {
-            super::pm::require_planning_home(&store, wave).await?;
             guards.push(super::pm::lock_wave_planning(wave).await?);
         }
         let project = super::project::current_project(&store, &destination)?;

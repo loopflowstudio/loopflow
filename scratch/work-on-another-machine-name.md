@@ -196,32 +196,48 @@ Readiness also returns local identity. The surviving reader orders by shared ran
 creation time and ID rather than edit time. Provider adapters compare explicit
 bindings. Rotation retains original receipt bytes and local execution is unchanged.
 
-Linear description acquisition is the next incomplete Project cut. At `4f103559be`,
-`ProjectNode.description` supplies the short summary; authored prose belongs to
-`content`. `into_pm_project` parses only workflow/KRs/targets from that content,
-`PmProject` cannot carry the remaining prose, and `project_accepted_planning`
-emits no `ProjectDescription`. The released-content conversion already obtains
-prose with `ProjectDocument::rewrite(None, "")`; the adapter can reuse that
-boundary rather than adding another parser or another public Project wrapper.
+### Next coherent cut: Project prose acquisition and receipts
 
-Acquisition prerequisite: whole-model `PlanningChanges::reconcile<T>` is removed.
-Both acquisition consumers now reconcile common-writer typed edits, preserving
-receipts and explicit Linear field translation without reconstructing PM models.
-Focused tests cover unchanged baselines, uncertain effects, successor saves,
-Linear-wins conflicts and canonical Task membership. The conflict test now also
-asserts canonical saved names. Provider observations and string receipt addresses
-remain; this is not the typed journal or prose acquisition completion.
+Source reconciliation at `ba8dc94830` (2026-10-10) confirms that Linear's
+`description` is the short summary; authored prose comes from `content`.
+`ProjectNode::into_pm_project` still drops that prose, `PmProject` cannot retain
+it, and `project_accepted_planning` emits no `ProjectDescription`. The shared
+`ProjectDocument` now supplies both parsed fields and source ranges; migration
+already extracts prose with `rewrite(None, "")`. No second parser is needed.
 
-The acquisition cut needs end-to-end evidence for full content, explicit empty/null
-content, and omitted content. Current `ProjectNode` requires the JSON keys but
-accepts null, then normalizes it to empty; omission is a decode failure, not an
-observed empty document. Preserve this distinction in concrete observations and
-never let partial evidence clear saved prose/criteria or settle pending fields.
-Prove an unchanged baseline retains a local save, an older acknowledgment cannot
-clear its successor, and an observed conflict retains both values under the
-selected Linear-wins policy. Assertions must read canonical Project IDs/content
-and retained receipts, not only the adapter's parsed result. No inbound prose or
-partial-observation acceptance is claimed by the existing local/Git fidelity tests.
+The missing behavior crosses more than the adapter:
+
+- Acquisition must retain the observed prose with its revision and apply it through
+  the common writer, under the canonical Project ID and existing ownership checks.
+- `PlanningChanges::observation` still reads the serialized provider record.
+  `record` indexes `body[field]`, so adding only an inbound edit would leave a
+  missing prose baseline represented as JSON null. A supplied empty value and an
+  unobserved field need distinct evidence, including retained pre-cut observations.
+- `edit_project` currently saves name/summary; `update_project_content` saves
+  workflow/KRs/targets. Neither creates a prose receipt, and
+  `LinearClient::project_field_input` rejects `description`. Typed local/Git prose
+  persistence therefore does not establish an ordinary local-save/Linear round
+  trip. The accepted common-writer reduction includes the save, baseline, delivery
+  and readback paths, without overwriting the independently owned managed fields.
+
+`ProjectNode` requires the content/description JSON keys through explicit
+`Option::deserialize`; null becomes empty and omission currently fails decoding.
+Keep omitted content unavailable, never an empty observation or settlement. A
+partial representation introduced during cache reduction must retain that distinction.
+No requirement to accept malformed full responses follows from partial-read safety.
+
+`9b6fe15676` already removed whole-model `PlanningChanges::reconcile<T>`.
+Acquisition now reconciles supplied typed edits; unchanged baselines preserve local
+saves, matching attempted observations rebase successors, and conflicts retain both
+values under Linear-wins. These mechanics and their focused tests are reusable,
+not proof of prose integration. String receipt addresses and provider caches remain.
+
+Acceptance for this cut reads canonical Projects and retained receipts after full,
+empty/null and omitted content; covers an unchanged baseline, an older acknowledgment
+with a newer save, and an observed Linear conflict. It also covers local save through
+outbound content replacement and readback, preserving workflow, KRs, targets and
+unrelated prose when those fields are edited. Existing local/Git fidelity and parser
+checks alone do not prove any composed Linear outcome.
 
 The public canonical Project reader cut is already implemented (`52e7da7f35`);
 it is not another pending wrapper replacement. Remaining `plan_read.rs` projections
@@ -285,12 +301,14 @@ Earlier baseline detail: `c8fe4628a:scratch/work-on-another-machine-name.md`.
 
 Checks: `cargo build -p loopflow --bin lf`, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, and LF-scrubbed `cargo test -p loopflow --lib` filters `project_document`, `project_markdown`, `project_content`, `structured_project_conversion_refuses_unreadable_criteria_without_losing_original` pass; gate owns the affected/materialized matrix. Earlier typed-field checks: `9b6fe15676:scratch/work-on-another-machine-name.md`.
 
-Context: authored memory/scratch fit. Before these edits, `lf context --skill compress` reported the
-generated Task seed/steers and workspace manifest at 19,403 tokens (3,403 over its
-16,000-token limit). Complete source:
-`.lf/tmp/context/9b38cc618d8f0252231dcdf15d6a17c9196a8b8d81798ee0b493e578c476abe2.md`.
-This generated source contains retained steers and the PR's file manifest; trimming
-authored notes cannot reduce it. No history or limits changed.
+Context: authored memory/scratch fit. `lf context --skill realign` reports the
+generated Task seed/steers and workspace manifest at 19,387 tokens (3,387 over
+16,000). Complete source:
+`.lf/tmp/context/c8f47cdc1e02c0a7387237774905a917015268c210ff8d254e2b159a05234531.md`.
+Retained steers and the generated file manifest own that excess; authored-note
+curation cannot remove it. No history or limits changed.
+
+Realign check: `git diff --check` passes; source inspection confirms the missing prose save/baseline/delivery paths; no code changed, broader verification remains with gate.
 
 ## Delete — do not maintain
 

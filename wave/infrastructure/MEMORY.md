@@ -632,11 +632,11 @@ owns local/imported fields; execution/attempts stay local. Preserve causality,
 losers and uncertainty. Gate/installation remain unproved.
 
 Jack accepted the full One Work audit; partial work is not review-ready.
-Canonical Projects retain IDs, bindings and rank. Acquisition reconciles typed
-edits, not whole-model JSON; receipt/journal vocabulary and provider projections
-remain. Linear prose/partial-observation proof remains: omission is not emptiness
-or settlement. Git recovery reads the journal; candidates prove no application
-or publication, and read errors retain cached Desktop content.
+Canonical Projects retain IDs, bindings and rank. Typed acquisition and one Markdown
+parser replace model patching, not provider projections. Prose still lacks acquisition,
+ordinary saves and Linear delivery; an inbound field alone leaves missing receipt
+baselines. Omission is not empty content or settlement. Git recovery reads the journal;
+candidates prove no application/publication, and read errors retain cached content.
 
 Cron retains installed ownership and failure exits ([evidence](release/MEMORY.md)).
 [Remaining work](../../scratch/work-on-another-machine-name.md). Republish #1491

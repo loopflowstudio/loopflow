@@ -377,7 +377,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::pm::linear::LinearProject;
+    use crate::linear::LinearProject;
 
     fn project(id: &str, slug: &str) -> LinearProject {
         LinearProject {

@@ -115,9 +115,9 @@ fn ensure_repository_team_compatible(wave: &Wave, target: &WaveLocator) -> Resul
     if &source == target.repo() {
         return Ok(());
     }
-    let source_team = crate::ops::pm::selected_linear_team(source.as_path())
+    let source_team = crate::ops::linear::selected_linear_team(source.as_path())
         .map_err(|error| anyhow!(error.to_string()))?;
-    let target_team = crate::ops::pm::selected_linear_team(target.repo().as_path())
+    let target_team = crate::ops::linear::selected_linear_team(target.repo().as_path())
         .map_err(|error| anyhow!(error.to_string()))?;
     if let (Some(source_team), Some(target_team)) = (source_team, target_team) {
         if source_team != target_team {

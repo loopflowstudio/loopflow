@@ -135,7 +135,7 @@ mod tests {
             "id":"linear-project", "revision":"2026-10-10T12:00:00Z", "slug":"product", "name":"Product", "summary":"",
             "workflow":"", "krs":[], "metric_targets":[], "status":"started", "initiative_ids":["initiative"], "team_ids":["team"]
         })).unwrap();
-        crate::pm::linear::acceptance::accept_linear_project_in(
+        crate::linear::acceptance::accept_linear_project_in(
             &store,
             wave.id(),
             "initiative",
@@ -193,11 +193,11 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         let wave = Wave::new(WaveId::new(), "product".into(), "/repo".into());
         store.create_wave(&wave).unwrap();
-        let mut observed: crate::pm::linear::LinearProject = serde_json::from_value(serde_json::json!({
+        let mut observed: crate::linear::LinearProject = serde_json::from_value(serde_json::json!({
             "id":"linear-project", "revision":"2026-10-10T12:00:00Z", "slug":"product", "name":"Product", "summary":"",
             "workflow":"", "krs":[], "metric_targets":[], "status":"started", "initiative_ids":["initiative"], "team_ids":["team"]
         })).unwrap();
-        crate::pm::linear::acceptance::accept_linear_project_in(
+        crate::linear::acceptance::accept_linear_project_in(
             &store,
             wave.id(),
             "initiative",
@@ -215,7 +215,7 @@ mod tests {
             .remove(0);
         assert_eq!(change.base, None);
         observed.description = Some(String::new());
-        crate::pm::linear::acceptance::accept_linear_project_in(
+        crate::linear::acceptance::accept_linear_project_in(
             &store,
             wave.id(),
             "initiative",
@@ -248,11 +248,11 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         let wave = Wave::new(WaveId::new(), "product".into(), "/repo".into());
         store.create_wave(&wave).unwrap();
-        let mut observed: crate::pm::linear::LinearProject = serde_json::from_value(serde_json::json!({
+        let mut observed: crate::linear::LinearProject = serde_json::from_value(serde_json::json!({
             "id":"linear-project", "revision":"2026-10-10T12:00:00Z", "slug":"product", "name":"Product", "summary":"", "description":"Baseline",
             "workflow":"", "krs":[], "metric_targets":[], "status":"started", "initiative_ids":["initiative"], "team_ids":["team"]
         })).unwrap();
-        crate::pm::linear::acceptance::accept_linear_project_in(
+        crate::linear::acceptance::accept_linear_project_in(
             &store,
             wave.id(),
             "initiative",
@@ -264,7 +264,7 @@ mod tests {
         observed.description = None;
         observed.revision = Some("2026-10-10T12:01:00Z".into());
         observed.summary = "New summary".into();
-        crate::pm::linear::acceptance::accept_linear_project_in(
+        crate::linear::acceptance::accept_linear_project_in(
             &store,
             wave.id(),
             "initiative",
@@ -301,7 +301,7 @@ mod tests {
             serde_json::json!({"value":"Baseline", "revision":"2026-10-10T12:00:00Z", "observed_at":17})
         );
         observed.description = Some("Baseline".into());
-        crate::pm::linear::acceptance::accept_linear_project_in(
+        crate::linear::acceptance::accept_linear_project_in(
             &store,
             wave.id(),
             "initiative",

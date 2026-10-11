@@ -1,6 +1,6 @@
 //! Linear observations stay adapter-internal; ingestion preserves ordered direction.
 use crate::durable::TaskId;
-use crate::pm::linear::{LinearComment, LinearIssueObservation};
+use crate::linear::{LinearComment, LinearIssueObservation};
 use crate::store::sqlite::SqliteStore;
 use crate::work::task::NewTask;
 use time::OffsetDateTime;

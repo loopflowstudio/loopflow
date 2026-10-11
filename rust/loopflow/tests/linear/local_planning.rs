@@ -414,7 +414,10 @@ fn public_local_plan_matches_desktop() {
     assert_eq!(actual, expected, "actual wire: {actual}");
     serde_json::from_value::<loopflow::lf::commands::waves::RoadmapTask>(actual["task"].clone())
         .unwrap();
-    serde_json::from_value::<loopflow::ops::pm::TaskComments>(actual["comments"].clone()).unwrap();
+    serde_json::from_value::<loopflow::work::task::comment::TaskComments>(
+        actual["comments"].clone(),
+    )
+    .unwrap();
 }
 
 #[test]
@@ -1155,7 +1158,7 @@ fn project_creation_binding_and_activation_save_offline() {
                     "initiative_ids": ["initiative"], "team_ids": ["fixture-team"]
                 }))
                 .unwrap();
-                loopflow::pm::linear::acceptance::accept_linear_project_in(
+                loopflow::linear::acceptance::accept_linear_project_in(
                     &store,
                     wave.id(),
                     "initiative",
@@ -1436,7 +1439,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
             canonical.to_string(),
         );
         store.create_wave(&wave).unwrap();
-        let project = loopflow::pm::linear::LinearProject {
+        let project = loopflow::linear::LinearProject {
             description: None,
             id: "provider-project".into(),
             revision: Some("2026-10-08T10:00:00Z".into()),
@@ -1453,7 +1456,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
             initiative_ids: vec!["initiative".into()],
             team_ids: vec!["fixture-team".into()],
         };
-        loopflow::pm::linear::acceptance::accept_linear_project_in(
+        loopflow::linear::acceptance::accept_linear_project_in(
             &store,
             wave.id(),
             "initiative",
@@ -1602,7 +1605,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
             incoming.workflow = "research".into();
             incoming.revision = Some("2026-10-08T11:00:00Z".into());
             incoming.krs[0].holds = true;
-            loopflow::pm::linear::acceptance::accept_linear_project_in(
+            loopflow::linear::acceptance::accept_linear_project_in(
                 &store,
                 wave.id(),
                 "initiative",
@@ -1642,7 +1645,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
             incoming.name = "Saved".into();
             incoming.workflow = "review".into();
             incoming.revision = Some("2026-10-08T12:00:00Z".into());
-            loopflow::pm::linear::acceptance::accept_linear_project_in(
+            loopflow::linear::acceptance::accept_linear_project_in(
                 &store,
                 wave.id(),
                 "initiative",
@@ -1716,7 +1719,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
             let mut incoming = project.clone();
             incoming.revision = Some("2026-10-08T13:00:00Z".into());
             incoming.krs[0].text = "Keep the concurrent provider plan".into();
-            loopflow::pm::linear::acceptance::accept_linear_project_in(
+            loopflow::linear::acceptance::accept_linear_project_in(
                 &store,
                 wave.id(),
                 "initiative",
@@ -1771,7 +1774,7 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             canonical.to_string(),
         );
         store.create_wave(&wave).unwrap();
-        let project = loopflow::pm::linear::LinearProject {
+        let project = loopflow::linear::LinearProject {
             description: None,
             id: "provider-project".into(),
             revision: Some("2026-10-08T10:00:00Z".into()),
@@ -1785,7 +1788,7 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             initiative_ids: vec!["initiative".into()],
             team_ids: vec!["fixture-team".into()],
         };
-        loopflow::pm::linear::acceptance::accept_linear_project_in(
+        loopflow::linear::acceptance::accept_linear_project_in(
             &store,
             wave.id(),
             "initiative",
@@ -1965,8 +1968,8 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             .edit_task(
                 &second,
                 0,
-                &loopflow::pm::PmItemUpdate {
-                    name: Some("Stale".into()),
+                &loopflow::work::task::TaskUpdate {
+                    title: Some("Stale".into()),
                     ..Default::default()
                 }
             )
@@ -2180,7 +2183,7 @@ fn rotation_saves_membership_and_pending_effects_offline() {
         if mapped {
             db.execute("UPDATE tasks SET external_issue_id='provider-issue',issue_identifier='FIX-1',planning_team_id='fixture-team' WHERE id=?1", [active.id.as_str()]).unwrap();
         }
-        let observed_project = loopflow::pm::linear::LinearProject {
+        let observed_project = loopflow::linear::LinearProject {
             id: "provider-project".into(),
             slug: project.slug.clone(),
             name: project.name.clone(),
@@ -2424,7 +2427,7 @@ fn rotation_saves_membership_and_pending_effects_offline() {
         existing.slug = "future".into();
         existing.status = loopflow::work::project::ProjectStatus::Planned;
         existing.linear_id =
-            mapped.then(|| loopflow::pm::LinearProjectId::new("future-provider").unwrap());
+            mapped.then(|| loopflow::linear::LinearProjectId::new("future-provider").unwrap());
         store.insert_project(&existing).unwrap();
         let mut next = plan.clone();
         next["waves"][0]["successor_id"] = serde_json::json!(existing
@@ -2533,9 +2536,9 @@ fn refiling_saves_membership_offline_and_retains_inbound_changes() {
             if mapped {
                 // Bind through the writer so foreground Git exchange sees the same
                 // identity as SQLite, rather than restoring a pre-binding journal.
-                project.linear_id = Some(loopflow::pm::LinearProjectId::new(name).unwrap());
+                project.linear_id = Some(loopflow::linear::LinearProjectId::new(name).unwrap());
                 store.insert_project(&project).unwrap();
-                let observed = loopflow::pm::linear::LinearProject {
+                let observed = loopflow::linear::LinearProject {
                     id: name.into(),
                     slug: project.slug.clone(),
                     name: project.name.clone(),
@@ -2549,7 +2552,7 @@ fn refiling_saves_membership_offline_and_retains_inbound_changes() {
                     team_ids: vec!["fixture-team".into()],
                     revision: None,
                 };
-                loopflow::pm::linear::acceptance::accept_linear_project_in(
+                loopflow::linear::acceptance::accept_linear_project_in(
                     &store,
                     wave.id(),
                     name,
@@ -3297,14 +3300,14 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
     let store = loopflow::store::sqlite::SqliteStore::new(&path).unwrap();
     let task = store.task(&id).unwrap().unwrap();
     let mut project = store.project(&task.project_id).unwrap().unwrap();
-    project.linear_id = Some(loopflow::pm::LinearProjectId::new("provider-project").unwrap());
+    project.linear_id = Some(loopflow::linear::LinearProjectId::new("provider-project").unwrap());
     store.insert_project(&project).unwrap();
-    let observed: loopflow::pm::linear::LinearProject = serde_json::from_value(json!({
+    let observed: loopflow::linear::LinearProject = serde_json::from_value(json!({
         "id":"provider-project", "slug":project.slug, "name":project.name,
         "summary":"", "description":"Saved Project prose", "workflow":"", "status":"started",
         "krs":[], "metric_targets":[], "initiative_ids":["initiative"], "team_ids":["team"], "revision":null
     })).unwrap();
-    loopflow::pm::linear::acceptance::accept_linear_project_in(
+    loopflow::linear::acceptance::accept_linear_project_in(
         &store,
         &task.wave_id,
         "initiative",
@@ -3340,8 +3343,8 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
         .edit_task(
             &id,
             task.revision,
-            &loopflow::pm::PmItemUpdate {
-                name: Some("Saved locally".into()),
+            &loopflow::work::task::TaskUpdate {
+                title: Some("Saved locally".into()),
                 description: Some("Saved Task prose".into()),
                 ..Default::default()
             },
@@ -3440,8 +3443,8 @@ fn observed_issue(
     project: &str,
     title: &str,
     description: &str,
-) -> loopflow::pm::linear::LinearIssue {
-    loopflow::pm::linear::LinearIssue {
+) -> loopflow::linear::LinearIssue {
+    loopflow::linear::LinearIssue {
         id: id.into(),
         identifier: "FIX-1".into(),
         name: title.into(),

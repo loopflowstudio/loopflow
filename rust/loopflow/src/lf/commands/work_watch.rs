@@ -110,7 +110,7 @@ pub struct TaskPart {
     pub task: String,
     pub work: TaskWork,
     pub flow_processes: Vec<FlowProcessDetail>,
-    pub comments: crate::ops::pm::TaskComments,
+    pub comments: crate::work::task::comment::TaskComments,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -384,7 +384,7 @@ struct Reader {
     /// The sessions revision a quiet deadline was read at, and that deadline.
     quiet: Option<(i64, Option<i64>)>,
     runtime: tokio::runtime::Runtime,
-    planning_sync: Option<(String, crate::ops::linear_observe::PlanningSync)>,
+    planning_sync: Option<(String, crate::ops::planning_sync::PlanningSync)>,
 }
 
 impl Reader {
@@ -427,7 +427,7 @@ impl Reader {
             let store = Arc::new(
                 crate::store::open_store(&StorageConfig::sqlite(self.database.clone())).await?,
             );
-            crate::ops::linear_observe::PlanningSync::start(store, repo.clone())
+            crate::ops::planning_sync::PlanningSync::start(store, repo.clone())
                 .map_err(anyhow::Error::from)
         });
         match result {

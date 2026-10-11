@@ -7,7 +7,7 @@ use std::time::Duration;
 use serde_json::{json, Value};
 
 use crate::durable::WorkRef;
-use crate::pm::linear::LinearClient;
+use crate::linear::LinearClient;
 use crate::store::planning_sync::PlanningChange;
 use crate::store::sqlite::planning_changes::PlanningChanges;
 use crate::store::Store;
@@ -51,7 +51,7 @@ pub(crate) async fn sync_fields(store: &Store, repo: &Path, work: &WorkRef) -> O
     };
     let changes = pending(store, owner)?;
     let attempt = async {
-        let client = super::pm::linear_client(repo).await?;
+        let client = super::linear::linear_client(repo).await?;
         if let Some(change) = changes.iter().find(|change| change.field == "deleted") {
             return sync_deletion(store, repo, owner, &client, change).await;
         }
@@ -301,9 +301,9 @@ async fn observe(
                 .await
                 .map_err(message)?
                 .ok_or_else(|| message("Project Wave is missing"))?;
-            let initiative = super::pm::read_initiative(repo, wave.slug())
+            let initiative = super::linear::read_initiative(repo, wave.slug())
                 .ok_or_else(|| message("Wave has no Linear Initiative"))?;
-            crate::pm::linear::acceptance::accept_linear_project_in(
+            crate::linear::acceptance::accept_linear_project_in(
                 &store.sqlite,
                 &project.wave_id,
                 &initiative,
@@ -357,8 +357,8 @@ fn task_input(store: &Store, change: &PlanningChange) -> OpsResult<Value> {
 pub(super) async fn ingest_task(
     store: &Store,
     repo: &Path,
-    issue: &crate::pm::linear::LinearIssue,
-    project: Option<&crate::pm::linear::LinearProject>,
+    issue: &crate::linear::LinearIssue,
+    project: Option<&crate::linear::LinearProject>,
     observed_at: i64,
 ) -> OpsResult<()> {
     let mut confirmed = None;
@@ -378,12 +378,12 @@ pub(super) async fn ingest_task(
                 .await
                 .map_err(message)?
                 .ok_or_else(|| message("Project Wave is missing"))?;
-            if let Some(initiative) = super::pm::read_initiative(repo, wave.slug()) {
+            if let Some(initiative) = super::linear::read_initiative(repo, wave.slug()) {
                 confirmed = Some((local.wave_id, initiative));
             }
         }
     }
-    crate::pm::linear::acceptance::accept_linear_issue_in(
+    crate::linear::acceptance::accept_linear_issue_in(
         &store.sqlite,
         &repo.to_string_lossy(),
         issue,

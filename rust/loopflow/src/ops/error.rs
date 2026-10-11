@@ -7,7 +7,7 @@ pub type OpsResult<T> = Result<T, OpsError>;
 #[derive(Debug, Error)]
 pub enum OpsError {
     #[error(transparent)]
-    Planning(#[from] crate::pm::LinearBindingError),
+    Planning(#[from] crate::linear::LinearBindingError),
     #[error(transparent)]
     TaskData(#[from] crate::work::task::TaskDataError),
     #[error("git error: {0}")]

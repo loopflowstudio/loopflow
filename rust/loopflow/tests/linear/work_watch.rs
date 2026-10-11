@@ -987,7 +987,8 @@ fn an_offline_cli_comment_reaches_the_open_desktop_thread() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let saved: loopflow::ops::pm::TaskComments = serde_json::from_slice(&output.stdout).unwrap();
+    let saved: loopflow::work::task::comment::TaskComments =
+        serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(saved.comments.len(), 1);
     assert_eq!(saved.pending_sync, [saved.comments[0].id.clone()]);
     assert_eq!(thread(&watch, 1), saved);

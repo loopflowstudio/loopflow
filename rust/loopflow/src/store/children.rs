@@ -29,7 +29,7 @@ impl Store {
         &self,
         id: &TaskId,
         expected_revision: u64,
-        patch: &crate::pm::PmItemUpdate,
+        patch: &crate::work::task::TaskUpdate,
     ) -> StoreResult<Task> {
         let id = id.clone();
         let patch = patch.clone();
@@ -266,7 +266,7 @@ impl Store {
     pub(crate) async fn apply_linear_observation(
         &self,
         task_id: &TaskId,
-        observation: crate::pm::linear::LinearIssueObservation,
+        observation: crate::linear::LinearIssueObservation,
         observed_at: OffsetDateTime,
     ) -> StoreResult<LinearObservationOutcome> {
         let task_id = task_id.clone();

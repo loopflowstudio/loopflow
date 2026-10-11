@@ -5,11 +5,11 @@ use crate::planning_exchange::PlanningKind;
 use rusqlite::TransactionBehavior;
 
 use crate::durable::{ProjectId, TaskId};
-use crate::pm::PmItemUpdate;
 use crate::store::planning_sync::PlanningChange;
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
 use crate::work::task::Task;
+use crate::work::task::TaskUpdate;
 
 use super::planning_changes::PlanningChanges;
 use super::SqliteStore;
@@ -97,7 +97,7 @@ impl SqliteStore {
         &self,
         id: &TaskId,
         expected_revision: u64,
-        patch: &PmItemUpdate,
+        patch: &TaskUpdate,
     ) -> StoreResult<Task> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -109,14 +109,14 @@ impl SqliteStore {
             ));
         }
         if patch
-            .name
+            .title
             .as_ref()
             .is_some_and(|title| title.trim().is_empty())
         {
             return Err(StoreError::InvalidData("Task title cannot be empty".into()));
         }
         let mut edits = Vec::new();
-        if let Some(value) = &patch.name {
+        if let Some(value) = &patch.title {
             edits.push(Edit::TaskTitle(Some(value.clone())));
         }
         if let Some(value) = &patch.description {

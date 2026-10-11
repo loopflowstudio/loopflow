@@ -1190,10 +1190,10 @@ fn run_admitted_agent(
         Some(cwd) => cwd.clone(),
         None => std::env::current_dir()?,
     };
-    let _planning_sync = crate::ops::linear_observe::PlanningSync::start_for_directory(&directory)
+    let _planning_sync = crate::ops::planning_sync::PlanningSync::start_for_directory(&directory)
         .map_err(|error| {
-            CoreError::ExecutionFailed(format!("cannot start planning sync: {error}"))
-        })?;
+        CoreError::ExecutionFailed(format!("cannot start planning sync: {error}"))
+    })?;
     let result = _run_with_transient_retries(
         &launch,
         &process,

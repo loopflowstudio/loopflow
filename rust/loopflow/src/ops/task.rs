@@ -10,6 +10,7 @@ mod file_save;
 pub use directory::{task_files, TaskDirectory, TaskFileEntry, TaskFileKind};
 pub use file_save::{task_save, TaskFileRecovery, TaskFileSave};
 
+use crate::work::task::comment::TaskComments;
 use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions};
 use std::io::Read;
@@ -233,7 +234,7 @@ fn active_pr(task: &Task) -> OpsResult<TaskPr> {
 // File access reads recorded placement without reconciling PR or execution state.
 fn file_store() -> OpsResult<crate::store::sqlite::SqliteStore> {
     #[cfg(test)]
-    let test_path = super::pm::PM_TEST_CONTEXT
+    let test_path = super::linear::LINEAR_TEST_CONTEXT
         .try_with(|context| context.path.clone())
         .ok();
     #[cfg(not(test))]
@@ -295,7 +296,8 @@ pub(super) fn block_on_task<T>(
 
 async fn task_store() -> OpsResult<SharedStore> {
     #[cfg(test)]
-    if let Ok(store) = super::pm::PM_TEST_CONTEXT.try_with(|context| context.store.clone()) {
+    if let Ok(store) = super::linear::LINEAR_TEST_CONTEXT.try_with(|context| context.store.clone())
+    {
         return Ok(store);
     }
     open_existing_store().await.map(Arc::new).ok_or_else(|| {
@@ -810,7 +812,8 @@ fn prepare_task(repo: &Path, issue: &str, options: TaskProcessOptions) -> OpsRes
                 .planning_transport()
             {
                 crate::config::PlanningConfig::Linear {} => {
-                    super::pm::acquire_task(&main, issue, super::pm::PmRefresh::Auto).await?
+                    super::linear::acquire_task(&main, issue, super::linear::LinearRefresh::Auto)
+                        .await?
                 }
                 crate::config::PlanningConfig::Git { .. } => {
                     return Err(task_error(format!(
@@ -1183,7 +1186,7 @@ async fn place_prepared_task(
             .map_err(task_error)?
             .ok_or_else(|| task_error("Task is unavailable"))?;
         let wave = owning_wave(store, &task).await?;
-        let acquisition = super::pm::lock_wave_planning(&wave).await?;
+        let acquisition = super::planning_sync::lock_wave_planning(&wave).await?;
         let current = store
             .get_task(task_id)
             .await
@@ -1278,7 +1281,7 @@ pub fn task_create(
     let input = resolve_task_create_input(title.as_deref(), report.as_deref())?;
     let main = crate::git::worktrees::main_repo_root(repo).map_err(task_error)?;
     block_on_task(async {
-        let store = super::pm::pm_store().await?;
+        let store = super::planning_sync::planning_store().await?;
         if let Err(error) =
             super::planning_sync::acquire_repository(&store, &main.to_string_lossy()).await
         {
@@ -1325,7 +1328,7 @@ pub fn task_create(
                     .ok_or_else(|| task_error("Task Wave is missing"))?
             }
         };
-        let acquisition = super::pm::lock_wave_planning(&wave).await?;
+        let acquisition = super::planning_sync::lock_wave_planning(&wave).await?;
         let creation_project = super::project::current_project(&store, &wave)?.id;
         let task = store
             .create_task(
@@ -2974,19 +2977,21 @@ pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
                 }
             }
         }
-        let inspection = if task.is_none()
-            && super::linear_observe::connected(&repo.to_string_lossy())
-        {
-            let selector = issue.ok_or_else(|| task_error("this checkout has no Task"))?;
-            let read =
-                super::pm::inspect_task_planning_async(repo, selector, super::pm::PmRefresh::Auto)
+        let inspection =
+            if task.is_none() && super::linear_observe::connected(&repo.to_string_lossy()) {
+                let selector = issue.ok_or_else(|| task_error("this checkout has no Task"))?;
+                let read = super::linear::inspect_task_planning_async(
+                    repo,
+                    selector,
+                    super::linear::LinearRefresh::Auto,
+                )
+                .await?;
+                task = super::planning_sync::find_task(&store, &repo.to_string_lossy(), selector)
                     .await?;
-            task =
-                super::planning_sync::find_task(&store, &repo.to_string_lossy(), selector).await?;
-            Some(read)
-        } else {
-            None
-        };
+                Some(read)
+            } else {
+                None
+            };
         let mut result = TaskStatus {
             sync: None,
             task: None,
@@ -3031,7 +3036,7 @@ pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
         result.planning_stale = result.planning_state != crate::store::PlanningState::Available
             || result.observed_at.is_some_and(|at| {
                 time::OffsetDateTime::now_utc().unix_timestamp() - at
-                    >= super::pm::PM_SOFT_STALE_SECS
+                    >= super::linear::LINEAR_SOFT_STALE_SECS
             });
         Ok(result)
     })
@@ -3040,7 +3045,7 @@ pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
 /// Complete the Task without changing its Workflow or Processes.
 pub fn task_complete(repo: &Path, issue: &str, note: Option<&str>) -> OpsResult<Task> {
     block_on_task(async {
-        let (store, mut task) = super::pm::resolve_saved_task(repo, None, issue).await?;
+        let (store, mut task) = resolve_saved_task(repo, None, issue).await?;
         if let Some(request) = store
             .sqlite
             .request_task_completion(&task.id, note)
@@ -3234,11 +3239,11 @@ async fn link_pr_to_linear(store: &SharedStore, task: &Task, pr: &mut TaskPr) {
             return;
         }
     };
-    let prior = crate::ops::pm::PrLinkageIds {
+    let prior = crate::ops::linear::PrLinkageIds {
         attachment_id: pr.linear_attachment_id.clone(),
         comment_id: pr.linear_comment_id.clone(),
     };
-    let request = crate::ops::pm::PrLinkRequest {
+    let request = crate::ops::linear::PrLinkRequest {
         issue_id: issue_id.as_str().to_string(),
         url: github.url.clone(),
         title,
@@ -3246,7 +3251,7 @@ async fn link_pr_to_linear(store: &SharedStore, task: &Task, pr: &mut TaskPr) {
         body,
     };
     let outcome =
-        crate::ops::pm::pm_link_pr_async(Path::new(wave.repo()), wave.slug(), &request, &prior)
+        crate::ops::linear::link_pr_async(Path::new(wave.repo()), wave.slug(), &request, &prior)
             .await;
     // Say so at publish time. The PR line in `lf task status` carries the durable
     // reading, but an operator running `lf pr open` should not have to go looking.
@@ -4041,22 +4046,22 @@ pub fn task_edit(
     repo: &Path,
     issue: &str,
     wave: Option<&str>,
-    update: crate::pm::PmItemUpdate,
+    update: crate::work::task::TaskUpdate,
 ) -> OpsResult<TaskEdit> {
-    if update == crate::pm::PmItemUpdate::default() {
+    if update == crate::work::task::TaskUpdate::default() {
         return Err(task_error(
             "task edit requires --title, --notes, --rank, --assignee or --unassign",
         ));
     }
     if update
-        .name
+        .title
         .as_deref()
         .is_some_and(|title| title.trim().is_empty())
     {
         return Err(task_error("Task title cannot be empty"));
     }
     block_on_task(async {
-        let (store, task) = super::pm::resolve_saved_task(repo, wave, issue).await?;
+        let (store, task) = resolve_saved_task(repo, wave, issue).await?;
         let edited = store
             .edit_task(&task.id, task.revision, &update)
             .await
@@ -4074,9 +4079,9 @@ pub fn task_edit(
     })
 }
 
-pub fn task_refile(repo: &Path, issue: &str, wave: &str) -> OpsResult<super::pm::PmUpdateResult> {
+pub fn task_refile(repo: &Path, issue: &str, wave: &str) -> OpsResult<Task> {
     block_on_task(async {
-        let (store, task) = super::pm::resolve_saved_task(repo, None, issue).await?;
+        let (store, task) = resolve_saved_task(repo, None, issue).await?;
         let locator = crate::work::wave::WaveLocator::discover(repo, wave).map_err(task_error)?;
         if store
             .get_wave_at(&locator)
@@ -4099,7 +4104,7 @@ pub fn task_refile(repo: &Path, issue: &str, wave: &str) -> OpsResult<super::pm:
         waves.dedup_by(|a, b| a.id() == b.id());
         let mut guards = Vec::new();
         for wave in &waves {
-            guards.push(super::pm::lock_wave_planning(wave).await?);
+            guards.push(super::planning_sync::lock_wave_planning(wave).await?);
         }
         let project = super::project::current_project(&store, &destination)?;
         store
@@ -4114,10 +4119,11 @@ pub fn task_refile(repo: &Path, issue: &str, wave: &str) -> OpsResult<super::pm:
         }
         drop(guards);
         super::planning_sync::sync_after_save(&store, destination.repo()).await;
-        Ok(super::pm::PmUpdateResult {
-            wave: destination.slug().into(),
-            id: task.id.to_string(),
-        })
+        store
+            .get_task(&task.id)
+            .await
+            .map_err(task_error)?
+            .ok_or_else(|| task_error("saved Task is missing"))
     })
 }
 
@@ -4127,10 +4133,8 @@ pub fn task_comment(
     wave: Option<&str>,
     message: Option<&str>,
     steer: bool,
-) -> OpsResult<super::pm::TaskComments> {
-    block_on_task(super::pm::task_comment_async(
-        repo, wave, issue, message, steer,
-    ))
+) -> OpsResult<crate::work::task::comment::TaskComments> {
+    block_on_task(task_comment_async(repo, wave, issue, message, steer))
 }
 
 pub(crate) fn append_task_comment(
@@ -4249,6 +4253,115 @@ pub fn task_wait(issue: &str, until: TaskWaitUntil, timeout: Option<Duration>) -
     }
 }
 
+/// Read the saved Task thread or save a comment without allocating execution state.
+pub(crate) async fn task_comment_async(
+    repo: &Path,
+    wave: Option<&str>,
+    issue: &str,
+    message: Option<&str>,
+    steer: bool,
+) -> OpsResult<TaskComments> {
+    let (store, task) = resolve_saved_task(repo, wave, issue).await?;
+    if let Some(message) = message {
+        append_task_comment(&store, &task, message, steer)?;
+        let owner = store
+            .get_wave(&task.wave_id)
+            .await
+            .map_err(|error| OpsError::Message(error.to_string()))?
+            .ok_or_else(|| OpsError::Message("Task Wave is missing".into()))?;
+        super::planning_sync::sync_after_save(&store, owner.repo()).await;
+    }
+    let refresh_error = if message.is_none() && task.linear_id.is_some() {
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            super::linear_observe::refresh_task_comments(&store, &task),
+        )
+        .await
+        {
+            Ok(Ok(())) => None,
+            Ok(Err(error)) => Some(error.to_string()),
+            Err(_) => Some("Comment refresh timed out; showing saved comments".into()),
+        }
+    } else {
+        None
+    };
+    let mut thread = store
+        .sqlite
+        .task_comments(&task.id)
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    thread.refresh_error = refresh_error;
+    Ok(thread)
+}
+
+pub(crate) async fn resolve_saved_task(
+    repo: &Path,
+    wave: Option<&str>,
+    issue: &str,
+) -> OpsResult<(SharedStore, Task)> {
+    let store = Arc::new(super::planning_sync::planning_store().await?);
+    let canonical = crate::repository::CanonicalRepo::discover(repo)
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    let task = super::planning_sync::find_task(&store, &canonical.to_string(), issue).await?;
+    let task = match task {
+        Some(task) => task,
+        None => {
+            // Cold acquisition imports the remote record once. The stored Task owns
+            // every subsequent read and write, including while Linear is unavailable.
+            match crate::config::load_config(Some(repo))
+                .map_err(task_error)?
+                .unwrap_or_default()
+                .planning_transport()
+            {
+                crate::config::PlanningConfig::Linear {} => {
+                    super::linear::acquire_task(repo, issue, super::linear::LinearRefresh::Force)
+                        .await?
+                }
+                crate::config::PlanningConfig::Git { .. } => {
+                    return Err(task_error(format!(
+                        "Task {issue:?} not found in selected Git planning"
+                    )))
+                }
+            }
+        }
+    };
+    let owner = store
+        .get_wave(&task.wave_id)
+        .await
+        .map_err(|error| OpsError::Message(error.to_string()))?
+        .ok_or_else(|| OpsError::Message("Task Wave is missing".into()))?;
+    let expected_wave = match wave {
+        Some(selector) => Some(
+            crate::work::wave::context::resolve_managed_wave(
+                Some(&store),
+                Some(repo),
+                Some(selector),
+                None,
+            )
+            .await
+            .map_err(|error| OpsError::Message(error.to_string()))?,
+        ),
+        None => None,
+    };
+    let locator = crate::work::wave::WaveLocator::new(canonical, owner.slug())
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    let scoped_owner = store
+        .get_wave_at(&locator)
+        .await
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    if scoped_owner.as_ref().map(|wave| wave.id()) != Some(owner.id())
+        || expected_wave
+            .as_ref()
+            .is_some_and(|expected| expected.id() != owner.id())
+    {
+        return Err(OpsError::Message(format!(
+            "Task {issue} belongs to {} in {}",
+            owner.slug(),
+            owner.repo()
+        )));
+    }
+    Ok((store, task))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -4257,7 +4370,7 @@ mod tests {
     };
     use crate::child::ChildRef;
     use crate::durable::{TaskState, WorkRef, WorkStatus};
-    use crate::pm::{LinearIssueId, LinearProjectId};
+    use crate::linear::{LinearIssueId, LinearProjectId};
     use crate::store::{SharedStore, StorageConfig};
     use crate::test_linear_input::SeedLinear;
     use crate::work::project::{Project, ProjectId};
@@ -4918,8 +5031,8 @@ mod tests {
             "CREATE TRIGGER no_file_task_update BEFORE UPDATE ON tasks BEGIN SELECT RAISE(FAIL,'file access cannot update Task'); END;
              CREATE TRIGGER no_file_pr_update BEFORE UPDATE ON task_prs BEGIN SELECT RAISE(FAIL,'file access cannot reconcile PR'); END;"
         ).unwrap();
-        crate::ops::pm::PM_TEST_CONTEXT.sync_scope(
-            crate::ops::pm::PmTestContext {
+        crate::ops::linear::LINEAR_TEST_CONTEXT.sync_scope(
+            crate::ops::linear::LinearTestContext {
                 path: fixture.database_path.clone(),
                 store: fixture.store.clone(),
                 graphql_url: "http://127.0.0.1:1".into(),
@@ -4970,8 +5083,8 @@ mod tests {
         connection
             .execute_batch("PRAGMA foreign_keys=OFF; DELETE FROM task_prs; DELETE FROM projects;")
             .unwrap();
-        crate::ops::pm::PM_TEST_CONTEXT.sync_scope(
-            crate::ops::pm::PmTestContext {
+        crate::ops::linear::LINEAR_TEST_CONTEXT.sync_scope(
+            crate::ops::linear::LinearTestContext {
                 path: fixture.database_path.clone(),
                 store: fixture.store.clone(),
                 graphql_url: "http://127.0.0.1:1".into(),
@@ -5373,8 +5486,8 @@ mod tests {
              CREATE TRIGGER no_history_pr_update BEFORE UPDATE ON task_prs BEGIN SELECT RAISE(FAIL,'historical PR must remain read-only'); END;
              CREATE TRIGGER no_history_event BEFORE INSERT ON task_events BEGIN SELECT RAISE(FAIL,'historical Task must not gain events'); END;"
         ).unwrap();
-            crate::ops::pm::PM_TEST_CONTEXT.sync_scope(
-                crate::ops::pm::PmTestContext {
+            crate::ops::linear::LINEAR_TEST_CONTEXT.sync_scope(
+                crate::ops::linear::LinearTestContext {
                     path,
                     store,
                     graphql_url: "http://127.0.0.1:1".into(),

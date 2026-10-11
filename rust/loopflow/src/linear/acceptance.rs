@@ -4,7 +4,7 @@
 use super::LinearProject;
 use crate::durable::ProjectId;
 use crate::id::WaveId;
-use crate::pm::linear::LinearIssue;
+use crate::linear::LinearIssue;
 use crate::store::sqlite::planning::{
     associate_project, project_accepted_planning, require_accepted_initiative, revision_nanos,
 };
@@ -17,8 +17,8 @@ pub(crate) async fn accept_linear_inventory(
     store: &Store,
     wave: WaveId,
     initiative: String,
-    projects: Vec<crate::pm::linear::LinearProject>,
-    issues: Vec<crate::pm::linear::LinearIssue>,
+    projects: Vec<crate::linear::LinearProject>,
+    issues: Vec<crate::linear::LinearIssue>,
     observed_at: i64,
     acquisition: Option<Arc<PlanningLocks>>,
 ) -> StoreResult<()> {
@@ -32,7 +32,7 @@ pub(crate) async fn reconcile_linear_project_teams(
     store: &Store,
     wave: &WaveId,
     initiative: &str,
-    project: crate::pm::linear::LinearProject,
+    project: crate::linear::LinearProject,
     observed_at: i64,
     acquisition: Arc<PlanningLocks>,
 ) -> StoreResult<()> {
@@ -47,8 +47,8 @@ pub(crate) async fn reconcile_linear_project_teams(
 pub(crate) async fn accept_linear_issue(
     store: &Store,
     repo: &str,
-    issue: crate::pm::linear::LinearIssue,
-    project: Option<crate::pm::linear::LinearProject>,
+    issue: crate::linear::LinearIssue,
+    project: Option<crate::linear::LinearProject>,
     observed_at: i64,
     confirmed_wave: Option<(WaveId, String)>,
     acquisition: Option<Arc<PlanningLocks>>,
@@ -589,7 +589,7 @@ pub(crate) fn put_item(
 pub(crate) fn observe_task_state(
     store: &SqliteStore,
     delivery: &sqlite::task_state_delivery::TaskStateDelivery,
-    observed: &crate::pm::linear::LinearIssue,
+    observed: &crate::linear::LinearIssue,
 ) -> StoreResult<bool> {
     let mut conn = store.conn.lock().expect("store mutex poisoned");
     let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -707,7 +707,7 @@ mod tests {
             let project = ProjectId::new();
             let task = TaskId::new();
             conn.execute_batch(
-                &include_str!("../../../tests/fixtures/migrations/planning_task_evidence.sql")
+                &include_str!("../../tests/fixtures/migrations/planning_task_evidence.sql")
                     .replace("{wave}", wave.as_str())
                     .replace("{project}", project.as_str())
                     .replace("{task}", task.as_str()),
@@ -772,7 +772,7 @@ mod tests {
         let wave = crate::work::wave::Wave::new(WaveId::new(), "product".into(), "/repo".into());
         store.create_wave(&wave).unwrap();
         let mut snapshot: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
-            "../../../../../tests/fixtures/dto/task_history_planning.json"
+            "../../../../tests/fixtures/dto/task_history_planning.json"
         ))
         .unwrap();
         snapshot.projects.truncate(1);
@@ -865,7 +865,7 @@ mod tests {
         let wave = crate::work::wave::Wave::new(WaveId::new(), "product".into(), "/repo".into());
         store.create_wave(&wave).unwrap();
         let mut snapshot: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
-            "../../../../../tests/fixtures/dto/task_history_planning.json"
+            "../../../../tests/fixtures/dto/task_history_planning.json"
         ))
         .unwrap();
         let initiative = snapshot.projects[0].initiative_ids[0].clone();
@@ -978,13 +978,13 @@ mod tests {
             let mut conn = Connection::open_in_memory().unwrap();
             crate::store::migrations::apply_before_current_draft(&conn, "planning_peers");
             let snapshot: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
-                "../../../../../tests/fixtures/dto/task_history_planning.json"
+                "../../../../tests/fixtures/dto/task_history_planning.json"
             ))
             .unwrap();
             let mut project = snapshot.projects[0].clone();
             project.revision = Some("2026-10-05T12:00:00Z".into());
             project.name = historical_name.into();
-            project.slug = crate::pm::project_slug(historical_name);
+            project.slug = crate::linear::project_slug(historical_name);
             let original = serde_json::to_string(&project).unwrap();
             conn.execute(
                 "INSERT INTO pm_projects(repo,provider,id,observed_at,body)
@@ -1002,7 +1002,7 @@ mod tests {
             ))
             .unwrap();
             project.name = "Product — Customer requests".into();
-            project.slug = crate::pm::project_slug(&project.name);
+            project.slug = crate::linear::project_slug(&project.name);
 
             let mut conflict = project.clone();
             conflict.summary.push_str("conflict");
@@ -1055,7 +1055,7 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         crate::store::migrations::apply_before_current_draft(&conn, "planning_peers");
         let snapshot: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
-            "../../../../../tests/fixtures/dto/task_history_planning.json"
+            "../../../../tests/fixtures/dto/task_history_planning.json"
         ))
         .unwrap();
         let item = &snapshot.items[0];
@@ -1113,7 +1113,7 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         crate::store::migrations::apply_before_current_draft(&conn, "planning_peers");
         let planning: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
-            "../../../../../tests/fixtures/dto/task_history_planning.json"
+            "../../../../tests/fixtures/dto/task_history_planning.json"
         ))
         .unwrap();
         let mut item = planning
@@ -1153,7 +1153,7 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         crate::store::migrations::apply_before_current_draft(&conn, "planning_peers");
         let planning: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
-            "../../../../../tests/fixtures/dto/task_history_planning.json"
+            "../../../../tests/fixtures/dto/task_history_planning.json"
         ))
         .unwrap();
         let mut item = planning.items[0].clone();

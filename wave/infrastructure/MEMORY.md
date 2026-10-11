@@ -617,7 +617,8 @@ acceptance remain at
 Jack Heart selected Linear, shared or default user-keyed Git per repository.
 One typed writer owns local/imported Work; outages buffer without fallback/election.
 Execution/attempts stay local; retain causal losers and uncertainty. Before review:
-finish PM orchestration, typed journal, ordinary follow-ups and cron.
+finish typed journal, ordinary follow-ups and cron. The generic PM facade is removed;
+Task edits/comments and planning exchange now have domain/planning owners.
 
 Canonical readers use Work and narrow retained claims. Delivery needs accepted
 revision plus archive/membership eligibility; foreign facts grant no ownership.

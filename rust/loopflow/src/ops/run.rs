@@ -301,8 +301,8 @@ mod tests {
     use super::{resolve_work_binding, resolve_work_selection, WorkSelection};
     use crate::durable::{ProjectId, TaskId, WorkRef};
     use crate::id::WaveId;
-    use crate::pm::linear::LinearProject;
-    use crate::pm::{LinearIssueId, LinearProjectId};
+    use crate::linear::LinearProject;
+    use crate::linear::{LinearIssueId, LinearProjectId};
     use crate::store::SharedStore;
     use crate::store::StorageConfig;
     use crate::test_linear_input::Inventory;

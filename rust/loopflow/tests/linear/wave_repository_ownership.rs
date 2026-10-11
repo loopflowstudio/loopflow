@@ -8,7 +8,7 @@ use std::process::Command;
 
 use loopflow::durable::{MachineId, WorkRef, WorkStatus};
 use loopflow::id::WaveId;
-use loopflow::pm::{LinearIssueId, LinearProjectId};
+use loopflow::linear::{LinearIssueId, LinearProjectId};
 use loopflow::store::StorageConfig;
 use loopflow::work::project::{Project, ProjectId};
 use loopflow::work::task::{LinearWritebackState, Observation, Task, TaskId, TaskPr, TaskPrId};

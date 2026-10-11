@@ -773,7 +773,7 @@ fn convert_project_content(conn: &rusqlite::Connection) -> StoreResult<()> {
         })?
         .collect::<Result<Vec<_>, _>>()?;
     for (id, body) in rows {
-        let document = crate::pm::project_document::parse_project_document(&body)
+        let document = crate::linear::project_document::parse_project_document(&body)
             .map_err(|error| StoreError::InvalidData(format!("Project {id}: {error}")))?;
         conn.execute(
             "UPDATE projects SET description=?2,krs=?3,metric_targets=?4 WHERE id=?1",
@@ -1516,10 +1516,18 @@ mod tests {
             INSERT INTO task_state_deliveries(id,task_id,target,attempted,error)
             VALUES('uncertain','task-proof','completed',1,'Lost response');
         "#).unwrap();
+        conn.execute_batch(include_str!(
+            "../../tests/fixtures/migrations/planning_local_sessions.sql"
+        ))
+        .unwrap();
         let tables = [
             "tasks",
             "processes",
             "task_workflows",
+            "agent_sessions",
+            "session_events",
+            "session_activity",
+            "task_events",
             "task_comment_deliveries",
             "task_state_deliveries",
             "pm_issue_changes",
@@ -4958,7 +4966,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        let content = crate::pm::project_document::parse_project_document(&text).unwrap();
+        let content = crate::linear::project_document::parse_project_document(&text).unwrap();
         assert_eq!(content.krs, project.krs);
         assert_eq!(content.workflow, project.workflow);
         assert_eq!(content.metric_targets, project.metric_targets);

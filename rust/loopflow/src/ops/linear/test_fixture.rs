@@ -4,7 +4,7 @@ use std::sync::Arc;
 use rusqlite::OptionalExtension;
 use tempfile::TempDir;
 
-use super::PmTestContext;
+use super::LinearTestContext;
 use crate::id::WaveId;
 use crate::store::{open_ephemeral_store, CredentialType, ProviderToken, StorageConfig, Store};
 use crate::work::wave::Wave;
@@ -56,8 +56,8 @@ impl Fixture {
             .unwrap()
     }
 
-    pub(super) fn context(&self, graphql_url: &str) -> PmTestContext {
-        PmTestContext {
+    pub(super) fn context(&self, graphql_url: &str) -> LinearTestContext {
+        LinearTestContext {
             path: self.database.clone(),
             store: self.store.clone(),
             graphql_url: graphql_url.into(),
@@ -169,7 +169,7 @@ impl Drop for PlanningEnvironment {
 pub(crate) async fn refresh_task_input(
     repo: &std::path::Path,
     selector: &str,
-    refresh: super::PmRefresh,
+    refresh: super::LinearRefresh,
 ) -> crate::ops::OpsResult<crate::test_linear_input::IssueFixture> {
     let read = super::inspect_task_planning_async(repo, selector, refresh).await?;
     if read.observation.state != crate::store::PlanningState::Available {
@@ -182,7 +182,7 @@ pub(crate) async fn refresh_task_input(
             }),
         ));
     }
-    let store = super::pm_store().await?;
+    let store = super::planning_store().await?;
     let database = store.sqlite.home_dir().unwrap().join("loopflow.db");
     let scope = crate::repository::CanonicalRepo::discover(repo).unwrap();
     Ok(loopflow_test_support::retained_task_input(
@@ -195,14 +195,16 @@ pub(crate) async fn refresh_task_input(
 pub(super) async fn capture_inventory(
     repo: &std::path::Path,
     wave: &str,
-    context: &super::PmContext,
+    context: &super::LinearRepository,
+    initiative: &str,
     store: &Store,
 ) -> crate::ops::OpsResult<crate::test_linear_input::Inventory> {
-    let projects = super::checked_projects_with_store(repo, context, wave, store).await?;
+    let projects =
+        super::checked_projects_with_store(repo, context, initiative, wave, store).await?;
     let items = context
         .client
         .list_project_issues(&projects)
         .await
-        .map_err(super::pm_to_ops)?;
+        .map_err(super::linear_error)?;
     Ok(crate::test_linear_input::Inventory { projects, items })
 }

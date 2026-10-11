@@ -392,7 +392,7 @@ fn spawn_session_command_with_env(
     launch_lock: Option<File>,
 ) -> Result<()> {
     let _planning_sync =
-        crate::ops::linear_observe::PlanningSync::start_for_directory(&command.cwd)?;
+        crate::ops::planning_sync::PlanningSync::start_for_directory(&command.cwd)?;
     let outcome = session_command_status_with_env(
         command,
         environment,

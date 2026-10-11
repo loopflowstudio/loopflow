@@ -860,7 +860,7 @@ fn roadmap_task(detail: TaskDetailSnapshot) -> RoadmapTask {
 /// A Task's section, from the same planning primitives the row already carries.
 fn task_section(task: &TaskDetailSnapshot) -> RoadmapSection {
     let Some(runtime) = &task.runtime else {
-        return if crate::pm::terminal_reason(task.task.state.as_deref(), task.task.completed)
+        return if crate::linear::terminal_reason(task.task.state.as_deref(), task.task.completed)
             .is_some()
         {
             RoadmapSection::Later
@@ -871,7 +871,8 @@ fn task_section(task: &TaskDetailSnapshot) -> RoadmapSection {
     // Linear completing a Task that never left `start` withdraws it from what
     // is offered; an active one keeps its place and shows the conflict.
     let withdrawn = matches!(runtime.status, TaskState::NotReady | TaskState::Ready)
-        && crate::pm::terminal_reason(task.task.state.as_deref(), task.task.completed).is_some();
+        && crate::linear::terminal_reason(task.task.state.as_deref(), task.task.completed)
+            .is_some();
     if runtime.status.is_terminal() || withdrawn {
         return RoadmapSection::Later;
     }
@@ -1017,7 +1018,7 @@ async fn validate_linear_ownership(
             .push((wave.id(), wave.slug()));
     }
     for (repo, waves) in ownership {
-        let expected_team = crate::ops::pm::selected_linear_team(&repo)
+        let expected_team = crate::ops::linear::selected_linear_team(&repo)
             .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()));
         store
             .sqlite
@@ -1277,8 +1278,11 @@ async fn snapshot_task_detail(
         crate::ops::task_run::task_run_control(&crate::ops::task_run::TaskRunEvidence {
             status: Some(&work_status),
             // Shared completion withdraws an unstarted Task, never advances its Workflow.
-            plan_terminal_reason: crate::pm::terminal_reason(task.state.as_deref(), task.completed)
-                .filter(|_| matches!(runtime.status, TaskState::NotReady | TaskState::Ready)),
+            plan_terminal_reason: crate::linear::terminal_reason(
+                task.state.as_deref(),
+                task.completed,
+            )
+            .filter(|_| matches!(runtime.status, TaskState::NotReady | TaskState::Ready)),
             worktree_blocker: worktree_blocker
                 .as_ref()
                 .map(|blocker| blocker.reason.as_str()),
@@ -2370,7 +2374,7 @@ mod tests {
             assert_eq!(detail.task.state, item.state);
             assert_eq!(detail.task.completed_at, item.completed_at);
             assert_eq!(detail.task.completed, item.completed);
-            let terminal = crate::pm::terminal_reason(item.state.as_deref(), item.completed);
+            let terminal = crate::linear::terminal_reason(item.state.as_deref(), item.completed);
             assert_eq!(
                 matches!(super::task_section(detail), super::RoadmapSection::Later),
                 terminal.is_some()
@@ -2511,7 +2515,7 @@ mod tests {
             directory.path().display().to_string(),
         );
         store.create_wave(&wave).await.unwrap();
-        let mut item = crate::pm::linear::LinearIssue {
+        let mut item = crate::linear::LinearIssue {
             branch_name: None,
             revision: None,
             id: "removed".into(),
@@ -2710,7 +2714,7 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let selected = "999bdbdd-c045-41a6-8ffc-a97c4a40b0b3";
         let predecessor = "218967b6-a760-4b7c-9a46-11d9d61a42c2";
-        let project = |id: &str, name: &str| crate::pm::linear::LinearProject {
+        let project = |id: &str, name: &str| crate::linear::LinearProject {
             description: None,
             id: id.into(),
             name: name.into(),
@@ -2724,7 +2728,7 @@ mod tests {
             initiative_ids: vec!["initiative".into()],
             team_ids: vec!["team".into()],
         };
-        let item = crate::pm::linear::LinearIssue {
+        let item = crate::linear::LinearIssue {
             id: "issue".into(),
             identifier: "FIX-1".into(),
             name: "Unreviewed backlog".into(),

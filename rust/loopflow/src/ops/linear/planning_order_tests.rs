@@ -8,11 +8,11 @@ use serde_json::json;
 
 use super::{mark_issue_updated, seed_provider_task, with_planning_task, PlanningState};
 use crate::durable::WorkRef;
-use crate::ops::pm::refresh_wave;
-use crate::ops::pm::test_fixture::Fixture;
-use crate::pm::PmItemUpdate;
+use crate::ops::linear::refresh_wave;
+use crate::ops::linear::test_fixture::Fixture;
 use crate::store::Store;
 use crate::work::task::Task;
+use crate::work::task::TaskUpdate;
 
 fn with_order(
     test: impl FnOnce(
@@ -55,7 +55,7 @@ fn reorder(store: &Store, task: &Task, rank: u32) {
         .edit_task(
             &task.id,
             current.revision,
-            &PmItemUpdate {
+            &TaskUpdate {
                 rank: Some(rank),
                 ..Default::default()
             },
@@ -115,7 +115,7 @@ fn planning_order_active_connection_delivers_after_outage() {
     with_order(|runtime, fixture, repo, tasks, state| {
         runtime.block_on(async {
             state.lock().await.field_outage = true;
-            let sync = crate::ops::linear_observe::PlanningSync::start(
+            let sync = crate::ops::planning_sync::PlanningSync::start(
                 fixture.store.clone(),
                 repo.to_string_lossy().into_owned(),
             )
@@ -414,18 +414,19 @@ fn planning_order_equal_keys_preserve_groups_through_intermediate_moves() {
 fn planning_order_stale_list_cannot_undo_confirmed_reorder() {
     with_order(|runtime, fixture, repo, tasks, state| {
         runtime.block_on(async {
-            let ctx = crate::ops::pm::resolve_context(repo, "product")
+            let (ctx, initiative) = crate::ops::linear::resolve_context(repo, "product")
                 .await
                 .unwrap();
             let stale = crate::test_linear_input::InventoryFixture {
                 wave_id: tasks[0].wave_id.clone(),
                 provider: "linear".into(),
-                initiative: ctx.initiative.clone(),
+                initiative: initiative.clone(),
                 synced_at: time::OffsetDateTime::now_utc().unix_timestamp(),
-                snapshot: crate::ops::pm::test_fixture::capture_inventory(
+                snapshot: crate::ops::linear::test_fixture::capture_inventory(
                     repo,
                     "product",
                     &ctx,
+                    &initiative,
                     &fixture.store,
                 )
                 .await

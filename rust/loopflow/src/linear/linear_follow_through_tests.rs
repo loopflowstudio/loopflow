@@ -4,7 +4,7 @@ use axum::{extract::State, routing::post, Json, Router};
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
 
-use crate::pm::linear::LinearClient;
+use crate::linear::LinearClient;
 
 async fn respond(
     State(related): State<Arc<Mutex<bool>>>,

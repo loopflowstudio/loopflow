@@ -1273,8 +1273,8 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                 repo,
                 issue,
                 wave.as_deref(),
-                loopflow::pm::PmItemUpdate {
-                    name: title.clone(),
+                loopflow::work::task::TaskUpdate {
+                    title: title.clone(),
                     description: notes.clone(),
                     rank: *rank,
                     assignee: if *unassign {
@@ -1290,7 +1290,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
         }
         TaskCommand::Refile { issue, wave } => {
             let result = loopflow::ops::task::task_refile(repo, issue, wave)?;
-            println!("{}: filed task {}", result.wave, result.id);
+            println!("{wave}: filed task {}", result.id);
             Ok(())
         }
         TaskCommand::Comment {

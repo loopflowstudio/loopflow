@@ -69,7 +69,7 @@ pub fn task_follow_up(repo: &Path, issue: &str, options: &FollowUpOptions) -> Op
                 .ok_or_else(|| task_error("destination Wave is not initialized"))?;
             let project = crate::ops::project::current_project(&store, &wave)?;
             let (issue_id, title, existing) = if let Some(selector) = &options.existing {
-                let saved = crate::ops::pm::resolve_saved_task(repo, None, selector)
+                let saved = crate::ops::task::resolve_saved_task(repo, None, selector)
                     .await?
                     .1;
                 if saved.id == task.id {
@@ -145,7 +145,7 @@ async fn link_intent(
         .map_err(task_error)?;
     // Filing reservations already retain their child locally. Acquisition remains
     // necessary only for historical links to an existing, not-yet-retained issue.
-    let saved = crate::ops::pm::resolve_saved_task(repo, None, &intent.issue_id)
+    let saved = crate::ops::task::resolve_saved_task(repo, None, &intent.issue_id)
         .await?
         .1;
     let link = FollowThroughLink {

@@ -8,7 +8,7 @@ use std::path::Path;
 
 use base64::prelude::*;
 use loopflow::id::WaveId;
-use loopflow::pm::{LinearIssueId, LinearProjectId};
+use loopflow::linear::{LinearIssueId, LinearProjectId};
 use loopflow::store::{StorageConfig, Store};
 use loopflow::work::project::{Project, ProjectId};
 use loopflow::work::task::{LinearWritebackState, Task, TaskId, TaskPr, TaskPrId};

@@ -7,9 +7,9 @@ use serde_json::{json, Value};
 use super::{task_follow_up, FollowUpOptions};
 use crate::durable::TaskState;
 use crate::id::WaveId;
-use crate::ops::pm::{PmTestContext, PM_TEST_CONTEXT};
+use crate::linear::{LinearIssueId, LinearProjectId};
+use crate::ops::linear::{LinearTestContext, LINEAR_TEST_CONTEXT};
 use crate::ops::task::task_completion_gate;
-use crate::pm::{LinearIssueId, LinearProjectId};
 use crate::store::{open_ephemeral_store, CredentialType, ProviderToken, StorageConfig};
 use crate::work::project::{Project, ProjectId};
 use crate::work::task::{
@@ -115,8 +115,8 @@ fn local_follow_up_retries_keep_identity_and_allow_independent_completion() {
         .unwrap();
     pr.merge_commit = Some(repo.head_sha());
     runtime.block_on(store.update_task_pr(&pr)).unwrap();
-    PM_TEST_CONTEXT.sync_scope(
-        PmTestContext {
+    LINEAR_TEST_CONTEXT.sync_scope(
+        LinearTestContext {
             path: directory.path().join("loopflow.db"),
             store: store.clone(),
             graphql_url: "http://127.0.0.1:1".into(),
@@ -229,8 +229,8 @@ fn follow_up_export_recovers_lost_issue_and_relation_responses_after_completion(
             tokio::spawn(async move { axum::serve(listener, app).await.unwrap() }),
         )
     });
-    PM_TEST_CONTEXT.sync_scope(
-        PmTestContext {
+    LINEAR_TEST_CONTEXT.sync_scope(
+        LinearTestContext {
             path: directory.path().join("loopflow.db"),
             store: store.clone(),
             graphql_url: url,
@@ -713,8 +713,8 @@ fn historical_filing_converts_to_one_local_child_and_preserves_export_uncertaint
                 tokio::spawn(async move { axum::serve(listener, app).await.unwrap() }),
             )
         });
-        PM_TEST_CONTEXT.sync_scope(
-            PmTestContext {
+        LINEAR_TEST_CONTEXT.sync_scope(
+            LinearTestContext {
                 path: directory.path().join("loopflow.db"),
                 store: store.clone(),
                 graphql_url: url,

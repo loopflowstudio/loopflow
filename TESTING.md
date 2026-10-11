@@ -32,7 +32,7 @@ builds the current CLI and takes its path from Cargo’s artifact output:
 
 ```sh
 cargo test -p loopflow --lib local_planning
-cargo test -p loopflow --lib pm::linear::acceptance
+cargo test -p loopflow --lib linear::acceptance
 ```
 
 These fixtures still invoke the built CLI with disposable Homes. Shared execution
@@ -664,7 +664,7 @@ exercise acquisition in a different order from Task creation. Process-sensitive
 cleanup fixtures must observe child readiness before inspecting live executables.
 
 ```bash
-uv run python scripts/materialize_rust_tests.py -- cargo nextest run -p loopflow --lib -E 'test(ops::pm::task_planning_tests::)' --no-fail-fast
+uv run python scripts/materialize_rust_tests.py -- cargo nextest run -p loopflow --lib -E 'test(ops::linear::task_planning_tests::)' --no-fail-fast
 ```
 
 Every CLI fixture must select an explicit disposable `LF_HOME` and pin
@@ -819,7 +819,7 @@ provider/GitHub tests. Known live-check limits belong in Infrastructure memory.
 Landing changes also affect release finalization and Linear completion recovery:
 
 ```bash
-uv run python scripts/materialize_rust_tests.py -- cargo nextest run -p loopflow -E 'binary(release_tests) | test(ops::pm::task_planning_tests::task_completion) | test(ops::pr_landing::)' --no-fail-fast
+uv run python scripts/materialize_rust_tests.py -- cargo nextest run -p loopflow -E 'binary(release_tests) | test(ops::linear::task_planning_tests::task_completion) | test(ops::pr_landing::)' --no-fail-fast
 ```
 
 Detached repair proofs enter through the compiled CLI so admission records its
@@ -906,7 +906,7 @@ continuity in an explicit experimental Machine.
 
 The separate planning CLI proof (`cargo test -p loopflow --lib planning_lookup_tests`) runs planning-only `task status` by identifier and UUID against
 normalized local planning, proving that inspection creates no execution or worktree.
-That CLI case exercises cached planning; `ops::pm::planning_lookup_tests` covers
+That CLI case exercises cached planning; `ops::linear::planning_lookup_tests` covers
 acquisition with simulated Linear responses, including missing Projects, partial
 responses, absence, and provider failure. Neither is configured live-provider proof.
 
@@ -1131,7 +1131,7 @@ Run the same Linux suite when changing Linear mutation inputs or acknowledgement
 the reconnect peer must accept partial Initiative updates and return `success`.
 
 ```bash
-cargo nextest run -p loopflow --lib -E 'test(pm::linear::) | test(ops::pm::) | test(ops::linear_observe::)' --no-fail-fast
+cargo nextest run -p loopflow --lib -E 'test(linear::) | test(ops::linear::) | test(ops::linear_observe::)' --no-fail-fast
 cargo nextest run -p loopflow --test planning_reconnect_tests --no-fail-fast
 ```
 

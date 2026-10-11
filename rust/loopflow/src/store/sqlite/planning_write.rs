@@ -474,10 +474,10 @@ mod tests {
     use crate::id::WaveId;
     use crate::planning_exchange::PlanningKind;
     use crate::planning_git::PlanningDestination;
-    use crate::pm::PmItemUpdate;
     use crate::store::sqlite::SqliteStore;
     use crate::work::task::comment::{TaskComment, TaskCommentAuthor};
     use crate::work::task::NewTask;
+    use crate::work::task::TaskUpdate;
     use crate::work::wave::Wave;
 
     fn plan(store: &SqliteStore) -> TaskId {
@@ -635,12 +635,52 @@ mod tests {
             .unwrap();
             conn.execute("INSERT INTO task_workflows(task_id,graph,node,updated_at) VALUES(?1,?2,'review',1)",rusqlite::params![task.as_str(),r#"{"name":"review","nodes":[{"name":"review","skill":"review","description":null}],"edges":[]}"#]).unwrap();
         }
+        let local_wave = b.task(&task).unwrap().unwrap().wave_id;
+        {
+            let conn = b.conn.lock().unwrap();
+            conn.execute_batch("INSERT INTO processes(id,trace_id,command,cwd,started_at) VALUES('11111111-1111-4111-8111-111111111111','trace','lf run code','/retained/task',2);").unwrap();
+            conn.execute_batch(
+                &include_str!("../../../tests/fixtures/migrations/planning_local_sessions.sql")
+                    .replace("task-proof", task.as_str())
+                    .replace("wave-proof", local_wave.as_str()),
+            )
+            .unwrap();
+        }
+        let execution = || {
+            let conn = b.conn.lock().unwrap();
+            [
+                "processes",
+                "agent_sessions",
+                "session_events",
+                "session_activity",
+                "task_workflows",
+                "task_state_deliveries",
+            ]
+            .into_iter()
+            .map(|table| {
+                let mut query = conn
+                    .prepare(&format!("SELECT * FROM {table} ORDER BY rowid"))
+                    .unwrap();
+                let columns = query.column_count();
+                query
+                    .query_map([], |row| {
+                        (0..columns)
+                            .map(|i| row.get::<_, rusqlite::types::Value>(i))
+                            .collect::<rusqlite::Result<Vec<_>>>()
+                    })
+                    .unwrap()
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .unwrap()
+            })
+            .collect::<Vec<_>>()
+        };
+        let retained_execution = execution();
         let original = a.task(&task).unwrap().unwrap();
         a.edit_task(
             &task,
             original.revision,
-            &PmItemUpdate {
-                name: Some("Changed".into()),
+            &TaskUpdate {
+                title: Some("Changed".into()),
                 ..Default::default()
             },
         )
@@ -674,6 +714,7 @@ mod tests {
         b.import_peer_planning("/repo", &route.id(), "next", &snapshot)
             .unwrap();
         assert_eq!(revision, b.revisions().unwrap());
+        assert_eq!(execution(), retained_execution);
         let received = b.task(&task).unwrap().unwrap();
         assert_eq!(received.title, "Changed");
         assert_eq!(received.worktree.unwrap().to_str(), Some("/retained"));
@@ -717,7 +758,7 @@ mod tests {
             conn.query_row("SELECT count(*) FROM task_state_deliveries", [], |r| r
                 .get::<_, i64>(0))
                 .unwrap(),
-            0
+            1
         );
         drop(conn);
         let before = a.export_peer_planning("/repo", &route.id()).unwrap();
@@ -728,8 +769,8 @@ mod tests {
             .edit_task(
                 &task,
                 current.revision,
-                &PmItemUpdate {
-                    name: Some("Must roll back".into()),
+                &TaskUpdate {
+                    title: Some("Must roll back".into()),
                     ..Default::default()
                 }
             )

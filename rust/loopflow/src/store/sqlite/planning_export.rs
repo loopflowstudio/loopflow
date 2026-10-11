@@ -108,7 +108,7 @@ impl SqliteStore {
                 let project = super::children::project_in(&tx, id)?;
                 let description = &project.description;
                 let input = json!({"id":uuid,"teamIds":[team],"name":project.name,"description":project.summary,
-                    "content":format!("{}\n{}", description, crate::pm::project_document::render_project_content(&project.workflow, &project.krs, &project.metric_targets)),"useDefaultTemplate":false});
+                    "content":format!("{}\n{}", description, crate::linear::project_document::render_project_content(&project.workflow, &project.krs, &project.metric_targets)),"useDefaultTemplate":false});
                 (serde_json::to_value(project)?, input)
             }
         };

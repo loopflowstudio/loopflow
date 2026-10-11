@@ -1,8 +1,8 @@
 //! Captured Linear input for preservation and delayed-observation fixtures.
 #![allow(dead_code)]
 use loopflow::id::WaveId;
-use loopflow::pm::linear::LinearIssue;
-use loopflow::pm::linear::LinearProject;
+use loopflow::linear::LinearIssue;
+use loopflow::linear::LinearProject;
 use loopflow::store::sqlite::SqliteStore;
 use loopflow::store::{PlanningLocks, Store, StoreResult};
 use serde::{Deserialize, Serialize};
@@ -26,8 +26,8 @@ pub struct InventoryFixture {
 /// A planning observation; neither Project ownership nor execution is required.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct IssueFixture {
-    pub item: loopflow::pm::linear::LinearIssue,
-    pub project: Option<loopflow::pm::linear::LinearProject>,
+    pub item: loopflow::linear::LinearIssue,
+    pub project: Option<loopflow::linear::LinearProject>,
     pub observed_at: i64,
 }
 
@@ -54,7 +54,7 @@ impl SeedLinear for Store {
         locks: Option<Arc<PlanningLocks>>,
     ) -> StoreResult<()> {
         assert_eq!(input.provider, "linear");
-        loopflow::pm::linear::acceptance::accept_linear_inventory(
+        loopflow::linear::acceptance::accept_linear_inventory(
             self,
             input.wave_id,
             input.initiative,
@@ -74,7 +74,7 @@ impl SeedLinear for Store {
         locks: Option<Arc<PlanningLocks>>,
     ) -> StoreResult<()> {
         assert_eq!(provider, "linear");
-        loopflow::pm::linear::acceptance::accept_linear_issue(
+        loopflow::linear::acceptance::accept_linear_issue(
             self,
             repo,
             input.item,
@@ -99,7 +99,7 @@ pub trait SeedLinearSqlite {
 impl SeedLinearSqlite for SqliteStore {
     fn seed_inventory(&self, input: &InventoryFixture) -> StoreResult<()> {
         assert_eq!(input.provider, "linear");
-        loopflow::pm::linear::acceptance::accept_linear_inventory_in(
+        loopflow::linear::acceptance::accept_linear_inventory_in(
             self,
             &input.wave_id,
             &input.initiative,
@@ -116,7 +116,7 @@ impl SeedLinearSqlite for SqliteStore {
         confirmed: Option<(&WaveId, &str)>,
     ) -> StoreResult<()> {
         assert_eq!(provider, "linear");
-        loopflow::pm::linear::acceptance::accept_linear_issue_in(
+        loopflow::linear::acceptance::accept_linear_issue_in(
             self,
             repo,
             &input.item,

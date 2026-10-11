@@ -839,7 +839,7 @@ pub fn connect_wave(
     let progress = &CliProgress;
     let ambient_wave = |explicit| planning_wave(repo_root, explicit);
     let targets = if all {
-        crate::ops::pm::list_local_waves(repo_root)?
+        crate::ops::linear::list_local_waves(repo_root)?
     } else {
         let explicit = wave;
         // Wave connection is a creation flow: its positional name may select a
@@ -856,9 +856,9 @@ pub fn connect_wave(
         vec![name]
     };
     for wave in targets {
-        let result = crate::ops::pm::pm_init(
+        let result = crate::ops::linear::connect(
             repo_root,
-            &crate::ops::pm::PmInitOptions {
+            &crate::ops::linear::LinearInitOptions {
                 wave: Some(wave),
                 team_key: team_key.map(str::to_string),
                 team_name: team_name.map(str::to_string),
@@ -897,9 +897,9 @@ pub fn sync_planning(
     } else {
         planning_wave(repo, wave)?
     };
-    let result = crate::ops::pm::pm_sync(
+    let result = crate::ops::linear::refresh(
         repo,
-        &crate::ops::pm::PmSyncOptions { wave, plan },
+        &crate::ops::linear::LinearSyncOptions { wave, plan },
         &CliProgress,
     )?;
     if json {
@@ -919,7 +919,7 @@ pub fn refresh_status(wave: Option<&str>) -> Result<String> {
     let repo = crate::repo::working_directory()?;
     let wave =
         planning_wave(&repo, wave)?.ok_or_else(|| anyhow::anyhow!("Select a Wave to refresh"))?;
-    tokio::runtime::Runtime::new()?.block_on(crate::ops::pm::refresh_wave(&repo, &wave))?;
+    tokio::runtime::Runtime::new()?.block_on(crate::ops::linear::refresh_wave(&repo, &wave))?;
     Ok(wave)
 }
 
@@ -984,9 +984,9 @@ pub fn run_repo(cmd: &RepoCommand) -> Result<()> {
         } => crate::lf::commands::ci::run(since, wave.as_deref(), repo.as_deref(), *json),
         RepoCommand::Reteam { apply } => {
             let repo = crate::repo::working_directory()?;
-            let result = crate::ops::pm::pm_reteam(
+            let result = crate::ops::linear::reteam(
                 &repo,
-                &crate::ops::pm::PmReteamOptions { apply: *apply },
+                &crate::ops::linear::LinearReteamOptions { apply: *apply },
                 &CliProgress,
             )?;
             print_pm_reteam_result(&result);
@@ -995,7 +995,7 @@ pub fn run_repo(cmd: &RepoCommand) -> Result<()> {
     }
 }
 
-fn print_pm_reteam_result(result: &crate::ops::pm::PmReteamResult) {
+fn print_pm_reteam_result(result: &crate::ops::linear::LinearReteamResult) {
     let verb = if result.applied { "moved" } else { "will move" };
     println!(
         "repository {} (waves: {}) → team {} ({}-*){}",
@@ -1048,7 +1048,7 @@ fn print_pm_reteam_result(result: &crate::ops::pm::PmReteamResult) {
     }
 }
 
-fn print_pm_sync_result(result: &crate::ops::pm::PmSyncResult) {
+fn print_pm_sync_result(result: &crate::ops::linear::LinearSyncResult) {
     if result.actions.is_empty() && result.diagnostics.is_empty() {
         println!("PM state matches local waves and projects");
         return;

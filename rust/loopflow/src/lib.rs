@@ -28,13 +28,13 @@ pub mod task_work;
 pub(crate) mod terminal_title;
 pub mod workflow;
 // Build-time parsing lives here so its golden tests compile against the exact parser.
+pub mod linear;
 #[allow(dead_code)]
 pub(crate) mod migration_drafts;
 pub mod ops;
 pub mod performance;
 pub mod planning_exchange;
 pub mod planning_git;
-pub mod pm;
 pub mod pr_landing;
 pub mod profile;
 pub mod program_status;

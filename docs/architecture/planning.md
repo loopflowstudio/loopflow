@@ -76,6 +76,12 @@ live state; its stored values and historical judgment events remain readable evi
 The typed field writer—not either complete domain struct—defines portable content;
 flattening records does not make checkout or execution fields synchronizable.
 
+`linear/` owns provider responses and acceptance; there is no generic PM facade.
+`ops/planning_sync.rs` owns foreground exchange, store access and Wave locks for
+both transports. Ordinary Task lookup and comments belong to `ops/task.rs`.
+A Git lookup miss stays a Git lookup miss; it cannot fall through to Linear.
+Unmapped local Projects remain local during Linear refresh until their export links them.
+
 `work::task::comment::TaskComment` owns shared discussion. `TaskComments` joins
 the thread with local delivery status. Linear comment IDs, author IDs and revisions
 stay in adapter-internal observations and retained receipts; one adapter conversion

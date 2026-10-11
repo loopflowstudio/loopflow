@@ -17,7 +17,7 @@ use time::OffsetDateTime;
 use crate::child::AbandonIntent;
 use crate::durable::{Author, TaskState};
 use crate::id::WaveId;
-use crate::pm::{LinearIssueId, LinearProjectId};
+use crate::linear::{LinearIssueId, LinearProjectId};
 use crate::store::rows::now_unix;
 use crate::store::{PlanningState, StoreError, StoreResult};
 use crate::work::project::{Project, ProjectEvent, ProjectEventKind, ProjectId};
@@ -674,7 +674,7 @@ impl SqliteStore {
     pub(crate) fn apply_linear_observation(
         &self,
         task_id: &TaskId,
-        observation: &crate::pm::linear::LinearIssueObservation,
+        observation: &crate::linear::LinearIssueObservation,
         observed_at: OffsetDateTime,
     ) -> StoreResult<LinearObservationOutcome> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
@@ -1096,7 +1096,7 @@ pub(super) fn require_task_planning(conn: &Connection, task: &Task) -> StoreResu
         |row| Ok((row.get(0)?, row.get(1)?)),
     )?;
     if super::durable::task_state_in(conn, &task.id)? != crate::durable::TaskState::Active
-        && crate::pm::terminal_reason(state.as_deref(), completed).is_some()
+        && crate::linear::terminal_reason(state.as_deref(), completed).is_some()
     {
         return Err(StoreError::InvalidAuthority(
             "terminal planning state cannot start work; its execution history is preserved".into(),
@@ -2015,9 +2015,9 @@ mod local_planning_tests {
 
     use crate::durable::{ProjectId, TaskId};
     use crate::id::WaveId;
-    use crate::pm::PmItemUpdate;
     use crate::store::sqlite::SqliteStore;
     use crate::work::task::NewTask;
+    use crate::work::task::TaskUpdate;
 
     fn local_project(store: &SqliteStore) -> ProjectId {
         let repo = store.home_dir().unwrap();
@@ -2182,8 +2182,8 @@ mod local_planning_tests {
             .edit_task(
                 &task.id,
                 task.revision,
-                &PmItemUpdate {
-                    name: Some("Fix quoted input".into()),
+                &TaskUpdate {
+                    title: Some("Fix quoted input".into()),
                     description: None,
                     ..Default::default()
                 },
@@ -2195,8 +2195,8 @@ mod local_planning_tests {
             .edit_task(
                 &task.id,
                 task.revision,
-                &PmItemUpdate {
-                    name: Some("Stale".into()),
+                &TaskUpdate {
+                    title: Some("Stale".into()),
                     description: None,
                     ..Default::default()
                 }
@@ -2266,8 +2266,8 @@ mod local_planning_tests {
             .edit_task(
                 &local.id,
                 mapped.revision,
-                &PmItemUpdate {
-                    name: Some("A mapping does not transfer authority".into()),
+                &TaskUpdate {
+                    title: Some("A mapping does not transfer authority".into()),
                     description: None,
                     ..Default::default()
                 },

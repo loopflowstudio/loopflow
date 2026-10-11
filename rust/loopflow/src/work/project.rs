@@ -9,7 +9,7 @@ use time::OffsetDateTime;
 use crate::child::AbandonIntent;
 pub use crate::durable::ProjectId;
 use crate::id::WaveId;
-use crate::pm::{LinearBindingError, LinearProjectId};
+use crate::linear::{LinearBindingError, LinearProjectId};
 use crate::work::task::{TaskEventKind, TaskId};
 
 /// Shared Project status, independent of a provider’s display label.

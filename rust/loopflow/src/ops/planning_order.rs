@@ -5,7 +5,7 @@ use std::path::Path;
 use serde_json::json;
 
 use crate::durable::ProjectId;
-use crate::pm::linear::{LinearClient, OrderedIssue};
+use crate::linear::{LinearClient, OrderedIssue};
 use crate::store::sqlite::planning_order::{include_members, OrderEffect};
 use crate::store::Store;
 
@@ -32,7 +32,7 @@ pub(super) async fn sync_order(
     loop {
         let issues = client.ordered_items(external).await.map_err(message)?;
         let items = issues.iter().map(|i| i.item.clone()).collect::<Vec<_>>();
-        if !crate::pm::linear::acceptance::accept_linear_project_order_in(
+        if !crate::linear::acceptance::accept_linear_project_order_in(
             &store.sqlite,
             &repo.to_string_lossy(),
             external,

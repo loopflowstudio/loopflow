@@ -5,7 +5,7 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 use loopflow::id::WaveId;
-use loopflow::ops::pm::{canonical_wave_title_path, list_local_waves};
+use loopflow::ops::linear::{canonical_wave_title_path, list_local_waves};
 use loopflow::store::sqlite::SqliteStore;
 use loopflow::work::wave::{Wave, WaveLocator};
 

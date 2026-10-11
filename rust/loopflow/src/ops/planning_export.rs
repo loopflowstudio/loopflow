@@ -5,7 +5,7 @@ use std::time::Duration;
 use serde_json::json;
 
 use crate::durable::WorkRef;
-use crate::pm::linear::LinearClient;
+use crate::linear::LinearClient;
 use crate::store::sqlite::planning_changes::PlanningChanges;
 use crate::store::sqlite::planning_export::PlanningExport;
 use crate::store::Store;
@@ -69,14 +69,14 @@ pub(crate) async fn sync_export(store: &Store, repo: &Path, work: &WorkRef) -> O
             .await
             .map_err(message)?
             .ok_or_else(|| message("Wave is missing"))?;
-        let initiative = super::pm::read_initiative(repo, wave.slug())
+        let initiative = super::linear::read_initiative(repo, wave.slug())
             .ok_or_else(|| message("Wave has no Linear Initiative; export remains pending"))?;
-        let team = super::pm::repository_team_id(repo)?;
+        let team = super::linear::repository_team_id(repo)?;
         let export = store
             .sqlite
             .prepare_planning_export(owner, &team, &initiative)
             .map_err(message)?;
-        let client = super::pm::linear_client(repo).await?;
+        let client = super::linear::linear_client(repo).await?;
         if observe(store, repo, owner, &client, &export, &wave_id).await? {
             return Ok(());
         }
@@ -189,7 +189,7 @@ async fn observe(
                     "Created Project has conflicting Initiative membership; receipt retained",
                 ));
             }
-            crate::pm::linear::acceptance::accept_linear_project_in(
+            crate::linear::acceptance::accept_linear_project_in(
                 &store.sqlite,
                 wave,
                 &export.initiative,
@@ -242,7 +242,7 @@ async fn sync_follow_through_relations(store: &Store, repo: &Path) -> OpsResult<
             continue;
         };
         let attempt = async {
-            super::pm::issue_client()
+            super::linear::issue_client()
                 .await?
                 .ensure_follow_up_relation(
                     &relation.source_issue_id,

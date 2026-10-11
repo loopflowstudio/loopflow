@@ -74,7 +74,7 @@ pub(crate) struct WaveLocatorUpdate {
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
     #[error(transparent)]
-    Planning(#[from] crate::pm::LinearBindingError),
+    Planning(#[from] crate::linear::LinearBindingError),
     #[error(transparent)]
     TaskData(#[from] crate::work::task::TaskDataError),
     #[error("sqlite error: {0}")]
@@ -1207,7 +1207,7 @@ mod tests {
     use crate::child::ChildRef;
     use crate::durable::{Author, WorkRef};
     use crate::id::WaveId;
-    use crate::pm::{LinearIssueId, LinearProjectId};
+    use crate::linear::{LinearIssueId, LinearProjectId};
     use crate::profile::EmailAddress;
     use crate::test_linear_input::{InventoryFixture, SeedLinear};
     use crate::work::project::{Project, ProjectId};
@@ -2247,7 +2247,7 @@ mod tests {
         let other = Wave::new(crate::id::WaveId::new(), "other".into(), "/repo".into());
         store.create_wave(&other).await.unwrap();
         let mut foreign = make_project(&other);
-        foreign.linear_id = Some(crate::pm::LinearProjectId::new("foreign-project").unwrap());
+        foreign.linear_id = Some(crate::linear::LinearProjectId::new("foreign-project").unwrap());
         store.create_project(&foreign).await.unwrap();
         let mut response = snapshot.clone();
         response.synced_at = 2;
@@ -2482,7 +2482,7 @@ mod tests {
             )
             .await
             .unwrap();
-        assert!(crate::pm::linear::acceptance::accept_linear_project_in(
+        assert!(crate::linear::acceptance::accept_linear_project_in(
             &store.sqlite,
             wave.id(),
             &snapshot.initiative,
@@ -2529,7 +2529,7 @@ mod tests {
             holds: false,
         });
         confirmed.revision = Some("2026-10-05T12:00:01Z".into());
-        crate::pm::linear::acceptance::accept_linear_project_in(
+        crate::linear::acceptance::accept_linear_project_in(
             &store.sqlite,
             wave.id(),
             &snapshot.initiative,
@@ -2560,7 +2560,7 @@ mod tests {
         assert_eq!(durable.krs, confirmed.krs);
         let other = Wave::new(WaveId::new(), "other".into(), wave.repo().into());
         store.create_wave(&other).await.unwrap();
-        assert!(crate::pm::linear::acceptance::accept_linear_project_in(
+        assert!(crate::linear::acceptance::accept_linear_project_in(
             &store.sqlite,
             other.id(),
             &snapshot.initiative,
@@ -2598,7 +2598,8 @@ mod tests {
         store.create_project(&predecessor).await.unwrap();
         select_project(&store, &predecessor);
         let mut successor = make_project(&wave);
-        successor.linear_id = Some(crate::pm::LinearProjectId::new("successor-project").unwrap());
+        successor.linear_id =
+            Some(crate::linear::LinearProjectId::new("successor-project").unwrap());
         let task = make_task(&wave, &predecessor);
         let pr = make_task_pr(&task);
         store.seed_task(&task, &pr).await.unwrap();
@@ -3246,7 +3247,7 @@ mod tests {
         let mut observed = snapshot.snapshot.projects.remove(0);
         observed.workflow = "incident".into();
         observed.status = crate::work::project::ProjectStatus::Completed;
-        crate::pm::linear::acceptance::accept_linear_project_in(
+        crate::linear::acceptance::accept_linear_project_in(
             &store.sqlite,
             wave.id(),
             &snapshot.initiative,

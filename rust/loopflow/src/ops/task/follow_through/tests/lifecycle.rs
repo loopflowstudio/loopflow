@@ -13,7 +13,7 @@ use serde_json::{json, Value};
 
 use super::{fixture, respond, Linear};
 use crate::lf::commands::work_watch::{WorkContent, WorkFrame};
-use crate::ops::pm::{PmRefresh, PmTestContext, PM_TEST_CONTEXT};
+use crate::ops::linear::{LinearRefresh, LinearTestContext, LINEAR_TEST_CONTEXT};
 use crate::ops::task::follow_through::{task_follow_up, FollowUpOptions};
 
 struct Running {
@@ -276,10 +276,10 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
             tokio::spawn(async move { axum::serve(listener, app).await.unwrap() }),
         )
     });
-    PM_TEST_CONTEXT.sync_scope(PmTestContext {
+    LINEAR_TEST_CONTEXT.sync_scope(LinearTestContext {
         path: home.path().join("loopflow.db"), store: store.clone(), graphql_url: url,
     }, || {
-        let planning = runtime.block_on(crate::ops::pm::test_fixture::refresh_task_input(repo.path(), "FIX-1", PmRefresh::Force)).unwrap();
+        let planning = runtime.block_on(crate::ops::linear::test_fixture::refresh_task_input(repo.path(), "FIX-1", LinearRefresh::Force)).unwrap();
         store.sqlite.seed_inventory(&crate::test_linear_input::InventoryFixture {
             wave_id: wave.id().clone(), provider: "linear".into(), initiative: "initiative-1".into(),
             synced_at: time::OffsetDateTime::now_utc().unix_timestamp(),

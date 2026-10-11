@@ -5,8 +5,8 @@ use crate::planning_exchange::PlanningKind;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
 use crate::durable::TaskId;
-use crate::ops::pm::TaskComments;
 use crate::store::{StoreError, StoreResult};
+use crate::work::task::comment::TaskComments;
 use crate::work::task::comment::{TaskComment, TaskCommentAuthor};
 
 use super::SqliteStore;
@@ -14,7 +14,7 @@ use super::SqliteStore;
 pub(super) fn ingest_task_comment(
     conn: &Connection,
     task: &TaskId,
-    comment: &crate::pm::linear::LinearComment,
+    comment: &crate::linear::LinearComment,
 ) -> StoreResult<bool> {
     let existing: Option<(String, Option<String>)> = conn
         .query_row(
@@ -273,7 +273,7 @@ mod tests {
         let initial_state = store.task_state(&task).unwrap();
         store.append_task_comment(&task, &original).unwrap();
         let steers = store.task_steers(&task).unwrap();
-        let observed = crate::pm::linear::LinearComment {
+        let observed = crate::linear::LinearComment {
             id: original.id.clone(),
             body: "Provider body".into(),
             author_id: Some("person-2".into()),
@@ -323,11 +323,11 @@ mod tests {
             original
         );
         assert_eq!(
-            serde_json::from_str::<crate::pm::linear::LinearComment>(&receipt.1).unwrap(),
+            serde_json::from_str::<crate::linear::LinearComment>(&receipt.1).unwrap(),
             observed
         );
         assert!(!receipt.2);
-        let stale = crate::pm::linear::LinearComment {
+        let stale = crate::linear::LinearComment {
             body: original.body.clone(),
             revision: Some("2026-10-08T01:00:00Z".into()),
             ..observed.clone()
@@ -337,7 +337,7 @@ mod tests {
             store.task_comments(&task).unwrap().comments,
             thread.comments
         );
-        let amended = crate::pm::linear::LinearComment {
+        let amended = crate::linear::LinearComment {
             body: "Later provider correction".into(),
             revision: Some("2026-10-08T01:04:00Z".into()),
             ..observed

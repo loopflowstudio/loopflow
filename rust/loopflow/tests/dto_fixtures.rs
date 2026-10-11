@@ -58,8 +58,8 @@ fn active_sessions_preserve_identity_waiting_clients_and_incomplete_evidence() {
 
 #[test]
 fn task_comments_keep_authorship_and_require_every_field() {
-    use loopflow::ops::pm::TaskComments;
     use loopflow::work::task::comment::TaskCommentAuthor;
+    use loopflow::work::task::comment::TaskComments;
     let json = include_str!("../../../tests/fixtures/dto/task_comments.json");
     let thread: TaskComments = serde_json::from_str(json).unwrap();
     assert_eq!(thread.comments[0].author, TaskCommentAuthor::Integration);

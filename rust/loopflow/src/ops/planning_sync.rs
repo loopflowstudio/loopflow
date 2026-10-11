@@ -1,12 +1,17 @@
-//! Foreground custom-ref exchange. Git observes/publishes documents; the common
-//! writer alone imports planning. Fetch, import and publication retain separate
-//! evidence. Blocking workers own effect locks through cancellation and readback.
+//! Foreground planning exchange for the repository's selected transport.
+//! Acquisition and delivery run independently; the common writer alone changes Work.
+//! Blocking workers retain their locks through cancellation, commit and readback.
 
+use crate::work::wave::Wave;
+use std::fs::OpenOptions;
+use std::future::Future;
 use std::path::Path;
+use std::sync::Arc;
+use std::time::Duration;
 
 use crate::planning_exchange::PlanningSnapshot;
 use crate::planning_git::{PlanningGit, PlanningPublication, PlanningRevision};
-use crate::store::{sqlite::SqliteStore, Store};
+use crate::store::{open_store, sqlite::SqliteStore, SharedStore, StorageConfig, Store};
 
 use super::{OpsError, OpsResult};
 
@@ -269,4 +274,169 @@ fn publish_destination(
     store
         .record_peer_publication(repo, destination, saved.revision.as_str(), state, &exported)
         .map_err(message)
+}
+
+/// A foreground connection's independent planning acquisition and delivery.
+/// Dropping the connection cancels requests; durable identities survive cancellation.
+#[derive(Debug)]
+pub(crate) struct PlanningSync {
+    stop: Option<tokio::sync::oneshot::Sender<()>>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl PlanningSync {
+    /// Repository planning follows every foreground provider, not Task attribution.
+    pub(crate) fn start_for_directory(directory: &std::path::Path) -> OpsResult<Self> {
+        super::task::block_on_task(async {
+            let store = super::planning_sync::planning_store().await?;
+            let repo = crate::repository::CanonicalRepo::discover(directory)
+                .map_err(|error| OpsError::Message(error.to_string()))?
+                .to_string();
+            Self::start(std::sync::Arc::new(store), repo)
+                .map_err(|error| OpsError::Message(error.to_string()))
+        })
+    }
+
+    pub(crate) fn start(store: SharedStore, repo: String) -> std::io::Result<Self> {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?;
+        let (stop, stopped) = tokio::sync::oneshot::channel();
+        #[cfg(test)]
+        let context = super::linear::LINEAR_TEST_CONTEXT
+            .try_with(Clone::clone)
+            .ok();
+        let thread = std::thread::Builder::new()
+            .name("planning-sync".into())
+            .spawn(move || {
+                let drive = async {
+                    tokio::select! {
+                        _ = stopped => {},
+                        _ = repeat_sync("Git planning acquisition", Duration::from_secs(5), || {
+                            acquire_repository(&store, &repo)
+                        }) => {},
+                        _ = repeat_sync("Git planning publication", Duration::from_secs(1), || {
+                            publish_repository(&store, &repo)
+                        }) => {},
+                        _ = repeat_sync("comment acquisition", Duration::from_secs(15), || {
+                            super::linear_observe::refresh_repository_comments(&store, &repo)
+                        }) => {},
+                        _ = repeat_sync("planning acquisition", Duration::from_secs(15), || async {
+                            tokio::time::timeout(Duration::from_secs(5), super::linear_observe::refresh_repository_planning(&store, &repo))
+                                .await.map_err(|error| OpsError::Message(error.to_string()))?
+                        }) => {},
+                        _ = repeat_sync("comment delivery", Duration::from_secs(1), || {
+                            super::linear_observe::sync_repository_deliveries(&store, &repo, false)
+                        }) => {},
+                        _ = repeat_sync("planning export", Duration::from_secs(1), || {
+                            super::planning_export::sync_repository_exports(&store, &repo)
+                        }) => {},
+                        _ = repeat_sync("field delivery", Duration::from_secs(1), || {
+                            super::planning_delivery::sync_repository_fields(&store, &repo)
+                        }) => {},
+                        _ = repeat_sync("Task state delivery", Duration::from_secs(1), || {
+                            super::linear_observe::sync_repository_deliveries(&store, &repo, true)
+                        }) => {},
+                    }
+                };
+                #[cfg(test)]
+                if let Some(context) = context {
+                    runtime.block_on(super::linear::LINEAR_TEST_CONTEXT.scope(context, drive));
+                    return;
+                }
+                runtime.block_on(drive);
+            })?;
+        Ok(Self {
+            stop: Some(stop),
+            thread: Some(thread),
+        })
+    }
+}
+
+// Each branch has its own delay after an attempt. A slow delivery cannot
+// postpone acquisition or cause missed ticks to burst when the request returns.
+async fn repeat_sync<F: Future<Output = OpsResult<()>>>(
+    operation: &str,
+    delay: Duration,
+    mut attempt: impl FnMut() -> F,
+) {
+    loop {
+        if let Err(error) = attempt().await {
+            tracing::debug!(%error, operation, "planning synchronization pending");
+        }
+        tokio::time::sleep(delay).await;
+    }
+}
+
+impl Drop for PlanningSync {
+    fn drop(&mut self) {
+        if let Some(stop) = self.stop.take() {
+            let _ = stop.send(());
+        }
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+pub(super) fn storage_config_from_env() -> OpsResult<crate::store::StorageConfig> {
+    #[cfg(test)]
+    if let Ok(config) =
+        super::linear::LINEAR_TEST_CONTEXT.try_with(|ctx| StorageConfig::sqlite(ctx.path.clone()))
+    {
+        return Ok(config);
+    }
+    crate::store::storage_config_from_env()
+        .map_err(|err| OpsError::Message(format!("failed to resolve planning store: {err}")))
+}
+
+pub(crate) async fn planning_store() -> OpsResult<Store> {
+    open_planning_store(&storage_config_from_env()?).await
+}
+
+pub(super) async fn open_planning_store(config: &StorageConfig) -> OpsResult<Store> {
+    #[cfg(test)]
+    if let Ok(store) = super::linear::LINEAR_TEST_CONTEXT
+        .try_with(|ctx| Store::from_sqlite_for_test(ctx.store.sqlite.clone()))
+    {
+        return Ok(store);
+    }
+    let config = config.clone();
+    // Store opening uses synchronous SQLite I/O. Keep it off the deadline's executor.
+    tokio::task::spawn_blocking(move || {
+        tokio::runtime::Handle::current().block_on(open_store(&config))
+    })
+    .await
+    .map_err(|_| message("Could not open the planning store"))?
+    .map_err(|err| OpsError::Message(format!("failed to open planning store: {err}")))
+}
+
+pub(crate) async fn lock_wave_planning(wave: &Wave) -> OpsResult<Arc<crate::store::PlanningLocks>> {
+    // Keep the existing lock inode namespace shared with already-running callers.
+    let path = crate::store::lf_home_dir().join("chapter-locks");
+    #[cfg(test)]
+    let path = super::linear::LINEAR_TEST_CONTEXT
+        .try_with(|context| context.path.with_extension("chapter-locks"))
+        .unwrap_or(path);
+    std::fs::create_dir_all(&path).map_err(|error| OpsError::Message(error.to_string()))?;
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path.join(format!("{}.lock", wave.id())))
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    // OS ownership releases on crash; provider state makes the next holder a resumer.
+    for _ in 0..300 {
+        match fs2::FileExt::try_lock_exclusive(&file) {
+            Ok(()) => return Ok(Arc::new(crate::store::PlanningLocks::new(file))),
+            Err(cause) if cause.kind() == std::io::ErrorKind::WouldBlock => {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            Err(cause) => return Err(OpsError::Message(cause.to_string())),
+        }
+    }
+    Err(OpsError::Message(
+        "another planning operation is active; retry after it finishes".into(),
+    ))
 }

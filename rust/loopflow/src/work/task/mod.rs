@@ -15,9 +15,18 @@ use time::OffsetDateTime;
 use crate::child::{prefixed_uuid_id, AbandonIntent};
 pub use crate::durable::TaskId;
 use crate::id::WaveId;
-use crate::pm::{LinearBindingError, LinearIssueId};
+use crate::linear::{LinearBindingError, LinearIssueId};
 use crate::pr_landing::PrLandingId;
 use crate::work::project::ProjectId;
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct TaskUpdate {
+    pub rank: Option<u32>,
+    /// Omitted preserves assignment; explicit None clears it.
+    pub assignee: Option<Option<String>>,
+    pub title: Option<String>,
+    pub description: Option<String>,
+}
 
 /// The caller retains this identity across a retry; a separate create mints another.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -802,7 +811,7 @@ mod tests {
         GithubPr, LinearWritebackOperation, LinearWritebackState, PrPhase, PrPublication, Task,
         TaskId, TaskPr, TaskPrId,
     };
-    use crate::pm::LinearIssueId;
+    use crate::linear::LinearIssueId;
 
     fn task() -> Task {
         let now = time::OffsetDateTime::now_utc();

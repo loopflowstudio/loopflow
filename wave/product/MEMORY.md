@@ -176,8 +176,7 @@ New Tasks carry an immutable creating-Machine coordinator through planning; its
 SQLite transaction grants one permanent execution owner. Positive receipts stay
 local, outside planning merge. Lost replies retry the same owner; later delegation
 cannot replace it. Historical shared Tasks with no coordinator still refuse.
-Race/exchange and two-Machine CLI fixtures pass, including lost-reply retry and
-checkout on the admitted Machine. This is isolated SSH/provider simulation,
+Race/exchange and lost-reply CLI fixtures pass. This is isolated SSH/provider simulation,
 not live migration or native acceptance. LOO-414 keeps unavailable-coordinator
 recovery and detached launch retries. Rust gate: 2544 passed; five failures repaired
 and passed focused. Parent integration: 102/103 pass, last selector repair passes;

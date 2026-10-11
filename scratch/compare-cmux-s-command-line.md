@@ -94,7 +94,7 @@ workspaces and outer layouts by `WorkspaceIdentity`; `WorkModel` still emits
 `inspectLayouts()`, and the Flow-log view discards its content location.
 Input-inventory compression in that checkpoint changes none of these owners.
 The October 9 review is historical:
-`4cde15a0d3:scratch/pr-review.html`. Its stopped-pursuit account, mutation-wide
+`scratch/pr-review.html` (retained local artifact, not tracked in Git). Its stopped-pursuit account, mutation-wide
 inspection replies and pre-caller-inference examples are superseded; it is not
 the current demo or a reason to defer the independent tab implementation.
 

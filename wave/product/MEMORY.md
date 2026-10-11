@@ -34,7 +34,7 @@ LOO-389 comments failed: unbound Initiative.
 - Refreshable context supersedes frozen delivery; history: `37205c3fb6`.
   LOO-420 retains native skills, translates ports and inlines builtins.
   `4cde15a0d3` removes Task inventory hashes/reads, not capture receipts.
-  Installed input remains over budget; local rendering proves no adoption.
+  Installed input exceeds budget; rendering proves no adoption.
 
 [LOO-427's comparison](../../docs/reviews/terminal-command-comparison.md) records
 command dispositions. Jack folded LOO-430/431/432 into LOO-427: identity, window

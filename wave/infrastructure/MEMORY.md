@@ -265,8 +265,8 @@ Implementation exposed a startup lock cycle: Claude 2.1.296 invokes SessionStart
 before draining stdin. With exclusive hook and input fencing, only 512 of 131,133
 bytes wrote within dispatch's two seconds. The configured isolated probe establishes
 ordering, not a public lf launch or delivery pass. Production source was restored;
-the experimental diff and repeatable probe remain under scratch. Startup exclusion,
-identity activation and provider acceptance are unresolved. Four draft receipt tests
+the design retains a Git reference to the diff and a scratch probe. Startup
+exclusion, identity activation and provider acceptance are unresolved. Four draft receipt tests
 prove no cutover. `scratch/session-steer-subscriptions.md` owns remaining work and
 the unselected read-side-fence/startup-protocol revision.
 

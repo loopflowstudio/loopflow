@@ -20,9 +20,8 @@ Main's #1518/#1521 already supply checkout-based context refresh and a rendered
 10,000-byte hook ceiling; extend that owner rather than adding another budget or
 context reader. Main's #1524 preserves Codex live handoff while Claude/OpenCode
 stop and resume native history. Neither change resolves callback authority.
-Release child memory's operation-entry lesson applies here: helper tests cannot
-establish public launch/hook dispatch or configured provider acceptance. Its
-GOAL.md and complete MEMORY.md were reviewed; no deeper child scope was present.
+Helper tests cannot establish public launch/hook dispatch or configured provider
+acceptance.
 
 ## Startup fence counterexample — 2026-10-11
 
@@ -56,9 +55,10 @@ activation also needs its own proof: Claude can replace the AgentProcess inside
 before `Harness::start` becomes stale on that path.
 
 Dependent cutover stopped. Production Rust and tests were restored to `a839b8fad2`;
-all old delivery paths remain together. The complete experimental diff is preserved
-in [the compressed patch](session-steer-subscriptions.patch.gz), based on that commit.
-It is unfinished evidence, not a shippable slice: Work publication wrappers,
+all old delivery paths remain together. The withdrawn experimental diff is preserved
+at `0ffdb9c04acdca129767b0e45719e6f00390bed2:scratch/session-steer-subscriptions.patch.gz`,
+based on `a839b8fad2`. Keep it in Git history rather than maintaining a second code
+copy in scratch. It is unfinished evidence, not a shippable slice: Work publication wrappers,
 source revision keys, native bootstrap, OpenCode adapter integration, prepared-crash
 recovery, complete migration preservation and public adapter proofs are missing.
 Four draft receipt tests passed (idle pending/one emission, uncertain write/explicit
@@ -109,24 +109,19 @@ Blindly substituting the current token instead would give an old callback new
 authority, including after A → B → A. Retiring live handoff is outside this Task
 and is explicitly excluded by Infrastructure's AgentProcess direction.
 
-Implementation choice: distinguish provider-originated context emission from
-attached-client input. Save the existing AgentProcess ID and provider conversation
-identity with the adapter. Under the Session attachment fence (whose startup exclusion mode remains unresolved
-above), verify that
-the same provider still belongs to the Session, capture the current claim, and
-hold that lock through the bounded output write. Receipts retain both provider
-identity and the claim observed for that attempt. Provider replacement rejects
-the old adapter; attachment-only handoff preserves the provider's adapter.
-This must not upgrade client commands, passive viewers or unrelated callbacks.
-Bind the installed adapter to its recorded AgentProcess and native conversation
-through a private launch-owned capability, scoped only to context delivery. Reuse
-existing provider provenance where it establishes that binding; otherwise include
-the capability in the Task's single migration. Do not derive it from the current
-attachment token or accept an arbitrary caller's identities. Attachment-only
-handoff retains the provider capability; provider replacement revokes it. Reject
-child-conversation callbacks. Prove A → B → A handoff, replacement and stale
-callbacks at the public hook boundary. No general process-control authority is
-added. Explicit adapter rebinding is not a second implementation path.
+Bind context delivery to the recorded AgentProcess and native conversation through
+one private launch-owned capability. Reuse existing provider provenance if it
+establishes that binding; otherwise add the capability in the Task's single
+migration. Neither caller-supplied identities nor the current attachment token
+can grant it. Attachment-only handoff preserves the capability; provider replacement
+revokes it. Reject child-conversation callbacks.
+
+Under the Session fence, validate that binding, observe the current attachment
+claim and hold exclusion through the bounded output write. Receipts record the
+provider identity and observed claim. The startup exclusion mode remains unresolved
+above. This grants no attached-client input or general process-control authority.
+Prove A → B → A handoff, replacement and stale/child rejection through the public
+hook boundary. Explicit adapter rebinding is not a second delivery path.
 
 Provider contract findings that survive either choice:
 
@@ -318,10 +313,7 @@ the reason and pending count. Already-open providers without the adapter remain 
 start installs the declaration. Codex attachment-only reconnect strips configuration
 overrides and cannot be treated as installation; no hot-reload or retroactive
 installation claim.
-Hooks validate their provider-bound capability and saved Session/AgentSession,
-then observe the current attachment under the shared lock, not from cwd or
-an arbitrary caller-supplied Session ID. Child provider conversations cannot consume
-their parent's receipts.
+All hooks use the provider delivery authority above; cwd never selects a Session.
 
 Remote execution uses the destination Machine's existing command routing and local
 Session store. Direct Session publication routes there; it is never planning data.
@@ -331,8 +323,10 @@ cannot exchange a scope, report unavailable exchange. No new cross-machine bus.
 
 ## Delete — do not maintain
 
-Paths below are under `rust/loopflow/src/` unless stated otherwise. Delete in the
-same cut as the replacement; do not refactor these predecessors separately.
+The withdrawn patch lives only at the Git reference above; retain the startup
+reproducer until the replacement passes its public fixture. Production targets
+below remain pending that replacement, not separate cleanup. Paths are under
+`rust/loopflow/src/` unless stated otherwise; delete them in the same cut.
 
 - `RunningFlow.steers` and its node cursor logic in `lf/commands/flow.rs`;
   `Cli.steers_after`, forwarding/clone code in `lf/mod.rs`, and the seed filter in
@@ -369,8 +363,8 @@ claiming remote exchange or already-open coverage from local fixture success.
 
 ## Internal slices
 
-1. **This slice:** resolve the startup fence counterexample and establish/test provider-bound emission and OpenCode adapter
-   invocation identity alongside the publication/receipt transaction and released-frontier
+1. Resolve startup exclusion/identity and prove provider-bound emission and OpenCode
+   adapter invocation identity alongside the publication/receipt transaction and released-frontier
    migration; cut launch seeding over and delete old Flow/live-injection ownership
    together. Include minimal provider consumers so removal does not strand delivery.
 2. Complete all provider boundary adapters, exact trust and status/retry surfaces;
@@ -403,4 +397,4 @@ if the status shape crosses that boundary. Configured provider probes use isolat
 homes and headless fake endpoints; unavailable probes are explicitly deferred to
 capable CI, never recorded as passes.
 
-Check: `uv run python scratch/claude-startup-fence.py`, 2026-10-11 — Claude 2.1.296 reproduced the startup lock cycle (512/131,133 bytes in two seconds); four archived receipt tests passed, production cutover withdrawn; `git diff --check` and `lf context` pass, provider acceptance remains unresolved.
+Check: `git diff --check` and `lf context` — pass after documentation/archive reduction; code and reproducer unchanged, prior startup counterexample retained; provider acceptance remains for implementation/gate.

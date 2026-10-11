@@ -1220,3 +1220,9 @@ live Session without shell-level scrubbing:
 ```bash
 cargo test -p loopflow --test session_cli_tests session_names_are_shared_and_human_names_win
 ```
+
+Headless provider transport changes also run the research-artifact test
+`two_task_research_runs_leave_distinct_uncommitted_artifacts_for_the_next_prompt`
+and Linux `planning_reconnect_tests`. Their stand-ins must consume and echo the
+stream-input request before reporting success; sleeping and emitting an uncorrelated
+print-mode result can race the seed write and fail with a broken pipe.

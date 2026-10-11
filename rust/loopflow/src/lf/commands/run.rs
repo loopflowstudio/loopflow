@@ -1485,17 +1485,31 @@ for line in sys.stdin:
         let provider = bin.join("claude");
         std::fs::write(
             &provider,
-            r#"#!/bin/sh
-if [ "${1:-}" = "--version" ]; then
-  printf '%s\n' 'claude test'
-  exit 0
-fi
-sleep "$LF_TEST_RESEARCH_DELAY"
-mkdir -p "$(dirname "$LF_TEST_RESEARCH_OUTPUT")"
-temporary="$LF_TEST_RESEARCH_OUTPUT.$LF_CAPTURE_KEY.tmp"
-printf '%s\n' "$LF_TEST_RESEARCH_CONTENT" > "$temporary"
-mv "$temporary" "$LF_TEST_RESEARCH_OUTPUT"
-printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"output_tokens":3}}'
+            r#"#!/usr/bin/env python3
+import json
+import os
+import sys
+import time
+from pathlib import Path
+
+if "--version" in sys.argv:
+    print("claude test")
+    sys.exit(0)
+for line in sys.stdin:
+    message = json.loads(line)
+    if message.get("type") != "user":
+        continue
+    message["session_id"] = "research-thread"
+    print(json.dumps(message), flush=True)
+    time.sleep(float(os.environ["LF_TEST_RESEARCH_DELAY"]))
+    output = Path(os.environ["LF_TEST_RESEARCH_OUTPUT"])
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output.with_name(output.name + "." + os.environ["LF_CAPTURE_KEY"] + ".tmp")
+    temporary.write_text(os.environ["LF_TEST_RESEARCH_CONTENT"] + "\n")
+    temporary.replace(output)
+    print(json.dumps({"type": "result", "uuid": message["uuid"],
+        "session_id": "research-thread", "subtype": "success", "result": "Done",
+        "usage": {"input_tokens": 7, "output_tokens": 3}}), flush=True)
 "#,
         )
         .unwrap();

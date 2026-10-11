@@ -4,14 +4,14 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
-use crate::engine::flow_graph::{FlowGraph, FlowNode, FlowNodeKind};
-use crate::engine::flow_output::FlowOutput;
-use crate::engine::skill_invocation::SkillInvocation;
-use crate::engine::target::{resolve_definition, DefinitionKind, Target};
-use crate::engine::{compile_flow, ExecutionCursor, FlowDefinition};
+use crate::definition::{resolve_definition, DefinitionKind, Target};
+use crate::flow::graph::{FlowGraph, FlowNode, FlowNodeKind};
+use crate::flow::output::FlowOutput;
+use crate::flow::{compile_flow, FlowDefinition};
 use crate::lf::commands::{flow, run};
 use crate::lf::Cli;
 use crate::ops::WorkBinding;
+use crate::skills::invocation::SkillInvocation;
 
 /// Assemble the launch's ordinary input from existing local evidence only.
 pub fn assemble(
@@ -146,8 +146,13 @@ pub struct PromptPreview {
     pub system_prompt: String,
     pub task_prompt: String,
     pub skill_invocation: Option<SkillInvocation>,
-    pub context: crate::engine::context_budget::ContextBudgetReport,
-    pub unwritten_sources: Vec<crate::engine::context_budget::ContextSource>,
+    pub references: Vec<ContextReference>,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct ContextReference {
+    pub path: String,
+    pub content: String,
 }
 
 impl PromptPreview {
@@ -159,8 +164,11 @@ impl PromptPreview {
                 invocation.skill.name, invocation.arguments
             ));
         }
-        if !self.unwritten_sources.is_empty() {
-            text.push_str(&format!("\n\nPreview only: {} excerpt sources were not written; JSON includes their complete bytes.", self.unwritten_sources.len()));
+        for reference in &self.references {
+            text.push_str(&format!(
+                "\n\nReference {} (current reading; live context may refresh):\n{}",
+                reference.path, reference.content
+            ));
         }
         text
     }
@@ -199,9 +207,11 @@ fn preview_flow(
     let items = compile_flow(flow, repo)?;
     flow::require_autonomous_steps(&items)?;
     let graph = FlowGraph::new(&flow.name, &items);
-    let mut current = if let Some(skill) =
-        crate::engine::execution::current_skill(&items, &ExecutionCursor::default())
-    {
+    let mut current = if let Some(skill) = match items.first() {
+        Some(crate::flow::ConcreteStep::Skill(skill)) => Some(skill.clone()),
+        Some(crate::flow::ConcreteStep::Xor(branch)) => Some(branch.router_skill()),
+        _ => None,
+    } {
         let mut launch = cli.process_options();
         launch.resolved_invocation = Some(SkillInvocation {
             skill: skill.skill.clone(),

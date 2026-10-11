@@ -131,7 +131,7 @@ async fn read_checkout(
         return Ok(());
     }
     let wave = super::owning_wave(store, &task).await?;
-    let repo = crate::engine::worktrees::main_repo_root(Path::new(wave.repo()))?;
+    let repo = crate::git::worktrees::main_repo_root(Path::new(wave.repo()))?;
     report.unavailable.push("Checkout leases, placement admission and concurrent changes are rechecked only during execution; this reading reserves nothing".into());
     if let Some(worktree) = &task.worktree {
         let present = worktree.join(".git").try_exists()?;
@@ -151,7 +151,7 @@ async fn read_checkout(
                 Err(super::OpsError::Message(reason)) => report.impediments.push(reason),
                 Err(error) => return Err(error.into()),
             }
-            if !crate::engine::worktrees::branch_exists(&repo, &task.branch)? {
+            if !crate::git::worktrees::branch_exists(&repo, &task.branch)? {
                 report.unavailable.push("Recorded branch is absent locally; restoration must fetch before deciding whether its history can be recovered. No fetch was performed".into());
             }
         }

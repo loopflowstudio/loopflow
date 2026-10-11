@@ -71,7 +71,7 @@ pub fn watch_task_files(issue: &str, expected: &Path, request: &str) -> Result<(
         let _ = changes.try_send(());
     })?;
     watcher.watch(expected, RecursiveMode::Recursive)?;
-    let metadata = crate::engine::git::absolute_git_dir(expected)?;
+    let metadata = crate::git::absolute_git_dir(expected)?;
     if !metadata.starts_with(expected) {
         watcher.watch(&metadata, RecursiveMode::Recursive)?;
     }

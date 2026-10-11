@@ -493,7 +493,7 @@ step processes, with no separate record or process.
 
 Every Flow naming a Task, or run in its checkout, is equally that Task's
 work; none is selected or privileged. Taskless and Task execution share the
-Flow runner. Each `task run` starts a fresh Flow as a child `lf run`, and a fresh
+Flow runner. Each `task run` starts a fresh Flow as a child `lf flow`, and a fresh
 one again when that Flow process fails. Flows hold autonomous
 steps only: launching one with a `human: true` step is rejected. Finishing
 retains history and chooses no successor; Flow completion alone does not

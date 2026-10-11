@@ -579,9 +579,10 @@ lf --task LOO-427 desktop open --diff --explain --json
 
 `--context` assembles a skill or inline request's input from local sources using
 ordinary launch settings. JSON includes system/task prompts, native skill arguments,
-budget accounting and complete bytes for excerpt sources that were **not written**.
+current reference contents. Launch saves generated references; Wave and scratch
+context can refresh during the conversation. Preview creates no reference files.
 It never prepares a checkout, refreshes planning, writes storage or runs a provider.
-A real launch refreshes Task direction, so parity applies to the same snapshot.
+A real launch refreshes Task direction; preview does not predict future hook input.
 
 For a Flow, preview shows the compiled graph and input states keyed by node.
 Only the initial skill or router gets current-snapshot input. Later nodes and

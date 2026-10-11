@@ -299,7 +299,7 @@ fn public_status_keeps_healthy_plans_and_receipts_visible_beside_a_damaged_journ
 
 #[test]
 fn public_association_preserves_ids_and_reports_unfinished_projection() {
-    use loopflow::engine::planning_git::PlanningDestination;
+    use loopflow::planning_git::PlanningDestination;
     use loopflow::store::sqlite::SqliteStore;
 
     let repo = TestRepo::new();

@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use loopflow::engine::planning_exchange::{
+use loopflow::planning_exchange::{
     LinearObservation, PlanningKind, PlanningMutation, PlanningObject, PlanningSnapshot,
 };
 use serde_json::json;

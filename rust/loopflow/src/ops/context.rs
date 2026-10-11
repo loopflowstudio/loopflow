@@ -174,7 +174,7 @@ async fn read_context(
                 anyhow::bail!(error);
             }
         };
-        report.process = ContextFact::bound(record.lfid, "explicit");
+        report.process = ContextFact::bound(record.id, "explicit");
         // The caller is provenance, not the work this command performed.
         if let Some(id) = record.caller_session_id {
             report.session = ContextFact::bound(id, "process_caller");
@@ -199,7 +199,7 @@ async fn read_context(
         directory = record.cwd.clone();
         source = "session_checkout";
         session_record = Some(record);
-    } else if let Some(id) = crate::journal::current_process_lfid() {
+    } else if let Some(id) = crate::journal::current_lf_process_id() {
         report.process = ContextFact::bound(id, "inspecting_process");
     }
     let session_task = if let Some(record) = &session_record {
@@ -276,7 +276,7 @@ async fn read_context(
             .map(|repo| repo.to_string())
     };
     if matches!(report.task, ContextFact::Unbound) {
-        match crate::engine::git::worktree_root(&directory) {
+        match crate::git::worktree_root(&directory) {
             Ok(root) => {
                 report.checkout = ContextFact::bound(root.display(), source);
                 report.execution_machine = ContextFact::bound(local, "local_checkout");

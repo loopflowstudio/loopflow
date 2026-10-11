@@ -338,7 +338,7 @@ async fn read_creation(
         project: None,
     });
     report.effects.push("Save a new unstarted Task and pending planning mutations locally; attempt configured synchronization without allocating execution".into());
-    let main = crate::engine::worktrees::main_repo_root(cwd)?;
+    let main = crate::git::worktrees::main_repo_root(cwd)?;
     let selected = match super::select_task_creation_wave(store, &main, wave_selector).await {
         Ok(selected) => selected,
         Err(error) => {

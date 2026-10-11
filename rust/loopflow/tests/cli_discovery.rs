@@ -570,7 +570,7 @@ fn desktop_open_has_one_owner_and_ambiguous_shorthand_has_no_effects() {
         matches!(composed.command, Some(Commands::Desktop { cmd: DesktopCommand::Open { session: Some(ref id), diff: true, json: true } }) if id == "session-exact")
     );
     assert!(Cli::command().find_subcommand("open").is_none());
-    let saved: loopflow::engine::flow::Command =
+    let saved: loopflow::flow::Command =
         serde_json::from_value(serde_json::json!({"command": "open", "args": []})).unwrap();
     assert_eq!(saved.argv(), ["lf", "desktop", "open"]);
     assert_eq!(saved.clone().current(), saved);
@@ -708,7 +708,7 @@ fn history_help_is_passive_and_saved_commands_keep_their_evidence_selectors() {
         ("usage", vec!["--days", "0"], vec!["usage", "--days", "0"]),
     ] {
         let saved = serde_json::json!({"command": command, "args": args});
-        let restored: loopflow::engine::flow::Command = serde_json::from_value(saved).unwrap();
+        let restored: loopflow::flow::Command = serde_json::from_value(saved).unwrap();
         assert_eq!(restored.command, "history");
         assert_eq!(restored.args, expected);
     }

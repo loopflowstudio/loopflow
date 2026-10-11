@@ -68,4 +68,4 @@ both axes and hidden panes. The Work-keyed registry, per-pane locations, outer-t
 deletion, navigation and DTO cutover remain unimplemented; no predecessor layout
 was extended. Native acceptance remains with demo.
 
-Check: `scripts/test_desktop.sh --filter MultiplexerStoreTests -Xswiftc -gnone --no-parallel` — build and 26 tests PASS; `cargo fmt --check`/Clippy PASS; broader suites: gate/CI, native: demo.
+Check: merge Rust compile/Clippy, 15 preview/planning checks and 60 Swift checks PASS (renamed fixture repaired); native proof: demo. Logs: `/tmp/loo427-merge-*`.

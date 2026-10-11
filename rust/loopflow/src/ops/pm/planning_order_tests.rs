@@ -212,7 +212,7 @@ fn planning_order_peers_recover_lost_reply_and_preserve_later_save() {
             assert_eq!(state.lock().await.field_writes, 1);
             assert!(deliver(&fixture.store, repo, &tasks[0]).await.is_err());
             assert_eq!(state.lock().await.field_writes, 1);
-            let destination = crate::engine::planning_git::PlanningDestination::new(
+            let destination = crate::planning_git::PlanningDestination::new(
                 "/synthetic/order-remote", "refs/loopflow/planning/shared/order-test").unwrap();
             let repo_name = repo.to_string_lossy();
             let destination_id = fixture.store.sqlite.bind_peer_planning(&repo_name, &destination).unwrap();
@@ -312,7 +312,7 @@ fn planning_order_peers_retain_primary_key_only_moves() {
                 .unwrap();
             assert_eq!(source.effects[0].input, json!({"prioritySortOrder": 5.0}));
 
-            let destination = crate::engine::planning_git::PlanningDestination::new(
+            let destination = crate::planning_git::PlanningDestination::new(
                 "/synthetic/order-remote",
                 "refs/loopflow/planning/shared/order-test",
             )

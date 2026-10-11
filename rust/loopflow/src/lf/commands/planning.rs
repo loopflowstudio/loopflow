@@ -5,14 +5,14 @@ use std::path::Path;
 
 use anyhow::{anyhow, Result};
 
-use crate::engine::planning_exchange::{PlanningKind, PlanningObject};
-use crate::engine::planning_git::PlanningDestination;
 use crate::id::WaveId;
 use crate::lf::PlanningCommand;
+use crate::planning_exchange::{PlanningKind, PlanningObject};
+use crate::planning_git::PlanningDestination;
 use crate::store::{RegistryUnavailable, Store};
 
 pub fn run(cmd: &PlanningCommand) -> Result<()> {
-    let repo = crate::engine::worktrees::main_repo_root(&super::util::find_repo_root()?)?;
+    let repo = crate::git::worktrees::main_repo_root(&super::util::find_repo_root()?)?;
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(run_async(&repo, cmd))
 }

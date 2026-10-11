@@ -47,7 +47,7 @@
       "from": {
         "kind": "edge",
         "edge": 1,
-        "process_lfid": "process-retained",
+        "lf_process_id": "process-retained",
         "running": true
       },
       "to": "start",

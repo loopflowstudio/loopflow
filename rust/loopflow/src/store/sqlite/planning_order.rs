@@ -155,7 +155,7 @@ fn resolve_order(conn: &Connection, ids: &[String]) -> StoreResult<Vec<String>> 
         .map(|id| {
             Ok(super::planning_peers::associated_local_id(
                 conn,
-                crate::engine::planning_exchange::PlanningKind::Task,
+                crate::planning_exchange::PlanningKind::Task,
                 id,
                 None,
             )?

@@ -364,15 +364,6 @@ so an interruption before replacement otherwise destroys retry evidence. The
 public restart fixture reproduces that boundary with no Session provider PID;
 retry uses saved identities. Unknown ownership and independent reviews still block.
 
-Jack Heart authorized LOO-377's repair; #1429 merged as `c5dc238b0afb`, CI passing.
-LOO-370 later completed; installed acceptance remained unproved and LOO-373 owned
-landing-placement reconciliation. The retired review-restart mechanism and fixture
-are archived at `35e759aaf:wave/infrastructure/MEMORY.md`, this heading.
-Retain its lessons: service, driver and provider are distinct owners. Settle
-launch reservation before collecting them; preserve exact identities before
-signaling removes receipts. Fence writers and retain history without claiming
-successful review. Unknown ownership never authorizes stopping independent work.
-
 ## Transient recovery (LOO-326, curated 2026-10-09)
 
 Jack Heart approved cached planning regardless of age for existing Task restart,
@@ -421,8 +412,6 @@ boundary remain at `30a4d48c8:wave/infrastructure/MEMORY.md`, this heading and i
 linked receipts. They preserve due ownership, candidate, uncertain publication,
 caller edits and child-held leases; simulated passes establish neither public
 container/macOS acceptance nor configured automatic settlement.
-
-`c41895363:wave/infrastructure/MEMORY.md`
 
 October 6 scheduled receipt cron_a4b8b11b2a534bf99d183e677f2a6871 failed after
 recovery cron_5d930c31c7ae4a118f6b93774496991c passed continuity but the scorecard
@@ -642,14 +631,15 @@ execution and retains conservative cleanup. Proofs and unresolved Desktop
 acceptance remain at
 `e50dbd749e3207599f9937ce45653f4c6f33a5cd:wave/infrastructure/MEMORY.md`.
 
-
 ## Tasks across machines (LOO-412, 2026-10-09)
+
 Jack Heart selected review-only custom-ref sync, not landing/real export.
 Joining publishes nothing; imports remain unplaced. Malformed input aborts import;
 contradictions defer effects, not saves/acquisition. Preserve execution, baselines,
 uncertainty and losers. Readback cannot settle mappings/errors or removal via creation.
 Desktop retains last-good scoped status; per-Work recovery remains. Mixed exchange
 stays disabled. Omission is not convergence. Earlier proofs: `9dfb95451`, this heading.
+
 `39dba32c1` retains creation origins; common acquisition owns exact readback.
 `8f3472eda`/`b5b491099` retain exact cross-origin Linear parents, per-origin heads
 and private selection without exporting correspondence. Equal text grants no causality.
@@ -800,13 +790,6 @@ node/iteration positions, not child Flows; retry keeps the pass and iteration
 advances its counters. Captured input belongs to Session history and names its
 Process; deleted RunId and intermediate conversion owners stay deleted. Older
 proofs establish no final-frontier conversion.
-
-September 29–30's superseded owner/schema proofs:
-`fe07245a3:wave/infrastructure/MEMORY.md`.
-Current LfProcess/LfSession/Flow contracts live in the architecture reference;
-ancestry grants no Task/Flow authority. Preserve proven ancestry, captured input
-and iteration identity. Deleted RunId/conversion owners stay deleted; old proofs
-establish no final-frontier conversion.
 
 - **Flow decisions are typed results** of the selected successful turn,
   modelled on PydanticAI and Jev: the step declares its output schema. The

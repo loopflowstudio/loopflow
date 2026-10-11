@@ -144,9 +144,9 @@ impl SqliteStore {
         };
         {
             let peer_kind = if kind == "task" {
-                crate::engine::planning_exchange::PlanningKind::Task
+                crate::planning_exchange::PlanningKind::Task
             } else {
-                crate::engine::planning_exchange::PlanningKind::Project
+                crate::planning_exchange::PlanningKind::Project
             };
             let mut query = tx.prepare(
                 "SELECT id,field FROM planning_peer_changes WHERE kind=?1 AND object_id=?2",
@@ -372,10 +372,10 @@ pub(crate) struct CreationReceipt {
 }
 
 pub(crate) fn validate_peer_receipt(
-    object: &crate::engine::planning_exchange::PlanningObject,
+    object: &crate::planning_exchange::PlanningObject,
     value: &Value,
 ) -> StoreResult<CreationReceipt> {
-    use crate::engine::planning_exchange::PlanningKind;
+    use crate::planning_exchange::PlanningKind;
     let receipt: CreationReceipt = serde_json::from_value(value.clone())?;
     let export = &receipt.export;
     let expected = uuid::Uuid::parse_str(
@@ -458,7 +458,7 @@ pub(crate) fn validate_peer_receipt(
 /// Projection retries reuse decoded receipts from the validated snapshot.
 pub(super) fn import_peer_receipts<'a>(
     conn: &Connection,
-    object: &crate::engine::planning_exchange::PlanningObject,
+    object: &crate::planning_exchange::PlanningObject,
     owner: PlanningChanges<'_>,
     winner: &CreationReceipt,
     history: impl IntoIterator<Item = &'a CreationReceipt>,

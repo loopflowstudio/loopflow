@@ -213,13 +213,13 @@ pub fn run(command: &HistoryCommand) -> anyhow::Result<()> {
             };
             let filter = LfProcessFilter {
                 repo,
-                parent_process_lfid: match parent {
+                parent_lf_process_id: match parent {
                     Some(parent) => Some(
                         store
                             .resolve_process(parent)
                             .await?
                             .context("Parent Process was not found")?
-                            .lfid,
+                            .id,
                     ),
                     None => None,
                 },

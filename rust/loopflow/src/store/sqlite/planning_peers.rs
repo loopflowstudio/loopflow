@@ -8,12 +8,12 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use crate::durable::{ProjectId, TaskId};
-use crate::engine::planning_exchange::{
+use crate::id::WaveId;
+use crate::planning_exchange::{
     winning_heads, LinearObservation, PlanningKind, PlanningMutation, PlanningObject,
     PlanningSnapshot,
 };
-use crate::engine::planning_git::PlanningDestination;
-use crate::id::WaveId;
+use crate::planning_git::PlanningDestination;
 use crate::store::{PeerPlanningStatus, PeerProjectionConflict, StoreError, StoreResult};
 
 use super::planning::ProviderEvidence;
@@ -2471,10 +2471,10 @@ mod tests {
 
     use super::SqliteStore;
     use crate::durable::{ProjectId, TaskId};
-    use crate::engine::planning_exchange::PlanningSnapshot;
-    use crate::engine::planning_git::PlanningDestination;
-    use crate::id::{ProcessLfid, TraceId, WaveId};
+    use crate::id::{LfProcessId, TraceId, WaveId};
     use crate::ops::pm::{TaskComment, TaskCommentAuthor};
+    use crate::planning_exchange::PlanningSnapshot;
+    use crate::planning_git::PlanningDestination;
     use crate::work::wave::Wave;
 
     fn binding() -> PlanningDestination {
@@ -6113,7 +6113,7 @@ mod tests {
         checkout: &str,
     ) {
         let machine = store.local_machine().unwrap().id;
-        let driver = ProcessLfid::new();
+        let driver = LfProcessId::new();
         {
             let conn = store.conn.lock().unwrap();
             conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id)
@@ -6129,9 +6129,9 @@ mod tests {
             )
             .unwrap();
         }
-        let definition = crate::engine::workflow::WorkflowDefinition {
+        let definition = crate::workflow::WorkflowDefinition {
             name: "review".into(),
-            nodes: vec![crate::engine::workflow::WorkflowNode {
+            nodes: vec![crate::workflow::WorkflowNode {
                 name: "review".into(),
                 skill: "review".into(),
                 description: None,
@@ -6718,7 +6718,7 @@ mod tests {
 
     #[test]
     fn joining_a_plan_keeps_unrelated_local_work_out_of_its_publication() {
-        use crate::engine::planning_git::{PlanningGit, PlanningPublication};
+        use crate::planning_git::{PlanningGit, PlanningPublication};
         use loopflow_test_support::TestRepo;
 
         let remote = TestRepo::new();
@@ -6896,7 +6896,7 @@ mod tests {
         let wave_id = incoming
             .objects()
             .iter()
-            .find(|object| object.kind == crate::engine::planning_exchange::PlanningKind::Wave)
+            .find(|object| object.kind == crate::planning_exchange::PlanningKind::Wave)
             .unwrap()
             .id
             .clone();
@@ -7234,15 +7234,15 @@ mod tests {
         );
         for (kind, field) in [
             (
-                crate::engine::planning_exchange::PlanningKind::Task,
+                crate::planning_exchange::PlanningKind::Task,
                 "provider_removal",
             ),
             (
-                crate::engine::planning_exchange::PlanningKind::Task,
+                crate::planning_exchange::PlanningKind::Task,
                 "provider_invalidation",
             ),
             (
-                crate::engine::planning_exchange::PlanningKind::Project,
+                crate::planning_exchange::PlanningKind::Project,
                 "provider_archive",
             ),
         ] {
@@ -7434,7 +7434,7 @@ mod tests {
         assert_eq!(base, export(&left, "/source"));
         import(&right, "/target", "first", &base);
         assert_eq!(export(&right, "/target"), base);
-        let driver = ProcessLfid::new();
+        let driver = LfProcessId::new();
         {
             let conn = right.conn.lock().unwrap();
             conn.execute(
@@ -7444,9 +7444,9 @@ mod tests {
             .unwrap();
             conn.execute("INSERT INTO processes(lfid,trace_id,started_at,completed_at,outcome) VALUES(?1,?2,1,2,'succeeded')",params![driver,TraceId::new()]).unwrap();
         }
-        let definition = crate::engine::workflow::WorkflowDefinition {
+        let definition = crate::workflow::WorkflowDefinition {
             name: "review".into(),
-            nodes: vec![crate::engine::workflow::WorkflowNode {
+            nodes: vec![crate::workflow::WorkflowNode {
                 name: "review".into(),
                 skill: "review".into(),
                 description: None,
@@ -7610,7 +7610,7 @@ mod tests {
     #[test]
     fn correspondence_import_retains_creation_origins_and_exact_readback() {
         use super::super::planning_changes::PlanningChanges;
-        use crate::engine::planning_exchange::PlanningKind;
+        use crate::planning_exchange::PlanningKind;
 
         for (kind, reverse) in [PlanningKind::Task, PlanningKind::Project]
             .into_iter()
@@ -7705,7 +7705,7 @@ mod tests {
             let later_task = target.pending_task_changes(&local_task).unwrap();
             let later_project = target.pending_project_changes(&local_project).unwrap();
             let document = export(&source, "/source");
-            let object = crate::engine::planning_exchange::PlanningObject {
+            let object = crate::planning_exchange::PlanningObject {
                 kind,
                 id: origin.owner().1.into(),
             };
@@ -7928,7 +7928,7 @@ mod tests {
     #[test]
     fn peer_creation_identity_defers_legacy_effects_and_cannot_be_rekeyed() {
         use super::super::planning_changes::PlanningChanges;
-        use crate::engine::planning_exchange::PlanningKind;
+        use crate::planning_exchange::PlanningKind;
 
         for kind in [PlanningKind::Task, PlanningKind::Project] {
             let (_home, source) = store();
@@ -8047,7 +8047,7 @@ mod tests {
                 .all(|(id, change)| retained.changes.get(id) == Some(change)));
             assert!(!super::exists(
                 &target.conn.lock().unwrap(),
-                &crate::engine::planning_exchange::PlanningObject {
+                &crate::planning_exchange::PlanningObject {
                     kind,
                     id: owner.owner().1.into(),
                 }
@@ -8062,7 +8062,7 @@ mod tests {
 
         use rusqlite::trace::{TraceEvent, TraceEventCodes};
 
-        use crate::engine::planning_exchange::{PlanningKind, PlanningObject};
+        use crate::planning_exchange::{PlanningKind, PlanningObject};
 
         thread_local! {
             static WRITER: RefCell<Option<rusqlite::Connection>> = const { RefCell::new(None) };
@@ -8156,7 +8156,7 @@ mod tests {
 
     #[test]
     fn associated_readback_captures_foreign_predecessor_without_sharing_private_history() {
-        use crate::engine::planning_exchange::{PlanningKind, PlanningObject};
+        use crate::planning_exchange::{PlanningKind, PlanningObject};
 
         let (_source_home, source) = store();
         let (_, row, incoming_task) = linear_seed(&source);
@@ -8402,7 +8402,7 @@ mod tests {
 
     #[test]
     fn associated_origins_project_jointly_and_save_after_peer_edits() {
-        use crate::engine::planning_exchange::{PlanningKind, PlanningObject};
+        use crate::planning_exchange::{PlanningKind, PlanningObject};
 
         let (_source_home, source) = store();
         let (_target_home, target) = store();
@@ -8778,7 +8778,7 @@ mod tests {
     #[test]
     fn explicit_correspondence_resolves_local_work_but_retains_projection_holds() {
         use super::super::planning_changes::PlanningChanges;
-        use crate::engine::planning_exchange::{PlanningKind, PlanningObject};
+        use crate::planning_exchange::{PlanningKind, PlanningObject};
 
         let (_home, source) = store();
         let (_, row, incoming_task) = linear_seed(&source);
@@ -9210,8 +9210,8 @@ mod tests {
         parents.changes.retain(|_, change| {
             matches!(
                 change.object.kind,
-                crate::engine::planning_exchange::PlanningKind::Wave
-                    | crate::engine::planning_exchange::PlanningKind::Project
+                crate::planning_exchange::PlanningKind::Wave
+                    | crate::planning_exchange::PlanningKind::Project
             )
         });
         import(&right, "/target", "parents", &parents);

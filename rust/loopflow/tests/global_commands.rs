@@ -786,10 +786,14 @@ fn repo_selection_carries_scoped_task_prefix_through_reads_and_writes() {
     );
     let preview: serde_json::Value = serde_json::from_str(&output).unwrap();
     assert_eq!(preview["resolution"]["task"]["value"], first);
-    assert!(preview["input"]["system_prompt"]
-        .as_str()
+    assert!(preview["input"]["references"]
+        .as_array()
         .unwrap()
-        .contains("Changed selected"));
+        .iter()
+        .any(|source| source["content"]
+            .as_str()
+            .unwrap()
+            .contains("Changed selected")));
     assert!(
         fs::read(path).unwrap() == before,
         "preview changed database bytes"
@@ -803,7 +807,7 @@ fn invocation_previews_preserve_absent_storage_and_reject_unsupported_commands()
     repo.create_file(".lf/skills/probe.md", "Inspect preview marker.");
     repo.create_file(
         ".lf/config.yaml",
-        "diff: false\ndiff_files: false\npaste: false\ncontext_budgets:\n  goal_tokens: 300\n",
+        "diff: false\ndiff_files: false\npaste: false\ncontext_budgets:\n  memory_tokens: 300\n",
     );
     let message = "Long supplied direction. ".repeat(500);
     let output = success(
@@ -816,11 +820,12 @@ fn invocation_previews_preserve_absent_storage_and_reject_unsupported_commands()
         .unwrap(),
     );
     let input: serde_json::Value = serde_json::from_str(&output).unwrap();
-    assert!(input["system_prompt"]
+    assert!(input["task_prompt"]
         .as_str()
         .unwrap()
         .contains("Inspect preview marker."));
-    assert_eq!(input["unwritten_sources"][0]["content"], message);
+    assert!(input["task_prompt"].as_str().unwrap().contains(&message));
+    assert!(!repo.path().join(".lf/prompts").exists());
     for args in [
         vec!["probe", &message, "--context", "--json"],
         vec!["probe:", &message, "--context", "--json"],
@@ -834,7 +839,7 @@ fn invocation_previews_preserve_absent_storage_and_reject_unsupported_commands()
             "system_prompt",
             "task_prompt",
             "skill_invocation",
-            "unwritten_sources",
+            "references",
         ] {
             assert_eq!(input[field], equivalent[field], "{args:?}: {field}");
         }
@@ -1446,7 +1451,7 @@ fn connection_session(home: &Path, cwd: &Path) -> loopflow::session::LfSession {
                 caller_artifact_key: None,
                 task_id: None,
                 wave_id: None,
-                flow_process_lfid: None,
+                flow_lf_process_id: None,
                 work_source: None,
                 bound_at: None,
                 id: "connection-proof".into(),

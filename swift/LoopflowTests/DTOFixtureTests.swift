@@ -102,7 +102,7 @@ struct DTOFixtureTests {
     @Test func taskMoveExplanationsPreservePositionsAndCompletionUncertainty() throws {
         let data = try loadFixtureData("task_move_explanations.json")
         let reports = try JSONDecoder().decode([TaskMoveExplanation].self, from: data)
-        #expect(reports[0].action?.from == .edge(index: 1, processLfid: "process-retained", running: true))
+        #expect(reports[0].action?.from == .edge(index: 1, lfProcessId: "process-retained", running: true))
         #expect(reports[0].action?.to == "start")
         #expect(reports[0].action?.reason == "Restart Workflow")
         #expect(reports[1].action?.workflow == nil)
@@ -255,9 +255,6 @@ struct DTOFixtureTests {
         }
     }
 
-}
-
-    @Test
     @Test("Activity retains unknown record identity without a PID")
     func activityFixture() throws {
         let snapshot = try JSONDecoder().decode(ActivitySnapshot.self, from: loadFixtureData("activity_snapshot.json"))

@@ -8,9 +8,9 @@ use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-use loopflow::engine::planning_git::{PlanningDestination, PlanningGit, PlanningPublication};
 use loopflow::lf::commands::work_watch::{WorkContent, WorkFrame};
 use loopflow::ops::pm::TaskCommentAuthor;
+use loopflow::planning_git::{PlanningDestination, PlanningGit, PlanningPublication};
 use loopflow::store::{
     open_ephemeral_store, sqlite::SqliteStore, PeerPlanningStatus, StorageConfig,
 };

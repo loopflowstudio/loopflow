@@ -298,7 +298,7 @@ fn context_preview_matches_launched_input_without_writing_or_running_provider() 
     repo.create_file(".lf/skills/probe.md", "Read this exact preview marker.");
     repo.create_file(
         ".lf/config.yaml",
-        "diff: false\ndiff_files: false\npaste: false\ncontext_budgets:\n  goal_tokens: 300\n",
+        "diff: false\ndiff_files: false\npaste: false\ncontext_budgets:\n  memory_tokens: 300\n",
     );
     let bin = home.path().join("bin");
     fs::create_dir(&bin).unwrap();
@@ -347,23 +347,18 @@ exit 23
         String::from_utf8_lossy(&preview.stderr)
     );
     let input: serde_json::Value = serde_json::from_slice(&preview.stdout).unwrap();
-    assert_eq!(input["task_prompt"], INITIAL_TURN_PROMPT);
+    assert!(input["task_prompt"].as_str().unwrap().contains(&message));
+    assert!(!repo.path().join(".lf/prompts").exists());
     assert!(!home.path().join("provider-calls").exists());
     assert!(!home.path().join("machine").exists());
     assert!(!repo.path().join(".lf/tmp").exists());
-    let sources = input["unwritten_sources"].as_array().unwrap();
-    assert_eq!(sources.len(), 1);
-    assert_eq!(sources[0]["content"], message);
+
     let launch = invoke(false);
     assert!(!launch.status.success());
     assert!(String::from_utf8_lossy(&launch.stderr).contains("fixture finished"));
     assert_eq!(
         fs::read_to_string(home.path().join("received-context")).unwrap(),
         input["system_prompt"].as_str().unwrap()
-    );
-    assert_eq!(
-        fs::read_to_string(sources[0]["path"].as_str().unwrap()).unwrap(),
-        message
     );
 }
 
@@ -399,7 +394,7 @@ fn flow_context_preview_preserves_absent_store_and_captured_first_skill() {
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(report["graph"]["steps"][1]["returns_to"], 0);
     assert_eq!(report["inputs"][0]["node"], 0);
-    let prompt = report["inputs"][0]["input"]["system_prompt"]
+    let prompt = report["inputs"][0]["input"]["task_prompt"]
         .as_str()
         .unwrap();
     assert!(prompt.contains("First input marker."));

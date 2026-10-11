@@ -10,7 +10,7 @@ use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
 use crate::work::project::Project;
 
-use super::{durable, SqliteStore};
+use super::SqliteStore;
 
 impl SqliteStore {
     /// Provision a Wave hierarchy without a provider, preserving existing authored files.
@@ -32,6 +32,7 @@ impl SqliteStore {
         let repo = canonical.to_string();
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        super::repositories::ensure_repository_in(&tx, &repo)?;
         let workflows = read_workflows(checkout)?;
         let mut parent: Option<WaveId> = None;
         let mut prefix = String::new();
@@ -60,7 +61,6 @@ impl SqliteStore {
                     let wave = authored_id.unwrap_or_default();
                     let now = now_unix();
                     tx.execute("INSERT INTO waves(id,name,repo,created_at,parent_wave_id) VALUES(?1,?2,?3,?4,?5)", params![wave, part, repo, now, parent])?;
-                    durable::create_wave_work(&tx, &wave, now)?;
                     wave
                 }
             };

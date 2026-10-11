@@ -2474,7 +2474,14 @@ fn wave_documents_follow_files_while_workflows_remain_stored() {
         let catalog = lf(
             repo.path(),
             home.path(),
-            &["wave", "workflow", "list", "--wave", "product", "--json"],
+            &[
+                "wave",
+                "workflow",
+                "list",
+                "--wave",
+                "tools/parser",
+                "--json",
+            ],
         );
         let entries = catalog.as_array().unwrap();
         let saved = entries
@@ -3046,5 +3053,9 @@ fn wave_files_are_checkout_local_and_edits_reach_status_without_ensure() {
     .output()
     .unwrap();
     assert!(!removed.status.success());
-    assert!(String::from_utf8_lossy(&removed.stderr).contains("unrecognized subcommand 'edit'"));
+    assert!(String::from_utf8_lossy(&removed.stderr).contains("--memory"));
+    assert_eq!(
+        std::fs::read_to_string(memory).unwrap(),
+        "A freshly edited decision."
+    );
 }

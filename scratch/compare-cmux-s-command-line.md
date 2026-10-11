@@ -1,6 +1,6 @@
 # Desktop control on shared Work — LOO-427
 
-**Status (reconciled October 10, 2026):** Jack Heart authorized implementation through demo
+**Status (October 10, 2026):** Jack Heart authorized implementation through demo
 review, in one PR. Recorded checkout location, prototype delegation/routing,
 repository-keyed windows, exact retained-pane arrangement and text/key input are
 implemented locally. `9cc0707b0`/`92d95edfe` add owner observation and shared
@@ -311,11 +311,12 @@ fail before effects. `--context` on a non-agent command is invalid; Flow preview
 skill/router has current-snapshot input. Future and repeat input stays unavailable;
 commands have no agent prompt. It never executes predecessors.
 
-`--docs` keeps its existing meaning: add contents from paths, globs or directories
-to agent input; it does not generate documentation. Explain can show why those
-sources were included. Preserve context budgets, provenance and truncation
-reporting while retiring `context --explain` as a separate identity front door.
-The standalone budget report's final home remains open.
+`--docs` selects reference files; it does not generate documentation. Main's
+October 10 context design supersedes frozen launch snapshots and input-budget
+gates: Wave/scratch context refreshes, while captured Work direction remains a
+launch reference. `--context` previews system/first-turn input and current reference
+contents without writing logs or launching. It does not promise future hook bytes.
+Memory/scratch size targets remain advisory; provenance stays explicit.
 
 ### Repository lookup
 
@@ -345,7 +346,7 @@ previews share compilation and initial input, including native arguments. Read-o
 Broader action explanation and complete-path composition remain unfinished.
 
 Gate separates discovery, wire shape and routing/preview behavior (§5), including
-effect-free reads, selected-Machine repository lookup and snapshot input parity.
+effect-free reads, selected-Machine repository lookup and current-input fidelity.
 Exact-target fixtures do not prove the composed usable endpoint.
 
 ## Architecture and ownership

@@ -2,7 +2,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use loopflow::engine::planning_git::{
+use loopflow::planning_git::{
     PlanningDestination, PlanningGit, PlanningGitError, PlanningPublication,
 };
 use loopflow_test_support::TestRepo;

@@ -94,7 +94,7 @@ fn planning_reconnect_fixture(mode: &str) {
 // Import portable plans before connecting Linear. Mixed-provider Git exchange
 // remains disabled; this exercises the common foreground owner after import.
 fn import_unprepared_plans(repo: &std::path::Path, home: &std::path::Path) -> serde_json::Value {
-    use loopflow::engine::planning_git::PlanningDestination;
+    use loopflow::planning_git::PlanningDestination;
     use loopflow::store::sqlite::SqliteStore;
 
     let source_repo = TestRepo::new();
@@ -188,7 +188,7 @@ fn import_rejected_deletion(
     home: &std::path::Path,
     task: &loopflow::durable::TaskId,
 ) -> serde_json::Value {
-    use loopflow::engine::planning_git::PlanningDestination;
+    use loopflow::planning_git::PlanningDestination;
     use loopflow::store::sqlite::SqliteStore;
     use rusqlite::params;
 

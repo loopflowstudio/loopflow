@@ -1225,8 +1225,8 @@ fn flow_context_preview_reads_selected_machine_graph_without_executing_steps() {
 #[test]
 fn imported_execution_location_survives_delegation_and_rejects_stale_peer_reads() {
     use loopflow::durable::{RepositoryId, TaskId};
-    use loopflow::engine::planning_git::PlanningDestination;
     use loopflow::planning::NewTask;
+    use loopflow::planning_git::PlanningDestination;
     use loopflow::store::sqlite::SqliteStore;
 
     let fixture = preview_machines();

@@ -377,7 +377,7 @@ impl<'a> PlanningChanges<'a> {
                 }
                 return super::planning_peers::local_reference(
                     conn,
-                    crate::engine::planning_exchange::PlanningKind::Project,
+                    crate::planning_exchange::PlanningKind::Project,
                     &value,
                 );
             }

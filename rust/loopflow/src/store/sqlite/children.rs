@@ -846,7 +846,7 @@ impl SqliteStore {
             }
             let local = super::planning_peers::associated_local_id(
                 &snapshot,
-                crate::engine::planning_exchange::PlanningKind::Project,
+                crate::planning_exchange::PlanningKind::Project,
                 project,
                 None,
             )?;
@@ -1474,7 +1474,7 @@ pub(super) fn resolve_task_id_in(
     }
     super::planning_peers::associated_local_id(
         conn,
-        crate::engine::planning_exchange::PlanningKind::Task,
+        crate::planning_exchange::PlanningKind::Task,
         issue,
         repo,
     )

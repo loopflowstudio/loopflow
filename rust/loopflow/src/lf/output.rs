@@ -7,7 +7,7 @@ pub(crate) fn print_process(process: &crate::process::LfProcess) {
         .unwrap_or_else(|_| command.to_string());
     println!(
         "{}  {}  {}  {}",
-        process.lfid,
+        process.id,
         process.started_at,
         process.outcome.as_deref().unwrap_or("unknown"),
         display

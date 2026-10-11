@@ -978,7 +978,7 @@ fn an_offline_cli_comment_reaches_the_open_desktop_thread() {
 
 #[test]
 fn peer_planning_receipts_reach_open_desktop_without_refresh() {
-    use loopflow::engine::planning_git::PlanningDestination;
+    use loopflow::planning_git::PlanningDestination;
     use loopflow::store::PeerPlanningStatus;
 
     let home = Machine::new();

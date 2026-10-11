@@ -70,7 +70,7 @@ pub fn resolve_selection(selection: &str) -> Result<PathBuf> {
             !selection.is_empty() && !selection.contains('/'),
             "repository names must be a single name; use ./ or an absolute path for {selection:?}"
         );
-        let root = crate::engine::config::repository_root()?.unwrap_or_else(|| "~/src".into());
+        let root = crate::config::repository_root()?.unwrap_or_else(|| "~/src".into());
         let root = expand_home(&root)?;
         anyhow::ensure!(
             root.is_absolute(),

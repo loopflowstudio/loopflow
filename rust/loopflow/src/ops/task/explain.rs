@@ -205,7 +205,7 @@ impl TaskMoveExplanation {
                     .as_ref()
                     .map(|name| format!(" of Workflow {name}"))
                     .unwrap_or_default(),
-                if action.to == crate::engine::workflow::END {
+                if action.to == crate::workflow::END {
                     "record arrival then request completion; settlement checks PR gates and eligible checkout cleanup"
                 } else {
                     "run nothing; leave existing Processes alone"
@@ -277,7 +277,7 @@ async fn read_task_move(
             .filter(|reason| !reason.is_empty())
             .map(str::to_owned),
     });
-    if node == crate::engine::workflow::END {
+    if node == crate::workflow::END {
         report.unavailable.push("Arrival, completion reconciliation and eligible checkout cleanup are execution effects; none were performed. This is not completion permission".into());
     }
     Ok(())

@@ -33,6 +33,8 @@ pub(crate) mod migration_drafts;
 pub mod ops;
 pub mod performance;
 pub mod planning;
+pub mod planning_exchange;
+pub mod planning_git;
 pub mod pm;
 pub mod pr_landing;
 pub mod profile;

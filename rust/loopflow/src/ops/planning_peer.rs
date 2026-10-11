@@ -4,8 +4,8 @@
 
 use std::path::Path;
 
-use crate::engine::planning_exchange::PlanningSnapshot;
-use crate::engine::planning_git::{PlanningGit, PlanningPublication, PlanningRevision};
+use crate::planning_exchange::PlanningSnapshot;
+use crate::planning_git::{PlanningGit, PlanningPublication, PlanningRevision};
 use crate::store::{sqlite::SqliteStore, Store};
 
 use super::{OpsError, OpsResult};
@@ -217,8 +217,8 @@ mod tests {
     use loopflow_test_support::TestRepo;
 
     use super::{acquire_destination, publish_destination, publish_repository};
-    use crate::engine::planning_git::{PlanningDestination, PlanningGit};
     use crate::id::WaveId;
+    use crate::planning_git::{PlanningDestination, PlanningGit};
     use crate::store::sqlite::SqliteStore;
     use crate::store::{open_ephemeral_store, StorageConfig};
     use crate::work::wave::Wave;
@@ -269,8 +269,7 @@ mod tests {
         let independent = PlanningGit::new(&root, &plans[1].0).unwrap();
         let published = independent.fetch().unwrap().unwrap();
         assert_eq!(
-            crate::engine::planning_exchange::PlanningSnapshot::from_bytes(&published.bytes)
-                .unwrap(),
+            crate::planning_exchange::PlanningSnapshot::from_bytes(&published.bytes).unwrap(),
             store
                 .sqlite
                 .export_peer_planning(key, &plans[1].0.id())

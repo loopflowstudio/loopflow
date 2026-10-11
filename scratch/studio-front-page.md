@@ -700,3 +700,5 @@ strip links to its own site in a new tab.
 - Jack Heart: "Then try one paragraph that combines the private secure remote jobs and the multi-subscription balancing" → one paragraph in `x11`: "It scales across your machines and your subscriptions: private, secure remote jobs and telemetry made easy through `ssh`, and multi-subscription balancing that moves to the next login when one runs out." The lead-in is Claude's; the two halves are his.
 
 - Jack Heart: "coding agent launcher" → the `x11` CLI section opens "Underneath Loopflow's task-centered API is a coding agent launcher, `lf`." Claude applied it to that sentence; the section heading is unchanged.
+
+- Jack Heart: "the CLI for launching coding agents" → the `x11` CLI section heading is "`lf`: the CLI for launching coding agents."

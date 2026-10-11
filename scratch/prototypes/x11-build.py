@@ -128,7 +128,7 @@ main = f'''
   </div>
 </section>
 <section class="pair clihero">
-  <h2><code>lf</code>: the CLI for agent workflows.</h2>
+  <h2><code>lf</code>: the CLI for launching coding agents.</h2>
   <div class="halves">
     <article>
       <p>Underneath Loopflow’s task-centered API is a coding agent launcher, <code>lf</code>. One command says where an agent runs, on whose login, with which model, on which piece of work, and what it does. Set it once in a Graph and every launch is the same.</p>

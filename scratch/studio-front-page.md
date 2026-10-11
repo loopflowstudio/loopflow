@@ -745,3 +745,5 @@ strip links to its own site in a new tab.
 - Jack Heart: "maybe the bubble could be a little lighter" → the cycling word's background in `x12` is a paler pink with a softer edge and shadow.
 
 - Jack Heart revised the section heading: "Arrange your coding sessions around sustaining waves and resolving tasks." Set in `x12` as written.
+
+- Jack Heart: "work-centered API instead of task-centered? or wave-and-task-centered?" → `x12` says "Underneath Loopflow's work-centered API is `lf`." (Claude's pick of his two.)

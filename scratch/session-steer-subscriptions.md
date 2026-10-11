@@ -27,6 +27,63 @@ needed in this reconciliation.
 - SwiftPM's nested sandbox could not start in the previous step. The changed
   author model compiled and round-tripped independently; CI owns the full suite.
 
+## Concept review — 2026-10-11, proposed
+
+Jack Heart requested concept-review after publication. No implementation change,
+new execution or publication is selected by this review.
+
+Accepted model remains: one authored direction, its existing source owner, and
+independent delivery to applicable Sessions. Work wrappers select scope; provider
+delivery remains Session-only. Downward propagation, future-Session launch context,
+bounded context, idle staying idle and explicit retry remain binding.
+
+The consequential mismatch is visibility and recovery. Publication prints a saved
+ID; status and retry require a Session ID. Jack Heart can steer a Task but must
+enumerate its conversations to find unavailable or uncertain delivery. All current
+adapters stop at local emission, so a successful write never establishes acceptance.
+This is not fixed by renaming emitted to delivered.
+
+Proposed usage copy for README/conducting, not implemented:
+
+> Save direction on the Task. Each associated conversation receives it when work
+> next reaches a supported boundary; idle conversations remain idle. Inspect the
+> saved direction from the Task to see where it is pending, offered or unavailable.
+> If an offer is uncertain, retry that offer for the affected conversation. The
+> original direction and earlier attempts remain available. Offered does not mean
+> the agent followed it. Repository/Wave direction currently stays on this Machine.
+
+Proposed instruction for the skill that publishes direction, not installed:
+
+> After saving a steer, report saved status and the recipient evidence available
+> at that source. Surface unavailable or uncertain offers in the ongoing
+> conversation. Do not start an idle Session or claim that direction was applied.
+
+| Action | Product concept | Existing/proposed API |
+| --- | --- | --- |
+| Save “keep the public name” on a Task | Authored direction | Existing Task comment publication |
+| Continue either associated conversation | Independent Session delivery | Existing callback reconciliation/emission |
+| Inspect that direction from the Task | Recipient evidence | Proposed source-level projection of existing associations/receipts |
+| Retry an uncertain offer for one conversation | Another delivery attempt | Existing `retry_session_steer`, surfaced beside that recipient |
+
+No new subscription lifecycle or delivery authority is needed for that projection.
+Recipients are observed current membership, not a frozen promise; future Sessions
+still acquire saved direction at launch. Bound/page recipient reads and distinguish
+unavailable remote exchange from zero recipients. A retired recipient's receipt
+remains history even when it no longer belongs to the Task.
+
+Counterexample: output completes, then the provider drops the context. The current
+reviewed contract retains emitted/unconfirmed and requires explicit retry. Better
+visibility does not make this reliable acceptance. Open product question: is that
+offer-once contract sufficient, or does steering need an explicit agent
+acknowledgement visible in the conversation? An acknowledgement would be a separate
+claim by the agent, never proof of compliance; its absence must not wake idle work
+or silently authorize automatic reinjection. This alternative is not accepted.
+
+Next proof: show the two-Session normal path and lost-output recovery from the
+source Task, without requiring Jack Heart to look up Session IDs or read capability
+tokens, batch hashes or adapter lifecycle states. Preserve the existing receipts
+and provider-handoff counterexamples throughout.
+
 The complete prior design, provider-source findings and dated implementation
 account are preserved at
 `0d04805ab35f2ba0ee4d72dec3cc9caa1d1aa051:scratch/session-steer-subscriptions.md`.

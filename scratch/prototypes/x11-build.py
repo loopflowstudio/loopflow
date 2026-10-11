@@ -118,13 +118,31 @@ main = f'''
     <article>
       <p>A workflow says how a Task gets from an idea to shipped, and where you come in: early on in the design, later on to try the change, both, or neither. Stay close while the work is new, and drop a stop once you trust how it goes. You can zoom in and you can zoom out.</p>
       <p>Workflows are files in your repository. Use these three, change them, or write your own, and each project picks the one its Tasks follow, so hands-on work and hands-off work run side by side.</p>
-      <p>Private, secure remote jobs and telemetry made easy through <code>ssh</code>.</p>
       <p class="more"><a href="/docs/waves">Tasks and Waves ↗</a><a href="/docs/authoring#workflows">Write a workflow ↗</a></p>
     </article>
     <article>
       <div class="card"><ul class="wfs">
 {WFS}
       </ul></div>
+    </article>
+  </div>
+</section>
+<section class="pair clihero">
+  <h2><code>lf</code>: the CLI for software engineering.</h2>
+  <div class="halves">
+    <article>
+      <p>Everything above is <code>lf</code> underneath. Use it anywhere you would launch Claude Code, Codex, or OpenCode: it launches agents, runs Skills and Flows, keeps every session, and manages your accounts and usage.</p>
+      <p>Private, secure remote jobs and telemetry made easy through <code>ssh</code>.</p>
+      <p class="more"><a href="/cli">The CLI ↗</a><a href="/docs/authoring#flows">Skills and Flows ↗</a></p>
+    </article>
+    <article>
+<pre tabindex="0" aria-label="lf commands" class="term"><span class="p">$</span> <b>lf</b> -a codex : "fix the test"     <span class="c">  # launch an agent with a prompt</span>
+<span class="p">$</span> <b>lf</b> skill design "Add CSV export" <span class="c">  # a saved prompt: a Skill</span>
+<span class="p">$</span> <b>lf</b> run pursue                    <span class="c">  # Skills in sequence: a Flow</span>
+<span class="p">$</span> <b>lf</b> task run EXP-12               <span class="c">  # its own worktree, then its Flow</span>
+<span class="p">$</span> <b>lf</b> resume                        <span class="c">  # pick the last Session back up</span>
+<span class="p">$</span> <b>lf</b> usage --task EXP-12           <span class="c">  # what that Task cost</span>
+<span class="p">$</span> <b>lf</b> land                          <span class="c">  # merge when checks pass</span></pre>
     </article>
   </div>
 </section>
@@ -137,7 +155,6 @@ main = f'''
     <li><b><a href="https://wisprflow.ai" target="_blank" rel="noopener">Wispr Flow</a></b><span>talk instead of typing</span></li>
     <li><b><a href="https://cmux.com" target="_blank" rel="noopener">cmux</a> · <a href="https://herdr.dev" target="_blank" rel="noopener">herdr</a></b><span><code>lf</code> runs inside them</span></li>
   </ul>
-  <p class="under"><a href="/cli">Underneath, it is all <code>lf</code>: the CLI for software engineering ↗</a></p>
 </section>
 <section id="yours" class="reading">
   <h2>Free and open source (MIT).</h2>
@@ -155,6 +172,7 @@ extra = '''
 .home-page .pair h2{max-width:900px}.home-page .pair .halves .more{margin:0;border:0;padding:0}
 .home-page .works .under{margin:22px 0 0;font:500 14px var(--font-mono)}.home-page .works .under a{color:var(--text);text-decoration:underline;text-decoration-color:#b9b1a6;text-underline-offset:4px}.home-page .works .under a:hover{color:var(--wine)}
 .home-page .reading.closing{padding-top:8px}
+.home-page .clihero h2 code{font-size:.9em}.home-page .clihero .term{margin:0;font-size:12.5px;overflow-x:auto}
 .home-page #yours .say.req{margin-bottom:4px}.home-page #yours .reqs{margin:0 0 14px;padding-left:1.2em;font-size:18px;line-height:1.6;color:#333}.home-page #yours .reqs li{margin:0}.home-page #yours .reqs code{font-size:.88em}
 .home-page #yours .say{max-width:760px;margin:0 0 14px}.home-page #yours .say code{font-size:.88em}.home-page #yours{padding-bottom:28px}
 .home-page .pair .halves{margin-top:22px!important;align-items:start}.home-page .pair h2 em{font-style:italic}

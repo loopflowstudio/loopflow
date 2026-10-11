@@ -626,3 +626,5 @@ strip links to its own site in a new tab.
 - Jack Heart, on the line under Download at the top of `x11`: "Just: Free and open source (MIT)" → set. The statement that the coding agent has its own cost is no longer on the page; the growth memory rule that "Free" sits next to it is overridden here by Jack.
 
 - Jack Heart: "i feel like Private, secure remote jobs and telemetry made easy through ssh. might want to be higher in the product pitch" → moved in `x11` from the closing section to the "Stay engaged *and* scale the swarm." section, as its third paragraph. The closing section keeps only the requirements.
+
+- Jack Heart: "I think we need a 2nd thing that is similarly sized to stay engaged and cli is a CLI hero", then "The CLI for agent workflows ?" → `x11` has a second section the size of the swarm section, headed "`lf`: the CLI for agent workflows.": two short paragraphs (the second is his ssh line, moved here) beside a seven-command terminal card, linking to `/cli`. The "Underneath, it is all lf" link under Works with is removed.

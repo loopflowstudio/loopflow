@@ -252,6 +252,25 @@ checkpoint CI skipped tests; Linux/installed acceptance remains unproved.
 Prior live-takeover evidence: `5e95ce9a4:wave/infrastructure/MEMORY.md`, this heading.
 Plan: `scratch/stop-and-take-over-claude.md`.
 
+## Session steer subscriptions (lf-9c03797, 2026-10-11)
+
+Jack Heart accepted Session-only delivery with repository/Work wrappers and downward
+propagation, independent receipts, launch seeding, bounded context and idle staying
+idle. Replace Flow cursors, live Task injection and summary replay together; planning
+publication receipts cannot establish provider acceptance. Implementation is unstarted;
+`scratch/session-steer-subscriptions.md` owns the design and remaining work.
+
+Codex attachment handoff preserves the provider and its hook declaration but changes
+the claim; reconnect strips configuration overrides. A launch-bound hook can become
+permanently stale; reading the current claim alone cannot authorize it. Provider-origin
+emission versus explicit fenced rebinding remains unapproved. Preserve A → B → A
+rejection, child-conversation separation and replacement fences. Pinned Codex/OpenCode
+source findings are design evidence, not configured delivery: parent Session IDs may
+appear in child hooks, and OpenCode transform callbacks supply no provider request ID.
+OpenCode boundary/retry identity remains unresolved. Local emission is not durable
+context confirmation. Release's operation-entry lesson requires public adapter proofs,
+not only receipt/helper tests.
+
 ## Process-owned liveness (LOO-451, 2026-10-10)
 
 Jack Heart removed client-file compatibility (`5228ab69`); launches record an
@@ -512,50 +531,25 @@ Rotation accepts confirmed readbacks; reteam requires exact Team/full issue
 readbacks and preserves newer facts. Deleted identity shortcuts and generic
 writers stay deleted. Source-only evidence: `d4d77d8e22f4244ad83027ba9c85bb8644a622e6`.
 
-October 5: queued SQLite workers own Wave guards through commit, including after
-caller cancellation; one shared writer preserves that lifetime. Multi-Wave
-operations lock in stable ID order and reuse held guards. Cold detail re-reads
-ownership under the lock; delayed absence compares the queried revision/age.
-Inspection follows UUID across renames. Cancellation proofs exclude competing
-reteam preview until commit; separate apply fixtures cover cached recovery and
-expansion/move/narrowing response loss. These supersede the unrepaired-reteam
-finding; the registration and rotation proofs below establish later boundaries,
-not installed acceptance.
-
-Exact-ID rotation supersedes the name-selector failure retained at
-`42e6c2706b1:scratch/keep-every-wave-ready-for.md`; cross-process recovery remains
-unproved. Desktop activation
-must preserve #1447's cached plans and independent Session reads, outside polling.
-#1446's ongoing procedures retain started-Task follow-through; reads never provision.
-
-October 5 admission, registration and rotation evidence is preserved at
-`fc0bb97f7e8e0ad3f9520daf12e7e76b2e4f2ee1:wave/infrastructure/MEMORY.md`
-under this heading. LOO-406 deleted the obsolete registration writers; their
-historical proofs are not the common-writer acceptance. Retain stored workspace
-membership, Task/PR identity, unset Started and issue-reported ownership. Ordered
-Wave and checkout locks survive queued writes and caller cancellation; Git leases
-remain separate. Unreviewed backlog is never automatically canceled.
-CI-repair entry, public crash/retry and configured readiness remain unproved.
+October 5 rotation/registration proof detail and superseded file-binding history:
+`724c5737640a2c79db0cda9aad0065d933e30cc5:wave/infrastructure/MEMORY.md`, this heading.
+LOO-406 removed the obsolete registration writers; their proofs are not common-writer
+acceptance. Preserve workspace membership, Task/PR identity, unset Started and
+provider-reported ownership. Ordered Wave/checkout guards survive queued writes
+and cancellation; Git leases remain separate. Cold reads recheck ownership and
+revision under the guard. Rotation preflights and reserves all pairs before writes,
+retains creation intent and editable unfinished KRs, reclassifies before switching,
+and reconciles only saved selections afterward. Later starts, external moves,
+authored text and unreviewed backlog survive.
 
 Jack Heart's October 5 comment `e4dafef5-2a87-4359-818a-3770356ba850` authorizes
 Intelligence repair of Project `999bdbdd-c045-41a6-8ffc-a97c4a40b0b3`, preserving
-KRs, Tasks and identity without competing creation or repository rotation. That
-exact ID supplies selection; active-Project adoption proves no Backlog activation
-or installed repair.
-
-The archived file-binding design is superseded by SQLite selection below.
-Its output-handle leak remains unresolved; seeded ensure recovery proves no crash
-recovery. Exact evidence remains in the preserved October 5 notes above.
-
-October 5 rotation retains exact-ID input, selected issue membership and settled
-history. Whole-input preflight includes accepted facts and legacy conversion;
-all pairs reserve before provider writes. Creation intent survives retry; unfinished KRs stay editable.
-Before switching, reclassify new work; afterward reconcile only saved selections,
-preserving later starts and external moves. Planning updates preserve names,
-summaries and unrelated text. Queued membership/conversion writers retain guards.
-Operation fixtures cover partial settlement and both sides of the switch;
-CLI crashes, Desktop and configured Intelligence acceptance remain open.
-Earlier counterexamples: `fc6df439424bd341ec3cd8182c19b13ed45cffd7:wave/infrastructure/MEMORY.md`.
+KRs, Tasks and identity without competing creation or rotation. Exact-ID adoption
+proves no Backlog activation or installed repair. Cached plans and independent
+Session reads survive activation; reads never provision. Public CLI/crash recovery,
+CI-repair entry, configured readiness and Intelligence acceptance remain unproved;
+the file-binding output-handle leak remains unresolved. Operation fixtures alone
+cannot establish those boundaries.
 
 October 6: Jack Heart authorized SQLite selection and LOO-382's stream, deleting
 the YAML selector and `ProjectPreparation`. Dependency `e887a21c1` entered through

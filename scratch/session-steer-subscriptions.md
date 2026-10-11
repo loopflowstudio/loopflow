@@ -4,6 +4,23 @@ Task `lf-9c03797`, 2026-10-11. Jack Heart accepted the Session-only primitive an
 wrappers for pursuit (“ok, pursue”). Production cutover has not started; the
 handoff authority amendment below remains unapproved.
 
+## Current implementation — reconciled 2026-10-11
+
+At `03ba479ae2`, Task launch still reads event-backed steers into `TaskSeed`;
+`TaskInput::poll` injects them on a five-second timer, and `RunningFlow` keeps
+per-node cursors through `--steers-after`. `ContextDelivery::prepare` saves generated
+Task summaries as references that later context hooks reread. No publication,
+Session subscription, delivery receipt or `session_steers` integration target exists.
+The data structures, commands and transaction below remain design, not shipped APIs.
+
+Main's #1518/#1521 already supply checkout-based context refresh and a rendered
+10,000-byte hook ceiling; extend that owner rather than adding another budget or
+context reader. Main's #1524 preserves Codex live handoff while Claude/OpenCode
+stop and resume native history. Neither change resolves callback authority.
+Release child memory's operation-entry lesson applies here: helper tests cannot
+establish public launch/hook dispatch or configured provider acceptance. Its
+GOAL.md and complete MEMORY.md were reviewed; no deeper child scope was present.
+
 ## What to build
 
 Deliver authored repository, Wave, Task and direct Session direction through one
@@ -239,8 +256,10 @@ Sources: [Codex hooks](https://learn.chatgpt.com/docs/hooks),
 Install only Loopflow-owned launch declarations, preserving user hooks/settings.
 Extend Codex's existing exact-declaration trust hashing beyond SessionStart; no
 global trust bypass. Providers may skip unavailable/untrusted hooks: status reports
-the reason and pending count. Already-open processes without the adapter remain
-unavailable until normal reconnect; no hot-reload or retroactive installation claim.
+the reason and pending count. Already-open providers without the adapter remain unavailable until a provider
+start installs the declaration. Codex attachment-only reconnect strips configuration
+overrides and cannot be treated as installation; no hot-reload or retroactive
+installation claim.
 Hooks validate their saved Session/AgentSession and current attachment, not cwd or
 an arbitrary caller-supplied Session ID. Child provider conversations cannot consume
 their parent's receipts.
@@ -319,4 +338,4 @@ if the status shape crosses that boundary. Configured provider probes use isolat
 homes and headless fake endpoints; unavailable probes are explicitly deferred to
 capable CI, never recorded as passes.
 
-Check: `git diff --check` and `lf context`, 2026-10-11 — clean and within budgets; prose-only reduction, build/tests skipped; provider acceptance remains for implementation and gate.
+Check: `git diff --check` and `lf context`, 2026-10-11 — clean; memory and scratch within both targets; prose-only reconciliation, no test rerun; provider acceptance remains for implementation/gate.

@@ -388,6 +388,9 @@ pub(crate) fn ensure_record(
     object: &PlanningObject,
     edits: &[PlanningEdit],
 ) -> StoreResult<()> {
+    if object.kind == PlanningKind::Wave {
+        super::repositories::ensure_repository_in(conn, repo)?;
+    }
     let exists = conn.query_row(
         &format!(
             "SELECT EXISTS(SELECT 1 FROM {} WHERE id=?1)",

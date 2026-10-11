@@ -789,7 +789,10 @@ fn public_local_planning_survives_restart_with_generated_identity() {
             "--json",
         ],
     );
-    assert_eq!(project["krs"][0]["text"], "Quoted input survives");
+    assert_eq!(
+        project["project"]["krs"][0]["text"],
+        "Quoted input survives"
+    );
     let read_comments = lf(
         repo.path(),
         home.path(),
@@ -1330,8 +1333,9 @@ fn project_reads_keep_canonical_identity_and_authored_order_after_edits() {
                     repo.path(),
                     home.path(),
                     &[
-                        "project",
-                        "edit",
+                        "wave",
+                        "edit-plan",
+                        "--project",
                         projects[1].id.as_str(),
                         "--name",
                         "Edited",
@@ -1360,15 +1364,8 @@ fn project_reads_keep_canonical_identity_and_authored_order_after_edits() {
                 home.path(),
                 &["wave", "status", "product", "--json"],
             );
-            let roadmap = lf(
-                repo.path(),
-                home.path(),
-                &["roadmap", "--wave", "product", "--json"],
-            );
-            for rows in [
-                &status["tasks"]["items"],
-                &roadmap["waves"][0]["tasks"]["items"],
-            ] {
+            {
+                let rows = &status["tasks"]["items"];
                 let rows = rows.as_array().unwrap();
                 assert_eq!(rows.len(), 1);
                 let task = &rows[0]["task"];
@@ -1396,10 +1393,8 @@ fn project_reads_keep_canonical_identity_and_authored_order_after_edits() {
             assert_eq!(retained.branch, saved.branch);
             assert_eq!(retained.base_commit, saved.base_commit);
             assert_eq!(retained.pm_snapshot_synced_at, saved.pm_snapshot_synced_at);
-            for rows in [
-                &status["projects"]["items"],
-                &roadmap["waves"][0]["projects"]["items"],
-            ] {
+            {
+                let rows = &status["projects"]["items"];
                 let rows = rows.as_array().unwrap();
                 assert_eq!(rows.len(), 2);
                 for (row, project) in rows.iter().zip(&projects) {
@@ -1556,20 +1551,20 @@ fn project_edits_save_offline_in_both_connection_modes() {
             ],
         );
         drop(writer);
-        assert_eq!(saved["id"], id.as_str());
+        assert_eq!(saved["project"]["id"], id.as_str());
         assert_eq!(
-            saved["linear_id"],
+            saved["project"]["linear_id"],
             if mapped {
                 serde_json::json!(project.id)
             } else {
                 Value::Null
             }
         );
-        assert_eq!(saved["description"], authored.description.trim());
-        assert_eq!(saved["name"], "Saved");
-        assert_eq!(saved["summary"], "");
-        assert_eq!(saved["workflow"], "review");
-        assert_eq!(saved["krs"][0]["text"], "Retain the proof");
+        assert_eq!(saved["project"]["description"], authored.description.trim());
+        assert_eq!(saved["project"]["name"], "Saved");
+        assert_eq!(saved["project"]["summary"], "");
+        assert_eq!(saved["project"]["workflow"], "review");
+        assert_eq!(saved["project"]["krs"][0]["text"], "Retain the proof");
         assert_eq!(saved["sync"]["connected"], connected);
         assert_eq!(
             saved["sync"]["changes"].as_array().unwrap().is_empty(),
@@ -1718,20 +1713,20 @@ fn project_edits_save_offline_in_both_connection_modes() {
                 "--json",
             ],
         );
-        assert_eq!(saved["krs"], content["krs"]);
-        assert_eq!(saved["workflow"], content["workflow"]);
-        assert_eq!(saved["id"], id.as_str());
+        assert_eq!(saved["project"]["krs"], content["krs"]);
+        assert_eq!(saved["project"]["workflow"], content["workflow"]);
+        assert_eq!(saved["project"]["id"], id.as_str());
         assert_eq!(
-            saved["linear_id"],
+            saved["project"]["linear_id"],
             if mapped {
                 serde_json::json!(project.id)
             } else {
                 Value::Null
             }
         );
-        assert_eq!(saved["description"], authored.description.trim());
-        assert_eq!(saved["name"], "Saved");
-        assert_eq!(saved["summary"], "");
+        assert_eq!(saved["project"]["description"], authored.description.trim());
+        assert_eq!(saved["project"]["name"], "Saved");
+        assert_eq!(saved["project"]["summary"], "");
         assert_eq!(
             store.pending_project_changes(&id).unwrap().len(),
             if mapped { 3 } else { 5 }
@@ -3153,7 +3148,7 @@ fn wave_planning_reads_current_and_historical_chapters_without_starting_work() {
         home.path(),
         &["wave", "workflow", "show", wave.slug(), "--json"],
     );
-    assert_eq!(selected["id"], current.id.as_str());
+    assert_eq!(selected["project"]["id"], current.id.as_str());
     let retained = lf(
         repo.path(),
         home.path(),
@@ -3166,7 +3161,7 @@ fn wave_planning_reads_current_and_historical_chapters_without_starting_work() {
             "--json",
         ],
     );
-    assert_eq!(retained["workflow"], "code");
+    assert_eq!(retained["project"]["workflow"], "code");
     let scoped = lf(
         repo.path(),
         home.path(),
@@ -3179,7 +3174,7 @@ fn wave_planning_reads_current_and_historical_chapters_without_starting_work() {
             "--json",
         ],
     );
-    assert_eq!(scoped["id"], current.id.as_str());
+    assert_eq!(scoped["project"]["id"], current.id.as_str());
     let source = lf(
         repo.path(),
         home.path(),

@@ -141,7 +141,7 @@ fn execution(conn: &Connection, task: &str) -> Vec<Vec<Vec<rusqlite::types::Valu
     .into_iter()
     .map(|table| {
         let (predicate, identity) = if table == "processes" {
-            ("lfid=?1", "00000000-0000-4000-8000-000000000001")
+            ("id=?1", "00000000-0000-4000-8000-000000000001")
         } else {
             ("task_id=?1", task)
         };
@@ -201,7 +201,7 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
     });
     let conn = Connection::open(left.path().join("loopflow.db")).unwrap();
     conn.busy_timeout(Duration::from_secs(5)).unwrap();
-    conn.execute("INSERT INTO processes(lfid,trace_id,started_at) VALUES('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000002',1)", []).unwrap();
+    conn.execute("INSERT INTO processes(id,trace_id,started_at) VALUES('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000002',1)", []).unwrap();
     conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,interactive,input_published,cwd,task_id,wave_id)
         VALUES('retained-session','Retained','human',1,1,1,?1,?2,?3)",
         params![source_key,fixture.task.id.as_str(),fixture.task.wave_id.as_str()]).unwrap();
@@ -727,7 +727,7 @@ fn public_wave_reads_imported_planning_without_placing_or_changing_execution() {
         .is_empty());
     let wave_id = fixture.task.wave_id.as_str();
     let conn = Connection::open(right.path().join("loopflow.db")).unwrap();
-    conn.execute("INSERT INTO processes(lfid,trace_id,started_at) VALUES('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000002',1)", []).unwrap();
+    conn.execute("INSERT INTO processes(id,trace_id,started_at) VALUES('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000002',1)", []).unwrap();
     let retained_task = worker.task(&retained.parse().unwrap()).unwrap().unwrap();
     conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,interactive,input_published,cwd,task_id,wave_id)
         VALUES('retained-session','Retained','human',1,1,1,?1,?2,?3)", params![target_key, retained, retained_task.wave_id.as_str()]).unwrap();

@@ -89,50 +89,15 @@ exchange is superseded, not remaining work. Installed context still
 uses the old generated inventory; [questions](questions.md#context-budget) records
 the measured overage without changing budgets or production schema boundaries.
 
-Dependency inspection includes `2588b1ca27` and the newer `58de9907b6` typed-writer,
-domain and main-module cut. The earlier 33-path sync was aborted. The operator's
-October 10 brief interpretation removes that unmerged reduction as a shipping
-prerequisite: this diff retains the older enrollment baseline, not configured
-transport. That reconciliation made no new integration or combined-tree gate;
-subsequent queue repairs are below. Product has no child Markdown/memories; relevant Infrastructure planning
-sections were read, not its entire unrelated history.
+## Earlier queue repairs — archived
 
+The aborted 33-path integration, baseline-first interpretation, 19 repaired Rust
+cases, TaskCapture/TaskFlow corrections and their exact commands remain at
+`e7da790e2a:scratch/findings.md`, **Queue repair — current**. Jack Heart's later
+stack order supersedes that interpretation; those passes do not validate the
+combined tree. LOO-391/397/414 retain the proof and admission boundaries above.
 
-## Queue repair — current
-
-Earlier gate failures, repairs, full command counts and receipts survive at
-`596a867460:scratch/findings.md`, **Queue gate** and `.lf/tmp/gate/run-83045/`.
-No final full-suite pass is inferred from those focused passes. The operator
-interpreted Jack Heart's acceptance of the reviewed baseline as leaving the active
-LOO-412 reduction separate; Jack did not author that later brief or explicitly
-choose the dependency-integration detail. This resumed gate is local only.
-
-All 19 unconfirmed Rust cases now have confirming passes. Canonical repository
-repair retains legacy plan IDs as locators while keeping the canonical selection.
-Review added direct alias-retention and missing-membership-inventory assertions.
-The other failures were stale setup/expectations: select stored Workflows, seed
-the complete candidate schema, retain coherent PR/Task placement and mutation
-graphs, use current owner/refusal explanations, and run headless history through
-an isolated fake managed provider.
-
-TaskCapture/TaskFlow now use repository/Work identity. Bare Task navigation proves
-no Session acquisition; an explicit Session link opens the retained conversation
-and companions. Their earlier compile and Machine-mismatch failures remain in
-`/tmp/loo427-resumed-swift-build-failure.log` and `swift{2,3}.log`; no native proof is implied.
-
-Check: materialized network-isolated nextest repair filters — original 19: 14 pass/5 fail, then 3 pass/2 fail, then both pass plus 6 affected cases (8/8, including the full Wave resolution matrix); `/tmp/loo427-resumed-rust{,2,3}.log`, compile failure `rust2-compile.log`. All original failures resolved; unrelated completed suites were not repeated.
-Check: `scripts/test_desktop.sh --filter 'TaskCaptureTests|TaskFlowTests' -Xswiftc -gnone --no-parallel`, then focused TaskFlow rerun — Capture 6/6 and Flow 9/9 pass on unchanged final test sources; `/tmp/loo427-resumed-swift{2,4}.log`. Headless only.
-Check: `cargo fmt --check`, `cargo clippy --all-targets --jobs 4 -- -D warnings`, architecture/Swift boundary scripts and `git diff --check` — PASS; `/tmp/loo427-resumed-{clippy,architecture}.log`.
-
-No new full-suite pass or reusable gate receipt is claimed. Caller owns shipping;
-this repair neither publishes nor integrates the active LOO-412 reduction.
-Linux reconnect and the remaining installation matrix stay with capable CI;
-native/configured proof and other deferred Tasks retain their recorded owners.
-Installed generated context remains over budget; authored notes fit without
-installation, history deletion or raised limits.
-
-
-## Final gate — October 10
+## Before stacking — October 10
 
 `run-79717` found two Rust fixture failures: a retained creation input omitted
 `dueDate`, and foreground sync opened an empty Machine after the comment fixture

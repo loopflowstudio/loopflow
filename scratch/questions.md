@@ -20,7 +20,7 @@ Open choices:
   and `wave edit-plan [WAVE]` use current selection; `--project ID` addresses history.
   Project identity and Workflow capture stay with their existing owners.
 - Skill/Flow name collisions. Flow preview presentation below is reversible.
-- Final home for standalone prompt-budget reporting. Keep `--steers-after` and its existing filtering.
+- Final home for standalone prompt-budget reporting. October 11: Jack Heart requested replacing `--steers-after` and live injection through a separate Infrastructure Task, `lf-9c03797` (`task_9c03797346ce4de292a6cff8ef1d0298`; Linear sync pending). Its complete brief owns bounded per-Session subscriptions, repository/Wave/Task downward propagation, direct Session steers, next-tool-boundary delivery and idle staying idle. LOO-427 retains the current mechanism until that replacement lands.
 - Remembered repository names: Jack is unsure; draft uses root/name or explicit path.
 - Discord is deferred by Jack: leave it unchanged.
 
@@ -158,3 +158,11 @@ Files-owner choice (October 10): a changed retained owner is unavailable rather
 than silently redirecting an existing document/Undo buffer. Repeated readings of
 the same owner reuse it; request nonce/time do not create another store. This
 reversible presentation limit is not Task transfer or first-start authority.
+
+## Shared first start after stacking — October 11
+
+The combined gate observed Git-by-default creation enrolling ordinary new Tasks
+in shared planning; the existing no-owner first-start refusal then blocks launch.
+LOO-414 owns admission, and LOO-412 received this integration finding through a
+Task steer. No reply or resolution is claimed. Keep the duplicate-execution
+protection; the stack is not landing-ready while ordinary Task startup is blocked.

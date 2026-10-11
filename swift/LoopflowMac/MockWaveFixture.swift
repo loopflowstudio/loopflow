@@ -298,7 +298,8 @@ enum MockWaveFixture {
             "items": [
               {
                 "id": "project-1",
-                "work_id": null,
+                "linear_id": null,
+                "sync": {"connected": false, "changes": []},
                 "slug": "release-feedback",
                 "name": "current",
                 "workflow": "incident",

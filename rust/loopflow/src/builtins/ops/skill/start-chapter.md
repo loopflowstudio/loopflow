@@ -22,7 +22,7 @@ return proposals, never mutate planning. Reconcile them into one retained
 `scratch/chapter-plan.json` with this shape:
 
 ```json
-{"name":"October","waves":[{"wave_id":"<Wave UUID>","successor_id":"<Project UUID>","create":true,"project_name":"October — reliability","content":{"metric_targets":[],"workflow":"","krs":[{"text":"Observable improvement","holds":false}]}}]}
+{"name":"October","waves":[{"wave_id":"<Wave UUID>","successor_id":"<Project UUID>","create":true,"project_name":"October — reliability","metric_targets":[],"workflow":"","krs":[{"text":"Observable improvement","holds":false}]}]}
 ```
 
 Allocate each new successor UUID v4 once and retain it. For an explicitly selected

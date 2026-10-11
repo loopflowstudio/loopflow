@@ -112,7 +112,12 @@ fn task_status_reads_projectless_planning_without_allocating_execution() {
             String::from_utf8_lossy(&output.stderr)
         );
         let status: TaskStatus = serde_json::from_slice(&output.stdout).unwrap();
-        assert_eq!(status.planning.as_ref(), expected);
+        assert!(status.task.is_none());
+        assert!(status.project.is_none());
+        assert_eq!(
+            status.observed_at,
+            expected.map(|record| record.observed_at)
+        );
         assert_eq!(status.planning_state, state);
         assert!(status.execution.is_none());
         assert_eq!(status.planning_error.is_some(), error);

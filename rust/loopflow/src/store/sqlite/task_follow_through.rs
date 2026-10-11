@@ -218,7 +218,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(
             "SELECT COALESCE(t.external_issue_id,t.id), t.issue_identifier, e.kind_json,
-                    COALESCE(target.external_issue_id,target.id)
+                    target.id, target.external_issue_id
              FROM task_events e JOIN tasks t ON t.id = e.task_id
              LEFT JOIN tasks target ON target.id=json_extract(e.kind_json, '$.link.issue_id')
                 OR target.external_issue_id=json_extract(e.kind_json, '$.link.issue_id')
@@ -233,10 +233,11 @@ impl SqliteStore {
                 row.get::<_, String>(1)?,
                 row.get::<_, String>(2)?,
                 row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<String>>(4)?,
             ))
         })?;
         for row in rows {
-            let (issue_id, identifier, json, alias) = row?;
+            let (issue_id, identifier, json, local_id, provider_id) = row?;
             let event: TaskEventKind = serde_json::from_str(&json).map_err(|error| {
                 StoreError::InvalidData(format!("invalid follow-through event: {error}"))
             })?;
@@ -245,7 +246,10 @@ impl SqliteStore {
                     issue_id,
                     identifier,
                 };
-                for key in std::iter::once(link.issue_id).chain(alias) {
+                for key in std::iter::once(link.issue_id)
+                    .chain(local_id)
+                    .chain(provider_id)
+                {
                     let children = sources.entry(key).or_default();
                     if !children.contains(&source) {
                         children.push(source.clone());

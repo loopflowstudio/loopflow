@@ -2,8 +2,8 @@ use std::path::{Path, PathBuf};
 
 use crate::durable::{render_steers, Steer, WorkRef};
 use crate::id::WaveId;
-use crate::planning::ProjectPlan;
 use crate::store::SharedStore;
+use crate::work::project::Project;
 
 use crate::work::task::{Task, TaskPr};
 use crate::work::wave::Wave;
@@ -24,7 +24,7 @@ pub struct WorkBinding {
 
 pub(crate) fn render_task_context(
     task: &Task,
-    project: &ProjectPlan,
+    project: &Project,
     pr: Option<&TaskPr>,
     wave_name: &str,
     steers: &[Steer],
@@ -40,14 +40,14 @@ pub(crate) fn render_task_context(
         .unwrap_or_default();
     format!(
         "Task {identifier}: {title}\n\n{description}\n\nChapter plan: {project} (source {project_id})\n{project_context}\n\n{direction}\n\nTask directive snapshot synced at: {task_snapshot_synced_at}\nChapter plan snapshot synced at: {project_snapshot_synced_at}\nWave: {wave}\nTask Work: {task_id}\nWorktree: {worktree}\nBranch: {branch}{pull_request}\nBase commit: {base_commit}\n{placement}",
-        identifier = task.plan.identifier,
-        title = task.plan.title,
-        description = task.plan.description,
+        identifier = task.identifier,
+        title = task.title,
+        description = task.description,
         project = project.name,
         project_id = project.linear_id.as_ref().map(|id| id.as_str()).unwrap_or("local"),
-        project_context = project.prompt_context,
+        project_context = render_project_context(project),
         direction = render_steers(steers),
-        task_snapshot_synced_at = task.plan.pm_snapshot_synced_at.map(|at| at.to_string()).unwrap_or_else(|| "not observed".into()),
+        task_snapshot_synced_at = task.pm_snapshot_synced_at.map(|at| at.to_string()).unwrap_or_else(|| "not observed".into()),
         project_snapshot_synced_at = project.pm_snapshot_synced_at.map(|at| at.to_string()).unwrap_or_else(|| "not observed".into()),
         wave = wave_name,
         task_id = task.id,
@@ -56,6 +56,25 @@ pub(crate) fn render_task_context(
         base_commit = task.base_commit,
         placement = placement,
     )
+}
+
+fn render_project_context(project: &crate::work::project::Project) -> String {
+    let targets = serde_json::to_string_pretty(&project.metric_targets)
+        .expect("validated metric targets serialize");
+    let mut content = format!(
+        "{}\n## Metric targets\n\n```json\n{targets}\n```",
+        project.description
+    );
+    if !project.workflow.trim().is_empty() {
+        content.push_str(&format!("\n\nworkflow: {}", project.workflow.trim()));
+    }
+    content.push_str("\n\n## KRs");
+    for kr in &project.krs {
+        let marker = if kr.holds { "x" } else { " " };
+        content.push_str(&format!("\n\n- [{marker}] {}", kr.text.trim()));
+    }
+    content.push('\n');
+    content
 }
 
 fn render_wave_context(repo: &Path, wave: &str, metric_context: &str) -> String {
@@ -151,7 +170,7 @@ pub(crate) async fn select_work(
                 .map_err(run_error)?
                 .ok_or_else(|| run_error(format!("Task {} has no owning Wave", task.id)))?;
             if let Some(selected) = &selected_wave {
-                require_wave_match(&wave, selected, &format!("Task {}", task.plan.identifier))?;
+                require_wave_match(&wave, selected, &format!("Task {}", task.identifier))?;
             }
             wave
         }
@@ -198,18 +217,17 @@ async fn bind_selected_work(
         let work = WorkRef::Task(task.id.clone());
         let steers = Vec::new();
         let pr = store.active_task_pr(&task.id).await.map_err(run_error)?;
-        let mut context =
-            render_task_context(&task, &project.plan, pr.as_ref(), wave.slug(), &steers);
+        let mut context = render_task_context(&task, &project, pr.as_ref(), wave.slug(), &steers);
         if let Ok(Some(workflow)) = store.sqlite.workflow(&task.id) {
-            context.push_str(&format!("\n\n{}", workflow.guidance(&task.plan.identifier)));
+            context.push_str(&format!("\n\n{}", workflow.guidance(&task.identifier)));
         }
         let cwd = task.worktree()?.clone();
         return Ok(WorkBinding {
             source: selected.source,
             subjects: vec![
                 format!("wave:{}", wave.slug()),
-                format!("project:{}", project.plan.slug),
-                format!("task:{}", task.plan.identifier),
+                format!("project:{}", project.slug),
+                format!("task:{}", task.identifier),
             ],
             work,
             wave_id: task.wave_id,
@@ -321,12 +339,14 @@ mod tests {
     use super::{resolve_work_binding, resolve_work_selection, WorkSelection};
     use crate::durable::{ProjectId, TaskId, WorkRef};
     use crate::id::WaveId;
-    use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
-    use crate::pm::{PmKr, PmProject, PmSnapshot};
+    use crate::planning::{LinearIssueId, LinearProjectId};
+    use crate::pm::linear::LinearProject;
+    use crate::pm::PmSnapshot;
     use crate::store::SharedStore;
     use crate::store::{PmSnapshotRow, StorageConfig};
     use crate::work::project::Project;
-    use crate::work::task::{Observation, PmWritebackState, Task, TaskPr, TaskPrId};
+    use crate::work::project::ProjectKR;
+    use crate::work::task::{LinearWritebackState, Observation, Task, TaskPr, TaskPrId};
     use crate::work::wave::Wave;
     use std::path::PathBuf;
 
@@ -344,18 +364,19 @@ mod tests {
         let now = OffsetDateTime::now_utc();
         Project {
             id: ProjectId::new(),
-            plan: ProjectPlan {
-                summary: String::new(),
-                workflow: "feature".into(),
-                status: crate::pm::ProjectStatus::Started,
-                linear_id: Some(LinearProjectId::new(planning_id).unwrap()),
-                slug: slug.to_string(),
-                name: slug.to_string(),
-                prompt_context: "Ship the requested behavior.".to_string(),
-                pm_snapshot_synced_at: Some(now.unix_timestamp()),
-            },
+
+            summary: String::new(),
+            workflow: "feature".into(),
+            status: crate::work::project::ProjectStatus::Started,
+            linear_id: Some(LinearProjectId::new(planning_id).unwrap()),
+            slug: slug.to_string(),
+            name: slug.to_string(),
+            description: "Ship the requested behavior.".to_string(),
+            krs: Vec::new(),
+            metric_targets: Vec::new(),
+            pm_snapshot_synced_at: Some(now.unix_timestamp()),
+
             wave_id: wave.id().clone(),
-            iteration: 0,
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -366,15 +387,15 @@ mod tests {
         let now = OffsetDateTime::now_utc();
         let task = Task {
             id: TaskId::new(),
-            plan: TaskPlan {
-                revision: 0,
-                linear_id: Some(LinearIssueId::new("runtime-research").unwrap()),
-                identifier: "LOO-267".to_string(),
-                title: "Research the runtime".to_string(),
-                description: "Compare independent findings.".to_string(),
-                pm_snapshot_synced_at: Some(now.unix_timestamp()),
-            },
-            pm_writeback: PmWritebackState::Current,
+
+            revision: 0,
+            linear_id: Some(LinearIssueId::new("runtime-research").unwrap()),
+            identifier: "LOO-267".to_string(),
+            title: "Research the runtime".to_string(),
+            description: "Compare independent findings.".to_string(),
+            pm_snapshot_synced_at: Some(now.unix_timestamp()),
+
+            pm_writeback: LinearWritebackState::Current,
             wave_id: wave.id().clone(),
             project_id: project.id.clone(),
             worktree: Some(worktree),
@@ -386,6 +407,12 @@ mod tests {
             abandon_intent: None,
             created_at: now,
             updated_at: now,
+            rank: 0,
+            assignee: None,
+            due_date: None,
+            state: None,
+            completed: false,
+            completed_at: None,
             observation: Observation::NotRequired,
         };
         let pr = TaskPr {
@@ -411,7 +438,7 @@ mod tests {
             &store.sqlite,
             wave.id(),
             None,
-            project.plan.linear_id.as_ref().unwrap().as_str(),
+            project.linear_id.as_ref().unwrap().as_str(),
             &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
         )
         .unwrap();
@@ -435,7 +462,7 @@ mod tests {
             &store.sqlite,
             wave.id(),
             None,
-            project.plan.linear_id.as_ref().unwrap().as_str(),
+            project.linear_id.as_ref().unwrap().as_str(),
             &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
         )
         .unwrap();
@@ -516,7 +543,7 @@ mod tests {
             &store,
             other.path(),
             WorkSelection {
-                task: Some(task.plan.identifier.as_str()),
+                task: Some(task.identifier.as_str()),
                 wave: None,
             },
             None,
@@ -953,14 +980,14 @@ mod tests {
             .unwrap()
             .execute(
                 "INSERT INTO task_deletions(wave_id,issue_id,identifier,confirmed_at) VALUES (?1,?2,?3,1)",
-                rusqlite::params![wave.id().as_str(), task.plan.linear_id.as_ref().unwrap().as_str(), task.plan.identifier],
+                rusqlite::params![wave.id().as_str(), task.linear_id.as_ref().unwrap().as_str(), task.identifier],
             )
             .unwrap();
 
         for selector in [
             task.id.as_str(),
-            task.plan.linear_id.as_ref().unwrap().as_str(),
-            &task.plan.identifier,
+            task.linear_id.as_ref().unwrap().as_str(),
+            &task.identifier,
         ] {
             let binding = resolve_work_binding(&store, repo.path(), &format!("task:{selector}"))
                 .await
@@ -1070,7 +1097,7 @@ mod tests {
                 .await
                 .unwrap();
         let mut project = project(&wave, "desktop", "project-desktop");
-        project.plan.slug = "desktop-renamed".into();
+        project.slug = "desktop-renamed".into();
         store.create_project(&project).await.unwrap();
         let task = task(&store, &wave, &project, directory.path().join("workspace")).await;
         let session = |task_id: Option<TaskId>, caller: Option<String>| {
@@ -1128,9 +1155,9 @@ mod tests {
         );
         store.create_session(session(None, None)).await.unwrap();
         for selector in [
-            task.plan.identifier.as_str(),
+            task.identifier.as_str(),
             task.id.as_str(),
-            task.plan.linear_id.as_ref().unwrap().as_str(),
+            task.linear_id.as_ref().unwrap().as_str(),
         ] {
             let rows = store
                 .sqlite
@@ -1268,7 +1295,8 @@ mod tests {
             .await
             .unwrap();
         let snapshot = PmSnapshot {
-            projects: vec![PmProject {
+            projects: vec![LinearProject {
+                description: None,
                 revision: None,
                 id: "project-api".to_string(),
                 slug: "loopflow-api".to_string(),
@@ -1277,8 +1305,8 @@ mod tests {
 
                 metric_targets: Vec::new(),
                 workflow: "feature".into(),
-                status: crate::pm::ProjectStatus::Started,
-                krs: vec![PmKr {
+                status: crate::work::project::ProjectStatus::Started,
+                krs: vec![ProjectKR {
                     text: "One model everywhere".to_string(),
                     holds: false,
                 }],

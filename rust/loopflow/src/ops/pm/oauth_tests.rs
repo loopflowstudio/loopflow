@@ -15,7 +15,7 @@ use super::{
 use crate::durable::Author;
 use crate::ops::error::OpsResult;
 use crate::ops::NullProgress;
-use crate::planning::{LinearProjectId, ProjectPlan};
+use crate::planning::LinearProjectId;
 use crate::pm::test_server::{self, json_response, QueuedResponse};
 use crate::pm::PmSnapshot;
 use crate::provider_auth::{LinearRefreshError, LINEAR_REFRESH_CONFIG, LINEAR_REFRESH_URL};
@@ -112,18 +112,19 @@ async fn pm_read_linear_oauth_recovers() {
     let timestamp = time::OffsetDateTime::from_unix_timestamp(now()).unwrap();
     let project = Project {
         id: ProjectId::new(),
-        plan: ProjectPlan {
-            summary: String::new(),
-            workflow: "feature".into(),
-            status: crate::pm::ProjectStatus::Started,
-            linear_id: Some(LinearProjectId::new("project-1").unwrap()),
-            slug: "reliability".into(),
-            name: "Reliability".into(),
-            prompt_context: "Retain this planning history.".into(),
-            pm_snapshot_synced_at: Some(1),
-        },
+
+        summary: String::new(),
+        workflow: "feature".into(),
+        status: crate::work::project::ProjectStatus::Started,
+        linear_id: Some(LinearProjectId::new("project-1").unwrap()),
+        slug: "reliability".into(),
+        name: "Reliability".into(),
+        description: "Retain this planning history.".into(),
+        krs: Vec::new(),
+        metric_targets: Vec::new(),
+        pm_snapshot_synced_at: Some(1),
+
         wave_id: wave.id().clone(),
-        iteration: 3,
         abandon_intent: None,
         created_at: timestamp,
         updated_at: timestamp,
@@ -187,15 +188,17 @@ async fn pm_read_linear_oauth_recovers() {
         .unwrap();
     assert_eq!(refreshed.id, project.id);
     assert_eq!(refreshed.wave_id, project.wave_id);
-    assert_eq!(refreshed.iteration, project.iteration);
     assert_eq!(refreshed.abandon_intent, project.abandon_intent);
     assert_eq!(refreshed.created_at, project.created_at);
     assert!(refreshed.updated_at >= project.updated_at);
-    assert_eq!(refreshed.plan.linear_id, project.plan.linear_id);
-    assert_eq!(refreshed.plan.status, crate::pm::ProjectStatus::Started);
-    assert_eq!(refreshed.plan.workflow, "feature");
-    assert!(refreshed.plan.prompt_context.contains("Fresh proof"));
-    assert!(refreshed.plan.pm_snapshot_synced_at > project.plan.pm_snapshot_synced_at);
+    assert_eq!(refreshed.linear_id, project.linear_id);
+    assert_eq!(
+        refreshed.status,
+        crate::work::project::ProjectStatus::Started
+    );
+    assert_eq!(refreshed.workflow, "feature");
+    assert!(refreshed.krs.iter().any(|kr| kr.text == "Fresh proof"));
+    assert!(refreshed.pm_snapshot_synced_at > project.pm_snapshot_synced_at);
     assert_eq!(
         fixture
             .store

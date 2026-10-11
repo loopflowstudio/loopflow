@@ -1,4 +1,4 @@
-use super::{acquire_task, block_on_task, owning_wave, task_error, task_store};
+use super::{block_on_task, owning_wave, task_error, task_store};
 use crate::ops::OpsResult;
 use crate::store::Store;
 use crate::work::task::follow_through::{FollowThroughIntent, FollowThroughLink};
@@ -67,18 +67,15 @@ pub fn task_follow_up(repo: &Path, issue: &str, options: &FollowUpOptions) -> Op
                 .await
                 .map_err(task_error)?
                 .ok_or_else(|| task_error("destination Wave is not initialized"))?;
-            let selected = crate::ops::project::current_project(&store, &wave)?;
-            let project = store
-                .get_project_by_project(&selected.id)
-                .await
-                .map_err(task_error)?
-                .ok_or_else(|| task_error("follow-up destination Project is unavailable"))?;
+            let project = crate::ops::project::current_project(&store, &wave)?;
             let (issue_id, title, existing) = if let Some(selector) = &options.existing {
-                let saved = acquire_task(&store, repo, selector).await?;
+                let saved = crate::ops::pm::resolve_saved_task(repo, None, selector)
+                    .await?
+                    .1;
                 if saved.id == task.id {
                     return Err(task_error("a Task cannot follow up itself"));
                 }
-                (saved.id.to_string(), saved.plan.title, true)
+                (saved.id.to_string(), saved.title, true)
             } else {
                 let title = options
                     .title
@@ -110,7 +107,7 @@ pub fn task_follow_up(repo: &Path, issue: &str, options: &FollowUpOptions) -> Op
                 .unwrap_or("");
             let notes = format!(
                 "Follow-up to {} {}\n\n{}",
-                task.plan.identifier,
+                task.identifier,
                 source,
                 options
                     .notes
@@ -148,19 +145,26 @@ async fn link_intent(
         .map_err(task_error)?;
     // Filing reservations already retain their child locally. Acquisition remains
     // necessary only for historical links to an existing, not-yet-retained issue.
-    let saved = acquire_task(store, repo, &intent.issue_id).await?;
-    let item = super::task_planning_item(store, &saved)?;
+    let saved = crate::ops::pm::resolve_saved_task(repo, None, &intent.issue_id)
+        .await?
+        .1;
     let link = FollowThroughLink {
         key: intent.key.clone(),
         issue_id: intent.issue_id.clone(),
-        identifier: saved.plan.identifier,
-        url: item.url,
-        due: item.due_date,
+        identifier: saved.identifier.clone(),
+        url: store.sqlite.task_issue_url(&saved.id).map_err(task_error)?,
+        due: saved.due_date.clone(),
     };
     store
         .sqlite
         .link_follow_through(task, &link)
         .map_err(task_error)?;
+    let owner = store
+        .get_wave(&saved.wave_id)
+        .await
+        .map_err(task_error)?
+        .ok_or_else(|| task_error("follow-up Wave is missing"))?;
+    crate::ops::planning_sync::sync_after_save(store, owner.repo()).await;
     Ok(link)
 }
 

@@ -863,10 +863,8 @@ fn offline_cli_completion_and_reopening_reach_desktop_without_refresh() {
                         for task in items {
                             if let Some(runtime) = task.runtime {
                                 if runtime.status == expected
-                                    && task.task.sync.as_ref().is_some_and(|sync| {
-                                        sync.changes.iter().any(|change| {
-                                            change.field == "state" && change.error.is_some()
-                                        })
+                                    && task.task.sync.changes.iter().any(|change| {
+                                        change.field == "state" && change.error.is_some()
                                     })
                                 {
                                     assert_eq!(
@@ -1011,14 +1009,11 @@ fn peer_planning_receipts_reach_open_desktop_without_refresh() {
     )
     .unwrap();
     let id = home.store.bind_peer_planning(repo, &destination).unwrap();
-    home.store
-        .select_peer_waves(repo, &id, &[home.wave.id().clone()])
-        .unwrap();
     home.store.use_peer_planning(repo, Some(&id)).unwrap();
     let statuses = read(&|statuses| statuses.iter().any(|status| status.active));
     assert_eq!(statuses.len(), 1);
     assert_eq!(statuses[0].id, id);
-    assert_eq!(statuses[0].pending_local, Some(true));
+    assert!(statuses[0].pending_local);
     assert!(statuses[0].selected_records > 0);
 
     home.raw()
@@ -1041,7 +1036,7 @@ fn peer_planning_receipts_reach_open_desktop_without_refresh() {
         Some("reply lost" | "Git publication pending; local planning retained")
     ));
     assert_eq!(statuses[0].imported_revision, None);
-    assert_eq!(statuses[0].pending_local, Some(true));
+    assert!(statuses[0].pending_local);
     home.store.use_peer_planning(repo, None).unwrap();
     let statuses = read(&|statuses| !statuses[0].active);
     assert_eq!(

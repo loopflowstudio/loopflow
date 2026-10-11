@@ -278,7 +278,7 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
     PM_TEST_CONTEXT.sync_scope(PmTestContext {
         path: home.path().join("loopflow.db"), store: store.clone(), graphql_url: url,
     }, || {
-        let planning = runtime.block_on(crate::ops::task_pm::resolve_task_async(repo.path(), "FIX-1", PmRefresh::Force)).unwrap();
+        let planning = runtime.block_on(crate::ops::pm::read_task_planning_async(repo.path(), "FIX-1", PmRefresh::Force)).unwrap();
         store.sqlite.put_pm_snapshot(&crate::store::PmSnapshotRow {
             wave_id: wave.id().clone(), provider: "linear".into(), initiative: "initiative-1".into(),
             synced_at: time::OffsetDateTime::now_utc().unix_timestamp(),
@@ -299,6 +299,8 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
         assert_eq!(merged["status"]["execution"]["work"]["workflow"]["position"]["running"], true);
         assert_ne!(merged["status"]["execution"]["status"], "done");
         assert!(crate::ops::task::task_complete(repo.path(), "FIX-1", None).is_err());
+        // Exercise buffered filing while the selected planning transport is offline.
+        provider.lock().unwrap().unavailable = true;
         task_follow_up(repo.path(), "FIX-1", &FollowUpOptions {
             key: Some("installed".into()), title: Some("Verify installed release".into()),
             notes: Some("Run the released command; retain failures.".into()), due: Some("2026-10-09".into()),
@@ -325,7 +327,7 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
         let child_id = store.sqlite.task_follow_through(&source.id).unwrap().intents[0].issue_id.clone();
         let child = runtime.block_on(store.get_task_by_issue(&child_id)).unwrap().unwrap();
         assert!(child.worktree.is_none());
-        assert!(child.plan.linear_id.is_none());
+        assert!(child.linear_id.is_none());
         assert_ne!(store.sqlite.task_state(&child.id).unwrap(), crate::durable::TaskState::Done);
         // Completion and filing are saved locally; provider delivery has its own receipt.
         assert!(provider.lock().unwrap().issues.is_empty());

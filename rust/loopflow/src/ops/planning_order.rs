@@ -26,7 +26,7 @@ pub(super) async fn sync_order(
         .await
         .map_err(message)?
         .ok_or_else(|| message("Project is missing"))?;
-    let external = local.plan.linear_id()?.as_str();
+    let external = local.linear_id()?.as_str();
     // The caller bounds the entire operation. Each confirmed move is durable;
     // a timeout preserves the exact last attempt for the next foreground pass.
     loop {

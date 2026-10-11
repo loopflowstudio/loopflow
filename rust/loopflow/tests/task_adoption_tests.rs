@@ -6,7 +6,7 @@ use std::path::Path;
 use std::process::Command;
 
 use loopflow::id::WaveId;
-use loopflow::planning::{LinearProjectId, ProjectPlan};
+use loopflow::planning::LinearProjectId;
 use loopflow::store::{open_ephemeral_store, PmSnapshotRow, StorageConfig};
 use loopflow::work::project::{Project, ProjectId};
 use loopflow::work::wave::Wave;
@@ -96,17 +96,17 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
         let project = Project {
             id: ProjectId::new(),
             wave_id: wave.id().clone(),
-            plan: ProjectPlan {
-                summary: String::new(),
-                linear_id: Some(LinearProjectId::new("project-1").unwrap()),
-                slug: "chapter".into(),
-                name: "Chapter".into(),
-                workflow: "adoption".into(),
-                status: loopflow::pm::ProjectStatus::Started,
-                prompt_context: "Adopt existing work".into(),
-                pm_snapshot_synced_at: Some(now.unix_timestamp()),
-            },
-            iteration: 0,
+
+            summary: String::new(),
+            linear_id: Some(LinearProjectId::new("project-1").unwrap()),
+            slug: "chapter".into(),
+            name: "Chapter".into(),
+            workflow: "adoption".into(),
+            status: loopflow::work::project::ProjectStatus::Started,
+            description: "Adopt existing work".into(),
+            krs: Vec::new(),
+            metric_targets: Vec::new(),
+            pm_snapshot_synced_at: Some(now.unix_timestamp()),
             abandon_intent: None,
             created_at: now,
             updated_at: now,

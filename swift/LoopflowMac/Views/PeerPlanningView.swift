@@ -14,12 +14,12 @@ struct PeerPlanningView: View {
                 }
                 if let destinations = reading.value {
                     if !destinations.contains(where: \.active) {
-                        Text("Future root Waves: local")
+                        Text("No active Git planning destination")
                     }
                     ForEach(destinations) { destination in
                         status(destination)
                     }
-                    Text("Import retention is not publication or convergence. Linear delivery is separate.")
+                    Text("Fetched, imported and published show separate steps of synchronization.")
                 } else if reading.isLoading {
                     Text("Reading sync status…")
                 }
@@ -36,23 +36,31 @@ struct PeerPlanningView: View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             Text(destination.reference)
             Text("Destination: \(destination.id)")
-            if destination.active { Text("Selected for future root Waves") }
-            Text("\(destination.selectedRecords) selected records")
-            switch destination.pendingLocal {
-            case true?: Text("Local changes pending")
-            case false?: Text("No additional eligible local changes")
-            case nil: Text("Local changes unknown")
-            }
+            if destination.active { Text("Configured for this repository") }
+            Text("\(destination.selectedRecords) planning records")
+            Text(destination.pendingLocal ? "Local changes pending" : "No pending local changes")
             Text("Publication: \(destination.publicationState ?? "not attempted") (\(destination.publicationRevision ?? "none"))")
             Text("Fetched: \(destination.fetchedRevision ?? "none")")
             Text("Retained import: \(destination.importedRevision ?? "none")")
-            if let error = destination.localError { Text(error) }
             if let error = destination.acquisitionError { Text(error) }
             if let error = destination.publicationError { Text(error) }
             ForEach(destination.conflicts.indices, id: \.self) { index in
                 let conflict = destination.conflicts[index]
                 Text("Held \(conflict.object.kind) \(conflict.object.id): \(conflict.reason)")
             }
+            ForEach(destination.changes.keys.sorted(), id: \.self) { id in
+                if let change = destination.changes[id] {
+                    DisclosureGroup("\(change.object.kind) \(change.object.id): \(change.field)") {
+                        VStack(alignment: .leading, spacing: Spacing.xs) {
+                            Text(destination.candidates.contains(id) ? "Candidate, not confirmed" : "Retained alternative")
+                            Text(change.valueText)
+                            Text("Mutation: \(id)")
+                        }
+                    }
+                    .accessibilityIdentifier("peer-recovery-\(id)")
+                }
+            }
+            Text("Inspection changes nothing. Copy a retained value into an ordinary edit to save it again.")
         }
         .accessibilityIdentifier("peer-planning-\(destination.id)")
     }

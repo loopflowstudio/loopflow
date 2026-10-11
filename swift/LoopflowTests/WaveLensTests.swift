@@ -186,7 +186,7 @@ struct WaveLensTests {
 
     private func makeTask(state: String, reason: String) throws -> WaveTaskWork {
         let json = """
-        {"task":{"id":"\(reason)","identifier":"W2-1","name":"n","description":"","rank":1,"completed":false,"state":"unstarted","completed_at":null, "due_date": null, "follow_up_sources": [],"assignee":null},
+        {"task":{"id":"\(reason)","identifier":"W2-1","name":"n","description":"","rank":1,"completed":false,"state":"unstarted","completed_at":null, "due_date": null, "follow_up_sources": [], "acquisition": {"state": "available", "observed_at": null}, "linear_id": null, "sync": {"connected": false, "changes": []},"assignee":null},
         "reference":{"issue_url":null,"workspace":null},"runtime":null,"directive":null,
         "workflow_name":"feature","latest_flow_process":null,"execution":null,"run_control":{"unavailable":null}, "follow_through": {"intents":[],"links":[],"reason":null,"needs_conversion":false,"scope_notes":[]},
         "next_move":{"owner":"task","reason":"\(reason)"},

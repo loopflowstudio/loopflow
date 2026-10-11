@@ -613,14 +613,14 @@ pub(crate) fn land_repo(
             if pr.phase() == crate::work::task::PrPhase::Merged {
                 let next = match state {
                     crate::durable::TaskState::Done => {
-                        format!("Task {} is complete.", task.plan.identifier)
+                        format!("Task {} is complete.", task.identifier)
                     }
                     crate::durable::TaskState::Abandoned => {
-                        format!("Task {} is abandoned.", task.plan.identifier)
+                        format!("Task {} is abandoned.", task.identifier)
                     }
                     _ => format!(
                         "Finish follow-through, then run lf task complete {}.",
-                        task.plan.identifier
+                        task.identifier
                     ),
                 };
                 progress.status(&format!("Pull request already merged. {next}"));

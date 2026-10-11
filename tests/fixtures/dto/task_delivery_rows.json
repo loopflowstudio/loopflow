@@ -12,7 +12,15 @@
       "completed_at": null,
       "due_date": null,
       "follow_up_sources": [],
-      "sync": null
+      "sync": {
+        "connected": false,
+        "changes": []
+      },
+      "linear_id": null,
+      "acquisition": {
+        "state": "available",
+        "observed_at": null
+      }
     },
     "reference": {
       "issue_url": null,
@@ -428,7 +436,15 @@
       "completed_at": "2026-10-07T20:00:00Z",
       "due_date": null,
       "follow_up_sources": [],
-      "sync": null
+      "sync": {
+        "connected": false,
+        "changes": []
+      },
+      "linear_id": null,
+      "acquisition": {
+        "state": "available",
+        "observed_at": null
+      }
     },
     "reference": {
       "issue_url": null,
@@ -852,7 +868,15 @@
       "completed_at": "2026-10-07T20:00:00Z",
       "due_date": null,
       "follow_up_sources": [],
-      "sync": null
+      "sync": {
+        "connected": false,
+        "changes": []
+      },
+      "linear_id": null,
+      "acquisition": {
+        "state": "available",
+        "observed_at": null
+      }
     },
     "reference": {
       "issue_url": null,
@@ -1259,7 +1283,15 @@
           "identifier": "W2-SOURCE"
         }
       ],
-      "sync": null
+      "sync": {
+        "connected": false,
+        "changes": []
+      },
+      "linear_id": null,
+      "acquisition": {
+        "state": "available",
+        "observed_at": null
+      }
     },
     "reference": {
       "issue_url": null,
@@ -1323,7 +1355,15 @@
       "completed_at": null,
       "due_date": "2026-10-08",
       "follow_up_sources": [],
-      "sync": null
+      "sync": {
+        "connected": false,
+        "changes": []
+      },
+      "linear_id": null,
+      "acquisition": {
+        "state": "available",
+        "observed_at": null
+      }
     },
     "reference": {
       "issue_url": null,
@@ -1387,7 +1427,15 @@
       "completed_at": null,
       "due_date": null,
       "follow_up_sources": [],
-      "sync": null
+      "sync": {
+        "connected": false,
+        "changes": []
+      },
+      "linear_id": null,
+      "acquisition": {
+        "state": "available",
+        "observed_at": null
+      }
     },
     "reference": {
       "issue_url": null,
@@ -1805,7 +1853,15 @@
       "completed_at": null,
       "due_date": null,
       "follow_up_sources": [],
-      "sync": null
+      "sync": {
+        "connected": false,
+        "changes": []
+      },
+      "linear_id": null,
+      "acquisition": {
+        "state": "available",
+        "observed_at": null
+      }
     },
     "reference": {
       "issue_url": null,

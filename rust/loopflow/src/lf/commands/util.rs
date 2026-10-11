@@ -362,7 +362,7 @@ pub(crate) fn require_session_task(
     if store.task_deleted(&task)? {
         bail!(
             "Task {} was deleted and cannot resume execution",
-            task.plan.identifier
+            task.identifier
         );
     }
     Ok(())

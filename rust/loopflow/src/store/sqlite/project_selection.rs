@@ -1,11 +1,13 @@
 //! Current Project selection has one owner: the Wave row. YAML is import evidence only.
 use rusqlite::{params, Connection, OptionalExtension};
 
+use super::planning_write::{self, PlanningEdit as Edit};
 use super::SqliteStore;
 use crate::durable::ProjectId;
 use crate::id::WaveId;
-use crate::pm::PmProject;
+use crate::planning_exchange::PlanningKind;
 use crate::store::{PlanningLocks, StoreError, StoreResult};
+use crate::work::project::Project;
 
 pub(super) fn read_in(conn: &Connection, wave: &WaveId) -> StoreResult<Option<String>> {
     Ok(conn.query_row(
@@ -52,9 +54,11 @@ fn bind_in(conn: &Connection, wave: &WaveId, project: &str) -> StoreResult<Proje
             "Wave already has a different configured Project".into(),
         ));
     }
-    conn.execute(
-        "UPDATE waves SET current_project_id=?2 WHERE id=?1 AND current_project_id IS NULL",
-        params![wave, id.as_str()],
+    planning_write::local(
+        conn,
+        PlanningKind::Wave,
+        wave.as_str(),
+        &[Edit::WaveProject(Some(id.to_string()))],
     )?;
     Ok(id)
 }
@@ -71,9 +75,11 @@ fn write_in(
         ));
     }
     let id = resolve_project_id(conn, wave, project)?;
-    conn.execute(
-        "UPDATE waves SET current_project_id=?2 WHERE id=?1 AND current_project_id IS NOT ?2",
-        params![wave, id.as_str()],
+    planning_write::local(
+        conn,
+        PlanningKind::Wave,
+        wave.as_str(),
+        &[Edit::WaveProject(Some(id.to_string()))],
     )?;
     Ok(())
 }
@@ -95,14 +101,14 @@ pub(crate) fn write_project_binding(
 }
 
 impl SqliteStore {
-    pub(crate) fn bind_project(&self, wave: &WaveId, project: &str) -> StoreResult<PmProject> {
+    pub(crate) fn bind_project(&self, wave: &WaveId, project: &str) -> StoreResult<Project> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let project = bind_in(&tx, wave, project)?;
-        let candidate = super::plan_read::project_in(&tx, &project)?;
+        let candidate = super::children::project_in(&tx, &project)?;
         let competing: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM project_transitions WHERE wave_id=?1 AND settled_at IS NULL
             AND (successor_id NOT IN (?2,?3) OR predecessor_id IS NOT NULL OR reset_name IS NOT NULL))",
-            params![wave,project.as_str(),candidate.id],|row|row.get(0))?;
+            params![wave,project.as_str(),candidate.linear_id.as_ref().map(|id| id.as_str()).unwrap_or(project.as_str())],|row|row.get(0))?;
         if competing {
             return Err(StoreError::InvalidAuthority(
                 "an unfinished Project transition owns selection".into(),
@@ -168,13 +174,18 @@ impl SqliteStore {
             if let Some(existing) = existing {
                 existing
             } else {
-                tx.execute(
-                    "INSERT INTO projects(id,wave_id,created_at,updated_at,project_slug,
-                    project_name,project_prompt_context,status,workflow)
-                    VALUES(?1,?2,?3,?3,?4,?4,'','started','')",
-                    params![id.as_str(), wave, now, name],
+                planning_write::create(
+                    &tx,
+                    "",
+                    PlanningKind::Project,
+                    id.as_str(),
+                    &[
+                        Edit::ProjectWave(wave.to_string()),
+                        Edit::ProjectSlug(Some(name.into())),
+                        Edit::ProjectName(Some(name.into())),
+                        Edit::ProjectStatus(crate::work::project::ProjectStatus::Started),
+                    ],
                 )?;
-                super::planning_peers::capture_project_content(&tx, &id)?;
                 if pending.is_none() {
                     tx.execute("INSERT INTO project_transitions(wave_id,successor_id,created_at,local_plan_json)
                         VALUES(?1,?2,?3,?4)",params![wave,id.as_str(),now,serde_json::json!({"name":name}).to_string()])?;
@@ -183,12 +194,12 @@ impl SqliteStore {
             }
         };
         let id = ProjectId::from_raw(id);
-        let project = super::plan_read::project_in(&tx, &id)?;
+        let project = super::children::project_in(&tx, &id)?;
         if !matches!(
             project.status,
-            crate::pm::ProjectStatus::Backlog
-                | crate::pm::ProjectStatus::Planned
-                | crate::pm::ProjectStatus::Started
+            crate::work::project::ProjectStatus::Backlog
+                | crate::work::project::ProjectStatus::Planned
+                | crate::work::project::ProjectStatus::Started
         ) {
             return Err(StoreError::InvalidAuthority(
                 "terminal or paused Project history cannot be activated".into(),
@@ -200,9 +211,13 @@ impl SqliteStore {
             serde_json::to_value(project.status)?,
             serde_json::json!("started"),
         )?;
-        tx.execute(
-            "UPDATE projects SET status='started',updated_at=?2 WHERE id=?1 AND status!='started'",
-            params![id.as_str(), now],
+        planning_write::local(
+            &tx,
+            PlanningKind::Project,
+            id.as_str(),
+            &[Edit::ProjectStatus(
+                crate::work::project::ProjectStatus::Started,
+            )],
         )?;
         write_in(&tx, wave, selected.as_deref(), id.as_str())?;
         if readiness_in(&tx, wave)?.state == ProjectReadinessState::Unavailable {
@@ -296,10 +311,7 @@ pub struct ProjectActivation {
 }
 
 impl SqliteStore {
-    pub(crate) fn selected_planning_project(
-        &self,
-        wave: &WaveId,
-    ) -> StoreResult<Option<PmProject>> {
+    pub(crate) fn selected_project(&self, wave: &WaveId) -> StoreResult<Option<Project>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.unchecked_transaction()?;
         let readiness = readiness_in(&tx, wave)?;
@@ -317,7 +329,7 @@ impl SqliteStore {
             [wave],
             |row| row.get(0),
         )?;
-        let project = super::plan_read::project_in(&tx, &ProjectId::from_raw(id))?;
+        let project = super::children::project_in(&tx, &ProjectId::from_raw(id))?;
         tx.commit()?;
         Ok(Some(project))
     }
@@ -333,9 +345,9 @@ impl SqliteStore {
 // supply an accepted entity without claiming a complete provider membership list.
 fn readiness_in(conn: &Connection, wave: &WaveId) -> StoreResult<ProjectReadiness> {
     Ok(conn.query_row(
-            "SELECT COALESCE(p.external_project_id,p.id), p.pm_snapshot_synced_at,
+            "SELECT p.id, p.pm_snapshot_synced_at,
              CASE WHEN w.current_project_id IS NULL THEN 'unconfigured'
-                  WHEN p.id IS NULL OR p.project_name IS NULL OR p.project_slug IS NULL OR p.project_prompt_context IS NULL THEN 'unavailable'
+                  WHEN p.id IS NULL OR p.project_name IS NULL OR p.project_slug IS NULL OR p.description IS NULL THEN 'unavailable'
                   WHEN f.id IS NOT NULL AND NOT json_valid(f.body) THEN 'unavailable'
                   WHEN f.id IS NOT NULL AND (f.archived OR f.membership_unresolved OR p.pm_snapshot_synced_at IS NOT f.observed_at
                     OR (s.wave_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM json_each(f.body,'$.initiative_ids') WHERE value=s.initiative)))
@@ -405,7 +417,9 @@ mod tests {
             .unwrap();
         let id = store.ensure_project(wave.id(), "Original name").unwrap();
         assert_eq!(id.as_str(), "proj_11111111111141118111111111111111");
-        store.edit_project(&id, Some("Later edit"), None).unwrap();
+        store
+            .edit_project(&id, Some("Later edit"), None, None)
+            .unwrap();
         let changes = store.pending_project_changes(&id).unwrap();
         let before = store.revisions().unwrap();
         assert_eq!(
@@ -414,16 +428,10 @@ mod tests {
         );
         assert_eq!(store.revisions().unwrap(), before);
         assert_eq!(store.pending_project_changes(&id).unwrap(), changes);
-        assert_eq!(store.planning_project(&id).unwrap().name, "Later edit");
+        assert_eq!(store.project(&id).unwrap().unwrap().name, "Later edit");
         let receipt: (String,bool) = store.conn.lock().unwrap().query_row("SELECT successor_id,settled_at IS NOT NULL FROM project_transitions WHERE wave_id=?1",[wave.id()],|row|Ok((row.get(0)?,row.get(1)?))).unwrap();
         assert_eq!(receipt, (reserved.into(), true));
-        assert!(store
-            .project(&id)
-            .unwrap()
-            .unwrap()
-            .plan
-            .linear_id
-            .is_none());
+        assert!(store.project(&id).unwrap().unwrap().linear_id.is_none());
     }
 
     #[test]

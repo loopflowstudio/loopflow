@@ -801,7 +801,7 @@ pub enum SessionCommand {
         #[arg(long)]
         search: Option<String>,
     },
-    /// Connect to the live conversation, or resume its saved history
+    /// Stop headless Claude/OpenCode and resume history; connect to Codex live
     #[command(name = "connect")]
     Open {
         /// Session ID or provider conversation ID
@@ -892,6 +892,9 @@ pub enum WaveCommand {
         name: Option<String>,
         #[arg(long)]
         summary: Option<String>,
+        /// Authored chapter prose
+        #[arg(long)]
+        description: Option<String>,
     },
 
     /// Rotate this Wave using its exact destination in a retained chapter plan
@@ -1656,31 +1659,6 @@ pub enum PlanningCommand {
         #[arg(long, value_name = "UUID")]
         recover: Option<String>,
     },
-    /// Pin a remote and user-keyed ref; joining selects no existing work
-    Connect {
-        #[arg(long)]
-        remote: String,
-        /// Explicitly join a shared ref instead of the saved user's ref
-        #[arg(long, value_name = "NAME")]
-        shared: Option<String>,
-    },
-    /// Route future root Waves to a destination, or use 'local' for no sharing
-    Use { destination: String },
-    /// Include existing Waves and their descendants in a destination
-    Select {
-        destination: String,
-        /// Exact Wave IDs; this may make retained history eligible for sharing
-        #[arg(long = "wave", required = true, num_args = 1..)]
-        waves: Vec<String>,
-    },
-    /// Associate an incoming full Work ID with existing local Work; never merge execution or share it
-    Associate {
-        incoming: String,
-        #[arg(long = "with", value_name = "LOCAL_ID")]
-        local: String,
-        #[arg(long, value_name = "PROVIDER_ID")]
-        linear: String,
-    },
     /// Show selection, retained imports and held records without contacting Git
     Status {
         #[arg(long)]
@@ -1698,7 +1676,7 @@ pub enum RepoCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Configure Git planning synchronization without publishing existing work
+    /// Inspect planning synchronization and personal identity
     Planning {
         #[command(subcommand)]
         cmd: PlanningCommand,
@@ -3028,3 +3006,6 @@ pub enum DiscordCommand {
     /// Poll a configured channel and post each Session's final answer
     Serve { wave: String },
 }
+
+/// Pushed code requirements for one remote Task invocation.
+pub const TASK_SOURCE_ENV: &str = "LF_TASK_SOURCE";

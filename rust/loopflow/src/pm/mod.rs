@@ -1,4 +1,6 @@
+use crate::pm::linear::LinearProject;
 pub mod linear;
+pub(crate) mod project_document;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
@@ -13,68 +15,6 @@ pub struct TeamBinding {
     pub id: String,
     pub key: String,
     pub created: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PmKr {
-    pub text: String,
-    pub holds: bool,
-}
-
-/// Linear's Project status category, independent of the team's display label.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ProjectStatus {
-    Backlog,
-    Planned,
-    Started,
-    Paused,
-    Completed,
-    Canceled,
-}
-
-impl ProjectStatus {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Backlog => "backlog",
-            Self::Planned => "planned",
-            Self::Started => "started",
-            Self::Paused => "paused",
-            Self::Completed => "completed",
-            Self::Canceled => "canceled",
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ChapterMetricTarget {
-    pub metric_id: String,
-    pub target: crate::work::wave::metrics::MetricTarget,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ProjectContent {
-    pub metric_targets: Vec<ChapterMetricTarget>,
-    pub workflow: String,
-    pub krs: Vec<PmKr>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct PmProject {
-    pub id: String,
-    pub revision: Option<String>,
-    pub slug: String,
-    pub name: String,
-    pub summary: String,
-    pub metric_targets: Vec<ChapterMetricTarget>,
-    pub workflow: String,
-    pub status: ProjectStatus,
-    pub krs: Vec<PmKr>,
-    pub initiative_ids: Vec<String>,
-    /// Stable ids of the Linear teams this Project belongs to. A managed Project
-    /// must carry exactly the repository Team.
-    pub team_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -140,7 +80,7 @@ pub fn terminal_reason(state: Option<&str>, completed: bool) -> Option<&'static 
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PmSnapshot {
-    pub projects: Vec<PmProject>,
+    pub projects: Vec<LinearProject>,
     pub items: Vec<PmItem>,
 }
 
@@ -158,7 +98,7 @@ impl PmPortfolioValidator {
         wave: &str,
         initiative_id: &str,
         expected_team_id: Option<&str>,
-        projects: &[PmProject],
+        projects: &[LinearProject],
         items: &[PmItem],
     ) -> PmResult<()> {
         validate_snapshot_ownership(wave, initiative_id, expected_team_id, projects, items)?;
@@ -198,7 +138,7 @@ fn validate_snapshot_ownership(
     wave: &str,
     initiative_id: &str,
     expected_team_id: Option<&str>,
-    projects: &[PmProject],
+    projects: &[LinearProject],
     items: &[PmItem],
 ) -> PmResult<()> {
     let mut projects_by_id = BTreeMap::new();
@@ -256,7 +196,7 @@ pub(crate) fn validate_project_ownership(
     wave: &str,
     initiative_id: &str,
     expected_team_id: Option<&str>,
-    project: &PmProject,
+    project: &LinearProject,
 ) -> PmResult<()> {
     if project.initiative_ids.as_slice() != [initiative_id] {
         return Err(PmError::Message(format!(
@@ -295,35 +235,6 @@ pub struct PmItemUpdate {
     pub description: Option<String>,
 }
 
-/// A read of one issue's editable content plus its comments, taken to
-/// stream Linear edits into a Task. `revision` is the provider's
-/// last-updated marker (Linear `updatedAt`), monotonic per issue, and is
-/// compared — not trusted as identity — so out-of-order responses never move
-/// the cursor backward.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct IssueObservation {
-    pub revision: String,
-    pub title: String,
-    pub description: String,
-    pub comments: Vec<IssueComment>,
-}
-
-/// One issue comment, with just enough authorship to distinguish participant direction
-/// from Loopflow's own writeback. `author_id` is the provider user id; `None`
-/// for an integration/bot actor with no backing user, which is never treated
-/// as participant direction.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct IssueComment {
-    pub id: String,
-    /// Provider creation time; display order. `revision` orders direction.
-    pub created_at: Option<String>,
-    pub revision: Option<String>,
-    pub body: String,
-    pub author_id: Option<String>,
-    /// Provider display name for attribution, independent of the provider user ID.
-    pub author_name: Option<String>,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum PmError {
     #[error("{0}")]
@@ -347,163 +258,6 @@ pub fn project_slug(name: &str) -> String {
         }
     }
     slug
-}
-
-pub fn parse_project_content(content: &str) -> PmResult<ProjectContent> {
-    enum Section {
-        None,
-        Targets,
-        Krs,
-    }
-
-    let mut section = Section::None;
-    let mut targets = Vec::new();
-    let mut workflow = String::new();
-    let mut authored_as_flow = String::new();
-    let mut krs = Vec::new();
-    let mut current_kr: Option<PmKr> = None;
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if let Some(value) = trimmed.strip_prefix("workflow:") {
-            workflow = value.trim().to_string();
-            continue;
-        }
-        // Projects written before the line was renamed; the next write
-        // through `lf` renders `workflow:`.
-        if let Some(value) = trimmed.strip_prefix("flow:") {
-            authored_as_flow = value.trim().to_string();
-            continue;
-        }
-        match trimmed {
-            "## Metric targets" => {
-                if let Some(kr) = current_kr.take() {
-                    krs.push(kr);
-                }
-                section = Section::Targets;
-                continue;
-            }
-            "## KRs" => {
-                if let Some(kr) = current_kr.take() {
-                    krs.push(kr);
-                }
-                section = Section::Krs;
-                continue;
-            }
-            _ => {}
-        }
-
-        if trimmed.starts_with('#') {
-            if let Some(kr) = current_kr.take() {
-                krs.push(kr);
-            }
-            section = Section::None;
-            continue;
-        }
-
-        match section {
-            Section::Targets => {
-                if !trimmed.starts_with("```") {
-                    targets.push(line);
-                }
-            }
-            Section::Krs => {
-                let item = if let Some(text) = trimmed.strip_prefix("- [x] ") {
-                    Some((true, text))
-                } else if let Some(text) = trimmed.strip_prefix("- [X] ") {
-                    Some((true, text))
-                } else if let Some(text) = trimmed.strip_prefix("- [ ] ") {
-                    Some((false, text))
-                } else {
-                    trimmed.strip_prefix("- ").map(|text| (false, text))
-                };
-
-                if let Some((holds, text)) = item {
-                    if let Some(kr) = current_kr.take() {
-                        krs.push(kr);
-                    }
-                    if !text.trim().is_empty() {
-                        current_kr = Some(PmKr {
-                            text: text.trim().to_string(),
-                            holds,
-                        });
-                    }
-                } else if !trimmed.is_empty() {
-                    if let Some(kr) = current_kr.as_mut() {
-                        kr.text.push(' ');
-                        kr.text.push_str(trimmed);
-                    }
-                }
-            }
-            Section::None => {}
-        }
-    }
-    if let Some(kr) = current_kr {
-        krs.push(kr);
-    }
-
-    let metric_targets = if targets.iter().all(|line| line.trim().is_empty()) {
-        Vec::new()
-    } else {
-        serde_json::from_str(&targets.join("\n"))
-            .map_err(|error| PmError::Message(format!("invalid chapter metric targets: {error}")))?
-    };
-    if workflow.is_empty() {
-        workflow = authored_as_flow;
-    }
-    let content = ProjectContent {
-        metric_targets,
-        workflow,
-        krs,
-    };
-    content.validate()?;
-    Ok(content)
-}
-
-impl ProjectContent {
-    pub fn validate(&self) -> PmResult<()> {
-        let mut ids = std::collections::BTreeSet::new();
-        for metric in &self.metric_targets {
-            if metric.metric_id.trim().is_empty()
-                || !metric.target.value().is_finite()
-                || !ids.insert(&metric.metric_id)
-            {
-                return Err(PmError::Message(
-                    "chapter metric targets require unique nonempty metric IDs and finite values"
-                        .into(),
-                ));
-            }
-        }
-        Ok(())
-    }
-}
-
-pub fn render_project_content(project: &ProjectContent) -> String {
-    let mut content = render_metric_targets(project);
-    let workflow = project.workflow.trim();
-    if !workflow.is_empty() {
-        content.push_str(&format!("\n\nworkflow: {workflow}"));
-    }
-    content.push_str("\n\n");
-    content.push_str(&render_krs(project));
-    content.push('\n');
-    content
-}
-
-fn render_metric_targets(project: &ProjectContent) -> String {
-    format!(
-        "## Metric targets\n\n```json\n{}\n```",
-        serde_json::to_string_pretty(&project.metric_targets)
-            .expect("validated metric targets serialize")
-    )
-}
-
-fn render_krs(project: &ProjectContent) -> String {
-    let mut content = String::from("## KRs");
-    for kr in &project.krs {
-        let marker = if kr.holds { "x" } else { " " };
-        content.push_str(&format!("\n\n- [{marker}] {}", kr.text.trim()));
-    }
-    content
 }
 
 pub(crate) const RATE_LIMIT_RETRIES: u8 = 3;
@@ -676,78 +430,6 @@ mod tests {
             "id":"project-1", "slug":"plan", "name":"Plan", "summary":"",
             "metric_targets":[], "krs":[], "initiative_ids":[], "team_ids":[]
         });
-        assert!(serde_json::from_value::<PmProject>(value).is_err());
-    }
-
-    #[test]
-    fn project_content_without_workflow_preserves_krs() {
-        let content = parse_project_content("## KRs\n- [ ] Keep this proof\n").unwrap();
-        assert!(content.workflow.is_empty());
-        assert_eq!(content.krs[0].text, "Keep this proof");
-        let rendered = render_project_content(&content);
-        assert!(!rendered.contains("flow:"));
-        assert_eq!(parse_project_content(&rendered).unwrap(), content);
-    }
-
-    #[test]
-    fn a_project_written_with_a_flow_line_names_that_workflow_until_rewritten() {
-        let earlier = parse_project_content("flow: research\n\n## KRs\n").unwrap();
-        assert_eq!(earlier.workflow, "research");
-        assert!(render_project_content(&earlier).contains("\n\nworkflow: research\n"));
-        let both = parse_project_content("flow: research\nworkflow: code\n").unwrap();
-        assert_eq!(both.workflow, "code");
-    }
-
-    #[test]
-    fn project_content_round_trips_linear_markdown() {
-        let project = ProjectContent {
-            metric_targets: vec![ChapterMetricTarget {
-                metric_id: "throughput".into(),
-                target: crate::work::wave::metrics::MetricTarget::AtLeast { value: 0.95 },
-            }],
-            workflow: "feature".to_string(),
-            krs: vec![
-                PmKr {
-                    text: "One proof holds".to_string(),
-                    holds: true,
-                },
-                PmKr {
-                    text: "Another remains".to_string(),
-                    holds: false,
-                },
-            ],
-        };
-        let rendered = render_project_content(&project);
-        assert_eq!(parse_project_content(&rendered).unwrap(), project);
-
-        let local = "# Project Name\n\nA measured bet.\n\n## KRs\n\n- One proof holds\n  across wrapped lines.\n";
-        assert_eq!(
-            parse_project_content(local).unwrap(),
-            ProjectContent {
-                metric_targets: Vec::new(),
-                workflow: String::new(),
-                krs: vec![PmKr {
-                    text: "One proof holds across wrapped lines.".to_string(),
-                    holds: false,
-                }],
-            }
-        );
-    }
-}
-
-#[cfg(test)]
-mod chapter_content_tests {
-    use super::{parse_project_content, ProjectContent};
-    #[test]
-    fn chapter_content_rejects_ambiguous_targets_and_separate_objectives() {
-        let duplicate = r##"## Metric targets
-```json
-[{"metric_id":"rate","target":{"kind":"at_least","value":0.9}},
- {"metric_id":"rate","target":{"kind":"at_most","value":0.1}}]
-```
-"##;
-        assert!(parse_project_content(duplicate).is_err());
-        assert!(parse_project_content("## Metric targets\nnot JSON").is_err());
-        assert!(serde_json::from_str::<ProjectContent>(r#"{"definition":"Second objective","metric_targets":[],"flows":{"recommended":null},"krs":[]}"#).is_err());
+        assert!(serde_json::from_value::<LinearProject>(value).is_err());
     }
 }

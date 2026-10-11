@@ -1,10 +1,10 @@
 //! Only the current attachment may close an AgentProcess. A replaced lf
 //! invocation may settle its own capture, not stop the new owner's provider.
 
-use crate::journal::{process_identity_evidence, ProcessIdentityEvidence};
+use crate::harness::agent_process::close_session_agent_process;
 use crate::process::SessionAttachment;
 use crate::store::sqlite::SqliteStore;
-use crate::store::{StoreError, StoreResult};
+use crate::store::StoreResult;
 
 pub(crate) fn finish_session_attachment(
     store: &SqliteStore,
@@ -15,60 +15,6 @@ pub(crate) fn finish_session_attachment(
     store.finish_session_attachment(session, attachment, outcome, || {
         close_session_agent_process(store, session)
     })
-}
-
-/// Called with the exact attachment locked, never with SQLite held across I/O.
-/// Native providers settle through their launcher; only Codex owns a detached
-/// app-server whose connection can be relinquished before invocation settlement.
-pub(super) fn close_session_agent_process(store: &SqliteStore, session: &str) -> StoreResult<bool> {
-    let Some(attachment) = store.session_attachment(session)? else {
-        return Ok(false);
-    };
-    let agents = store.agent_processes()?;
-    let Some(agent) = agents
-        .iter()
-        .find(|agent| agent.process.id == attachment.agent_process_id)
-    else {
-        return Ok(false);
-    };
-    let Some((pid, started)) = agent.process.pid.zip(agent.process.os_started_at) else {
-        return Ok(false);
-    };
-    match process_identity_evidence(pid, started) {
-        ProcessIdentityEvidence::Dead => return Ok(true),
-        ProcessIdentityEvidence::Unknown => {
-            return Err(StoreError::InvalidAuthority(
-                "AgentProcess OS identity is unavailable".into(),
-            ))
-        }
-        ProcessIdentityEvidence::Live => {}
-    }
-    #[cfg(unix)]
-    if agent.provider.as_deref() == Some("codex") && !agent.interactive {
-        if let Some((endpoint, thread)) = store.session_connection(session)? {
-            let owners = agents
-                .iter()
-                .filter(|agent| {
-                    agent.process.pid == Some(pid) && agent.process.os_started_at == Some(started)
-                })
-                .count();
-            if owners > 1 {
-                return Err(StoreError::InvalidAuthority(
-                    "AgentProcess OS identity has multiple owners".into(),
-                ));
-            }
-            crate::harness::codex_connection::close_agent_process(
-                (&endpoint, &thread),
-                pid,
-                started,
-            )
-            .map_err(|error| {
-                StoreError::InvalidData(format!("close Codex conversation {session}: {error}"))
-            })?;
-            return Ok(true);
-        }
-    }
-    Ok(false)
 }
 
 #[cfg(test)]
@@ -359,6 +305,150 @@ mod tests {
                 .completed_at
                 .is_some());
         });
+    }
+
+    #[test]
+    fn headless_close_obeys_the_current_attachment_for_every_provider() {
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        for provider in ["claude", "opencode", "codex"] {
+            let (home, store, detached) = resume_fixture();
+            rusqlite::Connection::open(home.path().join("store.db"))
+                .unwrap()
+                .execute("UPDATE agent_sessions SET provider=?1", [provider])
+                .unwrap();
+            let launch = LfProcessId::new();
+            let takeover = LfProcessId::new();
+            let sql = rusqlite::Connection::open(home.path().join("store.db")).unwrap();
+            for process in [&launch, &takeover] {
+                sql.execute(
+                    "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?1,1)",
+                    [process],
+                )
+                .unwrap();
+            }
+            // A fresh AgentProcess records the provider at launch, not the
+            // Session's mutable next-launch settings.
+            let first = store
+                .claim_session_attachment("resume", Some(&detached), &launch, true)
+                .unwrap();
+            let mut command = std::process::Command::new("/bin/sleep");
+            command.env_clear().arg("60").process_group(0);
+            store
+                .record_agent_process_launch("resume", &first, &command)
+                .unwrap();
+            let child = Child(command.spawn().unwrap());
+            let pid = child.0.id();
+            let birth = crate::journal::process_started_at(pid).unwrap().unwrap();
+            store
+                .record_agent_process_identity("resume", &first, pid, birth)
+                .unwrap();
+            if provider == "codex" {
+                store
+                    .record_session_connection(
+                        "resume",
+                        &first,
+                        home.path().join("absent.sock").to_str().unwrap(),
+                        &"saved-thread".into(),
+                    )
+                    .unwrap();
+            }
+            let second = store
+                .claim_session_attachment("resume", Some(&first), &takeover, false)
+                .unwrap();
+            assert_eq!(first.agent_process_id, second.agent_process_id);
+            assert!(
+                super::finish_session_attachment(&store, "resume", &first, "interrupted").is_err()
+            );
+            assert_eq!(
+                crate::journal::process_identity_evidence(pid, birth),
+                crate::journal::ProcessIdentityEvidence::Live
+            );
+            assert_eq!(
+                store.session_attachment("resume").unwrap(),
+                Some(second.clone())
+            );
+            let returned = store
+                .claim_session_attachment("resume", Some(&second), &launch, false)
+                .unwrap();
+            assert_eq!(returned.agent_process_id, first.agent_process_id);
+            assert_ne!(returned.token, first.token);
+            for stale in [&first, &second] {
+                assert!(
+                    super::finish_session_attachment(&store, "resume", stale, "interrupted")
+                        .is_err()
+                );
+            }
+            assert_eq!(
+                crate::journal::process_identity_evidence(pid, birth),
+                crate::journal::ProcessIdentityEvidence::Live
+            );
+            super::finish_session_attachment(&store, "resume", &returned, "interrupted").unwrap();
+            assert_eq!(
+                crate::journal::process_identity_evidence(pid, birth),
+                crate::journal::ProcessIdentityEvidence::Dead
+            );
+            assert!(store
+                .process(&first.agent_process_id)
+                .unwrap()
+                .unwrap()
+                .completed_at
+                .is_some());
+        }
+    }
+
+    #[test]
+    fn foreground_agent_is_not_subject_to_headless_close_before_or_after_exit() {
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        for provider in ["claude", "opencode", "codex"] {
+            let (home, store, detached) = resume_fixture();
+            rusqlite::Connection::open(home.path().join("store.db"))
+                .unwrap()
+                .execute(
+                    "UPDATE agent_sessions SET provider=?1, interactive=1",
+                    [provider],
+                )
+                .unwrap();
+            let attachment = store
+                .claim_session_attachment("resume", Some(&detached), &LfProcessId::new(), true)
+                .unwrap();
+            let mut command = std::process::Command::new("/bin/sleep");
+            command.env_clear().arg("60").process_group(0);
+            store
+                .record_agent_process_launch("resume", &attachment, &command)
+                .unwrap();
+            let mut child = Child(command.spawn().unwrap());
+            let pid = child.0.id();
+            let birth = crate::journal::process_started_at(pid).unwrap().unwrap();
+            store
+                .record_agent_process_identity("resume", &attachment, pid, birth)
+                .unwrap();
+            assert!(!store
+                .with_session_attachment("resume", &attachment, || {
+                    super::close_session_agent_process(&store, "resume")
+                })
+                .unwrap());
+            assert_eq!(
+                crate::journal::process_identity_evidence(pid, birth),
+                crate::journal::ProcessIdentityEvidence::Live
+            );
+            assert_eq!(
+                store.session_attachment("resume").unwrap(),
+                Some(attachment.clone())
+            );
+            child.0.kill().unwrap();
+            child.0.wait().unwrap();
+            let before = store.process(&attachment.agent_process_id).unwrap();
+            assert!(!store
+                .with_session_attachment("resume", &attachment, || {
+                    super::close_session_agent_process(&store, "resume")
+                })
+                .unwrap());
+            assert_eq!(store.process(&attachment.agent_process_id).unwrap(), before);
+            assert_eq!(
+                store.session_attachment("resume").unwrap(),
+                Some(attachment)
+            );
+        }
     }
 
     #[test]

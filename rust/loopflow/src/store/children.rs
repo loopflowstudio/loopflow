@@ -271,10 +271,10 @@ impl Store {
         .await
     }
 
-    pub async fn apply_linear_observation(
+    pub(crate) async fn apply_linear_observation(
         &self,
         task_id: &TaskId,
-        observation: crate::pm::IssueObservation,
+        observation: crate::pm::linear::LinearIssueObservation,
         observed_at: OffsetDateTime,
     ) -> StoreResult<LinearObservationOutcome> {
         let task_id = task_id.clone();

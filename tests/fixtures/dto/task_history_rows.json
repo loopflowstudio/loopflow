@@ -12,7 +12,15 @@
       "assignee": null,
       "due_date": null,
       "follow_up_sources": [],
-      "sync": null
+      "sync": {
+        "connected": false,
+        "changes": []
+      },
+      "linear_id": null,
+      "acquisition": {
+        "state": "available",
+        "observed_at": null
+      }
     },
     "reference": {
       "issue_url": null,
@@ -71,7 +79,15 @@
       "assignee": null,
       "due_date": null,
       "follow_up_sources": [],
-      "sync": null
+      "sync": {
+        "connected": false,
+        "changes": []
+      },
+      "linear_id": null,
+      "acquisition": {
+        "state": "available",
+        "observed_at": null
+      }
     },
     "reference": {
       "issue_url": null,
@@ -130,7 +146,15 @@
       "assignee": null,
       "due_date": null,
       "follow_up_sources": [],
-      "sync": null
+      "sync": {
+        "connected": false,
+        "changes": []
+      },
+      "linear_id": null,
+      "acquisition": {
+        "state": "available",
+        "observed_at": null
+      }
     },
     "reference": {
       "issue_url": null,
@@ -189,7 +213,15 @@
       "assignee": null,
       "due_date": null,
       "follow_up_sources": [],
-      "sync": null
+      "sync": {
+        "connected": false,
+        "changes": []
+      },
+      "linear_id": null,
+      "acquisition": {
+        "state": "available",
+        "observed_at": null
+      }
     },
     "reference": {
       "issue_url": null,
@@ -248,7 +280,15 @@
       "assignee": null,
       "due_date": null,
       "follow_up_sources": [],
-      "sync": null
+      "sync": {
+        "connected": false,
+        "changes": []
+      },
+      "linear_id": null,
+      "acquisition": {
+        "state": "available",
+        "observed_at": null
+      }
     },
     "reference": {
       "issue_url": null,
@@ -307,7 +347,15 @@
       "assignee": null,
       "due_date": null,
       "follow_up_sources": [],
-      "sync": null
+      "sync": {
+        "connected": false,
+        "changes": []
+      },
+      "linear_id": null,
+      "acquisition": {
+        "state": "available",
+        "observed_at": null
+      }
     },
     "reference": {
       "issue_url": null,
@@ -366,7 +414,15 @@
       "assignee": null,
       "due_date": null,
       "follow_up_sources": [],
-      "sync": null
+      "sync": {
+        "connected": false,
+        "changes": []
+      },
+      "linear_id": null,
+      "acquisition": {
+        "state": "available",
+        "observed_at": null
+      }
     },
     "reference": {
       "issue_url": null,
@@ -425,7 +481,15 @@
       "assignee": null,
       "due_date": null,
       "follow_up_sources": [],
-      "sync": null
+      "sync": {
+        "connected": false,
+        "changes": []
+      },
+      "linear_id": null,
+      "acquisition": {
+        "state": "available",
+        "observed_at": null
+      }
     },
     "reference": {
       "issue_url": null,
@@ -484,7 +548,15 @@
       "assignee": null,
       "due_date": null,
       "follow_up_sources": [],
-      "sync": null
+      "sync": {
+        "connected": false,
+        "changes": []
+      },
+      "linear_id": null,
+      "acquisition": {
+        "state": "available",
+        "observed_at": null
+      }
     },
     "reference": {
       "issue_url": null,
@@ -543,7 +615,15 @@
       "assignee": null,
       "due_date": null,
       "follow_up_sources": [],
-      "sync": null
+      "sync": {
+        "connected": false,
+        "changes": []
+      },
+      "linear_id": null,
+      "acquisition": {
+        "state": "available",
+        "observed_at": null
+      }
     },
     "reference": {
       "issue_url": null,
@@ -602,7 +682,15 @@
       "assignee": null,
       "due_date": null,
       "follow_up_sources": [],
-      "sync": null
+      "sync": {
+        "connected": false,
+        "changes": []
+      },
+      "linear_id": null,
+      "acquisition": {
+        "state": "available",
+        "observed_at": null
+      }
     },
     "reference": {
       "issue_url": null,
@@ -661,7 +749,15 @@
       "assignee": null,
       "due_date": null,
       "follow_up_sources": [],
-      "sync": null
+      "sync": {
+        "connected": false,
+        "changes": []
+      },
+      "linear_id": null,
+      "acquisition": {
+        "state": "available",
+        "observed_at": null
+      }
     },
     "reference": {
       "issue_url": null,
@@ -720,7 +816,15 @@
       "assignee": null,
       "due_date": null,
       "follow_up_sources": [],
-      "sync": null
+      "sync": {
+        "connected": false,
+        "changes": []
+      },
+      "linear_id": null,
+      "acquisition": {
+        "state": "available",
+        "observed_at": null
+      }
     },
     "reference": {
       "issue_url": null,
@@ -779,7 +883,15 @@
       "assignee": null,
       "due_date": null,
       "follow_up_sources": [],
-      "sync": null
+      "sync": {
+        "connected": false,
+        "changes": []
+      },
+      "linear_id": null,
+      "acquisition": {
+        "state": "available",
+        "observed_at": null
+      }
     },
     "reference": {
       "issue_url": null,
@@ -838,7 +950,15 @@
       "assignee": null,
       "due_date": null,
       "follow_up_sources": [],
-      "sync": null
+      "sync": {
+        "connected": false,
+        "changes": []
+      },
+      "linear_id": null,
+      "acquisition": {
+        "state": "available",
+        "observed_at": null
+      }
     },
     "reference": {
       "issue_url": null,
@@ -897,7 +1017,15 @@
       "assignee": null,
       "due_date": null,
       "follow_up_sources": [],
-      "sync": null
+      "sync": {
+        "connected": false,
+        "changes": []
+      },
+      "linear_id": null,
+      "acquisition": {
+        "state": "available",
+        "observed_at": null
+      }
     },
     "reference": {
       "issue_url": null,

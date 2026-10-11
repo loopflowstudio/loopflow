@@ -1,29 +1,46 @@
 [
   {
-    "id": "unreadable-plan",
+    "id": "held-plan",
     "reference": "refs/loopflow/planning/shared/review",
     "active": false,
-    "selected_records": 3,
+    "selected_records": 1,
     "imported_revision": "retained-import",
     "fetched_revision": "newer-fetch",
     "acquisition_error": null,
     "publication_revision": "attempted-publication",
     "publication_state": "unconfirmed",
     "publication_error": "reply lost",
-    "pending_local": null,
-    "local_error": "Local planning journal is invalid; pending changes and sharing holds are unknown. Retained plans and sync receipts are unchanged.",
+    "pending_local": true,
     "conflicts": [
       {
-        "object": {"kind": "task", "id": "retained-task"},
+        "object": {
+          "kind": "task",
+          "id": "retained-task"
+        },
         "reason": "retained projection conflict"
       }
+    ],
+    "changes": {
+      "held-title": {
+        "object": {
+          "kind": "task",
+          "id": "retained-task"
+        },
+        "field": "issue_title",
+        "value": "Held title",
+        "clock": 1,
+        "parents": []
+      }
+    },
+    "candidates": [
+      "held-title"
     ]
   },
   {
     "id": "healthy-plan",
     "reference": "refs/loopflow/planning/shared/team",
     "active": true,
-    "selected_records": 1,
+    "selected_records": 2,
     "imported_revision": null,
     "fetched_revision": null,
     "acquisition_error": null,
@@ -31,7 +48,59 @@
     "publication_state": null,
     "publication_error": null,
     "pending_local": true,
-    "local_error": null,
-    "conflicts": []
+    "conflicts": [],
+    "changes": {
+      "title-loser": {
+        "object": {
+          "kind": "task",
+          "id": "retained-task"
+        },
+        "field": "issue_title",
+        "value": "Retained title",
+        "clock": 1,
+        "parents": []
+      },
+      "title-head": {
+        "object": {
+          "kind": "task",
+          "id": "retained-task"
+        },
+        "field": "issue_title",
+        "value": "Current title",
+        "clock": 2,
+        "parents": [
+          "title-loser"
+        ]
+      },
+      "assignee-head": {
+        "object": {
+          "kind": "task",
+          "id": "retained-task"
+        },
+        "field": "planning_assignee",
+        "value": "Maya",
+        "clock": 3,
+        "parents": []
+      },
+      "comment-head": {
+        "object": {
+          "kind": "comment",
+          "id": "retained-comment"
+        },
+        "field": "content",
+        "value": {
+          "body": "Direction",
+          "author": "{\"kind\": \"person\", \"name\": \"Maya\"}",
+          "created_at": "2026-10-10T12:00:00Z"
+        },
+        "clock": 4,
+        "parents": []
+      }
+    },
+    "candidates": [
+      "assignee-head",
+      "comment-head",
+      "title-head"
+    ]
   }
 ]

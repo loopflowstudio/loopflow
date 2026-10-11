@@ -1,5 +1,5 @@
 //! Immutable planning mutations, not execution records. Causality precedes clocks;
-//! concurrent Linear observations win, otherwise the latest clock/identity wins.
+//! concurrent values use the latest clock/identity. Linear uses its own transport.
 //! Losing values stay in the document and are available for recovery.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -28,41 +28,8 @@ impl PlanningKind {
     }
 
     /// The portable allowlist deliberately excludes execution, paths and controls.
-    pub fn fields(self) -> &'static [&'static str] {
-        match self {
-            Self::Wave => &["name", "parent_wave_id", "current_project_id", "delegation"],
-            Self::Project => &[
-                "delegation",
-                "wave_id",
-                "external_project_id",
-                "project_slug",
-                "project_name",
-                "project_summary",
-                "workflow",
-                "krs",
-                "metric_targets",
-                "status",
-                "planning_rank",
-                "planning_initiatives",
-                "planning_teams",
-            ],
-            Self::Task => &[
-                "delegation",
-                "project_id",
-                "external_issue_id",
-                "issue_identifier",
-                "issue_title",
-                "issue_description",
-                "planning_rank",
-                "planning_assignee",
-                "disposition",
-                "planning_deleted_at",
-                "planning_url",
-                "planning_branch_name",
-                "planning_team_id",
-            ],
-            Self::Comment => &["task_id", "content"],
-        }
+    pub fn fields(self) -> Vec<&'static str> {
+        crate::store::sqlite::planning_write::fields(self)
     }
 }
 
@@ -73,99 +40,6 @@ pub struct PlanningObject {
     pub id: String,
 }
 
-/// The provider fact that justified a mutation, including its original acquisition
-/// time. Peer receipt time and Git ancestry cannot establish provider freshness.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct LinearObservation {
-    pub body: Value,
-    pub observed_at: i64,
-}
-
-impl LinearObservation {
-    pub fn revision(&self) -> Option<&str> {
-        self.body["revision"].as_str()
-    }
-
-    pub(crate) fn revision_time(&self) -> Option<i128> {
-        self.revision().and_then(|revision| {
-            time::OffsetDateTime::parse(revision, &time::format_description::well_known::Rfc3339)
-                .ok()
-                .map(|time| time.unix_timestamp_nanos())
-        })
-    }
-
-    /// Fields with entity-revision ordering. Membership's local IDs are resolved
-    /// by the Store; Project relationships and list rank have separate frontiers.
-    pub(crate) fn fields(&self, kind: PlanningKind) -> Result<Value, serde_json::Error> {
-        Ok(match kind {
-            PlanningKind::Task => {
-                let item: crate::pm::PmItem = serde_json::from_value(self.body.clone())?;
-                serde_json::json!({
-                    "external_issue_id":item.id,"issue_identifier":item.identifier,
-                    "issue_title":item.name,"issue_description":item.description,
-                    "planning_assignee":item.assignee,
-                    "disposition":{"planning_state":item.state,"planning_completed":i32::from(item.completed),"planning_completed_at":item.completed_at},
-                    "planning_url":item.url,"planning_branch_name":item.branch_name,"planning_team_id":item.team_id,
-                })
-            }
-            PlanningKind::Project => {
-                let project: crate::pm::PmProject = serde_json::from_value(self.body.clone())?;
-                serde_json::json!({
-                    "external_project_id":project.id,"project_slug":project.slug,"project_name":project.name,
-                    "project_summary":project.summary,"workflow":project.workflow,"status":project.status.as_str(),
-                    "krs":project.krs,"metric_targets":project.metric_targets,
-                })
-            }
-            PlanningKind::Comment => {
-                let observed: crate::pm::IssueComment = serde_json::from_value(self.body.clone())?;
-                let comment = crate::ops::pm::TaskComment::from(&observed);
-                serde_json::json!({"content":{
-                    "body":comment.body,"author":serde_json::to_string(&comment.author)?,
-                    "created_at":comment.created_at,
-                }})
-            }
-            PlanningKind::Wave => serde_json::json!({}),
-        })
-    }
-
-    fn validate(&self, kind: PlanningKind) -> Result<(), PlanningExchangeError> {
-        if self.observed_at < 0
-            || self.body["id"].as_str().is_none_or(str::is_empty)
-            || self
-                .body
-                .get("revision")
-                .is_none_or(|value| !value.is_null() && !value.is_string())
-            || (self.revision().is_some() && self.revision_time().is_none())
-        {
-            return Err(PlanningExchangeError::Invalid("invalid Linear observation"));
-        }
-        // Round trips reject extra payload, including local execution or paths.
-        let body = match kind {
-            PlanningKind::Task => serde_json::to_value(
-                serde_json::from_value::<crate::pm::PmItem>(self.body.clone())?,
-            )?,
-            PlanningKind::Project => serde_json::to_value(serde_json::from_value::<
-                crate::pm::PmProject,
-            >(self.body.clone())?)?,
-            PlanningKind::Comment => serde_json::to_value(serde_json::from_value::<
-                crate::pm::IssueComment,
-            >(self.body.clone())?)?,
-            PlanningKind::Wave => {
-                return Err(PlanningExchangeError::Invalid(
-                    "Wave has no Linear observation",
-                ))
-            }
-        };
-        if body != self.body {
-            return Err(PlanningExchangeError::Invalid(
-                "unexpected Linear observation fields",
-            ));
-        }
-        Ok(())
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlanningMutation {
@@ -174,7 +48,6 @@ pub struct PlanningMutation {
     pub value: Value,
     /// Hybrid logical milliseconds, advanced beyond every observed mutation.
     pub clock: i64,
-    pub linear: Option<LinearObservation>,
     /// Observed heads of this field, not a global revision or Git ancestry.
     pub parents: BTreeSet<String>,
 }
@@ -183,49 +56,6 @@ pub struct PlanningMutation {
 #[serde(deny_unknown_fields)]
 pub struct PlanningSnapshot {
     pub changes: BTreeMap<String, PlanningMutation>,
-}
-
-impl PlanningMutation {
-    /// An exact provider fact can bridge retained identities before joint projection.
-    /// Equal values, clocks or names alone are no proof.
-    fn observes_same_fact(&self, previous: &Self) -> bool {
-        self.object.kind == previous.object.kind
-            && matches!(self.object.kind, PlanningKind::Task | PlanningKind::Project)
-            && self.value == previous.value
-            && self
-                .linear
-                .as_ref()
-                .zip(previous.linear.as_ref())
-                .is_some_and(|(next, prior)| next.body == prior.body)
-    }
-
-    pub(crate) fn provider_evidence(&self) -> bool {
-        matches!(
-            (self.object.kind, self.field.as_str()),
-            (
-                PlanningKind::Task,
-                "provider_removal" | "provider_invalidation"
-            ) | (PlanningKind::Project, "provider_archive" | "provider_teams")
-        )
-    }
-
-    pub(crate) fn order_receipt(&self) -> Option<&str> {
-        if self.object.kind != PlanningKind::Project {
-            return None;
-        }
-        self.field
-            .strip_prefix("order:")
-            .filter(|id| !id.is_empty())
-    }
-
-    pub(crate) fn deletion_receipt(&self) -> Option<&str> {
-        if self.object.kind != PlanningKind::Task {
-            return None;
-        }
-        self.field
-            .strip_prefix("deletion:")
-            .filter(|id| !id.is_empty())
-    }
 }
 
 impl PlanningSnapshot {
@@ -255,13 +85,12 @@ impl PlanningSnapshot {
                 return Err(PlanningExchangeError::ReusedChange(id.clone()));
             }
         }
+        merged.validate()?;
         Ok(merged)
     }
 
     /// Head mutations in change-ID order, borrowed from the retained journal.
     pub fn heads(&self) -> impl Iterator<Item = (&str, &PlanningMutation)> {
-        // Portable links retain each origin's own frontier; only the receiver
-        // can associate identities for joint projection.
         let retired: BTreeSet<_> = self
             .changes
             .values()
@@ -279,131 +108,21 @@ impl PlanningSnapshot {
             .map(|(id, change)| (id.as_str(), change))
     }
 
-    /// Evaluate causality before ranking within the caller's projection owners.
-    /// Foreign predecessors may lead back to this owner's past without granting
-    /// correspondence. Creation receipts keep their origin even after association.
-    pub(crate) fn heads_by<'a, K: Ord>(
-        &'a self,
-        owner: impl Fn(&'a PlanningObject) -> K,
-    ) -> impl Iterator<Item = (&'a str, &'a PlanningMutation)> {
-        let heads: Vec<_> = self.heads().collect();
-        let mut parents = BTreeMap::<_, Vec<_>>::new();
-        for (_, change) in &heads {
-            let creation_origin = (change.field == "creation").then_some(&change.object);
-            parents
-                .entry((owner(&change.object), creation_origin))
-                .or_default()
-                .extend(change.parents.iter().map(String::as_str));
-        }
-        let mut retired = BTreeSet::new();
-        for ((projection, creation_origin), parents) in parents {
-            for (id, parent) in self.ancestors(parents) {
-                if owner(&parent.object) == projection
-                    && creation_origin.is_none_or(|origin| origin == &parent.object)
-                {
-                    retired.insert(id);
-                }
-            }
-        }
-        heads
-            .into_iter()
-            .filter(move |(id, _)| !retired.contains(id))
-    }
-
-    /// Walk each retained predecessor once, including paths through foreign
-    /// origins. Callers decide which ancestors may retire heads or supply bases.
-    pub(crate) fn ancestors<'a>(
-        &'a self,
-        parents: impl IntoIterator<Item = &'a str>,
-    ) -> impl Iterator<Item = (&'a str, &'a PlanningMutation)> {
-        let mut pending: Vec<_> = parents.into_iter().collect();
-        let mut visited = BTreeSet::new();
-        std::iter::from_fn(move || {
-            while let Some(id) = pending.pop() {
-                if visited.insert(id) {
-                    let change = &self.changes[id];
-                    pending.extend(change.parents.iter().map(String::as_str));
-                    return Some((id, change));
-                }
-            }
-            None
-        })
-    }
-
-    pub(crate) fn objects(&self) -> BTreeSet<&PlanningObject> {
-        self.changes.values().map(|change| &change.object).collect()
-    }
-
-    /// Keep winner identity and origin available to delivery projection. Values
-    /// alone cannot distinguish a local intention from an observed Linear fact.
+    /// Select current values while retaining every competing mutation.
     pub fn winners(&self) -> impl Iterator<Item = (&str, &PlanningMutation)> {
-        winning_heads(self.heads(), |change| {
-            (&change.object, change.field.as_str())
-        })
+        winning_heads(self.heads())
     }
 
     pub fn validate(&self) -> Result<(), PlanningExchangeError> {
-        // Portable links carry evidence, never local correspondence. Only an
-        // explicit receiver association combines origins for projection.
-        let mut claims: BTreeMap<_, BTreeSet<_>> = BTreeMap::new();
-        for change in self.changes.values() {
-            if matches!(
-                (change.object.kind, change.field.as_str()),
-                (PlanningKind::Task, "external_issue_id")
-                    | (PlanningKind::Project, "external_project_id")
-            ) {
-                if let Some(id) = change.value.as_str() {
-                    claims.entry(&change.object).or_default().insert(id);
-                }
-            }
-        }
-        let same_provider_work = |left: &PlanningObject, right: &PlanningObject| {
-            left.kind == right.kind
-                && claims
-                    .get(left)
-                    .is_some_and(|ids| ids.len() == 1 && Some(ids) == claims.get(right))
-        };
         for (id, change) in &self.changes {
             if id.is_empty()
                 || change.object.id.is_empty()
                 || change.clock < 0
-                || !(change.object.kind.fields().contains(&change.field.as_str())
-                    || (matches!(
-                        change.object.kind,
-                        PlanningKind::Task | PlanningKind::Project
-                    ) && change.field == "creation")
-                    || change.deletion_receipt().is_some()
-                    || change.order_receipt().is_some()
-                    || change.provider_evidence())
+                || !change.object.kind.fields().contains(&change.field.as_str())
             {
                 return Err(PlanningExchangeError::Invalid("invalid planning mutation"));
             }
             validate_value(change)?;
-            if let Some(observation) = &change.linear {
-                observation.validate(change.object.kind)?;
-                if change.object.kind == PlanningKind::Comment
-                    && observation.body["id"].as_str() != Some(change.object.id.as_str())
-                {
-                    return Err(PlanningExchangeError::Invalid(
-                        "comment observation identity mismatch",
-                    ));
-                }
-                let fields = observation.fields(change.object.kind)?;
-                if let Some(value) = fields.get(&change.field) {
-                    if value != &change.value {
-                        return Err(PlanningExchangeError::Invalid(
-                            "mutation disagrees with its Linear observation",
-                        ));
-                    }
-                } else if !matches!(
-                    (change.object.kind, change.field.as_str()),
-                    (PlanningKind::Task, "project_id") | (PlanningKind::Comment, "task_id")
-                ) {
-                    return Err(PlanningExchangeError::Invalid(
-                        "field has no Linear entity frontier",
-                    ));
-                }
-            }
             for parent in &change.parents {
                 let previous = self
                     .changes
@@ -411,9 +130,7 @@ impl PlanningSnapshot {
                     .ok_or(PlanningExchangeError::Invalid(
                         "missing planning predecessor",
                     ))?;
-                if (previous.object != change.object
-                    && !change.observes_same_fact(previous)
-                    && !same_provider_work(&change.object, &previous.object))
+                if previous.object != change.object
                     || previous.field != change.field
                     || previous.clock >= change.clock
                 {
@@ -427,23 +144,14 @@ impl PlanningSnapshot {
 
 /// Select within an already evaluated frontier. Import and accepted local
 /// observations share this policy without reconstructing a partial journal.
-pub(crate) fn winning_heads<'a, K: Ord>(
+pub(crate) fn winning_heads<'a>(
     heads: impl IntoIterator<Item = (&'a str, &'a PlanningMutation)>,
-    mut key: impl FnMut(&'a PlanningMutation) -> K,
 ) -> impl Iterator<Item = (&'a str, &'a PlanningMutation)> {
     let mut fields = BTreeMap::new();
     for (id, change) in heads {
-        let priority = (
-            change.linear.is_some(),
-            change
-                .linear
-                .as_ref()
-                .and_then(LinearObservation::revision_time),
-            change.clock,
-            id,
-        );
+        let priority = (change.clock, id);
         let winner = fields
-            .entry(key(change))
+            .entry((&change.object, change.field.as_str()))
             .or_insert((priority, (id, change)));
         if priority > winner.0 {
             *winner = (priority, (id, change));
@@ -453,90 +161,13 @@ pub(crate) fn winning_heads<'a, K: Ord>(
 }
 
 fn validate_value(change: &PlanningMutation) -> Result<(), PlanningExchangeError> {
-    let value = &change.value;
-    if change.provider_evidence() {
-        return crate::store::sqlite::planning::ProviderEvidence::validate(
-            change.object.kind,
-            &change.field,
-            value,
-        )
-        .map(|_| ())
-        .map_err(|_| PlanningExchangeError::Invalid("invalid provider evidence"));
-    }
-    if change.deletion_receipt().is_some() {
-        return crate::store::sqlite::planning_changes::validate_peer_deletion(value)
-            .map_err(|_| PlanningExchangeError::Invalid("invalid planning deletion receipt"));
-    }
-    if change.order_receipt().is_some() {
-        return crate::store::sqlite::planning_order::validate_peer_receipt(value)
-            .map_err(|_| PlanningExchangeError::Invalid("invalid planning order receipt"));
-    }
-    let text = |value: &Value| value.is_null() || value.is_string();
-    let valid = match change.field.as_str() {
-        "workflow" | "krs" | "metric_targets" if change.object.kind == PlanningKind::Project => {
-            let mut content = serde_json::json!({"workflow":"","krs":[],"metric_targets":[]});
-            content[&change.field] = value.clone();
-            serde_json::from_value::<crate::pm::ProjectContent>(content).is_ok_and(|content| {
-                content.validate().is_ok()
-                    && serde_json::to_value(&content)
-                        .is_ok_and(|roundtrip| roundtrip[&change.field] == *value)
-            })
-        }
-        "creation" => {
-            crate::store::sqlite::planning_export::validate_peer_receipt(&change.object, value)
-                .is_ok()
-        }
-        "planning_rank" => value.as_u64().is_some_and(|rank| rank <= u32::MAX as u64),
-        "planning_deleted_at" => value.is_null() || value.as_i64().is_some_and(|at| at >= 0),
-        "planning_initiatives" | "planning_teams" => value
-            .as_str()
-            .is_some_and(|text| serde_json::from_str::<Vec<String>>(text).is_ok()),
-        "delegation" => {
-            value.is_null()
-                || value.as_object().is_some_and(|group| {
-                    group.len() == 3
-                        && group
-                            .get("machine_id")
-                            .and_then(Value::as_str)
-                            .is_some_and(|id| crate::durable::MachineId::parse(id).is_ok())
-                        && group
-                            .get("placed_at")
-                            .and_then(Value::as_i64)
-                            .is_some_and(|at| at >= 0)
-                        && matches!(
-                            group.get("provenance").and_then(Value::as_str),
-                            Some("explicit" | "legacy")
-                        )
-                })
-        }
-        "disposition" => value.as_object().is_some_and(|group| {
-            group.len() == 3
-                && group.get("planning_state").is_some_and(text)
-                && group.get("planning_completed_at").is_some_and(text)
-                && group
-                    .get("planning_completed")
-                    .is_some_and(|v| matches!(v.as_i64(), Some(0 | 1)))
-        }),
-        "content" => value.as_object().is_some_and(|group| {
-            group.len() == 3
-                && group.get("body").is_some_and(Value::is_string)
-                && group
-                    .get("author")
-                    .and_then(Value::as_str)
-                    .is_some_and(|a| {
-                        serde_json::from_str::<crate::ops::pm::TaskCommentAuthor>(a).is_ok()
-                    })
-                && group.get("created_at").is_some_and(text)
-        }),
-        _ => text(value),
-    };
-    if valid {
-        Ok(())
-    } else {
-        Err(PlanningExchangeError::Invalid(
-            "invalid planning field value",
-        ))
-    }
+    crate::store::sqlite::planning_write::PlanningEdit::from_value(
+        change.object.kind,
+        &change.field,
+        change.value.clone(),
+    )
+    .map(|_| ())
+    .map_err(|_| PlanningExchangeError::Invalid("invalid planning field value"))
 }
 
 #[derive(Debug, thiserror::Error)]

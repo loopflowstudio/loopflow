@@ -1,3 +1,7 @@
+use crate::work::project::{ProjectKR, ProjectStatus};
+use crate::work::wave::metrics::MetricTarget;
+
+use super::project_document::{self, parse_project_document};
 use reqwest::StatusCode;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -5,10 +9,59 @@ use serde_json::{json, Value};
 use tokio::time::sleep;
 use tracing::warn;
 
-use crate::pm::{
-    parse_project_content, project_slug, IssueComment, IssueObservation, PmError, PmItem,
-    PmProject, PmResult, PmWave, TeamBinding, RATE_LIMIT_RETRIES,
-};
+use crate::pm::{project_slug, PmError, PmItem, PmResult, PmWave, TeamBinding, RATE_LIMIT_RETRIES};
+
+use crate::work::task::comment::{TaskComment, TaskCommentAuthor};
+
+/// A read of one issue's editable content plus its comments, taken to
+/// stream Linear edits into a Task. `revision` is the provider's
+/// last-updated marker (Linear `updatedAt`), monotonic per issue, and is
+/// compared — not trusted as identity — so out-of-order responses never move
+/// the cursor backward.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LinearIssueObservation {
+    pub revision: String,
+    pub title: String,
+    pub description: String,
+    pub comments: Vec<LinearComment>,
+}
+
+/// Linear's comment and attribution metadata, retained unchanged in conflict receipts.
+/// A provider user or an explicit requester steer supplies person attribution;
+/// an integration's display name alone does not.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct LinearComment {
+    pub id: String,
+    /// Provider creation time; display order. `revision` orders direction.
+    pub created_at: Option<String>,
+    pub revision: Option<String>,
+    pub body: String,
+    pub author_id: Option<String>,
+    /// Provider display name for attribution, independent of the provider user ID.
+    pub author_name: Option<String>,
+}
+
+impl From<&LinearComment> for TaskComment {
+    fn from(comment: &LinearComment) -> Self {
+        let author =
+            if comment.author_id.is_some() || crate::ops::linear_observe::is_steer(&comment.body) {
+                TaskCommentAuthor::Person {
+                    name: crate::ops::linear_observe::comment_requester(
+                        &comment.body,
+                        comment.author_name.as_deref(),
+                    ),
+                }
+            } else {
+                TaskCommentAuthor::Integration
+            };
+        Self {
+            id: comment.id.clone(),
+            body: comment.body.clone(),
+            author,
+            created_at: comment.created_at.clone(),
+        }
+    }
+}
 
 const LINEAR_BASE_URL: &str = "https://api.linear.app/graphql";
 const LIST_ITEMS_PAGE_SIZE: u32 = 50;
@@ -682,7 +735,10 @@ impl LinearClient {
         }
     }
 
-    async fn project_status_id(&self, status: crate::pm::ProjectStatus) -> PmResult<String> {
+    async fn project_status_id(
+        &self,
+        status: crate::work::project::ProjectStatus,
+    ) -> PmResult<String> {
         let team = self.require_team_id()?;
         self.project_statuses()
             .await?
@@ -734,7 +790,7 @@ impl LinearClient {
         }
     }
 
-    pub async fn list_projects(&self, initiative_id: &str) -> PmResult<Vec<PmProject>> {
+    pub async fn list_projects(&self, initiative_id: &str) -> PmResult<Vec<LinearProject>> {
         self.list_projects_including_archived(initiative_id, false)
             .await
     }
@@ -743,7 +799,7 @@ impl LinearClient {
         &self,
         initiative_id: &str,
         include_archived: bool,
-    ) -> PmResult<Vec<PmProject>> {
+    ) -> PmResult<Vec<LinearProject>> {
         let mut after = None;
         let mut projects = Vec::new();
         loop {
@@ -762,7 +818,7 @@ impl LinearClient {
             projects.extend(
                 page.nodes
                     .into_iter()
-                    .map(ProjectNode::into_pm_project)
+                    .map(ProjectNode::into_observation)
                     .collect::<PmResult<Vec<_>>>()?,
             );
             if !page.page_info.has_next_page {
@@ -937,7 +993,7 @@ impl LinearClient {
     pub async fn issue_ownership(
         &self,
         issue_id: &str,
-    ) -> PmResult<Option<(PmItem, Option<PmProject>)>> {
+    ) -> PmResult<Option<(PmItem, Option<LinearProject>)>> {
         let response: IssueOwnershipData = self
             .graphql(ISSUE_OWNERSHIP_QUERY, json!({ "id": issue_id }))
             .await?;
@@ -1004,7 +1060,7 @@ impl LinearClient {
         Ok(())
     }
 
-    pub async fn find_project(&self, project_id: &str) -> PmResult<Option<PmProject>> {
+    pub async fn find_project(&self, project_id: &str) -> PmResult<Option<LinearProject>> {
         // A filtered collection has an explicit empty result. The singular Project
         // endpoint can return NOT_FOUND as a GraphQL error, indistinguishable from
         // inaccessible evidence without provider-specific error guessing.
@@ -1033,22 +1089,22 @@ impl LinearClient {
                         "Project {project_id} is archived; reconcile its status in Linear"
                     )));
                 }
-                project.into_pm_project()
+                project.into_observation()
             })
             .transpose()
     }
 
-    pub async fn project_ownership(&self, project_id: &str) -> PmResult<PmProject> {
-        self.project_node(project_id).await?.into_pm_project()
+    pub async fn project_ownership(&self, project_id: &str) -> PmResult<LinearProject> {
+        self.project_node(project_id).await?.into_observation()
     }
 
     pub(crate) async fn project_content_observation(
         &self,
         id: &str,
-    ) -> PmResult<(PmProject, String)> {
+    ) -> PmResult<(LinearProject, String)> {
         let node = self.project_node(id).await?;
         let content = node.content.clone().unwrap_or_default();
-        Ok((node.into_pm_project()?, content))
+        Ok((node.into_observation()?, content))
     }
 
     pub(crate) async fn project_field_input(
@@ -1065,7 +1121,7 @@ impl LinearClient {
                     .map_err(|e| PmError::Message(format!("invalid Project status: {e}")))?;
                 Ok(json!({"statusId": self.project_status_id(status).await?}))
             }
-            "workflow" | "krs" | "metric_targets" => {
+            "description" | "workflow" | "krs" | "metric_targets" => {
                 Ok(json!({"content": patch_project_field(content, field, value)?}))
             }
             _ => Err(PmError::Message(format!(
@@ -1077,7 +1133,7 @@ impl LinearClient {
     pub(crate) async fn find_export_issue(
         &self,
         id: &str,
-    ) -> PmResult<Option<(PmItem, Option<PmProject>)>> {
+    ) -> PmResult<Option<(PmItem, Option<LinearProject>)>> {
         let response: Value = self
             .graphql(
                 r#"query FindExportIssue($id: ID!) {
@@ -1193,7 +1249,7 @@ impl LinearClient {
         team: &str,
         promote: bool,
         apply: bool,
-    ) -> PmResult<PmProject> {
+    ) -> PmResult<LinearProject> {
         let mut node = self.project_node(project_id).await?;
         let original = node.content.clone().unwrap_or_default();
         let converted = convert_legacy_project_content(&original)?;
@@ -1201,19 +1257,20 @@ impl LinearClient {
             && node.archived_at.is_none()
             && matches!(
                 node.status.type_,
-                crate::pm::ProjectStatus::Backlog | crate::pm::ProjectStatus::Planned
+                crate::work::project::ProjectStatus::Backlog
+                    | crate::work::project::ProjectStatus::Planned
             );
         node.content = Some(converted.clone());
         if promote {
-            node.status.type_ = crate::pm::ProjectStatus::Started;
+            node.status.type_ = crate::work::project::ProjectStatus::Started;
         }
-        let mut project = node.into_pm_project()?;
+        let mut project = node.into_observation()?;
         crate::pm::validate_project_ownership("adoption", initiative, Some(team), &project)?;
         if apply && (converted != original || promote) {
             let mut input = json!({"content":converted});
             if promote {
                 input["statusId"] = json!(
-                    self.project_status_id(crate::pm::ProjectStatus::Started)
+                    self.project_status_id(crate::work::project::ProjectStatus::Started)
                         .await?
                 );
             }
@@ -1432,7 +1489,7 @@ impl LinearClient {
     }
 
     /// Read one issue's title, description, comments, and revision marker.
-    pub async fn observe_issue(&self, issue_id: &str) -> PmResult<IssueObservation> {
+    pub(crate) async fn observe_issue(&self, issue_id: &str) -> PmResult<LinearIssueObservation> {
         let response: IssueObservationData = self
             .graphql(
                 ISSUE_OBSERVATION_QUERY,
@@ -1445,7 +1502,7 @@ impl LinearClient {
         let mut page = issue.comments;
         let mut comments = Vec::new();
         loop {
-            comments.extend(page.nodes.into_iter().map(|node| IssueComment {
+            comments.extend(page.nodes.into_iter().map(|node| LinearComment {
                 id: node.id,
                 created_at: node.created_at,
                 revision: node.updated_at,
@@ -1485,7 +1542,7 @@ impl LinearClient {
                 .cmp(&right.revision)
                 .then(left.id.cmp(&right.id))
         });
-        Ok(IssueObservation {
+        Ok(LinearIssueObservation {
             revision: issue.updated_at,
             title: issue.title,
             description: issue.description.unwrap_or_default(),
@@ -1777,7 +1834,7 @@ struct IssueOwnershipData {
 }
 
 impl IssueNode<ProjectNode> {
-    fn into_ownership(self) -> PmResult<(PmItem, Option<PmProject>)> {
+    fn into_ownership(self) -> PmResult<(PmItem, Option<LinearProject>)> {
         let item = self.fields.into_pm_item(
             0,
             self.project.as_ref().map(|project| ProjectRef {
@@ -1787,7 +1844,9 @@ impl IssueNode<ProjectNode> {
         )?;
         Ok((
             item,
-            self.project.map(ProjectNode::into_pm_project).transpose()?,
+            self.project
+                .map(ProjectNode::into_observation)
+                .transpose()?,
         ))
     }
 }
@@ -1872,14 +1931,14 @@ struct TeamCreatePayload {
 #[derive(Deserialize)]
 struct ProjectStatusNode {
     #[serde(rename = "type")]
-    type_: crate::pm::ProjectStatus,
+    type_: crate::work::project::ProjectStatus,
 }
 
 #[derive(Deserialize)]
 struct ProjectStatusChoice {
     id: String,
     #[serde(rename = "type")]
-    type_: crate::pm::ProjectStatus,
+    type_: crate::work::project::ProjectStatus,
     position: f64,
     #[serde(rename = "teamId")]
     team_id: Option<String>,
@@ -1917,62 +1976,43 @@ struct ProjectNode {
 
 // Replace only the selected planning field, retaining unrelated provider prose.
 fn patch_project_field(content: &str, field: &str, value: &Value) -> PmResult<String> {
-    let mut parsed = serde_json::to_value(parse_project_content(content)?)
-        .map_err(|e| PmError::Message(e.to_string()))?;
-    parsed[field] = value.clone();
-    let parsed: crate::pm::ProjectContent =
-        serde_json::from_value(parsed).map_err(|e| PmError::Message(e.to_string()))?;
-    parsed.validate()?;
-    let (header, replacement) = match field {
-        "workflow" => (None, format!("workflow: {}\n", parsed.workflow)),
-        "krs" => (Some("## KRs"), format!("{}\n", super::render_krs(&parsed))),
-        "metric_targets" => (
-            Some("## Metric targets"),
-            format!("{}\n", super::render_metric_targets(&parsed)),
-        ),
+    use project_document::ProjectField::{Krs, Targets, Workflow};
+    let document = parse_project_document(content)?;
+    if field == "description" {
+        let description: String =
+            serde_json::from_value(value.clone()).map_err(|e| PmError::Message(e.to_string()))?;
+        return document.replace_description(&description);
+    }
+    let (owner, replacement) = match field {
+        "workflow" => {
+            let workflow: String = serde_json::from_value(value.clone())
+                .map_err(|e| PmError::Message(e.to_string()))?;
+            (Workflow, format!("workflow: {workflow}"))
+        }
+        "krs" => {
+            let krs: Vec<crate::work::project::ProjectKR> =
+                serde_json::from_value(value.clone())
+                    .map_err(|e| PmError::Message(e.to_string()))?;
+            (Krs, project_document::render_krs(&krs))
+        }
+        "metric_targets" => {
+            let targets: Vec<crate::work::wave::metrics::MetricTarget> =
+                serde_json::from_value(value.clone())
+                    .map_err(|e| PmError::Message(e.to_string()))?;
+            crate::work::project::validate_metric_targets(&targets).map_err(PmError::Message)?;
+            (Targets, project_document::render_metric_targets(&targets))
+        }
         _ => {
             return Err(PmError::Message(format!(
                 "unsupported content field {field}"
             )))
         }
     };
-    let mut result = String::new();
-    let mut section = false;
-    let mut replaced = false;
-    for line in content.split_inclusive('\n') {
-        let trimmed = line.trim();
-        let workflow = trimmed.starts_with("workflow:") || trimmed.starts_with("flow:");
-        if header.is_none() && workflow {
-            if !replaced {
-                result.push_str(&replacement);
-                replaced = true;
-            }
-            continue;
-        }
-        if trimmed.starts_with('#') {
-            section = header == Some(trimmed);
-            if section {
-                if !replaced {
-                    result.push_str(&replacement);
-                    replaced = true;
-                }
-                continue;
-            }
-        }
-        // Workflow lines are parsed independently of their Markdown section.
-        if !section || workflow {
-            result.push_str(line);
-        }
-    }
-    if !replaced {
-        result.push_str("\n\n");
-        result.push_str(&replacement);
-    }
-    Ok(result)
+    Ok(document.rewrite(owner, &format!("{replacement}\n\n")))
 }
 
 fn convert_legacy_project_content(content: &str) -> PmResult<String> {
-    let current = parse_project_content(content)?.workflow;
+    let current = parse_project_document(content)?.workflow;
     let mut section = false;
     let mut legacy: Option<String> = None;
     let mut converted = String::new();
@@ -2003,9 +2043,10 @@ fn convert_legacy_project_content(content: &str) -> PmResult<String> {
 }
 
 impl ProjectNode {
-    fn into_pm_project(self) -> PmResult<PmProject> {
-        let content = parse_project_content(self.content.as_deref().unwrap_or_default())?;
-        Ok(PmProject {
+    fn into_observation(self) -> PmResult<LinearProject> {
+        let content = parse_project_document(self.content.as_deref().unwrap_or_default())?;
+        Ok(LinearProject {
+            description: Some(content.observed_description()),
             id: self.id,
             revision: self.revision,
             slug: project_slug(&self.name),
@@ -2017,9 +2058,9 @@ impl ProjectNode {
             // Older rotation archived its predecessor without changing status.
             // Retain that history without presenting it as a current plan.
             status: if self.archived_at.is_some()
-                && self.status.type_ != crate::pm::ProjectStatus::Canceled
+                && self.status.type_ != crate::work::project::ProjectStatus::Canceled
             {
-                crate::pm::ProjectStatus::Completed
+                crate::work::project::ProjectStatus::Completed
             } else {
                 self.status.type_
             },
@@ -2210,6 +2251,110 @@ fn first_meaningful_paragraph(description: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn project_markdown_prose_replacement_preserves_managed_fields() {
+        let client =
+            super::LinearClient::with_base_url("fixture".into(), None, "http://127.0.0.1:1".into());
+        let source = "Old introduction.\nworkflow: code\n## Metric targets\nTarget rationale.\n```json\n[{\"metric_id\":\"proof\",\"target\":{\"kind\":\"at_least\",\"value\":1.0}}]\n```\n## KRs\nPreamble.\n- [ ] Keep this criterion\n  across lines.\n\nOld closing.\n";
+        let before = super::parse_project_document(source).unwrap();
+        for description in ["", "New authored prose.", "## Examples\n````markdown\n```yaml\nworkflow: example\n```\n## KRs\n- [x] Example only\n````\nClosing prose.\n"] {
+            let input = client.project_field_input("description", &serde_json::json!(description), source).await.unwrap();
+            let after = input["content"].as_str().unwrap();
+            let parsed = super::parse_project_document(after).unwrap();
+            assert_eq!(parsed.description().trim(), description.trim());
+            assert_eq!(parsed.workflow, before.workflow);
+            assert_eq!(parsed.krs, before.krs);
+            assert_eq!(parsed.metric_targets, before.metric_targets);
+            assert!(!after.contains("Old introduction"));
+            assert!(!after.contains("Target rationale"));
+            assert!(!after.contains("Old closing"));
+        }
+        for description in [
+            "workflow: replacement",
+            "## KRs\n- [x] Replacement",
+            "```markdown\nUnclosed example",
+        ] {
+            assert!(
+                client
+                    .project_field_input("description", &serde_json::json!(description), source)
+                    .await
+                    .is_err(),
+                "{description}"
+            );
+        }
+        assert!(client
+            .project_field_input("description", &serde_json::Value::Null, source)
+            .await
+            .is_err());
+    }
+
+    #[test]
+    fn project_markdown_edits_preserve_examples_and_unknown_prose() {
+        for example in [
+            "````markdown\n```yaml\nworkflow: example\nflow: legacy\n```\n## KRs\n- [x] Example only\n````\n",
+            "~~~yaml\nworkflow: example\n## Metric targets\nnot JSON\n~~~\n",
+        ] {
+            let source = format!("## Example\n{example}\nworkflow: actual\n## Metric targets\nTarget rationale.\n```json\n[]\n```\nTarget note.\n## KRs\nKR preamble.\n- [ ] Original criterion\n\nParagraph after the criterion.\n{example}## Notes\nKeep these bytes.\n");
+            let before = super::parse_project_document(&source).unwrap();
+            assert_eq!(before.workflow, "actual");
+            assert_eq!(before.krs.len(), 1);
+            assert_eq!(before.krs[0].text, "Original criterion");
+            assert!(before.metric_targets.is_empty());
+            for (field, value) in [
+                ("workflow", serde_json::json!("review")),
+                ("krs", serde_json::json!([{"text":"New criterion","holds":true}])),
+                ("metric_targets", serde_json::json!([{"metric_id":"proof","target":{"kind":"at_least","value":1.0}}])),
+            ] {
+                let after = super::patch_project_field(&source, field, &value).unwrap();
+                assert_eq!(after.matches(example).count(), 2, "{field}: {after}");
+                for prose in ["Target rationale.\n", "Target note.\n", "KR preamble.\n", "Paragraph after the criterion.\n", "## Notes\nKeep these bytes.\n"] {
+                    assert!(after.contains(prose), "{field}: {after}");
+                }
+                let parsed = super::parse_project_document(&after).unwrap();
+                assert_eq!(parsed.workflow, if field == "workflow" { "review" } else { &before.workflow });
+                assert_eq!(parsed.krs, if field == "krs" { serde_json::from_value(value.clone()).unwrap() } else { before.krs.clone() });
+                assert_eq!(parsed.metric_targets, if field == "metric_targets" { serde_json::from_value(value).unwrap() } else { before.metric_targets.clone() });
+            }
+        }
+    }
+
+    #[test]
+    fn project_markdown_edits_reject_invalid_replacements() {
+        let source = "workflow: code\n## KRs\n- [ ] Keep this proof\n";
+        for (field, value) in [
+            ("workflow", serde_json::json!(null)),
+            ("krs", serde_json::json!([{"text": "Missing judgment"}])),
+            (
+                "metric_targets",
+                serde_json::json!([
+                    {"metric_id": "rate", "target": {"kind": "at_least", "value": 1.0}},
+                    {"metric_id": "rate", "target": {"kind": "at_most", "value": 2.0}},
+                ]),
+            ),
+            ("unsupported", serde_json::json!("value")),
+        ] {
+            assert!(
+                super::patch_project_field(source, field, &value).is_err(),
+                "{field}"
+            );
+        }
+    }
+
+    #[test]
+    fn project_markdown_edits_keep_unfenced_targets_separate_from_kr_prose() {
+        let source = "## Metric targets\n[]\n## KRs\nPreamble.\n- [ ] Existing proof\n";
+        let after = super::patch_project_field(
+            source,
+            "krs",
+            &serde_json::json!([{"text":"New proof","holds":true}]),
+        )
+        .unwrap();
+        assert!(after.contains("Preamble.\n"));
+        let content = super::parse_project_document(&after).unwrap();
+        assert!(content.metric_targets.is_empty());
+        assert_eq!(content.krs[0].text, "New proof");
+    }
+
     use super::*;
     use crate::pm::test_server::{self, json_response};
     use axum::http::StatusCode;
@@ -2221,9 +2366,9 @@ mod tests {
             "Retain prose.\n\n## Flows\nrecommended: custom\n\n## KRs\n- [ ] Original proof\n";
         let after = convert_legacy_project_content(before).unwrap();
         assert_eq!(after, before.replace("recommended:", "workflow:"));
-        assert_eq!(parse_project_content(&after).unwrap().workflow, "custom");
+        assert_eq!(parse_project_document(&after).unwrap().workflow, "custom");
         assert_eq!(convert_legacy_project_content(&after).unwrap(), after);
-        assert!(parse_project_content(before).unwrap().workflow.is_empty());
+        assert!(parse_project_document(before).unwrap().workflow.is_empty());
         assert!(convert_legacy_project_content(
             "workflow: different\n\n## Flows\nrecommended: custom"
         )
@@ -2258,7 +2403,7 @@ mod tests {
         assert_eq!(adopted.name, "Summer work — customer requests");
         assert!(adopted.workflow.is_empty());
         assert_eq!(adopted.krs[0].text, "Preserve this proof");
-        assert_eq!(adopted.status, crate::pm::ProjectStatus::Started);
+        assert_eq!(adopted.status, crate::work::project::ProjectStatus::Started);
     }
 
     #[test]
@@ -2388,7 +2533,7 @@ mod tests {
         assert_eq!(
             observation.comments,
             vec![
-                IssueComment {
+                LinearComment {
                     author_name: Some("Jack".to_string()),
                     id: "c-1".to_string(),
                     created_at: None,
@@ -2396,7 +2541,7 @@ mod tests {
                     body: "please prioritize".to_string(),
                     author_id: Some("user-human".to_string()),
                 },
-                IssueComment {
+                LinearComment {
                     author_name: None,
                     id: "c-2".to_string(),
                     created_at: None,
@@ -2404,7 +2549,7 @@ mod tests {
                     body: "PR: https://x".to_string(),
                     author_id: Some("user-loopflow".to_string()),
                 },
-                IssueComment {
+                LinearComment {
                     author_name: None,
                     id: "c-3".to_string(),
                     created_at: None,
@@ -2629,7 +2774,7 @@ mod tests {
             let client = LinearClient::with_base_url("fixture".into(), Some(team.into()), base_url);
             assert_eq!(
                 client
-                    .project_status_id(crate::pm::ProjectStatus::Completed)
+                    .project_status_id(crate::work::project::ProjectStatus::Completed)
                     .await
                     .unwrap(),
                 preferred
@@ -2654,7 +2799,7 @@ mod tests {
             let client =
                 LinearClient::with_base_url("fixture".into(), Some("selected".into()), base_url);
             let error = client
-                .project_status_id(crate::pm::ProjectStatus::Completed)
+                .project_status_id(crate::work::project::ProjectStatus::Completed)
                 .await
                 .unwrap_err();
             assert!(error.to_string().contains("cursor"));
@@ -3054,3 +3199,24 @@ mod tests {
 #[cfg(test)]
 #[path = "linear_follow_through_tests.rs"]
 mod follow_through_tests;
+
+/// Retained Linear facts, including foreign and not-yet-associated Projects.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LinearProject {
+    pub id: String,
+    pub revision: Option<String>,
+    pub slug: String,
+    pub name: String,
+    pub summary: String,
+    /// None means historical/unobserved prose, never an observed empty value.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    pub metric_targets: Vec<MetricTarget>,
+    pub workflow: String,
+    pub status: ProjectStatus,
+    pub krs: Vec<ProjectKR>,
+    pub initiative_ids: Vec<String>,
+    /// Stable ids of the Linear teams this Project belongs to. A managed Project
+    /// must carry exactly the repository Team.
+    pub team_ids: Vec<String>,
+}

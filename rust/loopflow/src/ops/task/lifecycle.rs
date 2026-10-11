@@ -20,7 +20,7 @@ pub(crate) async fn cleanup_completed_task(store: &SharedStore, task: &Task) -> 
     let Some(pr) = store.active_task_pr(&task.id).await.map_err(task_error)? else {
         eprintln!(
             "Task {} is complete; retained its PR-less checkout and artifacts.",
-            task.plan.identifier
+            task.identifier
         );
         return Ok(());
     };
@@ -31,7 +31,7 @@ pub(crate) async fn cleanup_completed_task(store: &SharedStore, task: &Task) -> 
     if !super::CompletionGate::from_delivery(Some(&pr), &follow_through).satisfied() {
         eprintln!(
             "Task {} is complete; retained checkout for unresolved delivery.",
-            task.plan.identifier
+            task.identifier
         );
         return Ok(());
     }
@@ -39,7 +39,7 @@ pub(crate) async fn cleanup_completed_task(store: &SharedStore, task: &Task) -> 
     if !blockers.is_empty() {
         eprintln!(
             "Task {} is complete; retained checkout: {}",
-            task.plan.identifier,
+            task.identifier,
             blockers.join("; ")
         );
         return Ok(());
@@ -50,7 +50,7 @@ pub(crate) async fn cleanup_completed_task(store: &SharedStore, task: &Task) -> 
         if task.worktree.as_ref().is_some_and(|path| path == &repo) {
             eprintln!(
                 "Task {} is complete; retained the primary checkout and branch.",
-                task.plan.identifier
+                task.identifier
             );
             return Ok(());
         }
@@ -79,7 +79,7 @@ pub(crate) async fn cleanup_completed_task(store: &SharedStore, task: &Task) -> 
     result.map_err(|error| {
         task_error(format!(
             "Task {} is complete, but cleanup is incomplete: {error}. Inspect the retained checkout with `lf wt list`.",
-            task.plan.identifier,
+            task.identifier,
         ))
     })
 }
@@ -121,7 +121,7 @@ pub(crate) fn notice_retained_task(
     block_on_task(async {
         if let Some((store, task)) = branch_task(repo, branch).await? {
             require_idle(&store, &task)?;
-            progress.status(&format!("Task {} and its Linear outcome remain unchanged; use `lf task abandon {}` to cancel the Task.", task.plan.identifier, task.plan.identifier));
+            progress.status(&format!("Task {} and its Linear outcome remain unchanged; use `lf task abandon {}` to cancel the Task.", task.identifier, task.identifier));
         }
         Ok(())
     })
@@ -214,10 +214,10 @@ async fn abandon(repo: &Path, selector: &str, force: bool) -> OpsResult<String> 
     if let Err(error) = cleanup {
         eprintln!(
             "{} is canceled; retained checkout/PR: {error}",
-            task.plan.identifier
+            task.identifier
         );
     }
-    Ok(task.plan.identifier)
+    Ok(task.identifier)
 }
 
 async fn save_abandon(store: &SharedStore, task: &Task) -> OpsResult<()> {
@@ -226,7 +226,7 @@ async fn save_abandon(store: &SharedStore, task: &Task) -> OpsResult<()> {
         .await
         .map_err(task_error)?;
     let wave = owning_wave(store, task).await?;
-    crate::ops::planning_peer::sync_after_save(store, wave.repo()).await;
+    crate::ops::planning_sync::sync_after_save(store, wave.repo()).await;
     Ok(())
 }
 
@@ -245,8 +245,8 @@ pub fn task_delete(repo: &Path, issue: &str) -> OpsResult<String> {
         };
         store.sqlite.delete_task(&task.id).map_err(task_error)?;
         let wave = owning_wave(&store, &task).await?;
-        crate::ops::planning_peer::sync_after_save(&store, wave.repo()).await;
-        Ok(task.plan.identifier)
+        crate::ops::planning_sync::sync_after_save(&store, wave.repo()).await;
+        Ok(task.identifier)
     })
 }
 
@@ -277,7 +277,7 @@ async fn prepare_abandon(
     }
     if sweep || pr.is_some() {
         let issue = match task {
-            Some(task) => task.plan.linear_id.as_ref().map(|id| id.as_str()),
+            Some(task) => task.linear_id.as_ref().map(|id| id.as_str()),
             None => Some(issue),
         };
         if let Some(issue) = issue {
@@ -405,32 +405,27 @@ pub fn task_sweep(repo: &Path, apply: bool) -> OpsResult<Vec<SweepEntry>> {
                     // Read membership after preparation, immediately before effects.
                     match crate::ops::pm::require_outside_current_chapter(repo, &item.id).await {
                         Err(error) => format!("skipped: {error}"),
-                        Ok(resolved) => {
-                            let task = resolve_task(&store, &resolved.item.id).await?.ok_or_else(
-                                || task_error("Task was not retained after acquisition"),
-                            )?;
-                            match save_abandon(&store, &task).await {
-                                Err(error) => format!(
-                                    "incomplete: {error}; retry task abandon {}",
-                                    item.identifier
-                                ),
-                                Ok(()) => {
-                                    let mut outcome = "canceled".to_string();
-                                    if let Some(deletion) = deletion {
-                                        if let Err(error) = crate::ops::abandon::abandon_prepared(
-                                            deletion,
-                                            &NullProgress,
-                                        )
-                                        .await
-                                        {
-                                            outcome =
-                                                format!("canceled; retained checkout/PR: {error}");
-                                        }
+                        Ok(task) => match save_abandon(&store, &task).await {
+                            Err(error) => format!(
+                                "incomplete: {error}; retry task abandon {}",
+                                item.identifier
+                            ),
+                            Ok(()) => {
+                                let mut outcome = "canceled".to_string();
+                                if let Some(deletion) = deletion {
+                                    if let Err(error) = crate::ops::abandon::abandon_prepared(
+                                        deletion,
+                                        &NullProgress,
+                                    )
+                                    .await
+                                    {
+                                        outcome =
+                                            format!("canceled; retained checkout/PR: {error}");
                                     }
-                                    outcome
                                 }
+                                outcome
                             }
-                        }
+                        },
                     }
                 }
             };

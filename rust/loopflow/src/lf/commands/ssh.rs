@@ -3,6 +3,7 @@
 
 use crate::durable::TaskExecutionRoute;
 use crate::lf::Cli;
+use crate::ops::task::remote::TaskSource;
 use crate::provider_account::selection::AccountSelection;
 use anyhow::{anyhow, Context};
 use clap::Parser;
@@ -50,6 +51,11 @@ pub fn run(
         super::desktop::require_supported()?;
     }
     let runtime = tokio::runtime::Runtime::new()?;
+    let source = if preview || resident_operation {
+        None
+    } else {
+        runtime.block_on(resolve_task_source(cli.task.as_deref()))?
+    };
     let target = if preview || resident_operation {
         let store = crate::store::read_existing_registry()?
             .ok_or_else(|| anyhow!("Machine unavailable: local registry is absent"))?;
@@ -94,6 +100,7 @@ pub fn run(
                 .env_value()?,
         )
     };
+    let source_json = source.as_ref().map(serde_json::to_string).transpose()?;
     let user_name = crate::config::participant_name()?.unwrap_or_default();
     let mut extra_env = vec![
         (EXPECTED_MACHINE_ID_ENV, target.id.as_str()),
@@ -106,9 +113,8 @@ pub fn run(
         ));
         extra_env.push(crate::provider_account::activation::isolation_env(true));
     }
-    let declaration = std::env::var(crate::lf::WORK_DECLARATION_ENV).ok();
-    if let Some(value) = declaration.as_deref() {
-        extra_env.push((crate::lf::WORK_DECLARATION_ENV, value));
+    if let Some(source) = source_json.as_deref() {
+        extra_env.push((crate::lf::TASK_SOURCE_ENV, source));
     }
     let mut cmd = vec!["lf".to_string()];
     if cli.repository.is_none() {
@@ -119,7 +125,7 @@ pub fn run(
     cmd.extend(if preview {
         lf_args.to_vec()
     } else {
-        resident_args(lf_args, cli, routed)
+        resident_args(lf_args, cli, routed, source.as_ref())
     });
     if matches!(
         &cli.command,
@@ -172,8 +178,14 @@ pub fn run(
     run_ssh(&target.route, forward_agent, &preamble)
 }
 
-fn resident_args(args: &[String], cli: &Cli, routed: bool) -> Vec<String> {
+fn resident_args(
+    args: &[String],
+    cli: &Cli,
+    routed: bool,
+    source: Option<&TaskSource>,
+) -> Vec<String> {
     // Automatic Work routing carries the resolved plan, not a path on this Machine.
+    let task_flag = cli.task.as_ref().map(|task| format!("--task={task}"));
     let mut remove_repo = routed && cli.repo.is_some();
     let mut remaining = cli.account.len() + cli.only_account.len();
     let mut shared = cli.shared;
@@ -200,6 +212,21 @@ fn resident_args(args: &[String], cli: &Cli, routed: bool) -> Vec<String> {
         } else if shared && arg == "--shared" {
             result.push("--isolate".into());
             shared = false;
+        } else if let Some(source) = source.filter(|_| {
+            (arg == "--task" && iter.as_slice().first() == cli.task.as_ref())
+                || task_flag.as_ref() == Some(arg)
+        }) {
+            // Linear mappings resolve independently retained Task IDs on the target.
+            if arg == "--task" {
+                iter.next();
+            }
+            result.push(format!(
+                "--task={}",
+                source
+                    .issue_id
+                    .as_deref()
+                    .unwrap_or(source.task_id.as_str())
+            ));
         } else {
             result.push(arg.clone());
         }
@@ -207,7 +234,56 @@ fn resident_args(args: &[String], cli: &Cli, routed: bool) -> Vec<String> {
     result
 }
 
-/// Parse transport policy once; help/version are forwarded for the peer to print.
+async fn resolve_task_source(selector: Option<&str>) -> anyhow::Result<Option<TaskSource>> {
+    let Some(selector) = selector else {
+        return Ok(None);
+    };
+    let Some(store) = crate::store::open_existing_store().await else {
+        return Ok(None);
+    };
+    // Validate pushed code before any planning I/O can hide missing source work.
+    let source = TaskSource::resolve(&store, selector).await?;
+    let repo = match store.get_task_by_issue(selector).await? {
+        Some(task) => store
+            .get_wave(&task.wave_id)
+            .await?
+            .map(|wave| std::path::PathBuf::from(wave.repo())),
+        None => crate::repo::discover_repo_root(&crate::repo::working_directory()?)
+            .ok()
+            .flatten(),
+    };
+    if let Some(repo) = repo {
+        if crate::ops::linear_observe::connected(&repo.to_string_lossy()) {
+            if let Some(task) = store.get_task_by_issue(selector).await? {
+                if let Err(error) = crate::ops::planning_export::sync_export(
+                    &store,
+                    &repo,
+                    &crate::durable::WorkRef::Task(task.id),
+                )
+                .await
+                {
+                    tracing::warn!(%error,"Linear publication pending; remote resolution uses retained planning");
+                }
+            }
+            let source = TaskSource::resolve(&store, selector).await?;
+            if source
+                .as_ref()
+                .is_some_and(|source| source.issue_id.is_none())
+            {
+                return Err(anyhow!("Task {selector} is saved locally but has not reached Linear; retry after planning synchronization"));
+            }
+            return Ok(source);
+        }
+        if let Err(error) =
+            crate::ops::planning_sync::publish_repository(&store, &repo.to_string_lossy()).await
+        {
+            tracing::warn!(%error,"Git planning publication pending; remote resolution uses retained planning");
+        }
+    }
+
+    Ok(source)
+}
+
 pub fn parse_remote_command(lf_args: &[String]) -> anyhow::Result<Cli> {
     if lf_args.first().is_some_and(|arg| arg == "lf") {
         return Err(anyhow!(
@@ -451,7 +527,7 @@ mod tests {
     fn remote_preferences_cannot_relax_the_resident_account_restriction() {
         let args = ["--account", "person@", "--shared", "skill", "implement"].map(str::to_string);
         assert_eq!(
-            resident_args(&args, &parse_remote_command(&args).unwrap(), false),
+            resident_args(&args, &parse_remote_command(&args).unwrap(), false, None),
             ["--isolate", "skill", "implement"]
         );
     }
@@ -468,7 +544,7 @@ mod tests {
         ]
         .map(str::to_string);
         assert_eq!(
-            resident_args(&args, &parse_remote_command(&args).unwrap(), false),
+            resident_args(&args, &parse_remote_command(&args).unwrap(), false, None),
             [
                 "--isolate",
                 "skill",
@@ -488,9 +564,9 @@ mod tests {
             ]);
             let args = args.into_iter().map(str::to_owned).collect::<Vec<_>>();
             let cli = parse_remote_command(&args).unwrap();
-            assert_eq!(resident_args(&args, &cli, false), args);
+            assert_eq!(resident_args(&args, &cli, false, None), args);
             assert_eq!(
-                resident_args(&args, &cli, true),
+                resident_args(&args, &cli, true, None),
                 ["--task", "LOO-427", "skill", "debug", "--", "--repo", "literal"]
             );
         }

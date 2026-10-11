@@ -1134,11 +1134,9 @@ fn task_abandonment_adopts_linear_conflict_and_retains_local_decision() {
             fixture
                 .store
                 .sqlite
-                .planning_task(&task.id)
+                .task(&task.id)
                 .unwrap()
-                .record
                 .unwrap()
-                .item
                 .state
                 .as_deref(),
             Some("completed")
@@ -1320,7 +1318,11 @@ fn task_completion_ingestion_preserves_baseline_and_atomically_adopts_linear() {
         let mut remote = fixture
             .store
             .sqlite
-            .planning_task(&task.id)
+            .pm_task_observation(
+                &repo.display().to_string(),
+                "linear",
+                task.linear_id.as_ref().unwrap().as_str(),
+            )
             .unwrap()
             .record
             .unwrap();
@@ -1351,16 +1353,9 @@ fn task_completion_ingestion_preserves_baseline_and_atomically_adopts_linear() {
                 .id,
             delivery.id
         );
-        let saved = fixture
-            .store
-            .sqlite
-            .planning_task(&task.id)
-            .unwrap()
-            .record
-            .unwrap()
-            .item;
+        let saved = fixture.store.sqlite.task(&task.id).unwrap().unwrap();
         assert_eq!(saved.state.as_deref(), Some("completed"));
-        assert_eq!(saved.name, "Linear title");
+        assert_eq!(saved.title, "Linear title");
         remote.item.state = Some("canceled".into());
         remote.item.revision = Some("2026-10-08T02:00:00Z".into());
         remote.observed_at += 1;
@@ -1385,11 +1380,9 @@ fn task_completion_ingestion_preserves_baseline_and_atomically_adopts_linear() {
             fixture
                 .store
                 .sqlite
-                .planning_task(&task.id)
+                .task(&task.id)
                 .unwrap()
-                .record
                 .unwrap()
-                .item
                 .state
                 .as_deref(),
             Some("completed")
@@ -1423,11 +1416,9 @@ fn task_completion_ingestion_preserves_baseline_and_atomically_adopts_linear() {
             fixture
                 .store
                 .sqlite
-                .planning_task(&task.id)
+                .task(&task.id)
                 .unwrap()
-                .record
                 .unwrap()
-                .item
                 .state
                 .as_deref(),
             Some("canceled")
@@ -1459,7 +1450,10 @@ fn task_completion_ingestion_preserves_baseline_and_atomically_adopts_linear() {
 
 #[test]
 fn task_completion_late_acknowledgement_preserves_explicit_reopening() {
-    with_planning_task(|runtime, fixture, repo, task, _state| {
+    with_planning_task(|runtime, fixture, repo, task, state| {
+        runtime.block_on(async {
+            state.lock().await.field_outage = true;
+        });
         crate::ops::task::task_complete(repo, task.id.as_str(), Some("Delivered")).unwrap();
         let completed = fixture
             .store
@@ -1493,6 +1487,24 @@ fn task_completion_late_acknowledgement_preserves_explicit_reopening() {
         fixture
             .store
             .sqlite
+            .take_up_workflow(
+                &task.id,
+                &crate::workflow::WorkflowDefinition {
+                    name: "reopen".into(),
+                    nodes: vec![crate::workflow::WorkflowNode {
+                        name: "start".into(),
+                        skill: "review".into(),
+                        description: None,
+                    }],
+                    edges: vec![],
+                },
+                &process.id,
+                None,
+            )
+            .unwrap();
+        fixture
+            .store
+            .sqlite
             .set_workflow_node(&task.id, "start", &process.id, Some("New scope"))
             .unwrap();
         assert_eq!(
@@ -1516,7 +1528,11 @@ fn task_completion_late_acknowledgement_preserves_explicit_reopening() {
         let mut late = fixture
             .store
             .sqlite
-            .planning_task(&task.id)
+            .pm_task_observation(
+                &repo.display().to_string(),
+                "linear",
+                task.linear_id.as_ref().unwrap().as_str(),
+            )
             .unwrap()
             .record
             .unwrap()
@@ -1532,11 +1548,9 @@ fn task_completion_late_acknowledgement_preserves_explicit_reopening() {
             fixture
                 .store
                 .sqlite
-                .planning_task(&task.id)
+                .task(&task.id)
                 .unwrap()
-                .record
                 .unwrap()
-                .item
                 .state
                 .as_deref(),
             Some("unstarted")
@@ -1622,11 +1636,9 @@ fn task_completion_active_sync_acquires_membership_while_delivery_is_pending() {
                         if fixture
                             .store
                             .sqlite
-                            .planning_task(&task.id)
+                            .task(&task.id)
                             .unwrap()
-                            .record
                             .unwrap()
-                            .item
                             .state
                             .as_deref()
                             == Some("canceled")
@@ -1926,13 +1938,7 @@ exit 0
                     }
                     loop {
                         let thread = fixture.store.sqlite.task_comments(&task.id).unwrap();
-                        let remote = fixture
-                            .store
-                            .sqlite
-                            .planning_task(&other.id)
-                            .unwrap()
-                            .record
-                            .unwrap();
+                        let remote = fixture.store.sqlite.task(&other.id).unwrap().unwrap();
                         if fixture
                             .store
                             .sqlite
@@ -1941,7 +1947,7 @@ exit 0
                             .is_none()
                             && thread.pending_sync.is_empty()
                             && thread.comments.iter().any(|c| c.id == "incoming-reconnect")
-                            && remote.item.completed
+                            && remote.completed
                             && fixture
                                 .store
                                 .get_task_by_issue("FIX-3")
@@ -2040,16 +2046,7 @@ fn assert_completion_adopts_reopening(during_delivery: bool) {
             .unwrap()
             .unwrap();
         assert!(!original.attempted);
-        let planning = || {
-            fixture
-                .store
-                .sqlite
-                .planning_task(&task.id)
-                .unwrap()
-                .record
-                .unwrap()
-                .item
-        };
+        let planning = || fixture.store.sqlite.task(&task.id).unwrap().unwrap();
         assert!(
             planning().completed,
             "local completion saves before delivery"
@@ -2201,6 +2198,9 @@ fn task_completion_unseen_reopening_can_be_overwritten_by_unconditional_delivery
 #[test]
 fn task_completion_lost_reply_adopts_linear_reopening() {
     with_planning_task(|runtime, fixture, repo, task, state| {
+        runtime.block_on(async {
+            state.lock().await.field_outage = true;
+        });
         crate::ops::task::task_complete(repo, task.id.as_str(), Some("Delivered")).unwrap();
         let original = fixture
             .store
@@ -2209,7 +2209,9 @@ fn task_completion_lost_reply_adopts_linear_reopening() {
             .unwrap()
             .unwrap();
         runtime.block_on(async {
-            state.lock().await.lose_completion = true;
+            let mut provider = state.lock().await;
+            provider.field_outage = false;
+            provider.lose_completion = true;
         });
         runtime
             .block_on(crate::ops::linear_observe::sync_task_state(
@@ -2234,14 +2236,7 @@ fn task_completion_lost_reply_adopts_linear_reopening() {
             .pending_task_state(&task.id)
             .unwrap()
             .is_none());
-        let adopted = fixture
-            .store
-            .sqlite
-            .planning_task(&task.id)
-            .unwrap()
-            .record
-            .unwrap()
-            .item;
+        let adopted = fixture.store.sqlite.task(&task.id).unwrap().unwrap();
         assert_eq!(adopted.state.as_deref(), Some("unstarted"));
         assert!(!adopted.completed);
         assert!(fixture.store.sqlite.workflow(&task.id).unwrap().is_none());
@@ -2262,7 +2257,18 @@ fn task_completion_lost_reply_adopts_linear_reopening() {
             WorkStatus::Ready
         );
         // A delayed matching readback cannot erase an already observed collision.
-        let mut late = adopted.clone();
+        let mut late = fixture
+            .store
+            .sqlite
+            .pm_task_observation(
+                &repo.display().to_string(),
+                "linear",
+                task.linear_id.as_ref().unwrap().as_str(),
+            )
+            .unwrap()
+            .record
+            .unwrap()
+            .item;
         late.state = Some("completed".into());
         late.completed = true;
         assert!(!fixture
@@ -3506,16 +3512,7 @@ fn save_field_name(
             .unwrap();
         crate::durable::WorkRef::Project(task.project_id.clone())
     } else {
-        let saved = fixture
-            .store
-            .sqlite
-            .planning_task(&task.id)
-            .unwrap()
-            .record
-            .unwrap()
-            .item;
         let current = fixture.store.sqlite.task(&task.id).unwrap().unwrap();
-        assert_eq!(current.title, saved.name);
         fixture
             .store
             .sqlite
@@ -4185,15 +4182,7 @@ fn planning_export_late_readback_preserves_newer_edits_and_inventory_identity() 
             "Later chapter"
         );
         assert_eq!(
-            fixture
-                .store
-                .sqlite
-                .planning_task(&task.id)
-                .unwrap()
-                .record
-                .unwrap()
-                .item
-                .name,
+            fixture.store.sqlite.task(&task.id).unwrap().unwrap().title,
             "Later task"
         );
         assert_eq!(
@@ -4233,15 +4222,7 @@ fn planning_export_late_readback_preserves_newer_edits_and_inventory_identity() 
                 .unwrap();
         });
         assert_eq!(
-            fixture
-                .store
-                .sqlite
-                .planning_task(&task.id)
-                .unwrap()
-                .record
-                .unwrap()
-                .item
-                .name,
+            fixture.store.sqlite.task(&task.id).unwrap().unwrap().title,
             "Linear decision"
         );
         assert!(fixture
@@ -4289,7 +4270,12 @@ fn planning_export_removal_during_uncertain_creation_retains_identity() {
             ))
             .unwrap();
         assert_eq!(
-            fixture.store.sqlite.planning_task(&task.id).unwrap().state,
+            fixture
+                .store
+                .sqlite
+                .task_acquisition(&task.id)
+                .unwrap()
+                .state,
             crate::store::PlanningState::Removed
         );
         runtime
@@ -4726,6 +4712,79 @@ fn project_prose_rejects_stale_and_foreign_observations_without_settling() {
                     pending
                 );
                 assert_eq!(state.lock().await.field_writes, 0);
+            });
+        });
+    }
+}
+
+#[test]
+fn task_field_delivery_requires_revision_accepted_into_work() {
+    for foreign in [false, true] {
+        with_planning_task(|runtime, fixture, repo, task, state| {
+            runtime.block_on(async {
+                let issue = task.linear_id.as_ref().unwrap().as_str();
+                let original = state.lock().await.issues[0].clone();
+                if !foreign {
+                    let mut provider = state.lock().await;
+                    mark_issue_updated(&mut provider.issues[0]);
+                    drop(provider);
+                    super::read_task_planning_async(repo, issue, PmRefresh::Force)
+                        .await
+                        .unwrap();
+                }
+                let work = save_field_name(fixture, task, false, "Pending local title");
+                let saved = fixture.store.sqlite.task(&task.id).unwrap().unwrap();
+                let receipt = field_receipts(fixture, task, false)[0].clone();
+                let workflow = fixture.store.sqlite.workflow(&task.id).unwrap();
+                {
+                    let mut provider = state.lock().await;
+                    if foreign {
+                        let mut project = planning_project("foreign-project", "foreign-project");
+                        project["initiatives"] = json!({"nodes":[{"id":"foreign-initiative"}]});
+                        provider.extra_projects.push(project.clone());
+                        provider.issues[0]["project"] = project;
+                        mark_issue_updated(&mut provider.issues[0]);
+                    } else {
+                        provider.issues[0] = original;
+                    }
+                }
+                let error = crate::ops::planning_delivery::sync_fields(&fixture.store, repo, &work)
+                    .await
+                    .unwrap_err();
+                assert!(
+                    error.to_string().contains("field delivery deferred"),
+                    "{error}"
+                );
+                assert_eq!(state.lock().await.field_writes, 0);
+                assert_eq!(fixture.store.sqlite.task(&task.id).unwrap().unwrap(), saved);
+                assert_eq!(fixture.store.sqlite.workflow(&task.id).unwrap(), workflow);
+                let pending = field_receipts(fixture, task, false);
+                assert_eq!(pending.len(), 1);
+                assert_eq!(pending[0].id, receipt.id);
+                let attempted: bool = rusqlite::Connection::open(&fixture.database)
+                    .unwrap()
+                    .query_row(
+                        "SELECT attempted FROM task_changes WHERE id=?1",
+                        [&receipt.id],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                assert!(!attempted);
+                if foreign {
+                    let retained = fixture
+                        .store
+                        .sqlite
+                        .pm_task_observation(&repo.display().to_string(), "linear", issue)
+                        .unwrap()
+                        .record
+                        .unwrap();
+                    assert_eq!(retained.item.project_id.as_deref(), Some("foreign-project"));
+                    assert!(!fixture
+                        .store
+                        .sqlite
+                        .accepted_task_revision(&task.id, issue, retained.item.revision.as_deref())
+                        .unwrap());
+                }
             });
         });
     }

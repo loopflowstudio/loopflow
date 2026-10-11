@@ -26,7 +26,6 @@ mod ci_incidents;
 mod durable;
 mod flow_inventory;
 mod metrics;
-mod plan_read;
 pub(crate) mod planning;
 pub(crate) mod planning_changes;
 pub(crate) mod planning_export;

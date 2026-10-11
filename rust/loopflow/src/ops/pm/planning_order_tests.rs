@@ -67,18 +67,13 @@ fn reorder(store: &Store, task: &Task, rank: u32) {
 fn local_order(store: &Store, tasks: &[Task]) -> Vec<String> {
     let mut ordered = tasks
         .iter()
-        .map(|t| {
-            store
-                .sqlite
-                .planning_task(&t.id)
-                .unwrap()
-                .record
-                .unwrap()
-                .item
-        })
+        .map(|t| store.sqlite.task(&t.id).unwrap().unwrap())
         .collect::<Vec<_>>();
     ordered.sort_by_key(|item| item.rank);
-    ordered.into_iter().map(|i| i.id).collect()
+    ordered
+        .into_iter()
+        .map(|i| i.linear_id.unwrap().as_str().to_owned())
+        .collect()
 }
 
 async fn remote_order(state: &Arc<tokio::sync::Mutex<PlanningState>>) -> Vec<String> {
@@ -284,12 +279,10 @@ fn planning_order_acquisition_during_write_preserves_newer_save_and_scalar_edits
                     fixture
                         .store
                         .sqlite
-                        .planning_task(&tasks[0].id)
+                        .task(&tasks[0].id)
                         .unwrap()
-                        .record
                         .unwrap()
-                        .item
-                        .name,
+                        .title,
                     "Inbound title during reorder"
                 );
                 assert_eq!(

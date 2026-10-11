@@ -276,13 +276,11 @@ async fn observe(
                 },
             )
             .await?;
-            let accepted = store
+            if !store
                 .sqlite
-                .planning_task(id)
+                .accepted_task_revision(id, &external, revision.as_deref())
                 .map_err(message)?
-                .record
-                .ok_or_else(|| message("Task planning is unavailable"))?;
-            if accepted.item.revision != revision {
+            {
                 return Err(message(
                     "Newer or unresolved Linear planning retained; field delivery deferred",
                 ));

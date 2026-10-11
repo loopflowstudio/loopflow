@@ -1833,7 +1833,13 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
                     rusqlite::params![id.as_str(), alias],
                 )
                 .unwrap();
-                let mut item = store.planning_task(id).unwrap().record.unwrap().item;
+                let mut item = observed_issue(
+                    alias,
+                    &project.id,
+                    "Independent same title",
+                    "Original notes",
+                );
+                item.identifier = alias.into();
                 item.revision = Some("2026-10-08T10:00:00Z".into());
                 item.team_id = Some("fixture-team".into());
                 snapshot.items.push(item);
@@ -2001,8 +2007,8 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
                 conflict.linear_value,
                 Some(serde_json::json!("Concurrent title"))
             );
-            let retained = store.planning_task(&second).unwrap().record.unwrap().item;
-            assert_eq!(retained.name, "Concurrent title");
+            let retained = store.task(&second).unwrap().unwrap();
+            assert_eq!(retained.title, "Concurrent title");
             assert_eq!(retained.description, "");
             assert_eq!(retained.rank, 0);
             assert_eq!(retained.assignee.as_deref(), Some("remote-person"));
@@ -2050,14 +2056,7 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             &["task", "edit", selector, "--unassign"],
         );
         let reopened = loopflow::store::sqlite::SqliteStore::new(&path).unwrap();
-        assert!(reopened
-            .planning_task(&second)
-            .unwrap()
-            .record
-            .unwrap()
-            .item
-            .assignee
-            .is_none());
+        assert!(reopened.task(&second).unwrap().unwrap().assignee.is_none());
         assert_eq!(reopened.task(&second).unwrap().unwrap().id, second);
         assert!(reopened
             .list_tasks(None)
@@ -2128,10 +2127,28 @@ fn rotation_saves_membership_and_pending_effects_offline() {
         if mapped {
             db.execute("UPDATE tasks SET external_issue_id='provider-issue',issue_identifier='FIX-1',planning_team_id='fixture-team' WHERE id=?1", [active.id.as_str()]).unwrap();
         }
-        let saved = store.planning_task(&active.id).unwrap().record.unwrap();
+        let observed_project = loopflow::pm::linear::LinearProject {
+            id: "provider-project".into(),
+            slug: project.slug.clone(),
+            name: project.name.clone(),
+            summary: project.summary.clone(),
+            description: Some(project.description.clone()),
+            workflow: project.workflow.clone(),
+            status: project.status,
+            krs: project.krs.clone(),
+            metric_targets: project.metric_targets.clone(),
+            initiative_ids: vec!["initiative".into()],
+            team_ids: vec!["fixture-team".into()],
+            revision: None,
+        };
         let mut snapshot = loopflow::pm::PmSnapshot {
-            projects: vec![saved.project.unwrap()],
-            items: vec![saved.item],
+            projects: vec![observed_project.clone()],
+            items: vec![observed_issue(
+                "provider-issue",
+                "provider-project",
+                "Started work",
+                "Retain description",
+            )],
         };
         snapshot.items[0].due_date.clone_from(&active.due_date);
         if mapped {
@@ -2290,7 +2307,24 @@ fn rotation_saves_membership_and_pending_effects_offline() {
                 [successor.as_str()],
             )
             .unwrap();
-            let mut echo = store.planning_task(&active.id).unwrap().record.unwrap();
+            let mut echo = store
+                .pm_task_observation(&canonical.to_string(), "linear", "provider-issue")
+                .unwrap()
+                .record
+                .unwrap();
+            let successor_plan = store.project(&successor).unwrap().unwrap();
+            let project = echo.project.as_mut().unwrap();
+            project.id = "exported-successor".into();
+            project.name = successor_plan.name;
+            project.slug = successor_plan.slug;
+            project.status = successor_plan.status;
+            project.summary = successor_plan.summary;
+            project.description = Some(successor_plan.description);
+            project.workflow = successor_plan.workflow;
+            project.krs = successor_plan.krs;
+            project.metric_targets = successor_plan.metric_targets;
+            echo.item.project_id = Some(project.id.clone());
+            echo.item.project = Some(project.slug.clone());
             echo.item.revision = Some("2026-10-08T12:30:00Z".into());
             echo.observed_at = 22;
             store
@@ -2341,7 +2375,11 @@ fn rotation_saves_membership_and_pending_effects_offline() {
             pending
         );
         if mapped {
-            let mut remote = store.planning_task(&active.id).unwrap().record.unwrap();
+            let mut remote = store
+                .pm_task_observation(&canonical.to_string(), "linear", "provider-issue")
+                .unwrap()
+                .record
+                .unwrap();
             let project = remote.project.as_mut().unwrap();
             project.id = "third-provider-project".into();
             project.name = "Another plan".into();
@@ -2369,7 +2407,7 @@ fn rotation_saves_membership_and_pending_effects_offline() {
             );
             assert!(store.pending_task_changes(&active.id).unwrap().is_empty());
             assert_eq!(
-                store.planning_task(&active.id).unwrap().state,
+                store.task_acquisition(&active.id).unwrap().state,
                 loopflow::store::PlanningState::Available
             );
         }
@@ -2393,6 +2431,7 @@ fn refiling_saves_membership_offline_and_retains_inbound_changes() {
         let canonical = loopflow::repository::CanonicalRepo::discover(repo.path()).unwrap();
         let db = rusqlite::Connection::open(&path).unwrap();
         let mut projects = Vec::new();
+        let mut observations = Vec::new();
         for name in ["source", "destination", "competing"] {
             let wave = loopflow::work::wave::Wave::new(
                 loopflow::id::WaveId::new(),
@@ -2411,7 +2450,7 @@ fn refiling_saves_membership_offline_and_retains_inbound_changes() {
                 // identity as SQLite, rather than restoring a pre-binding journal.
                 project.linear_id = Some(loopflow::planning::LinearProjectId::new(name).unwrap());
                 store.insert_project(&project).unwrap();
-                store
+                let observed = store
                     .put_pm_project(
                         wave.id(),
                         "linear",
@@ -2433,6 +2472,7 @@ fn refiling_saves_membership_offline_and_retains_inbound_changes() {
                         1,
                     )
                     .unwrap();
+                observations.push(observed);
             }
             projects.push(project);
         }
@@ -2448,7 +2488,11 @@ fn refiling_saves_membership_offline_and_retains_inbound_changes() {
         if mapped {
             db.execute("UPDATE tasks SET external_issue_id='provider-issue',issue_identifier='FIX-1',planning_team_id='fixture-team' WHERE id=?1", [task.id.as_str()]).unwrap();
         }
-        let original = store.planning_task(&task.id).unwrap().record.unwrap();
+        let original = loopflow::store::PmTaskRecord {
+            item: observed_issue("provider-issue", "source", "Refile me", "Original"),
+            project: observations.first().cloned(),
+            observed_at: 1,
+        };
         if mapped {
             store
                 .put_pm_task(
@@ -2551,7 +2595,7 @@ fn refiling_saves_membership_offline_and_retains_inbound_changes() {
                 projects[2].id
             );
             assert_eq!(
-                store.planning_task(&task.id).unwrap().state,
+                store.task_acquisition(&task.id).unwrap().state,
                 loopflow::store::PlanningState::Available
             );
         }
@@ -3193,4 +3237,25 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
     assert_eq!(node, "review");
     let process: (Option<i64>, Option<String>) = db.query_row("SELECT completed_at,outcome FROM processes WHERE id='11111111-1111-4111-8111-111111111111'", [], |row| Ok((row.get(0)?,row.get(1)?))).unwrap();
     assert_eq!(process, (None, None));
+}
+
+fn observed_issue(id: &str, project: &str, title: &str, description: &str) -> loopflow::pm::PmItem {
+    loopflow::pm::PmItem {
+        id: id.into(),
+        identifier: "FIX-1".into(),
+        name: title.into(),
+        description: description.into(),
+        project_id: Some(project.into()),
+        project: Some(project.into()),
+        team_id: Some("fixture-team".into()),
+        revision: None,
+        branch_name: None,
+        url: None,
+        rank: 0,
+        completed: false,
+        completed_at: None,
+        state: Some("unstarted".into()),
+        assignee: None,
+        due_date: None,
+    }
 }

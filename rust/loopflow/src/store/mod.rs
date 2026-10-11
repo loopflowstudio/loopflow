@@ -1678,15 +1678,21 @@ mod tests {
                 .await
                 .unwrap()
                 .unwrap();
-            let record = store
-                .sqlite
-                .planning_task(&task.id)
-                .unwrap()
-                .record
-                .unwrap();
-            assert_eq!(record.item, snapshot.snapshot.items[0]);
-            assert_eq!(record.project, Some(snapshot.snapshot.projects[1].clone()));
-            assert_eq!(record.observed_at, 17);
+            let record = store.sqlite.task(&task.id).unwrap().unwrap();
+            assert_eq!(record.title, snapshot.snapshot.items[0].name);
+            assert_eq!(record.description, snapshot.snapshot.items[0].description);
+            assert_eq!(record.assignee, snapshot.snapshot.items[0].assignee);
+            assert_eq!(record.rank, snapshot.snapshot.items[0].rank);
+            assert_eq!(
+                store
+                    .sqlite
+                    .project(&record.project_id)
+                    .unwrap()
+                    .unwrap()
+                    .krs,
+                snapshot.snapshot.projects[1].krs
+            );
+            assert_eq!(record.pm_snapshot_synced_at, Some(17));
             let process = crate::id::LfProcessId::new();
             rusqlite::Connection::open(directory.path().join("registry.db")).unwrap().execute(
                 "INSERT INTO processes(id,trace_id,started_at,completed_at,outcome) VALUES(?1,?2,1,2,'succeeded')",
@@ -1716,14 +1722,8 @@ mod tests {
             snapshot.snapshot.items[0].completed_at = Some("2026-10-05T12:00:30Z".into());
             store.put_pm_snapshot(snapshot.clone(), None).await.unwrap();
             assert_eq!(
-                store
-                    .sqlite
-                    .planning_task(&task.id)
-                    .unwrap()
-                    .record
-                    .unwrap()
-                    .item,
-                snapshot.snapshot.items[0]
+                store.sqlite.task(&task.id).unwrap().unwrap().completed_at,
+                snapshot.snapshot.items[0].completed_at
             );
             assert_eq!(store.sqlite.workflow(&task.id).unwrap(), workflow);
             store
@@ -1762,18 +1762,13 @@ mod tests {
                     )
                     .unwrap();
             }
-            let record = store
-                .sqlite
-                .planning_task(&task.id)
-                .unwrap()
-                .record
-                .unwrap();
-            assert_eq!(record.item.state.as_deref(), Some("unstarted"));
-            assert!(!record.item.completed);
-            assert_eq!(record.item.completed_at, None);
-            assert_eq!(record.item.assignee, None);
-            assert_eq!(record.item.rank, 0);
-            assert_eq!(record.observed_at, 17);
+            let record = store.sqlite.task(&task.id).unwrap().unwrap();
+            assert_eq!(record.state.as_deref(), Some("unstarted"));
+            assert!(!record.completed);
+            assert_eq!(record.completed_at, None);
+            assert_eq!(record.assignee, None);
+            assert_eq!(record.rank, 0);
+            assert_eq!(record.pm_snapshot_synced_at, Some(17));
             assert_eq!(store.sqlite.workflow(&task.id).unwrap(), reopened);
         }
     }

@@ -60,12 +60,10 @@ optimistic revisions, timestamps, historical iteration events and legacy mapping
 The whole Task struct remains unsuitable for exchange because it contains local data.
 The composed prose save/delivery/acquisition path now has focused proof and explicit
 field-revision/age retention across newer partial observations. The `PmProject`
-symbol is removed, but moving it to `pm::linear::LinearProject` did not finish this
-cut: `plan_read::project_in` and `PmSnapshot.projects` still
-expose or fabricate the second Project view. Their canonical conversion and private
-observation boundary remain required here, not after review. The current pursuit
-design owns the proof and remaining cut; earlier missing-field tracing remains at
-`a849341234:scratch/work-model-reduction.md`.
+symbol and `plan_read` projections are removed; `PmSnapshot.projects`
+still exposes the second Project view. Its canonical conversion and private-observation
+boundary remain required before review. Earlier tracing:
+`582c134439:scratch/work-model-reduction.md`.
 
 ## 2. Delete the second local reading stack
 
@@ -76,19 +74,13 @@ The canonical list preserves shared rank rather than edit-time order. Project an
 export read canonical Work. Rotation also consumes/returns canonical Tasks; it no
 longer substitutes IDs or re-resolves a fabricated PM item.
 
-**Remaining:** `store/sqlite/plan_read.rs` reconstructs `LinearProject` (formerly `PmProject`)/`PmItem` for
-Task observations. `planning_wave` and its consumers are removed. Delete the remaining projections. `PmTaskRecord` / `PmTaskObservation` must cease being alternate Task
-read results, including the embedded Project clone inside a Task observation. Task status and
-summary consumers return canonical content plus separate acquisition evidence
-(`96607a9a46`). The surviving delivery fence needs the revision accepted into Work,
-not merely the newest retained provider observation; the pursuit design owns this cut.
+**Removed:** `planning_task` and `plan_read::{task_in,project_in}`, including fixture
+dependencies. Task delivery reads accepted revision evidence directly from Work,
+not observed provider revision. Canonical status and summaries retain separate
+acquisition state/age. No local/provider-ID substitution remains in that reader.
 
-**Evidence:** `project_in` still rebuilds a PM-shaped Project from typed columns;
-`task_in` reconstructs
-provider-shaped fields and joins provider observations for due date/membership.
-`COALESCE(external_project_id,id)` and `COALESCE(external_issue_id,id)` let read
-results change ID meaning. Normal `store/children.rs` / `sqlite/children.rs` readers
-already provide the other route.
+**Remaining:** confine `PmTaskRecord` / `PmTaskObservation` to acquisition, including
+the embedded Project observation, and remove ordinary `PmSnapshot` results.
 
 **Keep:** explicit missing, invalid, removed and unavailable evidence. A failed
 provider read must not erase cached Work or convert unknown state into absence.

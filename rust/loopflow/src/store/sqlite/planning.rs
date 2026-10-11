@@ -12,6 +12,23 @@ use crate::store::{
 use crate::work::project::ProjectId;
 
 impl SqliteStore {
+    /// Delivery requires the fetched revision to have reached this Task's Work row.
+    /// Retaining an observation (including a foreign or rejected one) is insufficient.
+    pub(crate) fn accepted_task_revision(
+        &self,
+        task: &crate::durable::TaskId,
+        issue: &str,
+        revision: Option<&str>,
+    ) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND external_issue_id=?2
+             AND planning_provider_revision=?3)",
+            params![task.as_str(), issue, revision],
+            |row| row.get(0),
+        )?)
+    }
+
     /// Accept one confirmed Project without claiming a complete Wave refresh.
     pub fn put_pm_project(
         &self,
@@ -1078,13 +1095,7 @@ mod tests {
         assert!(refreshed.worktree.is_none());
         assert!(store.task_prs(&task.id).unwrap().is_empty());
         assert_eq!(
-            store
-                .planning_task(&task.id)
-                .unwrap()
-                .record
-                .unwrap()
-                .item
-                .rank,
+            store.task(&task.id).unwrap().unwrap().rank,
             row.snapshot.items[0].rank
         );
         // Replaying the older list cannot roll content back or duplicate the Task.

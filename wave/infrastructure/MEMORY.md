@@ -633,8 +633,8 @@ Renames are insufficient; gate/install unproved.
 
 `96607a9a46`: canonical status/create and CLI/Swift acquisition evidence.
 Availability/age, admission and delivery differ. Foreign observations grant no
-ownership; omission is not deletion. Delivery needs the revision accepted into
-Work, not merely observed. Candidates prove no publication.
+ownership; omission is not deletion. Delivery requires accepted Work revision; `plan_read` is deleted.
+Snapshot confinement remains.
 
 Jack assigned LOO-427 here (`bd295866bb`); stack order is unresolved. Preserve
 tabs, Machine ownership/admission; adapt delegation to the writer/released frontier.

@@ -235,24 +235,29 @@ or move captured Workflow/Process history. A foreign observation without owned W
 returns evidence and no Task; its original record stays in the acquisition store.
 Status/wait share async store reads; duplicate lookup/inspection wrappers are deleted.
 
-The next acquisition cut removes `planning_task` / `plan_read::{task_in,project_in}`
-and their fixture dependencies. Its sole production caller is
-`ops/planning_delivery.rs::observe`: after ingestion it compares the fetched
-revision with the revision accepted into Work. A raw observation revision cannot
-replace that fence: retaining a foreign or rejected observation is not accepting it.
-The replacement needs accepted-revision evidence without reconstructing Task/Project
-content. Then confine `PmSnapshot` and provider observations before bindings,
-ordinary follow-ups, cron and the remaining typed journal/provider-hierarchy audit.
-Acquisition availability, execution eligibility and delivery success remain separate;
-`require_task_planning_identity` still owns admission checks. Earlier counterexamples:
-`18520565d6:scratch/work-on-another-machine-name.md`.
+`planning_task` and `plan_read::{task_in,project_in}` are now deleted, including
+fixture dependencies. Ordinary assertions read canonical Work and separate acquisition
+state; inbound fixtures supply provider facts rather than reconstructing them from Work.
+Delivery checks the issue binding and non-null revision accepted into the Task row,
+not the newest retained observation. The regression exercises stale and foreign
+observations without provider writes or local Workflow changes. Review repaired
+completion fixtures that assumed a foreground save stayed pending: they now use
+an explicit outage and captured Workflow, without changing production behavior.
+
+The remaining acquisition cut confines `PmSnapshot` and provider observations and
+removes their hierarchy from ordinary readers. Project delivery still consumes
+`put_pm_project`'s provider-shaped result; its replacement must retain accepted
+Project revision evidence. Then bindings, ordinary follow-ups,
+cron and the remaining typed journal/provider-hierarchy audit remain required.
+Acquisition availability, admission and delivery are separate. Earlier tracing:
+`582c134439:scratch/work-on-another-machine-name.md`.
 
 Rotation now consumes and returns canonical Tasks, including saved dates/prose and
 explicit bindings. It no longer reconstructs PM records, substitutes IDs or repeats
 the Task lookup. Membership receipts and writes share the typed `save` path.
 Task export likewise reads canonical Work and captures only shared creation-field
 baselines; retained attempted inputs are unchanged. This removes those consumers,
-not `plan_read` or the provider hierarchy. Offline public rotation
+not the provider hierarchy. Offline public rotation
 covers both transport configurations/mapping states and transaction/retry preservation;
 export fixtures cover retained input and later saves.
 
@@ -319,14 +324,11 @@ single `planning_peers` draft adds that evidence and prose receipts, preserving
 receipt bytes, identities, attempts and sequence high-water marks. Released
 `0.13.11.001_release.sql` remains unchanged; LOO-406 has no draft after `db36f20ba8`.
 
-**The structural acquisition prerequisite is not complete.** `PmProject` moved to
-concrete `pm::linear::LinearProject`, but ordinary `plan_read::project_in`,
-`PmSnapshot.projects` still use that representation.
-The local projection still substitutes provider/local IDs and cannot represent
-saved prose. Moving its name did not delete this second domain view. Complete
-canonical Project consumers and confine the observation before calling audit
-sections 1–3 complete; do not defer these dependencies to a post-review follow-up.
-Project export now reads canonical Project directly. No replaced type alias remains.
+**The structural acquisition prerequisite is not complete.** The fabricated
+`plan_read` Project and Task views are deleted. `PmSnapshot.projects` and ordinary
+snapshot consumers still expose `LinearProject`; confining these observations and
+removing the second hierarchy remains required before audit sections 1–3 are complete.
+Project export reads canonical Project directly. No replaced type alias remains.
 
 The original acquisition tracing is preserved at
 `a849341234:scratch/work-on-another-machine-name.md`; the absorbed review is at
@@ -383,7 +385,7 @@ Earlier baseline detail: `c8fe4628a:scratch/work-on-another-machine-name.md`.
   cut. Regenerate them after the entire accepted reduction, before review-only
   republication. No readiness or landing follows from this persistence checkpoint.
 
-Checks: `git diff --check` passes for prose realignment; `96607a9a46` retains build/Clippy/status/DTO/headless evidence, not rerun; broader verification stays gate-owned.
+Checks: `cargo build -p loopflow --bin lf`, fmt/Clippy and eight focused reader/delivery/completion/offline fixtures pass (seven network-isolated); broader verification stays gate-owned.
 
 
 Context: authored memory/scratch fit; generated Task seed/steers/workspace exceeds

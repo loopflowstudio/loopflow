@@ -245,10 +245,10 @@ are accepted unproven. FIFO is Codex-only; reaping covers noninteractive provide
 Drafts must `depends_on` unreleased parents; name order broke materialized fixtures.
 Scratch-bearing PRs defer tests; TESTING.md owns gating.
 
-LOO-450: Jack selected one Claude harness, native schemas and predecessor deletion.
-Native turns supply answers; unknown providers fail. Corrections require fenced
-native identity; prose grants no control. Fake-provider Flow advancement proves
-neither configured publication nor installation.
+LOO-450: Jack selected ClaudeHarness, native schemas and predecessor deletion.
+Headless providers use harnesses; unknown names fail. Native answers require fenced
+identity; captures remain history. Fake-Flow advancement proves neither
+Task-to-publication nor installation; schema replay is unproved (Release's entry-point lesson).
 
 ## Execution vocabulary (LOO-441/442/446, 2026-10-10)
 

@@ -83,7 +83,19 @@ exchange memory retains the same execution boundary. Other sibling sections were
 not exhaustively reviewed.
 
 No native rendering, live Session manipulation, installation, publication or merge.
-Shared first-start admission still refuses; mixed-provider/running-Flow exchange,
-broader explanation and the other plan obligations remain. Installed context still
+Shared first-start admission still refuses (LOO-414); running-Flow exchange and
+native proof belong to LOO-391, broader explanation to LOO-397. Mixed-provider
+exchange is superseded, not remaining work. Installed context still
 uses the old generated inventory; [questions](questions.md#context-budget) records
 the measured overage without changing budgets or production schema boundaries.
+
+Dependency inspection includes `2588b1ca27` and the newer `58de9907b6` typed-writer,
+domain and main-module cut. The earlier 33-path sync was aborted. Jack Heart's
+updated October 10 brief explicitly removes that unmerged reduction as a shipping
+prerequisite: this diff retains the older enrollment baseline, not configured
+transport. The plan and comparison now distinguish both. No new integration or
+combined-tree gate occurred; actual main conflicts and test failures remain queue
+work. Product has no child Markdown/memories; relevant Infrastructure planning
+sections were read, not its entire unrelated history.
+
+Check: `git diff --check` — PASS (prose-only reconciliation); final affected gate remains with queue on the accepted baseline, with no reusable shipping pass claimed.

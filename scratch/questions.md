@@ -46,18 +46,21 @@ dispatch; an unscoped ambiguous prefix still fails.
 
 ## Context budget
 
-Installed `lf context --skill realign --json` still uses the retired per-file
-JSON inventory: the reconciliation read reports 35,459 goal tokens, 19,459 over 16,000.
-The complete launch source is `.lf/tmp/context/addbc0c0a36830a100f56442edeecba4d77fa8dd07159263a397cbaf0187a29d.md`;
-its omitted middle is inventory, not additional direction. The local renderer
-already emits quoted paths and change states without redundant hashes/sizes.
-Earlier offline measurement: `2feed22e1109:scratch/questions.md`, **Context budget**.
-This is an installed generated-input conflict, not authored scratch overflow;
-installation and production schema bypass remain unauthorized. Limits are unchanged.
+Installed `lf context --skill realign --json` still assembles stored historical
+steers and the retired per-file JSON inventory. The October 10 reconciliation
+measured 38,976 goal tokens (22,976 over 16,000) after the updated brief arrived;
+authored scratch fits. Complete launch source inspected:
+`.lf/tmp/context/2909e7f82e77cb5a97eb9fa5e489a2e490fd489284da1fa55278f04a7021485b.md`.
+Its middle repeats historical directives and its tail is generated inventory.
+The local renderer already uses quoted paths/change states. Editing a generated
+capture or deleting authored history cannot fix installed assembly; installation,
+store-history mutation and budget increases remain unauthorized. This is not an
+authored scratch overflow. Earlier measurement/evidence:
+`18e8cb7e1b:scratch/questions.md`, **Context budget**.
 
 ## Admission authority — October 9, unresolved
 
-The [plan's admission boundary](compare-cmux-s-command-line.md#admission-authority--unresolved-october-9)
+The [plan's admission boundary](compare-cmux-s-command-line.md#admission--deferred-to-loo-414)
 owns the counterexample, unreviewed Machine/key proposal and required proof.
 Who establishes the arbitration binding, how associated identities share it, and
 how unavailable-Machine recovery works remain undecided. No coordinator is inferred;

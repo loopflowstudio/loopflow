@@ -1,29 +1,22 @@
 # Desktop control on shared Work — LOO-427
 
-**Status (October 10, 2026):** Jack Heart authorized implementation through demo
-review, in one PR. Recorded checkout location, prototype delegation/routing,
-repository-keyed windows, exact retained-pane arrangement and text/key input are
-implemented locally. `9cc0707b0`/`92d95edfe` add owner observation and shared
-Task/Desktop location explanations; `faebb042e`–`5d55957c6` compose remote Task
-links through the existing Session/Files owners. Passive reads use the published, checksum-verified lf3
-fixed-buffer reader with exact pane/surface validation; native proof remains.
-Native acceptance and delivery remain.
+**Status (October 10, 2026):** Jack Heart accepted this diff for queue, then
+Task-completing shipping. Implementation and focused headless evidence are retained;
+native/configured proof is not claimed. The owners below replace the earlier demo
+hold. Jack Heart’s updated October 10 brief accepts the earlier LOO-412
+integration; its newer unmerged reduction is not a shipping prerequisite.
 
-LOO-418/#1499 is integrated; completion/checkout previews and creation receipts are reconciled.
-LOO-406/#1503 and LOO-412 through `96f714bd6` are composed locally;
-`1ece5cc52` reconciles transitive ancestry. Section 2 retains remaining composition.
-Completion/reopening, delegation exchange and remote companions are composed locally.
-Work-centered tabs are implemented locally (Work tabs below); native review remains. Exclusive admission, mixed-provider exchange, broader explanation and configured/native proof remain. Mixed Linear/Git
-stays disabled; native proof includes request-scoped Task/Session-plus-Changes opening.
+LOO-418/#1499, LOO-406/#1503 and the earlier LOO-412 integration through
+`96f714bd6` are composed locally. Work tabs, content-owned locations, ordinary pane
+selectors, shell-default Split and lf3 bounded reads remain the accepted baseline.
 [Findings](findings.md), [questions](questions.md) and the
-[comparison](../docs/reviews/terminal-command-comparison.md) retain evidence and open choices.
-
+[comparison](../docs/reviews/terminal-command-comparison.md) retain evidence and limits.
 
 ## Shipping scope — Jack Heart, October 10
 
 Jack Heart reviewed the complete diff, said it was good enough for now, and
 requested ownership of every unestablished item followed by queue then ship.
-This supersedes the demo-only/no-publication boundary above. It accepts delivery
+This supersedes the earlier demo-only/no-publication boundary. It accepts delivery
 with the following explicit follow-ups, not claims that their behavior is proved:
 
 - LOO-397 (Infrastructure), broadened: remaining effect-free invocation explanations
@@ -46,8 +39,11 @@ LOO-412's current source/design retains `lf planning status` and key recovery,
 but replaces connect/use/select and per-Wave enrollment with one configured
 transport per repository (Linear or personal/shared Git). Mixed Linear/Git exchange
 is superseded, not an unfinished feature to file. This checkout contains an earlier
-412 integration; queue must reconcile that dependency and prevent superseded setup
-from being advertised as the target design. No live planning migration, installation,
+412 integration. Jack Heart’s updated October 10 brief keeps newer unmerged
+transport/domain changes with LOO-412, outside this baseline’s shipping prerequisites.
+The old setup is implemented here, not the target design; the newer configured
+transport is not delivered here. Actual main conflicts and build/test failures remain
+queue work. No live planning migration, installation,
 provider login or real-data publication is authorized by this shipping request.
 
 Recorded proof limits remain honest. Headless gate runs once for the final tree;
@@ -176,7 +172,7 @@ The cut remains one PR with the rest of LOO-427. Saved relaunch layout belongs t
 LOO-416. LOO-452 owns richer key chords, LOO-397 deeper capability discovery.
 First-start admission is independent and still refused; this UI supplies no
 arbitration authority. Configured peers, native draft/focus retention and the
-rendered demo below remain review obligations, not proved by fixture checks.
+rendered exercise below belong to LOO-391, not a LOO-427 delivery hold.
 
 ### Checks and demo acceptance
 
@@ -222,8 +218,8 @@ explicitly afterward. No rendering or demo acceptance is claimed by this design.
 
 ## Command map — accepted October 8; remaining composition
 
-Jack Heart authorized implementation through demo review, not merge. The current
-command tree and examples belong in [the CLI guide](../docs/lf.md#discover-commands)
+The implementation was reviewed under the earlier demo boundary; October 10
+shipping approval now governs. The current command tree and examples belong in [the CLI guide](../docs/lf.md#discover-commands)
 and generated reference, not a second scratch specification. The complete reviewed
 map, flag table, repository-lookup decisions and prior fixture references remain at
 `26593ce39f:scratch/compare-cmux-s-command-line.md`, **Command map — October 8 review**.
@@ -305,6 +301,14 @@ Reuse these owners.
 
 ## Delete — do not maintain
 
+**Replacement owned by LOO-412, not this shipping cut:** configured transport and
+its typed writer supersede `PlanningCommand::{Connect,Use,Select}` and manual
+enrollment. This accepted baseline still implements them. The newer dependency
+also deletes association/recovery paths and retains `TaskSource`; wholesale
+integration would require deliberate reconciliation with correspondence, authored
+delegation and no-owner refusal. Jack Heart’s updated October 10 brief leaves
+that unmerged reduction with LOO-412. No second exchange engine is introduced.
+
 `42990dea3` completed both remaining deletions: the stale October 8 walkthrough
 and the duplicate sharing query. The reviewed simulation remains at
 `4c43550c2:scratch/design-walkthrough.html`, not as current status or native acceptance.
@@ -331,55 +335,25 @@ both first-start refusal boundaries remain pending an accepted admission owner.
 
 ## Implementation sequence — one PR
 
-### Latest direction — October 9
+### Admission — deferred to LOO-414
 
-Jack Heart's comments `0631ef7e`, `dfe4bc38`, `95ebc58c` and `22d93d69`:
-finish/checkpoint the active remote companion edit, then simplify Desktop selectors,
-then finish exclusive first-start admission. October 10 selects the independent Work-tab UI slice above while admission authority remains unresolved. Existing delegation exchange and recorded-owner
-observation must not be redone. Stacking on LOO-412 is authorized if necessary: inspect
-its committed API/integration state and use supported lf operations, never dirty peer code.
+`task_location::resolve` and `require_task_planning` retain shared first-start
+refusal. The common `repositories::task_is_shared_in` predicate shares membership,
+not admission. Local-only work, planning saves/acquisition and retained execution
+remain usable. Remote companions, selectors and Work tabs are checkpointed; none
+supplies cross-Machine arbitration.
 
-Remote companions (`7aa8a5eb5`) and selectors (`2c5610ca4`/`1f0f64150`) are
-checkpointed. Work resolution plus one Desktop inspection captures lifetime tokens;
-older feedback naming these as unimplemented is superseded. No stack/sync or
-dirty-checkout edit occurred.
+`4c43550c2`'s transport counterexamples show divergent revisions and independent
+refs both confirming. Confirmation, negative peer readings and local transactions
+cannot reserve execution. Later delegation cannot move a started Task. The proposed
+pinned admission Machine/key remains unreviewed: establishment, associated identity
+and unavailable-owner recovery need a decision in LOO-414. Two-Machine allocation,
+retry/disconnect and no-replay proof belongs there.
 
-#### Admission authority — unresolved October 9
-
-`task_location::resolve` and `require_task_planning` still refuse shared first
-start. The shared membership predicate removes duplicated SQL, not either
-boundary. Local-only work, planning saves/acquisition and retained execution
-remain usable. Jack Heart's requested delegated-start outcome is unfinished.
-
-**Contrary evidence:** `4c43550c2`'s `planning_git_tests` shows divergent revisions
-both confirming after reconciliation, and independent clones concurrently
-confirming conflicting delegation through different refs. These are transport
-counterexamples, not Task allocation or running-Flow proof. LOO-412 `a60d5594a`
-has identical transport code; stacking supplies no missing arbitration operation.
-
-Local locks/transactions and negative peer readings cannot reserve cross-Machine
-execution. Choosing among visible destinations also fails: Machines can see
-unequal sets, or an older claimant can disconnect before delegation changes.
-A late conflict cannot undo a running Flow; exchanging the winner as planning
-would violate the accepted execution boundary.
-
-**Unreviewed proposal:** pin one admission Machine/key for shared Task identity,
-independent of delegation, repository locators and planning destinations. Its
-existing store serializes an explicit admission operation and retains the winner
-before checkout preparation. Execution stays on the winning Machine; import
-copies no claims and starts nothing. Lost replies read the same decision;
-unavailability cannot elect a replacement.
-
-Review must settle who establishes that immutable binding, how historical and
-explicitly associated identities converge on it, and unavailable-Machine recovery,
-or choose another single arbitration domain. No current receipt, registry or
-destination selection supplies that authority. Silently choosing one adds a
-permanent availability dependency, not a reversible default.
-
-**Required proof:** two independent Machines allocate/start exactly once; retries
-and disconnects retain the winner; later delegation cannot move it; repeat import
-cannot replay execution. No runtime replication, Task transfer, duplicate Flow,
-publication or merge is authorized.
+Earlier sequence, proposal and counterexamples:
+`16e9c950b9:scratch/compare-cmux-s-command-line.md`, **Latest direction — October 9**.
+Jack Heart's October 10 shipping decision defers this implementation; it does not
+accept the delegated first-start path as complete or authorize Task transfer.
 
 ### 2. Shared Work identity, delegation and routing
 
@@ -422,48 +396,35 @@ Detailed APIs, fixture limits and prior status:
 composition (October 9)**. Headless proofs establish neither automatic background
 identity refresh, configured SSH nor mounted native surfaces.
 
-**Remaining implementation:** exclusive cross-Machine admission must precede
-first-start allocation; observation is not a reservation. The existing refusal is
-an incomplete delegated-start path, not acceptance. Mixed Linear/Git exchange,
-per-Work sharing/recovery presentation remain. Remote companions have focused proof, not native acceptance. Running-Flow/repeat-exchange composition still needs proof;
-retained-checkout opening does not close these obligations.
+**Remaining ownership:** LOO-414 owns exclusive first-start admission; LOO-391
+owns configured remote panes and planning exchange during a running Flow. Repeat
+exchange must retain controls, divergent execution history and pending inputs
+through disconnect/reconnect, comments, completion and causal reopening. Seeded
+Workflow/PR/placement fixtures and retained-checkout opening do not prove that path.
+No central Workflow write or remote arrival acknowledgement is introduced.
 
-**Required proof:** two machine fixtures converge on planning identities and
-changes; retained-checkout routing now has two-CLI/simulated-SSH proof, while
-delegated first start and running-Flow composition remain. Network failure retains
-local writes and visible pending sync; reconnection deduplicates and preserves
-conflicting input. Receiving planning completion never moves a local Workflow. A delegation
-edit never relabels an existing checkout or claims a process moved.
+#### Planning transport dependency
 
-#### Mixed command: `lf task run` — local operations, planning synchronization
+Each invocation, including `task run` and Workflow transitions, uses its execution
+Machine's ordinary store. Only portable planning synchronizes. Incoming completion
+cannot move a Workflow, stop a Process or clean a checkout. No real-data publication
+is authorized.
 
-Jack Heart selected execution-Machine-local operations: `task run` and its
-Workflow selection/departure/arrival stay in that Machine's ordinary store.
-Nested planning uses LOO-406's writer/optional Linear sync, never a callback
-planner. LOO-412 independently exchanges portable planning through user-keyed
-Git refs by default, explicit shared refs by opt-in. Connection selects/publishes
-nothing; Wave selection includes descendants/history. No real planning publication
-is authorized. Workflow, checkout paths, Sessions, Processes, claims and cleanup
-stay local; importing completion cannot move or stop execution.
+LOO-412's `2588b1ca27` replaces manual connect/use/select and mixed-provider
+exchange with configured repository transport and a typed writer. The newer
+inspected commit `58de9907b6` includes domain flattening and main's module/context
+changes; its plan reports focused checks, not a combined-tree gate. Neither cut
+is integrated here. `PlanningCommand` and `ops/planning_peer.rs` still implement
+the earlier enrollment baseline; configured transport is replacement direction only.
 
-Local saves retain stable mutation IDs and pending synchronization while offline;
-connected comments/completion use the existing foreground sync/Work stream, not a
-second poller. Associated origins retain original journals, receipts, creation
-inputs and private selection; only accepted joint frontiers parent saves. Readback
-cannot exclude unseen Linear reopening. Per-Work sharing/authorship/assignee and
-losing-edit recovery presentation remain unfinished. Seeded reconnect/delegation
-fixtures are not running-Flow or exclusive-admission proof. Integration revisions,
-ref spellings, superseded mechanisms and failed attempts:
-`e4a324636:scratch/compare-cmux-s-command-line.md`, **Mixed command**;
-[findings](findings.md#retained-evidence-and-limits).
-
-**Required mixed-operation proofs:** execution-local `task run` and its Workflow
-must coexist with repeat Git exchange, disconnect/reconnect, comments/follow-ups,
-completion and causal reopening. Seeded state is insufficient: preserve running
-controls, divergent execution history and pending inputs. Rejected provider facts
-must preserve displayed projection, not just provider cache; unresolved membership
-must remain visible without blocking unrelated imports. No central Workflow write
-or remote arrival acknowledgement.
+The earlier pinned `lf sync --manual 2588b1ca277e1a1a080488b3a31abaae82505685`
+attempt conflicted in 33 files and was aborted back to `16e9c950b9`. That remains
+failed integration evidence, not a current shipping blocker: Jack Heart's updated
+October 10 brief explicitly accepts this older baseline and leaves newer unmerged
+transport/domain changes with LOO-412. No dependency retry or peer edit occurred
+in this reconciliation. Queue still owns actual main conflicts and failing checks.
+The historical mixed design remains at
+`16e9c950b9:scratch/compare-cmux-s-command-line.md`, **Mixed command**.
 
 ### 3. One repository window and command explanation
 
@@ -566,7 +527,10 @@ LOO-452 shortcut customization and LOO-453 readiness/events explorations.
 
 ### 5. Complete-path verification and demo
 
-**Depends on remaining 1–4 composition.** One PR. Gate owns affected Rust suites and
+**Queue scope:** gate the accepted baseline after resolving actual main conflicts
+and build/test failures. Newer unmerged LOO-412 changes and deferred proof owners
+are not shipping holds. No final-tree gate has yet been recorded. One PR.
+Gate owns affected Rust suites and
 `cargo test -p loopflow --test dto_fixtures` for Rust wire fixtures, plus
 `cargo test -p loopflow --test documented_commands` for command ambiguity only.
 Headless Desktop coverage uses `scripts/test_desktop.sh -Xswiftc -gnone --no-parallel`.
@@ -574,12 +538,14 @@ Gate also owns full `session_lifecycle_tests` and the disposable installation
 migration harness for the changed association/schema, isolated per TESTING.md;
 empty filters are not proof. LOO-406's `planning_reconnect_tests` owns Linux
 work-watch/Flow reconnect
-fixtures, with dependency evidence in slice 2. LOO-427 still
-needs mixed Git-exchange and Desktop-selection coverage, including selection
-changes during foreground sync; no second reconnect harness is needed.
+fixtures, with dependency evidence in slice 2. LOO-391 owns running-Flow
+Git-exchange and configured Desktop-selection proof,
+including selection changes during foreground sync; no second reconnect harness
+is needed. Mixed Linear/Git exchange is superseded, not missing acceptance.
 
-Demo follows **Work tabs → Checks and demo acceptance**, including remote-location
-explanation and exact input/readback; no real accounts or live user terminals.
+LOO-391’s native exercise follows **Work tabs → Checks and demo acceptance**,
+including remote-location explanation and exact input/readback; no real accounts
+or live user terminals are authorized here.
 
 Prior checks: `7a36df4ea2:scratch/compare-cmux-s-command-line.md`, §5.
 Current focused result: [findings](findings.md).

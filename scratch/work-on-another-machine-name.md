@@ -348,7 +348,8 @@ the self-sandboxed Desktop observation check, 19 repaired headless Swift tests a
 Swift boundaries pass. Materialized recheck: 150/153 pass, including migrations,
 public SSH dispatch, Session recovery and live exchange; no leaks. Three failures
 exposed ordinary-folder resolution and cron classification; both repairs pass
-all three focused regressions. Final fmt/Clippy pass. Logs: `/tmp/loo412-gate-*`.
+all three focused regressions. Final fmt/Clippy and three source-built remote CLI
+checks pass at `bb93899d1f`. Logs: `/tmp/loo412-gate-*`.
 Website reports horizontal overflow at 1440px (1475px content width); homepage,
 CSS and its test are unchanged against base. This is retained counterevidence,
 not a passing gate. Fresh review remains.

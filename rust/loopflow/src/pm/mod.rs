@@ -1,5 +1,4 @@
-use crate::work::project::{ProjectKR, ProjectStatus};
-use crate::work::wave::metrics::MetricTarget;
+use crate::pm::linear::LinearProject;
 pub mod linear;
 pub(crate) mod project_document;
 
@@ -16,23 +15,6 @@ pub struct TeamBinding {
     pub id: String,
     pub key: String,
     pub created: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct PmProject {
-    pub id: String,
-    pub revision: Option<String>,
-    pub slug: String,
-    pub name: String,
-    pub summary: String,
-    pub metric_targets: Vec<MetricTarget>,
-    pub workflow: String,
-    pub status: ProjectStatus,
-    pub krs: Vec<ProjectKR>,
-    pub initiative_ids: Vec<String>,
-    /// Stable ids of the Linear teams this Project belongs to. A managed Project
-    /// must carry exactly the repository Team.
-    pub team_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -98,7 +80,7 @@ pub fn terminal_reason(state: Option<&str>, completed: bool) -> Option<&'static 
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PmSnapshot {
-    pub projects: Vec<PmProject>,
+    pub projects: Vec<LinearProject>,
     pub items: Vec<PmItem>,
 }
 
@@ -116,7 +98,7 @@ impl PmPortfolioValidator {
         wave: &str,
         initiative_id: &str,
         expected_team_id: Option<&str>,
-        projects: &[PmProject],
+        projects: &[LinearProject],
         items: &[PmItem],
     ) -> PmResult<()> {
         validate_snapshot_ownership(wave, initiative_id, expected_team_id, projects, items)?;
@@ -156,7 +138,7 @@ fn validate_snapshot_ownership(
     wave: &str,
     initiative_id: &str,
     expected_team_id: Option<&str>,
-    projects: &[PmProject],
+    projects: &[LinearProject],
     items: &[PmItem],
 ) -> PmResult<()> {
     let mut projects_by_id = BTreeMap::new();
@@ -214,7 +196,7 @@ pub(crate) fn validate_project_ownership(
     wave: &str,
     initiative_id: &str,
     expected_team_id: Option<&str>,
-    project: &PmProject,
+    project: &LinearProject,
 ) -> PmResult<()> {
     if project.initiative_ids.as_slice() != [initiative_id] {
         return Err(PmError::Message(format!(
@@ -448,6 +430,6 @@ mod tests {
             "id":"project-1", "slug":"plan", "name":"Plan", "summary":"",
             "metric_targets":[], "krs":[], "initiative_ids":[], "team_ids":[]
         });
-        assert!(serde_json::from_value::<PmProject>(value).is_err());
+        assert!(serde_json::from_value::<LinearProject>(value).is_err());
     }
 }

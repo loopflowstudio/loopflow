@@ -21,7 +21,8 @@ use crate::ops::progress::Progress;
 use crate::ops::task_pm::ResolvedTask;
 use crate::ops::util::normalize_wave_name;
 use crate::pm::linear::LinearClient;
-use crate::pm::{PmError, PmItem, PmProject, PmSnapshot, PmWave};
+use crate::pm::linear::LinearProject;
+use crate::pm::{PmError, PmItem, PmSnapshot, PmWave};
 use crate::provider_auth::{
     provider_token_refresh_due, refresh_stored_provider_token, Provider, TokenRefreshError,
 };
@@ -82,7 +83,7 @@ pub struct PmShowResult {
     pub provider: String,
     pub initiative: String,
     pub synced_at: i64,
-    pub projects: Vec<PmProject>,
+    pub projects: Vec<LinearProject>,
     pub items: Vec<PmItem>,
 }
 
@@ -180,7 +181,7 @@ pub struct PmRenameResult {
 pub struct PmResolvedTask {
     pub wave: String,
     pub initiative_id: String,
-    pub project: PmProject,
+    pub project: LinearProject,
     pub item: PmItem,
 }
 
@@ -798,7 +799,7 @@ async fn fetch_pm_snapshot_with_store(
 
 async fn fetch_pm_snapshot_for_projects(
     ctx: &PmContext,
-    projects: Vec<PmProject>,
+    projects: Vec<LinearProject>,
 ) -> OpsResult<PmSnapshot> {
     let project_items = try_join_all(
         projects
@@ -1508,7 +1509,7 @@ async fn resolve_owned_issue(repo: &Path, issue: &str) -> OpsResult<ResolvedTask
     crate::ops::task_pm::resolve_task_async(repo, issue, PmRefresh::Force).await
 }
 
-pub(crate) fn singular_project_initiative(project: &PmProject) -> OpsResult<String> {
+pub(crate) fn singular_project_initiative(project: &LinearProject) -> OpsResult<String> {
     match project.initiative_ids.as_slice() {
         [initiative] => Ok(initiative.clone()),
         initiatives => Err(OpsError::Message(format!(
@@ -1618,7 +1619,7 @@ async fn pm_reteam_async(
 async fn accept_reteam_project(
     resolved: &ResolvedReteamContext,
     wave: &crate::work::wave::Wave,
-    project: &PmProject,
+    project: &LinearProject,
     acquisition: Arc<crate::store::PlanningLocks>,
     expected_teams: &[String],
 ) -> OpsResult<()> {
@@ -2491,7 +2492,7 @@ fn matching_wave_id(waves: &[PmWave], title: &str) -> OpsResult<Option<String>> 
     }
 }
 
-fn ensure_unique_project_slugs(projects: &[PmProject], wave: &str) -> OpsResult<()> {
+fn ensure_unique_project_slugs(projects: &[LinearProject], wave: &str) -> OpsResult<()> {
     let mut names_by_slug = BTreeMap::new();
     for project in projects {
         if project.slug.is_empty() {
@@ -2515,7 +2516,7 @@ pub(crate) async fn checked_projects(
     repo: &Path,
     ctx: &PmContext,
     wave: &str,
-) -> OpsResult<Vec<PmProject>> {
+) -> OpsResult<Vec<LinearProject>> {
     let store = pm_store().await?;
     checked_projects_with_store(repo, ctx, wave, &store).await
 }
@@ -2525,7 +2526,7 @@ pub(super) async fn checked_projects_with_store(
     ctx: &PmContext,
     wave: &str,
     store: &Store,
-) -> OpsResult<Vec<PmProject>> {
+) -> OpsResult<Vec<LinearProject>> {
     let mut projects = ctx
         .client
         .list_projects(&ctx.initiative)
@@ -2577,12 +2578,12 @@ pub(super) async fn checked_projects_with_store(
     Ok(projects)
 }
 
-pub(super) fn project_is_foreign(project: &PmProject, team_id: &str) -> bool {
+pub(super) fn project_is_foreign(project: &LinearProject, team_id: &str) -> bool {
     !project.team_ids.is_empty() && !project.team_ids.iter().any(|id| id == team_id)
 }
 
 fn validate_project_ownership(
-    project: &PmProject,
+    project: &LinearProject,
     wave: &str,
     initiative_id: &str,
     team_id: &str,
@@ -2693,7 +2694,7 @@ fn pm_to_ops(err: PmError) -> OpsError {
 #[derive(Debug)]
 pub(crate) struct ChapterSweep {
     pub candidates: Vec<(String, String, PmItem)>,
-    pub skipped_projects: Vec<(String, PmProject)>,
+    pub skipped_projects: Vec<(String, LinearProject)>,
 }
 
 /// Read every linked Initiative, including archived predecessor Projects.
@@ -3490,7 +3491,8 @@ mod tests {
 
     #[test]
     fn duplicate_linear_project_slugs_are_drift() {
-        let project = |id: &str, name: &str| PmProject {
+        let project = |id: &str, name: &str| LinearProject {
+            description: None,
             revision: None,
             id: id.to_string(),
             slug: crate::pm::project_slug(name),

@@ -9,7 +9,8 @@ use serde::{Deserialize, Serialize};
 use crate::git::{is_clean, rev_parse};
 use crate::id::WaveId;
 use crate::ops::{OpsError, OpsResult};
-use crate::pm::{PmItem, PmProject};
+use crate::pm::linear::LinearProject;
+use crate::pm::PmItem;
 use crate::store::sqlite::project_selection::read_project_binding;
 use crate::store::Store;
 use crate::work::project::{Project, ProjectStatus};
@@ -382,7 +383,7 @@ pub(crate) async fn adopt_legacy_projects(
     wave_name: &str,
     ctx: &PmContext,
     apply: bool,
-) -> OpsResult<Vec<PmProject>> {
+) -> OpsResult<Vec<LinearProject>> {
     let locator = WaveLocator::discover(repo, wave_name).map_err(error)?;
     let Some(wave) = store.get_wave_at(&locator).await.map_err(error)? else {
         return Ok(Vec::new());

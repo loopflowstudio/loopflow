@@ -503,13 +503,16 @@ pub enum SkillCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum ProjectCommand {
-    /// Update a Project's name or summary
+    /// Update a Project's name, summary or prose
     Edit {
         project: String,
         #[arg(long)]
         name: Option<String>,
         #[arg(long)]
         summary: Option<String>,
+        /// Authored prose; managed Workflow, KRs and targets stay unchanged
+        #[arg(long)]
+        description: Option<String>,
     },
     /// Select and inspect reusable Workflows
     Workflow {

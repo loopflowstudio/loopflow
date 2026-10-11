@@ -25,6 +25,7 @@ impl SqliteStore {
         project: &ProjectId,
         name: Option<&str>,
         summary: Option<&str>,
+        description: Option<&str>,
     ) -> StoreResult<()> {
         if name.is_some_and(|name| name.trim().is_empty()) {
             return Err(StoreError::InvalidData(
@@ -37,6 +38,10 @@ impl SqliteStore {
             .map(|name| Edit::ProjectName(Some(name.into())))
             .into_iter()
             .chain(summary.map(|summary| Edit::ProjectSummary(summary.into())))
+            .chain(
+                description
+                    .map(|description| Edit::ProjectDescription(Some(description.trim().into()))),
+            )
             .collect();
         write_edits(&tx, project, &edits)?;
         tx.commit()?;
@@ -149,6 +154,113 @@ mod tests {
     use crate::work::wave::Wave;
 
     #[test]
+    fn project_prose_unobserved_baseline_stays_unknown_at_the_same_revision() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let wave = Wave::new(WaveId::new(), "product".into(), "/repo".into());
+        store.create_wave(&wave).unwrap();
+        let mut observed: crate::pm::linear::LinearProject = serde_json::from_value(serde_json::json!({
+            "id":"linear-project", "revision":"2026-10-10T12:00:00Z", "slug":"product", "name":"Product", "summary":"",
+            "workflow":"", "krs":[], "metric_targets":[], "status":"started", "initiative_ids":["initiative"], "team_ids":["team"]
+        })).unwrap();
+        store
+            .put_pm_project(wave.id(), "linear", "initiative", &observed, 1)
+            .unwrap();
+        let project = store.list_projects(Some(wave.id())).unwrap().remove(0);
+        store
+            .edit_project(&project.id, None, None, Some("Saved without a baseline"))
+            .unwrap();
+        let change = store
+            .pending_project_changes(&project.id)
+            .unwrap()
+            .remove(0);
+        assert_eq!(change.base, None);
+        observed.description = Some(String::new());
+        store
+            .put_pm_project(wave.id(), "linear", "initiative", &observed, 2)
+            .unwrap();
+        assert_eq!(store.project(&project.id).unwrap().unwrap().description, "");
+        let conn = store.conn.lock().unwrap();
+        let (value, conflict): (String, String) = conn
+            .query_row(
+                "SELECT value_json,conflict_json FROM project_changes WHERE id=?1",
+                [&change.id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<String>(&value).unwrap(),
+            "Saved without a baseline"
+        );
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&conflict).unwrap()["value"],
+            ""
+        );
+    }
+
+    #[test]
+    fn project_prose_partial_observation_retains_its_original_baseline_and_age() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let wave = Wave::new(WaveId::new(), "product".into(), "/repo".into());
+        store.create_wave(&wave).unwrap();
+        let mut observed: crate::pm::linear::LinearProject = serde_json::from_value(serde_json::json!({
+            "id":"linear-project", "revision":"2026-10-10T12:00:00Z", "slug":"product", "name":"Product", "summary":"", "description":"Baseline",
+            "workflow":"", "krs":[], "metric_targets":[], "status":"started", "initiative_ids":["initiative"], "team_ids":["team"]
+        })).unwrap();
+        store
+            .put_pm_project(wave.id(), "linear", "initiative", &observed, 17)
+            .unwrap();
+        let project = store.list_projects(Some(wave.id())).unwrap().remove(0);
+        observed.description = None;
+        observed.revision = Some("2026-10-10T12:01:00Z".into());
+        observed.summary = "New summary".into();
+        store
+            .put_pm_project(wave.id(), "linear", "initiative", &observed, 29)
+            .unwrap();
+        let saved = store.project(&project.id).unwrap().unwrap();
+        assert_eq!(saved.description, "Baseline");
+        assert_eq!(saved.summary, "New summary");
+        store
+            .edit_project(&project.id, None, None, Some("Next save"))
+            .unwrap();
+        let change = store
+            .pending_project_changes(&project.id)
+            .unwrap()
+            .remove(0);
+        assert_eq!(
+            change.base,
+            Some(serde_json::json!({"value":"Baseline", "revision":"2026-10-10T12:00:00Z"}))
+        );
+        let prose: String = store
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT prose_json FROM pm_projects WHERE id='linear-project'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&prose).unwrap(),
+            serde_json::json!({"value":"Baseline", "revision":"2026-10-10T12:00:00Z", "observed_at":17})
+        );
+        observed.description = Some("Baseline".into());
+        store
+            .put_pm_project(wave.id(), "linear", "initiative", &observed, 30)
+            .unwrap();
+        assert_eq!(
+            store.project(&project.id).unwrap().unwrap().description,
+            "Next save"
+        );
+        assert_eq!(
+            store.pending_project_changes(&project.id).unwrap(),
+            vec![change]
+        );
+    }
+
+    #[test]
     fn project_edit_failure_rolls_back_fields_definitions_and_receipts() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
@@ -166,7 +278,7 @@ mod tests {
         drop(conn);
         let before = store.revisions().unwrap();
         assert!(store
-            .edit_project(&project, Some("Changed"), Some("New summary"))
+            .edit_project(&project, Some("Changed"), Some("New summary"), None)
             .is_err());
         assert!(store
             .select_project_workflow(
@@ -216,7 +328,9 @@ mod tests {
             store
                 .update_project_content(&project, "review", &[], &[])
                 .unwrap();
-            store.edit_project(&project, Some(name), Some("")).unwrap();
+            store
+                .edit_project(&project, Some(name), Some(""), None)
+                .unwrap();
             assert_eq!(store.revisions().unwrap(), before);
             assert_eq!(store.pending_project_changes(&project).unwrap(), changes);
             owners.push((wave.id().clone(), project));

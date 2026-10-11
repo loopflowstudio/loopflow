@@ -512,7 +512,7 @@ fn planning_order_uncertainty_does_not_stall_project_field_delivery() {
             fixture
                 .store
                 .sqlite
-                .edit_project(&tasks[0].project_id, Some("Independent title"), None)
+                .edit_project(&tasks[0].project_id, Some("Independent title"), None, None)
                 .unwrap();
             assert!(deliver(&fixture.store, repo, &tasks[0]).await.is_err());
             assert_eq!(

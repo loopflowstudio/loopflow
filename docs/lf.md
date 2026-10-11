@@ -196,6 +196,7 @@ full IDs in automation.
 lf task edit <id> --rank 0 --assignee <person-id>
 lf task edit <id> --unassign
 lf project edit <project-id> --name "Parser" --summary "Retain quoted input"
+lf project edit <project-id> --description "Preserve quoted text across machines."
 lf project workflow set <project-id> review --file /tmp/review.yaml
 lf project workflow list --project <project-id> --json
 lf project workflow source <project-id> review

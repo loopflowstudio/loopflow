@@ -265,6 +265,15 @@ impl<'a> PlanningChanges<'a> {
             .optional()?;
         let mut body: Option<Value> = body.map(|body| serde_json::from_str(&body)).transpose()?;
         if let (Self::Project(id), Some(body)) = (self, body.as_mut()) {
+            let prose: Option<String> = conn.query_row(
+                "SELECT o.prose_json FROM projects p JOIN waves w ON w.id=p.wave_id
+                 JOIN pm_projects o ON o.id=p.external_project_id AND o.repo=w.repo AND o.provider='linear'
+                 WHERE p.id=?1", [id.as_str()], |row| row.get(0))?;
+            if let Some(prose) = prose {
+                let prose: Value = serde_json::from_str(&prose)?;
+                body["description"] = prose["value"].clone();
+                body["description_revision"] = prose["revision"].clone();
+            }
             body["task_order"] =
                 serde_json::to_value(super::planning_order::observed_order(conn, id)?)?;
         }
@@ -286,8 +295,15 @@ impl<'a> PlanningChanges<'a> {
         let (owner, id) = self.owner();
         let body = self.observation(conn)?;
         let base = body
-            .map(|body| -> StoreResult<Value> {
-                Ok(serde_json::json!({"revision": body["revision"], "value": self.normalize(conn, field, body[field].clone())?}))
+            .as_ref()
+            .and_then(|body| body.get(field).map(|value| (body, value)))
+            .map(|(body, value)| -> StoreResult<Value> {
+                let revision = if matches!(self, Self::Project(_)) && field == "description" {
+                    &body["description_revision"]
+                } else {
+                    &body["revision"]
+                };
+                Ok(serde_json::json!({"revision": revision, "value": self.normalize(conn, field, value.clone())?}))
             })
             .transpose()?;
         conn.execute(

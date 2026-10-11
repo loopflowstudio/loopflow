@@ -261,9 +261,12 @@ pub async fn edit(
     selector: &str,
     name: Option<&str>,
     summary: Option<&str>,
+    description: Option<&str>,
 ) -> OpsResult<(Project, PlanningSyncStatus)> {
-    if name.is_none() && summary.is_none() {
-        return Err(project_error("project edit requires --name or --summary"));
+    if name.is_none() && summary.is_none() && description.is_none() {
+        return Err(project_error(
+            "project edit requires --name, --summary or --description",
+        ));
     }
     let store = super::pm::pm_store().await?;
     let project = resolve_project(&store, repo, selector).await?;
@@ -275,7 +278,7 @@ pub async fn edit(
     let _acquisition = super::pm::lock_wave_planning(&wave).await?;
     store
         .sqlite
-        .edit_project(&project.id, name, summary)
+        .edit_project(&project.id, name, summary, description)
         .map_err(project_error)?;
     drop(_acquisition);
     super::planning_sync::sync_after_save(&store, wave.repo()).await;

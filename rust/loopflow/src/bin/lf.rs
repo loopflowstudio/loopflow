@@ -1895,13 +1895,19 @@ fn execute_command(
                     project,
                     name,
                     summary,
+                    description,
                 },
         }) => {
             let cwd = std::env::current_dir()?;
             let repo = loopflow::repo::discover_repo_root(&cwd)?.unwrap_or(cwd);
-            let (_, sync) = tokio::runtime::Runtime::new()?.block_on(
-                loopflow::ops::project::edit(&repo, project, name.as_deref(), summary.as_deref()),
-            )?;
+            let (_, sync) =
+                tokio::runtime::Runtime::new()?.block_on(loopflow::ops::project::edit(
+                    &repo,
+                    project,
+                    name.as_deref(),
+                    summary.as_deref(),
+                    description.as_deref(),
+                ))?;
             print_planning_sync(&sync);
             Ok(())
         }

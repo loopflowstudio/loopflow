@@ -2,13 +2,14 @@ use std::path::Path;
 
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::pm::PmRefresh;
-use crate::pm::{PmItem, PmProject};
+use crate::pm::linear::LinearProject;
+use crate::pm::PmItem;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResolvedTask {
     pub wave: String,
     pub observed_at: i64,
-    pub project: PmProject,
+    pub project: LinearProject,
     pub item: PmItem,
 }
 

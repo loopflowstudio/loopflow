@@ -1363,7 +1363,8 @@ fn project_edits_save_offline_in_both_connection_modes() {
             canonical.to_string(),
         );
         store.create_wave(&wave).unwrap();
-        let project = loopflow::pm::PmProject {
+        let project = loopflow::pm::linear::LinearProject {
+            description: None,
             id: "provider-project".into(),
             revision: Some("2026-10-08T10:00:00Z".into()),
             slug: "original".into(),
@@ -1402,7 +1403,6 @@ fn project_edits_save_offline_in_both_connection_modes() {
         let mut authored = store.project(&id).unwrap().unwrap();
         authored.description =
             "Authored prose — preserved\n\n```yaml\nworkflow: example\n```\n".into();
-        store.insert_project(&authored).unwrap();
         // Exact identities still resolve when another Project's name/slug shadows them.
         let mut shadow = store.project(&id).unwrap().unwrap();
         shadow.id = loopflow::durable::ProjectId::new();
@@ -1424,6 +1424,8 @@ fn project_edits_save_offline_in_both_connection_modes() {
                 "Saved",
                 "--summary",
                 "",
+                "--description",
+                &authored.description,
             ],
         );
         let output = command(
@@ -1473,7 +1475,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
                 Value::Null
             }
         );
-        assert_eq!(saved["description"], authored.description);
+        assert_eq!(saved["description"], authored.description.trim());
         assert_eq!(saved["name"], "Saved");
         assert_eq!(saved["summary"], "");
         assert_eq!(saved["workflow"], "review");
@@ -1495,7 +1497,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
         }
         assert_eq!(store.project(&shadow.id).unwrap().unwrap(), shadow);
         let changes = store.pending_project_changes(&id).unwrap();
-        assert_eq!(changes.len(), 3);
+        assert_eq!(changes.len(), 4);
         lf(
             repo.path(),
             home.path(),
@@ -1507,6 +1509,8 @@ fn project_edits_save_offline_in_both_connection_modes() {
                 "Saved",
                 "--summary",
                 "",
+                "--description",
+                &authored.description,
             ],
         );
         // Repeated commands and reopened stores retain the original delivery identities.
@@ -1606,12 +1610,12 @@ fn project_edits_save_offline_in_both_connection_modes() {
                 Value::Null
             }
         );
-        assert_eq!(saved["description"], authored.description);
+        assert_eq!(saved["description"], authored.description.trim());
         assert_eq!(saved["name"], "Saved");
         assert_eq!(saved["summary"], "");
         assert_eq!(
             store.pending_project_changes(&id).unwrap().len(),
-            if mapped { 2 } else { 4 }
+            if mapped { 3 } else { 5 }
         );
         lf(repo.path(), home.path(), &args);
         let repeated = lf(
@@ -1675,7 +1679,8 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             canonical.to_string(),
         );
         store.create_wave(&wave).unwrap();
-        let project = loopflow::pm::PmProject {
+        let project = loopflow::pm::linear::LinearProject {
+            description: None,
             id: "provider-project".into(),
             revision: Some("2026-10-08T10:00:00Z".into()),
             slug: "product".into(),

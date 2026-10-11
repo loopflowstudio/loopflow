@@ -1972,7 +1972,7 @@ mod local_planning_tests {
             )
             .unwrap();
         store
-            .edit_project(&id, Some("Renamed body of work"), Some("New summary"))
+            .edit_project(&id, Some("Renamed body of work"), Some("New summary"), None)
             .unwrap();
         drop(store);
         let store = SqliteStore::open_ephemeral(&path).unwrap();

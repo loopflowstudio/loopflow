@@ -418,7 +418,9 @@ mod tests {
             .unwrap();
         let id = store.ensure_project(wave.id(), "Original name").unwrap();
         assert_eq!(id.as_str(), "proj_11111111111141118111111111111111");
-        store.edit_project(&id, Some("Later edit"), None).unwrap();
+        store
+            .edit_project(&id, Some("Later edit"), None, None)
+            .unwrap();
         let changes = store.pending_project_changes(&id).unwrap();
         let before = store.revisions().unwrap();
         assert_eq!(

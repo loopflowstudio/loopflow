@@ -4,7 +4,8 @@ use rusqlite::{Connection, OptionalExtension};
 
 use crate::durable::{ProjectId, TaskId};
 use crate::id::WaveId;
-use crate::pm::{PmItem, PmProject, PmSnapshot};
+use crate::pm::linear::LinearProject;
+use crate::pm::{PmItem, PmSnapshot};
 use crate::store::{PlanningState, PmTaskObservation, PmTaskRecord, StoreError, StoreResult};
 
 use super::children::TASK_IDENTIFIER;
@@ -45,7 +46,7 @@ impl SqliteStore {
     }
 }
 
-fn projects_in(conn: &Connection, wave: &WaveId) -> StoreResult<Vec<PmProject>> {
+fn projects_in(conn: &Connection, wave: &WaveId) -> StoreResult<Vec<LinearProject>> {
     let project_ids = {
         let mut query = conn.prepare(
             "SELECT id FROM projects WHERE wave_id=?1 ORDER BY planning_rank,created_at,id",
@@ -61,14 +62,15 @@ fn projects_in(conn: &Connection, wave: &WaveId) -> StoreResult<Vec<PmProject>> 
         .collect::<StoreResult<Vec<_>>>()
 }
 
-pub(super) fn project_in(conn: &Connection, id: &ProjectId) -> StoreResult<PmProject> {
-    let (mut project, krs, targets, initiatives, teams): (PmProject, String, String, String, String) = conn.query_row(
+pub(super) fn project_in(conn: &Connection, id: &ProjectId) -> StoreResult<LinearProject> {
+    let (mut project, krs, targets, initiatives, teams): (LinearProject, String, String, String, String) = conn.query_row(
         "SELECT COALESCE(p.external_project_id,p.id),p.project_slug,p.project_name,p.project_summary,
             p.krs,p.workflow,p.status,p.planning_provider_revision,
             p.planning_initiatives,p.planning_teams,p.metric_targets
          FROM projects p
          WHERE p.id=?1",
-        [id.as_str()], |row| Ok((PmProject {
+        [id.as_str()], |row| Ok((LinearProject {
+            description: None,
             id: row.get(0)?, slug: row.get(1)?, name: row.get(2)?, summary: row.get(3)?,
             workflow: row.get(5)?, status: serde_json::from_value(serde_json::Value::String(row.get(6)?))
                 .map_err(|error| rusqlite::Error::FromSqlConversionFailure(6,rusqlite::types::Type::Text,Box::new(error)))?, revision: row.get(7)?,

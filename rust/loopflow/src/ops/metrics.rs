@@ -376,10 +376,11 @@ mod tests {
     };
 
     use super::*;
-    use crate::pm::PmProject;
+    use crate::pm::linear::LinearProject;
 
-    fn project(id: &str, slug: &str) -> PmProject {
-        PmProject {
+    fn project(id: &str, slug: &str) -> LinearProject {
+        LinearProject {
+            description: None,
             revision: None,
             id: id.to_string(),
             slug: slug.to_string(),

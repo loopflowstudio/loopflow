@@ -33,6 +33,25 @@ impl ProjectDocument<'_> {
         prose
     }
 
+    /// Managed spans own their separating whitespace, not the prose value.
+    /// Released-content conversion deliberately keeps using the lossless reader.
+    pub fn observed_description(&self) -> String {
+        let mut parts = Vec::new();
+        let mut start = 0;
+        for (range, _) in &self.fields {
+            let part = self.source[start..range.start].trim();
+            if !part.is_empty() {
+                parts.push(part);
+            }
+            start = range.end;
+        }
+        let part = self.source[start..].trim();
+        if !part.is_empty() {
+            parts.push(part);
+        }
+        parts.join("\n\n")
+    }
+
     pub fn replace_description(&self, description: &str) -> PmResult<String> {
         // Prose and managed fields share Markdown syntax. Fenced examples are
         // prose; an unclosed fence or live managed declaration cannot silently

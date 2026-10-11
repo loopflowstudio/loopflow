@@ -10,15 +10,17 @@ use crate::ops::pm::test_fixture::PlanningEnvironment;
 use crate::ops::pm::{pm_sync, resolve_context, PmSyncOptions, PmTestContext, PM_TEST_CONTEXT};
 use crate::ops::NullProgress;
 use crate::planning::LinearIssueId;
-use crate::pm::{PmItem, PmProject};
+use crate::pm::linear::LinearProject;
+use crate::pm::PmItem;
 use crate::store::{open_ephemeral_store, CredentialType, ProviderToken, StorageConfig};
 use crate::work::project::ProjectStatus;
 use crate::work::task::{LinearWritebackState, Observation, Task, TaskId, TaskPr, TaskPrId};
 use crate::work::wave::{ensure_wave_row, WaveLocator};
 use time::OffsetDateTime;
 
-fn project(id: &str, name: &str, status: ProjectStatus) -> PmProject {
-    PmProject {
+fn project(id: &str, name: &str, status: ProjectStatus) -> LinearProject {
+    LinearProject {
+        description: None,
         revision: None,
         id: id.into(),
         name: name.into(),
@@ -282,7 +284,7 @@ async fn context(home: &std::path::Path, repo: &std::path::Path, url: &str) -> P
 async fn seed_project(
     store: &crate::store::Store,
     wave: &crate::work::wave::Wave,
-    plan: &PmProject,
+    plan: &LinearProject,
 ) -> crate::work::project::Project {
     if let Some(existing) = store.get_project_by_project(&plan.id).await.unwrap() {
         return existing;

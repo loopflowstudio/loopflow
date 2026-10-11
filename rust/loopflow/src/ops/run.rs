@@ -301,7 +301,8 @@ mod tests {
     use crate::durable::{ProjectId, TaskId, WorkRef};
     use crate::id::WaveId;
     use crate::planning::{LinearIssueId, LinearProjectId};
-    use crate::pm::{PmProject, PmSnapshot};
+    use crate::pm::linear::LinearProject;
+    use crate::pm::PmSnapshot;
     use crate::store::SharedStore;
     use crate::store::{PmSnapshotRow, StorageConfig};
     use crate::work::project::Project;
@@ -1016,7 +1017,8 @@ mod tests {
             .await
             .unwrap();
         let snapshot = PmSnapshot {
-            projects: vec![PmProject {
+            projects: vec![LinearProject {
+                description: None,
                 revision: None,
                 id: "project-api".to_string(),
                 slug: "loopflow-api".to_string(),

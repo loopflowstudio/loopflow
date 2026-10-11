@@ -1220,7 +1220,10 @@ fn unavailable_task(task: &Task, status: TaskState) -> UnavailableTaskEvidence {
     }
 }
 
-fn recommended_flow(projects: &[crate::pm::PmProject], project_id: Option<&str>) -> String {
+fn recommended_flow(
+    projects: &[crate::pm::linear::LinearProject],
+    project_id: Option<&str>,
+) -> String {
     projects
         .iter()
         .find(|project| Some(project.id.as_str()) == project_id)
@@ -2806,7 +2809,8 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let selected = "999bdbdd-c045-41a6-8ffc-a97c4a40b0b3";
         let predecessor = "218967b6-a760-4b7c-9a46-11d9d61a42c2";
-        let project = |id: &str, name: &str| crate::pm::PmProject {
+        let project = |id: &str, name: &str| crate::pm::linear::LinearProject {
+            description: None,
             id: id.into(),
             name: name.into(),
             slug: name.into(),

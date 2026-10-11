@@ -1454,6 +1454,43 @@ mod tests {
     }
 
     #[test]
+    fn project_prose_receipt_migration_preserves_uncertain_effects() {
+        let conn = open();
+        apply_before_current_draft(&conn, "planning_peers");
+        if !_draft_is_canonical("planning_peers") {
+            for draft in crate::build_info::migration_draft_manifest() {
+                if draft.name == "planning_peers" {
+                    break;
+                }
+                conn.execute_batch(draft.sql).unwrap();
+            }
+        }
+        conn.execute_batch("INSERT INTO waves(id,name,repo,created_at) VALUES('wave-proof','proof','/repo',1);
+            INSERT INTO projects(id,wave_id,created_at) VALUES('project-proof','wave-proof',1);
+            INSERT INTO project_changes(seq,id,project_id,field,value_json,base_json,conflict_json,attempted,error,acknowledged_revision,acknowledged,order_effects_json)
+            VALUES(7,'receipt-proof','project-proof','summary','\"Saved\"','{\"revision\":\"r1\",\"value\":\"Before\"}',NULL,1,'Lost reply',NULL,0,'[\"effect-proof\"]');
+            UPDATE sqlite_sequence SET seq=42 WHERE name='project_changes';").unwrap();
+        let rows = |conn: &rusqlite::Connection| {
+            conn.query_row("SELECT json_array(seq,id,project_id,field,value_json,base_json,conflict_json,attempted,error,acknowledged_revision,acknowledged,order_effects_json) FROM project_changes WHERE id='receipt-proof'", [], |r| r.get::<_, String>(0)).unwrap()
+        };
+        let before = rows(&conn);
+        conn.execute_batch(&current_draft_sql("planning_peers"))
+            .unwrap();
+        assert_eq!(rows(&conn), before);
+        conn.execute("INSERT INTO project_changes(id,project_id,field,value_json) VALUES('prose-proof','project-proof','description','\"Purpose\"')", []).unwrap();
+        assert_eq!(
+            conn.query_row(
+                "SELECT seq FROM project_changes WHERE id='prose-proof'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            43
+        );
+        validate_foreign_keys(&conn).unwrap();
+    }
+
+    #[test]
     fn structured_project_content_preserves_released_work_and_pending_delivery() {
         let conn = open();
         apply_before_current_draft(&conn, "local_planning");

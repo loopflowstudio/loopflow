@@ -1,3 +1,6 @@
+use crate::work::project::{ProjectKR, ProjectStatus};
+use crate::work::wave::metrics::MetricTarget;
+
 use super::project_document::{self, parse_project_document};
 use reqwest::StatusCode;
 use serde::de::DeserializeOwned;
@@ -6,9 +9,7 @@ use serde_json::{json, Value};
 use tokio::time::sleep;
 use tracing::warn;
 
-use crate::pm::{
-    project_slug, PmError, PmItem, PmProject, PmResult, PmWave, TeamBinding, RATE_LIMIT_RETRIES,
-};
+use crate::pm::{project_slug, PmError, PmItem, PmResult, PmWave, TeamBinding, RATE_LIMIT_RETRIES};
 
 use crate::work::task::comment::{TaskComment, TaskCommentAuthor};
 
@@ -789,7 +790,7 @@ impl LinearClient {
         }
     }
 
-    pub async fn list_projects(&self, initiative_id: &str) -> PmResult<Vec<PmProject>> {
+    pub async fn list_projects(&self, initiative_id: &str) -> PmResult<Vec<LinearProject>> {
         self.list_projects_including_archived(initiative_id, false)
             .await
     }
@@ -798,7 +799,7 @@ impl LinearClient {
         &self,
         initiative_id: &str,
         include_archived: bool,
-    ) -> PmResult<Vec<PmProject>> {
+    ) -> PmResult<Vec<LinearProject>> {
         let mut after = None;
         let mut projects = Vec::new();
         loop {
@@ -817,7 +818,7 @@ impl LinearClient {
             projects.extend(
                 page.nodes
                     .into_iter()
-                    .map(ProjectNode::into_pm_project)
+                    .map(ProjectNode::into_observation)
                     .collect::<PmResult<Vec<_>>>()?,
             );
             if !page.page_info.has_next_page {
@@ -992,7 +993,7 @@ impl LinearClient {
     pub async fn issue_ownership(
         &self,
         issue_id: &str,
-    ) -> PmResult<Option<(PmItem, Option<PmProject>)>> {
+    ) -> PmResult<Option<(PmItem, Option<LinearProject>)>> {
         let response: IssueOwnershipData = self
             .graphql(ISSUE_OWNERSHIP_QUERY, json!({ "id": issue_id }))
             .await?;
@@ -1059,7 +1060,7 @@ impl LinearClient {
         Ok(())
     }
 
-    pub async fn find_project(&self, project_id: &str) -> PmResult<Option<PmProject>> {
+    pub async fn find_project(&self, project_id: &str) -> PmResult<Option<LinearProject>> {
         // A filtered collection has an explicit empty result. The singular Project
         // endpoint can return NOT_FOUND as a GraphQL error, indistinguishable from
         // inaccessible evidence without provider-specific error guessing.
@@ -1088,22 +1089,22 @@ impl LinearClient {
                         "Project {project_id} is archived; reconcile its status in Linear"
                     )));
                 }
-                project.into_pm_project()
+                project.into_observation()
             })
             .transpose()
     }
 
-    pub async fn project_ownership(&self, project_id: &str) -> PmResult<PmProject> {
-        self.project_node(project_id).await?.into_pm_project()
+    pub async fn project_ownership(&self, project_id: &str) -> PmResult<LinearProject> {
+        self.project_node(project_id).await?.into_observation()
     }
 
     pub(crate) async fn project_content_observation(
         &self,
         id: &str,
-    ) -> PmResult<(PmProject, String)> {
+    ) -> PmResult<(LinearProject, String)> {
         let node = self.project_node(id).await?;
         let content = node.content.clone().unwrap_or_default();
-        Ok((node.into_pm_project()?, content))
+        Ok((node.into_observation()?, content))
     }
 
     pub(crate) async fn project_field_input(
@@ -1132,7 +1133,7 @@ impl LinearClient {
     pub(crate) async fn find_export_issue(
         &self,
         id: &str,
-    ) -> PmResult<Option<(PmItem, Option<PmProject>)>> {
+    ) -> PmResult<Option<(PmItem, Option<LinearProject>)>> {
         let response: Value = self
             .graphql(
                 r#"query FindExportIssue($id: ID!) {
@@ -1248,7 +1249,7 @@ impl LinearClient {
         team: &str,
         promote: bool,
         apply: bool,
-    ) -> PmResult<PmProject> {
+    ) -> PmResult<LinearProject> {
         let mut node = self.project_node(project_id).await?;
         let original = node.content.clone().unwrap_or_default();
         let converted = convert_legacy_project_content(&original)?;
@@ -1263,7 +1264,7 @@ impl LinearClient {
         if promote {
             node.status.type_ = crate::work::project::ProjectStatus::Started;
         }
-        let mut project = node.into_pm_project()?;
+        let mut project = node.into_observation()?;
         crate::pm::validate_project_ownership("adoption", initiative, Some(team), &project)?;
         if apply && (converted != original || promote) {
             let mut input = json!({"content":converted});
@@ -1833,7 +1834,7 @@ struct IssueOwnershipData {
 }
 
 impl IssueNode<ProjectNode> {
-    fn into_ownership(self) -> PmResult<(PmItem, Option<PmProject>)> {
+    fn into_ownership(self) -> PmResult<(PmItem, Option<LinearProject>)> {
         let item = self.fields.into_pm_item(
             0,
             self.project.as_ref().map(|project| ProjectRef {
@@ -1843,7 +1844,9 @@ impl IssueNode<ProjectNode> {
         )?;
         Ok((
             item,
-            self.project.map(ProjectNode::into_pm_project).transpose()?,
+            self.project
+                .map(ProjectNode::into_observation)
+                .transpose()?,
         ))
     }
 }
@@ -2040,9 +2043,10 @@ fn convert_legacy_project_content(content: &str) -> PmResult<String> {
 }
 
 impl ProjectNode {
-    fn into_pm_project(self) -> PmResult<PmProject> {
+    fn into_observation(self) -> PmResult<LinearProject> {
         let content = parse_project_document(self.content.as_deref().unwrap_or_default())?;
-        Ok(PmProject {
+        Ok(LinearProject {
+            description: Some(content.observed_description()),
             id: self.id,
             revision: self.revision,
             slug: project_slug(&self.name),
@@ -3195,3 +3199,24 @@ mod tests {
 #[cfg(test)]
 #[path = "linear_follow_through_tests.rs"]
 mod follow_through_tests;
+
+/// Retained Linear facts, including foreign and not-yet-associated Projects.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LinearProject {
+    pub id: String,
+    pub revision: Option<String>,
+    pub slug: String,
+    pub name: String,
+    pub summary: String,
+    /// None means historical/unobserved prose, never an observed empty value.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    pub metric_targets: Vec<MetricTarget>,
+    pub workflow: String,
+    pub status: ProjectStatus,
+    pub krs: Vec<ProjectKR>,
+    pub initiative_ids: Vec<String>,
+    /// Stable ids of the Linear teams this Project belongs to. A managed Project
+    /// must carry exactly the repository Team.
+    pub team_ids: Vec<String>,
+}

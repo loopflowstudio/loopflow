@@ -43,7 +43,7 @@ pub struct PmSnapshotRow {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PmTaskRecord {
     pub item: crate::pm::PmItem,
-    pub project: Option<crate::pm::PmProject>,
+    pub project: Option<crate::pm::linear::LinearProject>,
     pub observed_at: i64,
 }
 
@@ -367,10 +367,10 @@ impl Store {
         wave: &WaveId,
         provider: &str,
         initiative: &str,
-        project: crate::pm::PmProject,
+        project: crate::pm::linear::LinearProject,
         observed_at: i64,
         acquisition: Option<Arc<PlanningLocks>>,
-    ) -> StoreResult<crate::pm::PmProject> {
+    ) -> StoreResult<crate::pm::linear::LinearProject> {
         let wave = wave.clone();
         let provider = provider.to_string();
         let initiative = initiative.to_string();
@@ -385,7 +385,7 @@ impl Store {
         wave: &WaveId,
         provider: &str,
         initiative: &str,
-        project: crate::pm::PmProject,
+        project: crate::pm::linear::LinearProject,
         observed_at: i64,
         acquisition: Arc<PlanningLocks>,
     ) -> StoreResult<()> {
@@ -440,7 +440,7 @@ impl Store {
         &self,
         repo: &str,
         provider: &str,
-        project: crate::pm::PmProject,
+        project: crate::pm::linear::LinearProject,
         observed_at: i64,
     ) -> StoreResult<()> {
         let repo = repo.to_string();

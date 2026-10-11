@@ -1,7 +1,7 @@
 # Simplification Opportunities
 
 October 10, 2026. Jack Heart selected 427 stacked on 412, ready to land after
-412. The parent is recorded; integration of published `fe5262b093` is in progress.
+412. Published `fe5262b093` is integrated; focused verification is in progress.
 412 owns combined simplification. No second planning rewrite is launched here.
 
 ## Integration boundary
@@ -14,11 +14,11 @@ path as ordinary execution. The parent may continue changing before landing.
 
 ## Opportunity 1: Finish the existing planning reduction before composing it
 
-**Misalignment:** this branch carries the older peer enrollment and mixed
-Linear/Git evidence model. The accepted LOO-412 direction selects one transport per
+**Earlier misalignment:** peer enrollment and mixed Linear/Git evidence duplicated
+planning representations. The integrated LOO-412 cut now selects one transport per
 repository and one typed Work writer.
 
-**Symptom:** `store/sqlite/planning_peers.rs` adds 9,899 lines, including 7,433 lines
+**Before integration:** `store/sqlite/planning_peers.rs` added 9,899 lines, including 7,433 lines
 in its test module. Its production paths include `use_peer_planning`, selection
 conflicts, provider evidence acquisition, creation-receipt projection and separate
 field projection. `planning_exchange.rs` also reconstructs provider-shaped fields.
@@ -30,7 +30,7 @@ superseded enrollment, mixed-provider projection and their exclusive fixtures at
 that integration boundary. Do not implement a competing rewrite here.
 
 **Cascade:** fewer planning representations, identity conversions, SQL projections,
-setup commands and fixture matrices. LOO-412 owns this cut. The previous integration had 33 conflicts; savings are unmeasured.
+setup commands and fixture matrices. LOO-412 owns this cut. The current integration resolves 38 conflicted paths; final savings remain unmeasured.
 Preserve causal conflicts, uncertain effects, historical mappings and execution.
 
 ## Opportunity 2: Explain the operation's own decision
@@ -57,7 +57,7 @@ broader explanation work. Savings are unmeasured.
 Keep Work-keyed workspaces, content-owned locations, the multiplexer and Ghostty
 surfaces. Snapshot selection and live lifetime validation have distinct jobs.
 
-Check: read-only source/design review; no product changes or test reruns. Against
+Historical read-only count before integration: against
 base `5f44fd9e`, source files add about 23,050 net lines; trailing Rust test modules
 account for about 8,853, leaving roughly 14,200 non-test source lines (comments and
 blanks included). Counts are estimates, not a promised deletion budget.

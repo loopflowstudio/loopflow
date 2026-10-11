@@ -2,11 +2,13 @@
 
 **Status (October 10, 2026):** Jack Heart requested preparing LOO-427 stacked
 on LOO-412, with landing only after 412 lands. The recorded parent is PR #1491.
-Sync is integrating published parent `fe5262b093`; unpublished 412 work stays there.
+Merge `74d84dc391` integrates published parent `fe5262b093`; unpublished 412 work stays there.
 The earlier baseline-first delivery interpretation is superseded. This integration
 preserves accepted Work tabs, pane controls and recorded-Machine execution while
 adopting 412's canonical Work and configured planning transport. Reduction for both
 Tasks remains coordinated with 412; no publication or landing readiness is claimed.
+
+Check: `cargo fmt`, `cargo clippy --all-targets --jobs 4 -- -D warnings`, and focused delegation/migration/remote-source tests pass; combined-tree gate pending; native proof stays with LOO-391.
 
 ## Shipping scope — Jack Heart, October 10
 
@@ -367,20 +369,17 @@ Machine's ordinary store. Only portable planning synchronizes. Incoming completi
 cannot move a Workflow, stop a Process or clean a checkout. No real-data publication
 is authorized.
 
-LOO-412's `2588b1ca27` replaces manual connect/use/select and mixed-provider
-exchange with configured repository transport and a typed writer. The newer
-inspected commit `58de9907b6` includes domain flattening and main's module/context
-changes; its plan reports focused checks, not a combined-tree gate. Neither cut
-is integrated here. `PlanningCommand` and `ops/planning_peer.rs` still implement
-the earlier enrollment baseline; configured transport is replacement direction only.
+LOO-412's published `fe5262b093` is integrated through merge `74d84dc391`.
+Configured transport and its typed planning writer replace manual enrollment and
+mixed-provider projections. Delegation uses that same writer; local defaults stay
+local, authored assignments exchange, and recorded checkout Machines remain pinned.
+The obsolete planning-creation lookup is removed from Task reads and follow-through.
 
-The earlier pinned `lf sync --manual 2588b1ca277e1a1a080488b3a31abaae82505685`
-attempt conflicted in 33 files and was aborted back to `16e9c950b9`. That remains
-failed integration evidence, not a current shipping blocker: the operator's October 10 brief interprets Jack Heart's acceptance as covering this older baseline and leaves newer unmerged
-transport/domain changes with LOO-412. No dependency retry or peer edit occurred
-in this reconciliation. Queue still owns actual main conflicts and failing checks.
-The historical mixed design remains at
-`16e9c950b9:scratch/compare-cmux-s-command-line.md`, **Mixed command**.
+Jack Heart selected this stack order on October 10: prepare 427 now, land only
+after 412. Later unpublished 412 reductions remain with 412 and require another
+integration when published. The previous baseline-first interpretation and aborted
+transport attempts grant no current delivery authority. Historical mixed
+design: `16e9c950b9:scratch/compare-cmux-s-command-line.md`, **Mixed command**.
 
 ### 3. One repository window and command explanation
 

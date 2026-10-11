@@ -1071,6 +1071,7 @@ mod durable_store_tests {
         use crate::durable::{MachineId, WorkRef};
         use crate::planning_exchange::{PlanningKind, PlanningMutation, PlanningObject};
         let (_dir, store, task_id) = store_with_task();
+        store.ensure_repository("/repo").unwrap();
         let before = store.task_execution_route(&task_id).unwrap();
         let task = store.task(&task_id).unwrap().unwrap();
         let wave = WorkRef::Wave(task.wave_id.clone());

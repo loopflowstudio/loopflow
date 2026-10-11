@@ -1489,8 +1489,6 @@ pub(super) fn resolve_task_id_in(
         "SELECT t.id, COALESCE(t.issue_title, t.issue_identifier, t.id) FROM tasks t
          LEFT JOIN projects p ON p.id=t.project_id LEFT JOIN waves w ON w.id=p.wave_id
          WHERE (t.id=?1 OR t.external_issue_id=?1 OR t.issue_identifier=?1
-            OR EXISTS(SELECT 1 FROM planning_creations c WHERE c.kind='task'
-                AND c.task_id=t.id AND json_extract(c.export_json,'$.id')=?1)
             OR substr(lower(t.id), 6, length(?2))=?2) AND (?3 IS NULL OR w.repo=?3)
          ORDER BY t.id",
     )?;

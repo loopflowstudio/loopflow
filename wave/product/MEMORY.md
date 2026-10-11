@@ -122,9 +122,8 @@ from import. #1517 preserves opaque AgentSessionId bytes. Repairs/evidence:
 `e3ca861b1`: mounted-page/visibility observation replaces callbacks; request IDs
 fence registration only. Pre-registration failures survive.
 
-Preview counterexamples (WAL, registry and Flow):
-`829c9b993:wave/product/MEMORY.md`, this heading. Explicit-Machine previews skip
-credential/identity probes; configured SSH/admission remain unproved.
+Preview counterexamples and credential-probe limits:
+`829c9b993:wave/product/MEMORY.md`, this heading; configured SSH/admission unproved.
 
 Identity is not action validation. Shared validators recheck writes; `--context`
 rejects non-agent commands before stdin. Refile resolves IDs before initialization;
@@ -173,6 +172,8 @@ and LOO-453 (readiness/events); research:
 
 Jack Heart (October 10) accepted Work-named repository/Wave/Task tabs over retained
 panes, with close meaning hide; the Work-keyed cutover remains unimplemented.
+Task selection/refresh and bare remote links no longer acquire primary Sessions;
+explicit Session/Changes opening survives. Headless page-readiness proof is not tabs.
 His later `ff61b6bc` correction selects shell-by-default Split, no empty option.
 CLI and native split controls now share shell-location resolution before mutation;
 missing remote location refuses without a local fallback. Headless fixtures are

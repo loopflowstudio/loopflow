@@ -23,6 +23,48 @@ struct WorkDestinationTests {
             == TaskLink(issue: "LOO-427", repo: nil))
     }
 
+    @Test(arguments: [false, true])
+    func bareTaskOpeningDoesNotAcquireASession(remote: Bool) async throws {
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(try fixture().utf8))
+        let wave = try #require(snapshot.waves.first)
+        let task = try #require(wave.tasks.items.first)
+        let taskID = task.runtime?.workId ?? task.id
+        let remoteIdentity = WorkspaceIdentity(machineId: "peer", worktree: "/peer/retained-checkout")
+        let query = RegistryQuery { args, _ in
+            if args.starts(with: ["repo", "identity"]) {
+                return #"{"id":"repository","locators":["repository"]}"#
+            }
+            if args.starts(with: ["--machine", "peer", "--repository", "repository", "task", "location"]) {
+                let index = try #require(args.firstIndex(of: "--request"))
+                return String(decoding: try JSONSerialization.data(withJSONObject: [[
+                    "request": args[index + 1], "repository_id": "repository", "task_id": taskID,
+                    "machine_id": "peer", "observed_at": 1,
+                    "location": ["state": "recorded", "task_id": "remote-task", "checkout": remoteIdentity.worktree]
+                ]]), as: UTF8.self)
+            }
+            throw RegistryQueryError("Bare Work opening cannot prepare a checkout or acquire a Session")
+        }
+        let model = WorkModel(query: query, repoPath: wave.wave.repo)
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        let link = TaskLink(issue: taskID, repo: wave.wave.repo, session: nil, diff: false,
+                            machine: remote ? "peer" : nil, repository: remote ? "repository" : nil)
+        await model.openTaskLink(try #require(link.url))
+        #expect(model.selection == .task(id: task.id))
+        #expect(model.roadmap.value == snapshot)
+        #expect(model.linkedSession == nil)
+        #expect(model.navigation.selectedSessionId == nil)
+        #expect(model.taskOpening?.status == .opening)
+        let page = try #require(model.linkedTaskPage)
+        #expect(page.taskID == task.id)
+        if remote {
+            #expect(model.navigation.preparedTaskWorktrees[task.id] == remoteIdentity)
+        } else {
+            #expect(model.navigation.preparedTaskWorktrees.isEmpty)
+        }
+        model.finishTaskPage(page)
+        #expect(model.taskOpening?.status == .usable)
+    }
+
     @Test(arguments: ["recorded", "stale", "unavailable", "unrecorded", "wrong-checkout"])
     func remoteOpeningKeepsLocalPlanningAndRetainedDrafts(outcome: String) async throws {
         if outcome == "recorded", ProcessInfo.processInfo.environment["LOOPFLOW_REMOTE_COMPANION_HOST"] == nil {

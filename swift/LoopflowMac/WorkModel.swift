@@ -234,7 +234,10 @@ final class WorkModel {
             executionTask = remoteTask
             executionIdentity = WorkspaceIdentity(machineId: machine, worktree: checkout)
         }
-        guard link.session != nil || link.diff || location != nil else {
+        guard link.session != nil || link.diff else {
+            if location != nil, let executionIdentity {
+                navigation.preparedTaskWorktrees[task.id] = executionIdentity
+            }
             openTaskDestination(wave: wave, task: task, preservingOpening: true)
             linkedTaskPage = LinkedTaskPage(generation: generation, taskID: task.id, repo: wave.wave.repo.normalizedFilePath)
             return

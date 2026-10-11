@@ -589,8 +589,6 @@ struct SessionsContentView: View {
     private let store: SessionsStore
     @State private var restorePaletteFocus = true
     @State private var launchError: String?
-    /// Tasks this window already asked `lf session ensure --task` about.
-    @State private var ensuredTasks: Set<String> = []
     @State private var launchErrorTitle = "Could not start conversation"
     @Environment(\.palette) private var palette
 
@@ -769,11 +767,6 @@ struct SessionsContentView: View {
                 navigation.selectedSessionId = focusedPaneSessions.first?.id
             }
         }
-        .onChange(of: taskIdentity, initial: true) { _, _ in
-            if navigation.selectedSessionId == nil, let work = model.selection, work.kind == .task {
-                enterTask(work)
-            }
-        }
         .onChange(of: model.sessions.value, initial: true) { _, records in
             guard model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath,
                   let records else { return }
@@ -781,9 +774,6 @@ struct SessionsContentView: View {
             store.reconcile(records)
             if model.sessions.errorMessage == nil {
                 workspaces.reconcileMembership(records)
-                if let work = model.selection, work.kind == .task {
-                    enterTask(work)
-                }
                 if let selected = navigation.selectedSessionId,
                    let record = records.first(where: { $0.id == selected }),
                    let identity = record.workspace?.identity,
@@ -958,44 +948,7 @@ struct SessionsContentView: View {
     private func openTask(_ work: WorkReference) {
         model.select(work)
         navigation.content = .terminals
-        enterTask(work)
-    }
-
-    /// A Task opens on its one Session. The store names the primary once
-    /// `lf session ensure --task` has chosen or started it; until then this
-    /// asks, once per Task in this window.
-    private func enterTask(_ work: WorkReference) {
-        // The exact linked Session is already chosen; ordinary primary entry
-        // must not race it when planning and Session observations arrive together.
-        guard model.linkedSession == nil else { return }
-        guard let identity = taskIdentity, let task = fileTask else { return }
-        let panes = workspaces.workspace(for: identity).multiplexer
-        if let session = focusedPaneSessions.first {
-            navigation.selectedSessionId = session.id
-            return
-        }
-        guard panes.layout.allPanes.allSatisfy({ $0.content == .empty }) else { return }
-        let sessions = model.visibleSessions.filter { $0.primaryScope == nil && $0.workspace?.identity == identity }
-        if let primary = sessions.first(where: { $0.taskPrimary && $0.state != .closed }) {
-            openSession(primary)
-            return
-        }
-        guard identity.machineId == machineId, model.sessions.errorMessage == nil, model.sessions.value != nil,
-              ensuredTasks.insert(task.task.id).inserted else { return }
-        let (taskId, issue, origin) = (task.task.id, task.task.task.identifier, navigation)
-        Task { @MainActor in
-            do {
-                let ensured = try await query.ensureTaskSession(issue: issue, cwd: identity.worktree)
-                origin.taskSessionErrors[taskId] = nil
-                await model.refresh()
-                guard model.selection == work, origin.selectedSessionId == nil,
-                      panes.layout.allPanes.allSatisfy({ $0.content == .empty }),
-                      let record = model.sessions.value?.first(where: { $0.id == ensured.id }) else { return }
-                openSession(record)
-            } catch {
-                origin.taskSessionErrors[taskId] = error.localizedDescription
-            }
-        }
+        navigation.selectedSessionId = focusedPaneSessions.first?.id
     }
 
     private func launchSessionSkill(_ launch: SessionSkillLaunch) {

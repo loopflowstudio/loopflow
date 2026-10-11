@@ -150,8 +150,9 @@ below the outline. Sessions without a Task association are also available under
 There is no creation opt-out from checkout association. **Task details** opens the description, comments and Run history.
 
 A Task's workspace is its Workflow in the header and a multiplexer below.
-Opening a Task opens its one Session (`lf session ensure --task`); there is no
-Sessions list. The header draws the Workflow as a graph scaled to the window:
+Opening a Task shows its retained panes without creating or connecting a Session.
+Use **New conversation** or an explicit Session link to connect; an unplaced Task
+keeps its explicit **Prepare workspace** action. The header draws the Workflow as a graph scaled to the window:
 `start` and `end` as circles, each node a box saying what you do there, one
 labelled arrow per edge, a loop back as an arc over its node. The current node
 or running edge is marked. The labels of the edges leaving the current node
@@ -590,7 +591,8 @@ loads. Registered Task links report their page/Session outcome on the window ins
 These are transient receipts, not opening history or Work identity. Remote Task links
 retain the local repository window and re-observe the named execution Machine before
 opening its Session and optional Changes pane. A remote link without `--session`
-uses that Task's primary Session. Missing, changed or unavailable recorded locations
+shows the Task without creating or connecting a Session. An explicit Changes
+request without a Session still uses that Task's primary Session. Missing, changed or unavailable recorded locations
 never prepare another checkout. The CLI transports native Session argv over SSH,
 keeping the owner's data directory and explicit takeover behavior. Local panes and
 drafts remain retained; no remote planning tree or execution record is imported.

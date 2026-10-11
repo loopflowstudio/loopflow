@@ -1314,7 +1314,9 @@ fn task_completion_retains_request_but_rolls_back_status_if_delivery_cannot_comm
 
 #[test]
 fn task_completion_ingestion_preserves_baseline_and_atomically_adopts_linear() {
-    with_planning_task(|runtime, fixture, repo, task, _state| {
+    with_planning_task(|runtime, fixture, repo, task, state| {
+        // Completion attempts foreground delivery; keep the receipt pending for ingestion.
+        runtime.block_on(async { state.lock().await.field_outage = true });
         let mut remote = fixture
             .store
             .sqlite
@@ -1590,10 +1592,12 @@ fn task_completion_late_acknowledgement_preserves_explicit_reopening() {
 #[test]
 fn task_completion_active_sync_acquires_membership_while_delivery_is_pending() {
     with_planning_task(|runtime, fixture, repo, task, state| {
+        runtime.block_on(async { state.lock().await.field_outage = true });
         crate::ops::task::task_complete(repo, task.id.as_str(), Some("Saved during outage"))
             .unwrap();
         runtime.block_on(async {
             let mut provider = state.lock().await;
+            provider.field_outage = false;
             provider.issues[0]["state"] = json!({"type":"canceled"});
             mark_issue_updated(&mut provider.issues[0]);
             let mut added = provider.issues[0].clone();

@@ -2315,10 +2315,34 @@ fn refiling_saves_membership_offline_and_retains_inbound_changes() {
                 home.path(),
                 &["wave", "ensure", name, "--json"],
             );
-            let project = store.list_projects(Some(wave.id())).unwrap().remove(0);
+            let mut project = store.list_projects(Some(wave.id())).unwrap().remove(0);
             if mapped {
-                db.execute("UPDATE projects SET external_project_id=?2,planning_teams='[\"fixture-team\"]',planning_initiatives=?3 WHERE id=?1",
-                    rusqlite::params![project.id.as_str(), name, serde_json::json!([name]).to_string()]).unwrap();
+                // Bind through the writer so foreground Git exchange sees the same
+                // identity as SQLite, rather than restoring a pre-binding journal.
+                project.linear_id = Some(loopflow::planning::LinearProjectId::new(name).unwrap());
+                store.insert_project(&project).unwrap();
+                store
+                    .put_pm_project(
+                        wave.id(),
+                        "linear",
+                        name,
+                        &loopflow::pm::linear::LinearProject {
+                            id: name.into(),
+                            slug: project.slug.clone(),
+                            name: project.name.clone(),
+                            summary: project.summary.clone(),
+                            description: Some(project.description.clone()),
+                            workflow: project.workflow.clone(),
+                            status: project.status,
+                            krs: project.krs.clone(),
+                            metric_targets: project.metric_targets.clone(),
+                            initiative_ids: vec![name.into()],
+                            team_ids: vec!["fixture-team".into()],
+                            revision: None,
+                        },
+                        1,
+                    )
+                    .unwrap();
             }
             projects.push(project);
         }
@@ -2387,13 +2411,15 @@ fn refiling_saves_membership_offline_and_retains_inbound_changes() {
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].field, "project_id");
         assert_eq!(changes[0].value, projects[1].id.as_str());
-        let before = revision();
+        // A repeated command may refresh exchange status, but cannot edit the Task
+        // or enqueue another membership effect.
+        let before = store.task(&task.id).unwrap().unwrap();
         assert!(command(repo.path(), home.path(), &args)
             .output()
             .unwrap()
             .status
             .success());
-        assert_eq!(revision(), before);
+        assert_eq!(store.task(&task.id).unwrap().unwrap(), before);
         assert_eq!(store.pending_task_changes(&task.id).unwrap(), changes);
         if mapped {
             let mut incoming = original.clone();
@@ -2415,6 +2441,7 @@ fn refiling_saves_membership_offline_and_retains_inbound_changes() {
             let mut other = incoming.project.clone().unwrap();
             // Preserve the duplicate slug: exact provider IDs must beat names.
             other.id = "competing".into();
+            other.revision = Some("2026-10-08T14:01:00Z".into());
             other.initiative_ids = vec!["competing".into()];
             incoming.project = Some(other);
             incoming.item.project_id = Some("competing".into());

@@ -93,9 +93,12 @@ create another generic reader framework simply to replace these functions.
 
 ## 3. Collapse accepted-provider-to-Work projection
 
-**Remove or shrink:** `store/sqlite/planning.rs::project_accepted_planning`,
-`item_edits`, separate create/update projection branches, and provider hierarchy
-readback through `pm_snapshot` / `pm_task_observation_in`. Today `put_pm_project`,
+**Remove or shrink:** `store/sqlite/planning.rs::project_accepted_planning` and
+provider hierarchy readback through `pm_snapshot` / `pm_task_observation_in`.
+The duplicate Task create/update projection branches and `item_edits` are removed:
+one accepted-observation query and typed edit slice now feed the common writer,
+retaining existing identity, rank, pending disposition and membership fences.
+Today `put_pm_project`,
 `put_pm_task`, `put_pm_snapshot`, `associate_project`, `put_project` and `put_item`
 retain provider records, then copy accepted content into Work. Acquisition should
 apply eligible typed facts through the same writer used for local edits.
@@ -235,7 +238,7 @@ errors keep their distinct owners. No schema or historical evidence is removed.
 ## 10. Unify selectors and acquisition orchestration
 
 **Locations:** `ops/pm.rs::{PmContext,RepositoryPmContext,resolve_saved_task,
-read_task_planning_async,inspect_task_planning,pm_resolve_task,resolve_owned_issue,
+read_task_planning_async,inspect_task_planning,resolve_owned_issue,
 list_pm_waves,list_local_waves}`, `ops/task_pm.rs::ResolvedTask`,
 `ops/planning_sync.rs::find_task`, `ops/run.rs`, `ops/task/remote.rs`.
 
@@ -246,6 +249,9 @@ that only selects another domain reader. Retain bounded refresh/lock behavior;
 `read_pm_snapshot`, `plan_snapshot_read`, `load_show_snapshot` and
 `fetch_pm_snapshot_with_store` need consolidation with the cache removal rather
 than new wrappers around renamed snapshots.
+
+`PmResolvedTask` and the two `pm_resolve_task` forwarding wrappers are deleted;
+`ResolvedTask`, the acquisition/lookup split and provider-shaped results remain.
 
 Linear setup, OAuth, Team/Initiative mapping and reteam are real integration
 operations. Keep them concrete. A local lookup cannot infer that another Machine

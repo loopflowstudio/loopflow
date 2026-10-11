@@ -177,14 +177,6 @@ pub struct PmRenameResult {
     pub title: String,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct PmResolvedTask {
-    pub wave: String,
-    pub initiative_id: String,
-    pub project: LinearProject,
-    pub item: PmItem,
-}
-
 // ── Client + Linear project resolution ──────────────────────────────
 
 #[derive(Clone)]
@@ -1475,26 +1467,6 @@ async fn inspect_task_planning_async(
     })
 }
 
-pub fn pm_resolve_task(repo: &Path, issue: &str) -> OpsResult<PmResolvedTask> {
-    block_on_pm(pm_resolve_task_async(repo, issue))
-}
-
-pub(crate) async fn pm_resolve_task_async(repo: &Path, issue: &str) -> OpsResult<PmResolvedTask> {
-    let ResolvedTask {
-        wave,
-        item,
-        project,
-        ..
-    } = resolve_owned_issue(repo, issue).await?;
-    let initiative_id = singular_project_initiative(&project)?;
-    Ok(PmResolvedTask {
-        wave,
-        initiative_id,
-        project,
-        item,
-    })
-}
-
 async fn resolve_owned_issue(repo: &Path, issue: &str) -> OpsResult<ResolvedTask> {
     let task = pm_store()
         .await?
@@ -2766,8 +2738,8 @@ pub(crate) async fn chapter_sweep_candidates(repo: &Path) -> OpsResult<ChapterSw
 pub(crate) async fn require_outside_current_chapter(
     repo: &Path,
     issue: &str,
-) -> OpsResult<PmResolvedTask> {
-    let resolved = pm_resolve_task_async(repo, issue).await?;
+) -> OpsResult<ResolvedTask> {
+    let resolved = resolve_owned_issue(repo, issue).await?;
     let store = pm_store().await?;
     let locator = crate::work::wave::WaveLocator::discover(repo, &resolved.wave)
         .map_err(|error| OpsError::Message(error.to_string()))?;

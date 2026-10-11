@@ -240,19 +240,25 @@ canonical Project consumers and confine the observation before calling audit
 sections 1–3 complete; do not defer these dependencies to a post-review follow-up.
 Project export now reads canonical Project directly. No replaced type alias remains.
 
-The original acquisition tracing and adapter-only proof limits are preserved at
-`a849341234:scratch/work-on-another-machine-name.md`; the in-flight review lives in
-`project-acquisition-dependency.md`. The remaining private-observation/ordinary-reader
-cut belongs here, before bindings, ordinary follow-ups, cron and the rest of the
-audit. No partial publication or readiness follows from composed prose proof.
+The original acquisition tracing is preserved at
+`a849341234:scratch/work-on-another-machine-name.md`; the absorbed review is at
+`f2ca2063b5:scratch/project-acquisition-dependency.md`. Its missing prose proof is
+superseded above, not its private-observation requirement. The public canonical
+Project reader cut (`52e7da7f35`) is complete. Remaining Task/snapshot consumers of
+`LinearProject` belong to this acquisition prerequisite, before bindings, ordinary
+follow-ups, cron and the rest of the audit. No partial publication or readiness.
 
-The public canonical Project reader cut is already implemented (`52e7da7f35`);
-it is not another pending wrapper replacement. Remaining `plan_read.rs` projections
-serve Task observations and `planning_wave`, owned by the later Task/snapshot cut.
-After acquisition, the earlier pass still requires concrete Linear bindings,
-ordinary Task/comment follow-ups and cron unification before the rest of the audit.
-The `4f103559be` sync brought website/architecture presentation changes, not these
-missing behaviors; it does not reopen the completed reader cut.
+Acquisition now selects new and existing Tasks in one query and applies one typed
+edit slice through the common writer. Existing identities, local order,
+pending disposition and cross-Wave membership fences remain distinct from first
+admission. The duplicate import branch and `item_edits` forwarding function are
+deleted. `PmResolvedTask` and both `pm_resolve_task` wrappers are also deleted;
+the remaining resolver still carries provider-shaped Work and must be replaced.
+These reductions do not complete canonical Project acquisition or the deeper audit.
+Focused checks exposed fixtures predating foreground exchange: offline completion
+now simulates an outage; repeat refiling preserves Task/receipts rather than freezing
+sync status. Mappings enter through the writer, not SQL inconsistent with its journal;
+changed provider content carries a revision.
 
 Compression removes the fabricated Git recovery record/value hierarchy: status and
 CLI/Desktop now inspect retained journal mutations directly, with candidate IDs
@@ -306,11 +312,11 @@ Earlier baseline detail: `c8fe4628a:scratch/work-on-another-machine-name.md`.
   cut. Regenerate them after the entire accepted reduction, before review-only
   republication. No readiness or landing follows from this persistence checkpoint.
 
-Checks: CLI build, seven `project_prose_` tests, public offline Project-edit fixture, fmt and all-target Clippy pass; tests are network-isolated; gate owns affected/materialized/Desktop verification.
+Checks: `cargo build -p loopflow --bin lf`, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and five network-isolated acquisition/completion/membership/sweep tests pass; gate owns affected/materialized/Desktop verification.
 
 Context: authored memory/scratch fit. The generated Task seed/steers and workspace
-manifest reported 19,573 tokens (3,573 over 16,000), inspected at
-`.lf/tmp/context/c94fd11853cc1c1163aaf73ff366876b9ccc9decbd3eaf0135de5dc2d0abe782.md`.
+manifest still exceed 16,000 tokens (19,468 observed at
+`.lf/tmp/context/f859f6dd553e69fbb8c537e5786ba6360ac461a63204e4fdee1c97ef74adbf57.md`).
 Authored-note curation cannot remove retained Task history or generated metadata;
 neither history nor a limit changed.
 

@@ -621,21 +621,27 @@ fn project_accepted_planning(
             super::planning_export::attach_in(tx, repo, false, &serde_json::from_str(&body)?)?;
         }
     }
-    // Reconcile pending fields against their provider baselines in the same transaction.
-    let mut query = tx.prepare(&format!("WITH accepted AS ({ACCEPTED_WAVE_PROJECTS}) SELECT target.id,i.body,i.observed_at,p.id FROM tasks target JOIN pm_items i ON target.external_issue_id=i.id
+    // Admission and refresh share one accepted observation. Existing Tasks retain
+    // their IDs, local order and pending disposition; new Tasks receive only Work.
+    let mut query = tx.prepare(&format!(
+        "WITH accepted AS ({ACCEPTED_WAVE_PROJECTS})
+         SELECT target.id,i.body,i.observed_at,p.id FROM pm_items i
          JOIN projects p ON p.external_project_id=i.project_id
-         JOIN projects current ON current.id=target.project_id
          JOIN accepted observed ON observed.id=i.project_id AND observed.wave_id=p.wave_id
-         WHERE target.external_issue_id=i.id
-         AND (current.wave_id=p.wave_id OR EXISTS(
+         LEFT JOIN tasks target ON target.external_issue_id=i.id
+         LEFT JOIN projects current ON current.id=target.project_id
+         WHERE i.repo=?1 AND i.provider=?2 AND i.needs_refresh=0
+         AND i.id IN (SELECT value FROM json_each(?3))
+         AND (target.id IS NULL OR current.wave_id=p.wave_id OR EXISTS(
              SELECT 1 FROM task_changes c WHERE c.task_id=target.id AND c.field='project_id'
              AND c.acknowledged=0 AND c.conflict_json IS NULL AND json_extract(c.value_json,'$')=current.id
              AND c.seq=(SELECT max(seq) FROM task_changes WHERE task_id=target.id AND field='project_id')))
-         AND i.repo=?1 AND i.provider=?2 AND i.needs_refresh=0
-         AND i.id IN (SELECT value FROM json_each(?3))
-         AND NOT EXISTS(SELECT 1 FROM task_deletions d WHERE d.wave_id=current.wave_id AND d.issue_id=i.id)
-         AND NOT EXISTS(SELECT 1 FROM pm_issue_changes c WHERE c.issue_id=i.id AND i.provider='linear' AND c.removed=1)"))?;
-    let updates = query
+         AND NOT EXISTS(SELECT 1 FROM task_deletions d
+             WHERE d.wave_id=COALESCE(current.wave_id,p.wave_id) AND d.issue_id=i.id)
+         AND NOT EXISTS(SELECT 1 FROM pm_issue_changes c WHERE c.issue_id=i.id
+             AND (target.id IS NULL OR i.provider='linear') AND c.removed=1)"
+    ))?;
+    let observations = query
         .query_map(
             params![
                 repo,
@@ -646,7 +652,7 @@ fn project_accepted_planning(
             ],
             |row| {
                 Ok((
-                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, i64>(2)?,
                     row.get::<_, String>(3)?,
@@ -655,94 +661,55 @@ fn project_accepted_planning(
         )?
         .collect::<Result<Vec<_>, _>>()?;
     drop(query);
-    for (id, body, observed_at, project) in updates {
+    for (existing, body, observed_at, project) in observations {
         let item: PmItem = serde_json::from_str(&body)?;
-        let task_id = crate::durable::TaskId::from_raw(&id);
-        super::task_state_delivery::reconcile_in(tx, &task_id, &item)?;
-        let pending:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM task_state_deliveries WHERE task_id=?1 AND settled=0 AND seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=?1))",[&id],|r|r.get(0))?;
-        let mut edits = item_edits(&item, &project);
-        super::planning_changes::PlanningChanges::Task(&task_id).reconcile_edits(
-            tx,
-            item.revision.as_deref(),
-            &mut edits,
-        )?;
-        edits.retain(|edit| {
-            !matches!(edit, Edit::TaskRank(_))
-                && (!pending || !matches!(edit, Edit::Disposition(_)))
-        });
-        planning_write::local(tx, PlanningKind::Task, &id, &edits)?;
-        tx.execute(
-            "UPDATE tasks SET planning_provider_revision=?2,pm_snapshot_synced_at=?3 WHERE id=?1",
-            params![id, item.revision, observed_at],
-        )?;
-    }
-    let mut query = tx.prepare(&format!(
-        "WITH accepted AS ({ACCEPTED_WAVE_PROJECTS})
-         SELECT i.body,i.observed_at,p.id FROM pm_items i
-         JOIN projects p ON p.external_project_id=i.project_id
-         JOIN accepted observed ON observed.id=i.project_id AND observed.wave_id=p.wave_id
-         WHERE i.repo=?1 AND i.provider=?2 AND i.needs_refresh=0
-         AND i.id IN (SELECT value FROM json_each(?3))
-         AND NOT EXISTS(SELECT 1 FROM tasks t WHERE t.external_issue_id=i.id)
-         AND NOT EXISTS(SELECT 1 FROM task_deletions d WHERE d.wave_id=p.wave_id AND d.issue_id=i.id)
-         AND NOT EXISTS(SELECT 1 FROM pm_issue_changes c WHERE c.issue_id=i.id AND c.removed=1)"
-    ))?;
-    let imported = query
-        .query_map(
-            params![
-                repo,
-                provider,
-                item_ids,
-                confirmed_wave,
-                confirmed_initiative
-            ],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, String>(2)?,
-                ))
-            },
-        )?
-        .collect::<Result<Vec<_>, _>>()?;
-    drop(query);
-    for (body, observed_at, project) in imported {
-        let item: PmItem = serde_json::from_str(&body)?;
-        let id = crate::durable::TaskId::from_issue(&item.id);
-        planning_write::create(
-            tx,
-            repo,
-            PlanningKind::Task,
-            id.as_str(),
-            &item_edits(&item, &project),
-        )?;
+        let id = existing.as_ref().map_or_else(
+            || crate::durable::TaskId::from_issue(&item.id),
+            crate::durable::TaskId::from_raw,
+        );
+        let mut edits = vec![
+            Edit::TaskProject(project),
+            Edit::TaskLinearId(Some(item.id.clone())),
+            Edit::TaskIdentifier(item.identifier.clone()),
+            Edit::TaskTitle(Some(item.name.clone())),
+            Edit::TaskDescription(Some(item.description.clone())),
+            Edit::TaskRank(item.rank),
+            Edit::TaskUrl(item.url.clone()),
+            Edit::TaskBranch(item.branch_name.clone()),
+            Edit::TaskTeam(item.team_id.clone()),
+            Edit::TaskAssignee(item.assignee.clone()),
+            Edit::TaskDueDate(item.due_date.clone()),
+            Edit::Disposition(Disposition {
+                planning_state: item.state.clone(),
+                planning_completed: i64::from(item.completed),
+                planning_completed_at: item.completed_at.clone(),
+            }),
+        ];
+        if existing.is_some() {
+            super::task_state_delivery::reconcile_in(tx, &id, &item)?;
+            let pending: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM task_state_deliveries WHERE task_id=?1 AND settled=0
+                 AND seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=?1))",
+                [id.as_str()],
+                |row| row.get(0),
+            )?;
+            super::planning_changes::PlanningChanges::Task(&id).reconcile_edits(
+                tx,
+                item.revision.as_deref(),
+                &mut edits,
+            )?;
+            edits.retain(|edit| {
+                !matches!(edit, Edit::TaskRank(_))
+                    && (!pending || !matches!(edit, Edit::Disposition(_)))
+            });
+        }
+        planning_write::create(tx, repo, PlanningKind::Task, id.as_str(), &edits)?;
         tx.execute(
             "UPDATE tasks SET planning_provider_revision=?2,pm_snapshot_synced_at=?3 WHERE id=?1",
             params![id.as_str(), item.revision, observed_at],
         )?;
     }
     Ok(())
-}
-
-fn item_edits(item: &PmItem, project: &str) -> Vec<Edit> {
-    vec![
-        Edit::TaskProject(project.into()),
-        Edit::TaskLinearId(Some(item.id.clone())),
-        Edit::TaskIdentifier(item.identifier.clone()),
-        Edit::TaskTitle(Some(item.name.clone())),
-        Edit::TaskDescription(Some(item.description.clone())),
-        Edit::TaskRank(item.rank),
-        Edit::TaskUrl(item.url.clone()),
-        Edit::TaskBranch(item.branch_name.clone()),
-        Edit::TaskTeam(item.team_id.clone()),
-        Edit::TaskAssignee(item.assignee.clone()),
-        Edit::TaskDueDate(item.due_date.clone()),
-        Edit::Disposition(Disposition {
-            planning_state: item.state.clone(),
-            planning_completed: i64::from(item.completed),
-            planning_completed_at: item.completed_at.clone(),
-        }),
-    ]
 }
 
 fn same_ids(left: &[String], right: &[String]) -> bool {
@@ -1088,6 +1055,41 @@ mod tests {
             store.task_by_issue("MOVED-42").unwrap().unwrap().id,
             task.id
         );
+        // A detail acquisition refreshes content, never the order observed by a list.
+        let mut detail = row.snapshot.items[0].clone();
+        detail.name = "Updated on another machine".into();
+        detail.rank = 99;
+        detail.revision = Some("2099-01-02T00:00:00Z".into());
+        store
+            .put_pm_task(
+                "/repo",
+                "linear",
+                &crate::store::PmTaskRecord {
+                    item: detail.clone(),
+                    project: Some(row.snapshot.projects[0].clone()),
+                    observed_at: 44,
+                },
+                Some((wave.id(), &row.initiative)),
+            )
+            .unwrap();
+        let refreshed = store.task(&task.id).unwrap().unwrap();
+        assert_eq!(refreshed.title, detail.name);
+        assert_eq!(refreshed.pm_snapshot_synced_at, Some(44));
+        assert!(refreshed.worktree.is_none());
+        assert!(store.task_prs(&task.id).unwrap().is_empty());
+        assert_eq!(
+            store
+                .planning_task(&task.id)
+                .unwrap()
+                .record
+                .unwrap()
+                .item
+                .rank,
+            row.snapshot.items[0].rank
+        );
+        // Replaying the older list cannot roll content back or duplicate the Task.
+        store.put_pm_snapshot(&row).unwrap();
+        assert_eq!(store.task(&task.id).unwrap().unwrap().title, detail.name);
         store
             .observe_pm_issue_change(&row.snapshot.items[0].id, None, true)
             .unwrap();

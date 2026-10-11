@@ -632,10 +632,11 @@ owns local/imported fields; execution/attempts stay local. Preserve causality,
 losers and uncertainty. Gate/installation remain unproved.
 
 Jack accepted the full One Work audit; partial work is not review-ready.
-Canonical Projects retain IDs, bindings and rank; saves share acquisition’s typed
-receipt mapping. One Markdown parser replaces model patching. Prose fixtures pass; LinearProject
-still leaks into ordinary reads. Partial observations retain field revision/age;
-entity and local-write revisions cannot substitute. Omission proves no settlement. Git recovery reads the journal;
+Projects retain IDs, bindings and rank; saves/acquisition share typed receipts.
+One Markdown parser replaces model patching; ordinary LinearProject reads remain.
+Unified acquisition preserves legacy IDs, pending disposition and local order.
+Partial fields retain revision/age, never entity/write clocks. Omission proves no
+settlement. Git recovery reads the journal;
 candidates prove no application/publication; read errors retain cached content.
 
 Cron retains installed ownership and failure exits ([evidence](release/MEMORY.md)).

@@ -263,6 +263,12 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool, current_tas
         abandon_intent: None,
         created_at: now,
         updated_at: now,
+        rank: 0,
+        assignee: None,
+        due_date: None,
+        state: None,
+        completed: false,
+        completed_at: None,
         observation: Observation::NotRequired,
     };
     let stale_pr = TaskPr {

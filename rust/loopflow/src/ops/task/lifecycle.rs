@@ -405,32 +405,27 @@ pub fn task_sweep(repo: &Path, apply: bool) -> OpsResult<Vec<SweepEntry>> {
                     // Read membership after preparation, immediately before effects.
                     match crate::ops::pm::require_outside_current_chapter(repo, &item.id).await {
                         Err(error) => format!("skipped: {error}"),
-                        Ok(resolved) => {
-                            let task = resolve_task(&store, &resolved.item.id).await?.ok_or_else(
-                                || task_error("Task was not retained after acquisition"),
-                            )?;
-                            match save_abandon(&store, &task).await {
-                                Err(error) => format!(
-                                    "incomplete: {error}; retry task abandon {}",
-                                    item.identifier
-                                ),
-                                Ok(()) => {
-                                    let mut outcome = "canceled".to_string();
-                                    if let Some(deletion) = deletion {
-                                        if let Err(error) = crate::ops::abandon::abandon_prepared(
-                                            deletion,
-                                            &NullProgress,
-                                        )
-                                        .await
-                                        {
-                                            outcome =
-                                                format!("canceled; retained checkout/PR: {error}");
-                                        }
+                        Ok(task) => match save_abandon(&store, &task).await {
+                            Err(error) => format!(
+                                "incomplete: {error}; retry task abandon {}",
+                                item.identifier
+                            ),
+                            Ok(()) => {
+                                let mut outcome = "canceled".to_string();
+                                if let Some(deletion) = deletion {
+                                    if let Err(error) = crate::ops::abandon::abandon_prepared(
+                                        deletion,
+                                        &NullProgress,
+                                    )
+                                    .await
+                                    {
+                                        outcome =
+                                            format!("canceled; retained checkout/PR: {error}");
                                     }
-                                    outcome
                                 }
+                                outcome
                             }
-                        }
+                        },
                     }
                 }
             };

@@ -18,7 +18,6 @@ use crate::config::load_repo_config;
 use crate::durable::WorkRef;
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
-use crate::ops::task_pm::ResolvedTask;
 use crate::ops::util::normalize_wave_name;
 use crate::pm::linear::LinearClient;
 use crate::pm::linear::LinearProject;
@@ -32,6 +31,7 @@ use crate::store::{
     ProviderToken, ProviderTokenReplacement, StorageConfig, Store,
 };
 use crate::work::task::comment::TaskComment;
+use crate::work::task::Task;
 use crate::work::wave::config::{read_wave_config, update_wave_goal_config, WavePmConfig};
 use crate::work::wave::Wave;
 
@@ -1091,12 +1091,7 @@ pub(crate) async fn resolve_saved_task(
         None => {
             // Cold acquisition imports the remote record once. The stored Task owns
             // every subsequent read and write, including while Linear is unavailable.
-            let resolved = resolve_owned_issue(repo, issue).await?;
-            store
-                .get_task_by_issue(&resolved.item.id)
-                .await
-                .map_err(|error| OpsError::Message(error.to_string()))?
-                .ok_or_else(|| OpsError::Message(format!("Task {issue} is not stored")))?
+            resolve_owned_issue(repo, issue).await?
         }
     };
     let owner = store
@@ -1183,13 +1178,20 @@ pub(crate) async fn pm_link_pr_async(
             }
         }
     };
-    match resolve_owned_issue(repo, &request.issue_id).await {
-        Ok(ResolvedTask {
-            wave: owning_wave, ..
-        }) if owning_wave == wave => {}
-        Ok(ResolvedTask {
-            wave: owning_wave, ..
-        }) => {
+    let ownership = async {
+        let task = resolve_owned_issue(repo, &request.issue_id).await?;
+        let owner = pm_store()
+            .await?
+            .get_wave(&task.wave_id)
+            .await
+            .map_err(|error| OpsError::Message(error.to_string()))?
+            .ok_or_else(|| OpsError::Message("Task Wave is missing".into()))?;
+        Ok::<_, OpsError>(owner.slug().to_owned())
+    }
+    .await;
+    match ownership {
+        Ok(owning_wave) if owning_wave == wave => {}
+        Ok(owning_wave) => {
             return PrLinkageOutcome {
                 ids: prior.clone(),
                 error: Some(format!(
@@ -1467,7 +1469,40 @@ async fn inspect_task_planning_async(
     })
 }
 
-async fn resolve_owned_issue(repo: &Path, issue: &str) -> OpsResult<ResolvedTask> {
+pub(crate) async fn acquire_task(repo: &Path, issue: &str, refresh: PmRefresh) -> OpsResult<Task> {
+    let record = read_task_planning_async(repo, issue, refresh).await?;
+    let item = record.item;
+    let project = record.project.ok_or_else(|| {
+        OpsError::Message(format!(
+            "task {} has no Project; planning can be inspected but managed work requires ownership",
+            item.identifier
+        ))
+    })?;
+    let initiative = singular_project_initiative(&project)?;
+    let wave = wave_for_initiative(repo, &initiative)?;
+    let team_id = repository_team_id(repo)?;
+    crate::pm::validate_project_ownership(&wave, &initiative, Some(&team_id), &project)
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    if item.team_id.as_deref() != Some(team_id.as_str()) {
+        return Err(OpsError::Message(format!(
+            "task {} belongs to Team {}, expected repository Team {}",
+            item.identifier,
+            item.team_id.as_deref().unwrap_or("unmapped"),
+            team_id
+        )));
+    }
+    let store = pm_store().await?;
+    let task = store
+        .get_task_by_issue(&item.id)
+        .await
+        .map_err(|error| OpsError::Message(error.to_string()))?
+        .ok_or_else(|| {
+            OpsError::Message("accepted planning did not retain the Task identity".into())
+        })?;
+    Ok(task)
+}
+
+async fn resolve_owned_issue(repo: &Path, issue: &str) -> OpsResult<Task> {
     let task = pm_store()
         .await?
         .get_task_by_issue(issue)
@@ -1478,7 +1513,7 @@ async fn resolve_owned_issue(repo: &Path, issue: &str) -> OpsResult<ResolvedTask
         .map(|task| task.linear_id())
         .transpose()?
         .map_or(issue, |id| id.as_str());
-    crate::ops::task_pm::resolve_task_async(repo, issue, PmRefresh::Force).await
+    acquire_task(repo, issue, PmRefresh::Force).await
 }
 
 pub(crate) fn singular_project_initiative(project: &LinearProject) -> OpsResult<String> {
@@ -2735,27 +2770,19 @@ pub(crate) async fn chapter_sweep_candidates(repo: &Path) -> OpsResult<ChapterSw
     })
 }
 
-pub(crate) async fn require_outside_current_chapter(
-    repo: &Path,
-    issue: &str,
-) -> OpsResult<ResolvedTask> {
+pub(crate) async fn require_outside_current_chapter(repo: &Path, issue: &str) -> OpsResult<Task> {
     let resolved = resolve_owned_issue(repo, issue).await?;
     let store = pm_store().await?;
-    let locator = crate::work::wave::WaveLocator::discover(repo, &resolved.wave)
-        .map_err(|error| OpsError::Message(error.to_string()))?;
     let wave = store
-        .get_wave_at(&locator)
+        .get_wave(&resolved.wave_id)
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?
         .ok_or_else(|| OpsError::Message("current Wave is unavailable".into()))?;
     let chapter = super::project::current_project(&store, &wave)?;
-    if chapter
-        .linear_id
-        .as_ref()
-        .is_some_and(|id| resolved.item.project_id.as_deref() == Some(id.as_str()))
-        || resolved.item.completed
+    if chapter.id == resolved.project_id
+        || resolved.completed
         || matches!(
-            resolved.item.state.as_deref(),
+            resolved.state.as_deref(),
             Some("completed" | "canceled" | "duplicate")
         )
     {

@@ -631,13 +631,13 @@ Outages buffer locally, without fallback/publisher election. One typed writer
 owns local/imported fields; execution/attempts stay local. Preserve causality,
 losers and uncertainty. Gate/installation remain unproved.
 
-Jack accepted the full One Work audit; partial work is not review-ready.
-Projects retain IDs, bindings and rank; saves/acquisition share typed receipts.
-One Markdown parser replaces model patching; ordinary LinearProject reads remain.
-Unified Task admission/refresh still retains provider-shaped readers. Partial
-fields retain revision/age; omission proves no settlement. Follow-up conversion
-retains uncertain creation/relation effects, never synthetic comment success.
-Git journal candidates prove no application/publication; read errors retain cache.
+Jack accepted the full audit; partial work is not review-ready. Projects retain
+IDs, bindings and rank; saves/acquisition share typed receipts. One Markdown parser
+replaces model patching. Acquisition returns canonical Task, not `ResolvedTask`;
+snapshot/status still manufacture provider-shaped Work. Partial fields retain
+revision/age; omission proves no settlement. Follow-ups retain uncertain effects,
+never synthetic comment success. Git candidates prove no application/publication;
+read errors retain cache.
 
 Cron retains installed ownership and failure exits ([evidence](release/MEMORY.md)).
 [Remaining work](../../scratch/work-on-another-machine-name.md). Republish #1491

@@ -807,16 +807,7 @@ fn prepare_task(repo: &Path, issue: &str, options: TaskProcessOptions) -> OpsRes
             None => {
                 // An unknown provider alias needs acquisition once. All saved Tasks
                 // then use their stored identity and the same placement transaction.
-                let resolved =
-                    super::task_pm::resolve_task_async(&main, issue, super::pm::PmRefresh::Auto)
-                        .await?;
-                store
-                    .get_task_by_issue(&resolved.item.id)
-                    .await
-                    .map_err(task_error)?
-                    .ok_or_else(|| {
-                        task_error("accepted planning did not retain the Task identity")
-                    })?
+                super::pm::acquire_task(&main, issue, super::pm::PmRefresh::Auto).await?
             }
         };
         let wave = owning_wave(&store, &task).await?;
@@ -4809,6 +4800,12 @@ mod tests {
             abandon_intent: None,
             created_at: now,
             updated_at: now,
+            rank: 0,
+            assignee: None,
+            due_date: None,
+            state: None,
+            completed: false,
+            completed_at: None,
             observation: Observation::NotRequired,
         };
         let pr = TaskPr {

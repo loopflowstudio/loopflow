@@ -1470,6 +1470,12 @@ mod tests {
             abandon_intent: None,
             created_at: now,
             updated_at: now,
+            rank: 0,
+            assignee: None,
+            due_date: None,
+            state: None,
+            completed: false,
+            completed_at: None,
             observation: crate::work::task::Observation::NotRequired,
         }
     }

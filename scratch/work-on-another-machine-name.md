@@ -203,24 +203,25 @@ Linear field mapping. Rotation no longer reconstructs PM Project/Task records:
 its membership check supplies the exact previous Project. The later prose cut below extends receipts in this Task’s single draft;
 canonical observation ownership remains unfinished.
 
-### Next coherent cut — reconciled 2026-10-10 at `7ec3ff7dc4`
+### Canonical Task acquisition — October 10
 
-The earlier feedback's missing prose round trip is implemented by `5bd501e6aa`;
-its ownership objection remains. `7ec3ff7dc4` unifies Task admission/refresh but
-still reads accepted provider caches. Neither commit completes direct acquisition.
+Task now reads its existing persisted rank, assignee, due date, state, completion
+and completion time directly. Creation saves those fields through the typed writer
+once, instead of capturing an incomplete initial Task and then correcting it.
+Acquisition returns the saved Task; `ResolvedTask` and `ops/task_pm.rs` are removed.
+Cold placement, comments, PR ownership and sweep consume that identity; sweep
+compares canonical Project IDs. Concrete Linear ownership validation remains at
+acquisition. No migration or execution write is added.
 
-The next dependency is canonical Task fields and the Task/snapshot readers that
-still manufacture Projects. `plan_read::project_in` substitutes external/local IDs
-and sets description to `None`; `ResolvedTask` still carries `LinearProject` and
-`PmItem`. `task_in` reads `planning_due_date`, then overwrites it from the provider
-observation. This is source counterevidence to a single ordinary Work reader, not
-an executed due-date failure. Replacing only the Project type leaves the Task join
-and identity ambiguity intact. The coherent cut includes canonical Task fields,
-these readers and their callers, with concrete ownership/removal/age evidence kept
-outside domain content. Same-ID local/Git/Linear reads, saved prose and due dates,
-partial observations, pending membership and unchanged execution need composed proof.
-Bindings, ordinary follow-ups, cron and the remaining audit follow that prerequisite;
-none are optional. The full accepted scope and review-only boundary are unchanged.
+The structural prerequisite remains incomplete. `plan_read::project_in` still
+substitutes external/local IDs and sets description to `None`; `task_in` still
+overwrites due dates from provider observations. Status and Wave snapshots still
+manufacture provider-shaped Work. Their callers must use canonical Task/Project
+with explicit ownership/removal/age evidence, including pending membership.
+The new focused proofs cover canonical fields after restart/import, Linear
+acquisition and pending local edits, not composed CLI/Desktop or populated
+execution preservation. Bindings, ordinary follow-ups, cron and the entire deeper
+audit remain required before review-only republication. No partial readiness.
 
 ### Project prose: composed behavior and remaining ownership cut
 
@@ -252,7 +253,7 @@ LOO-406's draft remain unchanged.
 
 **The structural acquisition prerequisite is not complete.** `PmProject` moved to
 concrete `pm::linear::LinearProject`, but ordinary `plan_read::project_in`,
-`PmSnapshot.projects` and `ResolvedTask.project` still use that representation.
+`PmSnapshot.projects` still use that representation.
 The local projection still substitutes provider/local IDs and cannot represent
 saved prose. Moving its name did not delete this second domain view. Complete
 canonical Project consumers and confine the observation before calling audit
@@ -271,9 +272,9 @@ Acquisition now selects new and existing Tasks in one query and applies one type
 edit slice through the common writer. Existing identities, local order,
 pending disposition and cross-Wave membership fences remain distinct from first
 admission. The duplicate import branch and `item_edits` forwarding function are
-deleted. `PmResolvedTask` and both `pm_resolve_task` wrappers are also deleted;
-the remaining resolver still carries provider-shaped Work and must be replaced.
-These reductions do not complete canonical Project acquisition or the deeper audit.
+deleted. `PmResolvedTask`, both `pm_resolve_task` wrappers and now `ResolvedTask` are deleted.
+Acquisition returns canonical Task; ordinary snapshot/status projections still need
+replacement. These reductions do not complete canonical acquisition or the audit.
 Focused checks exposed fixtures predating foreground exchange: offline completion
 now simulates an outage; repeat refiling preserves Task/receipts rather than freezing
 sync status. Mappings enter through the writer, not SQL inconsistent with its journal;
@@ -331,12 +332,12 @@ Earlier baseline detail: `c8fe4628a:scratch/work-on-another-machine-name.md`.
   cut. Regenerate them after the entire accepted reduction, before review-only
   republication. No readiness or landing follows from this persistence checkpoint.
 
-Checks: `git diff --check` passes (realign, prose only); prior build/fmt/Clippy and five isolated acquisition/completion/membership/sweep passes remain recorded at `7ec3ff7dc4`; gate owns affected/materialized/Desktop verification.
+Checks: worktree CLI build, fmt, `cargo clippy --all-targets -- -D warnings`, diff check and six isolated canonical-fields/acquisition/ownership/sweep/import tests pass; gate owns affected/materialized/Desktop verification.
 
-Context: authored memory/scratch fit. `lf context --skill realign` on October 10
-reports a 19,582-token generated Task seed/steer/workspace source against 16,000
-(3,582 over). Its full source is
-`.lf/tmp/context/43da14d740ddb9bede011488ae271ba9c8c5d52c41e0cf635c71601dc571565c.md`.
+Context: authored memory/scratch fit. The October 10 `lf context --skill implement`
+query reports a 19,455-token generated Task seed/steer/workspace source against
+16,000 (3,455 over):
+`.lf/tmp/context/7d4146b163c480851d621ac59ee291b9956535cc7344a46da5b03958280a5c8d.md`.
 The overflow is retained Task history/generated metadata, not authored scratch;
 no history or limit changed.
 

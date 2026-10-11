@@ -561,6 +561,13 @@ pub struct Task {
     pub identifier: String,
     pub title: String,
     pub description: String,
+    /// Shared planning fields; independent of local execution and Workflow position.
+    pub rank: u32,
+    pub assignee: Option<String>,
+    pub due_date: Option<String>,
+    pub state: Option<String>,
+    pub completed: bool,
+    pub completed_at: Option<String>,
     /// Optional Linear binding, not a second owner of this record.
     pub linear_id: Option<LinearIssueId>,
     /// Acquisition time of the retained Linear observation, never a write clock.
@@ -811,6 +818,12 @@ mod tests {
             abandon_intent: None,
             created_at: now,
             updated_at: now,
+            rank: 0,
+            assignee: None,
+            due_date: None,
+            state: None,
+            completed: false,
+            completed_at: None,
             observation: crate::work::task::Observation::NotRequired,
         }
     }

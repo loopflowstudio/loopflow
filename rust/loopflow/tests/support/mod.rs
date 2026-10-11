@@ -413,6 +413,12 @@ fn register_task_fixture(
         abandon_intent: None,
         created_at: now,
         updated_at: now,
+        rank: 0,
+        assignee: None,
+        due_date: None,
+        state: None,
+        completed: false,
+        completed_at: None,
         observation: loopflow::work::task::Observation::NotRequired,
     };
     let mut pr = TaskPr {

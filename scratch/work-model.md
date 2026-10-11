@@ -61,8 +61,9 @@ prove a provider exited or authorize cleanup. Local absence cannot prove peer ab
 
 ## Current source and evidence
 
-The existing pass removed plan wrappers and confined Linear comment observations
-(`28913feeda`, `105e1d15ad`). Project persistence also replaces internal Markdown with typed description,
+Plan wrappers and public Linear comment observations are removed. Task reads its
+shared fields directly; acquisition returns it without the deleted `ResolvedTask`.
+Ordinary provider-shaped snapshot/status readers remain. Project persistence also replaces internal Markdown with typed description,
 workflow, KRs and targets, including transactional conversion and peer fidelity
 proof. Public ProjectContent and its operation arguments are also removed; ProjectStatus
 is domain-owned. Linear/migration Markdown stays private; retained rotation receipts

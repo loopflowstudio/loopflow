@@ -52,16 +52,16 @@ ProjectKR, MetricTarget and domain TaskComment are implemented.
 
 Project persistence has direct description, KRs and targets; the internal
 Markdown round trip and public ProjectContent are removed. PM-shaped readers remain.
-Task's direct title/description do not yet absorb the shared fields read through
-`PmItem` (disposition, assignee, due date and ordering). Complete their actual domain
-representation before deleting the old views. Domain ProjectStatus now belongs to
+Task now reads rank, assignee, due date, state, completion and completion time
+from the existing shared columns. Acquisition returns that canonical Task; ordinary
+`PmItem` projections still require deletion. Domain ProjectStatus now belongs to
 `work/project.rs`. Optional Linear IDs remain bindings, never replacement domain IDs. Keep
 optimistic revisions, timestamps, historical iteration events and legacy mappings.
 The whole Task struct remains unsuitable for exchange because it contains local data.
 The composed prose save/delivery/acquisition path now has focused proof and explicit
 field-revision/age retention across newer partial observations. The `PmProject`
 symbol is removed, but moving it to `pm::linear::LinearProject` did not finish this
-cut: `plan_read::project_in`, `PmSnapshot.projects` and `ResolvedTask.project` still
+cut: `plan_read::project_in` and `PmSnapshot.projects` still
 expose or fabricate the second Project view. Their canonical conversion and private
 observation boundary remain required here, not after review. The current pursuit
 design owns the proof and remaining cut; earlier missing-field tracing remains at
@@ -239,7 +239,7 @@ errors keep their distinct owners. No schema or historical evidence is removed.
 
 **Locations:** `ops/pm.rs::{PmContext,RepositoryPmContext,resolve_saved_task,
 read_task_planning_async,inspect_task_planning,resolve_owned_issue,
-list_pm_waves,list_local_waves}`, `ops/task_pm.rs::ResolvedTask`,
+list_pm_waves,list_local_waves}`,
 `ops/planning_sync.rs::find_task`, `ops/run.rs`, `ops/task/remote.rs`.
 
 Use the store's canonical Task selector for local Task ID, provider ID and issue
@@ -250,8 +250,10 @@ that only selects another domain reader. Retain bounded refresh/lock behavior;
 `fetch_pm_snapshot_with_store` need consolidation with the cache removal rather
 than new wrappers around renamed snapshots.
 
-`PmResolvedTask` and the two `pm_resolve_task` forwarding wrappers are deleted;
-`ResolvedTask`, the acquisition/lookup split and provider-shaped results remain.
+`PmResolvedTask`, both `pm_resolve_task` wrappers and `ResolvedTask` are deleted;
+`ops/task_pm.rs` is removed. Acquisition validates concrete Linear ownership and
+returns the saved Task. The acquisition/lookup split and ordinary provider-shaped
+snapshot/status results remain.
 
 Linear setup, OAuth, Team/Initiative mapping and reteam are real integration
 operations. Keep them concrete. A local lookup cannot infer that another Machine

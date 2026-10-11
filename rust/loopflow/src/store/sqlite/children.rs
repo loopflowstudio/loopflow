@@ -68,6 +68,11 @@ pub(super) fn create_task_in(conn: &Connection, input: &NewTask) -> StoreResult<
         |row| row.get(0),
     )?;
 
+    let rank: u32 = conn.query_row(
+        "SELECT COALESCE(max(planning_rank)+1,0) FROM tasks WHERE project_id=?1",
+        [input.project_id.as_str()],
+        |row| row.get(0),
+    )?;
     let now = OffsetDateTime::now_utc();
     let task = Task {
         id: input.id.clone(),
@@ -91,29 +96,16 @@ pub(super) fn create_task_in(conn: &Connection, input: &NewTask) -> StoreResult<
         abandon_intent: None,
         created_at: now,
         updated_at: now,
+        rank,
+        assignee: None,
+        due_date: input.due_date.clone(),
+        state: Some("unstarted".into()),
+        completed: false,
+        completed_at: None,
         observation: crate::work::task::Observation::NotRequired,
     };
     validate_task(&task)?;
     insert_task_row(conn, &task)?;
-    let rank: u32 = conn.query_row(
-        "SELECT COALESCE(max(planning_rank)+1,0) FROM tasks WHERE project_id=?1 AND id!=?2",
-        params![task.project_id.as_str(), task.id.as_str()],
-        |r| r.get(0),
-    )?;
-    planning_write::local(
-        conn,
-        PlanningKind::Task,
-        task.id.as_str(),
-        &[
-            Edit::TaskDueDate(input.due_date.clone()),
-            Edit::TaskRank(rank),
-            Edit::Disposition(super::planning_write::Disposition {
-                planning_state: Some("unstarted".into()),
-                planning_completed: 0,
-                planning_completed_at: None,
-            }),
-        ],
-    )?;
     conn.execute(
         "INSERT INTO task_creation_intents(task_id, project_id, title, description, due_date)
          VALUES(?1, ?2, ?3, ?4, ?5)",
@@ -1142,6 +1134,14 @@ fn insert_task_row(conn: &Connection, task: &Task) -> StoreResult<()> {
             Edit::TaskIdentifier(task.identifier.clone()),
             Edit::TaskTitle(Some(task.title.clone())),
             Edit::TaskDescription(Some(task.description.clone())),
+            Edit::TaskRank(task.rank),
+            Edit::TaskAssignee(task.assignee.clone()),
+            Edit::TaskDueDate(task.due_date.clone()),
+            Edit::Disposition(super::planning_write::Disposition {
+                planning_state: task.state.clone(),
+                planning_completed: i64::from(task.completed),
+                planning_completed_at: task.completed_at.clone(),
+            }),
         ],
     )?;
     conn.execute("UPDATE tasks SET pm_snapshot_synced_at=?2,worktree=?3,workspace_slug=?4,abandon_requested_at=?5,abandon_reason=?6,created_at=?7,updated_at=?8,agent=?9,branch=?10,base_commit=?11,parent_pr_id=?12 WHERE id=?1",params![
@@ -1211,7 +1211,8 @@ fn task_columns() -> String {
             AND t.external_issue_id IS NOT NULL
             AND d.seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=t.id)),
         json_object('state','current')),
-    t.project_id, t.abandon_requested_at, t.abandon_reason, t.agent, t.planning_revision, t.branch, t.base_commit, t.parent_pr_id
+    t.project_id, t.abandon_requested_at, t.abandon_reason, t.agent, t.planning_revision, t.branch, t.base_commit, t.parent_pr_id,
+    t.planning_rank,t.planning_assignee,t.planning_due_date,t.planning_state,t.planning_completed,t.planning_completed_at
     FROM tasks t JOIN projects p ON p.id=t.project_id")
 }
 const TASK_PR_COLUMNS: &str = "SELECT
@@ -1591,6 +1592,12 @@ fn map_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         abandon_intent,
         created_at: crate::store::rows::unix_to_datetime(row.get(8)?),
         updated_at: crate::store::rows::unix_to_datetime(row.get(9)?),
+        rank: row.get(20)?,
+        assignee: row.get(21)?,
+        due_date: row.get(22)?,
+        state: row.get(23)?,
+        completed: row.get(24)?,
+        completed_at: row.get(25)?,
         // Runtime freshness is derived when reconciliation decides whether the
         // durable GitHub observation can be reused.
         observation: crate::work::task::Observation::NotRequired,
@@ -1948,6 +1955,92 @@ mod local_planning_tests {
             .ensure_wave_project(repo.to_str().unwrap(), "inbox")
             .unwrap()
             .id
+    }
+
+    #[test]
+    fn canonical_task_fields_survive_restart_and_peer_import() {
+        use super::super::planning_write::{self, Disposition, PlanningEdit};
+        use crate::planning_exchange::PlanningKind;
+        use crate::planning_git::PlanningDestination;
+
+        let source = tempfile::tempdir().unwrap();
+        let target = tempfile::tempdir().unwrap();
+        let path = source.path().join("loopflow.db");
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let task = store
+            .create_task(&NewTask {
+                id: TaskId::new(),
+                project_id: local_project(&store),
+                title: "Shared Task".into(),
+                description: "Keep the local execution".into(),
+                due_date: Some("2026-10-15".into()),
+            })
+            .unwrap();
+        assert_eq!(task.due_date.as_deref(), Some("2026-10-15"));
+        {
+            let conn = store.conn.lock().unwrap();
+            let tx = conn.unchecked_transaction().unwrap();
+            planning_write::local(
+                &tx,
+                PlanningKind::Task,
+                task.id.as_str(),
+                &[
+                    PlanningEdit::TaskRank(7),
+                    PlanningEdit::TaskAssignee(Some("assignee-1".into())),
+                    PlanningEdit::Disposition(Disposition {
+                        planning_state: Some("completed".into()),
+                        planning_completed: 1,
+                        planning_completed_at: Some("2026-10-10T12:00:00Z".into()),
+                    }),
+                ],
+            )
+            .unwrap();
+            tx.commit().unwrap();
+        }
+        drop(store);
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let saved = store.task(&task.id).unwrap().unwrap();
+        assert_eq!(saved.rank, 7);
+        assert_eq!(saved.assignee.as_deref(), Some("assignee-1"));
+        assert_eq!(saved.state.as_deref(), Some("completed"));
+        assert!(saved.completed);
+        assert_eq!(saved.completed_at.as_deref(), Some("2026-10-10T12:00:00Z"));
+        assert_eq!(saved.due_date, task.due_date);
+        assert_eq!(saved.worktree, task.worktree);
+        assert_eq!(saved.branch, task.branch);
+        assert_eq!(saved.parent_pr_id, task.parent_pr_id);
+        let peer = SqliteStore::open_ephemeral(&target.path().join("loopflow.db")).unwrap();
+        let destination =
+            PlanningDestination::new("/fixture.git", "refs/loopflow/planning/shared/test").unwrap();
+        let wave = store.get_wave(&saved.wave_id).unwrap().unwrap();
+        let repo = wave.repo();
+        let target_path = target.path().canonicalize().unwrap();
+        let target_repo = target_path.to_str().unwrap();
+        let destination_id = store.bind_peer_planning(repo, &destination).unwrap();
+        peer.bind_peer_planning(target_repo, &destination).unwrap();
+        store
+            .use_peer_planning(repo, Some(&destination_id))
+            .unwrap();
+        peer.use_peer_planning(target_repo, Some(&destination_id))
+            .unwrap();
+        let snapshot = store.export_peer_planning(repo, &destination_id).unwrap();
+        for _ in 0..2 {
+            peer.import_peer_planning(target_repo, &destination_id, "fixture", &snapshot)
+                .unwrap();
+            let imported = peer.task(&task.id).unwrap().unwrap();
+            assert_eq!(imported.id, saved.id);
+            assert_eq!(imported.project_id, saved.project_id);
+            assert_eq!(imported.title, saved.title);
+            assert_eq!(imported.description, saved.description);
+            assert_eq!(imported.rank, saved.rank);
+            assert_eq!(imported.assignee, saved.assignee);
+            assert_eq!(imported.due_date, saved.due_date);
+            assert_eq!(imported.state, saved.state);
+            assert_eq!(imported.completed, saved.completed);
+            assert_eq!(imported.completed_at, saved.completed_at);
+            assert!(imported.worktree.is_none());
+            assert!(peer.task_prs(&task.id).unwrap().is_empty());
+        }
     }
 
     #[test]

@@ -13,6 +13,7 @@ use super::test_fixture::{now, Fixture, PlanningEnvironment};
 use super::{LinearRefresh, LINEAR_TEST_CONTEXT};
 use crate::durable::WorkStatus;
 use crate::ops::NullProgress;
+use crate::work::edit::WorkValue;
 use crate::work::task::{
     GithubPr, LinearWritebackState, Observation, PrMergeMode, PrMergeRequest, PrPhase,
     PrPresentation, PrPublication, Task, TaskEventKind, TaskPr, TaskPrId,
@@ -3982,12 +3983,14 @@ fn planning_export_captures_shared_task_fields_without_local_execution() {
         assert_eq!(first.input["description"], child.description);
         assert_eq!(first.input["dueDate"], child.due_date.as_deref().unwrap());
         assert_eq!(
-            first.model,
-            json!({
-                "name": child.title, "description": child.description,
-                "assignee": child.assignee, "due_date": child.due_date,
-                "project_id": child.project_id, "state": child.state,
-            })
+            first.baseline,
+            vec![
+                WorkValue::TaskTitle(Some(child.title.clone())),
+                WorkValue::TaskDescription(Some(child.description.clone())),
+                WorkValue::TaskAssignee(child.assignee.clone()),
+                WorkValue::TaskDueDate(child.due_date.clone()),
+                WorkValue::TaskProject(child.project_id.to_string()),
+            ]
         );
         fixture
             .store
@@ -4007,7 +4010,8 @@ fn planning_export_captures_shared_task_fields_without_local_execution() {
             .prepare_planning_export(owner, "another-team", "another-initiative")
             .unwrap();
         assert_eq!(retry.input, first.input);
-        assert_eq!(retry.model, first.model);
+        assert_eq!(retry.baseline, first.baseline);
+        assert_eq!(retry.task_state, first.task_state);
         assert_eq!(retry.id, first.id);
         assert_eq!(
             fixture.store.sqlite.task(&child.id).unwrap().unwrap().title,

@@ -33,7 +33,7 @@ misses stay on Git. Linear refresh retains unmapped local Projects without looku
 Populated migration/import fixtures now cover Session turns, capture reservations,
 attachment claims/activity and an uncertain local cancellation receipt. This proves
 stored preservation, not configured provider control.
-The typed local writer/journal now shares WorkEdit. Linear receipt/creation baseline reduction,
+The typed local writer/journal now shares WorkEdit. Typed Linear field receipts,
 historical follow-through effects and cron conversion remain before gate/republication. Earlier acquisition/fixture review findings:
 `1930805f40:scratch/questions.md`; no installation or stopped-Flow replay occurred.
 
@@ -47,5 +47,11 @@ so the earlier finding never established a public cold-start failure.
 Both `planning.rs` modules are deleted. Linear acceptance owns projection,
 Linear observations own invalidation/evidence, and field delivery owns accepted
 revision eligibility. The journal stores typed mutations directly; receipt
-translation and generic creation baselines still need deletion. Module removal
+translation still needs deletion. Module removal
 alone does not complete Jack Heart's audit.
+
+Creation baselines now retain typed attempted fields, with released conversion from
+captured receipts. Historical state UUIDs do not establish semantic state; retained
+input remains recoverable. The field-receipt cut must separately preserve explicit
+null membership versus an absent baseline; `WorkValue::TaskProject` itself requires
+a Project. Ordering and deletion effects have distinct receipt semantics.

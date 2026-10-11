@@ -9,7 +9,7 @@ approval from Jack. This is accepted scope, with conditional deletions identifie
 
 This audit and [design](work-on-another-machine-name.md) share one delivery scope.
 Canonical readers, concrete observation columns and private acquisition exist.
-Remaining: Linear receipt/creation-baseline reduction, ordinary follow-ups and one cron list. Concrete
+Remaining: typed Linear field receipts, ordinary follow-ups and one cron list. Concrete
 bindings are implemented (§14). All precede Jack Heart's next
 review of PR #1491. Publication is review-only; landing, installation and export
 of actual Work to the public repository remain unauthorized.
@@ -174,10 +174,10 @@ round trips; parent-first creation and per-record import savepoints remain.
 Causal parents, competing values, uncertain effects and routing evidence survive.
 Only the Task draft changed; released SQL remains immutable.
 
-**Still delete:** receipt string-field translation/normalization and generic
-creation baselines. Project creation serializes the whole Project; Task creation
-already restricts its baseline to creation fields, excluding execution. `WorkValue::with_value` remains solely for pending Linear
-receipt decoding; remove it with that cut. Team/Initiative lists and comment
+**Still delete:** receipt string-field translation/normalization.
+`WorkValue::with_value` remains solely for pending Linear receipt decoding;
+remove it with that cut. Creation now retains typed `WorkValue`s and captured
+Task state, excluding whole Project/Task models. Team/Initiative lists and comment
 authors remain typed. Populated conversion and repeated import fixtures retain
 Session turns, claims, activity, capture reservations and cancellation uncertainty.
 
@@ -289,16 +289,19 @@ to `linear/acceptance.rs`; invalidation, evidence and revision parsing to
 `sqlite/planning_changes.rs`. Receipt translation and creation baseline reduction
 remain; deleting the module does not finish the audit.
 
-October 11 source reconciliation at `c7bb8a58e0`: `PlanningChanges::record`,
-`baseline`, `normalize` and `reconcile_edits` still address receipt values by
-strings/JSON; `linear_field` maps the typed values back to those names.
-`PlanningExport.model` and `attach_in` iterate a generic creation map. The next
-cut replaces these translations with typed retained values while preserving the
-captured provider input, sequence boundary, baselines and readback semantics.
-An attempted creation's original values must survive later local saves and
-provider changes; reconstructing its baseline from current Work would lose that
-boundary. Released receipts require populated conversion, not a compatibility
-reader for an unshipped Git format.
+October 11 creation cut removes `PlanningExport.model` and generic-map
+attachment. Typed creation values and captured Task state retain the original
+provider input, sequence boundary and link identity. The single draft converts
+released receipts from their captured model, never current Work. Attachment
+compares typed values and rebases from the attempt, not changed readback.
+Historical intent conversion uses the intent's values; a state UUID supplies no
+invented semantic state. Full follow-through deletion remains §13.
+
+`PlanningChanges::{record,baseline,normalize,reconcile_edits}` and `linear_field`
+still address ordinary field receipts by strings/JSON. Remove those translations
+and `WorkValue::with_value` together. Preserve older acknowledgments, conflicts,
+partial/null membership and sequence high-water marks. Creation conversion proof
+does not establish field-receipt conversion or full gate acceptance.
 
 Do not unify creation, comments, ordering, deletion and disposition into a new
 universal effect lifecycle merely for symmetry. Their existing receipts,
@@ -403,7 +406,7 @@ alignment in the same diff as public removals.
 
 ## Proof and stop conditions
 
-Remaining order: Linear receipts and creation baselines; follow-ups and cron;
+Remaining order: typed Linear field receipts; follow-ups and cron;
 gate and review. Each cut deletes its replaced paths in the same diff.
 
 Before dropping persistent state, inventory the released frontier and current

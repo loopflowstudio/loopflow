@@ -185,7 +185,7 @@ Existing credential fencing, receipt recovery, lock names and refresh ages remai
 PM facade. `5a8ae4cdb6` and `c7bb8a58e0` then completed the typed journal and
 concrete observation/projection owners; feedback based on `6b7015d056` predates
 those cuts. Remaining:
-Linear receipt/creation baseline reduction, ordinary follow-ups and one cron list;
+Typed Linear field receipts, ordinary follow-ups and one cron list;
 materialized/headless affected gate and fresh +/- HTML review before review-only
 republication. Populated Session/attachment preservation is covered below. Concrete adapter naming alone does not
 finish the remaining writer/delivery hierarchy. No installation was performed.
@@ -295,9 +295,12 @@ indexes support lookup; private writer-derived table routing preserves destinati
 history. Parent-first creation, observed-versus-applied heads and losing values
 remain. `store/sqlite/planning.rs` is deleted: Linear acceptance owns projection,
 Linear observations own invalidation/evidence, and field delivery owns accepted
-revision eligibility. Receipt translation and generic creation baselines remain
-(Project still serializes its whole record; Task captures only creation fields),
-followed by ordinary follow-ups and cron; this is not audit completion.
+revision eligibility. Creation now retains typed fields and captured Task state; whole-model snapshots
+and generic-map attachment are deleted. Released conversion retains provider input,
+identity, sequence bounds and uncertainty independently of later Work edits.
+Historical intent conversion retains intent values, leaving unknown semantic state
+unknown. Ordinary field receipts still translate strings/JSON; follow-ups and
+cron also remain before audit completion.
 
 Cron conversion must retain the installed owner independently of file location.
 Release's October 5 memory records both jobs installed under Infrastructure,
@@ -328,7 +331,7 @@ Writer transport/causal proofs: `eda4a98097` in this plan.
   follows the entire reduction and affected gate, before review-only republication.
 
 Earlier focused proof: `9dbd6fc2d8`, `dfd3b80611`, `f025e9b7ab`,
-`dfa2cdafba`, `09709a05cc` in this plan. Remaining Linear receipts/creation baselines, follow-ups, cron, gate and review
+`dfa2cdafba`, `09709a05cc` in this plan. Remaining typed Linear field receipts, follow-ups, cron, gate and review
 precede republication.
 
 Prior checks and fixture limits: `6b7015d056` at this path. The earlier nextest
@@ -337,6 +340,6 @@ unexplained and belongs to gate; no retry or timeout adjustment was added.
 Reused source checks at `c7bb8a58e0`: `cargo fmt`, LF-cleared `cargo clippy --all-targets -- -D warnings`, CLI build, focused nextest writer/migration/Linear acceptance/exchange/Git/DTO/foreground cases and Swift DTO tests (30) pass across targeted runs; stale migration-frontier, Process-column and streaming-provider fixtures were repaired without weakening assertions. Full materialized/headless gate remains after the audit.
 Additional intermittent nextest leaks: `flow_compositions_round_trip_distinct_compositions_and_required_children` and `due_dates_enrich_absent_history_but_preserve_observed_null_at_equal_revision`; causes unresolved, retained for gate.
 
-Reconciliation check: `git diff --check` and `lf context` pass; source checks reused, full affected materialized/headless gate deferred until the audit is complete.
+Creation-baseline sanity: `cargo fmt`, LF-cleared `cargo clippy --all-targets -- -D warnings`, `cargo build -p loopflow --bin lf`, and focused nextest export/migration/preservation selection pass (10); nextest also reports `planning_export_late_readback_preserves_newer_edits_and_inventory_identity` leaky. Gate owns that fourth unexplained handle leak and full materialized/headless acceptance. `git diff --check` and `lf context` pass.
 
 Transport evidence: `0181133849` at this path; earlier simulated adoption: `5960415b3:scratch/remote-task-demo.md` (not real SSH or integrated acceptance).

@@ -759,6 +759,17 @@ fn apply_set(conn: &rusqlite::Connection, set: &[Migration]) -> StoreResult<()> 
 pub(crate) fn seed_peer_planning(conn: &rusqlite::Connection, sql: &str) -> StoreResult<()> {
     if sql.contains("CREATE TABLE planning_peer_changes (") {
         convert_project_content(conn)?;
+        let mut query = conn.prepare(
+            "SELECT export_json FROM project_transitions WHERE export_json IS NOT NULL
+            UNION ALL SELECT export_json FROM task_creation_intents WHERE export_json IS NOT NULL",
+        )?;
+        for row in query.query_map([], |row| row.get::<_, String>(0))? {
+            let export: super::sqlite::planning_export::PlanningExport =
+                serde_json::from_str(&row?)?;
+            for value in export.baseline {
+                value.validate()?;
+            }
+        }
         super::sqlite::planning_write::seed(conn)?;
     }
     Ok(())

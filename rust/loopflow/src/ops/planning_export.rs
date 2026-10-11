@@ -93,7 +93,11 @@ pub(crate) async fn sync_export(store: &Store, repo: &Path, work: &WorkRef) -> O
         let project = matches!(owner, PlanningChanges::Project(_));
         if project {
             input["statusId"] = client
-                .project_field_input("status", &export.model["status"], "")
+                .project_field_input(
+                    "status",
+                    &json!(export.project_status().map_err(message)?),
+                    "",
+                )
                 .await
                 .map_err(message)?["statusId"]
                 .clone();
@@ -103,7 +107,7 @@ pub(crate) async fn sync_export(store: &Store, repo: &Path, work: &WorkRef) -> O
                     input["teamId"]
                         .as_str()
                         .ok_or_else(|| message("creation Team is missing"))?,
-                    export.model["state"].as_str().unwrap_or("unstarted")
+                    export.task_state.as_deref().unwrap_or("unstarted")
                 )
                 .await
                 .map_err(message)?);

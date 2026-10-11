@@ -127,6 +127,50 @@ CREATE TRIGGER store_revision_project_changes_delete AFTER DELETE ON project_cha
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
 
 
+-- Creation recovery keeps the original captured values, not today's Work.
+-- Provider inputs, IDs, attempt flags and the sequence boundary remain intact.
+CREATE TEMP TABLE creation_baseline_conversion(valid INTEGER NOT NULL CHECK(valid=1));
+INSERT INTO creation_baseline_conversion
+SELECT json_type(export_json,'$.model')='object'
+    AND json_type(export_json,'$.input')='object'
+    AND json_type(export_json,'$.model.status')='text'
+FROM project_transitions WHERE export_json IS NOT NULL;
+INSERT INTO creation_baseline_conversion
+SELECT json_type(export_json,'$.model')='object'
+    AND json_type(export_json,'$.input')='object'
+FROM task_creation_intents WHERE export_json IS NOT NULL;
+DROP TABLE creation_baseline_conversion;
+
+UPDATE project_transitions SET export_json=json_remove(json_set(export_json,
+    '$.task_state',NULL,
+    '$.baseline',json((SELECT json_group_array(json_object(
+        'field',CASE key
+            WHEN 'name' THEN 'project_name' WHEN 'summary' THEN 'project_summary'
+            WHEN 'description' THEN 'project_description' WHEN 'status' THEN 'project_status'
+            WHEN 'workflow' THEN 'workflow' WHEN 'krs' THEN 'krs'
+            WHEN 'metric_targets' THEN 'metric_targets' END,
+        'value',json(export_json -> ('$.model.' || key))))
+        FROM json_each(export_json,'$.model')
+        WHERE key IN ('name','summary','description','status','workflow','krs','metric_targets')))),
+    '$.model')
+WHERE export_json IS NOT NULL;
+
+UPDATE task_creation_intents SET export_json=json_remove(json_set(export_json,
+    '$.task_state',json_extract(export_json,'$.model.state'),
+    '$.baseline',json((SELECT json_group_array(json_object(
+        'field',CASE key
+            WHEN 'name' THEN 'task_title' WHEN 'description' THEN 'task_description'
+            WHEN 'assignee' THEN 'task_assignee' WHEN 'due_date' THEN 'task_due_date'
+            WHEN 'project_id' THEN 'task_project' END,
+        'value',json(CASE WHEN key='project_id'
+            THEN json_quote(COALESCE((SELECT id FROM projects
+                WHERE id=entry.value OR external_project_id=entry.value),entry.value))
+            ELSE export_json -> ('$.model.' || key) END)))
+        FROM json_each(export_json,'$.model') entry
+        WHERE key IN ('name','description','assignee','due_date','project_id')))),
+    '$.model')
+WHERE export_json IS NOT NULL;
+
 -- Local-only Git planning. Linear effects keep their existing local owners.
 CREATE TABLE planning_peer_changes (
     id TEXT PRIMARY KEY,

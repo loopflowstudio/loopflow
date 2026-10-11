@@ -18,8 +18,7 @@
   migration retains bytes. Partial observations retain field revision/age. These
   choices have no UX approval.
 
-Repaired admission, selectors and Git decoding: `17314daeb5:scratch/questions.md`.
-Jack Heart requires removal, not just renaming the hierarchy.
+Jack Heart requires removal of the hierarchy, not renaming.
 
 Connect selects repository Linear and retains its Team; Git-miss lookup respects
 that transport without allocating Work. Reteam preserves unrelated edits and

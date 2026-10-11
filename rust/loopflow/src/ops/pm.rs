@@ -1131,7 +1131,7 @@ pub(crate) async fn validate_saved_task_scope(
     {
         return Err(OpsError::Message(format!(
             "Task {} belongs to {} in {}",
-            task.plan.identifier,
+            task.identifier,
             owner.slug(),
             owner.repo()
         )));

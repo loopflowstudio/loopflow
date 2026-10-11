@@ -759,6 +759,10 @@ fn apply_set(conn: &rusqlite::Connection, set: &[Migration]) -> StoreResult<()> 
 pub(crate) fn seed_peer_planning(conn: &rusqlite::Connection, sql: &str) -> StoreResult<()> {
     if sql.contains("CREATE TABLE planning_peer_changes (") {
         convert_project_content(conn)?;
+    }
+    if sql.contains("CREATE TABLE planning_peer_changes (")
+        || sql.contains("CREATE TABLE delegated_placements (")
+    {
         super::sqlite::planning_write::seed(conn)?;
     }
     Ok(())
@@ -1632,6 +1636,7 @@ mod tests {
             .unwrap();
         conn.execute_batch(&current_draft_sql("task_checkout_machine"))
             .unwrap();
+        super::seed_peer_planning(&conn, &current_draft_sql("task_checkout_machine")).unwrap();
         conn.execute(
             "UPDATE work_placements SET machine_id='machine-b' WHERE task_id='t'",
             [],
@@ -1661,7 +1666,7 @@ mod tests {
             .unwrap();
         assert_eq!(provenance, "legacy");
         let seeded: String = conn.query_row(
-            "SELECT value FROM planning_peer_changes WHERE object_id='t' AND field='delegation' AND clock=0",
+            "SELECT value FROM planning_peer_changes WHERE object_id='t' AND field='delegation' ORDER BY clock DESC LIMIT 1",
             [], |row| row.get(0),
         ).unwrap();
         let seeded: serde_json::Value = serde_json::from_str(&seeded).unwrap();

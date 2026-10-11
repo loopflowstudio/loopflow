@@ -159,10 +159,9 @@ async fn read_planning(
                 return Ok(());
             }
             let task = read_saved_task(store, cwd, selection.wave, &report.resolution).await?;
-            if let Err(error) =
-                store
-                    .sqlite
-                    .validate_task_edit(&task.id, task.plan.revision, update)
+            if let Err(error) = store
+                .sqlite
+                .validate_task_edit(&task.id, task.revision, update)
             {
                 report.impediments.push(error.to_string());
                 return Ok(());
@@ -178,7 +177,7 @@ async fn read_planning(
             .map(|(field, _)| field.to_owned())
             .collect();
             report.action = Some(TaskPlanningAction::Edit {
-                revision: task.plan.revision,
+                revision: task.revision,
                 fields,
             });
             report.effects.push("Save changed fields and pending planning mutations locally; attempt configured synchronization. Workflow, checkout and Processes stay unchanged".into());
@@ -197,7 +196,7 @@ async fn read_planning(
             })?;
             let current = crate::ops::project::current_project(store, &destination)?;
             let project = store
-                .get_project_by_project(&current.id)
+                .get_project(&current.id)
                 .await?
                 .ok_or_else(|| anyhow::anyhow!("destination Project is unavailable"))?;
             report.action = Some(TaskPlanningAction::Refile {
@@ -268,7 +267,7 @@ async fn read_planning(
                 }
                 report.effects.push("Append one local comment with stable identity and authored provenance; attempt configured synchronization. Execution stays unchanged".into());
                 report.unavailable.push("Comment identity and caller/participant provenance are captured only when saving".into());
-            } else if task.plan.linear_id.is_some() {
+            } else if task.linear_id.is_some() {
                 report.effects.push("Refresh Linear comments with a bounded wait, then show the saved thread even if refresh fails".into());
             } else {
                 report
@@ -278,7 +277,7 @@ async fn read_planning(
             report.action = Some(TaskPlanningAction::Comment {
                 message: message.map(|value| value.trim().to_owned()),
                 steer: *steer,
-                refresh: message.is_none() && task.plan.linear_id.is_some(),
+                refresh: message.is_none() && task.linear_id.is_some(),
             });
         }
     }
@@ -401,7 +400,7 @@ async fn read_creation(
         }
     };
     let project = store
-        .get_project_by_project(&project.id)
+        .get_project(&project.id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("selected Project is missing"))?;
     if let Some(TaskPlanningAction::Create {

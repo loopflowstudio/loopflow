@@ -260,9 +260,7 @@ async fn read_task_move(
 ) -> anyhow::Result<()> {
     let task = read_local_task(store, &mut report.resolution).await?;
     let workflow = store.sqlite.workflow(&task.id)?;
-    if let Err(error) =
-        super::validate_workflow_move(workflow.as_ref(), &task.plan.identifier, node)
-    {
+    if let Err(error) = super::validate_workflow_move(workflow.as_ref(), &task.identifier, node) {
         report.impediments.push(error.to_string());
         return Ok(());
     }

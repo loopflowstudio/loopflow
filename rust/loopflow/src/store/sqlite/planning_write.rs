@@ -23,11 +23,20 @@ pub(crate) struct CommentContent {
     pub created_at: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Delegation {
+    pub machine_id: crate::durable::MachineId,
+    pub placed_at: i64,
+    pub provenance: crate::durable::PlacementProvenance,
+}
+
 macro_rules! planning_fields {
     ($(($kind:ident, $variant:ident, $column:literal, $value:ty)),* $(,)?) => {
         #[derive(Debug, Clone, PartialEq)]
         pub(crate) enum PlanningEdit {
             $($variant($value),)*
+            Delegation(PlanningKind, Option<Delegation>),
             Workflow(String),
             Krs(Vec<crate::work::project::ProjectKR>),
             MetricTargets(Vec<crate::work::wave::metrics::MetricTarget>),
@@ -38,6 +47,7 @@ macro_rules! planning_fields {
             pub(crate) fn from_value(kind: PlanningKind, field: &str, value: Value) -> StoreResult<Self> {
                 let edit=match (kind, field) {
                     $((PlanningKind::$kind, $column) => Self::$variant(serde_json::from_value(value)?),)*
+                    (kind @ (PlanningKind::Wave | PlanningKind::Project | PlanningKind::Task), "delegation") => Self::Delegation(kind, serde_json::from_value(value)?),
                     (PlanningKind::Project, "workflow") => Self::Workflow(serde_json::from_value(value)?),
                     (PlanningKind::Project, "krs") => Self::Krs(serde_json::from_value(value)?),
                     (PlanningKind::Project, "metric_targets") => Self::MetricTargets(serde_json::from_value(value)?),
@@ -51,6 +61,7 @@ macro_rules! planning_fields {
             pub(crate) fn kind(&self) -> PlanningKind {
                 match self {
                     $(Self::$variant(_) => PlanningKind::$kind,)*
+                    Self::Delegation(kind, _) => *kind,
                     Self::Workflow(_) | Self::Krs(_) | Self::MetricTargets(_) => PlanningKind::Project,
                     Self::Disposition(_) => PlanningKind::Task,
                     Self::CommentContent(_) => PlanningKind::Comment,
@@ -59,6 +70,7 @@ macro_rules! planning_fields {
             pub(crate) fn field(&self) -> &'static str {
                 match self {
                     $(Self::$variant(_) => $column,)*
+                    Self::Delegation(_, _) => "delegation",
                     Self::Workflow(_) => "workflow", Self::Krs(_) => "krs",
                     Self::MetricTargets(_) => "metric_targets", Self::Disposition(_) => "disposition",
                     Self::CommentContent(_) => "content",
@@ -67,6 +79,7 @@ macro_rules! planning_fields {
             pub(crate) fn value(&self) -> StoreResult<Value> {
                 Ok(match self {
                     $(Self::$variant(v) => serde_json::to_value(v)?,)*
+                    Self::Delegation(_, value) => serde_json::to_value(value)?,
                     Self::Workflow(v) => serde_json::to_value(v)?,
                     Self::Krs(v) => serde_json::to_value(v)?,
                     Self::MetricTargets(v) => serde_json::to_value(v)?,
@@ -84,6 +97,7 @@ macro_rules! planning_fields {
                 PlanningKind::Task => &["disposition"],
                 PlanningKind::Comment => &["content"],
             });
+            if kind != PlanningKind::Comment { fields.push("delegation"); }
             fields
         }
     }
@@ -120,6 +134,17 @@ planning_fields! {
 impl PlanningEdit {
     fn validate(&self) -> StoreResult<()> {
         match self {
+            Self::Delegation(
+                _,
+                Some(Delegation {
+                    provenance: crate::durable::PlacementProvenance::LocalDefault,
+                    ..
+                }),
+            ) => {
+                return Err(StoreError::InvalidData(
+                    "a local default is not an authored delegation".into(),
+                ));
+            }
             Self::Disposition(v) if !matches!(v.planning_completed, 0 | 1) => {
                 return Err(StoreError::InvalidData("invalid completion value".into()))
             }
@@ -154,8 +179,19 @@ pub(crate) fn table(kind: PlanningKind) -> &'static str {
 }
 
 pub(crate) fn read(conn: &Connection, object: &PlanningObject) -> StoreResult<Vec<PlanningEdit>> {
-    let fields = fields(object.kind);
+    let mut fields = fields(object.kind);
+    // The planning draft seeds before the later placement conversion. That
+    // conversion seeds again once authored assignment provenance is available.
+    let delegated: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('work_placements') WHERE name='provenance')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !delegated {
+        fields.retain(|field| *field != "delegation");
+    }
     let expressions: Vec<_> = fields.iter().map(|field| match *field {
+        "delegation" => format!("COALESCE((SELECT json_object('machine_id',machine_id,'placed_at',placed_at,'provenance',provenance) FROM work_placements WHERE {}_id={}.id),'null')", object.kind.as_str(), table(object.kind)),
         "krs" | "metric_targets" => field.to_string(),
         "disposition" => "json_object('planning_state',planning_state,'planning_completed',planning_completed,'planning_completed_at',planning_completed_at)".into(),
         "content" => "json_object('body',body,'author',author,'created_at',created_at)".into(),
@@ -217,6 +253,17 @@ pub(crate) fn write(
             continue;
         }
         match edit {
+            PlanningEdit::Delegation(kind, assignment) => {
+                let column = format!("{}_id", kind.as_str());
+                if let Some(assignment) = assignment {
+                    conn.execute(&format!("INSERT INTO work_placements({column},machine_id,placed_at,provenance) VALUES(?1,?2,?3,?4) ON CONFLICT({column}) DO UPDATE SET machine_id=excluded.machine_id,placed_at=excluded.placed_at,provenance=excluded.provenance"), params![object.id, assignment.machine_id.as_str(), assignment.placed_at, serde_json::to_value(assignment.provenance)?.as_str()])?;
+                } else {
+                    conn.execute(
+                        &format!("DELETE FROM work_placements WHERE {column}=?1"),
+                        [&object.id],
+                    )?;
+                }
+            }
             PlanningEdit::Disposition(v) => {
                 if !matches!(v.planning_completed, 0 | 1) {
                     return Err(StoreError::InvalidData("invalid completion value".into()));

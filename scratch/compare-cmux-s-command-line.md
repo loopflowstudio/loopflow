@@ -1,17 +1,12 @@
 # Desktop control on shared Work — LOO-427
 
-**Status (October 10, 2026):** Jack Heart accepted this diff for queue, then
-Task-completing shipping. Implementation and focused headless evidence are retained;
-native/configured proof is not claimed. The owners below replace the earlier demo
-hold. The operator interpreted Jack Heart’s acceptance as covering the earlier
-LOO-412 integration, excluding its unmerged reduction from shipping prerequisites.
-Jack did not author that later brief or explicitly decide that dependency detail.
-
-LOO-418/#1499, LOO-406/#1503 and the earlier LOO-412 integration through
-`96f714bd6` are composed locally. Work tabs, content-owned locations, ordinary pane
-selectors, shell-default Split and lf3 bounded reads remain the accepted baseline.
-[Findings](findings.md), [questions](questions.md) and the
-[comparison](../docs/reviews/terminal-command-comparison.md) retain evidence and limits.
+**Status (October 10, 2026):** Jack Heart requested preparing LOO-427 stacked
+on LOO-412, with landing only after 412 lands. The recorded parent is PR #1491.
+Sync is integrating published parent `fe5262b093`; unpublished 412 work stays there.
+The earlier baseline-first delivery interpretation is superseded. This integration
+preserves accepted Work tabs, pane controls and recorded-Machine execution while
+adopting 412's canonical Work and configured planning transport. Reduction for both
+Tasks remains coordinated with 412; no publication or landing readiness is claimed.
 
 ## Shipping scope — Jack Heart, October 10
 
@@ -36,20 +31,12 @@ with the following explicit follow-ups, not claims that their behavior is proved
 - LOO-453 (Product), already sufficient: exact-view readiness/waits/events, failures,
   stale target and reconnect behavior; receipts alone never promise usability.
 
-LOO-412's current source/design retains `lf planning status` and key recovery,
-but replaces connect/use/select and per-Wave enrollment with one configured
-transport per repository (Linear or personal/shared Git). Mixed Linear/Git exchange
-is superseded, not an unfinished feature to file. This checkout contains an earlier
-412 integration. The operator’s October 10 brief interpretation keeps newer unmerged
-transport/domain changes with LOO-412, outside this baseline’s shipping prerequisites.
-The old setup is implemented here, not the target design; the newer configured
-transport is not delivered here. Actual main conflicts and build/test failures remain
-queue work. No live planning migration, installation,
-provider login or real-data publication is authorized by this shipping request.
-
-Recorded proof limits remain honest. Headless gate runs once for the final tree;
-shipping requests Task-completing landing after queue. Native/configured proof is
-owned above and does not reimpose a demo hold Jack Heart has released.
+The previous gate repairs passed their focused checks and are retained at
+`bd295866bb`. They do not validate the combined tree. Integration must retain
+migration evidence, delegation inheritance and pinned execution while deleting
+manual enrollment and mixed-provider projections. Gate checks the final tree;
+LOO-391 retains native/configured proof. No live planning migration, installation,
+provider login or real-data publication is authorized.
 
 ## Accepted outcome
 

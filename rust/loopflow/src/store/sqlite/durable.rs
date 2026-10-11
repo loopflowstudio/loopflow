@@ -157,20 +157,42 @@ impl SqliteStore {
             [machine_id.as_str()],
             |_| Ok(()),
         )?;
-        let column = format!("{}_id", work.kind());
-        // Reaffirming explicit intent preserves its timestamp and journal entry;
-        // selecting a legacy assignment explicitly is still a new authored save.
-        tx.execute(
-            &format!(
-                "INSERT INTO work_placements ({column}, machine_id, enabled, placed_at, provenance)
-                 VALUES (?1, ?2, 1, ?3, 'explicit')
-                 ON CONFLICT({column}) DO UPDATE SET
-                    machine_id=excluded.machine_id, placed_at=excluded.placed_at,
-                    provenance=excluded.provenance
-                 WHERE machine_id IS NOT excluded.machine_id OR provenance IS NOT excluded.provenance"
-            ),
-            params![work.id(), machine_id.as_str(), now_unix()],
-        )?;
+        let kind = match work {
+            WorkRef::Wave(_) => crate::planning_exchange::PlanningKind::Wave,
+            WorkRef::Project(_) => crate::planning_exchange::PlanningKind::Project,
+            WorkRef::Task(_) => crate::planning_exchange::PlanningKind::Task,
+        };
+        let object = crate::planning_exchange::PlanningObject {
+            kind,
+            id: work.id().to_owned(),
+        };
+        let current = super::planning_write::read(&tx, &object)?
+            .into_iter()
+            .find_map(|edit| {
+                if let super::planning_write::PlanningEdit::Delegation(_, assignment) = edit {
+                    assignment
+                } else {
+                    None
+                }
+            });
+        if !current.as_ref().is_some_and(|assignment| {
+            assignment.machine_id == *machine_id
+                && assignment.provenance == PlacementProvenance::Explicit
+        }) {
+            super::planning_write::local(
+                &tx,
+                kind,
+                work.id(),
+                &[super::planning_write::PlanningEdit::Delegation(
+                    kind,
+                    Some(super::planning_write::Delegation {
+                        machine_id: machine_id.clone(),
+                        placed_at: now_unix(),
+                        provenance: PlacementProvenance::Explicit,
+                    }),
+                )],
+            )?;
+        }
         let placement = placement_in(&tx, work)?;
         tx.commit()?;
         Ok(placement)
@@ -1042,6 +1064,66 @@ mod durable_store_tests {
         assert_eq!(store.placement(&future_work).unwrap().machine_id, local);
         assert!(!store.task_started(&future.id).unwrap());
         assert!(store.task(&future.id).unwrap().unwrap().worktree.is_none());
+    }
+
+    #[test]
+    fn delegation_exchange_retains_checkout_and_does_not_echo_imports() {
+        use crate::durable::{MachineId, WorkRef};
+        use crate::planning_exchange::{PlanningKind, PlanningMutation, PlanningObject};
+        let (_dir, store, task_id) = store_with_task();
+        let before = store.task_execution_route(&task_id).unwrap();
+        let task = store.task(&task_id).unwrap().unwrap();
+        let wave = WorkRef::Wave(task.wave_id.clone());
+        let remote = MachineId::new();
+        store
+            .add_machine(&remote, "worker", "worker", "/repo")
+            .unwrap();
+        store.place_work(&wave, &remote).unwrap();
+        let binding = crate::planning_git::PlanningDestination::new(
+            "/tmp/unused-planning.git",
+            "refs/loopflow/planning/shared/test",
+        )
+        .unwrap();
+        let destination = store.bind_peer_planning("/repo", &binding).unwrap();
+        let mut snapshot = store.export_peer_planning("/repo", &destination).unwrap();
+        let object = PlanningObject {
+            kind: PlanningKind::Wave,
+            id: task.wave_id.to_string(),
+        };
+        let parents = snapshot
+            .heads()
+            .filter(|(_, change)| change.object == object && change.field == "delegation")
+            .map(|(id, _)| id.to_owned())
+            .collect();
+        let clock = snapshot
+            .changes
+            .values()
+            .map(|change| change.clock)
+            .max()
+            .unwrap()
+            + 1;
+        snapshot.changes.insert(
+            "remote-reset".into(),
+            PlanningMutation {
+                object,
+                field: "delegation".into(),
+                value: serde_json::Value::Null,
+                clock,
+                parents,
+            },
+        );
+        store
+            .import_peer_planning("/repo", &destination, "remote-revision", &snapshot)
+            .unwrap();
+        assert_eq!(
+            store.placement(&wave).unwrap().machine_id,
+            store.local_machine().unwrap().id
+        );
+        assert_eq!(store.task_execution_route(&task_id).unwrap(), before);
+        assert_eq!(
+            store.export_peer_planning("/repo", &destination).unwrap(),
+            snapshot
+        );
     }
 
     #[test]

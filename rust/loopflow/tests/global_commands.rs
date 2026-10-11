@@ -738,11 +738,11 @@ fn repo_selection_carries_scoped_task_prefix_through_reads_and_writes() {
         assert!(!error.contains("multiple stable Tasks"), "{error}");
     }
     assert_eq!(
-        store.task_by_issue(first).unwrap().unwrap().plan.title,
+        store.task_by_issue(first).unwrap().unwrap().title,
         "Changed selected"
     );
     let untouched = store.task_by_issue(second).unwrap().unwrap();
-    assert_eq!(untouched.plan.title, "Other");
+    assert_eq!(untouched.title, "Other");
     assert!(untouched.worktree.is_none());
     success(
         command(

@@ -1,20 +1,16 @@
 # Simplification Opportunities
 
-October 10, 2026. Jack Heart requested maximum reduction, then one Task landed
-ASAP with the other owning simplification for both. Landing order is unresolved:
-his latest “stacking on 412” is under clarification. No product refactor started.
-Gate repairs are checkpointed at `bd295866bb`; ship stopped before landing.
+October 10, 2026. Jack Heart selected 427 stacked on 412, ready to land after
+412. The parent is recorded; integration of published `fe5262b093` is in progress.
+412 owns combined simplification. No second planning rewrite is launched here.
 
 ## Integration boundary
 
-Against 412 `7853a22f5c`, 100 changed paths overlap (not 100 proven conflicts).
-Landing 427 first releases its older planning migration: 412 must then convert
-from that frontier. Landing 412 first requires adapting 427 delegation triggers
-to its surviving typed writer/journal. Never restore the old journal for delegation.
-Preserve checkout Machine pinning, legacy assignment uncertainty and null inheritance.
-412's current TaskSource carries code requirements, not execution state; evaluate
-admission callers rather than deleting it based on the earlier “transfer” label.
-Findings delivered to 412.
+Keep 412's canonical Work and configured transport. Adapt delegation to its typed
+writer; delete old trigger capture and mixed receipt projection. Preserve null
+inheritance, legacy assignment uncertainty, repository locators and checkout Machine
+pinning. TaskSource carries code requirements only and must pass the same admission
+path as ordinary execution. The parent may continue changing before landing.
 
 ## Opportunity 1: Finish the existing planning reduction before composing it
 

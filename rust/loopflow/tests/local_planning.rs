@@ -3108,12 +3108,14 @@ fn wave_planning_reads_current_and_historical_chapters_without_starting_work() {
     let current = store.project(&task.project_id).unwrap().unwrap();
     let mut historical = current.clone();
     historical.id = loopflow::durable::ProjectId::new();
-    historical.plan.slug = "earlier".into();
-    historical.plan.name = "Earlier chapter".into();
-    historical.plan.status = loopflow::pm::ProjectStatus::Completed;
-    historical.plan.workflow = "code".into();
-    historical.plan.prompt_context =
-        "workflow: code\n\n## KRs\n\n- [x] Historical proof remains\n".into();
+    historical.slug = "earlier".into();
+    historical.name = "Earlier chapter".into();
+    historical.status = loopflow::work::project::ProjectStatus::Completed;
+    historical.workflow = "code".into();
+    historical.krs = vec![loopflow::work::project::ProjectKR {
+        text: "Historical proof remains".into(),
+        holds: true,
+    }];
     store.insert_project(&historical).unwrap();
     let wave = store.get_wave(&current.wave_id).unwrap().unwrap();
     let plans_before = store.list_projects(Some(wave.id())).unwrap();
@@ -3250,15 +3252,15 @@ fn wave_planning_reads_current_and_historical_chapters_without_starting_work() {
         ],
     );
     assert_eq!(
-        store.project(&current.id).unwrap().unwrap().plan.name,
+        store.project(&current.id).unwrap().unwrap().name,
         "Current chapter"
     );
     assert_eq!(
-        store.project(&historical.id).unwrap().unwrap().plan.name,
-        historical.plan.name
+        store.project(&historical.id).unwrap().unwrap().name,
+        historical.name
     );
     assert_eq!(
-        store.project(&historical.id).unwrap().unwrap().plan.summary,
+        store.project(&historical.id).unwrap().unwrap().summary,
         "Retained proof"
     );
     assert_eq!(store.task(&task_id).unwrap().unwrap(), task);

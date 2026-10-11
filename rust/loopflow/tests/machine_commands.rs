@@ -1276,13 +1276,6 @@ fn imported_execution_location_survives_delegation_and_rejects_stale_peer_reads(
             .bind_peer_planning(path.to_str().unwrap(), &destination)
             .unwrap();
     }
-    remote
-        .select_peer_waves(
-            remote_path.to_str().unwrap(),
-            &destination.id(),
-            std::slice::from_ref(&task.wave_id),
-        )
-        .unwrap();
     local
         .import_peer_planning(
             local_path.to_str().unwrap(),

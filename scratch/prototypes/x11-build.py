@@ -136,7 +136,10 @@ main = f'''
       <p class="more"><a href="/cli">The CLI ↗</a><a href="/docs/authoring#flows">Skills and Flows ↗</a></p>
     </article>
     <article>
-<pre tabindex="0" aria-label="lf commands" class="term"><span class="p">$</span> <b>lf</b> --machine mini \\         <span class="c"># where it runs</span>
+<pre tabindex="0" aria-label="lf commands" class="term"><span class="p">$</span> <b>lf</b> task create --wave exports --title "Add CSV export"
+<span class="p">$</span> <b>lf</b> task run EXP-12          <span class="c"># its worktree, then its Flow</span>
+
+<span class="p">$</span> <b>lf</b> --machine mini \\         <span class="c"># where it runs</span>
      --account claude=you@ \\  <span class="c"># whose login pays</span>
      -a claude:opus \\         <span class="c"># which agent and model</span>
      --task EXP-12 \\          <span class="c"># which work, in its checkout</span>

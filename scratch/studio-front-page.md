@@ -637,3 +637,5 @@ strip links to its own site in a new tab.
 - Jack Heart: "Skills in sequence: a Graph" → the `run pursue` line is annotated "a Flow: Skills in a graph". Claude's reading; unconfirmed.
 
 - Jack Heart: "and just call it lf graph pursue" → the last line of the launch command in the `x11` card is `graph pursue  # Skills in sequence: a Graph`. No `lf graph` command exists in the code today (the command is `lf run`, the noun is Flow); the card shows a rename that has not been made. The rest of the page still says Flow.
+
+- Jack Heart: "$ lf task run EXP-12 # its worktree, then its Flow maybe should be first? actually first is task create?" → the `x11` card opens with `lf task create --wave exports --title "Add CSV export"`, then `lf task run EXP-12`, then the launch command, then `resume`, `usage`, `land`.

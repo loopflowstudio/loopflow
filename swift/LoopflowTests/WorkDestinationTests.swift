@@ -186,12 +186,12 @@ struct WorkDestinationTests {
                 machineId: remoteIdentity.machineId, worktree: remoteIdentity.worktree,
                 pane: targetPane.id, incarnation: targetPane.incarnation)
             try registry.controlPane(.init(target: target, action: .shell), model: model)
-            let shell = try #require(remote.multiplexer.layout.allPanes.first { $0.content == .shell })
+            let shell = try #require(remote.multiplexer.layout.allPanes.first { $0.content == .shell(location: remoteIdentity) })
             let command = try #require(remote.multiplexer.shellCommands[shell.id])
             #expect(Array(command.dropFirst()) == ["--machine", "peer", "--repository", "repository",
                 "task", "shell", remoteID, "--checkout", remoteIdentity.worktree])
             let splitID = try registry.controlPane(.init(target: target, action: .split(axis: .horizontal)), model: model)
-            #expect(remote.multiplexer.layout.pane(for: splitID)?.content == .shell)
+            #expect(remote.multiplexer.layout.pane(for: splitID)?.content == .shell(location: remoteIdentity))
             #expect(remote.multiplexer.shellCommands[splitID] == command)
             #expect(remote.multiplexer.layout.pane(for: targetPane.id) == targetPane)
             #expect(remote.multiplexer.focusedPaneId == focus)

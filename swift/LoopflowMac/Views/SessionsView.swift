@@ -63,8 +63,8 @@ final class SessionsWorkspace {
         guard let pane = multiplexer.layout.pane(for: paneId) else {
             throw RegistryQueryError("The addressed pane disappeared; no shell was opened.")
         }
-        if pane.content == .shell {
-            guard let location = pane.shellLocation else {
+        if case .shell(let location) = pane.content {
+            guard let location else {
                 throw RegistryQueryError("Shell location is unavailable; no shell was opened.")
             }
             return location
@@ -122,7 +122,7 @@ final class SessionsWorkspace {
                 MainActor.assumeIsolated {
                     guard let self,
                           let pane = self.multiplexer.layout.pane(for: paneId),
-                          pane.content == .shell, pane.shellLocation?.machineId == machineId
+                          pane.shellLocation?.machineId == machineId
                     else { return }
                     self.multiplexer.close(paneId)
                 }
@@ -280,7 +280,8 @@ final class SessionsWorkspaceRegistry {
         guard let workspace = workspaces[identity],
               let pane = workspace.multiplexer.layout.pane(for: target.pane),
               pane.incarnation == target.incarnation,
-              pane.content != .shell || pane.shellLocation == identity else {
+              pane.content != .shell(location: nil),
+              pane.shellLocation == nil || pane.shellLocation == identity else {
             throw RegistryQueryError("The pane content was removed or replaced. Inspect Desktop again; no pane was changed.")
         }
         return (workspace, pane)
@@ -289,7 +290,7 @@ final class SessionsWorkspaceRegistry {
     func path(containingShell id: String, machineId: String) -> WorkspaceIdentity? {
         workspaces.first {
             guard let pane = $0.value.multiplexer.layout.pane(for: id) else { return false }
-            return pane.content == .shell && pane.shellLocation?.machineId == machineId
+            return pane.shellLocation?.machineId == machineId
         }?.key
     }
 
@@ -1512,7 +1513,8 @@ private struct SessionPaneView: View {
     }
 
     private var closeHelp: String {
-        pane.content == .shell ? "Close this shell (⌘W)" : "Close this view; the Session keeps running (⌘W)"
+        if case .shell = pane.content { return "Close this shell (⌘W)" }
+        return "Close this view; the Session keeps running (⌘W)"
     }
 
     private func split(_ axis: SplitAxis) {

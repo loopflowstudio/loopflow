@@ -30,16 +30,6 @@ struct MultiplexerStoreTests {
         #expect(store.layout.pane(for: first.id)?.shellLocation == local)
     }
 
-    @Test("Replacing shell content cannot pass its execution location to another pane type")
-    func replacementClearsShellLocation() throws {
-        let store = MultiplexerStore()
-        let shell = try #require(store.newShell(location:
-            WorkspaceIdentity(machineId: "peer", worktree: "/remote")))
-        let replaced = store.layout.replacingContent(of: shell.id, with: .session(id: "conversation"))
-        #expect(replaced.firstPane.shellLocation == nil)
-        #expect(replaced.firstPane.incarnation != shell.incarnation)
-    }
-
     @Test("Visibility follows retained occurrences, collapse and zoom, not focus")
     func exactPaneVisibility() throws {
         let store = MultiplexerStore()
@@ -76,13 +66,13 @@ struct MultiplexerStoreTests {
         store.newShell(command: ["fixture"])
         #expect(store.layout.allPanes.count == 2)
         for pane in store.layout.allPanes {
-            #expect(pane.content == .shell)
+            #expect(pane.content == .shell(location: nil))
             #expect(store.shellCommands[pane.id] == ["fixture"])
         }
     }
 
     @Test("Companion insertion clears Undo and preserves the requested focus", arguments: [false, true], [
-        PaneContent.shell, .files(taskId: "task"), .flowLog(taskId: "task"),
+        PaneContent.shell(location: nil), .files(taskId: "task"), .flowLog(taskId: "task"),
     ])
     func emptyCompanionPublishesCompleteState(focus: Bool, content: PaneContent) throws {
         let store = MultiplexerStore()
@@ -97,7 +87,7 @@ struct MultiplexerStoreTests {
         store.setCollapsed(paneId: empty.id, collapsed: true)
         #expect(store.canUndoClose)
 
-        if content == .shell { store.newShell(command: ["fixture"], beside: empty.id, focus: focus) }
+        if content == .shell(location: nil) { store.newShell(command: ["fixture"], beside: empty.id, focus: focus) }
         else { store.show(content, beside: empty.id, focus: focus) }
         #expect(!store.canUndoClose)
         #expect(store.layout.pane(for: empty.id)?.content == content)
@@ -105,7 +95,7 @@ struct MultiplexerStoreTests {
         #expect(!store.collapsedPaneIds.contains(empty.id))
         #expect(store.focusedPaneId == (focus ? empty.id : selected.id))
         #expect(store.zoomedPaneId == (focus ? empty.id : selected.id))
-        if content == .shell { #expect(store.shellCommands[empty.id] == ["fixture"]) }
+        if content == .shell(location: nil) { #expect(store.shellCommands[empty.id] == ["fixture"]) }
         let published = store.layout
         store.undoClose()
         #expect(store.layout == published)
@@ -122,7 +112,7 @@ struct MultiplexerStoreTests {
         store.setZoom(selected.id, enabled: true)
         store.newShell(command: ["fixture"], beside: empty.id, focus: false)
         let shell = store.layout.pane(for: empty.id)
-        #expect(shell?.content == .shell)
+        #expect(shell?.content == .shell(location: nil))
         #expect(shell?.incarnation != empty.incarnation)
         #expect(store.shellCommands[empty.id] == ["fixture"])
         store.show(.files(taskId: "task"), beside: empty.id, focus: false)
@@ -217,7 +207,7 @@ struct MultiplexerStoreTests {
         store.newShell(command: ["server"])
         let shell = store.focusedPaneId
         store.load(sessionId: "design")
-        #expect(store.layout.pane(for: shell)?.content == .shell)
+        #expect(store.layout.pane(for: shell)?.content == .shell(location: nil))
         #expect(store.shellCommands[shell] == ["server"])
         store.setCollapsed(paneId: shell, collapsed: true)
         store.setCollapsed(paneId: store.focusedPaneId, collapsed: true)
@@ -280,7 +270,7 @@ struct MultiplexerStoreTests {
         let pane = try #require(store.split(first, axis: .vertical))
         #expect(store.layout.allPanes.count == 2)
         #expect(store.focusedPaneId == pane.id)
-        #expect(pane.content == .shell)
+        #expect(pane.content == .shell(location: nil))
         #expect(store.shellCommands[pane.id] == [])
     }
 
@@ -322,7 +312,7 @@ struct MultiplexerStoreTests {
 
         #expect(store.layout.allPanes.map(\.content) == [
             .session(id: "session-1"),
-            .shell,
+            .shell(location: nil),
             .session(id: "ask-2"),
         ])
     }
@@ -331,11 +321,11 @@ struct MultiplexerStoreTests {
     func newShellUsesAvailableSpace() {
         let store = MultiplexerStore()
         store.newShell()
-        #expect(store.focusedPane.content == .shell)
+        #expect(store.focusedPane.content == .shell(location: nil))
         #expect(store.layout.allPanes.count == 1)
 
         store.newShell()
-        #expect(store.focusedPane.content == .shell)
+        #expect(store.focusedPane.content == .shell(location: nil))
         #expect(store.layout.allPanes.count == 2)
     }
 
@@ -347,7 +337,7 @@ struct MultiplexerStoreTests {
         store.load(sessionId: "session-1")
 
         #expect(store.layout.allPanes.map(\.content) == [
-            .shell,
+            .shell(location: nil),
             .session(id: "session-1"),
         ])
     }
@@ -486,7 +476,7 @@ struct MultiplexerStoreTests {
         #expect(store.canUndoClose == retained)
         store.undoClose()
         #expect((store.pane(forSessionId: "session-1") != nil) == retained)
-        #expect(store.layout.pane(for: shellPane)?.content == .shell)
+        #expect(store.layout.pane(for: shellPane)?.content == .shell(location: nil))
         if !retained {
             #expect(store.layout.allPanes.map(\.id) == [shellPane])
             #expect(store.focusedPaneId == shellPane)
@@ -495,9 +485,9 @@ struct MultiplexerStoreTests {
 
     @Test("Focus and close follow split geometry instead of tree order")
     func spatialFocusAndClose() {
-        let left = PaneState(id: "left", content: .shell)
-        let upperRight = PaneState(id: "upper-right", content: .shell)
-        let lowerRight = PaneState(id: "lower-right", content: .shell)
+        let left = PaneState(id: "left", content: .shell(location: nil))
+        let upperRight = PaneState(id: "upper-right", content: .shell(location: nil))
+        let lowerRight = PaneState(id: "lower-right", content: .shell(location: nil))
         let right = LayoutNode.split(
             .horizontal,
             first: .leaf(upperRight),

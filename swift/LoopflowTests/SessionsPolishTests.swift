@@ -53,13 +53,13 @@ struct SessionsPolishTests {
         NotificationCenter.default.post(
             name: .ghosttySurfaceClosed, object: TerminalIdentity.session(paneId, machineId: fixtureMachineId)
         )
-        #expect(workspace.multiplexer.focusedPane.content == .shell)
+        #expect(workspace.multiplexer.focusedPane.content == .shell(location: workspace.identity))
         NotificationCenter.default.post(
             name: .ghosttySurfaceClosed, object: TerminalIdentity.shell(paneId, machineId: fixtureMachineId)
         )
 
         #expect(registry.workspace(for: fixtureWorkspace("/tmp/repo")).multiplexer.focusedPane.content == .empty)
-        #expect(other.multiplexer.focusedPane.content == .shell)
+        #expect(other.multiplexer.focusedPane.content == .shell(location: other.identity))
     }
 }
 #endif

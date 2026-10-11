@@ -48,9 +48,9 @@ dispatch; an unscoped ambiguous prefix still fails.
 
 ## Context budget
 
-Generated Work input remains about 35,000/16,000 tokens from retained steers and
-inventory. No historical requests or limits were altered to shrink generated input.
-Authored scratch and memory are curated separately.
+Generated Work input is 34,995/16,000 tokens (18,995 over) from retained steers and
+inventory. It cannot fit without changing source requests; this compression does
+not rewrite historical direction or raise limits. Authored scratch and memory fit.
 
 ## Admission authority — October 9, unresolved
 

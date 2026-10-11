@@ -673,7 +673,7 @@ struct DesktopPerformanceTests {
             navigator.onOpenSession(first)
             try await wait(window) { window.firstResponder === terminals[0] }
             guard terminals.enumerated().allSatisfy({ $0.element.surface == surfaces[$0.offset] }),
-                  multiplexer.layout.pane(for: companionPane)?.content == .shell,
+                  multiplexer.layout.pane(for: companionPane)?.content == .shell(location: workspace.identity),
                   multiplexer.layout.pane(for: otherPane)?.content == .session(id: other.id) else {
                 throw PerformanceFailure("failed", "Retained terminal identity or companion changed")
             }

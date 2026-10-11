@@ -88,7 +88,7 @@ public final class MultiplexerStore {
 
     @discardableResult
     public func split(_ paneId: String, axis: SplitAxis, command: [String] = [], location: WorkspaceIdentity? = nil, focusNewPane: Bool = true) -> PaneState? {
-        _insert(.shell, beside: paneId, focus: focusNewPane, splitAxis: axis, shellCommand: command, shellLocation: location)
+        _insert(.shell(location: location), beside: paneId, focus: focusNewPane, splitAxis: axis, shellCommand: command)
     }
 
     /// Relocate the leaf itself, retaining content occurrence and surface keys.
@@ -109,7 +109,7 @@ public final class MultiplexerStore {
         // Undo restores this pane as a new occurrence, never reviving a stale
         // control target. Other panes retain their existing occurrences.
         closedState = ClosedState(
-            layout: layout.replacingContent(of: paneId, with: pane.content, shellLocation: pane.shellLocation),
+            layout: layout.replacingContent(of: paneId, with: pane.content),
             focusedPaneId: focusedPaneId,
             zoomedPaneId: zoomedPaneId,
             collapsedPaneIds: collapsedPaneIds
@@ -170,7 +170,7 @@ public final class MultiplexerStore {
 
     @discardableResult
     public func newShell(command: [String] = [], location: WorkspaceIdentity? = nil, beside paneId: String? = nil, focus: Bool = true) -> PaneState? {
-        _insert(.shell, beside: paneId ?? focusedPaneId, focus: focus, shellCommand: command, shellLocation: location)
+        _insert(.shell(location: location), beside: paneId ?? focusedPaneId, focus: focus, shellCommand: command)
     }
 
     /// Reveal a Task's Flow process log or files beside existing terminals,
@@ -194,19 +194,18 @@ public final class MultiplexerStore {
         beside paneId: String,
         focus: Bool = true,
         splitAxis: SplitAxis? = nil,
-        shellCommand: [String]? = nil,
-        shellLocation: WorkspaceIdentity? = nil
+        shellCommand: [String]? = nil
     ) -> PaneState? {
         guard let target = layout.pane(for: paneId) else { return nil }
         let axis = splitAxis ?? (target.content == .empty ? nil : .vertical)
         let insertedId: String
         if let axis {
-            let pane = PaneState(content: content, shellLocation: shellLocation)
+            let pane = PaneState(content: content)
             insertedId = pane.id
             layout = layout.splitting(paneId, axis: axis, newPane: pane)
         } else {
             insertedId = paneId
-            layout = layout.replacingContent(of: paneId, with: content, shellLocation: shellLocation)
+            layout = layout.replacingContent(of: paneId, with: content)
             collapsedPaneIds.remove(paneId)
         }
         if let shellCommand { shellCommands[insertedId] = shellCommand }

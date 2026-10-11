@@ -383,7 +383,7 @@ struct DesktopPaneControlTests {
         #expect(!store.collapsedPaneIds.contains(files.id))
         #expect(store.layout.pane(for: files.id) == files)
         let shellReceipt = try router.controlPane(.init(target: source, action: .shell))
-        #expect(store.layout.pane(for: shellReceipt.pane)?.content == .shell)
+        #expect(store.layout.pane(for: shellReceipt.pane)?.content == .shell(location: identity))
         #expect(store.layout.allPanes.count == 5)
         #expect(store.layout.pane(for: session.id) == session)
         #expect(store.focusedPane == selected)
@@ -464,7 +464,7 @@ struct DesktopPaneControlTests {
         store.setFocusedPane(filesPane.id)
         let split = try router.controlPane(.init(target: shellTarget, action: .split(axis: .horizontal)))
         #expect(split.pane != shellTarget.pane)
-        #expect(store.layout.pane(for: split.pane)?.content == .shell)
+        #expect(store.layout.pane(for: split.pane)?.content == .shell(location: identity))
         #expect(store.shellCommands[split.pane] == [])
         #expect(split.repository == repository)
         #expect(split.machineId == identity.machineId)
@@ -594,7 +594,7 @@ struct DesktopPaneControlTests {
         register(router, window: window, registry: registry)
         store.close(shell.id)
         store.undoClose()
-        #expect(store.focusedPane.content == .shell)
+        #expect(store.focusedPane.content == .shell(location: identity))
         #expect(throws: RegistryQueryError.self) {
             try router.controlPane(DesktopPaneCommand(target: target(shell, window: window), action: .hide))
         }

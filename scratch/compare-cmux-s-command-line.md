@@ -54,7 +54,8 @@ existing shell-location owner for CLI, shortcuts and pane menus; missing remote
 location refuses before layout mutation. Work-keyed tabs, per-pane locations,
 outer-layout deletion and inspection/DTO cutover remain unimplemented. This is not Work tabs.
 
-**Shell locations:** retained shell panes now own their Machine/path; rendering,
+**Shell locations:** `PaneContent.shell` owns Machine/path, without separate stored
+pane metadata or location propagation through layout operations. Rendering,
 identity, exits, release and split use it. Missing location refuses rather than
 falling back locally. Session/Files/log location cutover, Work keys, tabs, outer
 layout deletion and DTOs remain; this internal cut is not the complete UI slice.

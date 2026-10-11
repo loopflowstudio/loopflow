@@ -228,7 +228,7 @@ struct WorktreeWorkspaceTests {
         let shell = store.focusedPaneId
         store.newShell(command: ["lf", "--interactive", ":", "hello"])
         #expect(store.layout.allPanes.count == 2)
-        #expect(store.layout.pane(for: shell)?.content == .shell)
+        #expect(store.layout.pane(for: shell)?.content == .shell(location: nil))
         #expect(store.shellCommands[shell] == [])
         #expect(store.shellCommands[store.focusedPaneId]?.last == "hello")
         store.close(store.focusedPaneId)

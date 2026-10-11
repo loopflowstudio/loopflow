@@ -17,11 +17,11 @@ struct MultiplexerLayoutTests {
     func splittingAddsAPane() {
         let base = PaneState(content: .empty)
         let layout = LayoutNode.leaf(base)
-        let shell = PaneState(content: .shell)
+        let shell = PaneState(content: .shell(location: nil))
         let split = layout.splitting(base.id, axis: .vertical, newPane: shell)
 
         #expect(split.allPanes.count == 2)
-        #expect(split.pane(for: shell.id)?.content == .shell)
+        #expect(split.pane(for: shell.id)?.content == .shell(location: nil))
         if case .split(let axis, _, _, let ratio) = split {
             #expect(axis == .vertical)
             #expect(ratio == 0.5)
@@ -33,7 +33,7 @@ struct MultiplexerLayoutTests {
     @Test("removing a pane collapses its split back to the sibling")
     func removingCollapses() {
         let a = PaneState(content: .empty)
-        let b = PaneState(content: .shell)
+        let b = PaneState(content: .shell(location: nil))
         let split = LayoutNode.leaf(a).splitting(a.id, axis: .horizontal, newPane: b)
 
         let collapsed = split.removing([b.id])
@@ -50,7 +50,7 @@ struct MultiplexerLayoutTests {
     @Test("Pruning nested panes retains surviving occurrences, axes and ratios")
     func pruningRetainsSurvivingSplits() {
         let a = PaneState(content: .session(id: "draft"))
-        let b = PaneState(content: .shell)
+        let b = PaneState(content: .shell(location: nil))
         let c = PaneState(content: .files(taskId: "task"))
         let left = LayoutNode.split(.horizontal, first: .leaf(a), second: .leaf(b), ratio: 0.3)
         let tree = LayoutNode.split(.vertical, first: left, second: .leaf(c), ratio: 0.7)
@@ -74,7 +74,7 @@ struct MultiplexerLayoutTests {
     @Test("replacing pane content preserves identity and tree shape")
     func replacePreservesShape() {
         let a = PaneState(content: .empty)
-        let b = PaneState(content: .shell)
+        let b = PaneState(content: .shell(location: nil))
         let split = LayoutNode.leaf(a).splitting(a.id, axis: .vertical, newPane: b)
 
         let replaced = split.replacingContent(of: b.id, with: .session(id: "session-1"))
@@ -86,7 +86,7 @@ struct MultiplexerLayoutTests {
     @Test("resizing updates the split between two panes")
     func updatingRatioChangesContainingSplit() {
         let a = PaneState(content: .empty)
-        let b = PaneState(content: .shell)
+        let b = PaneState(content: .shell(location: nil))
         let split = LayoutNode.leaf(a).splitting(a.id, axis: .vertical, newPane: b)
 
         let resized = split.updatingRatio(between: a.id, and: b.id, ratio: 0.3)
@@ -100,7 +100,7 @@ struct MultiplexerLayoutTests {
     @Test("a nested tree round-trips through Codable")
     func codableRoundTrip() throws {
         let a = PaneState(content: .session(id: "session-1"))
-        let b = PaneState(content: .shell)
+        let b = PaneState(content: .shell(location: nil))
         let c = PaneState(content: .empty)
         let tree = LayoutNode
             .leaf(a)

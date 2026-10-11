@@ -13,7 +13,8 @@ public enum SplitAxis: String, Codable, Sendable, Equatable {
 public enum PaneContent: Codable, Sendable, Equatable {
     case empty
     case session(id: String)
-    case shell
+    /// Unknown locations remain unavailable, never a local-shell fallback.
+    case shell(location: WorkspaceIdentity?)
     /// Every Flow process of a Task.
     case flowLog(taskId: String)
     /// A Task's worktree files.
@@ -25,17 +26,18 @@ public struct PaneState: Codable, Sendable, Identifiable, Equatable {
     public let content: PaneContent
     /// The content occurrence, distinct from the reusable pane slot.
     public let incarnation: String
-    /// A shell keeps its creation location across layout changes and Close/Undo.
-    public let shellLocation: WorkspaceIdentity?
+    /// Location travels with content, including replacement and Close/Undo.
+    public var shellLocation: WorkspaceIdentity? {
+        guard case .shell(let location) = content else { return nil }
+        return location
+    }
 
     public init(
         id: String = UUID().uuidString,
-        content: PaneContent,
-        shellLocation: WorkspaceIdentity? = nil
+        content: PaneContent
     ) {
         self.id = id
         self.content = content
-        self.shellLocation = content == .shell ? shellLocation : nil
         self.incarnation = UUID().uuidString
     }
 }
@@ -112,9 +114,9 @@ public indirect enum LayoutNode: Codable, Sendable, Equatable {
         }
     }
 
-    public func replacingContent(of paneId: String, with content: PaneContent, shellLocation: WorkspaceIdentity? = nil) -> LayoutNode {
+    public func replacingContent(of paneId: String, with content: PaneContent) -> LayoutNode {
         _replacingLeaf(paneId) { pane in
-            .leaf(PaneState(id: pane.id, content: content, shellLocation: shellLocation))
+            .leaf(PaneState(id: pane.id, content: content))
         }
     }
 

@@ -553,7 +553,10 @@ rediscovered; missing checkouts recover committed branch state. Live conversatio
 keep their placement until their attached LfProcess is idle.
 
 Persistent workspaces retain scratch locally through commit, sync, publication and
-landing. Selected-path commits preserve unrelated staged edits. Publication pushes
+landing. A scratch-only selection with no committable changes explains that policy
+and suggests moving durable notes outside `scratch/`. In ordinary Task worktrees,
+selected scratch files are committed. Selected-path commits preserve unrelated
+staged edits. Publication pushes
 the committed range, leaving later local edits alone. Inspect the complete range
 before publishing. PR landing clears scratch in non-persistent workspaces, whether
 or not the work belongs to a Task.

@@ -404,8 +404,7 @@ capture proves configured primary reuse and retained Work, not native/provider
 usability. Cleanup needs reviewed candidates and a restorable backup;
 unknown/interrupted records are not debris.
 
-October 11: first-use acquisition is considered once per retained repository
-workspace; refresh and hide-all never repeat it. Delayed ensure results populate
+October 11: first-use acquisition is considered once per repository workspace; refresh and hide-all never repeat it. Delayed ensure results populate
 the originating Work without selecting it. Task rows/palette prepare conversations;
 bare links and Flow-log inspection stay passive. Reusing the asynchronous Task
 entry for logs had redirected the companion into prior Work; keep log selection

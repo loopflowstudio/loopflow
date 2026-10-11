@@ -238,9 +238,9 @@ Drafts must `depends_on` unreleased parents; name order broke materialized fixtu
 Scratch-bearing PRs defer tests; TESTING.md owns gating.
 
 LOO-450: Jack selected one Claude harness, native schemas and predecessor deletion.
-Native turns alone supply answers; unknown providers fail. Corrections need fenced
-native identity selection. Fake-provider Flow advancement proves neither configured
-Task publication nor installation.
+Native turns supply answers; unknown providers fail. Corrections require fenced
+native identity; prose grants no control. Fake-provider Flow advancement proves
+neither configured publication nor installation.
 
 ## Execution vocabulary (LOO-441/442/446, 2026-10-10)
 

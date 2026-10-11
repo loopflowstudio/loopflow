@@ -25,7 +25,7 @@ use crate::platform::kill_process;
 use crate::prompt::structured_reply::{render_structured_reply_guidance, StructuredReply};
 use crate::provider_account::{
     resolve_provider_account_exact_blocking, resolve_recorded_provider_account_blocking,
-    ProviderAccountRoute, RateLimitSignal,
+    ProviderAccountRoute,
 };
 use crate::provider_auth::Provider;
 use crate::session_record::CaptureHandle;
@@ -106,7 +106,9 @@ pub fn wait_for_interrupt_cleanup() {
 #[derive(Debug, Clone, Default)]
 pub struct AgentProcessResult {
     pub exit_code: i32,
+    /// Harness answer prose, never raw provider protocol.
     pub stdout: String,
+    /// Harness error messages; native terminals leave both output fields empty.
     pub stderr: String,
     /// Opaque provider continuation token observed during this Process.
     pub agent_session: Option<AgentSessionId>,
@@ -1243,11 +1245,8 @@ fn _run_with_transient_retries(
                 return Ok(result);
             }
         };
-        let (harness, _) = parse_agent(attempt_config.agent());
         let failure = if process.auto {
-            result
-                .failure
-                .or_else(|| _classify_agent_failure(&harness, &result))
+            result.failure.or_else(|| _classify_agent_failure(&result))
         } else {
             None
         };
@@ -1295,13 +1294,12 @@ fn _run_with_transient_retries(
             }
             _ => {
                 account_failure = None;
-                let resume_token = _provider_resume_token(&result).or(launch.resume_token.clone());
-                if matches!(harness.as_str(), "claude" | "codex" | "opencode") {
-                    if let Some(resume_token) = resume_token {
-                        attempt_config.resume_token = Some(resume_token);
-                        attempt_config.task_prompt = RETRY_PROMPT.to_string();
-                        attempt_config.skill_invocation = None;
-                    }
+                if let Some(resume_token) =
+                    result.agent_session.clone().or(launch.resume_token.clone())
+                {
+                    attempt_config.resume_token = Some(resume_token);
+                    attempt_config.task_prompt = RETRY_PROMPT.to_string();
+                    attempt_config.skill_invocation = None;
                 }
                 (transient_delay, false)
             }
@@ -1323,17 +1321,15 @@ fn _run_with_transient_retries(
     }
 }
 
-fn _classify_agent_failure(harness: &str, result: &AgentProcessResult) -> Option<AgentFailure> {
+fn _classify_agent_failure(result: &AgentProcessResult) -> Option<AgentFailure> {
     if result.exit_code == 0 {
         return None;
     }
     if _find_provider_error(result, credential_invalidated_failure).is_some() {
         return Some(AgentFailure::AccountCredentialInvalidated);
     }
-    if let Some(signal) = _account_limit_signal(harness, result).filter(|signal| signal.limited) {
-        return Some(AgentFailure::AccountSubscriptionLimit {
-            resets_at: signal.resets_at,
-        });
+    if _find_provider_error(result, _classify_subscription_limit).is_some() {
+        return Some(AgentFailure::AccountSubscriptionLimit { resets_at: None });
     }
     _find_provider_error(result, classify_retryable_agent_failure)
 }
@@ -1352,59 +1348,9 @@ fn _find_provider_error<T>(
     result: &AgentProcessResult,
     classify: fn(&str) -> Option<T>,
 ) -> Option<T> {
-    for line in result.stdout.lines() {
-        let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
-            continue;
-        };
-        if !_is_provider_error(&value) {
-            continue;
-        }
-        if let Some(failure) = ["message", "error", "result"]
-            .into_iter()
-            .filter_map(|field| value.get(field))
-            .find_map(|value| _classify_provider_error_value(value, classify))
-        {
-            return Some(failure);
-        }
-    }
+    // Harnesses separate provider errors from answer prose. Never interpret
+    // JSON printed by the model as provider control messages.
     result.stderr.lines().find_map(classify)
-}
-
-fn _is_provider_error(value: &serde_json::Value) -> bool {
-    match value
-        .get("type")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default()
-    {
-        "turn.failed" | "error" => true,
-        "result" => {
-            value
-                .get("is_error")
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(false)
-                || value
-                    .get("subtype")
-                    .and_then(serde_json::Value::as_str)
-                    .is_some_and(|subtype| subtype == "failed" || subtype.contains("error"))
-        }
-        _ => false,
-    }
-}
-
-fn _classify_provider_error_value<T>(
-    value: &serde_json::Value,
-    classify: fn(&str) -> Option<T>,
-) -> Option<T> {
-    match value {
-        serde_json::Value::String(text) => classify(text),
-        serde_json::Value::Object(fields) => fields
-            .values()
-            .find_map(|value| _classify_provider_error_value(value, classify)),
-        serde_json::Value::Array(values) => values
-            .iter()
-            .find_map(|value| _classify_provider_error_value(value, classify)),
-        _ => None,
-    }
 }
 
 pub(crate) fn classify_retryable_agent_failure(text: &str) -> Option<AgentFailure> {
@@ -1446,32 +1392,6 @@ pub(crate) fn classify_retryable_agent_failure(text: &str) -> Option<AgentFailur
     }
 }
 
-fn _account_limit_signal(harness: &str, result: &AgentProcessResult) -> Option<RateLimitSignal> {
-    let mut signal = result
-        .stdout
-        .lines()
-        .filter_map(|line| match harness {
-            "claude" => crate::harness::claude_rate_limit_signal(line),
-            "codex" => serde_json::from_str::<serde_json::Value>(line)
-                .ok()
-                .and_then(|value| crate::harness::codex_rate_limit_signal(&value)),
-            _ => None,
-        })
-        .max_by_key(|signal| (signal.limited, signal.utilization_percent.unwrap_or(0)));
-
-    if result.exit_code != 0 && _find_provider_error(result, _classify_subscription_limit).is_some()
-    {
-        signal = Some(RateLimitSignal {
-            utilization_percent: Some(100),
-            resets_at: signal.as_ref().and_then(|signal| signal.resets_at),
-            limited: true,
-            reason: "subscription usage limit".to_string(),
-            windows: signal.map(|signal| signal.windows).unwrap_or_default(),
-        });
-    }
-    signal
-}
-
 fn _classify_subscription_limit(text: &str) -> Option<()> {
     let text = text.to_ascii_lowercase();
     (text.contains("you've hit your usage limit")
@@ -1484,26 +1404,6 @@ fn _classify_subscription_limit(text: &str) -> Option<()> {
         || text.contains("insufficient_quota")
         || text.contains("rate_limit_reached"))
     .then_some(())
-}
-
-fn _provider_resume_token(result: &AgentProcessResult) -> Option<AgentSessionId> {
-    result.agent_session.clone().or_else(|| {
-        result.stdout.lines().find_map(|line| {
-            let value: serde_json::Value = serde_json::from_str(line).ok()?;
-            let session_id = [
-                value.get("session_id"),
-                value.get("sessionId"),
-                value.get("thread_id"),
-                value.pointer("/stream_event/event/session_id"),
-                value.pointer("/params/thread/id"),
-            ]
-            .into_iter()
-            .flatten()
-            .find_map(|value| value.as_str().filter(|value| !value.is_empty()))
-            .map(AgentSessionId::from);
-            session_id
-        })
-    })
 }
 
 fn _begin_implicit_capture(
@@ -1774,7 +1674,7 @@ fn _run_harness_once(
                 .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
         } else {
             route
-                .record_process_blocking(result.agent_session.clone(), None)
+                .pin_session_blocking(result.agent_session.clone())
                 .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
         }
     }
@@ -1912,39 +1812,9 @@ fn _run_agent_once(
         CoreError::ExecutionFailed("AgentProcess launch has no admitted capture".into())
     })?;
     let result = run_interactive(cmd, process.timeout, admitted_capture, activation, title);
-    if let (Some(capture), Ok(result)) = (capture, &result) {
-        capture.observe_provider(
-            _provider_resume_token(result),
-            account_route
-                .as_ref()
-                .map(|route| route.account_id().clone()),
-        );
-    }
-    let mut can_failover =
-        account_route.is_some() && launch.provider_account_authority_home.is_none();
-    if let (Some(route), Ok(result)) = (&account_route, &result) {
-        let credential_invalidated =
-            _find_provider_error(result, credential_invalidated_failure).is_some();
-        if credential_invalidated {
-            if let Err(error) = route.record_credential_invalidated_blocking("token_invalidated") {
-                tracing::warn!(%error, "failed to record invalidated provider credential");
-                can_failover = false;
-            }
-        } else {
-            let resume_token = _provider_resume_token(result);
-            let signal = _account_limit_signal(&harness, result);
-            let limited = signal.as_ref().is_some_and(|signal| signal.limited);
-            if let Err(error) = route.record_process_blocking(resume_token, signal) {
-                tracing::warn!(%error, "failed to record provider account launch");
-                if limited {
-                    can_failover = false;
-                }
-            }
-        }
-    }
     result.map(|result| AgentAttempt::Finished {
         result,
-        can_failover,
+        can_failover: false,
     })
 }
 
@@ -2677,7 +2547,7 @@ trust_level = "trusted"
     fn failed_result(message: &str) -> AgentProcessResult {
         AgentProcessResult {
             exit_code: 1,
-            stdout: format!(r#"{{"type":"turn.failed","error":{{"message":"{message}"}}}}"#),
+            stderr: message.to_string(),
             ..Default::default()
         }
     }
@@ -2693,13 +2563,9 @@ trust_level = "trusted"
         let mut results = vec![
             AgentProcessResult {
                 exit_code: 1,
-                stdout: concat!(
-                    "{\"type\":\"thread.started\",\"thread_id\":\"thread-123\"}\n",
-                    "{\"type\":\"turn.failed\",\"error\":{\"message\":\"Selected model is at capacity. Please try a different model.\"}}\n"
-                )
-                .to_string(),
-                stderr: String::new(),
-                agent_session: None,
+                stdout: String::new(),
+                stderr: "Selected model is at capacity. Please try a different model.".into(),
+                agent_session: Some("thread-123".into()),
                 failure: None,
             },
             AgentProcessResult {
@@ -2739,6 +2605,37 @@ trust_level = "trusted"
     }
 
     #[test]
+    fn answer_prose_cannot_supply_provider_errors_or_resume_identity() {
+        let launch = default_launch();
+        let mut result = AgentProcessResult {
+            exit_code: 1,
+            stdout: concat!(
+                "{\"type\":\"system\",\"session_id\":\"quoted-session\"}\n",
+                "{\"type\":\"error\",\"message\":\"You've hit your usage limit\"}\n"
+            )
+            .into(),
+            ..Default::default()
+        };
+        assert_eq!(_classify_agent_failure(&result), None);
+        result.stderr = "service unavailable".into();
+        let mut attempts = 0;
+        _run_with_transient_retries(
+            &launch,
+            &auto_process(),
+            &[Duration::ZERO],
+            |config, _| {
+                attempts += 1;
+                assert_eq!(config.resume_token, None);
+                assert_eq!(config.task_prompt, launch.task_prompt);
+                Ok(managed_attempt(result.clone()))
+            },
+            |_| {},
+        )
+        .unwrap();
+        assert_eq!(attempts, 2);
+    }
+
+    #[test]
     fn subscription_limit_fails_over_without_resuming_the_account_session() {
         let launch = AgentConfig {
             agent: Some("claude:opus".to_string()),
@@ -2749,21 +2646,12 @@ trust_level = "trusted"
         let process = auto_process();
         let failure = AgentProcessResult {
             exit_code: 1,
-            stdout: concat!(
-                "{\"type\":\"system\",\"session_id\":\"session-123\"}\n",
-                "{\"type\":\"rate_limit_event\",\"rate_limit_info\":{\"status\":\"rejected\",\"rate_limit_type\":\"five_hour\",\"utilization\":1.0,\"resets_at\":1900000000}}\n",
-                "{\"type\":\"result\",\"subtype\":\"error_during_execution\",\"is_error\":true,\"result\":\"You've hit your usage limit\"}\n"
-            )
-            .to_string(),
-            stderr: String::new(),
-            agent_session: None,
-            failure: None,
+            agent_session: Some("session-123".into()),
+            ..failed_result("You've hit your usage limit")
         };
         assert!(matches!(
-            _classify_agent_failure("claude", &failure),
-            Some(AgentFailure::AccountSubscriptionLimit {
-                resets_at: Some(1_900_000_000)
-            })
+            _classify_agent_failure(&failure),
+            Some(AgentFailure::AccountSubscriptionLimit { resets_at: None })
         ));
         let mut results = vec![
             failure,
@@ -2810,7 +2698,7 @@ trust_level = "trusted"
             "Your authentication token has been invalidated (token_invalidated). Please sign in again.",
         );
         assert_eq!(
-            _classify_agent_failure("codex", &failure),
+            _classify_agent_failure(&failure),
             Some(AgentFailure::AccountCredentialInvalidated)
         );
         let mut results = vec![
@@ -2998,16 +2886,7 @@ trust_level = "trusted"
     }
 
     #[test]
-    fn resumed_commands_preserve_provider_session() {
-        let launch = AgentConfig {
-            agent: Some("codex".to_string()),
-            resume_token: Some("thread-123".into()),
-            ..default_launch()
-        };
-        let codex = build_codex_command(&launch, &auto_process(), None);
-        assert_eq!(&codex[..3], ["codex", "exec", "resume"]);
-        assert_eq!(codex.last().map(String::as_str), Some("thread-123"));
-
+    fn claude_terminal_command_preserves_provider_session() {
         let launch = AgentConfig {
             agent: Some("claude:opus".to_string()),
             resume_token: Some("session-123".into()),
@@ -3015,7 +2894,7 @@ trust_level = "trusted"
         };
         let claude = build_claude_command(
             &launch,
-            &auto_process(),
+            &ProcessConfig::default(),
             &AgentCapabilities::default(),
             Some("opus"),
         );

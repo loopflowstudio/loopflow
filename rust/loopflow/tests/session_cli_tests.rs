@@ -633,13 +633,14 @@ if [ "${1:-}" = --version ]; then exit 0; fi
 pwd -P > "$LF_TEST_RESUME_PROOF.cwd"
 printf '%s\n' "$@" > "$LF_TEST_RESUME_PROOF.args"
 printf '%s\n' "$LF_AGENT_CALLER" > "$LF_TEST_RESUME_PROOF.caller"
-while [ "$#" -gt 0 ]; do
-    if [ "$1" = --append-system-prompt-file ]; then
-        cat "$2" > "$LF_TEST_RESUME_PROOF.context"
-        break
-    fi
-    shift
-done
+python3 - "$@" <<'PYTHON'
+import json, os, pathlib, subprocess, sys
+args = sys.argv[1:]
+settings = json.loads(pathlib.Path(args[args.index("--settings") + 1]).read_text())
+hook = settings["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+block = json.loads(subprocess.check_output(hook, shell=True))["hookSpecificOutput"]["additionalContext"]
+pathlib.Path(os.environ["LF_TEST_RESUME_PROOF"] + ".context").write_text(block)
+PYTHON
 cat > "$LF_TEST_RESUME_PROOF.input"
 printf '%s\n' '{"type":"result","session_id":"fixture-native","subtype":"success","result":"continued"}'
 "#,
@@ -701,7 +702,8 @@ printf '%s\n' '{"type":"result","session_id":"fixture-native","subtype":"success
     );
     let sent = std::fs::read_to_string(home.path().join("proof.context")).unwrap();
     assert!(sent.contains("SAVED_CONTEXT"), "{sent}");
-    assert!(sent.contains("Continue here"), "{sent}");
+    let sent_input = std::fs::read_to_string(home.path().join("proof.input")).unwrap();
+    assert!(sent_input.contains("Continue here"), "{sent_input}");
     assert!(!sent.contains("CALLER_CONTEXT"), "{sent}");
     assert!(!sent.contains("CALLER_WAVE_CONTEXT"), "{sent}");
     assert!(!sent.contains("missing-original-skill"), "{sent}");

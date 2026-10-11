@@ -77,8 +77,6 @@ fn golden_prompts_match() {
     std::env::set_var("LF_HOME", home.path());
 
     let root = repo_root();
-    let store =
-        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
     for case_path in load_cases() {
         let yaml = fs::read_to_string(&case_path).expect("read golden yaml");
         let case: GoldenCase = serde_yaml_ng::from_str(&yaml).expect("parse golden yaml");
@@ -86,9 +84,6 @@ fn golden_prompts_match() {
         let fixture = tempfile::tempdir().unwrap();
         let repo = fixture.path().canonicalize().unwrap();
         copy_fixture(&root.join(&case.repo), &repo);
-        if let Some(wave) = &case.wave {
-            store.ensure_wave(repo.to_str().unwrap(), wave).unwrap();
-        }
         let opts = GatherContextOpts {
             repo_root: repo.clone(),
             skill: case.skill.clone(),

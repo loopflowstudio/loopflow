@@ -94,9 +94,8 @@ fn put_snapshot(
         .unwrap_or_else(|_| {
             format!("---\npm:\n  linear_initiative: {initiative}\n---\nFixture Wave.\n")
         });
-    store
-        .update_wave_document(registered.id(), "GOAL.md", &goal)
-        .unwrap();
+    std::fs::create_dir_all(repo.join("wave").join(wave)).unwrap();
+    std::fs::write(repo.join("wave").join(wave).join("GOAL.md"), goal).unwrap();
     store
         .put_pm_snapshot(&PmSnapshotRow {
             wave_id: registered.id().clone(),

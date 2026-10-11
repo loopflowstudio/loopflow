@@ -28,9 +28,8 @@ Produce a working change, resolve reversible ambiguity, and verify it. Preserve 
 
 ## Keep authored context within budget
 
-Use the assembled `lf:context-budget` snapshot, or run `lf context --skill implement`
-to read effective limits, their configuration sources, and current usage. Before
-updating scratch or Wave memory, read complete sources named by excerpt pointers.
+Run `lf context` to read memory and scratch size targets, their configuration
+sources, and current usage. Read complete sources before curating them.
 Bring over-budget material under both token and byte limits as part of this step.
 Merge duplicates, summarize long evidence, remove obsolete notes inherited from a
 stacked parent, and keep historical detail in git rather than ambient context.
@@ -126,6 +125,7 @@ If `<lf:wave>` is present, check `wave/<wave>/GOAL.md` and `MEMORY.md` in docs:
 
 - Follow the wave's intent and principles during implementation
 - Respect decisions and constraints recorded in `MEMORY.md`
+- Edit GOAL.md and MEMORY.md directly in this checkout like any other files
 - Note drift from wave constraints in `scratch/questions.md`
 
 ## When the design is wrong

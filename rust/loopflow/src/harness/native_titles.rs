@@ -29,10 +29,6 @@ pub(crate) fn name_native_session(provider: &str, input: &Value) -> anyhow::Resu
     let Some(prompt) = input["prompt"].as_str() else {
         return Ok(None);
     };
-    // lf's assembled context has its own attributed name and title transport.
-    if prompt == crate::prompt::INITIAL_TURN_PROMPT {
-        return Ok(None);
-    }
     let Some(title) = crate::naming::request_title(prompt) else {
         return Ok(None);
     };
@@ -189,11 +185,7 @@ mod tests {
         input["session_title"] = json!("Jack's hand name");
         assert!(name_native_session("claude", &input).unwrap().is_none());
         input.as_object_mut().unwrap().remove("session_title");
-        for prompt in [
-            json!(crate::prompt::INITIAL_TURN_PROMPT),
-            json!("..."),
-            Value::Null,
-        ] {
+        for prompt in [json!("..."), Value::Null] {
             input["prompt"] = prompt;
             for provider in ["claude", "codex"] {
                 assert!(name_native_session(provider, &input).unwrap().is_none());

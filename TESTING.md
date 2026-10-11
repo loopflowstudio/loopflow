@@ -83,6 +83,10 @@ Flow invoking the `default` skill must preserve their distinct launch modes.
 Prompt fixtures read the harness's actual inputs, including context files and
 stdin, rather than assuming everything remains in argv.
 
+Context byte-budget fixtures must reach their boundary with short temporary
+paths too. Run `TMPDIR=/tmp cargo test -p loopflow --lib context_block` when
+changing them; macOS's longer default paths can hide an undersized fixture.
+
 The composed delivery fixture runs a real CLI/Flow against an isolated Home and
 simulated provider observations, local follow-up filing and independent completion,
 then checks its captured CLI and monitor population in Rust
@@ -172,6 +176,13 @@ to the CI jobs below, and runs just those—fast suites first. `--reuse-passing`
 uses a prior pass only when tracked and untracked file content, the worktree,
 and the selected command plan are identical. Full and optional hosted runs never
 reuse evidence.
+
+Do not run source-tree Cargo builds alongside the materialized Rust phase.
+The materializer reuses this checkout's `target/`; rebuilding `target/debug/lf`
+from source mid-suite replaces the candidate with a different migration frontier.
+Wait for gate to finish, then run focused repairs serially (or use a separate
+`CARGO_TARGET_DIR`). Version/schema mismatches after such overlap are invalid
+verification evidence, not permission to alter a fixture or installed database.
 
 Slow suites (`loopflow`, `e2e`) stay off in changed-mode even when
 their paths change—the run prints why and how to force them:
@@ -607,8 +618,8 @@ registered-Task fixtures must reuse it rather than insert a second owner.
 
 Planning-owner changes must cover context/catalog reads, Wave relocation, Task
 initialization, Workflow completion/reopening and PR delivery fixtures alongside
-the new planning APIs. Seed stored definitions explicitly; writing a fixture file
-is not a planning mutation.
+the new planning APIs. Write Wave goal/memory fixtures directly in their checkout. Seed stored Workflow
+definitions explicitly; writing a Workflow file is not a planning mutation.
 An existing checkout fixture must settle initialization before testing delivery.
 Prompt fixtures nested in the source tree must fence Git discovery so the enclosing
 checkout cannot become their stored Wave owner. Verify them inside a Git checkout;
@@ -1074,6 +1085,8 @@ container works on macOS). That suite is compiled out on macOS, so a local Rust
 pass there does not cover its HTTPS fixtures. Keep nullable requested fields,
 including `dueDate`, present in fixture responses. Team migration also reads issue
 comments; its fixtures must include the requested pagination metadata.
+Run the same Linux suite when changing Linear mutation inputs or acknowledgements:
+the reconnect peer must accept partial Initiative updates and return `success`.
 
 ```bash
 cargo nextest run -p loopflow --lib -E 'test(pm::linear::) | test(ops::pm::) | test(ops::linear_observe::)' --no-fail-fast

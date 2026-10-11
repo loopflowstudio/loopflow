@@ -83,10 +83,11 @@ pub enum SessionFlowMembership {
     Independent,
 }
 
-/// Replayable, provider-facing inputs for one ordinary headless process.
+/// Saved provider inputs for native continuation and explicit headless replay.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AgentProcessRequest {
     pub system_prompt: String,
+    pub conversation_context: Option<crate::context_block::ContextDelivery>,
     pub task_prompt: String,
     pub skill_invocation: Option<crate::skills::invocation::SkillInvocation>,
     pub output_schema: Option<serde_json::Value>,
@@ -106,6 +107,7 @@ impl AgentProcessRequest {
     ) -> Self {
         Self {
             system_prompt: crate::agent::system_prompt_with_structured_replies(config),
+            conversation_context: config.conversation_context.clone(),
             task_prompt: config.task_prompt.clone(),
             skill_invocation: config.skill_invocation.clone(),
             output_schema: config.output_schema.clone(),
@@ -1966,6 +1968,7 @@ impl CaptureHandle {
         id: &str,
         spec: SessionCaptureSpec,
         context: &crate::trace::PreparedTurnContext,
+        request: Option<AgentProcessRequest>,
     ) -> StoreResult<Self> {
         let (dir, mut manifest) = resolve_manifest(home, id).map_err(record_error)?;
         // Atomically claim this preparation. A second launcher cannot record
@@ -1976,6 +1979,7 @@ impl CaptureHandle {
             context,
         })?;
         write_private_exclusive(&dir.join("context.json"), &bytes).map_err(record_error)?;
+        manifest.process = request;
         manifest.context = Some(SessionContextRef {
             path: "context.json".to_string(),
             content_sha256: hex::encode(Sha256::digest(&bytes)),
@@ -3393,7 +3397,8 @@ mod tests {
         assert!(!dir.join("events.jsonl").exists());
         let context = crate::trace::PreparedTurnContext::from_prompts("system", "review");
         let capture =
-            CaptureHandle::start_prepared(home.path(), &id, spec(home.path()), &context).unwrap();
+            CaptureHandle::start_prepared(home.path(), &id, spec(home.path()), &context, None)
+                .unwrap();
         capture.mark_spawn_requested();
         capture
             .0
@@ -3465,7 +3470,8 @@ mod tests {
         let mut process = spec(home.path());
         process.flow = super::SessionFlowMembership::Step(step);
         let context = crate::trace::PreparedTurnContext::from_prompts("system", "review");
-        let capture = CaptureHandle::start_prepared(home.path(), &id, process, &context).unwrap();
+        let capture =
+            CaptureHandle::start_prepared(home.path(), &id, process, &context, None).unwrap();
         capture.finish("completed").unwrap();
 
         let manifest = super::read_manifest(&dir).unwrap();
@@ -3709,7 +3715,8 @@ mod tests {
         assert!(!dir.join("provider-clients").exists());
         let context = crate::trace::PreparedTurnContext::from_prompts("system", "human prompt");
         let capture =
-            CaptureHandle::start_prepared(home.path(), &id, spec(home.path()), &context).unwrap();
+            CaptureHandle::start_prepared(home.path(), &id, spec(home.path()), &context, None)
+                .unwrap();
         let launched = super::read_manifest(&dir).unwrap();
         assert_eq!(capture.artifact_key(), id);
         assert!(CaptureHandle::prepare_at_with_key(
@@ -3733,7 +3740,8 @@ mod tests {
             hex::encode(<sha2::Sha256 as sha2::Digest>::digest(&context_bytes))
         );
         assert!(
-            CaptureHandle::start_prepared(home.path(), &id, spec(home.path()), &context).is_err()
+            CaptureHandle::start_prepared(home.path(), &id, spec(home.path()), &context, None)
+                .is_err()
         );
         capture.mark_spawn_requested();
         capture.finish("completed").unwrap();

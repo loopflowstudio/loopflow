@@ -224,22 +224,6 @@ impl std::ops::Deref for PmContext {
 }
 
 fn read_wave_pm_config(repo: &Path, wave: &str) -> Option<WavePmConfig> {
-    // The PM fixture's saved Wave definitions share its snapshot/token store.
-    #[cfg(test)]
-    if let Ok(config) = PM_TEST_CONTEXT.try_with(|ctx| {
-        let locator = crate::work::wave::WaveLocator::discover(repo, wave).unwrap();
-        let wave = ctx.store.sqlite.get_wave_at(&locator).unwrap()?;
-        let goal = ctx
-            .store
-            .sqlite
-            .wave_document(wave.id(), "GOAL.md")
-            .unwrap()?;
-        crate::work::wave::config::parse_wave_config(&goal)
-            .unwrap()
-            .pm
-    }) {
-        return config;
-    }
     read_wave_config(repo, wave).and_then(|config| config.pm)
 }
 
@@ -357,20 +341,18 @@ pub(crate) fn repository_team_for_snapshot_validation(
     if config.linear.team.is_some() {
         return Ok(None);
     }
+    let canonical = crate::repository::CanonicalRepo::discover(repo)
+        .map_err(|error| OpsError::Message(error.to_string()))?;
     for wave in store
         .sqlite
-        .list_waves(Some(&repo.to_string_lossy()))
+        .list_waves(Some(&canonical.to_string()))
         .map_err(|error| OpsError::Message(error.to_string()))?
     {
-        let Some(goal) = store
-            .sqlite
-            .wave_document(wave.id(), "GOAL.md")
+        let Some(definition) = crate::work::wave::config::try_read_wave_config(repo, wave.slug())
             .map_err(|error| OpsError::Message(error.to_string()))?
         else {
             continue;
         };
-        let definition = crate::work::wave::config::parse_wave_config(&goal)
-            .map_err(|error| OpsError::Message(error.to_string()))?;
         if definition
             .pm
             .is_some_and(|pm| pm.provider.is_some() || pm.linear_team.is_some())
@@ -2127,9 +2109,9 @@ async fn pm_sync_async(
     }
     progress.status("checking Linear repository Initiatives, Projects, and Tasks");
     let linear_waves = client.list_waves().await.map_err(pm_to_ops)?;
-    let linear_waves_by_id: BTreeMap<String, String> = linear_waves
+    let linear_waves_by_id: BTreeMap<String, &crate::pm::PmWave> = linear_waves
         .iter()
-        .map(|wave| (wave.id.clone(), wave.name.clone()))
+        .map(|wave| (wave.id.clone(), wave))
         .collect();
     for linear_wave in &linear_waves {
         if !initiative_waves.contains_key(&linear_wave.id) {
@@ -2140,28 +2122,47 @@ async fn pm_sync_async(
         }
     }
 
+    let default_branch = crate::git::get_default_branch(repo)?;
+    let summary_revision =
+        crate::git::rev_parse(repo, &format!("refs/heads/{default_branch}^{{commit}}"))?;
+    let mut wave_updates = Vec::new();
     let mut seen_projects: BTreeMap<String, String> = BTreeMap::new();
     for wave in &waves {
+        let goal = format!("wave/{wave}/GOAL.md");
+        let Some(content) = crate::git::show_file(repo, &summary_revision, &goal)? else {
+            let message = format!(
+                "{goal} is missing on default branch {default_branch}; cannot sync its summary"
+            );
+            diagnostics.push(message.clone());
+            blocking.push(message);
+            continue;
+        };
+        let summary = crate::work::wave::config::wave_summary(&content);
+        let summary = crate::pm::linear::linear_description(&summary);
         let Some(initiative_id) = read_initiative(repo, wave) else {
             blocking.push(format!("wave/{wave} has no Linear Initiative"));
             continue;
         };
         let expected_initiative_name = title_case(wave);
-        match linear_waves_by_id.get(&initiative_id) {
-            Some(actual) if actual != &expected_initiative_name => {
-                let message = format!(
-                    "rename Linear Initiative `{actual}` ({initiative_id}) to `{expected_initiative_name}` for wave/{wave}"
-                );
-                actions.push(message);
-            }
-            None => {
-                let message =
-                    format!("wave/{wave} points at missing Linear Initiative {initiative_id}");
-                diagnostics.push(message.clone());
-                blocking.push(message);
-                continue;
-            }
-            _ => {}
+        let Some(actual) = linear_waves_by_id.get(&initiative_id) else {
+            let message =
+                format!("wave/{wave} points at missing Linear Initiative {initiative_id}");
+            diagnostics.push(message.clone());
+            blocking.push(message);
+            continue;
+        };
+        let name = (actual.name != expected_initiative_name).then_some(expected_initiative_name);
+        let summary = (actual.summary != summary).then_some(summary);
+        if let Some(name) = &name {
+            actions.push(format!(
+                "rename Linear Initiative `{}` ({initiative_id}) to `{name}` for wave/{wave}",
+                actual.name
+            ));
+        }
+        if summary.is_some() {
+            actions.push(format!(
+                "update Linear Initiative {initiative_id} summary from {default_branch}:wave/{wave}/GOAL.md"
+            ));
         }
 
         let projects = client
@@ -2253,6 +2254,8 @@ async fn pm_sync_async(
         actions.push(format!(
             "refresh wave/{wave} PM snapshot from Linear Initiative {initiative_id}"
         ));
+        // Apply the checked binding and fields, not a later reread of the goal.
+        wave_updates.push((wave, initiative_id, name, summary));
     }
 
     if !options.plan && !blocking.is_empty() {
@@ -2264,13 +2267,10 @@ async fn pm_sync_async(
 
     if !options.plan {
         let team_id = team_id.expect("non-plan sync requires repository Team");
-        for wave in &waves {
-            let initiative =
-                read_initiative(repo, wave).expect("preflight required every selected Initiative");
-            let expected_initiative_name = title_case(wave);
-            if linear_waves_by_id.get(&initiative) != Some(&expected_initiative_name) {
+        for (wave, initiative, name, summary) in wave_updates {
+            if name.is_some() || summary.is_some() {
                 client
-                    .rename_wave(&initiative, &expected_initiative_name)
+                    .update_wave(&initiative, name.as_deref(), summary.as_deref())
                     .await
                     .map_err(pm_to_ops)?;
             }

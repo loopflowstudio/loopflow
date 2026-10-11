@@ -135,6 +135,9 @@ impl ClaudeHarness {
         }
         let mut cmd = Command::new("claude");
         cmd.args(&args);
+        if let Some(context) = &config.conversation_context {
+            cmd.args(super::context::claude_args(context)?);
+        }
         super::configure_agent_env(&mut cmd, config);
         let activation = match &self.account_route {
             Some(route) => route.launch_as(cmd.as_std_mut()).await?,
@@ -868,6 +871,7 @@ mod tests {
             chrome: false,
             session_attachment: None,
             system_prompt: String::new(),
+            conversation_context: None,
             task_prompt: "task".to_string(),
             skill_invocation: None,
             output_schema: None,
@@ -1017,6 +1021,7 @@ done
             chrome: false,
             session_attachment: None,
             system_prompt: String::new(),
+            conversation_context: None,
             task_prompt: String::new(),
             skill_invocation: None,
             output_schema: None,

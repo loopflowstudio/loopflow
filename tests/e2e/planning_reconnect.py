@@ -81,14 +81,23 @@ class Handler(BaseHTTPRequestHandler):
                         {
                             "id": "initiative-task-pr-tests",
                             "name": state["initiative_name"],
-                            "description": "",
+                            "description": state.get("initiative_description", ""),
                         }
                     ]
                 )
             }
         elif "mutation UpdateInitiative" in query:
-            state["initiative_name"] = variables["name"]
-            data = {"initiativeUpdate": {"initiative": {"id": variables["id"]}}}
+            update = variables["input"]
+            state["initiative_name"] = update.get("name", state["initiative_name"])
+            state["initiative_description"] = update.get(
+                "description", state.get("initiative_description", "")
+            )
+            data = {
+                "initiativeUpdate": {
+                    "success": True,
+                    "initiative": {"id": variables["id"]},
+                }
+            }
         elif "query ListInitiativeProjects" in query:
             data = {"initiative": {"projects": _page([project])}}
         elif "query ListProjectIssues" in query:

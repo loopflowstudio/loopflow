@@ -70,6 +70,9 @@ mod tests {
         "provider_session_accounts",
         "provider_tokens",
         "schema_migrations",
+        // Cleanup indexes retained history; it does not change workspace surfaces.
+        "session_evidence",
+        "session_evidence_backfill",
         "store_revisions",
         "task_linear_ingested_comments",
         "tool_responses",

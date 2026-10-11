@@ -105,6 +105,12 @@ integration-test target in the focused proof, not only `--lib`. Preserve deletio
 of obsolete helpers and their exclusive tests together; resolving an import must
 not resurrect a test for an API removed on main.
 
+Cleanup changes also exercise `pr_tests`, `land_tests` and
+`task_github_cache_tests`: these call reconciliation through both the library and
+CLI, beyond tests named `cleanup`. Classify new storage tables in the revision
+coverage test. Scheduler locks must be checked on Linux, including descriptor
+inheritance; a macOS-only pass does not cover Linux flock lifetime.
+
 ## Quick Reference
 
 ```bash

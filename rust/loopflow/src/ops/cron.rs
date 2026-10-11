@@ -297,7 +297,18 @@ pub(crate) fn repository_tick_disabled(home: &Path, key: &str) -> OpsResult<bool
     Ok(repository_disable_path(home, key).try_exists()?)
 }
 
-fn lock_repository_tick(spec: &CronSpec) -> OpsResult<fs::File> {
+#[derive(Debug)]
+struct RepositoryTickLock(fs::File);
+
+impl Drop for RepositoryTickLock {
+    fn drop(&mut self) {
+        // Forked children can briefly retain the open file description even
+        // with CLOEXEC. Maintenance admission belongs to this parent scope.
+        let _ = fs2::FileExt::unlock(&self.0);
+    }
+}
+
+fn lock_repository_tick(spec: &CronSpec) -> OpsResult<RepositoryTickLock> {
     let root = spec.host.lf_home.join("cron");
     fs::create_dir_all(&root)?;
     let file = OpenOptions::new()
@@ -307,7 +318,7 @@ fn lock_repository_tick(spec: &CronSpec) -> OpsResult<fs::File> {
         .write(true)
         .open(root.join(format!("{}.maintenance", spec.flow)))?;
     fs2::FileExt::try_lock_exclusive(&file)?;
-    Ok(file)
+    Ok(RepositoryTickLock(file))
 }
 
 /// Explicit selection persists even if launchd is unavailable during removal.
@@ -472,8 +483,9 @@ fn start_repository_fallback(agents: &Path, spec: &CronSpec) -> OpsResult<bool> 
         Err(error) => return Err(error),
     };
     if repository_tick_disabled(&spec.host.lf_home, &spec.flow)?
-        || (throttle.metadata()?.len() > 0
+        || (throttle.0.metadata()?.len() > 0
             && throttle
+                .0
                 .metadata()?
                 .modified()?
                 .elapsed()
@@ -501,7 +513,7 @@ fn start_repository_fallback(agents: &Path, spec: &CronSpec) -> OpsResult<bool> 
         command.env("HOME", home);
     }
     let mut child = command.spawn()?;
-    (&throttle).write_all(b"attempt\n")?;
+    (&throttle.0).write_all(b"attempt\n")?;
     // Reap if the initiating command stays alive; the finite child remains
     // independent when an ordinary command exits first.
     std::thread::spawn(move || {
@@ -2176,6 +2188,19 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn repository_tick_admission_ends_even_with_an_inherited_descriptor() {
+        let temp = tempfile::tempdir().unwrap();
+        let cron = spec(temp.path(), Path::new("/usr/bin/true"));
+        let lock = super::lock_repository_tick(&cron).unwrap();
+        // dup shares the open file description, as fork does before exec.
+        let inherited = lock.0.try_clone().unwrap();
+        drop(lock);
+        let next = super::lock_repository_tick(&cron).expect("parent released admission");
+        drop(inherited);
+        drop(next);
     }
 
     #[test]

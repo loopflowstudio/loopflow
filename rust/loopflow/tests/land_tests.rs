@@ -2036,9 +2036,11 @@ fi"#;
                 .unwrap();
             assert_eq!((step, flow_process.as_str()), (0, "failed"));
         }
-        assert!(!worktree.exists());
-        assert!(!local_branch_exists(&repo, "watched-land"));
-        assert!(!remote_branch_exists(&repo, "watched-land"));
+        // The observing CLI still runs in this checkout. Merge settlement is
+        // independent of collection; a later outside tick owns the retry.
+        assert!(worktree.exists());
+        assert!(local_branch_exists(&repo, "watched-land"));
+        assert!(remote_branch_exists(&repo, "watched-land"));
         if repair {
             let repaired_head = fs::read_to_string(&repair_proof).unwrap();
             let merged_head: String = conn
@@ -2613,8 +2615,20 @@ esac
         .args(["task", "complete", "INF-123"])
         .output()
         .unwrap();
-    assert!(String::from_utf8_lossy(&completed.stderr)
-        .contains("is complete, but cleanup is incomplete"));
+    assert!(
+        completed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&completed.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&completed.stderr).contains("retained "),
+        "{}",
+        String::from_utf8_lossy(&completed.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(worktree.join("scratch/retained.md")).unwrap(),
+        "keep the finishing notes"
+    );
     assert_eq!(
         runtime
             .block_on(fixture.store.task_state(&fixture.task.id))

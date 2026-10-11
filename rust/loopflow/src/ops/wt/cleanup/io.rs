@@ -239,7 +239,16 @@ fn decode<T: DeserializeOwned>(response: &str) -> OpsResult<T> {
 }
 
 fn worker_command(request: &Request) -> OpsResult<Command> {
-    let mut command = Command::new(std::env::current_exe()?);
+    let executable = std::env::current_exe()?;
+    #[cfg(not(test))]
+    let executable = if executable.file_name().is_some_and(|name| name == "lf") {
+        executable
+    } else {
+        // A library caller (including Desktop) cannot handle the CLI's worker
+        // entry point. Use its selected lf, not the application's executable.
+        crate::os_process::resolve_pinned_lf_binary().map_err(super::error)?
+    };
+    let mut command = Command::new(executable);
     exclude_inherited_descriptors(&mut command)?;
     if let Request::OpenLock { socket, .. } = request {
         use std::os::unix::process::CommandExt;

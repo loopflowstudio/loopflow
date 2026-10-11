@@ -757,3 +757,5 @@ strip links to its own site in a new tab.
 - Jack Heart: "or does that go better in pargraph" → yes. The `x12` CLI heading is back to "`lf`: the CLI for launching coding agents." and his line opens the paragraph: "Underneath Loopflow's work-centered API is `lf`: a universal interface for agent sessions across providers, and the software engineering process between the sessions."
 
 - Jack Heart set the CLI heading: "lf: the CLI for software engineering workflows with coding agents". Set in `x12`.
+
+- Jack Heart: "or the CLI for shipping software with coding agents?" → set as the `x12` CLI heading, replacing "…for software engineering workflows with coding agents".

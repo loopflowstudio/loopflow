@@ -211,12 +211,45 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
             )
             .await
             .unwrap();
+        let connection = rusqlite::Connection::open(&database).unwrap();
+        let plans = || {
+            let mut statement = connection
+                .prepare("SELECT id FROM repository_plans WHERE repo IN (?1,?2) ORDER BY id")
+                .unwrap();
+            statement
+                .query_map(
+                    rusqlite::params![alpha.repo(), alias.display().to_string()],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        let original_plans = plans();
+        assert_eq!(original_plans.len(), 2);
+        let canonical_plan: String = connection
+            .query_row(
+                "SELECT id FROM repository_plans WHERE repo=?1 AND selected=1",
+                [alpha.repo()],
+                |row| row.get(0),
+            )
+            .unwrap();
         let resolved = store
             .get_wave_at(&WaveLocator::discover(&repo_a, "legacy").unwrap())
             .await
             .unwrap()
             .unwrap();
         assert_eq!(resolved.id(), legacy.id());
+        assert_eq!(plans(), original_plans);
+        let selected_plan: String = connection
+            .query_row(
+                "SELECT id FROM repository_plans WHERE repo=?1 AND selected=1",
+                [resolved.repo()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(selected_plan, canonical_plan);
+
         assert_eq!(
             resolved.repo(),
             std::fs::canonicalize(&repo_a)

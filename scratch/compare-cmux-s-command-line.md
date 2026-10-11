@@ -3,8 +3,9 @@
 **Status (October 10, 2026):** Jack Heart accepted this diff for queue, then
 Task-completing shipping. Implementation and focused headless evidence are retained;
 native/configured proof is not claimed. The owners below replace the earlier demo
-hold. Jack Heart’s updated October 10 brief accepts the earlier LOO-412
-integration; its newer unmerged reduction is not a shipping prerequisite.
+hold. The operator interpreted Jack Heart’s acceptance as covering the earlier
+LOO-412 integration, excluding its unmerged reduction from shipping prerequisites.
+Jack did not author that later brief or explicitly decide that dependency detail.
 
 LOO-418/#1499, LOO-406/#1503 and the earlier LOO-412 integration through
 `96f714bd6` are composed locally. Work tabs, content-owned locations, ordinary pane
@@ -39,7 +40,7 @@ LOO-412's current source/design retains `lf planning status` and key recovery,
 but replaces connect/use/select and per-Wave enrollment with one configured
 transport per repository (Linear or personal/shared Git). Mixed Linear/Git exchange
 is superseded, not an unfinished feature to file. This checkout contains an earlier
-412 integration. Jack Heart’s updated October 10 brief keeps newer unmerged
+412 integration. The operator’s October 10 brief interpretation keeps newer unmerged
 transport/domain changes with LOO-412, outside this baseline’s shipping prerequisites.
 The old setup is implemented here, not the target design; the newer configured
 transport is not delivered here. Actual main conflicts and build/test failures remain
@@ -306,7 +307,7 @@ its typed writer supersede `PlanningCommand::{Connect,Use,Select}` and manual
 enrollment. This accepted baseline still implements them. The newer dependency
 also deletes association/recovery paths and retains `TaskSource`; wholesale
 integration would require deliberate reconciliation with correspondence, authored
-delegation and no-owner refusal. Jack Heart’s updated October 10 brief leaves
+delegation and no-owner refusal. The operator’s October 10 brief interpretation leaves
 that unmerged reduction with LOO-412. No second exchange engine is introduced.
 
 `42990dea3` completed both remaining deletions: the stale October 8 walkthrough
@@ -419,8 +420,7 @@ the earlier enrollment baseline; configured transport is replacement direction o
 
 The earlier pinned `lf sync --manual 2588b1ca277e1a1a080488b3a31abaae82505685`
 attempt conflicted in 33 files and was aborted back to `16e9c950b9`. That remains
-failed integration evidence, not a current shipping blocker: Jack Heart's updated
-October 10 brief explicitly accepts this older baseline and leaves newer unmerged
+failed integration evidence, not a current shipping blocker: the operator's October 10 brief interprets Jack Heart's acceptance as covering this older baseline and leaves newer unmerged
 transport/domain changes with LOO-412. No dependency retry or peer edit occurred
 in this reconciliation. Queue still owns actual main conflicts and failing checks.
 The historical mixed design remains at
@@ -529,7 +529,9 @@ LOO-452 shortcut customization and LOO-453 readiness/events explorations.
 
 **Queue scope:** gate the accepted baseline after resolving actual main conflicts
 and build/test failures. Newer unmerged LOO-412 changes and deferred proof owners
-are not shipping holds. The October 10 gate failed; focused repairs do not constitute a final-tree pass. See findings for remaining queue blockers. One PR.
+are not shipping holds. The October 10 gate failed; its remaining Rust and TaskCapture/TaskFlow failures
+now have confirming focused passes. Findings retains failures, final-tree evidence
+and CI limits; no new full-suite receipt is claimed. Caller invokes shipping. One PR.
 Gate owns affected Rust suites and
 `cargo test -p loopflow --test dto_fixtures` for Rust wire fixtures, plus
 `cargo test -p loopflow --test documented_commands` for command ambiguity only.

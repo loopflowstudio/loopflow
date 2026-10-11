@@ -210,7 +210,7 @@ struct TaskFlowTests {
         #expect(FlowLoopGeometry.below(1) > FlowLoopGeometry.below(0))
     }
 
-    @Test("The Task workspace opens on the ensured Session, with the Workflow in its header and the Flow process log as a pane")
+    @Test("Task navigation opens Work only; an explicit Session link keeps the Workflow and companions")
     @MainActor
     func taskWorkspace() async throws {
         _ = NSApplication.shared
@@ -244,11 +244,14 @@ struct TaskFlowTests {
         let reader = ScriptedReader(repo: repo, planning: ["roadmap": roadmap, "waves": waves],
                                     work: work, runs: [run])
         let calls = CallLog()
+        let roadmapJSON = String(decoding: try JSONSerialization.data(withJSONObject: roadmap), as: UTF8.self)
         let query = RegistryQuery(watchWork: { await reader.open() }) { args, _ in
             await calls.add(args)
             switch (args.first, args.dropFirst().first) {
             case ("session", "ensure"):
                 return try await reader.ensure(issue: args[3])
+            case ("session", "list"): return try await reader.inventory()
+            case ("wave", "show"): return roadmapJSON
             case ("machine", "id"): return #"{"id":"\#(fixtureMachineId)"}"#
             default: throw RegistryQueryError("The fixture has no \(args.prefix(2).joined(separator: " "))")
             }
@@ -257,7 +260,7 @@ struct TaskFlowTests {
         let keeping = Task { await model.keepWorkCurrent() }
         defer { keeping.cancel() }
         let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
-        let view = SessionsView(model: model, repoPath: repo, workspaces: registry, query: query)
+        let view = SessionsView(model: model, repoPath: repo, workspaces: registry, repository: "fixture-repository", query: query)
         let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 1280, height: 720),
                               styleMask: [.titled], backing: .buffered, defer: false)
         window.contentView = NSHostingView(rootView: view)
@@ -276,24 +279,30 @@ struct TaskFlowTests {
         // ViewInspector reads the toolbar and header; panes take the model from
         // the environment, so what they draw is read from AppKit's tree.
         func find(_ id: String) throws -> InspectableView<ViewType.ClassifiedView> {
-            try view.inspect().find(viewWithAccessibilityIdentifier: id)
+            do { return try view.inspect().find(viewWithAccessibilityIdentifier: id) }
+            catch { throw RegistryQueryError("Missing workspace element: \(id): \(error)") }
         }
         func drawn() -> Set<String> {
             Set(accessible(window.contentView!).compactMap { ax($0, "Identifier") as? String })
         }
 
-        // Opening a Task asks `lf` for its one Session and opens what it answers.
         try await eventually("planning arrives") { model.task(id: "issue-now") != nil }
         let task = try #require(model.task(id: "issue-now")?.task)
         let identity = try #require(task.reference.workspace?.identity)
-        let panes = fixtureWork(registry, identity).multiplexer
+        model.bindWorkspaces(registry, repository: "fixture-repository")
         model.select(.task(id: task.id))
-        model.navigation.content = .terminals
-        try await eventually("the Task's Session is ensured and opened") {
-            panes.focusedPane.sessionId == "ensured-\(task.task.identifier)"
-        }
-        #expect(await calls.calls.filter { $0.first == "session" && $0[1] == "ensure" }
-            == [["session", "ensure", "--task", task.task.identifier, "--json"]])
+        let key = model.workspaceKey(for: .task(id: task.id), repository: "fixture-repository")
+        let panes = registry.workspace(for: key, title: task.task.name, location: identity).multiplexer
+        try await settle()
+        #expect(panes.focusedPane.sessionId == nil)
+        #expect(await calls.calls.allSatisfy { $0.prefix(2) != ["session", "ensure"] })
+
+        // A separate explicit link opens the known conversation, not bare navigation.
+        let record = try JSONDecoder().decode(SessionRecord.self, from: Data(reader.ensure(issue: task.task.identifier).utf8))
+        let link = try #require(TaskLink(issue: task.task.identifier, repo: repo, session: record.id).url)
+        await model.openTaskLink(link)
+        try await eventually("the explicitly addressed Session opens") { panes.focusedPane.sessionId == record.id }
+        #expect(await calls.calls.allSatisfy { $0.prefix(2) != ["session", "ensure"] })
 
         // The header is the Workflow: the current node, its edges as buttons, Move to.
         try await eventually("the Task part arrives") { model.taskWork[task.id].value != nil }
@@ -383,6 +392,10 @@ private final class ScriptedReader {
         return String(decoding: try JSONSerialization.data(withJSONObject: session), as: UTF8.self)
     }
 
+    func inventory() throws -> String {
+        String(decoding: try JSONSerialization.data(withJSONObject: ["entries": sessions, "next": NSNull()]), as: UTF8.self)
+    }
+
     private func answer(_ request: WorkRequest) {
         let id: Int
         switch request {
@@ -396,7 +409,7 @@ private final class ScriptedReader {
 
     private func send(_ part: String, answers: Int, body: [String: Any]) {
         sequence += 1
-        let line: [String: Any] = ["part": part, "sequence": sequence, "answers": answers, "home": "/home",
+        let line: [String: Any] = ["part": part, "sequence": sequence, "answers": answers, "home": fixtureMachineId,
                                    "revisions": NSNull(), "unavailable": NSNull(), "body": body]
         guard let data = try? JSONSerialization.data(withJSONObject: line),
               let frame = try? WorkFrame.decode(line: data) else { return }

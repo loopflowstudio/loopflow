@@ -188,10 +188,10 @@ Jack Heart accepted LOO-427 for queue then Task-completing shipping on October 1
 (`16e9c950b9`), superseding the demo hold without claiming missing proof. LOO-397
 owns broader explanations/discovery; LOO-391 native Work-tab/input/read, configured
 remote panes and running-Flow exchange proof; LOO-416 relaunch persistence;
-LOO-452 richer keys; LOO-453 readiness/events. Allocations: comparison.
-Jack accepts the earlier LOO-412 baseline. Its unmerged
-configured-transport replacement stays with LOO-412, not a shipping prerequisite.
-October 10 queue: main integrated; gate failed. Repairs and final gate remain. No installation,
+LOO-452 richer keys; LOO-453 readiness/events. Owners: comparison.
+The operator interprets Jack’s acceptance as covering the earlier LOO-412 baseline;
+its unmerged replacement stays with LOO-412. Jack did not author that brief choice.
+Queue repairs pass focused checks; full matrix stays with CI. No installation,
 live migration/publication or provider-account use is authorized.
 
 ## Task delivery boundary (LOO-418, reconciled 2026-10-09)

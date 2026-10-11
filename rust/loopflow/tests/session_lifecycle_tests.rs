@@ -321,53 +321,7 @@ fi
     let project = status["planning"]["project"]["id"].as_str().unwrap();
     let selected = fixture.run(&["wave", "workflow", "set", "--project", project, "proof"]);
     assert!(selected.status.success(), "{selected:?}");
-    // Managed skill execution needs an agent account, independently of planning.
-    let account_home = fixture.home.path().join("fixture-codex");
-    std::fs::create_dir(&account_home).unwrap();
-    let claims =
-        BASE64_URL_SAFE_NO_PAD.encode(r#"{"email":"fixture@example.com","sub":"fixture"}"#);
-    std::fs::write(
-        account_home.join("auth.json"),
-        serde_json::json!({"tokens":{"access_token":"fixture","id_token":format!("h.{claims}.s")}})
-            .to_string(),
-    )
-    .unwrap();
-    let store = loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
-        .unwrap();
-    let account_id = loopflow::store::ProviderAccountId::parse("fixture").unwrap();
-    store
-        .upsert_provider_account(&loopflow::store::ProviderAccount {
-            provider: "codex".into(),
-            account_id: account_id.clone(),
-            home: Some(account_home),
-            login_email: Some(
-                loopflow::profile::EmailAddress::parse("fixture@example.com").unwrap(),
-            ),
-            observed_email: None,
-            observed_subject: None,
-            observed_credential_digest: None,
-            observed_plan: None,
-            credential_state: loopflow::store::CredentialState::Connected,
-            routing_state: loopflow::store::RoutingState::Automatic,
-            plan: None,
-            paid_through: None,
-            utilization_percent: None,
-            cooldown_until: None,
-            cooldown_reason: None,
-            last_selected_at: None,
-            created_at: 1,
-            updated_at: 1,
-        })
-        .unwrap();
-    store
-        .set_provider_route(&loopflow::profile::ProviderRoute {
-            scope: loopflow::profile::RouteScope::Default,
-            provider: loopflow::provider_auth::Provider::Codex,
-            accounts: vec![account_id],
-            created_at: 1,
-            updated_at: 1,
-        })
-        .unwrap();
+    managed_codex_account(&fixture);
     let run = fixture
         .command(&["-b", "--agent", "codex", "task", "run", task_id])
         .env("LF_ACCOUNT_ISOLATION", "isolated")
@@ -1471,9 +1425,67 @@ fn unavailable_store_starts_no_provider() {
     );
 }
 
+fn managed_codex_account(fixture: &Fixture) {
+    // Managed skill execution needs an agent account, independently of planning.
+    let account_home = fixture.home.path().join("fixture-codex");
+    std::fs::create_dir(&account_home).unwrap();
+    let claims =
+        BASE64_URL_SAFE_NO_PAD.encode(r#"{"email":"fixture@example.com","sub":"fixture"}"#);
+    std::fs::write(
+        account_home.join("auth.json"),
+        serde_json::json!({"tokens":{"access_token":"fixture","id_token":format!("h.{claims}.s")}})
+            .to_string(),
+    )
+    .unwrap();
+    let store = loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
+        .unwrap();
+    let account_id = loopflow::store::ProviderAccountId::parse("fixture").unwrap();
+    store
+        .upsert_provider_account(&loopflow::store::ProviderAccount {
+            provider: "codex".into(),
+            account_id: account_id.clone(),
+            home: Some(account_home),
+            login_email: Some(
+                loopflow::profile::EmailAddress::parse("fixture@example.com").unwrap(),
+            ),
+            observed_email: None,
+            observed_subject: None,
+            observed_credential_digest: None,
+            observed_plan: None,
+            credential_state: loopflow::store::CredentialState::Connected,
+            routing_state: loopflow::store::RoutingState::Automatic,
+            plan: None,
+            paid_through: None,
+            utilization_percent: None,
+            cooldown_until: None,
+            cooldown_reason: None,
+            last_selected_at: None,
+            created_at: 1,
+            updated_at: 1,
+        })
+        .unwrap();
+    store
+        .set_provider_route(&loopflow::profile::ProviderRoute {
+            scope: loopflow::profile::RouteScope::Default,
+            provider: loopflow::provider_auth::Provider::Codex,
+            accounts: vec![account_id],
+            created_at: 1,
+            updated_at: 1,
+        })
+        .unwrap();
+}
+
 #[test]
 fn headless_history_is_discoverable_without_entering_the_interactive_list() {
     let fixture = Fixture::new(false);
+    managed_codex_account(&fixture);
+    let provider = fixture.home.path().join("bin/codex");
+    std::fs::write(
+        &provider,
+        support::codex_app_server_script("Parser tidied.", ""),
+    )
+    .unwrap();
+    std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
     support::register_task_with_pr(
         fixture.home.path(),
         fixture.repo.path(),
@@ -1485,7 +1497,7 @@ fn headless_history_is_discoverable_without_entering_the_interactive_list() {
         "task-pr-tests",
         "--batch",
         "--agent",
-        "opencode",
+        "codex",
         ":",
         "Tidy the parser",
     ]);

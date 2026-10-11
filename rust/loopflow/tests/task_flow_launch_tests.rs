@@ -925,6 +925,7 @@ fn task_edges_launch_flows_named_after_collection_commands() {
         "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, flow: list}\n",
     )
     .unwrap();
+    task.select_workflow("reserved");
     task.ok(&["-b", "task", "run", "INF-123", "reserved"]);
     assert_eq!(
         task.workflow()["position"],
@@ -1707,9 +1708,10 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
 "#,
     );
     task.ok(&[
-        "project",
+        "wave",
         "workflow",
         "set",
+        "--project",
         task.registered.task.project_id.as_str(),
         "live-workflow",
         "--file",

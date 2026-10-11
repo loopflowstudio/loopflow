@@ -298,7 +298,7 @@ fn public_status_keeps_healthy_plans_and_receipts_visible_beside_a_damaged_journ
 }
 
 #[test]
-fn public_association_preserves_ids_and_reports_unfinished_projection() {
+fn public_association_preserves_ids_and_resolves_correspondence() {
     use loopflow::planning_git::PlanningDestination;
     use loopflow::store::sqlite::SqliteStore;
 
@@ -393,7 +393,12 @@ fn public_association_preserves_ids_and_reports_unfinished_projection() {
                 String::from_utf8_lossy(&reply.stderr)
             );
             assert!(String::from_utf8_lossy(&reply.stdout).contains(local_id));
-            assert!(String::from_utf8_lossy(&reply.stderr).contains("unfinished"));
+            assert!(
+                String::from_utf8_lossy(&reply.stderr)
+                    .contains("No provider effect or Git publication was issued"),
+                "{}",
+                String::from_utf8_lossy(&reply.stderr)
+            );
         }
     }
     let reply = invoke_lf(
@@ -464,5 +469,5 @@ fn public_association_preserves_ids_and_reports_unfinished_projection() {
         local.project_id.as_str(),
     ]
     .contains(&change.object.id.as_str())));
-    assert!(run(repo.path(), home.path(), &["status"]).contains("joint planning projection"));
+    assert!(run(repo.path(), home.path(), &["status"]).contains("Retained import: fixture"));
 }

@@ -1234,7 +1234,7 @@ fn task_run_explain_explicit_and_checkout_inferred_actions_preserve_all_state() 
         "--json",
     ]);
     assert!(invalid["action"].is_null());
-    assert_eq!(invalid["resolution"]["wave"]["state"], "bound");
+    assert_eq!(invalid["resolution"]["wave"]["state"], "bound", "{invalid}");
     assert_eq!(
         invalid["resolution"]["task"]["value"],
         registered.task.id.as_str()
@@ -1373,7 +1373,9 @@ fn task_run_explain_reports_remote_unknown_and_refused_evidence_without_effects(
             ),
             "remote" => {
                 assert!(report["action"].is_null());
-                assert!(report["unavailable"].to_string().contains("no peer read"));
+                assert!(report["unavailable"]
+                    .to_string()
+                    .contains("no recorded execution owner was observed"));
             }
             "unknown" => assert_eq!(
                 report["resolution"]["execution_machine"]["state"],
@@ -1705,12 +1707,13 @@ fn session_connect_explain_never_probes_or_claims_a_live_endpoint() {
     listener.set_nonblocking(true).unwrap();
     // Owned endpoint with a retained driver: no provider or account is started.
     db.execute(
-        "INSERT INTO processes(lfid,trace_id,started_at) VALUES('connection-driver','fixture',1)",
+        "INSERT INTO processes(id,trace_id,started_at) VALUES('connection-driver','fixture',1)",
         [],
     )
     .unwrap();
-    db.execute("UPDATE agent_sessions SET provider='codex',driver_process_lfid='connection-driver',driver_generation=1,provider_generation=1,provider_endpoint=?1,provider_thread='native-proof' WHERE id=?2",
-        rusqlite::params![endpoint.to_str().unwrap(), session.id]).unwrap();
+    db.execute("INSERT INTO processes(id,kind,trace_id,parent_lf_process_id,agent_session_id,attached_lf_process_id,attachment_token,endpoint,started_at) VALUES('connection-agent','agent','fixture','connection-driver',?1,'connection-driver','claim',?2,1)",
+        rusqlite::params![session.id, endpoint.to_str().unwrap()]).unwrap();
+    db.execute("UPDATE agent_sessions SET provider='codex',agent_process_id='connection-agent',provider_thread='native-proof' WHERE id=?1", [&session.id]).unwrap();
     db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
     let before = fs::read(&db_path).unwrap();
     let report: serde_json::Value = serde_json::from_str(&success(
@@ -2319,11 +2322,13 @@ fn task_planning_explain_retains_deletion_and_missing_evidence() {
         "--json",
     ]);
     assert!(invalid["action"].is_null());
-    assert_eq!(invalid["resolution"]["wave"]["state"], "bound");
-    assert_eq!(
-        invalid["resolution"]["task"]["value"],
-        registered.task.id.as_str()
-    );
+    // Invalid creation input must not inherit the deleted Task in this checkout.
+    assert_eq!(invalid["resolution"]["wave"]["state"], "unavailable");
+    assert!(invalid["resolution"]["wave"]["reason"]
+        .as_str()
+        .unwrap()
+        .contains("not been validated"));
+    assert_eq!(invalid["resolution"]["task"]["state"], "unbound");
     assert!(invalid["impediments"][0]
         .as_str()
         .unwrap()
@@ -2952,7 +2957,9 @@ fn task_checkout_explain_reads_restoration_and_refusals_without_restoring() {
                 "unavailable"
             ),
             "remote" => assert!(
-                report["unavailable"].to_string().contains("no peer read"),
+                report["unavailable"]
+                    .to_string()
+                    .contains("no recorded execution owner was observed"),
                 "{report}"
             ),
             _ => unreachable!(),
@@ -3040,7 +3047,7 @@ fn task_checkout_explain_proposes_unallocated_work_and_preserves_missing_storage
     .unwrap();
     assert!(report["action"].is_null());
     assert!(
-        report["impediments"]
+        report["unavailable"]
             .to_string()
             .contains("first-start admission is unavailable"),
         "{report}"

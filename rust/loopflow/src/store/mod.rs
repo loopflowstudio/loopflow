@@ -1905,7 +1905,6 @@ mod tests {
             "UPDATE pm_projects SET membership_unresolved=1",
             "UPDATE pm_projects SET body='malformed'",
             "UPDATE pm_projects SET observed_at=18",
-            "DELETE FROM pm_wave_projects",
             "UPDATE pm_wave_sync SET initiative='different-initiative'",
         ] {
             let (directory, store, wave) = planning_store().await;
@@ -1933,6 +1932,28 @@ mod tests {
                 snapshot.snapshot.projects
             );
         }
+    }
+
+    #[tokio::test]
+    async fn selected_project_survives_missing_provider_membership_inventory() {
+        let (directory, store, wave) = planning_store().await;
+        let project = make_project(&wave);
+        store.create_project(&project).await.unwrap();
+        select_project(&store, &project);
+        let task = make_task(&wave, &project);
+        store
+            .put_pm_snapshot(task_planning_snapshot(&wave, &project, &task), None)
+            .await
+            .unwrap();
+        let before = crate::ops::project::current_project(&store, &wave).unwrap();
+        rusqlite::Connection::open(directory.path().join("registry.db"))
+            .unwrap()
+            .execute_batch("DELETE FROM pm_wave_projects")
+            .unwrap();
+        assert_eq!(
+            crate::ops::project::current_project(&store, &wave).unwrap(),
+            before
+        );
     }
 
     #[tokio::test]

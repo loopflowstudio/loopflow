@@ -151,14 +151,15 @@ struct TaskCaptureTests {
         let repoIdentity = WorkspaceIdentity(machineId: machineId, worktree: repo)
         let taskIdentity = WorkspaceIdentity(machineId: machineId, worktree: taskPath)
         let registry = SessionsWorkspaceRegistry(localMachineId: machineId)
-        let repoPanes = fixtureWork(registry, repoIdentity).multiplexer
+        model.bindWorkspaces(registry, repository: "fixture-repository")
+        let repoPanes = registry.workspace(for: model.workspaceKey(for: nil, repository: "fixture-repository"), title: "Repository", location: repoIdentity).multiplexer
         repoPanes.newShell(command: ["retained-shell"])
         repoPanes.load(sessionId: "existing-conversation")
         let retained = repoPanes.layout.allPanes
-        let taskPanes = fixtureWork(registry, taskIdentity).multiplexer
+        let taskPanes = registry.workspace(for: model.workspaceKey(for: .task(id: task.id), repository: "fixture-repository"), title: task.task.name, location: taskIdentity).multiplexer
         taskPanes.newShell(command: ["task-shell"])
         let taskLayout = taskPanes.layout
-        let view = SessionsView(model: model, repoPath: repo, workspaces: registry,
+        let view = SessionsView(model: model, repoPath: repo, workspaces: registry, repository: "fixture-repository",
             query: RegistryQuery { _, _ in throw RegistryQueryError("Unexpected read") })
         let before = repoPanes.layout
         let content = model.navigation.content

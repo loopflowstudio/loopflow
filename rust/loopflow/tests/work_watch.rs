@@ -1003,7 +1003,8 @@ fn peer_planning_receipts_reach_open_desktop_without_refresh() {
         }
     };
     assert!(read(&|statuses| statuses.is_empty()).is_empty());
-    // Non-Git Work folders still display stored status. No remote worker runs.
+    // Non-Git Work folders still display stored status; foreground acquisition
+    // reports the unavailable destination without discarding local planning.
     let destination = PlanningDestination::new(
         home.path().join("offline.git").to_str().unwrap(),
         "refs/loopflow/planning/shared/team",
@@ -1028,10 +1029,17 @@ fn peer_planning_receipts_reach_open_desktop_without_refresh() {
             [&id],
         )
         .unwrap();
-    let statuses =
-        read(&|statuses| statuses[0].publication_state.as_deref() == Some("unconfirmed"));
+    let statuses = read(&|statuses| {
+        statuses[0].publication_state.as_deref() == Some("unconfirmed")
+            && statuses[0].fetched_revision.as_deref() == Some("fetched")
+    });
     assert_eq!(statuses[0].fetched_revision.as_deref(), Some("fetched"));
-    assert_eq!(statuses[0].publication_error.as_deref(), Some("reply lost"));
+    // The active foreground connection can already have recorded a newer
+    // publication failure. Both readings retain the unconfirmed receipt.
+    assert!(matches!(
+        statuses[0].publication_error.as_deref(),
+        Some("reply lost" | "Git publication pending; local planning retained")
+    ));
     assert_eq!(statuses[0].imported_revision, None);
     assert_eq!(statuses[0].pending_local, Some(true));
     home.store.use_peer_planning(repo, None).unwrap();

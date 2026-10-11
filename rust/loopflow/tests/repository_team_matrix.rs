@@ -296,7 +296,7 @@ fn repository_team_matrix() {
         let error = String::from_utf8_lossy(&checkout.stderr);
         assert!(!checkout.status.success());
         assert!(
-            error.contains("is done; use `lf task reopen"),
+            error.contains("is done; `lf task reopen"),
             "unexpected task result: {error}"
         );
     }

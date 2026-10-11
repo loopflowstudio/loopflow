@@ -2473,7 +2473,7 @@ mod tests {
     use crate::durable::{ProjectId, TaskId};
     use crate::id::{LfProcessId, TraceId, WaveId};
     use crate::ops::pm::{TaskComment, TaskCommentAuthor};
-    use crate::planning_exchange::PlanningSnapshot;
+    use crate::planning_exchange::{PlanningKind, PlanningSnapshot};
     use crate::planning_git::PlanningDestination;
     use crate::work::wave::Wave;
 
@@ -8979,6 +8979,15 @@ mod tests {
         assert_ne!(legacy.id, incoming_task);
         assert_ne!(legacy.project_id, incoming_project);
         preserve_execution(&target, private.id(), &legacy.id);
+        target
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET branch='retained-branch',base_commit='retained-base' WHERE id=?1",
+                [legacy.id.as_str()],
+            )
+            .unwrap();
         target.conn.lock().unwrap().execute(
             "INSERT INTO task_prs(id,task_id,sequence,slug,branch,base_commit,created_at,updated_at)
              VALUES(?1,?2,1,'retained','retained-branch','retained-base',1,1)",
@@ -9602,14 +9611,27 @@ mod tests {
         seed(&store);
         let original = export(&store, "/source");
         let mut reused = original.clone();
-        // Use a new object so repository ownership cannot mask the global
-        // mutation-ID collision this fixture is meant to exercise.
-        reused
+        // Remap the complete graph so ownership and incomplete-record validation
+        // cannot mask the global mutation-ID collision.
+        let replacements: std::collections::BTreeMap<_, _> = reused
             .changes
-            .retain(|_, change| change.field == "issue_title");
-        let change = reused.changes.values_mut().next().unwrap();
-        change.object.id = TaskId::new().to_string();
-        change.value = json!("Conflicting identity from another plan");
+            .values()
+            .map(|change| {
+                let id = match change.object.kind {
+                    PlanningKind::Wave => WaveId::new().to_string(),
+                    PlanningKind::Project => ProjectId::new().to_string(),
+                    PlanningKind::Task => TaskId::new().to_string(),
+                    PlanningKind::Comment => unreachable!("fixture has no comments"),
+                };
+                (change.object.id.clone(), id)
+            })
+            .collect();
+        for change in reused.changes.values_mut() {
+            change.object.id = replacements[&change.object.id].clone();
+            if let Some(replacement) = change.value.as_str().and_then(|id| replacements.get(id)) {
+                change.value = json!(replacement);
+            }
+        }
         let error = store
             .import_peer_planning("/other", &destination(), "reused", &reused)
             .unwrap_err();

@@ -923,7 +923,14 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
     let catalog = lf(
         repo.path(),
         home.path(),
-        &["wave", "workflow", "list", "--wave", "product", "--json"],
+        &[
+            "wave",
+            "workflow",
+            "list",
+            "--wave",
+            status["execution"]["wave"].as_str().unwrap(),
+            "--json",
+        ],
     );
     let private = catalog
         .as_array()

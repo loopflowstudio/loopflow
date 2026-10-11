@@ -2370,6 +2370,15 @@ mod local_planning_tests {
                 |row| row.get(0),
             )
             .unwrap();
+        // Exercise current readers only after the complete candidate schema.
+        for draft in [
+            "agent_process",
+            "lf_process_ids",
+            "planning_peers",
+            "task_checkout_machine",
+        ] {
+            conn.execute_batch(&current_draft_sql(draft)).unwrap();
+        }
         let store = SqliteStore {
             conn: Arc::new(Mutex::new(conn)),
         };

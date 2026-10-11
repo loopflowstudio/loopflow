@@ -18,7 +18,7 @@ implementation, not native or multi-Machine proof.
 LOO-412's current direction selects one configured planning transport per
 repository; mixed Linear/Git exchange and manual per-Wave enrollment are superseded.
 `lf planning status` remains. This accepted diff implements the earlier enrollment
-baseline, not that newer configuration path. Jack Heart’s updated October 10 brief
+baseline, not that newer configuration path. The operator’s October 10 brief interpretation
 leaves the unmerged transport/domain replacement with LOO-412; it is not a shipping
 prerequisite. Actual main conflicts and failing checks still require repair.
 Shared first-start refusal remains until LOO-414

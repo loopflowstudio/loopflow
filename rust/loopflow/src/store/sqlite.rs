@@ -1785,6 +1785,9 @@ impl SqliteStore {
         // Canonicalization changes one repository identity, including every Wave
         // and shared planning entity under that alias. Move them atomically;
         // uniqueness conflicts must preserve both observations, never merge them.
+        // A legacy symlink locator can already have a plan ID. Retain it as an
+        // alias while keeping the canonical location's selected plan.
+        tx.execute("UPDATE repository_plans SET selected=0 WHERE repo=?1 AND EXISTS(SELECT 1 FROM repository_plans WHERE repo=?2 AND selected=1)", params![expected_repo,target_repo])?;
         for table in [
             "repository_plans",
             "waves",

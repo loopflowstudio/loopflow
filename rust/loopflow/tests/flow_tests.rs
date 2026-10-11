@@ -2374,6 +2374,14 @@ fn task_edges_keep_single_skill_execution_after_removing_run_dispatch() {
         "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, flow: list}\n",
     )
     .unwrap();
+    loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db"))
+        .unwrap()
+        .select_project_workflow(
+            &task.task.project_id,
+            "skill-edge",
+            &fs::read_to_string(repo.path().join(".lf/workflows/skill-edge.yaml")).unwrap(),
+        )
+        .unwrap();
     let (_bin, path) = scripted_provider(home.path(), &[WORK]);
     let ran = run_lf(
         repo.path(),

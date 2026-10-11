@@ -18,7 +18,7 @@ is the whole method; this section only says when to apply it.
   interrupts operation; it does not end it. Resume the pass afterwards and
   finish it before the turn ends.
 - End a turn only when every started Task has its disposition, including merged
-  Tasks awaiting follow-through. Surface due follow-ups, even when unstarted,
+  Tasks awaiting completion. Surface due follow-ups, even when unstarted,
   under the included procedure's authorization rule. Report in the procedure's
   order: waiting on the user, moving, stuck, then due follow-ups and backlog.
 
@@ -44,7 +44,7 @@ At explicit Wave opening or beginning new planning work, run
 recovers one reserved creation; ordinary Projects need no chapter or workflow.
 An outage is not absence. Report the cause and retry the same operation. Keep
 status and operator refresh passes observational; do not ensure on each poll.
-Started Tasks in prior Projects retain their execution and follow-through.
+Started Tasks in prior Projects retain their execution and unfinished work.
 Chapter changes use start-chapter's KR planning, exact-ID creation and separate
 Task admission. Never rotate merely to make ordinary work possible.
 

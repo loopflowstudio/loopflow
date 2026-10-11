@@ -255,7 +255,7 @@ remain independent of goal and memory files.
 
 Placement, native Sessions, workflow skills and GitHub delivery use the same Task
 identity. `lf land` requests merge; `lf pr reconcile` observes delivery. After
-merge, follow-through files accepted obligations or records none, then
+merge, optional new work uses ordinary Task creation;
 `lf task complete <task-id>` completes the source. A repository without a code
 remote supports local work and refuses hosted landing. Local planning does not
 require Linear at any of these boundaries.
@@ -448,45 +448,24 @@ Ambiguous provider evidence remains unresolved. `lf ci watch` repairs actionable
 CI failures while it runs.
 
 ```bash
-lf task follow-up EXP-12 --title 'Verify the installed command' --notes 'Follow-up to EXP-12: after the release is installed, run the accepted scenario and record its version and result; investigate a failure.' --due 2026-10-09
-lf task follow-up EXP-12 --finish 'The installed check has its own Task'
+lf land --wait-and-fix
+# Optional: register more work with ordinary task create.
 lf task complete EXP-12
 ```
 
-After verified merge, file accepted remaining obligations as linked follow-up
-Tasks, or record `lf task follow-up EXP-12 --none 'No accepted work remains'`.
-Use `--existing ISSUE` to link work already filed and `--wave WAVE` to choose its
-owner. Give each additional obligation a distinct `--key` before `--finish`;
-reusing a key (default: `follow-up`) retries the original filing, even if its
-title changes. Retries retain the child identity and Project after chapter
-rotation. Inspect receipts and retry identical input after an uncertain response.
-The source completes after filing,
-without waiting for those children to finish. Preserve accepted later checks in
-PR copy before landing clears scratch.
+Verified merge leaves an open Task available for optional follow-up work. New
+work uses ordinary Task creation; no filing, disposition or “none needed” record
+is required. Preserve useful findings in the PR before scratch cleanup.
 
-Filing and completion work locally without Linear. In a connected repository,
-foreground planning sync exports saved Tasks and then their related-issue links,
-including links from already completed Tasks. Closing that connection leaves
-unsent or uncertain effects for the next connection; filing starts no watcher.
-Displayed follow-up names and due dates use the current saved Task, while retry
-receipts keep their original identity and input.
-
-`ship` runs gate, waited landing, then follow-through. A bare delivery, manual
-GitHub merge or stopped finishing Flow leaves **Merged · Follow-through pending**.
-The next Task/Wave operation checks for live work, then runs `finish-delivery`
-if needed. It does not rerun gate or re-arm the merged PR.
-
-Due follow-ups return on the owning Wave's next operation, even if unstarted.
-Their briefs carry release prerequisites, expected evidence and any timezone.
-A due date is not an alarm or proof of success. Only a concrete check already
-authorized in the brief can start unattended. Filing installs no schedule;
-without an installed Wave schedule, there is no automatic check between passes.
+`ship` runs gate and waited landing. Reaching its Workflow endpoint requests
+completion. Bare landing or a manual GitHub merge alone does not complete the
+Task. If completion fails after arrival, retry completion without replaying gate
+or re-arming the merged PR.
 
 `lf task complete EXP-12` completes without moving the Workflow. Moving or
 arriving at `end` records the movement, then requests completion. A failed
 request shows **Completion pending**; retry `lf task complete EXP-12`, without
-replaying the Flow. Completion requires merge and a durable none/filed
-disposition when the Task has a PR. Linear completion and reopening change
+replaying the Flow. Completion requires a verified merge when the Task has a PR. Linear completion and reopening change
 status without moving the Workflow or stopping Processes; reopening supersedes
 an older completion request. `lf task reopen EXP-12` does the same locally,
 including offline: it returns planning to unstarted and keeps the PR, checkout,

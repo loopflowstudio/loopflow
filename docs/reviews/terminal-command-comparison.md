@@ -259,7 +259,7 @@ retained execution is abandoned. Neither failure was repaired as a prerequisite.
   status read half; emission is deferred to LOO-415, with LOO-422 interoperability.
 - **Current command/product boundaries:** LOO-401 selects `self`, `config user`,
   app opening, and outright HTML screenshot removal. LOO-418 selects zero or one
-  PR per Task and follow-through as another Task. LOO-406 owns the accepted local
+  PR per Task; optional later work uses another ordinary Task. LOO-406 owns the accepted local
   planning writer and optional Linear sync. Jack selected execution-machine local
   operations and custom Git-ref Task synchronization on October 8; LOO-412 owns
   exchange. Workflow, checkout and process authority remain local. The shared

@@ -45,7 +45,7 @@ At explicit Wave opening or beginning new planning work, run
 recovers one reserved creation; ordinary Projects need no chapter or workflow.
 An outage is not absence. Report the cause and retry the same operation. Keep
 status and operator refresh passes observational; do not ensure on each poll.
-Started Tasks in prior Projects retain their execution and follow-through.
+Started Tasks in prior Projects retain their execution and unfinished work.
 Chapter changes use start-chapter's KR planning, exact-ID creation and separate
 Task admission. Never rotate merely to make ordinary work possible.
 

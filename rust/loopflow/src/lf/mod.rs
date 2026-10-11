@@ -1027,27 +1027,6 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// File or link follow-up Tasks after merge, then record the disposition
-    FollowUp {
-        issue: String,
-        #[arg(long, conflicts_with_all = ["existing", "none", "finish"], requires = "notes")]
-        title: Option<String>,
-        #[arg(long, requires = "title")]
-        notes: Option<String>,
-        #[arg(long, requires = "title")]
-        due: Option<String>,
-        #[arg(long)]
-        wave: Option<String>,
-        #[arg(long, conflicts_with_all = ["title", "none", "finish"])]
-        existing: Option<String>,
-        #[arg(long, conflicts_with_all = ["title", "existing", "finish"])]
-        none: Option<String>,
-        #[arg(long, conflicts_with_all = ["title", "existing", "none"])]
-        finish: Option<String>,
-        /// Stable obligation key; use a distinct key for each additional follow-up
-        #[arg(long)]
-        key: Option<String>,
-    },
     /// Enable or hold CI repair for a Task without interrupting running work
     Automate {
         issue: String,
@@ -1323,8 +1302,7 @@ impl TaskCommand {
             | Self::Refile { issue, .. }
             | Self::Comment { issue, .. }
             | Self::Interrupt { issue, .. }
-            | Self::Wait { issue, .. }
-            | Self::FollowUp { issue, .. } => Some(issue),
+            | Self::Wait { issue, .. } => Some(issue),
         }
     }
 
@@ -1361,8 +1339,7 @@ impl TaskCommand {
             | Self::Refile { issue, .. }
             | Self::Comment { issue, .. }
             | Self::Interrupt { issue, .. }
-            | Self::Wait { issue, .. }
-            | Self::FollowUp { issue, .. } => Some(issue),
+            | Self::Wait { issue, .. } => Some(issue),
         }
     }
 }

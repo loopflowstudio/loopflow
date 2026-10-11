@@ -67,13 +67,6 @@
                       "state": "idle",
                       "step": null
                     },
-                    "follow_through": {
-                      "intents": [],
-                      "links": [],
-                      "needs_conversion": false,
-                      "reason": null,
-                      "scope_notes": []
-                    },
                     "latest_flow_process": null,
                     "next_move": {
                       "owner": "wave",
@@ -103,12 +96,6 @@
                       "completed_at": null,
                       "description": "Follow-up to FIX-1 https://github.com/loopflowstudio/fixture/pull/1\n\nRun the released command; retain failures.",
                       "due_date": "2026-10-09",
-                      "follow_up_sources": [
-                        {
-                          "identifier": "FIX-1",
-                          "issue_id": "source-issue"
-                        }
-                      ],
                       "id": "task_e1d59e9bbca2470e8cd28742946bf876",
                       "identifier": "lf-e1d59e9",
                       "name": "Verify installed release",
@@ -151,35 +138,6 @@
                       "reason": "Flow delivery finished; nothing further is launched",
                       "state": "idle",
                       "step": null
-                    },
-                    "follow_through": {
-                      "intents": [
-                        {
-                          "due": "2026-10-09",
-                          "existing": false,
-                          "issue_id": "task_e1d59e9bbca2470e8cd28742946bf876",
-                          "key": "installed",
-                          "notes": "Follow-up to FIX-1 https://github.com/loopflowstudio/fixture/pull/1\n\nRun the released command; retain failures.",
-                          "project_id": "project-1",
-                          "relation_id": "7c65173c-930e-42a0-adf6-a42a4878e435",
-                          "state_id": null,
-                          "team_id": "",
-                          "title": "Verify installed release",
-                          "wave": "product"
-                        }
-                      ],
-                      "links": [
-                        {
-                          "due": "2026-10-09",
-                          "identifier": "lf-e1d59e9",
-                          "issue_id": "task_e1d59e9bbca2470e8cd28742946bf876",
-                          "key": "installed",
-                          "url": null
-                        }
-                      ],
-                      "needs_conversion": false,
-                      "reason": "Accepted installed check filed",
-                      "scope_notes": []
                     },
                     "latest_flow_process": {
                       "completed": [
@@ -342,7 +300,6 @@
                       "completed_at": "2026-10-08T23:28:31.532538801Z",
                       "description": "",
                       "due_date": null,
-                      "follow_up_sources": [],
                       "id": "source-issue",
                       "identifier": "FIX-1",
                       "name": "Deliver the command",
@@ -450,35 +407,6 @@
         "reason": "Flow delivery finished; nothing further is launched",
         "state": "idle",
         "step": null
-      },
-      "follow_through": {
-        "intents": [
-          {
-            "due": "2026-10-09",
-            "existing": false,
-            "issue_id": "task_e1d59e9bbca2470e8cd28742946bf876",
-            "key": "installed",
-            "notes": "Follow-up to FIX-1 https://github.com/loopflowstudio/fixture/pull/1\n\nRun the released command; retain failures.",
-            "project_id": "project-1",
-            "relation_id": "7c65173c-930e-42a0-adf6-a42a4878e435",
-            "state_id": null,
-            "team_id": "",
-            "title": "Verify installed release",
-            "wave": "product"
-          }
-        ],
-        "links": [
-          {
-            "due": "2026-10-09",
-            "identifier": "lf-e1d59e9",
-            "issue_id": "task_e1d59e9bbca2470e8cd28742946bf876",
-            "key": "installed",
-            "url": null
-          }
-        ],
-        "needs_conversion": false,
-        "reason": "Accepted installed check filed",
-        "scope_notes": []
       },
       "latest_flow_process": {
         "completed": [
@@ -641,7 +569,6 @@
         "completed_at": "2026-10-08T23:28:31.532538801Z",
         "description": "",
         "due_date": null,
-        "follow_up_sources": [],
         "id": "source-issue",
         "identifier": "FIX-1",
         "name": "Deliver the command",
@@ -687,35 +614,6 @@
           "step": null
         },
         "external_project_id": "project-1",
-        "follow_through": {
-          "intents": [
-            {
-              "due": "2026-10-09",
-              "existing": false,
-              "issue_id": "task_e1d59e9bbca2470e8cd28742946bf876",
-              "key": "installed",
-              "notes": "Follow-up to FIX-1 https://github.com/loopflowstudio/fixture/pull/1\n\nRun the released command; retain failures.",
-              "project_id": "project-1",
-              "relation_id": "7c65173c-930e-42a0-adf6-a42a4878e435",
-              "state_id": null,
-              "team_id": "",
-              "title": "Verify installed release",
-              "wave": "product"
-            }
-          ],
-          "links": [
-            {
-              "due": "2026-10-09",
-              "identifier": "lf-e1d59e9",
-              "issue_id": "task_e1d59e9bbca2470e8cd28742946bf876",
-              "key": "installed",
-              "url": null
-            }
-          ],
-          "needs_conversion": false,
-          "reason": "Accepted installed check filed",
-          "scope_notes": []
-        },
         "issue_id": "source-issue",
         "issue_identifier": "FIX-1",
         "latest_event": {
@@ -1731,13 +1629,6 @@
                       "state": "idle",
                       "step": null
                     },
-                    "follow_through": {
-                      "intents": [],
-                      "links": [],
-                      "needs_conversion": false,
-                      "reason": null,
-                      "scope_notes": []
-                    },
                     "latest_flow_process": null,
                     "next_move": {
                       "owner": "wave",
@@ -1767,12 +1658,6 @@
                       "completed_at": null,
                       "description": "Follow-up to FIX-1 https://github.com/loopflowstudio/fixture/pull/1\n\nRun the released command; retain failures.",
                       "due_date": "2026-10-09",
-                      "follow_up_sources": [
-                        {
-                          "identifier": "FIX-1",
-                          "issue_id": "source-issue"
-                        }
-                      ],
                       "id": "task_e1d59e9bbca2470e8cd28742946bf876",
                       "identifier": "lf-e1d59e9",
                       "name": "Verify installed release",
@@ -1815,35 +1700,6 @@
                       "reason": "Step Process 83496037-a550-44c9-9557-d3f451dc42d8 is running __telemetry-scorecard",
                       "state": "running",
                       "step": "__telemetry-scorecard"
-                    },
-                    "follow_through": {
-                      "intents": [
-                        {
-                          "due": "2026-10-09",
-                          "existing": false,
-                          "issue_id": "task_e1d59e9bbca2470e8cd28742946bf876",
-                          "key": "installed",
-                          "notes": "Follow-up to FIX-1 https://github.com/loopflowstudio/fixture/pull/1\n\nRun the released command; retain failures.",
-                          "project_id": "project-1",
-                          "relation_id": "7c65173c-930e-42a0-adf6-a42a4878e435",
-                          "state_id": null,
-                          "team_id": "",
-                          "title": "Verify installed release",
-                          "wave": "product"
-                        }
-                      ],
-                      "links": [
-                        {
-                          "due": "2026-10-09",
-                          "identifier": "lf-e1d59e9",
-                          "issue_id": "task_e1d59e9bbca2470e8cd28742946bf876",
-                          "key": "installed",
-                          "url": null
-                        }
-                      ],
-                      "needs_conversion": false,
-                      "reason": "Accepted installed check filed",
-                      "scope_notes": []
                     },
                     "latest_flow_process": {
                       "completed": [],
@@ -1991,7 +1847,6 @@
                       "completed_at": "2026-10-08T23:28:31.532538801Z",
                       "description": "",
                       "due_date": null,
-                      "follow_up_sources": [],
                       "id": "source-issue",
                       "identifier": "FIX-1",
                       "name": "Deliver the command",
@@ -2099,35 +1954,6 @@
         "reason": "Step Process 83496037-a550-44c9-9557-d3f451dc42d8 is running __telemetry-scorecard",
         "state": "running",
         "step": "__telemetry-scorecard"
-      },
-      "follow_through": {
-        "intents": [
-          {
-            "due": "2026-10-09",
-            "existing": false,
-            "issue_id": "task_e1d59e9bbca2470e8cd28742946bf876",
-            "key": "installed",
-            "notes": "Follow-up to FIX-1 https://github.com/loopflowstudio/fixture/pull/1\n\nRun the released command; retain failures.",
-            "project_id": "project-1",
-            "relation_id": "7c65173c-930e-42a0-adf6-a42a4878e435",
-            "state_id": null,
-            "team_id": "",
-            "title": "Verify installed release",
-            "wave": "product"
-          }
-        ],
-        "links": [
-          {
-            "due": "2026-10-09",
-            "identifier": "lf-e1d59e9",
-            "issue_id": "task_e1d59e9bbca2470e8cd28742946bf876",
-            "key": "installed",
-            "url": null
-          }
-        ],
-        "needs_conversion": false,
-        "reason": "Accepted installed check filed",
-        "scope_notes": []
       },
       "latest_flow_process": {
         "completed": [],
@@ -2275,7 +2101,6 @@
         "completed_at": "2026-10-08T23:28:31.532538801Z",
         "description": "",
         "due_date": null,
-        "follow_up_sources": [],
         "id": "source-issue",
         "identifier": "FIX-1",
         "name": "Deliver the command",
@@ -2321,35 +2146,6 @@
           "step": "__telemetry-scorecard"
         },
         "external_project_id": "project-1",
-        "follow_through": {
-          "intents": [
-            {
-              "due": "2026-10-09",
-              "existing": false,
-              "issue_id": "task_e1d59e9bbca2470e8cd28742946bf876",
-              "key": "installed",
-              "notes": "Follow-up to FIX-1 https://github.com/loopflowstudio/fixture/pull/1\n\nRun the released command; retain failures.",
-              "project_id": "project-1",
-              "relation_id": "7c65173c-930e-42a0-adf6-a42a4878e435",
-              "state_id": null,
-              "team_id": "",
-              "title": "Verify installed release",
-              "wave": "product"
-            }
-          ],
-          "links": [
-            {
-              "due": "2026-10-09",
-              "identifier": "lf-e1d59e9",
-              "issue_id": "task_e1d59e9bbca2470e8cd28742946bf876",
-              "key": "installed",
-              "url": null
-            }
-          ],
-          "needs_conversion": false,
-          "reason": "Accepted installed check filed",
-          "scope_notes": []
-        },
         "issue_id": "source-issue",
         "issue_identifier": "FIX-1",
         "latest_event": {
@@ -3138,7 +2934,7 @@
                 "items": [
                   {
                     "actions": {
-                      "reason": "Task FIX-1 cannot complete until its gates close: Merged · Follow-through pending; file follow-ups or record `lf task follow-up <issue> --none REASON`",
+                      "reason": "Merged; ready to complete the Task",
                       "recommended": "no_action"
                     },
                     "condition": {
@@ -3161,13 +2957,6 @@
                       "reason": "Step Process 83496037-a550-44c9-9557-d3f451dc42d8 is running __telemetry-scorecard",
                       "state": "running",
                       "step": "__telemetry-scorecard"
-                    },
-                    "follow_through": {
-                      "intents": [],
-                      "links": [],
-                      "needs_conversion": false,
-                      "reason": null,
-                      "scope_notes": []
                     },
                     "latest_flow_process": {
                       "completed": [],
@@ -3315,7 +3104,6 @@
                       "completed_at": null,
                       "description": "",
                       "due_date": null,
-                      "follow_up_sources": [],
                       "id": "source-issue",
                       "identifier": "FIX-1",
                       "name": "Deliver the command",
@@ -3400,7 +3188,7 @@
     },
     "row": {
       "actions": {
-        "reason": "Task FIX-1 cannot complete until its gates close: Merged · Follow-through pending; file follow-ups or record `lf task follow-up <issue> --none REASON`",
+        "reason": "Merged; ready to complete the Task",
         "recommended": "no_action"
       },
       "condition": {
@@ -3423,13 +3211,6 @@
         "reason": "Step Process 83496037-a550-44c9-9557-d3f451dc42d8 is running __telemetry-scorecard",
         "state": "running",
         "step": "__telemetry-scorecard"
-      },
-      "follow_through": {
-        "intents": [],
-        "links": [],
-        "needs_conversion": false,
-        "reason": null,
-        "scope_notes": []
       },
       "latest_flow_process": {
         "completed": [],
@@ -3577,7 +3358,6 @@
         "completed_at": null,
         "description": "",
         "due_date": null,
-        "follow_up_sources": [],
         "id": "source-issue",
         "identifier": "FIX-1",
         "name": "Deliver the command",
@@ -3598,7 +3378,7 @@
     "status": {
       "execution": {
         "actions": {
-          "reason": "Task FIX-1 cannot complete until its gates close: Merged · Follow-through pending; file follow-ups or record `lf task follow-up <issue> --none REASON`",
+          "reason": "Merged; ready to complete the Task",
           "recommended": "no_action"
         },
         "agent": null,
@@ -3623,13 +3403,6 @@
           "step": "__telemetry-scorecard"
         },
         "external_project_id": "project-1",
-        "follow_through": {
-          "intents": [],
-          "links": [],
-          "needs_conversion": false,
-          "reason": null,
-          "scope_notes": []
-        },
         "issue_id": "source-issue",
         "issue_identifier": "FIX-1",
         "latest_event": {

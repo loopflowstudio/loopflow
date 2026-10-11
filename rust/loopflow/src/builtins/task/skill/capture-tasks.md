@@ -18,8 +18,8 @@ but neither is a fragmentation rule. Keep speculative implementation steps insid
 the Task or its design. A Task delivers zero or one PR. A recommendation may
 need no PR; independently deliverable PRs need separate Tasks, stacked where
 dependent. Several Tasks are supported, never a quota. Later proof of an accepted
-outcome belongs to a follow-up Task filed after merge through `lf task follow-up`;
-read `lf help follow-through` for that path, including retry receipts.
+outcome can use another ordinary Task, with its source and expected evidence in
+the brief.
 
 ## Resolve ownership
 

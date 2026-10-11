@@ -297,35 +297,8 @@ struct DTOFixtureTests {
             let row = try #require(plan.roadmap.waves.flatMap { $0.tasks.items }
                 .first { $0.task.identifier == "FIX-1" })
             #expect(row.runtime?.status == capture.row.runtime?.status)
-            #expect(row.followThrough == capture.row.followThrough)
             #expect(row.pr?.id == merged.row.pr?.id)
         }
-        #expect(completed.row.followThrough.links.count == 1)
-        #expect(completed.row.followThrough.links[0].identifier.hasPrefix("lf-"))
-        #expect(completed.row.followThrough.links[0].due == "2026-10-09")
-        #expect(arrived.row.followThrough == completed.row.followThrough)
-    }
-
-    @Test("Follow-through remains pending until confirmed, with dated unstarted follow-ups")
-    func taskDeliveryFixture() throws {
-        let rows = try JSONDecoder().decode([String: RoadmapTask].self, from: loadFixtureData("task_delivery_rows.json"))
-        let pending = try #require(rows["pending"])
-        #expect(!pending.followThrough.resolved)
-        #expect(pending.runtime?.completionPending?.contains("lf task complete") == true)
-        #expect(rows["completed_running"]?.runtime?.status == .done)
-        #expect(rows["completed_running"]?.execution == pending.execution)
-        #expect(pending.followThrough.deliveryLabel(merged: true, done: false) == "Merged · Follow-through pending")
-        let done = try #require(rows["done"])
-        #expect(done.followThrough.resolved)
-        #expect(done.followThrough.deliveryLabel(merged: true, done: true) == "Done · Follow-up W2-FOLLOW")
-        #expect(done.followThrough.links.first?.url?.absoluteString == "https://linear.app/loopflow/issue/W2-FOLLOW")
-        #expect(rows["none"]?.followThrough.resolved == true)
-        let due = try #require(rows["due"])
-        #expect(due.runtime == nil)
-        #expect(due.task.dueDate == "2026-10-08")
-        #expect(!due.task.completed)
-        #expect(rows["unrelated"]?.task.followUpSources.isEmpty == true)
-        #expect(due.task.followUpLabel == "Follow-up to W2-SOURCE · Due 2026-10-08")
     }
 
     @Test("Planning delivery retains uncertainty, errors and both conflict values")

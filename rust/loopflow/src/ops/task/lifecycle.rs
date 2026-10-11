@@ -24,11 +24,7 @@ pub(crate) async fn cleanup_completed_task(store: &SharedStore, task: &Task) -> 
         );
         return Ok(());
     };
-    let follow_through = store
-        .sqlite
-        .task_follow_through(&task.id)
-        .map_err(task_error)?;
-    if !super::CompletionGate::from_delivery(Some(&pr), &follow_through).satisfied() {
+    if !super::CompletionGate::from_delivery(Some(&pr)).satisfied() {
         eprintln!(
             "Task {} is complete; retained checkout for unresolved delivery.",
             task.identifier

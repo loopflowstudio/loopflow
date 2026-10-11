@@ -73,14 +73,11 @@ and due follow-ups have been checked for selection or authorized execution.
   `lf task complete <issue>`, never `task run` or gate. Completion, Workflow
   position and Process liveness are independent. A newer reopening supersedes
   old intent; end alone cannot re-complete it.
-- **Finish merged delivery.** A verified merge is not Task completion. Inspect
-  all associated Flows and unfinished Processes first; leave a live ship Flow
-  to finish. With no live Flow process, a durable none/filed disposition needs
-  `lf task complete <issue>` and a status reread. Otherwise run
-  `lf --task <issue> flow finish-delivery` to file accepted follow-ups or record
-  none, then complete. This applies to manual GitHub merges too. Do not replay
-  gate, re-arm, resume a stopped Flow or wait for the filed children to finish.
-  Missing scope judgment or uncertain provider writes remain visible blockers.
+- **Finish merged delivery.** Merge alone does not complete a Task. Inspect
+  associated Flows and unfinished Processes; leave a live ship Flow to finish.
+  Otherwise, when the accepted outcome is satisfied, run `lf task complete <issue>`
+  and reread status. Optional new work uses ordinary Task creation; no filing or
+  disposition is required. Do not replay gate or re-arm a merged PR.
 - **Reviews stay in the Task conversation.** Surface the Session from
   `lf session list --waiting --json`. Discuss feedback and preserve agreed
   direction there; closing a Session supplies no navigation authority.
@@ -91,7 +88,7 @@ arm a merge, cancel or abandon Tasks, or change direction.
 
 ## Return to due follow-ups
 
-Read follow-up links and due dates in the shared plan, including unstarted Tasks.
+Read due dates and briefs in the shared plan, including unstarted Tasks.
 List due or overdue follow-ups separately from unrelated backlog. Use the date
 and any timezone, release or environment prerequisite in the brief; a due date
 is a day, not an exact-time alarm. Missing date or provider evidence stays unknown.

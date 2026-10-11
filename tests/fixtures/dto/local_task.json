@@ -42,13 +42,6 @@
       "state": "idle",
       "step": null
     },
-    "follow_through": {
-      "intents": [],
-      "links": [],
-      "needs_conversion": false,
-      "reason": null,
-      "scope_notes": []
-    },
     "latest_flow_process": null,
     "next_move": {
       "owner": "wave",
@@ -78,7 +71,6 @@
       "completed_at": null,
       "description": "Keep the escaped quote",
       "due_date": null,
-      "follow_up_sources": [],
       "id": "task_0123456789ab40008000000000000001",
       "identifier": "lf-0123456",
       "name": "Retain quoted input",

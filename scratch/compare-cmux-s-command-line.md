@@ -8,10 +8,15 @@ preserves accepted Work tabs, pane controls and recorded-Machine execution while
 adopting 412's canonical Work and configured planning transport. Reduction for both
 Tasks remains coordinated with 412; no publication or landing readiness is claimed.
 
-Check: Rust nextest 2544/2549 pass then all five repairs pass (11 focused); latest-parent suites 102/103 pass then selector repair passes; fmt/all-target Clippy and migration validation pass; Desktop 503 tests plus 45 post-sync DTO tests pass; Python/website repairs pass focused. CI owns materialized release graph; native proof: LOO-391.
+Check: optional-follow-up cut — affected Rust 250 passes, then 65 passes plus repaired regression passes; 82 Desktop tests/build, fmt, all-target Clippy, CLI/help/golden checks pass. Previous broad gate: `f1e8cd19ff`; CI owns release matrix, LOO-391 native proof.
 
-**This slice — delivery:** admission is implemented and checked. Publish the stacked
-PR; landing waits for LOO-412, then its integration/CI boundary.
+**This slice — publish:** Jack Heart's October 11 clarification is implemented:
+merge leaves a Task available for optional ordinary Task creation before completion.
+No required disposition or special API. Delete — do not maintain: follow-up CLI,
+filing/store/projection/UI, relation exporter, special skill/Flow and exclusive tests.
+Historical payloads and ordinary creation/export remain. Review also removed the
+completed-Task Flow exception and the full-history read needed only by that projection.
+Publish the stacked PR; landing still waits for LOO-412 and integration/CI.
 
 ## Shipping scope — Jack Heart, October 10
 

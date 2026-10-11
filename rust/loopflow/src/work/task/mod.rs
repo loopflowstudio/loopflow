@@ -4,7 +4,6 @@
 //! Sessions, Flows and Processes record work against that state.
 
 pub mod comment;
-pub mod follow_through;
 
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -632,7 +631,7 @@ impl Task {
     }
 }
 
-/// Historical keep-open scope, retained for conversion into follow-up Tasks.
+/// Historical keep-open scope, retained for event decoding only.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskFollowUp {
     pub outcome: String,
@@ -643,11 +642,12 @@ pub struct TaskFollowUp {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TaskEventKind {
+    // Historical follow-through events remain readable; no current writers.
     FollowThroughIntent {
-        intent: follow_through::FollowThroughIntent,
+        intent: FollowThroughIntent,
     },
     FollowThroughLinked {
-        link: follow_through::FollowThroughLink,
+        link: FollowThroughLink,
     },
     FollowThroughRelationConfirmed {
         relation_id: String,
@@ -683,6 +683,7 @@ pub enum TaskEventKind {
     Progress {
         summary: String,
     },
+    // Historical keep-open decision; no current writer.
     FollowUp {
         remaining: Option<TaskFollowUp>,
         reason: String,
@@ -1206,4 +1207,29 @@ mod tests {
         };
         assert!(task.validate().is_ok());
     }
+}
+
+/// Historical follow-through filing input; retained for event decoding only.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FollowThroughIntent {
+    pub key: String,
+    pub issue_id: String,
+    pub relation_id: String,
+    pub project_id: String,
+    pub team_id: String,
+    pub state_id: Option<String>,
+    pub wave: String,
+    pub title: String,
+    pub notes: String,
+    pub due: Option<String>,
+    pub existing: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FollowThroughLink {
+    pub key: String,
+    pub issue_id: String,
+    pub identifier: String,
+    pub url: Option<String>,
+    pub due: Option<String>,
 }

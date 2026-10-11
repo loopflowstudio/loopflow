@@ -36,10 +36,10 @@ lf pr reconcile                      # check delivery once; settle a verified me
 
 Publish makes a PR ready for review; it does not sync. Submit is
 for a reviewer to land; arm/land request auto-merge and return. Later reconciliation
-records verified merges. A merged Task completes after follow-through files
-accepted remaining obligations as linked Tasks or records none needed. `ship`
-waits with `lf land --wait-and-fix`, then performs that check; stopped finishing work is
-recovered by the next Task/Wave operation. A Task has zero or one PR; additional
+records verified merges. Bare landing leaves the Task open; optional new work uses
+ordinary Task creation before `lf task complete`. No follow-up record is required.
+`ship` runs gate and waited landing; its Workflow endpoint requests completion.
+A Task has zero or one PR; additional
 PRs belong to separate, optionally stacked Tasks. Use the
 selected delivery skill for preparation and recovery. `lf pr open` creates or
 updates a draft and opens its page; use it when the user asks to see the PR.

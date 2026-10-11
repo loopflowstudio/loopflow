@@ -15,8 +15,6 @@ pub use explain::{
     TaskRunExplanation,
 };
 mod directory;
-mod follow_through;
-pub use follow_through::{task_follow_up, FollowUpOptions};
 mod handoff;
 mod lifecycle;
 pub(crate) use lifecycle::{cleanup_completed_task, notice_retained_task, record_abandoned_pr};
@@ -54,7 +52,6 @@ use crate::store::sqlite::{EndMove, SqliteStore, TaskCheckout};
 use crate::store::{
     open_existing_store, open_registry_for_authority, RegistryUnavailable, SharedStore, Store,
 };
-use crate::work::task::follow_through::FollowThrough;
 use crate::work::task::{
     CiCheck, CiObservation, CiState, GithubObservation, GithubObservationResult, GithubPr,
     Observation, PrMergeMode, PrMergeRequest, PrPhase, PrPresentation, PrPublication, Task,
@@ -161,7 +158,6 @@ pub struct TaskSnapshot {
     pub agent: Option<String>,
     pub provider: String,
     pub pr: Option<TaskPr>,
-    pub follow_through: crate::work::task::follow_through::FollowThrough,
     pub latest_event: Option<crate::work::task::TaskEvent>,
     pub created_at: time::OffsetDateTime,
     pub updated_at: time::OffsetDateTime,
@@ -2780,7 +2776,7 @@ fn observe_required_checks(
     })
 }
 
-// Local control commands often arrive in a burst (`status`, then `follow-up`,
+// Local control commands often arrive in a burst (`status`, then `complete`,
 // then another `status`). One minute keeps merge/CI state responsive while
 // bounding those bursts to one GitHub read. A failed read opens a longer circuit:
 // a quota or outage should not be hammered by every short-lived `lf` process.
@@ -3303,7 +3299,7 @@ fn pr_link_state_label(pr: &TaskPr) -> String {
     match pr.phase() {
         PrPhase::Merged => "Merged".to_string(),
         PrPhase::Abandoned => "Abandoned".to_string(),
-        _ => "Open · follow-through after merge".to_string(),
+        _ => "Open · complete when the Task outcome is satisfied".to_string(),
     }
 }
 
@@ -3357,7 +3353,7 @@ async fn link_pr_to_linear(store: &SharedStore, task: &Task, pr: &mut TaskPr) {
 }
 
 // ---------------------------------------------------------------------------
-// Loopflow-requested completion needs merge and confirmed follow-through.
+// Loopflow-requested completion needs a verified merge when a PR exists.
 // Reads use their loaded delivery evidence; settlement checks it again in storage.
 // ---------------------------------------------------------------------------
 
@@ -3368,23 +3364,12 @@ pub(crate) struct CompletionGate {
 }
 
 impl CompletionGate {
-    pub(crate) fn from_delivery(pr: Option<&TaskPr>, follow_through: &FollowThrough) -> Self {
-        let mut blockers = Vec::new();
-        if (follow_through.needs_conversion || !follow_through.intents.is_empty())
-            && !follow_through.resolved()
-        {
-            blockers.push(
-                "Follow-through scope needs resolution; confirm filing or record none needed"
-                    .into(),
-            );
-        }
-        if let Some(pr) = pr {
-            if pr.phase() != PrPhase::Merged {
-                blockers.push("Pull request has not merged; merge it or abandon the Task".into());
-            } else if !follow_through.resolved() {
-                blockers.push("Merged · Follow-through pending; file follow-ups or record `lf task follow-up <issue> --none REASON`".into());
-            }
-        }
+    pub(crate) fn from_delivery(pr: Option<&TaskPr>) -> Self {
+        let blockers = if pr.is_some_and(|pr| pr.phase() != PrPhase::Merged) {
+            vec!["Pull request has not merged; merge it or abandon the Task".into()]
+        } else {
+            Vec::new()
+        };
         Self { blockers }
     }
 
@@ -3414,16 +3399,12 @@ pub(crate) async fn task_completion_gate(
     store: &SharedStore,
     task: &Task,
 ) -> OpsResult<CompletionGate> {
-    let follow_through = store
-        .sqlite
-        .task_follow_through(&task.id)
-        .map_err(task_error)?;
     let pr = store.active_task_pr(&task.id).await.map_err(task_error)?;
-    Ok(CompletionGate::from_delivery(pr.as_ref(), &follow_through))
+    Ok(CompletionGate::from_delivery(pr.as_ref()))
 }
 
 /// Reconcile retained delivery on the repository's existing periodic check.
-/// Historical keep-open decisions need a scope decision; elapsed age is no evidence.
+/// Merge observation does not request Task completion.
 pub(crate) async fn reconcile_delivered_task(
     store: &SharedStore,
     task: &mut Task,
@@ -3446,7 +3427,7 @@ pub(crate) async fn reconcile_delivered_task(
     if let Observation::Degraded { reason, .. } = &task.observation {
         return Err(task_error(reason));
     }
-    // Observing a merge succeeded even while authored follow-through is pending.
+    // Observing a merge does not itself complete the Task.
     reconcile_task_completion(store, task).await
 }
 
@@ -3490,15 +3471,10 @@ async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsResult<TaskSn
         .work_for_child(&ChildRef::Task(task.id.clone()))
         .await
         .map_err(|error| task_error(format!("failed to resolve Task Work: {error}")))?;
-    let mut events = store
-        .task_events_after(&task.id, 0)
+    let latest_event = store
+        .latest_task_event(&task.id)
         .await
-        .map_err(|error| task_error(format!("failed to read task events: {error}")))?;
-    let follow_through = store
-        .sqlite
-        .follow_through_from_events(&events)
-        .map_err(task_error)?;
-    let latest_event = events.pop();
+        .map_err(|error| task_error(format!("failed to read latest task event: {error}")))?;
     let pr = store.active_task_pr(&task.id).await.map_err(task_error)?;
     let active = pr.as_ref().filter(|pr| pr.is_active());
     let work_status = store
@@ -3523,7 +3499,7 @@ async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsResult<TaskSn
                 .map(|pr| pr.phase()),
             None => None,
         };
-        let completion_gate = CompletionGate::from_delivery(pr.as_ref(), &follow_through);
+        let completion_gate = CompletionGate::from_delivery(pr.as_ref());
         let completion_refusal = completion_gate.refusal(&task.identifier);
         let worktree_blocker = task_worktree_blocker(store, &task).await?;
         let resume_refusal = worktree_blocker
@@ -3600,7 +3576,6 @@ async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsResult<TaskSn
         agent: task.agent,
         provider,
         pr,
-        follow_through,
         latest_event,
         created_at: task.created_at,
         updated_at: task.updated_at,
@@ -5653,20 +5628,11 @@ mod tests {
                 .unwrap();
             assert_eq!(store.work_status(&work).await.unwrap(), WorkStatus::Ready);
             let gate = super::task_completion_gate(&store, &task).await.unwrap();
-            assert!(gate.reason().contains("Follow-through"));
-            let disposition = store.sqlite.task_follow_through(&task.id).unwrap();
-            assert!(disposition.needs_conversion);
-            assert!(disposition.scope_notes[0].contains(&follow_up.outcome));
-            assert!(disposition.scope_notes[0].contains(&follow_up.evidence));
+            assert!(gate.satisfied());
+            assert!(store.task_events_after(&task.id, 0).await.unwrap().iter().any(|event|
+                matches!(&event.kind, TaskEventKind::FollowUp { remaining: Some(value), .. }
+                    if value == &follow_up)));
         }
-        store
-            .sqlite
-            .finish_follow_through(
-                &task.id,
-                "Accepted later evidence was independently satisfied",
-                true,
-            )
-            .unwrap();
         apply_merged_task_landing(&store, &mut task, &pr, &landing)
             .await
             .unwrap();

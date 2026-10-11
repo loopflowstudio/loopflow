@@ -120,10 +120,7 @@ fn merged_action(evidence: &TaskActionEvidence) -> TaskActionModel {
     if let Some(refusal) = evidence.completion_refusal {
         return action(TaskAction::NoAction, refusal);
     }
-    action(
-        TaskAction::NoAction,
-        "Merged; complete the Task after recording follow-through",
-    )
+    action(TaskAction::NoAction, "Merged; ready to complete the Task")
 }
 
 fn apply_predecessor(model: TaskActionModel, predecessor: Option<PrPhase>) -> TaskActionModel {

@@ -36,7 +36,8 @@ fn active_sessions_preserve_identity_waiting_clients_and_incomplete_evidence() {
 
 #[test]
 fn task_comments_keep_authorship_and_require_every_field() {
-    use loopflow::ops::pm::{TaskCommentAuthor, TaskComments};
+    use loopflow::ops::pm::TaskComments;
+    use loopflow::work::task::comment::TaskCommentAuthor;
     let json = include_str!("../../../tests/fixtures/dto/task_comments.json");
     let thread: TaskComments = serde_json::from_str(json).unwrap();
     assert_eq!(thread.comments[0].author, TaskCommentAuthor::Integration);
@@ -755,7 +756,7 @@ fn peer_planning_status_keeps_unknown_local_state_and_retained_receipts() {
     assert_eq!(private.values[0].value_json, "\"Retained private title\"");
     assert_eq!(
         statuses[1].records[1].values[0].author,
-        Some(loopflow::ops::pm::TaskCommentAuthor::Person {
+        Some(loopflow::work::task::comment::TaskCommentAuthor::Person {
             name: Some("Maya".into())
         })
     );

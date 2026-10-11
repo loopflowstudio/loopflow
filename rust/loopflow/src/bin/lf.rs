@@ -1316,10 +1316,12 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             } else {
                 for comment in &result.comments {
                     let author = match &comment.author {
-                        loopflow::ops::pm::TaskCommentAuthor::Person { name } => {
+                        loopflow::work::task::comment::TaskCommentAuthor::Person { name } => {
                             name.as_deref().unwrap_or("unnamed person")
                         }
-                        loopflow::ops::pm::TaskCommentAuthor::Integration => "integration",
+                        loopflow::work::task::comment::TaskCommentAuthor::Integration => {
+                            "integration"
+                        }
                     };
                     let date = comment.created_at.as_deref().unwrap_or("date unavailable");
                     let sync = if result.pending_sync.contains(&comment.id) {

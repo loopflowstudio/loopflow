@@ -6,9 +6,61 @@ use tokio::time::sleep;
 use tracing::warn;
 
 use crate::pm::{
-    parse_project_content, project_slug, IssueComment, IssueObservation, PmError, PmItem,
-    PmProject, PmResult, PmWave, TeamBinding, RATE_LIMIT_RETRIES,
+    parse_project_content, project_slug, PmError, PmItem, PmProject, PmResult, PmWave, TeamBinding,
+    RATE_LIMIT_RETRIES,
 };
+
+use crate::work::task::comment::{TaskComment, TaskCommentAuthor};
+
+/// A read of one issue's editable content plus its comments, taken to
+/// stream Linear edits into a Task. `revision` is the provider's
+/// last-updated marker (Linear `updatedAt`), monotonic per issue, and is
+/// compared — not trusted as identity — so out-of-order responses never move
+/// the cursor backward.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LinearIssueObservation {
+    pub revision: String,
+    pub title: String,
+    pub description: String,
+    pub comments: Vec<LinearComment>,
+}
+
+/// Linear's comment and attribution metadata, retained unchanged in conflict receipts.
+/// A provider user or an explicit requester steer supplies person attribution;
+/// an integration's display name alone does not.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct LinearComment {
+    pub id: String,
+    /// Provider creation time; display order. `revision` orders direction.
+    pub created_at: Option<String>,
+    pub revision: Option<String>,
+    pub body: String,
+    pub author_id: Option<String>,
+    /// Provider display name for attribution, independent of the provider user ID.
+    pub author_name: Option<String>,
+}
+
+impl From<&LinearComment> for TaskComment {
+    fn from(comment: &LinearComment) -> Self {
+        let author =
+            if comment.author_id.is_some() || crate::ops::linear_observe::is_steer(&comment.body) {
+                TaskCommentAuthor::Person {
+                    name: crate::ops::linear_observe::comment_requester(
+                        &comment.body,
+                        comment.author_name.as_deref(),
+                    ),
+                }
+            } else {
+                TaskCommentAuthor::Integration
+            };
+        Self {
+            id: comment.id.clone(),
+            body: comment.body.clone(),
+            author,
+            created_at: comment.created_at.clone(),
+        }
+    }
+}
 
 const LINEAR_BASE_URL: &str = "https://api.linear.app/graphql";
 const LIST_ITEMS_PAGE_SIZE: u32 = 50;
@@ -1413,7 +1465,7 @@ impl LinearClient {
     }
 
     /// Read one issue's title, description, comments, and revision marker.
-    pub async fn observe_issue(&self, issue_id: &str) -> PmResult<IssueObservation> {
+    pub(crate) async fn observe_issue(&self, issue_id: &str) -> PmResult<LinearIssueObservation> {
         let response: IssueObservationData = self
             .graphql(
                 ISSUE_OBSERVATION_QUERY,
@@ -1426,7 +1478,7 @@ impl LinearClient {
         let mut page = issue.comments;
         let mut comments = Vec::new();
         loop {
-            comments.extend(page.nodes.into_iter().map(|node| IssueComment {
+            comments.extend(page.nodes.into_iter().map(|node| LinearComment {
                 id: node.id,
                 created_at: node.created_at,
                 revision: node.updated_at,
@@ -1466,7 +1518,7 @@ impl LinearClient {
                 .cmp(&right.revision)
                 .then(left.id.cmp(&right.id))
         });
-        Ok(IssueObservation {
+        Ok(LinearIssueObservation {
             revision: issue.updated_at,
             title: issue.title,
             description: issue.description.unwrap_or_default(),
@@ -2369,7 +2421,7 @@ mod tests {
         assert_eq!(
             observation.comments,
             vec![
-                IssueComment {
+                LinearComment {
                     author_name: Some("Jack".to_string()),
                     id: "c-1".to_string(),
                     created_at: None,
@@ -2377,7 +2429,7 @@ mod tests {
                     body: "please prioritize".to_string(),
                     author_id: Some("user-human".to_string()),
                 },
-                IssueComment {
+                LinearComment {
                     author_name: None,
                     id: "c-2".to_string(),
                     created_at: None,
@@ -2385,7 +2437,7 @@ mod tests {
                     body: "PR: https://x".to_string(),
                     author_id: Some("user-loopflow".to_string()),
                 },
-                IssueComment {
+                LinearComment {
                     author_name: None,
                     id: "c-3".to_string(),
                     created_at: None,

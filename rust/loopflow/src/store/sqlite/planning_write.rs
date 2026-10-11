@@ -123,7 +123,7 @@ impl PlanningEdit {
                 return Err(StoreError::InvalidData("invalid completion value".into()))
             }
             Self::CommentContent(v) => {
-                serde_json::from_str::<crate::ops::pm::TaskCommentAuthor>(&v.author)?;
+                serde_json::from_str::<crate::work::task::comment::TaskCommentAuthor>(&v.author)?;
             }
             Self::ProjectInitiatives(v) | Self::ProjectTeams(v) => {
                 serde_json::from_str::<Vec<String>>(v)?;
@@ -274,7 +274,7 @@ pub(crate) fn write(
                 }
             }
             PlanningEdit::CommentContent(v) => {
-                serde_json::from_str::<crate::ops::pm::TaskCommentAuthor>(&v.author)?;
+                serde_json::from_str::<crate::work::task::comment::TaskCommentAuthor>(&v.author)?;
                 for (key, value) in value.as_object().expect("typed comment").iter() {
                     columns.insert(key.clone(), value.clone());
                 }
@@ -504,10 +504,10 @@ mod tests {
     use crate::engine::planning_exchange::PlanningKind;
     use crate::engine::planning_git::PlanningDestination;
     use crate::id::WaveId;
-    use crate::ops::pm::{TaskComment, TaskCommentAuthor};
     use crate::planning::NewTask;
     use crate::pm::PmItemUpdate;
     use crate::store::sqlite::SqliteStore;
+    use crate::work::task::comment::{TaskComment, TaskCommentAuthor};
     use crate::work::wave::Wave;
 
     fn plan(store: &SqliteStore) -> TaskId {

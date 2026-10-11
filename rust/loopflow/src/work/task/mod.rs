@@ -3,6 +3,7 @@
 //! A Task owns one durable checkout, an optional PR, and Workflow progression.
 //! Sessions, Flows and Processes record work against that state.
 
+pub mod comment;
 pub mod follow_through;
 
 use std::path::PathBuf;

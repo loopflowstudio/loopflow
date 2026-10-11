@@ -163,10 +163,12 @@ async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
             }
             for value in record.values {
                 let author = match value.author {
-                    Some(crate::ops::pm::TaskCommentAuthor::Person { name }) => {
+                    Some(crate::work::task::comment::TaskCommentAuthor::Person { name }) => {
                         name.unwrap_or_else(|| "Unknown person".into())
                     }
-                    Some(crate::ops::pm::TaskCommentAuthor::Integration) => "Integration".into(),
+                    Some(crate::work::task::comment::TaskCommentAuthor::Integration) => {
+                        "Integration".into()
+                    }
                     None => "Unknown".into(),
                 };
                 println!(

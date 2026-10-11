@@ -50,7 +50,7 @@ pub struct PeerPlanningValue {
     pub value_json: String,
     /// Ranked journal candidate, not evidence of successful projection or delivery.
     pub candidate: bool,
-    pub author: Option<crate::ops::pm::TaskCommentAuthor>,
+    pub author: Option<crate::work::task::comment::TaskCommentAuthor>,
     pub observed_at: Option<i64>,
 }
 

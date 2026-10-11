@@ -56,6 +56,11 @@ live state; its stored values and historical judgment events remain readable evi
 The typed field writer—not either complete domain struct—defines portable content;
 flattening records does not make checkout or execution fields synchronizable.
 
+`work::task::comment::TaskComment` owns shared discussion. `TaskComments` joins
+the thread with local delivery status. Linear comment IDs, author IDs and revisions
+stay in adapter-internal observations and retained receipts; one adapter conversion
+provides domain authorship. Local saves and acquisition share the typed comment writer.
+
 Task and Project rows own identity for both paths. Locally authored Tasks mint a
 UUID before placement and retain it through provider creation. New Linear acquisitions
 derive the Task ID from the issue UUID; existing mapped Tasks keep their IDs.

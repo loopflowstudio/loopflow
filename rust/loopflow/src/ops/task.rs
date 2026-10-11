@@ -4143,7 +4143,7 @@ pub(crate) fn append_task_comment(
                 "{}\n\n<!-- loopflow-progress:{provenance}:{id} -->",
                 message.trim()
             ),
-            super::pm::TaskCommentAuthor::Integration,
+            crate::work::task::comment::TaskCommentAuthor::Integration,
         )
     } else {
         let name = crate::engine::config::participant_name().map_err(task_error)?;
@@ -4164,7 +4164,7 @@ pub(crate) fn append_task_comment(
                 "{}{requester}\n\n<!-- loopflow-steer:{id} -->",
                 message.trim()
             ),
-            super::pm::TaskCommentAuthor::Person { name },
+            crate::work::task::comment::TaskCommentAuthor::Person { name },
         )
     };
     if message.trim().is_empty() {
@@ -4174,7 +4174,7 @@ pub(crate) fn append_task_comment(
         .sqlite
         .append_task_comment(
             &task.id,
-            &super::pm::TaskComment {
+            &crate::work::task::comment::TaskComment {
                 id: id.clone(),
                 body,
                 author,

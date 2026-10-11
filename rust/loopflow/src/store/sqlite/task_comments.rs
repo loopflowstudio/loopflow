@@ -5,15 +5,16 @@ use crate::engine::planning_exchange::PlanningKind;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
 use crate::durable::TaskId;
-use crate::ops::pm::{TaskComment, TaskCommentAuthor, TaskComments};
+use crate::ops::pm::TaskComments;
 use crate::store::{StoreError, StoreResult};
+use crate::work::task::comment::{TaskComment, TaskCommentAuthor};
 
 use super::SqliteStore;
 
 pub(super) fn ingest_task_comment(
     conn: &Connection,
     task: &TaskId,
-    comment: &crate::pm::IssueComment,
+    comment: &crate::pm::linear::LinearComment,
 ) -> StoreResult<bool> {
     let existing: Option<(String, Option<String>)> = conn
         .query_row(
@@ -59,39 +60,12 @@ pub(super) fn ingest_task_comment(
             )?;
         }
     }
-    let author = comment_author(comment);
-    planning_write::create(
-        conn,
-        "",
-        PlanningKind::Comment,
-        &comment.id,
-        &[
-            Edit::CommentTask(task.to_string()),
-            Edit::CommentContent(super::planning_write::CommentContent {
-                body: comment.body.clone(),
-                author: serde_json::to_string(&author)?,
-                created_at: comment.created_at.clone(),
-            }),
-        ],
-    )?;
+    write_comment(conn, task, &TaskComment::from(comment))?;
     conn.execute(
         "UPDATE task_comments SET provider_revision=?2 WHERE id=?1",
         params![comment.id, comment.revision],
     )?;
     Ok(true)
-}
-
-fn comment_author(comment: &crate::pm::IssueComment) -> TaskCommentAuthor {
-    if comment.author_id.is_some() || crate::ops::linear_observe::is_steer(&comment.body) {
-        TaskCommentAuthor::Person {
-            name: crate::ops::linear_observe::comment_requester(
-                &comment.body,
-                comment.author_name.as_deref(),
-            ),
-        }
-    } else {
-        TaskCommentAuthor::Integration
-    }
 }
 
 fn read_comment(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskComment> {
@@ -110,13 +84,7 @@ fn read_comment(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskComment> {
     })
 }
 
-// Every locally authored comment retains its delivery identity in the same
-// transaction. Acquired provider comments enter through ingest_task_comment.
-fn insert_authored_comment(
-    conn: &Connection,
-    task: &TaskId,
-    comment: &TaskComment,
-) -> StoreResult<()> {
+fn write_comment(conn: &Connection, task: &TaskId, comment: &TaskComment) -> StoreResult<()> {
     planning_write::create(
         conn,
         "",
@@ -130,7 +98,16 @@ fn insert_authored_comment(
                 created_at: comment.created_at.clone(),
             }),
         ],
-    )?;
+    )
+}
+
+// Local and acquired comments share the field writer; only local saves enqueue delivery.
+fn insert_authored_comment(
+    conn: &Connection,
+    task: &TaskId,
+    comment: &TaskComment,
+) -> StoreResult<()> {
+    write_comment(conn, task, comment)?;
     conn.execute(
         "INSERT INTO task_comment_deliveries(comment_id,comment_json) VALUES(?1,?2)",
         params![comment.id, serde_json::to_string(comment)?],
@@ -265,8 +242,8 @@ impl SqliteStore {
 mod tests {
     use crate::durable::TaskId;
     use crate::id::WaveId;
-    use crate::ops::pm::{TaskComment, TaskCommentAuthor};
     use crate::store::sqlite::SqliteStore;
+    use crate::work::task::comment::{TaskComment, TaskCommentAuthor};
     use crate::work::wave::Wave;
 
     #[test]
@@ -296,7 +273,7 @@ mod tests {
         let initial_state = store.task_state(&task).unwrap();
         store.append_task_comment(&task, &original).unwrap();
         let steers = store.task_steers(&task).unwrap();
-        let observed = crate::pm::IssueComment {
+        let observed = crate::pm::linear::LinearComment {
             id: original.id.clone(),
             body: "Provider body".into(),
             author_id: Some("person-2".into()),
@@ -346,11 +323,11 @@ mod tests {
             original
         );
         assert_eq!(
-            serde_json::from_str::<crate::pm::IssueComment>(&receipt.1).unwrap(),
+            serde_json::from_str::<crate::pm::linear::LinearComment>(&receipt.1).unwrap(),
             observed
         );
         assert!(!receipt.2);
-        let stale = crate::pm::IssueComment {
+        let stale = crate::pm::linear::LinearComment {
             body: original.body.clone(),
             revision: Some("2026-10-08T01:00:00Z".into()),
             ..observed.clone()
@@ -360,7 +337,7 @@ mod tests {
             store.task_comments(&task).unwrap().comments,
             thread.comments
         );
-        let amended = crate::pm::IssueComment {
+        let amended = crate::pm::linear::LinearComment {
             body: "Later provider correction".into(),
             revision: Some("2026-10-08T01:04:00Z".into()),
             ..observed

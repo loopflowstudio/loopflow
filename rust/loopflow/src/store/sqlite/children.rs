@@ -635,10 +635,10 @@ impl SqliteStore {
     /// Persist one Linear observation as Task direction, atomically. Exactly-once
     /// comments are imported on the first read and deduplicated by revision.
     /// Issue revisions guard definition changes independently of comments.
-    pub fn apply_linear_observation(
+    pub(crate) fn apply_linear_observation(
         &self,
         task_id: &TaskId,
-        observation: &crate::pm::IssueObservation,
+        observation: &crate::pm::linear::LinearIssueObservation,
         observed_at: OffsetDateTime,
     ) -> StoreResult<LinearObservationOutcome> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
@@ -2353,3 +2353,7 @@ mod local_planning_tests {
         assert!(store.task_by_issue("LOO-2").unwrap().is_none());
     }
 }
+
+#[cfg(test)]
+#[path = "linear_observation_tests.rs"]
+mod linear_observation_tests;

@@ -30,6 +30,7 @@ use crate::store::{
     open_existing_store, open_store, PlanningState, PmSnapshotRow, PmTaskObservation, PmTaskRecord,
     ProviderToken, ProviderTokenReplacement, StorageConfig, Store,
 };
+use crate::work::task::comment::TaskComment;
 use crate::work::wave::config::{read_wave_config, update_wave_goal_config, WavePmConfig};
 use crate::work::wave::Wave;
 
@@ -101,45 +102,6 @@ pub struct TaskComments {
     /// Losing local comment bodies; the thread contains the adopted Linear values.
     pub conflicts: std::collections::BTreeMap<String, String>,
     pub refresh_error: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct TaskComment {
-    pub id: String,
-    pub body: String,
-    pub author: TaskCommentAuthor,
-    pub created_at: Option<String>,
-}
-
-impl From<&crate::pm::IssueComment> for TaskComment {
-    fn from(comment: &crate::pm::IssueComment) -> Self {
-        let author =
-            if comment.author_id.is_some() || crate::ops::linear_observe::is_steer(&comment.body) {
-                TaskCommentAuthor::Person {
-                    name: crate::ops::linear_observe::comment_requester(
-                        &comment.body,
-                        comment.author_name.as_deref(),
-                    ),
-                }
-            } else {
-                TaskCommentAuthor::Integration
-            };
-        Self {
-            id: comment.id.clone(),
-            body: comment.body.clone(),
-            author,
-            created_at: comment.created_at.clone(),
-        }
-    }
-}
-
-/// Who wrote a comment. A person has a provider user; an integration has none
-/// and is never participant direction, whatever the display says.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum TaskCommentAuthor {
-    Person { name: Option<String> },
-    Integration,
 }
 
 #[derive(Debug, Clone, Default)]

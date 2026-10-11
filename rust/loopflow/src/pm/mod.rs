@@ -285,35 +285,6 @@ pub struct PmItemUpdate {
     pub description: Option<String>,
 }
 
-/// A read of one issue's editable content plus its comments, taken to
-/// stream Linear edits into a Task. `revision` is the provider's
-/// last-updated marker (Linear `updatedAt`), monotonic per issue, and is
-/// compared — not trusted as identity — so out-of-order responses never move
-/// the cursor backward.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct IssueObservation {
-    pub revision: String,
-    pub title: String,
-    pub description: String,
-    pub comments: Vec<IssueComment>,
-}
-
-/// One issue comment, with just enough authorship to distinguish participant direction
-/// from Loopflow's own writeback. `author_id` is the provider user id; `None`
-/// for an integration/bot actor with no backing user, which is never treated
-/// as participant direction.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct IssueComment {
-    pub id: String,
-    /// Provider creation time; display order. `revision` orders direction.
-    pub created_at: Option<String>,
-    pub revision: Option<String>,
-    pub body: String,
-    pub author_id: Option<String>,
-    /// Provider display name for attribution, independent of the provider user ID.
-    pub author_name: Option<String>,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum PmError {
     #[error("{0}")]

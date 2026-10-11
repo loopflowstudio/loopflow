@@ -1,5 +1,7 @@
 //! `lf task comment ISSUE` against an isolated Linear GraphQL fixture.
 
+use crate::work::task::comment::TaskCommentAuthor;
+
 use clap::Parser;
 use std::os::unix::fs::PermissionsExt;
 use std::sync::Arc;
@@ -8,7 +10,7 @@ use axum::{extract::State, routing::post, Json, Router};
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
 
-use super::{task_comment_async, PmTestContext, TaskCommentAuthor, PM_TEST_CONTEXT};
+use super::{task_comment_async, PmTestContext, PM_TEST_CONTEXT};
 use crate::store::{open_ephemeral_store, CredentialType, ProviderToken, StorageConfig};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -385,7 +387,9 @@ exit 0
                         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
                     }
                     let saved = task_comment_async(&repo, None, "FIX-7", Some(&marker), true).await.unwrap();
-                    assert_eq!(saved.pending_sync.len(), 1);
+                    // The foreground save may deliver before returning its thread.
+                    assert!(saved.comments.iter().any(|comment|
+                        comment.id != incoming && comment.body.lines().next() == Some(marker.as_str())));
                     loop {
                         if store.sqlite.pending_task_comments(&task.id).unwrap().is_empty()
                             && store.sqlite.task_comments(&task.id).unwrap().comments.iter()
@@ -398,9 +402,12 @@ exit 0
                 assert_eq!(result.exit_code, 0);
                 assert!(running_check.unwrap(), "{marker} exited before synchronization");
             }
+            // Keep this create pending deliberately; connected saves may deliver immediately.
+            provider.lock().await.thread = Thread::Failing;
             let saved = task_comment_async(&repo, None, "FIX-7", Some("Local value survives"), true)
                 .await.unwrap();
             let collision = saved.pending_sync[0].clone();
+            provider.lock().await.thread = Thread::Empty;
             provider.lock().await.posted.push(comment(&collision,
                 Some("2026-09-27T00:00:03Z"), Some("Provider value survives"),
                 json!({"id":"person-1","displayName":"Maya","name":null})));

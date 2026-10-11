@@ -96,16 +96,6 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_agent: Option<&str>) -> Result<()> {
             message,
             title,
             body,
-        })
-        | Some(PrCommand::Land {
-            strict,
-            local,
-            complete,
-            next,
-            worktree,
-            message,
-            title,
-            body,
         }) => land_current(
             &LandOptions {
                 strict: *strict,
@@ -120,7 +110,39 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_agent: Option<&str>) -> Result<()> {
                 agent: cli_agent.map(str::to_string),
             },
             &progress,
-        ),
+        )
+        .map(|_| ()),
+        Some(PrCommand::Land {
+            strict,
+            local,
+            watch,
+            complete,
+            next,
+            worktree,
+            message,
+            title,
+            body,
+        }) => {
+            let landed = land_current(
+                &LandOptions {
+                    strict: *strict,
+                    local: *local,
+                    create_pr: true,
+                    complete: *complete,
+                    next_slug: next.clone(),
+                    worktree: worktree.clone(),
+                    commit_message: message.clone(),
+                    pr_title: title.clone(),
+                    pr_body: body.clone(),
+                    agent: cli_agent.map(str::to_string),
+                },
+                &progress,
+            )?;
+            match landed {
+                Some(pr_number) if *watch => watch_landing(pr_number, &progress),
+                _ => Ok(()),
+            }
+        }
         Some(PrCommand::Abandon { force, branch }) => {
             abandon_current(branch.as_deref(), *force, &progress)
         }
@@ -608,16 +630,38 @@ fn with_sync_retry<T>(
     }
 }
 
-fn land_current(options: &LandOptions, progress: &impl Progress) -> Result<()> {
+/// Returns the number of the PR handed off, when there is one.
+fn land_current(options: &LandOptions, progress: &impl Progress) -> Result<Option<u32>> {
     let repo_root = find_repo_root()?;
     land_repo(&repo_root, options, progress)
+}
+
+/// `lf land --watch`: repair failed checks until the PR leaves the open list,
+/// then settle the delivery once. A watcher already live for the repository
+/// keeps that job, and this returns after one delivery check.
+fn watch_landing(pr_number: u32, progress: &impl Progress) -> Result<()> {
+    let repo = find_repo_root()?;
+    crate::ops::ci_watch::watch(
+        &repo,
+        crate::ops::ci_watch::WatchOptions {
+            once: false,
+            parent_pid: None,
+            until_pr: Some(pr_number),
+        },
+    )?;
+    let report = crate::ops::pr_landing::reconcile_repository(&repo)?;
+    if !report.errors.is_empty() {
+        anyhow::bail!(report.errors.join("\n"));
+    }
+    progress.status("delivery check complete");
+    Ok(())
 }
 
 pub(crate) fn land_repo(
     repo_root: &Path,
     options: &LandOptions,
     progress: &impl Progress,
-) -> Result<()> {
+) -> Result<Option<u32>> {
     // The wave home stays put on land — no rotation, no cd.
     let pr = with_sync_retry(repo_root, "land", progress, |repo, integrated| {
         if integrated {
@@ -626,13 +670,13 @@ pub(crate) fn land_repo(
             arm(repo, options, progress)
         }
     })?;
-    if let Some(pr) = pr {
+    if let Some(pr) = &pr {
         progress.status(&format!(
             "PR #{} handed off; lf pr reconcile checks delivery.",
             pr.number
         ));
     }
-    Ok(())
+    Ok(pr.and_then(|pr| u32::try_from(pr.number).ok()))
 }
 
 fn submit_current(options: &LandOptions, progress: &impl Progress) -> Result<()> {
@@ -1049,7 +1093,11 @@ fn ci_watch_cmd(cmd: &crate::lf::CiCommand) -> Result<()> {
     match (install, uninstall, status) {
         (false, false, false) => Ok(ci_watch::watch(
             &repo,
-            ci_watch::WatchOptions { once, parent_pid },
+            ci_watch::WatchOptions {
+                once,
+                parent_pid,
+                until_pr: None,
+            },
         )?),
         (true, _, _) => {
             require_release_cron_binary()?;

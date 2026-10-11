@@ -247,7 +247,8 @@ on ordinary branches without creating a Task. Verified merge normally completes 
 it also recovers an existing PR whose GitHub identity is missing from the Task,
 without publishing or rotating the branch. Multiple PRs
 for the recorded branch remain unresolved. `lf ci watch`
-starts a ci-fix when a recorded landing fails its required checks.
+starts a ci-fix when a recorded landing fails its required checks. `lf land --watch`
+does both for its own PR: it stays until the PR merges or closes, then settles it.
 
 ```bash
 lf task follow-up EXP-12 --outcome 'Installed latency meets the budget' --evidence 'Warm p95 below 1s over 20 samples' --check-at 2026-10-09T17:00:00Z

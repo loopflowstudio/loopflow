@@ -1222,6 +1222,9 @@ pub enum PrCommand {
         strict: bool,
         #[arg(long)]
         local: bool,
+        /// Stay until the PR merges or closes, starting a ci-fix when a required check fails
+        #[arg(long)]
+        watch: bool,
         /// Complete after verified merge (the default unless --next is supplied)
         #[arg(short = 'c', long)]
         complete: bool,
@@ -2315,8 +2318,16 @@ mod tests {
                 cmd: Some(PrCommand::Land {
                     complete: true,
                     next: None,
+                    watch: false,
                     ..
                 })
+            })
+        ));
+        let watched = Cli::try_parse_from(["lf", "pr", "land", "--watch"]).expect("parse watch");
+        assert!(matches!(
+            watched.command,
+            Some(Commands::Pr {
+                cmd: Some(PrCommand::Land { watch: true, .. })
             })
         ));
 

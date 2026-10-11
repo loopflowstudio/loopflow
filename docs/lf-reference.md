@@ -173,6 +173,7 @@ Request auto-merge, retain settlement intent, and return
 |---|---|
 | `--strict` | strict Default: false. |
 | `--local` | local Default: false. |
+| `--watch` | Stay until the PR merges or closes, starting a ci-fix when a required check fails Default: false. |
 | `--complete / -c` | Complete after verified merge (the default unless --next is supplied) Default: false. |
 | `--next` | next |
 | `--worktree / -w` | worktree |

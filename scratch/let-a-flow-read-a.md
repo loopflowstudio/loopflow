@@ -72,3 +72,11 @@ October 10 reconciliation inspected Release's top-level goal and memory; that
 lesson applies here without transferring its release or schedule work to LOO-450.
 
 Checks: `cargo fmt`, `cargo clippy --all-targets -- -D warnings` and network-isolated `cargo test --offline -p loopflow --lib build_codex_command` pass (6 tests); prior native-answer/Claude-Flow/terminal/capture/usage proofs and the post-sync `context_launch_tests terminal_context_refreshes_without_replacing_instructions_or_losing_failed_sessions -- --exact` pass remain applicable. Gate owns wider launch/skill and non-null schema replay checks; configured demo remains open.
+
+## Delivery decision — October 10
+
+Jack Heart approved landing after reviewing the harness path and accepting quieter
+headless output: assistant text remains, but the old tool summaries and cost/time
+footer are no longer rendered. This authorizes `ship` and completion after verified
+merge; the configured live demo remains unproved, not a claimed pass. Gate retains
+ownership of the outstanding automated replay/launch checks.

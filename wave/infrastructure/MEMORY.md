@@ -274,6 +274,11 @@ checkpoint CI skipped tests; Linux/installed acceptance remains unproved.
 Prior live-takeover evidence: `5e95ce9a4:wave/infrastructure/MEMORY.md`, this heading.
 Plan: `scratch/stop-and-take-over-claude.md`.
 
+LOO-450: Jack selected ClaudeHarness, native schemas and predecessor deletion,
+approving landing with quieter output. Fenced native answers, replay/schema and
+fake-Flow proofs pass, not configured Task-to-publication or installation.
+Harness errors retain failed-result text for retries. CI owns the full matrix.
+
 ## Process-owned liveness (LOO-451, 2026-10-10)
 
 Jack Heart removed client-file compatibility (`5228ab69`); launches record an
@@ -805,14 +810,11 @@ proofs establish no final-frontier conversion.
   Chapter creation requires KRs, and backlog survives until explicit disposition.
   No Chapter table, second deployed client or distributed transaction is implied.
 
-LOO-298's gate and +6,202-line diff:
-`c418953634bd101f51878d2be2b40fb3facafabd:wave/infrastructure/MEMORY.md`.
-Full gate, configured acceptance and installed conversion remained unproved.
-Preserve ID ordering through Session projection, use dedicated PR stacking writes,
-and resolve automatic checkpoints through the same Work binding as execution.
-Provider stubs must contain conflict-agent launches: one bad fixture launched
-real credentials whose effects were not audited. Dense CLI timing and configured
-continuity remained unfinished in that dated evidence.
+LOO-298's gate, diff and unaudited real-provider fixture escape:
+`0f1858c647:wave/infrastructure/MEMORY.md`, this heading.
+Full gate, configured continuity and installed conversion remain unproved.
+Preserve Session ID ordering, dedicated PR stacking writes and Work-bound
+checkpoints. Provider stubs must contain conflict-agent launches.
 
 Jack Heart retired numeric performance targets, soak and deeper optimization
 on October 7. LOO-291/300 evidence and instrumentation:

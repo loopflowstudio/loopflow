@@ -9,15 +9,15 @@ use crate::id::AgentSessionId;
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;
-use std::io::{BufRead, BufReader, Read, Seek, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Command};
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{mpsc, Mutex, OnceLock};
+use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::agent::stream::{format_event, ParseResult, StreamFormat, StreamParser};
+use crate::agent::stream::StreamFormat;
 use crate::config::{default_agent, parse_agent};
 use crate::error::CoreError;
 use crate::os_process::wait_for_exit;
@@ -25,7 +25,7 @@ use crate::platform::kill_process;
 use crate::prompt::structured_reply::{render_structured_reply_guidance, StructuredReply};
 use crate::provider_account::{
     resolve_provider_account_exact_blocking, resolve_recorded_provider_account_blocking,
-    ProviderAccountRoute, RateLimitSignal,
+    ProviderAccountRoute,
 };
 use crate::provider_auth::Provider;
 use crate::session_record::CaptureHandle;
@@ -106,7 +106,9 @@ pub fn wait_for_interrupt_cleanup() {
 #[derive(Debug, Clone, Default)]
 pub struct AgentProcessResult {
     pub exit_code: i32,
+    /// Harness answer prose, never raw provider protocol.
     pub stdout: String,
+    /// Harness error messages; native terminals leave both output fields empty.
     pub stderr: String,
     /// Opaque provider continuation token observed during this Process.
     pub agent_session: Option<AgentSessionId>,
@@ -179,6 +181,8 @@ pub struct AgentConfig {
     pub task_prompt: String,
     /// Native skill selection, kept separate from gathered reference context.
     pub skill_invocation: Option<crate::skills::invocation::SkillInvocation>,
+    /// Native final-answer schema for this turn.
+    pub output_schema: Option<serde_json::Value>,
     /// Agent string (for example: "claude:opus" or "codex").
     pub agent: Option<String>,
     /// Max turn budget when supported by the harness.
@@ -656,10 +660,7 @@ fn claude_skip_permissions(cwd: Option<&Path>, auto: bool, skip_permissions: boo
     true
 }
 
-/// Common Claude CLI arguments shared across one-shot and session paths.
-///
-/// The one-shot command and persistent stream session add their mode-specific
-/// flags around these shared arguments.
+/// Common Claude CLI arguments shared by terminal and stream-input launches.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ClaudeArgs {
     /// Model variant (already resolved, no "claude:" prefix).
@@ -676,8 +677,6 @@ pub struct ClaudeArgs {
     pub worktree_isolation: bool,
     /// Max turn budget.
     pub max_turns: Option<u32>,
-    /// Enable streaming output (`--output-format stream-json --verbose`).
-    pub stream: bool,
     /// Enable Chrome integration.
     pub chrome: bool,
     /// Resume an existing Claude Code session.
@@ -756,12 +755,6 @@ impl ClaudeArgs {
             args.push(max_turns.to_string());
         }
 
-        if self.stream {
-            args.push("--output-format".to_string());
-            args.push("stream-json".to_string());
-            args.push("--verbose".to_string());
-        }
-
         if let Some(ref id) = self.resume_id {
             args.push("--resume".to_string());
             args.push(id.to_string());
@@ -782,6 +775,9 @@ pub fn build_claude_stream_session_args(
         "--replay-user-messages".to_string(),
         "--input-format".to_string(),
         "stream-json".to_string(),
+        "--output-format".to_string(),
+        "stream-json".to_string(),
+        "--verbose".to_string(),
     ];
     args.extend(
         ClaudeArgs {
@@ -799,12 +795,14 @@ pub fn build_claude_stream_session_args(
             worktree_isolation: config.write_scope == AgentWriteScope::Worktree
                 && config.execution_boundary.is_none(),
             max_turns: config.max_turns,
-            stream: true,
             chrome: false,
             resume_id: resume_id.cloned(),
         }
         .to_args(),
     );
+    if let Some(schema) = &config.output_schema {
+        args.extend(["--json-schema".to_string(), schema.to_string()]);
+    }
     args
 }
 
@@ -981,44 +979,21 @@ pub fn build_claude_command(
         add_dirs: provider_writable_roots(launch),
         skip_permissions: launch.execution_boundary.is_some()
             || (launch.write_scope == AgentWriteScope::Configured
-                && claude_skip_permissions(
-                    launch.cwd.as_deref(),
-                    process.auto,
-                    launch.skip_permissions,
-                )),
+                && claude_skip_permissions(launch.cwd.as_deref(), false, launch.skip_permissions)),
         worktree_isolation: launch.write_scope == AgentWriteScope::Worktree
             && launch.execution_boundary.is_none(),
         max_turns: launch.max_turns,
-        stream: process.auto && (process.stream || launch.skill_invocation.is_some()),
         chrome: capabilities.chrome,
         resume_id: launch.resume_token.clone(),
     };
     cmd.extend(claude_args.to_args());
 
-    if process.auto {
-        cmd.push("--print".to_string());
-    }
-
     cmd
 }
 
 /// Build Codex CLI command.
-pub fn build_codex_command(
-    launch: &AgentConfig,
-    process: &ProcessConfig,
-    model_variant: Option<&str>,
-) -> Vec<String> {
-    // `codex exec` for batch/auto mode, `codex` for interactive
-    let mut cmd = if process.auto {
-        let mut cmd = vec!["codex".to_string(), "exec".to_string()];
-        if launch.resume_token.is_some() {
-            cmd.push("resume".to_string());
-        }
-        cmd
-    } else {
-        vec!["codex".to_string()]
-    };
-
+pub fn build_codex_command(launch: &AgentConfig, model_variant: Option<&str>) -> Vec<String> {
+    let mut cmd = vec!["codex".to_string()];
     cmd.push("-c".to_string());
     cmd.push(format!("service_tier=\"{CODEX_DEFAULT_SERVICE_TIER}\""));
 
@@ -1049,43 +1024,23 @@ pub fn build_codex_command(
         }
     }
 
-    if process.stream {
-        cmd.push("--json".to_string());
-    }
-
     cmd.extend(codex_permission_args_for_scope(
         launch.cwd.as_deref(),
-        process.auto,
+        false,
         launch.skip_permissions,
         launch.write_scope,
     ));
-
-    if process.auto {
-        if let Some(resume_token) = &launch.resume_token {
-            cmd.push(resume_token.to_string());
-        }
-    }
 
     cmd
 }
 
 /// Build OpenCode CLI command.
-pub fn build_opencode_command(process: &ProcessConfig, model_variant: Option<&str>) -> Vec<String> {
-    // `opencode run` for batch/auto mode, `opencode` for interactive TUI
-    let mut cmd = if process.auto {
-        vec!["opencode".to_string(), "run".to_string()]
-    } else {
-        vec!["opencode".to_string()]
-    };
+pub fn build_opencode_command(model_variant: Option<&str>) -> Vec<String> {
+    let mut cmd = vec!["opencode".to_string()];
 
     if let Some(variant) = model_variant {
         cmd.push("--model".to_string());
         cmd.push(variant.to_string());
-    }
-
-    if process.auto && process.stream {
-        cmd.push("--format".to_string());
-        cmd.push("json".to_string());
     }
 
     cmd
@@ -1103,11 +1058,6 @@ fn build_opencode_env_for_scope(
         oc_config.insert(
             "permission".into(),
             serde_json::json!({"*": "allow", "external_directory": "deny"}),
-        );
-    } else if process.auto {
-        oc_config.insert(
-            "permission".into(),
-            serde_json::Value::String("allow".into()),
         );
     }
     if let Some(ref context_file) = process.context_file {
@@ -1143,22 +1093,25 @@ fn apply_harness_env(
     }
 }
 
-/// Build command for any model.
+/// Build a native terminal command for a supported provider.
 pub fn build_model_command(
     launch: &AgentConfig,
     process: &ProcessConfig,
     capabilities: &AgentCapabilities,
-) -> Vec<String> {
+) -> Result<Vec<String>, CoreError> {
     let agent = launch.agent();
     let (harness, model_variant) = parse_agent(agent);
     let model_variant = model_variant.as_deref();
-    match harness.as_str() {
-        "codex" => build_codex_command(launch, process, model_variant),
-        "opencode" => build_opencode_command(process, model_variant),
+    Ok(match harness.as_str() {
+        "codex" => build_codex_command(launch, model_variant),
+        "opencode" => build_opencode_command(model_variant),
         "claude" => build_claude_command(launch, process, capabilities, model_variant),
-        // Unknown harness: fall back to Claude with the full model string as variant.
-        _ => build_claude_command(launch, process, capabilities, Some(agent)),
-    }
+        _ => {
+            return Err(CoreError::ExecutionFailed(format!(
+                "unsupported agent provider: {harness}"
+            )))
+        }
+    })
 }
 
 /// Native terminal launch arguments must fit cmux's per-argument transport limit.
@@ -1304,11 +1257,8 @@ fn _run_with_transient_retries(
                 return Ok(result);
             }
         };
-        let (harness, _) = parse_agent(attempt_config.agent());
         let failure = if process.auto {
-            result
-                .failure
-                .or_else(|| _classify_agent_failure(&harness, &result))
+            result.failure.or_else(|| _classify_agent_failure(&result))
         } else {
             None
         };
@@ -1356,13 +1306,12 @@ fn _run_with_transient_retries(
             }
             _ => {
                 account_failure = None;
-                let resume_token = _provider_resume_token(&result).or(launch.resume_token.clone());
-                if matches!(harness.as_str(), "claude" | "codex" | "opencode") {
-                    if let Some(resume_token) = resume_token {
-                        attempt_config.resume_token = Some(resume_token);
-                        attempt_config.task_prompt = RETRY_PROMPT.to_string();
-                        attempt_config.skill_invocation = None;
-                    }
+                if let Some(resume_token) =
+                    result.agent_session.clone().or(launch.resume_token.clone())
+                {
+                    attempt_config.resume_token = Some(resume_token);
+                    attempt_config.task_prompt = RETRY_PROMPT.to_string();
+                    attempt_config.skill_invocation = None;
                 }
                 (transient_delay, false)
             }
@@ -1384,17 +1333,15 @@ fn _run_with_transient_retries(
     }
 }
 
-fn _classify_agent_failure(harness: &str, result: &AgentProcessResult) -> Option<AgentFailure> {
+fn _classify_agent_failure(result: &AgentProcessResult) -> Option<AgentFailure> {
     if result.exit_code == 0 {
         return None;
     }
     if _find_provider_error(result, credential_invalidated_failure).is_some() {
         return Some(AgentFailure::AccountCredentialInvalidated);
     }
-    if let Some(signal) = _account_limit_signal(harness, result).filter(|signal| signal.limited) {
-        return Some(AgentFailure::AccountSubscriptionLimit {
-            resets_at: signal.resets_at,
-        });
+    if _find_provider_error(result, _classify_subscription_limit).is_some() {
+        return Some(AgentFailure::AccountSubscriptionLimit { resets_at: None });
     }
     _find_provider_error(result, classify_retryable_agent_failure)
 }
@@ -1413,59 +1360,9 @@ fn _find_provider_error<T>(
     result: &AgentProcessResult,
     classify: fn(&str) -> Option<T>,
 ) -> Option<T> {
-    for line in result.stdout.lines() {
-        let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
-            continue;
-        };
-        if !_is_provider_error(&value) {
-            continue;
-        }
-        if let Some(failure) = ["message", "error", "result"]
-            .into_iter()
-            .filter_map(|field| value.get(field))
-            .find_map(|value| _classify_provider_error_value(value, classify))
-        {
-            return Some(failure);
-        }
-    }
+    // Harnesses separate provider errors from answer prose. Never interpret
+    // JSON printed by the model as provider control messages.
     result.stderr.lines().find_map(classify)
-}
-
-fn _is_provider_error(value: &serde_json::Value) -> bool {
-    match value
-        .get("type")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default()
-    {
-        "turn.failed" | "error" => true,
-        "result" => {
-            value
-                .get("is_error")
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(false)
-                || value
-                    .get("subtype")
-                    .and_then(serde_json::Value::as_str)
-                    .is_some_and(|subtype| subtype == "failed" || subtype.contains("error"))
-        }
-        _ => false,
-    }
-}
-
-fn _classify_provider_error_value<T>(
-    value: &serde_json::Value,
-    classify: fn(&str) -> Option<T>,
-) -> Option<T> {
-    match value {
-        serde_json::Value::String(text) => classify(text),
-        serde_json::Value::Object(fields) => fields
-            .values()
-            .find_map(|value| _classify_provider_error_value(value, classify)),
-        serde_json::Value::Array(values) => values
-            .iter()
-            .find_map(|value| _classify_provider_error_value(value, classify)),
-        _ => None,
-    }
 }
 
 pub(crate) fn classify_retryable_agent_failure(text: &str) -> Option<AgentFailure> {
@@ -1507,32 +1404,6 @@ pub(crate) fn classify_retryable_agent_failure(text: &str) -> Option<AgentFailur
     }
 }
 
-fn _account_limit_signal(harness: &str, result: &AgentProcessResult) -> Option<RateLimitSignal> {
-    let mut signal = result
-        .stdout
-        .lines()
-        .filter_map(|line| match harness {
-            "claude" => crate::harness::claude_rate_limit_signal(line),
-            "codex" => serde_json::from_str::<serde_json::Value>(line)
-                .ok()
-                .and_then(|value| crate::harness::codex_rate_limit_signal(&value)),
-            _ => None,
-        })
-        .max_by_key(|signal| (signal.limited, signal.utilization_percent.unwrap_or(0)));
-
-    if result.exit_code != 0 && _find_provider_error(result, _classify_subscription_limit).is_some()
-    {
-        signal = Some(RateLimitSignal {
-            utilization_percent: Some(100),
-            resets_at: signal.as_ref().and_then(|signal| signal.resets_at),
-            limited: true,
-            reason: "subscription usage limit".to_string(),
-            windows: signal.map(|signal| signal.windows).unwrap_or_default(),
-        });
-    }
-    signal
-}
-
 fn _classify_subscription_limit(text: &str) -> Option<()> {
     let text = text.to_ascii_lowercase();
     (text.contains("you've hit your usage limit")
@@ -1545,26 +1416,6 @@ fn _classify_subscription_limit(text: &str) -> Option<()> {
         || text.contains("insufficient_quota")
         || text.contains("rate_limit_reached"))
     .then_some(())
-}
-
-fn _provider_resume_token(result: &AgentProcessResult) -> Option<AgentSessionId> {
-    result.agent_session.clone().or_else(|| {
-        result.stdout.lines().find_map(|line| {
-            let value: serde_json::Value = serde_json::from_str(line).ok()?;
-            let session_id = [
-                value.get("session_id"),
-                value.get("sessionId"),
-                value.get("thread_id"),
-                value.pointer("/stream_event/event/session_id"),
-                value.pointer("/params/thread/id"),
-            ]
-            .into_iter()
-            .flatten()
-            .find_map(|value| value.as_str().filter(|value| !value.is_empty()))
-            .map(AgentSessionId::from);
-            session_id
-        })
-    })
 }
 
 fn _begin_implicit_capture(
@@ -1813,7 +1664,7 @@ fn _run_harness_once(
                 exit_code: exit_code.expect("event loop stops with an exit code"),
                 stdout,
                 stderr,
-                agent_session,
+                agent_session: harness.agent_session(),
                 failure: None,
             })
         };
@@ -1842,7 +1693,7 @@ fn _run_harness_once(
                 .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
         } else {
             route
-                .record_process_blocking(result.agent_session.clone(), None)
+                .pin_session_blocking(result.agent_session.clone())
                 .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
         }
     }
@@ -1858,13 +1709,11 @@ fn _run_agent_once(
 ) -> Result<AgentAttempt, CoreError> {
     let start = Instant::now();
     let (harness, model) = parse_agent(launch.agent());
-    if matches!(harness.as_str(), "codex" | "opencode") && process.auto {
+    if process.auto {
         return _run_harness_once(launch, process, model, retry);
     }
-    if !process.auto {
-        validate_terminal_turn(&launch.task_prompt)?;
-    }
-    let mut cmd_args = build_model_command(launch, process, capabilities);
+    validate_terminal_turn(&launch.task_prompt)?;
+    let mut cmd_args = build_model_command(launch, process, capabilities)?;
     if cmd_args.is_empty() {
         return Err(CoreError::ExecutionFailed("Empty command".to_string()));
     }
@@ -1898,51 +1747,10 @@ fn _run_agent_once(
         )
         .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     }
-    let title = if process.auto {
-        None
-    } else {
-        crate::terminal_title::TerminalTitle::prepare(&launch.env, &harness, &mut cmd)
-    };
+    let title = crate::terminal_title::TerminalTitle::prepare(&launch.env, &harness, &mut cmd);
     cmd.args(args);
-    if harness == "claude" && process.auto {
-        // Claude's text stdin carries large assembled context without
-        // argv limits. An anonymous file also avoids pipe backpressure at startup.
-        let mut input = tempfile::tempfile()?;
-        if let Some(invocation) = &launch.skill_invocation {
-            let (flags, command) = invocation
-                .claude_input(launch)
-                .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
-            cmd.args(["--input-format", "stream-json", "--replay-user-messages"]);
-            cmd.args(flags);
-            if !launch.task_prompt.is_empty() {
-                writeln!(
-                    input,
-                    "{}",
-                    serde_json::json!({
-                        "type": "user", "shouldQuery": false,
-                        "message": {"role": "user", "content": launch.task_prompt}
-                    })
-                )?;
-            }
-            writeln!(
-                input,
-                "{}",
-                serde_json::json!({
-                    "type": "user", "message": {"role": "user", "content": command}
-                })
-            )?;
-        } else {
-            input.write_all(launch.task_prompt.as_bytes())?;
-        }
-        input.rewind()?;
-        cmd.stdin(Stdio::from(input));
-    } else {
-        if process.auto {
-            cmd.stdin(Stdio::null());
-        }
-        if !launch.task_prompt.is_empty() {
-            cmd.arg(&launch.task_prompt);
-        }
+    if !launch.task_prompt.is_empty() {
+        cmd.arg(&launch.task_prompt);
     }
 
     if let Some(ref cwd) = launch.cwd {
@@ -2039,55 +1847,10 @@ fn _run_agent_once(
     let admitted_capture = capture.ok_or_else(|| {
         CoreError::ExecutionFailed("AgentProcess launch has no admitted capture".into())
     })?;
-    let result = if process.auto && process.stream {
-        // Stream mode: capture stdout line by line
-        run_streaming(
-            cmd,
-            process.stream_format,
-            process.timeout,
-            admitted_capture,
-            activation,
-        )
-    } else if process.auto {
-        // Batch mode: capture all output
-        run_batch(cmd, process.timeout, admitted_capture, activation)
-    } else {
-        // Interactive mode: inherit stdio
-        run_interactive(cmd, process.timeout, admitted_capture, activation, title)
-    };
-    if let (Some(capture), Ok(result)) = (capture, &result) {
-        capture.observe_provider(
-            _provider_resume_token(result),
-            account_route
-                .as_ref()
-                .map(|route| route.account_id().clone()),
-        );
-    }
-    let mut can_failover =
-        account_route.is_some() && launch.provider_account_authority_home.is_none();
-    if let (Some(route), Ok(result)) = (&account_route, &result) {
-        let credential_invalidated =
-            _find_provider_error(result, credential_invalidated_failure).is_some();
-        if credential_invalidated {
-            if let Err(error) = route.record_credential_invalidated_blocking("token_invalidated") {
-                tracing::warn!(%error, "failed to record invalidated provider credential");
-                can_failover = false;
-            }
-        } else {
-            let resume_token = _provider_resume_token(result);
-            let signal = _account_limit_signal(&harness, result);
-            let limited = signal.as_ref().is_some_and(|signal| signal.limited);
-            if let Err(error) = route.record_process_blocking(resume_token, signal) {
-                tracing::warn!(%error, "failed to record provider account launch");
-                if limited {
-                    can_failover = false;
-                }
-            }
-        }
-    }
+    let result = run_interactive(cmd, process.timeout, admitted_capture, activation, title);
     result.map(|result| AgentAttempt::Finished {
         result,
-        can_failover,
+        can_failover: false,
     })
 }
 
@@ -2103,87 +1866,6 @@ fn spawn_agent_child(
         .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     drop(activation);
     Ok(child)
-}
-
-fn run_batch(
-    mut cmd: Command,
-    timeout: Option<Duration>,
-    capture: &CaptureHandle,
-    activation: Option<std::fs::File>,
-) -> Result<AgentProcessResult, CoreError> {
-    let start = Instant::now();
-    cmd.stdout(Stdio::piped());
-    cmd.stderr(Stdio::piped());
-    let (mut child, attachment) = spawn_agent_child(cmd, capture, activation)?;
-    let _pid_guard = ChildPidGuard::new(child.id());
-
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| CoreError::ExecutionFailed("Failed to capture stdout".to_string()))?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| CoreError::ExecutionFailed("Failed to capture stderr".to_string()))?;
-
-    let stdout_handle = thread::spawn(move || -> std::io::Result<Vec<u8>> {
-        let mut reader = BufReader::new(stdout);
-        let mut bytes = Vec::new();
-        reader.read_to_end(&mut bytes)?;
-        Ok(bytes)
-    });
-    let stderr_handle = thread::spawn(move || -> std::io::Result<Vec<u8>> {
-        let mut reader = BufReader::new(stderr);
-        let mut bytes = Vec::new();
-        reader.read_to_end(&mut bytes)?;
-        Ok(bytes)
-    });
-
-    let (status, timed_out) = wait_for_exit(&mut child, timeout, || {})?;
-    capture
-        .record_native_agent_exit(&attachment)
-        .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
-    tracing::debug!(
-        elapsed_ms = start.elapsed().as_millis(),
-        "agent batch completed"
-    );
-
-    let stdout_bytes = stdout_handle
-        .join()
-        .map_err(|_| CoreError::ExecutionFailed("stdout reader thread panicked".to_string()))?
-        .map_err(|err| CoreError::ExecutionFailed(err.to_string()))?;
-    let stderr_bytes = stderr_handle
-        .join()
-        .map_err(|_| CoreError::ExecutionFailed("stderr reader thread panicked".to_string()))?
-        .map_err(|err| CoreError::ExecutionFailed(err.to_string()))?;
-
-    let mut parser = StreamParser::new();
-    for line in String::from_utf8_lossy(&stdout_bytes).lines() {
-        capture.record_raw("stdout", line);
-        if let ParseResult::Events(events) = parser.feed_line(line) {
-            for event in &events {
-                capture.record_stream_event(event);
-            }
-        }
-    }
-    for line in String::from_utf8_lossy(&stderr_bytes).lines() {
-        capture.record_raw("stderr", line);
-    }
-
-    if timed_out {
-        return Err(CoreError::ExecutionFailed(format!(
-            "agent timed out after {}",
-            format_timeout(timeout)
-        )));
-    }
-
-    Ok(AgentProcessResult {
-        exit_code: status.code().unwrap_or(1),
-        stdout: String::from_utf8_lossy(&stdout_bytes).to_string(),
-        stderr: String::from_utf8_lossy(&stderr_bytes).to_string(),
-        agent_session: None,
-        failure: None,
-    })
 }
 
 fn run_interactive(
@@ -2222,161 +1904,6 @@ fn run_interactive(
         exit_code: status.code().unwrap_or(1),
         stdout: String::new(),
         stderr: String::new(),
-        agent_session: None,
-        failure: None,
-    })
-}
-
-fn run_streaming(
-    mut cmd: Command,
-    stream_format: StreamFormat,
-    timeout: Option<Duration>,
-    capture: &CaptureHandle,
-    activation: Option<std::fs::File>,
-) -> Result<AgentProcessResult, CoreError> {
-    cmd.stdout(Stdio::piped());
-    cmd.stderr(Stdio::piped());
-
-    let start = Instant::now();
-    let (mut child, attachment) = spawn_agent_child(cmd, capture, activation)?;
-    let _pid_guard = ChildPidGuard::new(child.id());
-    tracing::debug!(elapsed_ms = start.elapsed().as_millis(), "agent spawned");
-
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| CoreError::ExecutionFailed("Failed to capture stdout".to_string()))?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| CoreError::ExecutionFailed("Failed to capture stderr".to_string()))?;
-
-    enum StreamKind {
-        Stdout,
-        Stderr,
-    }
-
-    let (tx, rx) = mpsc::channel::<(StreamKind, String)>();
-
-    let tx_out = tx.clone();
-    let stdout_handle = thread::spawn(move || {
-        let reader = BufReader::new(stdout);
-        for line in reader.lines().map_while(Result::ok) {
-            let _ = tx_out.send((StreamKind::Stdout, line));
-        }
-    });
-
-    let tx_err = tx.clone();
-    let stderr_handle = thread::spawn(move || {
-        let reader = BufReader::new(stderr);
-        for line in reader.lines().map_while(Result::ok) {
-            let _ = tx_err.send((StreamKind::Stderr, line));
-        }
-    });
-
-    drop(tx);
-
-    let mut stdout_content = String::new();
-    let mut stderr_content = String::new();
-    let mut logged_first_output = false;
-    let mut parser = StreamParser::new();
-
-    let use_color = match stream_format {
-        StreamFormat::Human(c) => Some(c),
-        StreamFormat::Raw => None,
-    };
-
-    let timeout_at = timeout.map(|value| Instant::now() + value);
-    let mut timed_out = false;
-    loop {
-        match rx.recv_timeout(Duration::from_millis(100)) {
-            Ok((stream, line)) => {
-                if !logged_first_output {
-                    tracing::info!(
-                        elapsed_ms = start.elapsed().as_millis(),
-                        "agent produced first output"
-                    );
-                    logged_first_output = true;
-                }
-                match stream {
-                    StreamKind::Stdout => {
-                        capture.record_raw("stdout", &line);
-
-                        if let Some(color) = use_color {
-                            match parser.feed_line(&line) {
-                                ParseResult::Events(events) => {
-                                    for event in &events {
-                                        capture.record_stream_event(event);
-
-                                        format_event(event, color);
-                                    }
-                                }
-                                ParseResult::Skipped => {}
-                                ParseResult::Passthrough => println!("{line}"),
-                            }
-                        } else {
-                            if let ParseResult::Events(events) = parser.feed_line(&line) {
-                                for event in &events {
-                                    capture.record_stream_event(event);
-                                }
-                            }
-                            println!("{line}");
-                        }
-                        stdout_content.push_str(&line);
-                        stdout_content.push('\n');
-                    }
-                    StreamKind::Stderr => {
-                        capture.record_raw("stderr", &line);
-
-                        if use_color.is_some() {
-                            // In Human mode, Claude --verbose duplicates stream-json
-                            // on stderr. Parse it and skip recognized events to avoid
-                            // printing raw JSON alongside formatted output.
-                            match parser.feed_line(&line) {
-                                ParseResult::Events(_) | ParseResult::Skipped => {}
-                                ParseResult::Passthrough => eprintln!("{line}"),
-                            }
-                        } else {
-                            eprintln!("{line}");
-                        }
-                        stderr_content.push_str(&line);
-                        stderr_content.push('\n');
-                    }
-                }
-            }
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
-            Err(mpsc::RecvTimeoutError::Disconnected) => break,
-        }
-
-        if !timed_out && timeout_at.is_some_and(|value| Instant::now() >= value) {
-            let _ = child.kill();
-            timed_out = true;
-        }
-    }
-
-    let status = child.wait()?;
-    capture
-        .record_native_agent_exit(&attachment)
-        .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
-    tracing::debug!(
-        elapsed_ms = start.elapsed().as_millis(),
-        "agent streaming completed"
-    );
-
-    let _ = stdout_handle.join();
-    let _ = stderr_handle.join();
-
-    if timed_out {
-        return Err(CoreError::ExecutionFailed(format!(
-            "agent timed out after {}",
-            format_timeout(timeout)
-        )));
-    }
-
-    Ok(AgentProcessResult {
-        exit_code: status.code().unwrap_or(1),
-        stdout: stdout_content,
-        stderr: stderr_content,
         agent_session: None,
         failure: None,
     })
@@ -2435,7 +1962,6 @@ mod tests {
     fn default_launch() -> AgentConfig {
         AgentConfig {
             task_prompt: "task".to_string(),
-            skill_invocation: None,
             ..Default::default()
         }
     }
@@ -2561,25 +2087,6 @@ trust_level = "trusted"
     }
 
     #[test]
-    fn build_claude_command_auto() {
-        let launch = AgentConfig {
-            skip_permissions: false,
-            ..default_launch()
-        };
-        let process = ProcessConfig {
-            auto: true,
-            stream: false,
-            ..Default::default()
-        };
-        let cmd = build_claude_command(&launch, &process, &AgentCapabilities::default(), None);
-        assert!(cmd.contains(&"--print".to_string()));
-        assert_eq!(
-            cmd.contains(&"--dangerously-skip-permissions".to_string()),
-            claude_skip_permissions(None, true, false)
-        );
-    }
-
-    #[test]
     fn build_claude_command_yolo() {
         let launch = AgentConfig {
             skip_permissions: true,
@@ -2592,19 +2099,6 @@ trust_level = "trusted"
         };
         let cmd = build_claude_command(&launch, &process, &AgentCapabilities::default(), None);
         assert!(cmd.contains(&"--dangerously-skip-permissions".to_string()));
-    }
-
-    #[test]
-    fn build_claude_command_stream() {
-        let launch = default_launch();
-        let process = ProcessConfig {
-            auto: true,
-            stream: true,
-            ..Default::default()
-        };
-        let cmd = build_claude_command(&launch, &process, &AgentCapabilities::default(), None);
-        assert!(cmd.contains(&"stream-json".to_string()));
-        assert!(cmd.contains(&"--verbose".to_string()));
     }
 
     #[test]
@@ -2674,44 +2168,12 @@ trust_level = "trusted"
     }
 
     #[test]
-    fn build_codex_command_auto() {
-        let launch = AgentConfig {
-            skip_permissions: false,
-            ..default_launch()
-        };
-        let process = ProcessConfig {
-            auto: true,
-            stream: false,
-            ..Default::default()
-        };
-        let cmd = build_codex_command(&launch, &process, None);
-        let policy_args = codex_permission_args(None, true, false);
-        assert!(cmd.contains(&"exec".to_string()));
-        assert_arg_pair(&cmd, "-c", "service_tier=\"default\"");
-        assert!(!cmd.contains(&"--full-auto".to_string()));
-        assert_eq!(
-            cmd.contains(&"--sandbox".to_string()),
-            policy_args.contains(&"--sandbox".to_string())
-        );
-        assert_eq!(
-            cmd.contains(&"--ask-for-approval".to_string()),
-            policy_args.contains(&"--ask-for-approval".to_string())
-        );
-        assert!(!cmd.contains(&"--dangerously-bypass-approvals-and-sandbox".to_string()));
-    }
-
-    #[test]
     fn build_codex_command_interactive() {
         let launch = AgentConfig {
             skip_permissions: false,
             ..default_launch()
         };
-        let process = ProcessConfig {
-            auto: false,
-            stream: false,
-            ..Default::default()
-        };
-        let cmd = build_codex_command(&launch, &process, None);
+        let cmd = build_codex_command(&launch, None);
         assert_arg_pair(&cmd, "-c", "service_tier=\"default\"");
         assert!(
             !cmd.contains(&"exec".to_string()),
@@ -2732,9 +2194,8 @@ trust_level = "trusted"
             skip_permissions: false,
             ..default_launch()
         };
-        let process = auto_process();
 
-        let cmd = build_codex_command(&launch, &process, None);
+        let cmd = build_codex_command(&launch, None);
         let idx = cmd
             .iter()
             .position(|arg| arg == "--add-dir")
@@ -2753,9 +2214,8 @@ trust_level = "trusted"
             skip_permissions: false,
             ..default_launch()
         };
-        let process = auto_process();
 
-        let cmd = build_codex_command(&launch, &process, None);
+        let cmd = build_codex_command(&launch, None);
         assert!(!cmd.contains(&"--add-dir".to_string()));
     }
 
@@ -2776,7 +2236,7 @@ trust_level = "trusted"
         };
         let process = auto_process();
 
-        let codex = build_codex_command(&launch, &process, None);
+        let codex = build_codex_command(&launch, None);
         assert!(codex.contains(&"--dangerously-bypass-approvals-and-sandbox".to_string()));
         assert!(!codex.contains(&"--add-dir".to_string()));
         let thread = build_codex_thread_start_params(&launch);
@@ -2792,8 +2252,7 @@ trust_level = "trusted"
     #[test]
     fn build_codex_command_with_model() {
         let launch = default_launch();
-        let process = auto_process();
-        let cmd = build_codex_command(&launch, &process, Some("o3"));
+        let cmd = build_codex_command(&launch, Some("o3"));
         assert!(cmd.contains(&"model=\"o3\"".to_string()));
     }
 
@@ -2803,8 +2262,7 @@ trust_level = "trusted"
             skip_permissions: true,
             ..default_launch()
         };
-        let process = auto_process();
-        let cmd = build_codex_command(&launch, &process, None);
+        let cmd = build_codex_command(&launch, None);
         assert!(cmd.contains(&"--dangerously-bypass-approvals-and-sandbox".to_string()));
         assert!(!cmd.contains(&"--sandbox".to_string()));
         assert!(!cmd.contains(&"--ask-for-approval".to_string()));
@@ -2829,7 +2287,7 @@ trust_level = "trusted"
             system_prompt: "Fixed additions.".into(),
             ..default_launch()
         };
-        let cmd = build_codex_command(&launch, &auto_process(), None);
+        let cmd = build_codex_command(&launch, None);
         assert!(cmd.contains(&"developer_instructions=\"Fixed additions.\"".to_string()));
         assert!(!cmd
             .iter()
@@ -2837,81 +2295,16 @@ trust_level = "trusted"
     }
 
     #[test]
-    fn build_codex_command_without_context_file() {
-        // Absence of a log file must never replace the native instructions.
-        let launch = default_launch();
-        let process = ProcessConfig {
-            context_file: None,
-            ..Default::default()
-        };
-        let cmd = build_codex_command(&launch, &process, None);
-        assert!(!cmd.iter().any(|a| a.contains("model_instructions_file")));
-    }
-
-    #[test]
-    fn build_opencode_command_auto() {
-        let process = ProcessConfig {
-            auto: true,
-            ..Default::default()
-        };
-        let cmd = build_opencode_command(&process, None);
-        assert_eq!(cmd[0], "opencode");
-        assert_eq!(cmd[1], "run");
-    }
-
-    #[test]
     fn build_opencode_command_interactive() {
-        let process = ProcessConfig::default();
-        let cmd = build_opencode_command(&process, None);
+        let cmd = build_opencode_command(None);
         assert_eq!(cmd, vec!["opencode"]);
     }
 
     #[test]
     fn build_opencode_command_with_model() {
-        let process = ProcessConfig::default();
-        let cmd = build_opencode_command(&process, Some("anthropic/claude-sonnet-4-5"));
+        let cmd = build_opencode_command(Some("anthropic/claude-sonnet-4-5"));
         assert!(cmd.contains(&"--model".to_string()));
         assert!(cmd.contains(&"anthropic/claude-sonnet-4-5".to_string()));
-    }
-
-    #[test]
-    fn build_opencode_command_streaming() {
-        let process = ProcessConfig {
-            auto: true,
-            stream: true,
-            ..Default::default()
-        };
-        let cmd = build_opencode_command(&process, None);
-        assert!(cmd.contains(&"run".to_string()));
-        assert!(cmd.contains(&"--format".to_string()));
-        assert!(cmd.contains(&"json".to_string()));
-    }
-
-    // ── build_opencode_env_for_scope ──────────────────────────────────────
-
-    #[test]
-    fn build_opencode_env_auto_and_context() {
-        let process = ProcessConfig {
-            auto: true,
-            context_file: Some(std::path::PathBuf::from("/tmp/lf-context.md")),
-            ..Default::default()
-        };
-        let env = build_opencode_env_for_scope(&process, AgentWriteScope::Configured).unwrap();
-        let v: serde_json::Value = serde_json::from_str(&env).unwrap();
-        assert_eq!(v["permission"], "allow");
-        assert_eq!(v["instructions"][0], "/tmp/lf-context.md");
-    }
-
-    #[test]
-    fn build_opencode_env_auto_only() {
-        let process = ProcessConfig {
-            auto: true,
-            ..Default::default()
-        };
-        let env = build_opencode_env_for_scope(&process, AgentWriteScope::Configured).unwrap();
-        let v: serde_json::Value = serde_json::from_str(&env).unwrap();
-        assert_eq!(v["permission"], "allow");
-        assert!(v.get("instructions").is_none());
     }
 
     #[test]
@@ -2996,7 +2389,6 @@ trust_level = "trusted"
             skip_permissions: true,
             worktree_isolation: false,
             max_turns: Some(10),
-            stream: true,
             chrome: true,
             resume_id: Some("sess_abc".into()),
         }
@@ -3010,9 +2402,6 @@ trust_level = "trusted"
         assert!(args.contains(&"--dangerously-skip-permissions".to_string()));
         assert!(args.contains(&"--max-turns".to_string()));
         assert!(args.contains(&"10".to_string()));
-        assert!(args.contains(&"--output-format".to_string()));
-        assert!(args.contains(&"stream-json".to_string()));
-        assert!(args.contains(&"--verbose".to_string()));
         assert!(args.contains(&"--resume".to_string()));
         assert!(args.contains(&"sess_abc".to_string()));
     }
@@ -3144,7 +2533,8 @@ trust_level = "trusted"
                 agent: Some(harness.to_string()),
                 ..default_launch()
             };
-            let cmd = build_model_command(&launch, &auto_process(), &AgentCapabilities::default());
+            let cmd = build_model_command(&launch, &auto_process(), &AgentCapabilities::default())
+                .unwrap();
             assert!(
                 !cmd.iter()
                     .any(|arg| { arg == "--model" || arg == "-m" || arg.starts_with("model=") }),
@@ -3154,17 +2544,22 @@ trust_level = "trusted"
     }
 
     #[test]
-    fn build_model_command_falls_back_to_claude_for_unknown_model() {
-        let unknown_model = "gpt-5.1-codex-high";
+    fn unknown_provider_is_rejected_in_both_launch_modes() {
+        let cwd = tempfile::tempdir().unwrap();
         let launch = AgentConfig {
-            agent: Some(unknown_model.to_string()),
+            agent: Some("not-a-provider:model".to_string()),
+            cwd: Some(cwd.path().to_path_buf()),
             ..default_launch()
         };
-        let process = auto_process();
-        let cmd = build_model_command(&launch, &process, &AgentCapabilities::default());
-        assert_eq!(cmd.first(), Some(&"claude".to_string()));
-        assert!(cmd.contains(&"--model".to_string()));
-        assert!(cmd.contains(&unknown_model.to_string()));
+        for auto in [false, true] {
+            let process = ProcessConfig {
+                auto,
+                ..Default::default()
+            };
+            let error = _run_agent_once(&launch, &process, &AgentCapabilities::default(), false)
+                .unwrap_err();
+            assert!(error.to_string().contains("not-a-provider"), "{error}");
+        }
     }
 
     fn managed_attempt(result: AgentProcessResult) -> AgentAttempt {
@@ -3177,7 +2572,7 @@ trust_level = "trusted"
     fn failed_result(message: &str) -> AgentProcessResult {
         AgentProcessResult {
             exit_code: 1,
-            stdout: format!(r#"{{"type":"turn.failed","error":{{"message":"{message}"}}}}"#),
+            stderr: message.to_string(),
             ..Default::default()
         }
     }
@@ -3193,13 +2588,9 @@ trust_level = "trusted"
         let mut results = vec![
             AgentProcessResult {
                 exit_code: 1,
-                stdout: concat!(
-                    "{\"type\":\"thread.started\",\"thread_id\":\"thread-123\"}\n",
-                    "{\"type\":\"turn.failed\",\"error\":{\"message\":\"Selected model is at capacity. Please try a different model.\"}}\n"
-                )
-                .to_string(),
-                stderr: String::new(),
-                agent_session: None,
+                stdout: String::new(),
+                stderr: "Selected model is at capacity. Please try a different model.".into(),
+                agent_session: Some("thread-123".into()),
                 failure: None,
             },
             AgentProcessResult {
@@ -3239,6 +2630,37 @@ trust_level = "trusted"
     }
 
     #[test]
+    fn answer_prose_cannot_supply_provider_errors_or_resume_identity() {
+        let launch = default_launch();
+        let mut result = AgentProcessResult {
+            exit_code: 1,
+            stdout: concat!(
+                "{\"type\":\"system\",\"session_id\":\"quoted-session\"}\n",
+                "{\"type\":\"error\",\"message\":\"You've hit your usage limit\"}\n"
+            )
+            .into(),
+            ..Default::default()
+        };
+        assert_eq!(_classify_agent_failure(&result), None);
+        result.stderr = "service unavailable".into();
+        let mut attempts = 0;
+        _run_with_transient_retries(
+            &launch,
+            &auto_process(),
+            &[Duration::ZERO],
+            |config, _| {
+                attempts += 1;
+                assert_eq!(config.resume_token, None);
+                assert_eq!(config.task_prompt, launch.task_prompt);
+                Ok(managed_attempt(result.clone()))
+            },
+            |_| {},
+        )
+        .unwrap();
+        assert_eq!(attempts, 2);
+    }
+
+    #[test]
     fn subscription_limit_fails_over_without_resuming_the_account_session() {
         let launch = AgentConfig {
             agent: Some("claude:opus".to_string()),
@@ -3249,21 +2671,12 @@ trust_level = "trusted"
         let process = auto_process();
         let failure = AgentProcessResult {
             exit_code: 1,
-            stdout: concat!(
-                "{\"type\":\"system\",\"session_id\":\"session-123\"}\n",
-                "{\"type\":\"rate_limit_event\",\"rate_limit_info\":{\"status\":\"rejected\",\"rate_limit_type\":\"five_hour\",\"utilization\":1.0,\"resets_at\":1900000000}}\n",
-                "{\"type\":\"result\",\"subtype\":\"error_during_execution\",\"is_error\":true,\"result\":\"You've hit your usage limit\"}\n"
-            )
-            .to_string(),
-            stderr: String::new(),
-            agent_session: None,
-            failure: None,
+            agent_session: Some("session-123".into()),
+            ..failed_result("You've hit your usage limit")
         };
         assert!(matches!(
-            _classify_agent_failure("claude", &failure),
-            Some(AgentFailure::AccountSubscriptionLimit {
-                resets_at: Some(1_900_000_000)
-            })
+            _classify_agent_failure(&failure),
+            Some(AgentFailure::AccountSubscriptionLimit { resets_at: None })
         ));
         let mut results = vec![
             failure,
@@ -3310,7 +2723,7 @@ trust_level = "trusted"
             "Your authentication token has been invalidated (token_invalidated). Please sign in again.",
         );
         assert_eq!(
-            _classify_agent_failure("codex", &failure),
+            _classify_agent_failure(&failure),
             Some(AgentFailure::AccountCredentialInvalidated)
         );
         let mut results = vec![
@@ -3498,16 +2911,7 @@ trust_level = "trusted"
     }
 
     #[test]
-    fn resumed_commands_preserve_provider_session() {
-        let launch = AgentConfig {
-            agent: Some("codex".to_string()),
-            resume_token: Some("thread-123".into()),
-            ..default_launch()
-        };
-        let codex = build_codex_command(&launch, &auto_process(), None);
-        assert_eq!(&codex[..3], ["codex", "exec", "resume"]);
-        assert_eq!(codex.last().map(String::as_str), Some("thread-123"));
-
+    fn claude_terminal_command_preserves_provider_session() {
         let launch = AgentConfig {
             agent: Some("claude:opus".to_string()),
             resume_token: Some("session-123".into()),
@@ -3515,7 +2919,7 @@ trust_level = "trusted"
         };
         let claude = build_claude_command(
             &launch,
-            &auto_process(),
+            &ProcessConfig::default(),
             &AgentCapabilities::default(),
             Some("opus"),
         );

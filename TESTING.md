@@ -1235,3 +1235,17 @@ live Session without shell-level scrubbing:
 ```bash
 cargo test -p loopflow --test session_cli_tests session_names_are_shared_and_human_names_win
 ```
+
+Headless provider transport changes also run the research-artifact test
+`two_task_research_runs_leave_distinct_uncommitted_artifacts_for_the_next_prompt`
+and Linux `planning_reconnect_tests`. Their stand-ins must consume and echo the
+stream-input request before reporting success; sleeping and emitting an uncorrelated
+print-mode result can race the seed write and fail with a broken pipe.
+
+Headless shutdown checks run on Linux as well as macOS: fast provider exit must
+settle its owned lifeline watchdog without mistaking it for foreign work. Include
+`launch_nonzero_exit`, bare/default launch, mixed-provider Flow and headless resume;
+Session interactivity must not select an individual launch’s process-group policy.
+Changes to AgentProcess launch-mode recording also run the complete
+`session_record::runtime::tests` module: native refusal and headless cleanup
+fixtures must declare opposite launch modes, independent of Session defaults.

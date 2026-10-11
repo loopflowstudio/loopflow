@@ -173,6 +173,7 @@ pub fn prepare_process_prompt(
         conversation_context,
         task_prompt,
         skill_invocation,
+        output_schema: None,
         agent: Some(agent),
         max_turns,
         resume_token: None,

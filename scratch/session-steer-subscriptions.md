@@ -1,4 +1,4 @@
-# Session steer subscriptions
+# Session steers
 
 Task `lf-9c03797`, 2026-10-11. Jack Heart accepted Session-only delivery with
 repository/Work wrappers (“ok, pursue”), then renewed pursuit after the provider
@@ -27,12 +27,32 @@ needed in this reconciliation.
 - SwiftPM's nested sandbox could not start in the previous step. The changed
   author model compiled and round-tripped independently; CI owns the full suite.
 
+## Vocabulary decision — 2026-10-11
+
+Jack Heart requested the minimum necessary vocabulary after identifying that
+“direction” and “steering” described the same message. Use **steer** for the saved
+message, **steer** as the verb, and **delivery** for sending it to a Session.
+Repository, Wave and Task identify where it applies; Session identifies the
+conversation receiving it. These are existing concepts, not new kinds of steer.
+
+Use “save a steer,” “inspect delivery,” and “retry delivery.” Do not introduce
+direction, publication, offer or subscription as additional product objects.
+Receipts, batches, hashes and capabilities describe internal mechanisms only.
+Retain distinctions that express different evidence: saving a steer, writing it
+to a provider and observing acceptance are not interchangeable. Vocabulary reduction
+does not approve acknowledgements, automatic retries or source-level status UX.
+
+README and usage prose use this vocabulary. CLI help and internal type/schema names
+still contain the older terms; aligning those is remaining implementation work.
+Prefer `Steer` over `SteerPublication` where they name the same message; preserve
+historical migration bytes and actual delivery evidence rather than renaming facts.
+
 ## Concept review — 2026-10-11, proposed
 
 Jack Heart requested concept-review after publication. No implementation change,
 new execution or publication is selected by this review.
 
-Accepted model remains: one authored direction, its existing source owner, and
+Accepted model remains: one steer, its existing source owner, and
 independent delivery to applicable Sessions. Work wrappers select scope; provider
 delivery remains Session-only. Downward propagation, future-Session launch context,
 bounded context, idle staying idle and explicit retry remain binding.
@@ -45,25 +65,25 @@ This is not fixed by renaming emitted to delivered.
 
 Proposed usage copy for README/conducting, not implemented:
 
-> Save direction on the Task. Each associated conversation receives it when work
+> Save a steer on the Task. Each associated Session receives it when work
 > next reaches a supported boundary; idle conversations remain idle. Inspect the
-> saved direction from the Task to see where it is pending, offered or unavailable.
-> If an offer is uncertain, retry that offer for the affected conversation. The
-> original direction and earlier attempts remain available. Offered does not mean
-> the agent followed it. Repository/Wave direction currently stays on this Machine.
+> steer from the Task to inspect delivery to each Session. Retry an uncertain
+> delivery beside the affected Session. The steer and earlier attempts remain
+> available. A successful provider write does not prove the agent followed the
+> steer. Repository/Wave steers currently stay on this Machine.
 
-Proposed instruction for the skill that publishes direction, not installed:
+Proposed instruction for the skill that saves steers, not installed:
 
-> After saving a steer, report saved status and the recipient evidence available
-> at that source. Surface unavailable or uncertain offers in the ongoing
-> conversation. Do not start an idle Session or claim that direction was applied.
+> After saving a steer, report its delivery status. Surface unavailable or uncertain
+> delivery in the ongoing conversation. Do not start an idle Session or claim that
+> the agent followed the steer.
 
 | Action | Product concept | Existing/proposed API |
 | --- | --- | --- |
-| Save “keep the public name” on a Task | Authored direction | Existing Task comment publication |
+| Save “keep the public name” on a Task | Steer | Existing Task comment save |
 | Continue either associated conversation | Independent Session delivery | Existing callback reconciliation/emission |
-| Inspect that direction from the Task | Recipient evidence | Proposed source-level projection of existing associations/receipts |
-| Retry an uncertain offer for one conversation | Another delivery attempt | Existing `retry_session_steer`, surfaced beside that recipient |
+| Inspect that steer from the Task | Delivery | Proposed source-level projection of existing associations/receipts |
+| Retry an uncertain delivery to one Session | Delivery attempt | Existing `retry_session_steer`, surfaced beside that Session |
 
 No new subscription lifecycle or delivery authority is needed for that projection.
 Recipients are observed current membership, not a frozen promise; future Sessions

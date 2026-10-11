@@ -120,10 +120,10 @@ Delegate durable work — the same verbs whether the caller is you or the wave:
 lf checkout INF-123                               # durable Task Work + worktree, no controller
 lf -b task run INF-123                            # place the Task, then run its Flow here until it ends
 lf task run INF-123 pursue                        # on a workflow: take the edge that runs pursue
-lf comment INF-123 "take the smaller approach"   # save direction for the Task's Sessions
-lf interrupt INF-123                             # end this turn so fresh direction is read now
+lf comment INF-123 "take the smaller approach"   # save a steer for the Task's Sessions
+lf interrupt INF-123                             # end the active turn
 lf --task INF-123 research "write scratch/runtime.md"    # one independent Task conversation
-lf task run INF-123 --reason "reconcile all scratch first" # publish direction, then run fresh work
+lf task run INF-123 --reason "reconcile all scratch first" # save a steer, then run fresh work
 lf task status INF-123 --json                         # inspect planning, even when sync is unavailable
 lf task complete INF-123                             # complete without moving the Workflow
 lf task reopen INF-123                               # reopen planning; keep the Workflow and PR
@@ -135,7 +135,7 @@ lf pr reconcile                                      # check recorded deliveries
 lf ci watch                                          # watch PR checks; start a ci-fix when a landing fails
 ```
 
-Acquired Task comments from Linear also become direction for each associated
+Acquired Task comments from Linear also become steers for each associated
 Session, with independent delivery at its next supported provider boundary.
 Steering leaves idle Sessions idle. A stopped Flow is history: `task run` never
 continues it, so inspect `lf task status` first.

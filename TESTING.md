@@ -99,6 +99,14 @@ then run `cargo test -p loopflow --test dto_fixtures composed_lifecycle` and
 Provider fixtures must read the launch's actual context channel. When a final
 sync adds fixtures that inspect a changed transport, run those focused tests
 before arming; the earlier gate did not cover the newly combined behavior.
+Claude stream fixtures must acknowledge the input's UUID before completing its
+result, and stay alive until the harness closes stdin. Include
+`explicit_agent_wins_through_task_nested_flows_and_provider_children` when
+integrating Claude transport changes; bound the test so missing acknowledgements
+fail locally instead of exhausting the merge queue's deadline.
+Cross-provider replay fixtures must install stand-ins for both the recorded and
+override providers, with a fixture/system-only PATH. A developer's installed
+provider must neither satisfy a missing fixture nor receive a test launch.
 
 ## Quick Reference
 
@@ -817,6 +825,10 @@ uv run python scripts/test_task_installation.py --test task_adopts_linear_checko
 ```
 
 Pass several names after `--test` to share one disposable build across related proofs.
+Agent-selection changes also require the container-only
+`declared_agent_can_start_another_tasks_flow` proof: saved Task defaults remain
+local, while explicit `-a` overrides child Tasks too. Ordinary Rust suites skip
+this installation-boundary proof.
 Every ordinary installation run first upgrades populated released planning and
 Task/PR fixtures through the combined drafts. Those checks retain zero/one/multiple
 historical PRs, pending completion delivery, a running Process and its Workflow,
@@ -1129,6 +1141,11 @@ changes require `DesktopHeadlessTests` alongside `WaveTests` to verify rendered 
 
 Fixture Machines must set `LF_HOME` explicitly, including when overriding `HOME`.
 Open fixture stores at `$LF_HOME/loopflow.db`; no variable selects another file.
+
+Managed-account status fixtures also pin `CLAUDE_CONFIG_DIR` to a disposable
+native home: verification observes the native login before polling managed
+accounts. Put managed homes below the fixture root so their sibling login locks
+cannot collide in the shared temporary directory.
 
 When changing Machine selection, run the affected fixtures with `LF_HOME` unset in
 the test runner; the materialization wrapper's shared test Machine can mask missing

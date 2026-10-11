@@ -628,6 +628,8 @@ mod tests {
     async fn claude_cached_identity_requires_current_verified_credentials() {
         let _env = crate::journal::test_env_lock();
         let root = tempfile::tempdir().unwrap();
+        let _native = crate::test_ambient::EnvGuard::clear(&["CLAUDE_CONFIG_DIR"]);
+        std::env::set_var("CLAUDE_CONFIG_DIR", root.path().join("native"));
         let store = std::sync::Arc::new(
             crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
                 root.path().join("store.db"),
@@ -635,10 +637,12 @@ mod tests {
             .await
             .unwrap(),
         );
+        let account_home = root.path().join("primary");
+        std::fs::create_dir(&account_home).unwrap();
         let mut account = crate::provider_account::new_account(
             crate::provider_auth::Provider::Claude,
             crate::store::ProviderAccountId::parse("primary").unwrap(),
-            root.path().to_path_buf(),
+            account_home.clone(),
             Some(crate::profile::EmailAddress::parse("first@example.com").unwrap()),
         );
         // Legacy observations have no binding to credential bytes.
@@ -647,9 +651,9 @@ mod tests {
         store.upsert_provider_account(&account).await.unwrap();
         let credential =
             r#"{"claudeAiOauth":{"accessToken":"fixture-first","expiresAt":4102444800000}}"#;
-        std::fs::write(root.path().join(".credentials.json"), credential).unwrap();
+        std::fs::write(account_home.join(".credentials.json"), credential).unwrap();
         std::fs::write(
-            root.path().join(".claude.json"),
+            account_home.join(".claude.json"),
             r#"{"oauthAccount":{"emailAddress":"first@example.com","accountUuid":"first-user"}}"#,
         )
         .unwrap();
@@ -674,7 +678,12 @@ mod tests {
         .await;
         let rows = super::managed_rows(&store, None, true).await.unwrap();
         server.await.unwrap();
-        assert_eq!(rows[0].verification, super::Verification::Accepted);
+        assert_eq!(
+            rows[0].verification,
+            super::Verification::Accepted,
+            "{:?}",
+            rows[0].diagnostic
+        );
         let verified = store
             .get_provider_account("claude", &account.account_id)
             .await
@@ -695,7 +704,7 @@ mod tests {
         );
 
         std::fs::write(
-            root.path().join(".credentials.json"),
+            account_home.join(".credentials.json"),
             credential.replace("fixture-first", "fixture-second"),
         )
         .unwrap();
@@ -738,7 +747,7 @@ mod tests {
         );
         assert_eq!(rejected.observed_subject, verified.observed_subject);
 
-        std::fs::write(root.path().join(".credentials.json"), credential).unwrap();
+        std::fs::write(account_home.join(".credentials.json"), credential).unwrap();
         store.upsert_provider_account(&verified).await.unwrap();
         let duplicate_home = root.path().join("duplicate");
         std::fs::create_dir(&duplicate_home).unwrap();

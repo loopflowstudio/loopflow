@@ -45,9 +45,6 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
             source.artifact_key
         ));
     }
-    if !check_cli_available(&harness) {
-        return Err(anyhow!("'{harness}' CLI is unavailable on this Machine"));
-    }
     let mut config = AgentConfig {
         system_prompt: request.system_prompt.clone(),
         conversation_context: request.conversation_context.clone(),
@@ -64,13 +61,25 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
         skip_permissions: request.skip_permissions,
         ..AgentConfig::default()
     };
+    config.apply_agent_override();
+    let (selected_harness, model) = crate::config::parse_agent(config.agent());
+    if selected_harness != harness {
+        config.provider_account_id = None;
+        config.provider_account_authority_home = None;
+    }
+    if !check_cli_available(&selected_harness) {
+        return Err(anyhow!(
+            "'{selected_harness}' CLI is unavailable on this Machine"
+        ));
+    }
     crate::agent::pin_provider_account_id_blocking(&mut config).map_err(anyhow::Error::from)?;
+    request.agent = config.agent().to_owned();
     request.account_id = config.provider_account_id.clone();
     let capabilities = AgentCapabilities {
         chrome: request.chrome,
     };
     let spec = SessionCaptureSpec {
-        harness,
+        harness: selected_harness,
         model,
         surface: "headless".to_string(),
         cwd: source.cwd,
@@ -151,9 +160,7 @@ mod tests {
         let bin = home.path().join("bin");
         std::fs::create_dir(&bin).unwrap();
         let evidence = home.path().join("replay-evidence");
-        let provider = bin.join(harness);
-        let provider_source = if harness == "claude" {
-            r#"#!/usr/bin/python3
+        let claude_source = r#"#!/usr/bin/python3
 import json, os, sys
 if '--version' in sys.argv:
     print('fixture')
@@ -169,18 +176,30 @@ for line in sys.stdin:
     print(json.dumps(message), flush=True)
     print(json.dumps({'type': 'system', 'subtype': 'init', 'session_id': 'replay-thread'}), flush=True)
     print(json.dumps({'type': 'result', 'uuid': 'replay-result', 'session_id': 'replay-thread', 'subtype': 'success', 'is_error': False, 'result': 'not the answer', 'structured_output': {'decision': 'advance'}}), flush=True)
-"#.to_string()
-        } else {
-            include_str!("../../../tests/support/opencode_server.py").replace("__WAIT__", "False")
-        };
-        std::fs::write(&provider, provider_source).unwrap();
-        std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+"#;
+        // Replay can switch providers; both the source and override must use
+        // stand-ins, never a provider installed on the test host.
+        for (name, source) in [
+            ("claude", claude_source.to_string()),
+            (
+                "opencode",
+                include_str!("../../../tests/support/opencode_server.py")
+                    .replace("__WAIT__", "False"),
+            ),
+        ] {
+            let provider = bin.join(name);
+            std::fs::write(&provider, source).unwrap();
+            std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
 
-        let path = std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(
-            &std::env::var_os("PATH").unwrap_or_default(),
-        )))
-        .unwrap();
-        let keys = ["PATH", "LF_BIN", "LF_HOME", "LF_TEST_REPLAY_EVIDENCE"];
+        let path = std::env::join_paths([bin, "/usr/bin".into(), "/bin".into()]).unwrap();
+        let keys = [
+            "PATH",
+            "LF_BIN",
+            "LF_HOME",
+            "LF_TEST_REPLAY_EVIDENCE",
+            crate::config::AGENT_OVERRIDE_ENV,
+        ];
         let _environment = crate::test_ambient::EnvGuard::clear(&keys);
         std::env::set_var("PATH", path);
         std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
@@ -284,5 +303,22 @@ for line in sys.stdin:
             .query_row("SELECT count(*) FROM tasks", [], |row| row.get(0))
             .unwrap();
         assert_eq!(tasks, 0, "replay requires no registered planning Work");
+
+        std::env::set_var(crate::config::AGENT_OVERRIDE_ENV, "opencode:opencode/other");
+        let overridden_id = crate::journal::with_test_ledger(registry.clone(), || {
+            replay_at(home.path(), &session.id)
+        })
+        .unwrap();
+        let (_, overridden) =
+            crate::session_record::resolve_manifest(home.path(), &overridden_id).unwrap();
+        assert_eq!(overridden.model.as_deref(), Some("opencode/other"));
+        let mut expected = request.clone();
+        expected.agent = "opencode:opencode/other".into();
+        // Claude's selected account cannot transfer to an OpenCode replay.
+        expected.account_id = None;
+        assert_eq!(overridden.process, Some(expected));
+        let (_, retained) =
+            crate::session_record::resolve_manifest(home.path(), &source_id).unwrap();
+        assert_eq!(retained.process, Some(request));
     }
 }

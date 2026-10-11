@@ -1,4 +1,5 @@
 //! Public launch proofs for the Session delivery cutover.
+mod support;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::process::{Command, Stdio};
@@ -9,6 +10,42 @@ use loopflow_test_support::TestRepo;
 fn claude_startup_preserves_large_combined_seed_and_correlated_answer() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
+    let _task =
+        support::register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    let account_home = home.path().join("accounts/claude/fixture");
+    fs::create_dir_all(&account_home).unwrap();
+    let credential = serde_json::json!({"claudeAiOauth":{"accessToken":"fixture-only","expiresAt":4102444800000i64}}).to_string();
+    fs::write(account_home.join(".credentials.json"), &credential).unwrap();
+    let store =
+        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    store
+        .upsert_provider_account(&loopflow::store::ProviderAccount {
+            provider: "claude".into(),
+            account_id: loopflow::store::ProviderAccountId::parse("fixture").unwrap(),
+            home: Some(account_home),
+            login_email: Some(
+                loopflow::profile::EmailAddress::parse("fixture@example.com").unwrap(),
+            ),
+            observed_email: Some("fixture@example.com".into()),
+            observed_subject: Some("fixture".into()),
+            observed_credential_digest: Some({
+                use sha2::Digest;
+                format!("{:x}", sha2::Sha256::digest(credential.as_bytes()))
+            }),
+            observed_plan: None,
+            credential_state: loopflow::store::CredentialState::Connected,
+            routing_state: loopflow::store::RoutingState::Automatic,
+            plan: None,
+            paid_through: None,
+            utilization_percent: None,
+            cooldown_until: None,
+            cooldown_reason: None,
+            last_selected_at: None,
+            created_at: now,
+            updated_at: now,
+        })
+        .unwrap();
     let bin = home.path().join("bin");
     fs::create_dir(&bin).unwrap();
     let skill = repo.path().join(".claude/skills/startup-proof");
@@ -27,7 +64,7 @@ fn claude_startup_preserves_large_combined_seed_and_correlated_answer() {
     }
     let provider = bin.join("claude");
     fs::write(&provider, r#"#!/usr/bin/python3
-import fcntl, hashlib, json, os, pathlib, select, subprocess, sys
+import fcntl, hashlib, json, os, pathlib, select, shlex, subprocess, sys
 if '--version' in sys.argv:
     print('fixture')
     sys.exit(0)
@@ -41,16 +78,28 @@ with open(lock, 'r+') as fence:
     fcntl.flock(fence, fcntl.LOCK_SH)
     settings = json.load(open(sys.argv[sys.argv.index('--settings') + 1]))
     hook = settings['hooks']['SessionStart'][0]['hooks'][0]['command']
+    arguments = shlex.split(hook)
+    adapter = json.loads(os.environ['LF_PROVIDER_CONTEXT'])
+    assert adapter['agent_process_id'] == caller['agent_process_id']
+    previous = home / 'previous-provider'
+    if '--resume' in sys.argv:
+        assert sys.argv[sys.argv.index('--resume') + 1] == 'startup-native'
+        assert previous.read_text() != adapter['agent_process_id'], 'replacement reused old capability'
+    previous.write_text(adapter['agent_process_id'])
     output = subprocess.check_output(hook, shell=True, input=json.dumps({'session_id': 'startup-native', 'hook_event_name': 'SessionStart', 'source': 'startup'}).encode())
     assert json.loads(output)['hookSpecificOutput']['additionalContext']
     (home / 'startup-complete').touch()
-context = json.loads(sys.stdin.readline())
-query = json.loads(sys.stdin.readline())
-assert context['shouldQuery'] is False
-expected = (home / 'clipboard').read_text()
-assert expected in context['message']['content'], 'incomplete non-query context'
-assert query['message']['content'][0]['text'].endswith('QUERY_END'), 'incomplete query'
-assert len(json.dumps(context).encode()) > 131133
+if '--resume' in sys.argv:
+    query = json.loads(sys.stdin.readline())
+    assert 'RESUME_END' in query['message']['content'][0]['text']
+else:
+    context = json.loads(sys.stdin.readline())
+    query = json.loads(sys.stdin.readline())
+    assert context['shouldQuery'] is False
+    expected = (home / 'clipboard').read_text()
+    assert expected in context['message']['content'], 'incomplete non-query context'
+    assert query['message']['content'][0]['text'].endswith('QUERY_END'), 'incomplete query'
+    assert len(json.dumps(context).encode()) > 131133
 assert query['uuid']
 query['session_id'] = 'startup-native'
 print(json.dumps(query), flush=True)
@@ -70,6 +119,7 @@ sys.stdin.read()
         .current_dir(repo.path())
         .args([
             "-b",
+            "--isolate",
             "-a",
             "claude",
             "-c",
@@ -100,4 +150,193 @@ sys.stdin.read()
     assert_eq!(native, "startup-native");
     assert_eq!(answer, "CORRELATED_STARTUP_ANSWER");
     assert!(!turn.is_empty());
+    let session: String = db
+        .query_row(
+            "SELECT id FROM agent_sessions WHERE provider_thread='startup-native'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let resumed = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .env_clear()
+        .env("HOME", home.path())
+        .env("LF_HOME", home.path())
+        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+        .env("CLAUDE_CONFIG_DIR", home.path().join(".claude"))
+        .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+        .current_dir(repo.path())
+        .args([
+            "-b",
+            "--isolate",
+            "session",
+            "resume",
+            &session,
+            "RESUME_END",
+        ])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(
+        resumed.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&resumed.stderr),
+        fs::read_to_string(home.path().join("provider-errors")).unwrap_or_default()
+    );
+    let answers: i64 = db.query_row("SELECT count(DISTINCT provider_turn) FROM session_events WHERE session_id=?1 AND kind='output' AND json_extract(payload,'$.text')='CORRELATED_STARTUP_ANSWER'", [&session], |r| r.get(0)).unwrap();
+    assert_eq!(
+        answers, 2,
+        "replacement preserves separate native answer correlation"
+    );
+}
+
+#[test]
+fn public_context_capability_survives_claim_changes_and_rejects_children_and_replacement() {
+    use loopflow::id::LfProcessId;
+    use loopflow::store::sqlite::SqliteStore;
+    use std::io::Write;
+    use std::time::{Duration, Instant};
+
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let provider = home.path().join("claude");
+    fs::write(&provider, r#"#!/usr/bin/python3
+import json, os, pathlib, shlex, sys, time
+if '--version' in sys.argv:
+    print('fixture')
+    sys.exit(0)
+home = pathlib.Path(os.environ['LF_HOME'])
+settings = json.load(open(sys.argv[sys.argv.index('--settings') + 1]))
+args = shlex.split(settings['hooks']['SessionStart'][0]['hooks'][0]['command'])
+message = json.loads(sys.stdin.readline())
+message['session_id'] = 'handoff-native'
+print(json.dumps(message), flush=True)
+print(json.dumps({'type': 'system', 'subtype': 'init', 'session_id': 'handoff-native'}), flush=True)
+(home / 'handoff.json').write_text(json.dumps({'delivery': args[args.index('--delivery') + 1], 'caller': os.environ['LF_AGENT_CALLER'], 'capture': os.environ['LF_CAPTURE_KEY'], 'capability': os.environ['LF_PROVIDER_CONTEXT']}))
+deadline = time.monotonic() + 15
+while not (home / 'finish').exists() and time.monotonic() < deadline:
+    time.sleep(.01)
+"#).unwrap();
+    fs::set_permissions(provider, fs::Permissions::from_mode(0o755)).unwrap();
+    let child = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .env_clear()
+        .env("HOME", home.path())
+        .env("LF_HOME", home.path())
+        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+        .env("CLAUDE_CONFIG_DIR", home.path().join(".claude"))
+        .env("PATH", format!("{}:/usr/bin:/bin", home.path().display()))
+        .current_dir(repo.path())
+        .args(["-b", "-a", "claude", ":", "Hold this conversation"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !home.path().join("handoff.json").exists() {
+        assert!(Instant::now() < deadline, "provider did not start");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let declaration: serde_json::Value =
+        serde_json::from_slice(&fs::read(home.path().join("handoff.json")).unwrap()).unwrap();
+    let caller: serde_json::Value =
+        serde_json::from_str(declaration["caller"].as_str().unwrap()).unwrap();
+    let session = caller["session_id"].as_str().unwrap();
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    loop {
+        let native: Option<String> = db
+            .query_row(
+                "SELECT provider_thread FROM agent_sessions WHERE id=?1",
+                [session],
+                |r| r.get(0),
+            )
+            .unwrap();
+        if native.as_deref() == Some("handoff-native") {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "native identity was not recorded"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let first = store.session_attachment(session).unwrap().unwrap();
+    let other = LfProcessId::new();
+    db.execute(
+        "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+        [&other],
+    )
+    .unwrap();
+    let second = store
+        .claim_session_attachment(session, Some(&first), &other, false)
+        .unwrap();
+    let third = store
+        .claim_session_attachment(
+            session,
+            Some(&second),
+            first.lf_process_id.as_ref().unwrap(),
+            false,
+        )
+        .unwrap();
+    assert_eq!(first.agent_process_id, third.agent_process_id);
+    assert_ne!(first.token, third.token);
+    let hook = |payload: serde_json::Value| {
+        let mut hook = Command::new(env!("CARGO_BIN_EXE_lf"))
+            .env_clear()
+            .env("HOME", home.path())
+            .env("LF_HOME", home.path())
+            .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+            .env("LF_AGENT_CALLER", declaration["caller"].as_str().unwrap())
+            .env("LF_CAPTURE_KEY", declaration["capture"].as_str().unwrap())
+            .env(
+                "LF_PROVIDER_CONTEXT",
+                declaration["capability"].as_str().unwrap(),
+            )
+            .env("PATH", "/usr/bin:/bin")
+            .current_dir(repo.path())
+            .args([
+                "__context-block",
+                "--delivery",
+                declaration["delivery"].as_str().unwrap(),
+                "--moment",
+                "start",
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        hook.stdin
+            .take()
+            .unwrap()
+            .write_all(payload.to_string().as_bytes())
+            .unwrap();
+        hook.wait_with_output().unwrap()
+    };
+    let payload = serde_json::json!({"session_id":"handoff-native", "hook_event_name":"SessionStart", "source":"resume"});
+    let received = hook(payload.clone());
+    assert!(
+        received.status.success(),
+        "{}",
+        String::from_utf8_lossy(&received.stderr)
+    );
+    assert!(!received.stdout.is_empty());
+    let mut nested = payload.clone();
+    nested["agent_id"] = serde_json::json!("child");
+    let rejected = hook(nested);
+    assert!(rejected.stdout.is_empty());
+    let mut foreign = payload.clone();
+    foreign["session_id"] = serde_json::json!("child-native");
+    let rejected = hook(foreign);
+    assert!(!rejected.status.success());
+    assert!(rejected.stdout.is_empty());
+    store
+        .claim_session_attachment(session, Some(&third), &other, true)
+        .unwrap();
+    let stale = hook(payload);
+    assert!(!stale.status.success());
+    assert!(stale.stdout.is_empty());
+    fs::write(home.path().join("finish"), "").unwrap();
+    let mut child = child;
+    child.wait().unwrap();
 }

@@ -21,6 +21,7 @@ const HOOK_CONTEXT_BYTES: usize = 10_000;
 pub enum ContextMoment {
     Start,
     Compact,
+    Tool,
 }
 
 /// Captured source identities, not frozen context. Hooks reread scratch and Wave
@@ -130,7 +131,10 @@ impl ContextDelivery {
             quote(&executable),
             quote(&path)
         );
-        Ok(serde_json::json!({"SessionStart": [
+        Ok(serde_json::json!({
+            "PostToolUse": [{"hooks": [{"type":"command", "command": format!("{command} tool"), "timeout":30}]}],
+            "UserPromptSubmit": [{"hooks": [{"type":"command", "command": format!("{command} tool"), "timeout":30}]}],
+            "SessionStart": [
             {"matcher": "startup|resume", "hooks": [{"type":"command", "command": format!("{command} start"), "timeout": 30}]},
             {"matcher": "compact", "hooks": [{"type":"command", "command": format!("{command} compact"), "timeout": 30}]}
         ]}))

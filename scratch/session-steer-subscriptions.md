@@ -3,9 +3,10 @@
 Task `lf-9c03797`, 2026-10-11. Jack Heart accepted the Session-only primitive and
 wrappers for pursuit (“ok, pursue”). After the stopped Flow reported the Codex
 handoff and OpenCode boundary gaps, Jack Heart renewed pursuit (“pursuse!”).
-Production cutover is not active. An October 11 implementation draft was withdrawn
-after the configured Claude startup probe exposed a lock cycle. The accepted
-outcome is unchanged; the startup authority revision below remains draft.
+Production steer cutover is not active. The withdrawn October 11 draft exposed
+a startup lock cycle. The working branch now proves shared startup exclusion and
+provider-bound context authority; the remaining publication/receipt cutover below
+is still required in this PR.
 
 ## Current implementation — reconciled 2026-10-11
 
@@ -13,7 +14,8 @@ At `ff1dc403c4`, Task launch still reads event-backed steers into `TaskSeed`;
 `TaskInput::poll` injects them on a five-second timer, and `RunningFlow` keeps
 per-node cursors through `--steers-after`. `ContextDelivery::prepare` saves generated
 Task summaries as references that later context hooks reread. No publication,
-Session subscription, delivery receipt or `session_steers` integration target exists.
+Session subscription or delivery receipt exists. The working `session_steers`
+integration target currently covers startup transport and provider authority only.
 The data structures, commands and transaction below remain design, not shipped APIs.
 
 Main's #1518/#1521 already supply checkout-based context refresh and a rendered
@@ -94,14 +96,38 @@ The public `session_steers` launch fixture invokes an external Claude skill with
 readable without draining it, then takes shared hook exclusion and invokes the
 real context command. It verifies the complete non-query context, correlated
 query, native identity and retained answer. This is a protocol transport proof:
-the fixture supplies hook exclusion; production provider-bound hook authority and
-replacement activation remain to be implemented. It proves no steer receipt.
+the fixture forces overlap and invokes production provider-bound hook exclusion.
+It also resumes the Task-associated Session with a fresh AgentProcess and verifies
+that the new capability names it, while preserving native identity and distinct
+answer correlation. It proves no steer receipt.
 The dispatch race fixture proves takeover waits for both shared writers and the
 former claim cannot dispatch afterward.
 
 The configured Claude 2.1.296 probe with `--shared` accepted all 131,133 bytes
 within the existing two-second bound; the original exclusive counterexample
 remains recorded above. Neither probe contacts a real model endpoint.
+
+### Provider capability activation
+
+The common `agent_process::{spawn,spawn_native}` functions reserve the capability
+against their frozen attachment and supply it through private `LF_PROVIDER_CONTEXT`
+immediately before the provider launch. This replaces the draft's early binding
+in saved context declarations, which missed Claude's `ensure_process` replacement
+and native OpenCode's earlier plugin assembly. The capability grants context
+output only; SQLite validates the selected AgentProcess and native binding under
+shared exclusion. A root startup callback activates an unbound native identity;
+subsequent callbacks must match. Child callbacks with `agent_id` are excluded before
+activation. Replacement rejects the old capability; client handoff preserves it.
+Capability reservation alone is not installation evidence; `activated_at` records
+an observed callback, not provider acceptance of its context.
+
+A public callback fixture retains the launch environment through A → B → A,
+then verifies output, child/foreign-thread rejection and replacement rejection.
+It uses a stand-in provider and the actual hook CLI/store claim APIs, not a
+configured Codex reconnect. OpenCode now generates adapter invocation UUIDs and
+refreshes each transform instead of caching consumable direction in its text;
+receipt-backed retry/error behavior remains unfinished. The sole draft migration
+currently contains capability storage; publication conversion is still pending.
 
 ## What to build
 
@@ -430,4 +456,4 @@ if the status shape crosses that boundary. Configured provider probes use isolat
 homes and headless fake endpoints; unavailable probes are explicitly deferred to
 capable CI, never recorded as passes.
 
-Check: `session_steers` public startup fixture, shared-dispatch race, isolated Claude `--shared` probe, `cargo fmt`, and `cargo clippy --all-targets -- -D warnings` pass; provider authority, publication/receipt cutover and broader gate acceptance remain unfinished.
+Check: isolated public startup/resume and capability fixtures, shared-dispatch race, configured Claude shared-fence probe, `cargo fmt`, Clippy and JS syntax pass; publication/receipt/deletion cutover and provider-specific retry proofs remain unfinished.

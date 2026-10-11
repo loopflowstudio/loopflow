@@ -48,6 +48,7 @@
 .x5 .wfnote{font-size:13.5px;line-height:1.6;color:#444;max-width:74ch;margin:0 0 28px}
 @media (max-width:900px){.x5 .wf{flex-direction:column;align-items:stretch;gap:12px}.x5 .wf .node{flex:none}.x5 .wf .edge i{width:2px;height:22px;margin:0 auto}.x5 .wf .edge i::after{right:-4px;top:auto;bottom:-1px;border-top:8px solid #b9b1a6;border-left:5px solid transparent;border-right:5px solid transparent;border-bottom:0}}
 
+.home-page .thesis{padding:34px 0 8px;max-width:800px}.home-page .thesis p{font:400 clamp(21px,1.9vw,26px)/1.42 var(--font-serif);letter-spacing:.005em;color:#2a2523;margin:0 0 20px}.home-page .thesis p:last-child{margin-bottom:0}
 .home-page .pair .say:has(+ .say){margin-bottom:16px}
 .home-page .cli-part{padding-top:72px}.home-page .cli-part h2{font-size:clamp(30px,3.2vw,42px);margin:0 0 26px}.home-page .cli-part h2 code{font-size:.9em}
 .walk .turn{margin-top:12px!important;padding:10px 14px;border-radius:8px;background:#fff;border:1px solid var(--border);font-size:14px;line-height:1.55;color:#333}
@@ -168,6 +169,11 @@
   <h1 aria-label="Loopflow is how you design, implement, demo and ship software with agents.">
   <span aria-hidden="true">Loopflow is how you <span class="rotating"><span>design</span><span>implement</span><span>demo</span><span>ship</span></span> software with agents.</span></h1>
 </section>
+<section class="thesis">
+  <p >Coding agents can do amazing things for you, but they ask amazing focus of you. How can you, a human with a single locus of attention, stay in sync with an entire parallel agent swarm? Shipping tens of thousands of lines is the easy part. Making them lines worth keeping — lines you don’t revert next month — is the hard part.</p>
+  <p >Loopflow helps you do that by arranging your agent sessions around clear work boundaries: long-lived areas of responsibility and objectives (“Waves”) and concrete outcomes (“Tasks”). You don’t have to keep every session window open for fear of it disappearing, or remember why you wanted to do this massive change in the first place.</p>
+  <p >Your work has defined workflows — how an idea gets researched, designed, implemented, validated, shipped, etc. — and the points at which you want to get involved: be that early on in design, later on in trying it out, both, or neither. Each Wave and Task has an associated workflow that is used to drive work forward and ensures that each session you come to in Loopflow is one where your input really matters.</p>
+</section>
 <section id="mac" class="x5 x6">
   <p class="slot"><span>Video goes here</span><span>A mock of the app stands in until it is recorded</span></p>
   <div class="win">
@@ -211,9 +217,6 @@
 </section>
 <section class="pair">
   <h2>Stay in flow as you build an epic company-scale project as one super-powered human.</h2>
-  <p class="say">Coding agents can do amazing things for you, but they ask amazing focus of you. How can you, a human with a single locus of attention, stay in sync with an entire parallel agent swarm? Shipping tens of thousands of lines is the easy part. Making them lines worth keeping — lines you don’t revert next month — is the hard part.</p>
-  <p class="say">Loopflow helps you do that by arranging your agent sessions around clear work boundaries: long-lived areas of responsibility and objectives (“Waves”) and concrete outcomes (“Tasks”). You don’t have to keep every session window open for fear of it disappearing, or remember why you wanted to do this massive change in the first place.</p>
-  <p class="say">Your work has defined workflows — how an idea gets researched, designed, implemented, validated, shipped, etc. — and the points at which you want to get involved: be that early on in design, later on in trying it out, both, or neither. Each Wave and Task has an associated workflow that is used to drive work forward and ensures that each session you come to in Loopflow is one where your input really matters.</p>
   <div class="ledger">
     <div><p class="eyebrow">What you do</p><ul><li>What to make</li><li>How it should work</li><li>Whether the design is right</li><li>Whether it works when you use it</li><li>When it is done</li></ul></div>
     <div><p class="eyebrow">What agents automate</p><ul><li>Writing the code</li><li>Keeping it tidy</li><li>Keeping up with the rest of the code</li><li>Opening the pull request</li><li>Running the checks and merging</li></ul></div>

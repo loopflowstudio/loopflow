@@ -586,3 +586,5 @@ strip links to its own site in a new tab.
 - Jack Heart: "Loopflow is How you, not where you" → the `x10` header reads "Loopflow is how you [design | implement | demo | ship] software with agents."
 
 - Jack Heart wrote the third paragraph: "Your work has defined workflows -- how an idea get researched designed, implemented, validated, shipped, etc. and the points at which you want to get involve: be that early on in design, later on in trying it out, both, or neither. Each Wave and Task has an associated workflow that used to drive work forward that ensures that each session you come to in loopflow is one where your input really matters." Set in `x10` with grammar fixed, replacing Claude's draft. "Every Task ends shipped" and the stay-involved / micromanage pair are no longer on the page.
+
+- Jack Heart: "put the paragraph at the very top, more in the style of super logical's thesis?" → in `x10`, the three paragraphs sit directly under the header and above the video slot, set as large serif prose in one narrow column. "Stay in flow…" stays as the heading over the two columns and the three flows. Claude read "the paragraph" as all three.

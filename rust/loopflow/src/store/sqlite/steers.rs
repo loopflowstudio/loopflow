@@ -186,20 +186,11 @@ fn reconcile(conn: &Connection, session: &str) -> StoreResult<()> {
          OR p.repo=(SELECT repo FROM agent_sessions WHERE id=?1))
         AND NOT EXISTS(SELECT 1 FROM steer_publications newer WHERE newer.source=p.source AND newer.seq>p.seq)
         )", super::task_work::session_tasks("s"));
-    // A revision or association change cancels the whole not-yet-written batch.
-    // Its emitter checks the reservation again before exposing any bytes.
     conn.execute(
         &format!(
-            "{scopes} UPDATE steer_batches SET evidence='cancelled'
-        WHERE session_id=?1 AND evidence='prepared' AND EXISTS(
-            SELECT 1 FROM steer_deliveries d WHERE d.batch_id=steer_batches.id
-            AND d.publication_id NOT IN applicable)"
+            "{scopes} UPDATE session_steers SET applicable=(publication_id IN applicable)
+        WHERE session_id=?1"
         ),
-        [session],
-    )?;
-    conn.execute(
-        "DELETE FROM steer_deliveries WHERE session_id=?1 AND batch_id IN (
-        SELECT id FROM steer_batches WHERE evidence='cancelled')",
         [session],
     )?;
     conn.execute(
@@ -209,18 +200,39 @@ fn reconcile(conn: &Connection, session: &str) -> StoreResult<()> {
         ),
         [session],
     )?;
+    // A revision or association change cancels the whole not-yet-written batch.
+    // Its emitter checks the reservation again before exposing any bytes.
     conn.execute(
-        &format!(
-            "{scopes} UPDATE session_steers SET applicable=(publication_id IN applicable)
-        WHERE session_id=?1"
-        ),
+        "UPDATE steer_batches SET evidence='cancelled'
+        WHERE session_id=?1 AND evidence='prepared' AND EXISTS(
+            SELECT 1 FROM steer_deliveries d JOIN session_steers s
+            ON s.session_id=d.session_id AND s.publication_id=d.publication_id
+            WHERE d.batch_id=steer_batches.id AND s.applicable=0)",
+        [session],
+    )?;
+    conn.execute(
+        "DELETE FROM steer_deliveries WHERE session_id=?1 AND batch_id IN (
+        SELECT id FROM steer_batches WHERE evidence='cancelled')",
         [session],
     )?;
     // Emitted and uncertain receipts survive scope changes and corrections.
-    conn.execute(&format!("{scopes} DELETE FROM session_steers WHERE session_id=?1
-        AND NOT EXISTS(SELECT 1 FROM steer_deliveries d WHERE d.session_id=?1 AND d.publication_id=session_steers.publication_id)
-        AND publication_id NOT IN applicable"), [session])?;
+    conn.execute(
+        "DELETE FROM session_steers WHERE session_id=?1 AND applicable=0
+        AND NOT EXISTS(SELECT 1 FROM steer_deliveries d
+            WHERE d.session_id=?1 AND d.publication_id=session_steers.publication_id)",
+        [session],
+    )?;
     Ok(())
+}
+
+fn pending_count(conn: &Connection, session: &str) -> StoreResult<i64> {
+    Ok(conn.query_row(
+        "SELECT count(*) FROM session_steers s WHERE s.session_id=?1 AND s.applicable=1
+        AND NOT EXISTS(SELECT 1 FROM steer_deliveries d WHERE d.session_id=s.session_id
+        AND d.publication_id=s.publication_id AND d.attempt=s.attempt)",
+        [session],
+        |row| row.get(0),
+    )?)
 }
 
 impl SqliteStore {
@@ -261,6 +273,15 @@ impl SqliteStore {
         self.publish_scope_steer(("repository", &repo.to_string()), author, text)
     }
 
+    pub fn publish_session_steer(
+        &self,
+        session: &str,
+        author: &str,
+        text: &str,
+    ) -> StoreResult<SteerPublication> {
+        self.publish_scope_steer(("session", session), author, text)
+    }
+
     fn publish_scope_steer(
         &self,
         owner: (&str, &str),
@@ -277,36 +298,8 @@ impl SqliteStore {
             &crate::durable::Author::Named(author.into()),
             text,
         )?;
-        // The same association resolver handles immediate fan-out and a later
-        // boundary after a new bind; publishing never starts provider work.
-        let sessions = tx
-            .prepare("SELECT id FROM agent_sessions")?
-            .query_map([], |row| row.get::<_, String>(0))?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        for session in sessions {
-            reconcile(&tx, &session)?;
-        }
-        tx.commit()?;
-        Ok(publication)
-    }
-
-    pub fn publish_session_steer(
-        &self,
-        session: &str,
-        author: &str,
-        text: &str,
-    ) -> StoreResult<SteerPublication> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let publication = publish_in(
-            &tx,
-            ("session", session),
-            &uuid::Uuid::new_v4().to_string(),
-            "1",
-            &crate::durable::Author::Named(author.into()),
-            text,
-        )?;
-        reconcile(&tx, session)?;
+        // Reads and callbacks reconcile their own Session, including publications
+        // saved before it existed. Publishing need not scan unrelated Sessions.
         tx.commit()?;
         Ok(publication)
     }
@@ -326,7 +319,16 @@ impl SqliteStore {
             FROM session_steers s JOIN steer_publications p ON p.id=s.publication_id
             LEFT JOIN steer_deliveries d ON d.session_id=s.session_id AND d.publication_id=s.publication_id AND d.attempt=s.attempt
             LEFT JOIN steer_batches b ON b.id=d.batch_id WHERE s.session_id=?1 AND p.seq>?2 ORDER BY p.seq LIMIT ?3"))?
-            .query_map(params![session,after,(limit+1) as i64],|r| Ok(SessionSteerStatus { publication: publication(r)?, attempt:r.get(6)?, evidence:r.get(7)?, batch_id:r.get(8)?,payload_hash:r.get(9)?,excerpted:r.get(10)? }))?
+            .query_map(params![session, after, (limit + 1) as i64], |row| {
+                Ok(SessionSteerStatus {
+                    publication: publication(row)?,
+                    attempt: row.get(6)?,
+                    evidence: row.get(7)?,
+                    batch_id: row.get(8)?,
+                    payload_hash: row.get(9)?,
+                    excerpted: row.get(10)?,
+                })
+            })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         let next_after = if items.len() > limit {
             items.truncate(limit);
@@ -334,13 +336,7 @@ impl SqliteStore {
         } else {
             None
         };
-        let pending = tx.query_row(
-            "SELECT count(*) FROM session_steers s WHERE s.session_id=?1 AND s.applicable=1
-            AND NOT EXISTS(SELECT 1 FROM steer_deliveries d WHERE d.session_id=s.session_id
-            AND d.publication_id=s.publication_id AND d.attempt=s.attempt)",
-            [session],
-            |row| row.get(0),
-        )?;
+        let pending = pending_count(&tx, session)?;
         let capability: String = tx.query_row("SELECT CASE
             WHEN p.id IS NULL OR p.completed_at IS NOT NULL THEN 'idle; pending until next supported provider start'
             WHEN a.agent_process_id IS NULL THEN 'unavailable; provider start required to install adapter'
@@ -416,7 +412,7 @@ impl SqliteStore {
     ) -> StoreResult<bool> {
         let _lock = self.lock_session_dispatch(&adapter.session)?;
         let batch = crate::id::SteerBatchId::new();
-        let selected = {
+        let (publications, remaining) = {
             let mut conn = self.conn.lock().expect("store mutex poisoned");
             let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
             let claim: Option<String> = tx.query_row("SELECT p.attachment_token FROM agent_sessions s
@@ -447,12 +443,11 @@ impl SqliteStore {
                     SELECT session_id,publication_id,attempt,?3 FROM session_steers WHERE session_id=?1 AND publication_id=?2",
                     params![adapter.session,row.id,batch])?;
             }
-            let remaining: i64 = tx.query_row("SELECT count(*) FROM session_steers s WHERE session_id=?1 AND s.applicable=1
-                AND NOT EXISTS(SELECT 1 FROM steer_deliveries d WHERE d.session_id=s.session_id AND d.publication_id=s.publication_id AND d.attempt=s.attempt)",[&adapter.session],|r|r.get(0))?;
+            let remaining = pending_count(&tx, &adapter.session)?;
             tx.commit()?;
             (rows, remaining as usize)
         };
-        let payload = match render(batch.as_str(), &selected.0, selected.1) {
+        let payload = match render(batch.as_str(), &publications, remaining) {
             Ok(payload) => payload,
             Err(error) => {
                 let mut conn = self.conn.lock().expect("store mutex poisoned");

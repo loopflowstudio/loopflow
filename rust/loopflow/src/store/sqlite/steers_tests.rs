@@ -442,6 +442,9 @@ fn correction_during_render_cancels_the_superseded_batch_before_write() {
         "Original",
     )
     .unwrap();
+    let retained = store
+        .publish_session_steer("session", "Author", "Independent direction")
+        .unwrap();
     store
         .emit_session_steers(
             &adapter,
@@ -463,15 +466,17 @@ fn correction_during_render_cancels_the_superseded_batch_before_write() {
         )
         .unwrap();
     let page = store.session_steers("session", 0, 32).unwrap();
-    assert_eq!(page.pending, 1);
-    assert_eq!(page.items[0].publication.text, "Correction");
+    assert_eq!(page.pending, 2);
+    assert_eq!(page.items[0].publication, retained);
+    assert_eq!(page.items[1].publication.text, "Correction");
     store
         .emit_session_steers(
             &adapter,
             "native",
             "two",
             |_, rows, _| {
-                assert_eq!(rows[0].text, "Correction");
+                assert_eq!(rows[0], retained);
+                assert_eq!(rows[1].text, "Correction");
                 Ok(rendered("corrected text"))
             },
             |_| Ok(()),

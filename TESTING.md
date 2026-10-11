@@ -1124,6 +1124,11 @@ changes require `DesktopHeadlessTests` alongside `WaveTests` to verify rendered 
 Fixture Machines must set `LF_HOME` explicitly, including when overriding `HOME`.
 Open fixture stores at `$LF_HOME/loopflow.db`; no variable selects another file.
 
+Managed-account status fixtures also pin `CLAUDE_CONFIG_DIR` to a disposable
+native home: verification observes the native login before polling managed
+accounts. Put managed homes below the fixture root so their sibling login locks
+cannot collide in the shared temporary directory.
+
 When changing Machine selection, run the affected fixtures with `LF_HOME` unset in
 the test runner; the materialization wrapper's shared test Machine can mask missing
 fixture setup. CLI fixtures must select their own disposable Machine. Upgrade proofs

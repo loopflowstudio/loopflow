@@ -44,44 +44,43 @@ public CLI, rather than treating successful parsing as launch acceptance.
 
 ## Remaining work
 
-Publication checks covered Task launches, replay, native resume, shell isolation,
-command discovery and startup after the integrated main changes. Review found
-root help exceeded its existing 25-line limit; removing two blank lines restored
-the limit without dropping the global override explanation. Discovery then passed.
-Jack Heart accepted the demo; the October 10 steer supersedes review-only delivery.
-Remote execution, installed/live-provider acceptance, hosted CI and delivery
-remain unproved; real-provider tests remain prohibited.
-No product decision is needed for this reconciliation.
-Prior evidence: `69bdad343:scratch/choose-the-agent-with-a.md`; compression:
-`5df2ba251`. The publication repair changes only root-help spacing.
+Jack Heart accepted the demo and shipping on October 10. Hosted CI, remote
+execution, installed/live-provider acceptance and delivery remain unproved;
+real-provider tests remain prohibited. Gate does not land or complete the Task.
 
-## Gate findings (2026-10-10)
+The remaining product failure is the unchanged homepage's desktop overflow:
+`test_page_fits_and_terminals_scroll_within_their_cells[chromium-1440]` measures
+1,475 px at a 1,440 px viewport. A standalone headless rendering of the existing
+homepage HTML/CSS reproduces it; the rotating headline's `white-space: nowrap`
+(`website/static/style.css:1400`) overflows with fallback fonts. Homepage layout
+is outside this branch's gate scope. The nested Python sandbox check remains
+CI-owned; its unchanged standalone network-denying proof previously passed.
 
-The global-agent acceptance passed, including all six recorded Claude Sessions,
-no-flag defaults, literal arguments, replay and native-provider refusal. Review
-found no further in-scope code change; stale delivery wording is corrected.
+## Main reconciliation and gate (2026-10-11)
 
-The complete gate is not green. Two unchanged Rust tests failed:
-`claude_cached_identity_requires_current_verified_credentials` reported
-Unavailable instead of Accepted, and
-`surviving_child_keeps_target_exclusive_after_parent_drops_lock` could not
-reacquire the lock after child exit. Their causes remain unresolved; no provider
-login or credential inspection was attempted to repair them. These need diagnosis
-before claiming a passing gate; they are outside this branch's changed code.
-The Python checkout-observation proof cannot nest `sandbox-exec` inside the
-network sandbox (`sandbox_apply: Operation not permitted`); its standalone,
-network-denying sandbox proof passes. Combined-run coverage remains deferred to
-capable CI. Logs: `.lf/tmp/gate/run-25073/`. Remote and installed acceptance remain
-unproved. Nothing was landed or completed by this gate.
+Merged pinned main `21dae527b4`; repair checkpoint `894b435823` reconciles the
+agent/config/prompt modules, native attachment, conversation context and the
+fixture's explicit Project workflow. Review retains one global declaration and
+one inherited explicit override. The six-Session acceptance, no-flag defaults,
+literal arguments and native-history refusal pass.
 
-Checks: `uv run python scripts/test.py --reuse-passing` (LF authority cleared): architecture, fmt, Clippy and website passed; Rust 2,280 passed/2 failed/17 skipped; Python 388 passed/1 nested-sandbox failure/19 skipped; standalone checkout-observation test 1 passed; `git diff --check` passed. Hosted CI owns the full matrix and deferred checks.
+Gate reproduced the earlier Claude verification failure using only a synthetic
+ambient login: native observation consumed the managed fixture's HTTP responses.
+The fixture now pins an empty native home and keeps managed login locks below
+its own root. Replay's second invocation also lacked the first invocation's
+ledger pin after main reconciliation; both now use the fixture store.
 
-## Main reconciliation (2026-10-11)
+Four checkout tests exposed a read-only pruning query that treated every
+unfinished Task as having a checkout. It now excludes NULL worktrees, with the
+existing ownership test covering planning-only Tasks while retaining allocated
+unfinished checkouts. These are the concrete simulated-review findings; no
+agent-selection API or production locking change was needed.
 
-Merged pinned main `21dae527b4`. Global selection now uses the reorganized
-agent/config/prompt modules and preserves native attachment and conversation
-context. The acceptance fixture selects its authored Project workflow explicitly.
-The first resolution script failed before continue; a local repair checkpoint
-removes remaining markers and restores the complete command reference.
+The earlier release-lock failure did not reproduce in 30 isolated runs, the
+materialized suite, or final focused verification. The assertion now preserves
+the acquisition error if it recurs. This is a current pass, not an established
+cause or repair of the earlier failure. Historical gate evidence remains at
+`03cf138188` and `.lf/tmp/gate/run-25073/`; current full-run logs are under
+`.lf/tmp/gate/run-13647/`.
 
-Check: network-isolated `cargo test -p loopflow --test task_flow_launch_tests explicit_agent_wins_through_task_nested_flows_and_provider_children -- --exact --nocapture` passed (1); fmt and diff check passed; broader checks remain with gate/CI.
+Checks: `uv run python scripts/test.py --base 21dae527b4 --reuse-passing` (LF authority cleared, disposable provider homes) passed architecture/fmt/Clippy; Rust 2,396 passed/1 replay failure/18 skipped, Python 403 passed/5 failed, website 74 passed/1 overflow failure; final `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `cargo build -p loopflow --bin lf` and network-isolated nextest for replay, cached identity, Task ownership and release lock passed (4); network-isolated `pytest python/tests/test_checkout_refresh.py -k "worktree_refresh_preserves_local_main or worktree_refresh_reports_fetch_failure_then_recovers or worktree_plans_leave_checkout_and_remote_refs_unchanged"` passed (7); nested sandbox coverage remains CI-owned; `git diff --check` passed.

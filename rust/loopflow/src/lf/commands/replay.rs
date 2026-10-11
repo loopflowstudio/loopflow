@@ -241,7 +241,10 @@ mod tests {
         assert_eq!(tasks, 0, "replay requires no registered planning Work");
 
         std::env::set_var(crate::config::AGENT_OVERRIDE_ENV, "opencode:opencode/other");
-        let overridden_id = replay_at(home.path(), &session.id).unwrap();
+        let overridden_id = crate::journal::with_test_ledger(registry.clone(), || {
+            replay_at(home.path(), &session.id)
+        })
+        .unwrap();
         let (_, overridden) =
             crate::session_record::resolve_manifest(home.path(), &overridden_id).unwrap();
         assert_eq!(overridden.model.as_deref(), Some("opencode/other"));

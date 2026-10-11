@@ -243,7 +243,7 @@ final class WorkModel {
             return
         }
         let sameRepo = repoPath?.normalizedFilePath == wave.wave.repo.normalizedFilePath
-        var records = sameRepo && location == nil ? sessions.value ?? [] : []
+        let retainedRecords = sameRepo && location == nil ? sessions.value ?? [] : []
         let sessionID: String
         if let selected = link.session {
             sessionID = selected
@@ -265,13 +265,14 @@ final class WorkModel {
                 executionTask = current.runtime?.workId ?? current.id
                 executionIdentity = navigation.preparedTaskWorktrees[task.id] ?? task.reference.workspace?.identity
             }
-            // Do not publish the single ensured record as a complete inventory.
-            records = []
         }
-        if !records.contains(where: { $0.id == sessionID }) {
+        var records: [SessionRecord] = []
+        if link.session != nil, retainedRecords.contains(where: { $0.id == sessionID }) {
+            records = retainedRecords
+        } else {
             // Publishing a partial inventory would retire retained panes whose
-            // records occur on later pages. Only retained targets skip this read.
-            records = []
+            // records occur on later pages. A newly ensured Session requires a
+            // complete reading too, even when its ID was already retained.
             var after: String?
             repeat {
                 let page = try await executionQuery.sessionPage(includingHeadless: true, after: after, cwd: wave.wave.repo)
@@ -280,9 +281,8 @@ final class WorkModel {
                 after = page.next
             } while after != nil
         }
-        let taskID = executionTask
         guard let record = records.first(where: { $0.id == sessionID }),
-              record.taskIds.contains(taskID) || record.workspace?.taskId == taskID else {
+              record.taskIds.contains(executionTask) || record.workspace?.taskId == executionTask else {
             throw RegistryQueryError("Session \(sessionID) was not found in Task \(task.task.identifier). Retry after its Session is available.")
         }
         if location != nil {

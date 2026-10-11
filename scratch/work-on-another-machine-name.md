@@ -228,6 +228,19 @@ The missing behavior crosses more than the adapter:
   round trip. The accepted common-writer reduction includes the save, baseline, delivery
   and readback paths, without overwriting the independently owned managed fields.
 
+Source reconciliation at `71bafc5ada` adds the delivery boundary to this cut:
+`ops/planning_delivery.rs::observe` already fetches raw content alongside
+`PmProject`, then accepts only the latter through `put_pm_project`. Raw content
+currently serves outbound patching, not retained prose evidence. The replacement
+acquisition must commit prose, its observed revision and receipt reconciliation
+with the existing ownership/staleness judgment; attaching raw prose afterward
+would let rejected or foreign observations bypass that judgment.
+`attempt_planning_field` also compares the retained provider revision before
+marking an attempt. Replacing cache-backed baselines must preserve that fence,
+not substitute the canonical Project's local write revision. Include stale and
+foreign content in the composed acquisition proof. This is remaining implementation,
+not another missing adapter fetch or permission to extend `PmProject`.
+
 The outbound Markdown boundary now replaces prose through the existing parsed
 field ranges, retaining workflow/KR/target source spans. Its focused test covers
 empty replacement and fenced examples; declarations or unclosed fences that would
@@ -321,13 +334,14 @@ Earlier baseline detail: `c8fe4628a:scratch/work-on-another-machine-name.md`.
   cut. Regenerate them after the entire accepted reduction, before review-only
   republication. No readiness or landing follows from this persistence checkpoint.
 
-Checks: `cargo build -p loopflow --bin lf`, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, LF-scrubbed `cargo test -p loopflow --lib store::sqlite::project_content::tests` (2), `--test local_planning project_` (5), `--test local_planning rotation` (2), and `git diff --check` pass; gate owns composed/materialized acceptance. Earlier parser/conversion checks: `d1e23a736f:scratch/work-on-another-machine-name.md`.
+Checks: `git diff --check` passes (prose-only realignment); source checks from `71bafc5ada` remain applicable, and gate owns composed/materialized acceptance.
 
-Context: authored memory/scratch fit. `lf context --skill compress` reports the
-generated Task seed/steers and workspace manifest at 19,404 tokens (3,404 over
-16,000); full source `.lf/tmp/context/4b77ceb81b3db84e980b7ec3054f2fa46c0e3a59fe98e1da456f9ffb911558ac.md`.
-The excess belongs to retained Task history/generated metadata, not authored
-notes. No history or limits changed; authored-note curation cannot remove it.
+Context: authored memory/scratch fit. `lf context --skill realign` reports the
+generated Task seed/steers and workspace manifest at 19,390 tokens (3,390 over
+16,000); complete source `.lf/tmp/context/a33908f9c89493a42ac9091fe3ed3166e12d9eb0df18813ede6a46230b39604a.md`.
+Retained Task history/generated metadata owns that excess; authored-note curation
+cannot remove it. No history or limit changed.
+
 
 
 ## Delete — do not maintain

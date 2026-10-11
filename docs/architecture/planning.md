@@ -65,6 +65,11 @@ Prompt assembly and Linear delivery render at their boundaries; malformed legacy
 content refuses the migration rather than discarding criteria. Extraction and Linear
 edits recognize fenced examples as prose and replace only owned field ranges;
 unrecognized paragraphs survive even inside managed sections.
+Linear Project prose is not yet acquired or saved through ordinary Project edits.
+The outbound content adapter preserves managed fields when replacing prose, but
+that alone does not establish save/receipt/readback behavior. Summary maps to
+Linear `description`; authored prose belongs to Linear `content`.
+
 `ProjectKR` is an explicit judgment. `MetricTarget` names a metric and a numeric
 `Threshold`, independently of the Wave's observations. Project iteration is no longer
 live state; its stored values and historical judgment events remain readable evidence.

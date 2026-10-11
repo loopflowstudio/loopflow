@@ -165,7 +165,12 @@ workflow, KRs and metric targets directly. The shared local/import writer and lo
 readers no longer parse/render stored Markdown; prompt assembly renders on demand.
 The one Task draft converts released content before seeding causal history, retaining
 saved workflow selection, observation age, mappings and pending delivery. Invalid
-criteria roll back the conversion. Tests cover multiline KR fidelity across restart
+criteria roll back the conversion. Review exposed fenced examples being mistaken
+for fields. Migration and Linear edits now share boundary-aware field ranges,
+preserving nested backtick/tilde examples, unknown paragraphs and target/KR
+preambles. The resolved note is retained at
+`1b67da0cfe:scratch/project-conversion-review.md`.
+Tests cover multiline KR fidelity across restart
 and Git import, transactional failure, released content conversion and retained local
 Workflow/checkout/effect evidence. These are source proofs, not installed acceptance.
 
@@ -197,7 +202,7 @@ Earlier baseline detail: `c8fe4628a:scratch/work-on-another-machine-name.md`.
   cut. Regenerate them after the entire accepted reduction, before review-only
   republication. No readiness or landing follows from this persistence checkpoint.
 
-Checks: `cargo test -p loopflow --lib` filters `structured_project_`, `project_content::tests`, and retained-link migration pass (6); `cargo build -p loopflow --bin lf`, `cargo fmt`, and `cargo clippy --all-targets -- -D warnings` pass; gate owns affected/materialized/Swift verification.
+Checks: `cargo test -p loopflow --lib` filters `project_markdown_`, `structured_project_`, and `project_content` pass, including Linear delivery; `cargo fmt`, `cargo build -p loopflow --bin lf`, and `cargo clippy --all-targets -- -D warnings` pass; gate owns affected/materialized/Swift verification.
 
 Context: authored memory/scratch fit. The generated Task launch seed and retained
 steers exceed the 16,000-token goal budget by 2,491 tokens in the latest inspected manifest. The generated

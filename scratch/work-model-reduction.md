@@ -133,7 +133,9 @@ render_project_content,render_metric_targets,render_krs}`, and `ops/chapter.rs`.
 Structured persistence and removal of `read_content`/writer Markdown assembly
 are implemented. Finish removing the ProjectContent argument threaded through
 ordinary operations. The migration alone parses released Markdown before journal
-seeding; malformed content refuses without losing original bytes. A private Linear parser/renderer still owns managed description
+seeding; malformed content refuses without losing original bytes. Conversion and
+Linear edits share recognized field ranges, preserving fenced examples and unknown
+prose. Public ProjectContent and its ordinary-operation arguments remain to delete. A private Linear parser/renderer still owns managed description
 sections; prompt assembly renders its own output. Preserve unrelated authored prose
 and partial-response omissions. Wave workflow definitions and a Task's captured
 Workflow are different responsibilities and remain separate.
@@ -162,6 +164,9 @@ fourth Work scope. Existing `WorkRef` still names Wave/Project/Task.
 **Locations:** `sqlite/planning_changes.rs::PlanningChanges::{record,normalize,
 reconcile}`, `planning.rs::PlanningChange`, field-producing operations and the
 Linear delivery adapter.
+
+Linear content-field replacement is now typed and preserves recognized Markdown
+ranges; the generic PlanningChanges patcher below remains.
 
 `reconcile<T>` serializes a whole PM model, overlays fields by string, then
 reconstructs it. Replace that path with typed local edits and explicit adapter

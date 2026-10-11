@@ -255,10 +255,10 @@ that only selects another domain reader. Retain bounded refresh/lock behavior;
 The unused `pm_show` inventory/DTO and `load_show_snapshot`/`read_pm_snapshot`
 are deleted. Status sync refreshes before its canonical read; acquisition returns
 no inventory. `plan_snapshot_read` still governs Task acquisition.
-`lf/commands/waves.rs::validate_pm_portfolio` and private acquisition inventory
-remain. Its sole `PmPortfolioValidator` consumer checks contradictory retained
-claims, not only accepted Work; the pursuit design specifies the replacement
-boundary and missing proof.
+`PmPortfolioValidator` and ordinary portfolio reconstruction are deleted. The
+store checks narrow retained ownership claims directly; no inventory leaves it.
+`pm_snapshot` remains test-consumed and public pending fixture conversion/deletion;
+private acquisition inventory and persistent provider hierarchy remain required cuts.
 
 `PmResolvedTask`, both `pm_resolve_task` wrappers and `ResolvedTask` are deleted;
 `ops/task_pm.rs` is removed. Acquisition validates concrete Linear ownership and
@@ -413,7 +413,5 @@ Required behavioral evidence:
    repetition and preserves existing dirty targets. CLI/DTO/headless Desktop
    agree about identity, available cached content and synchronization failures.
 
-Build the CLI from this worktree, test disposable stores with inherited authority
-cleared, and run focused checks per cut; gate owns affected suites once. No source
-fixture proves installed or real two-machine acceptance. Structural audit only:
-no new product test pass is claimed by this document.
+Use the pursuit design’s isolated CLI checks and delivery boundary. This audit
+claims no new verification or installed acceptance.

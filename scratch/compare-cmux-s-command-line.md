@@ -94,7 +94,7 @@ October 10 deletion cut: `WorktreeLayout`/store/view, checkout picker and
 Navigation now renders the selected contents through the existing multiplexer;
 New Session selects repository content rather than an alternate checkout route.
 The registry still keys workspaces by `WorkspaceIdentity`; Flow log still ignores
-its content location. `5af9451cf8` removes Session rows, retaining menus/diagnostics. This is an internal deletion checkpoint, not implemented
+its content location. `5af9451cf8` removes Session rows. This is an internal deletion checkpoint, not implemented
 Work tabs. Rekeying, tab retention/navigation and exact-target DTOs remain together.
 The October 9 review is historical:
 `scratch/pr-review.html` (retained local artifact, not tracked in Git). Its stopped-pursuit account, mutation-wide

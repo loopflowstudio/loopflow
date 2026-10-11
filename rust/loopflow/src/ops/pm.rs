@@ -3001,7 +3001,7 @@ mod tests {
                     let projects = resolved.store.list_projects(Some(registered.id())).await.unwrap();
                     assert_eq!(projects.len(), 1);
                     let teams: String = rusqlite::Connection::open(&database).unwrap().query_row(
-                        "SELECT json_extract(body,'$.team_ids') FROM pm_projects WHERE id=?1",
+                        "SELECT team_ids FROM pm_projects WHERE id=?1",
                         [projects[0].linear_id.as_ref().unwrap().as_str()], |r| r.get(0)
                     ).unwrap();
                     assert_eq!(serde_json::from_str::<Vec<String>>(&teams).unwrap(), ["team-loo"]);
@@ -3249,7 +3249,7 @@ mod tests {
                 }
                 let projects = resolved.store.list_projects(Some(wave.id())).await.unwrap();
                 let teams: String = rusqlite::Connection::open(&database).unwrap().query_row(
-                        "SELECT json_extract(body,'$.team_ids') FROM pm_projects WHERE id=?1",
+                        "SELECT team_ids FROM pm_projects WHERE id=?1",
                         [projects[0].linear_id.as_ref().unwrap().as_str()], |r| r.get(0)
                     ).unwrap();
                     assert_eq!(serde_json::from_str::<Vec<String>>(&teams).unwrap(), ["team-loo"]);

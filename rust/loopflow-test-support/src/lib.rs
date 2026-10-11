@@ -218,7 +218,7 @@ pub fn retained_task_input_in<T: serde::de::DeserializeOwned>(
 ) -> T {
     let (item, project, observed_at): (String, Option<String>, i64) = conn
         .query_row(
-            "SELECT i.body,p.body,i.observed_at FROM pm_items i LEFT JOIN pm_projects p
+            "SELECT json_object('id',i.id,'identifier',i.identifier,'project_id',i.project_id,'revision',i.revision,'branch_name',i.branch_name,'url',i.url,'name',i.name,'description',i.description,'rank',i.rank,'completed',json(CASE i.completed WHEN 1 THEN 'true' ELSE 'false' END),'completed_at',i.completed_at,'due_date',i.due_date,'state',i.state,'team_id',i.team_id,'assignee',i.assignee),CASE WHEN p.id IS NOT NULL THEN json_object('id',p.id,'revision',p.revision,'slug',p.slug,'name',p.name,'summary',p.summary,'workflow',p.workflow,'status',p.status,'krs',json(p.krs),'metric_targets',json(p.metric_targets),'initiative_ids',json(p.initiative_ids),'team_ids',json(p.team_ids)) END,i.observed_at FROM pm_items i LEFT JOIN pm_projects p
          ON p.repo=i.repo AND p.provider=i.provider AND p.id=i.project_id
          WHERE i.repo=?1 AND i.provider='linear' AND (i.id=?2 OR i.identifier=?2)",
             rusqlite::params![repo, selector],

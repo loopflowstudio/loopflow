@@ -5,9 +5,94 @@ ALTER TABLE projects RENAME COLUMN project_prompt_context TO description;
 ALTER TABLE projects ADD COLUMN krs TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(krs));
 ALTER TABLE projects ADD COLUMN metric_targets TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(metric_targets));
 
--- Prose can be absent from older observations. Retain its own revision and age
--- rather than making a newer partial Project observation refresh that evidence.
-ALTER TABLE pm_projects ADD COLUMN prose_json TEXT CHECK(prose_json IS NULL OR json_valid(prose_json));
+-- Reject lossy conversion before dropping the original evidence. Missing and
+-- explicitly null fields remain distinct where they affect acquisition/receipts.
+-- SQLite extraction collapses JSON arrays into strings and booleans into numbers;
+-- unsupported scalar types must leave the released rows and schema intact.
+CREATE TEMP TABLE linear_observation_conversion(valid INTEGER NOT NULL CHECK(valid=1));
+INSERT INTO linear_observation_conversion
+SELECT json_type(body)='object' AND NOT EXISTS(
+    SELECT 1 FROM json_each(body) WHERE
+    (key IN ('id','slug','name','summary','workflow','status') AND type!='text')
+    OR (key IN ('revision','description') AND type NOT IN ('text','null'))
+    OR (key IN ('krs','metric_targets','initiative_ids','team_ids') AND type!='array')
+    OR (key='id' AND type='text' AND value IS NOT p.id)
+) FROM pm_projects p;
+INSERT INTO linear_observation_conversion
+SELECT json_type(body)='object' AND NOT EXISTS(
+    SELECT 1 FROM json_each(body) WHERE
+    (key IN ('id','identifier','name','description') AND type!='text')
+    OR (key IN ('project_id','revision','branch_name','url','completed_at','due_date','state','team_id','assignee') AND type NOT IN ('text','null'))
+    OR (key='rank' AND type!='integer')
+    OR (key='completed' AND type NOT IN ('true','false'))
+    OR (key='id' AND type='text' AND value IS NOT i.id)
+    OR (key='identifier' AND type='text' AND value IS NOT i.identifier)
+) FROM pm_items i;
+DROP TABLE linear_observation_conversion;
+
+-- Concrete provider facts retain their own absence and acquisition evidence.
+ALTER TABLE pm_projects ADD COLUMN revision TEXT;
+ALTER TABLE pm_projects ADD COLUMN slug TEXT;
+ALTER TABLE pm_projects ADD COLUMN name TEXT;
+ALTER TABLE pm_projects ADD COLUMN summary TEXT;
+ALTER TABLE pm_projects ADD COLUMN workflow TEXT;
+ALTER TABLE pm_projects ADD COLUMN status TEXT;
+ALTER TABLE pm_projects ADD COLUMN krs TEXT;
+ALTER TABLE pm_projects ADD COLUMN metric_targets TEXT;
+ALTER TABLE pm_projects ADD COLUMN initiative_ids TEXT;
+ALTER TABLE pm_projects ADD COLUMN team_ids TEXT;
+ALTER TABLE pm_projects ADD COLUMN description TEXT;
+ALTER TABLE pm_projects ADD COLUMN description_revision TEXT;
+ALTER TABLE pm_projects ADD COLUMN description_observed_at INTEGER;
+UPDATE pm_projects SET revision=json_extract(body,'$.revision'),
+    slug=json_extract(body,'$.slug'),
+    name=json_extract(body,'$.name'),
+    summary=json_extract(body,'$.summary'),
+    workflow=json_extract(body,'$.workflow'),
+    status=json_extract(body,'$.status'),
+    krs=body -> '$.krs',
+    metric_targets=body -> '$.metric_targets',
+    initiative_ids=body -> '$.initiative_ids',
+    team_ids=body -> '$.team_ids',
+    description=json_extract(body,'$.description'),
+    description_revision=CASE WHEN json_type(body,'$.description')='text' THEN json_extract(body,'$.revision') END,
+    description_observed_at=CASE WHEN json_type(body,'$.description')='text' THEN observed_at END;
+ALTER TABLE pm_projects DROP COLUMN body;
+ALTER TABLE pm_items ADD COLUMN revision TEXT;
+ALTER TABLE pm_items ADD COLUMN branch_name TEXT;
+ALTER TABLE pm_items ADD COLUMN url TEXT;
+ALTER TABLE pm_items ADD COLUMN name TEXT;
+ALTER TABLE pm_items ADD COLUMN description TEXT;
+ALTER TABLE pm_items ADD COLUMN rank INTEGER;
+ALTER TABLE pm_items ADD COLUMN completed INTEGER;
+ALTER TABLE pm_items ADD COLUMN completed_at TEXT;
+ALTER TABLE pm_items ADD COLUMN due_date TEXT;
+ALTER TABLE pm_items ADD COLUMN state TEXT;
+ALTER TABLE pm_items ADD COLUMN team_id TEXT;
+ALTER TABLE pm_items ADD COLUMN assignee TEXT;
+ALTER TABLE pm_items ADD COLUMN completed_at_observed INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE pm_items ADD COLUMN due_date_observed INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE pm_items ADD COLUMN assignee_observed INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE pm_items ADD COLUMN claimed_project_id TEXT;
+ALTER TABLE pm_items ADD COLUMN project_id_observed INTEGER NOT NULL DEFAULT 0;
+UPDATE pm_items SET revision=json_extract(body,'$.revision'),
+    branch_name=json_extract(body,'$.branch_name'),
+    url=json_extract(body,'$.url'),
+    name=json_extract(body,'$.name'),
+    description=json_extract(body,'$.description'),
+    rank=json_extract(body,'$.rank'),
+    completed=json_extract(body,'$.completed'),
+    completed_at=json_extract(body,'$.completed_at'),
+    due_date=json_extract(body,'$.due_date'),
+    state=json_extract(body,'$.state'),
+    team_id=json_extract(body,'$.team_id'),
+    assignee=json_extract(body,'$.assignee'),
+    completed_at_observed=json_type(body,'$.completed_at') IS NOT NULL,
+    due_date_observed=json_type(body,'$.due_date') IS NOT NULL,
+    assignee_observed=json_type(body,'$.assignee') IS NOT NULL,
+    claimed_project_id=json_extract(body,'$.project_id'),
+    project_id_observed=json_type(body,'$.project_id') IS NOT NULL;
+ALTER TABLE pm_items DROP COLUMN body;
 
 -- Add prose receipts without changing captured values, attempts or sequence identity.
 DROP TRIGGER store_revision_project_changes_insert;

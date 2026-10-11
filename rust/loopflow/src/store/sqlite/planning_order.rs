@@ -179,7 +179,7 @@ pub(super) fn observe_in(
     for item in items {
         // An older list must not order a mixture of old and retained newer facts.
         let retained = conn.query_row(
-            "SELECT t.id,json_extract(i.body,'$.revision'),json_extract(i.body,'$.rank'),i.project_id
+            "SELECT t.id,i.revision,i.rank,i.project_id
              FROM pm_items i JOIN tasks t ON t.external_issue_id=i.id
              WHERE i.repo=?1 AND i.provider=?2 AND i.id=?3 AND i.needs_refresh=0 AND t.project_id=?4 AND t.planning_deleted_at IS NULL",
             params![repo,provider,item.id,project.as_str()], |row| Ok((

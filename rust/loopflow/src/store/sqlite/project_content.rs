@@ -266,7 +266,7 @@ mod tests {
             .lock()
             .unwrap()
             .query_row(
-                "SELECT prose_json FROM pm_projects WHERE id='linear-project'",
+                "SELECT json_object('value',description,'revision',description_revision,'observed_at',description_observed_at) FROM pm_projects WHERE id='linear-project'",
                 [],
                 |r| r.get(0),
             )

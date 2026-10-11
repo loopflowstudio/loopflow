@@ -1491,6 +1491,141 @@ mod tests {
     }
 
     #[test]
+    fn provider_columns_preserve_released_observations_and_local_execution() {
+        let conn = open();
+        apply_before_current_draft(&conn, "planning_peers");
+        conn.execute_batch(include_str!(
+            "../../tests/fixtures/migrations/planning_relationships.sql"
+        ))
+        .unwrap();
+        conn.execute_batch(r#"
+            INSERT INTO pm_projects(repo,provider,id,observed_at,body,archived,membership_unresolved,task_order_json)
+            VALUES('/repo','linear','foreign',17,'{"revision":"2026-10-10T12:00:00Z","description":"Foreign prose","initiative_ids":["other","disputed"],"team_ids":["foreign"]}',1,1,'["not-local"]'),
+                  ('/repo','linear','partial',19,'{"initiative_ids":["initiative"]}',0,0,NULL);
+            INSERT INTO pm_items(repo,provider,id,identifier,project_id,observed_at,body,needs_refresh)
+            VALUES('/repo','linear','unmapped','OTHER-1','foreign',23,'{"project_id":"contradictory","team_id":"foreign","completed_at":null,"due_date":"2026-10-17"}',1),
+                  ('/repo','linear','partial','OTHER-2',NULL,11,'{"name":"Unmapped"}',0);
+            INSERT INTO pm_issue_changes(issue_id,revision_ns,removed) VALUES('unmapped',123,1);
+            INSERT INTO pm_wave_sync(wave_id,provider,initiative,synced_at) VALUES('wave-proof','linear','initiative',29);
+            INSERT INTO pm_wave_projects(wave_id,project_id,position) VALUES('wave-proof','foreign',4);
+            INSERT INTO processes(id,trace_id,command,cwd,started_at)
+            VALUES('11111111-1111-4111-8111-111111111111','trace','lf run code','/retained/task',2);
+            INSERT INTO task_workflows(task_id,graph,node,edge,lf_process_id,updated_at)
+            VALUES('task-proof','{"name":"saved","nodes":[],"edges":[{"from":"review","to":"end"}]}','review',0,'11111111-1111-4111-8111-111111111111',7);
+            UPDATE tasks SET worktree='/retained/task',external_issue_id='legacy-identity' WHERE id='task-proof';
+            INSERT INTO task_state_deliveries(id,task_id,target,attempted,error)
+            VALUES('uncertain','task-proof','completed',1,'Lost response');
+        "#).unwrap();
+        let tables = [
+            "tasks",
+            "processes",
+            "task_workflows",
+            "task_comment_deliveries",
+            "task_state_deliveries",
+            "pm_issue_changes",
+            "pm_wave_sync",
+            "pm_wave_projects",
+        ];
+        let rows = |table: &str| {
+            let mut query = conn.prepare(&format!("SELECT * FROM {table}")).unwrap();
+            let columns = query.column_count();
+            query
+                .query_map([], |row| {
+                    (0..columns)
+                        .map(|i| row.get::<_, rusqlite::types::Value>(i))
+                        .collect::<rusqlite::Result<Vec<_>>>()
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap()
+        };
+        let before: Vec<_> = tables.iter().map(|table| rows(table)).collect();
+        let sql = current_draft_sql("planning_peers");
+        super::_migration_transaction(&conn, |conn| {
+            conn.execute_batch(&sql)?;
+            super::seed_peer_planning(conn, &sql)
+        })
+        .unwrap();
+        for (table, expected) in tables.iter().zip(before) {
+            assert_eq!(rows(table), expected, "{table}");
+        }
+        let project: (String,String,i64,i64,i64,String) = conn.query_row(
+            "SELECT description,description_revision,description_observed_at,observed_at,archived+membership_unresolved,initiative_ids FROM pm_projects WHERE id='foreign'", [],
+            |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?))).unwrap();
+        assert_eq!(
+            project,
+            (
+                "Foreign prose".into(),
+                "2026-10-10T12:00:00Z".into(),
+                17,
+                17,
+                2,
+                "[\"other\",\"disputed\"]".into()
+            )
+        );
+        let issues: Vec<_> = conn.prepare(
+            "SELECT id,project_id,claimed_project_id,completed_at_observed,due_date_observed,observed_at FROM pm_items ORDER BY id").unwrap()
+            .query_map([], |row| Ok((row.get::<_,String>(0)?,row.get::<_,Option<String>>(1)?,row.get::<_,Option<String>>(2)?,row.get::<_,bool>(3)?,row.get::<_,bool>(4)?,row.get::<_,i64>(5)?))).unwrap().collect::<Result<_,_>>().unwrap();
+        assert_eq!(
+            issues,
+            vec![
+                ("partial".into(), None, None, false, false, 11),
+                (
+                    "unmapped".into(),
+                    Some("foreign".into()),
+                    Some("contradictory".into()),
+                    true,
+                    true,
+                    23
+                )
+            ]
+        );
+        assert!(conn.prepare("SELECT body FROM pm_projects").is_err());
+        assert!(conn.prepare("SELECT body FROM pm_items").is_err());
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM projects", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        validate_foreign_keys(&conn).unwrap();
+    }
+
+    #[test]
+    fn invalid_provider_conversion_rolls_back_schema_and_original_evidence() {
+        for body in [
+            "retained invalid input",
+            r#"{"name":[]}"#,
+            r#"{"name":12}"#,
+            r#"{"rank":true}"#,
+            r#"{"completed":1}"#,
+        ] {
+            let conn = open();
+            apply_before_current_draft(&conn, "planning_peers");
+            conn.execute("INSERT INTO pm_items(repo,provider,id,identifier,observed_at,body) VALUES('/repo','linear','unreadable','OTHER-1',17,?1)",[body]).unwrap();
+            let error = super::_migration_transaction(&conn, |conn| {
+                conn.execute_batch(&current_draft_sql("planning_peers"))?;
+                Ok(())
+            })
+            .unwrap_err();
+            assert!(
+                error.to_string().contains("malformed JSON")
+                    || error.to_string().contains("valid=1"),
+                "{error}"
+            );
+            assert_eq!(
+                conn.query_row("SELECT body,observed_at FROM pm_items", [], |r| Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, i64>(1)?
+                )))
+                .unwrap(),
+                (body.into(), 17)
+            );
+            assert!(conn.prepare("SELECT description FROM projects").is_err());
+            assert!(conn.prepare("SELECT revision FROM pm_items").is_err());
+        }
+    }
+
+    #[test]
     fn typed_journal_seeding_preserves_released_relationships_authors_and_receipts() {
         let conn = open();
         apply_before_current_draft(&conn, "planning_peers");

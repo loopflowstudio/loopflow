@@ -1405,31 +1405,89 @@ async fn acquisition_reads_ownership_without_reconstructing_provider_content() {
         json_response(StatusCode::OK, issue(project())),
     ])
     .await;
-    PM_TEST_CONTEXT.scope(fixture.context(&url), async {
-        let task = super::acquire_task(&repo, "FIX-1", PmRefresh::Auto).await.unwrap();
-        let before = fixture.store.linear_issue_evidence(&repo.to_string_lossy(), "FIX-1").await.unwrap();
-        let project_before = fixture.store.get_project(&task.project_id).await.unwrap();
-        let wave_age = fixture.wave_refresh_at(&wave);
-        let conn = rusqlite::Connection::open(&fixture.database).unwrap();
-        conn.execute("UPDATE pm_items SET body=json_set(body,'$.name',json('[]'),'$.rank','unrelated bad content') WHERE id='issue-1'", []).unwrap();
-        conn.execute("UPDATE pm_projects SET body=json_set(body,'$.name',json('[]'),'$.krs','unrelated bad content') WHERE id='project-1'", []).unwrap();
-        assert_eq!(super::acquire_task(&repo, "issue-1", PmRefresh::Never).await.unwrap(), task);
-        assert_eq!(fixture.store.linear_issue_evidence(&repo.to_string_lossy(), "FIX-1").await.unwrap(), before);
-        for column in ["membership_unresolved", "archived"] {
-            conn.execute(&format!("UPDATE pm_projects SET {column}=1 WHERE id='project-1'"), []).unwrap();
-            assert!(super::acquire_task(&repo, "FIX-1", PmRefresh::Never).await.is_err());
-            let rejected = inspect_task_planning_async(&repo, "FIX-1", PmRefresh::Never).await.unwrap();
-            assert_eq!(rejected.observation.state, crate::store::PlanningState::Invalid);
-            assert_eq!(rejected.observation.observed_at, before.observed_at);
-            conn.execute(&format!("UPDATE pm_projects SET {column}=0 WHERE id='project-1'"), []).unwrap();
-        }
-        // A change receipt invalidates admission even when unrelated content is unreadable.
-        fixture.store.observe_pm_issue_change("issue-1", None, false).await.unwrap();
-        let invalidated = fixture.store.linear_issue_evidence(&repo.to_string_lossy(), "FIX-1").await.unwrap();
-        assert_eq!(invalidated.state, crate::store::PlanningState::Invalid);
-        assert_eq!(invalidated.observed_at, before.observed_at);
-        assert_eq!(fixture.store.get_task(&task.id).await.unwrap(), Some(task));
-        assert_eq!(fixture.store.get_project(&project_before.as_ref().unwrap().id).await.unwrap(), project_before);
-        assert_eq!(fixture.wave_refresh_at(&wave), wave_age);
-    }).await;
+    PM_TEST_CONTEXT
+        .scope(fixture.context(&url), async {
+            let task = super::acquire_task(&repo, "FIX-1", PmRefresh::Auto)
+                .await
+                .unwrap();
+            let before = fixture
+                .store
+                .linear_issue_evidence(&repo.to_string_lossy(), "FIX-1")
+                .await
+                .unwrap();
+            let project_before = fixture.store.get_project(&task.project_id).await.unwrap();
+            let wave_age = fixture.wave_refresh_at(&wave);
+            let conn = rusqlite::Connection::open(&fixture.database).unwrap();
+            conn.execute(
+                "UPDATE pm_items SET name='[]',rank='unrelated bad content' WHERE id='issue-1'",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE pm_projects SET name='[]',krs='unrelated bad content' WHERE id='project-1'",
+                [],
+            )
+            .unwrap();
+            assert_eq!(
+                super::acquire_task(&repo, "issue-1", PmRefresh::Never)
+                    .await
+                    .unwrap(),
+                task
+            );
+            assert_eq!(
+                fixture
+                    .store
+                    .linear_issue_evidence(&repo.to_string_lossy(), "FIX-1")
+                    .await
+                    .unwrap(),
+                before
+            );
+            for column in ["membership_unresolved", "archived"] {
+                conn.execute(
+                    &format!("UPDATE pm_projects SET {column}=1 WHERE id='project-1'"),
+                    [],
+                )
+                .unwrap();
+                assert!(super::acquire_task(&repo, "FIX-1", PmRefresh::Never)
+                    .await
+                    .is_err());
+                let rejected = inspect_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    rejected.observation.state,
+                    crate::store::PlanningState::Invalid
+                );
+                assert_eq!(rejected.observation.observed_at, before.observed_at);
+                conn.execute(
+                    &format!("UPDATE pm_projects SET {column}=0 WHERE id='project-1'"),
+                    [],
+                )
+                .unwrap();
+            }
+            // A change receipt invalidates admission even when unrelated content is unreadable.
+            fixture
+                .store
+                .observe_pm_issue_change("issue-1", None, false)
+                .await
+                .unwrap();
+            let invalidated = fixture
+                .store
+                .linear_issue_evidence(&repo.to_string_lossy(), "FIX-1")
+                .await
+                .unwrap();
+            assert_eq!(invalidated.state, crate::store::PlanningState::Invalid);
+            assert_eq!(invalidated.observed_at, before.observed_at);
+            assert_eq!(fixture.store.get_task(&task.id).await.unwrap(), Some(task));
+            assert_eq!(
+                fixture
+                    .store
+                    .get_project(&project_before.as_ref().unwrap().id)
+                    .await
+                    .unwrap(),
+                project_before
+            );
+            assert_eq!(fixture.wave_refresh_at(&wave), wave_age);
+        })
+        .await;
 }

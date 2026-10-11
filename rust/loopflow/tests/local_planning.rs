@@ -3329,7 +3329,7 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
         ("available", "UPDATE pm_items SET needs_refresh=0"),
         (
             "invalid",
-            "UPDATE pm_items SET project_id='another-project',body=json_set(body,'$.project_id','another-project')",
+            "UPDATE pm_items SET project_id='another-project',claimed_project_id='another-project'",
         ),
     ] {
         db.execute_batch(statement).unwrap();

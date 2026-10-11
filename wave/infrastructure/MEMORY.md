@@ -624,9 +624,10 @@ SQLite claims. Task status, admission and acquisition read narrow
 Linear evidence; ordinary provider readback is deleted. Delivery needs
 accepted revision plus archive/membership eligibility; foreign facts grant no ownership.
 Missing issue content cannot hide a canonical parent's archive or membership
-dispute. Projection and receipt baselines now consume typed fields; ingestion still
-compares whole observations and narrow readers still extract retained provider JSON.
-Consumer deletion does not prove persistent conversion. Independent observations retain their ages. Typed values alone
+dispute. Projection, receipts and acquisition now read concrete observation columns;
+whole Project/issue bodies and ingestion reconstruction are removed by the Task
+draft. Partial fields retain presence and prose age; adapter envelopes remain.
+Populated conversion and rollback proof belongs to the plan. Typed values alone
 are not a typed journal: field-addressed mutations still require reduction.
 Jack Heart excludes old-version support; an unshipped Git encoding needs no dual
 decoder. Released SQLite preservation and selected-format causal history remain

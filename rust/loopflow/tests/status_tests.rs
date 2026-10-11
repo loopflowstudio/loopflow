@@ -815,7 +815,7 @@ fn provider_inventory_loss_preserves_saved_planning_in_both_views() {
         let before = status_json(home.path(), &["product"], None);
         let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
         if let Some(payload) = payload {
-            conn.execute("UPDATE pm_projects SET body=?1", [payload])
+            conn.execute("UPDATE pm_projects SET team_ids=?1", [payload])
                 .unwrap();
         } else {
             conn.execute("DELETE FROM pm_wave_sync", []).unwrap();
@@ -846,7 +846,7 @@ fn provider_inventory_loss_preserves_saved_planning_in_both_views() {
                     assert_eq!(
                         task["task"]["acquisition"],
                         serde_json::json!({
-                            "state": "invalid", "observed_at": null
+                            "state": "invalid", "observed_at": previous["task"]["acquisition"]["observed_at"]
                         })
                     );
                 } else {

@@ -285,10 +285,7 @@ impl<'a> PlanningChanges<'a> {
     fn observed_revision(self, conn: &Connection) -> StoreResult<Option<String>> {
         Ok(conn
             .query_row(
-                &format!(
-                    "SELECT json_extract(o.body,'$.revision') FROM {}",
-                    self.observation_source()
-                ),
+                &format!("SELECT o.revision FROM {}", self.observation_source()),
                 [self.owner().1],
                 |row| row.get(0),
             )
@@ -300,13 +297,22 @@ impl<'a> PlanningChanges<'a> {
     // revision; unrelated fields cannot become another writable provider model.
     fn baseline(self, conn: &Connection, field: &str) -> StoreResult<Option<Value>> {
         let fields = match self {
-            Self::Task(_) => "o.body ->> '$.revision',
-                CASE ?2 WHEN 'deleted' THEN 'false' ELSE o.body -> ('$.' || ?2) END",
-            Self::Project(_) => "CASE WHEN ?2='description' THEN o.prose_json ->> '$.revision'
-                    ELSE o.body ->> '$.revision' END,
-                CASE ?2 WHEN 'description' THEN COALESCE(o.prose_json -> '$.value',o.body -> '$.description')
-                    WHEN 'task_order' THEN COALESCE(o.task_order_json,'null')
-                    ELSE o.body -> ('$.' || ?2) END",
+            Self::Task(_) => "o.revision, CASE ?2
+                WHEN 'deleted' THEN 'false'
+                WHEN 'name' THEN CASE WHEN o.name IS NOT NULL THEN json_quote(o.name) END
+                WHEN 'description' THEN CASE WHEN o.description IS NOT NULL THEN json_quote(o.description) END
+                WHEN 'project_id' THEN CASE WHEN o.project_id_observed THEN json_quote(o.claimed_project_id) END
+                WHEN 'assignee' THEN CASE WHEN o.assignee_observed THEN json_quote(o.assignee) END
+                WHEN 'due_date' THEN CASE WHEN o.due_date_observed THEN json_quote(o.due_date) END END",
+            Self::Project(_) => "CASE WHEN ?2='description' THEN o.description_revision ELSE o.revision END,
+                CASE ?2 WHEN 'description' THEN CASE WHEN o.description_observed_at IS NOT NULL THEN json_quote(o.description) END
+                WHEN 'name' THEN CASE WHEN o.name IS NOT NULL THEN json_quote(o.name) END
+                WHEN 'summary' THEN CASE WHEN o.summary IS NOT NULL THEN json_quote(o.summary) END
+                WHEN 'workflow' THEN CASE WHEN o.workflow IS NOT NULL THEN json_quote(o.workflow) END
+                WHEN 'status' THEN CASE WHEN o.status IS NOT NULL THEN json_quote(o.status) END
+                WHEN 'krs' THEN o.krs
+                WHEN 'metric_targets' THEN o.metric_targets
+                WHEN 'task_order' THEN COALESCE(o.task_order_json,'null') END",
         };
         let baseline = conn
             .query_row(
@@ -467,4 +473,75 @@ fn read_change(row: &rusqlite::Row<'_>) -> StoreResult<PlanningChange> {
         value: serde_json::from_str(&value)?,
         base: base.map(|value| serde_json::from_str(&value)).transpose()?,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use rusqlite::{params, Connection};
+    use serde_json::json;
+
+    use super::PlanningChanges;
+    use crate::durable::TaskId;
+    use crate::store::migrations::{apply_before_current_draft, current_draft_sql};
+
+    #[test]
+    fn membership_receipts_preserve_absent_null_and_contradictory_released_claims() {
+        for field_name in ["project_id", "assignee"] {
+            for (field, expected) in [
+                (None, None),
+                (
+                    Some(serde_json::Value::Null),
+                    Some(json!({"revision":"r1","value":null})),
+                ),
+                (
+                    Some(json!("retained-claim")),
+                    Some(json!({"revision":"r1","value":"retained-claim"})),
+                ),
+            ] {
+                let conn = Connection::open_in_memory().unwrap();
+                apply_before_current_draft(&conn, "planning_peers");
+                conn.execute_batch(include_str!(
+                    "../../../tests/fixtures/migrations/planning_relationships.sql"
+                ))
+                .unwrap();
+                conn.execute(
+                    "UPDATE tasks SET external_issue_id='issue' WHERE id='task-proof'",
+                    [],
+                )
+                .unwrap();
+                let mut input = json!({"revision":"r1"});
+                if let Some(field) = field {
+                    input[field_name] = field;
+                }
+                conn.execute(
+                    "INSERT INTO pm_items(repo,provider,id,identifier,project_id,observed_at,body)
+                VALUES('/repo','linear','issue','PROOF-1','indexed-project',17,?1)",
+                    [input.to_string()],
+                )
+                .unwrap();
+                conn.execute_batch(&current_draft_sql("planning_peers"))
+                    .unwrap();
+                let task = TaskId::from_raw("task-proof");
+                assert!(PlanningChanges::Task(&task)
+                    .record(
+                        &conn,
+                        field_name,
+                        json!("project-proof"),
+                        json!("desired-project")
+                    )
+                    .unwrap());
+                let base: Option<String> = conn
+                    .query_row(
+                        "SELECT base_json FROM task_changes WHERE task_id=?1",
+                        params![task.as_str()],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                assert_eq!(
+                    base.map(|value| serde_json::from_str::<serde_json::Value>(&value).unwrap()),
+                    expected
+                );
+            }
+        }
+    }
 }

@@ -2476,7 +2476,7 @@ mod tests {
         rusqlite::Connection::open(directory.path().join("registry.db"))
             .unwrap()
             .execute(
-                "UPDATE pm_projects SET body='not-json' WHERE id='first-ear'",
+                "UPDATE pm_projects SET initiative_ids='not-json' WHERE id='first-ear'",
                 [],
             )
             .unwrap();
@@ -2665,7 +2665,7 @@ mod tests {
         // Invalid provider evidence cannot erase the owned plan, but prevents metric evaluation.
         rusqlite::Connection::open(directory.path().join("registry.db"))
             .unwrap()
-            .execute("UPDATE pm_projects SET body='not-json'", [])
+            .execute("UPDATE pm_projects SET initiative_ids='not-json'", [])
             .unwrap();
         let super::Evidence::Ok {
             items,

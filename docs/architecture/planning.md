@@ -87,7 +87,12 @@ derive the Task ID from the issue UUID; existing mapped Tasks keep their IDs.
 Ticket aliases remain optional mappings. Repeated imports and ticket changes retain
 identity. Unowned observations stay in provider evidence tables. Released-frontier
 migration preserves existing identities, provider observations, PRs, Workflows and
-Session links.
+Session links. Provider content is retained as individual observation fields;
+ordinary readers and ingestion never reconstruct a stored Project or issue object.
+The membership index and provider claim remain separate when historical evidence
+contradicts itself. Confirming refreshes compare the claim; receipt baselines retain
+omitted versus explicitly null membership. Conversion refuses scalar type changes that SQLite would otherwise coerce,
+retaining the original schema and input on failure.
 
 `lf task create` generates the durable ID, saves the Task and returns that ID.
 Each explicit invocation creates a distinct Task, including identical titles.

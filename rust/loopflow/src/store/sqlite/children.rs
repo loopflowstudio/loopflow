@@ -1138,19 +1138,15 @@ fn task_acquisition_in(
                  SELECT 1 FROM task_changes c WHERE c.task_id=t.id AND c.field='project_id'
                  AND c.acknowledged=0 AND c.conflict_json IS NULL
                  AND c.seq=(SELECT max(seq) FROM task_changes WHERE task_id=t.id AND field=c.field))))
-             OR CASE WHEN NOT json_valid(i.body) THEN 1
-                WHEN json_type(i.body,'$.project_id') IS NOT NULL
-                     AND json_extract(i.body,'$.project_id') IS NOT i.project_id THEN 1
-                WHEN json_type(i.body,'$.team_id') NOT IN ('text','null') THEN 1
-                WHEN json_extract(i.body,'$.team_id') IS NOT NULL THEN
-                    NOT EXISTS(SELECT 1 FROM json_each(p.planning_teams)
-                               WHERE value=json_extract(i.body,'$.team_id'))
+             OR (i.project_id_observed AND i.claimed_project_id IS NOT i.project_id)
+             OR CASE WHEN i.team_id IS NOT NULL THEN
+                    NOT EXISTS(SELECT 1 FROM json_each(p.planning_teams) WHERE value=i.team_id)
                 ELSE 0 END
              OR CASE WHEN observed.id IS NULL THEN 0
-                WHEN NOT json_valid(observed.body) OR NOT json_valid(i.body) THEN 1
-                WHEN json_type(observed.body,'$.team_ids') IS NOT 'array' THEN 1
-                ELSE NOT EXISTS(SELECT 1 FROM json_each(observed.body,'$.team_ids')
-                                WHERE value=json_extract(i.body,'$.team_id')) END
+                WHEN NOT json_valid(observed.team_ids) THEN 1
+                WHEN json_type(observed.team_ids) IS NOT 'array' THEN 1
+                ELSE NOT EXISTS(SELECT 1 FROM json_each(observed.team_ids)
+                                WHERE value=i.team_id) END
              END,
          t.planning_deleted_at IS NOT NULL
          OR EXISTS(SELECT 1 FROM task_deletions d JOIN waves dw ON dw.id=d.wave_id

@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection, OptionalExtension, Transaction};
+use rusqlite::{named_params, params, Connection, OptionalExtension, Transaction};
 
 use super::planning_write::{self, Disposition, PlanningEdit as Edit};
 use crate::id::WaveId;
@@ -107,7 +107,7 @@ impl SqliteStore {
         let tx = conn.transaction()?;
         let previous: Option<String> = tx
             .query_row(
-                "SELECT json_extract(body,'$.initiative_ids') FROM pm_projects WHERE repo=?1 AND provider=?2 AND id=?3",
+                "SELECT initiative_ids FROM pm_projects WHERE repo=?1 AND provider=?2 AND id=?3",
                 params![repo, provider, project.id],
                 |row| row.get(0),
             )
@@ -121,9 +121,14 @@ impl SqliteStore {
             }
             // Reteam orders Team relationships only. Retain independently newer entity facts.
             tx.execute(
-                "UPDATE pm_projects SET body=json_set(body,'$.team_ids',json(?4)),membership_unresolved=0
+                "UPDATE pm_projects SET team_ids=?4,membership_unresolved=0
                  WHERE repo=?1 AND provider=?2 AND id=?3",
-                params![repo, provider, project.id, serde_json::to_string(&project.team_ids)?],
+                params![
+                    repo,
+                    provider,
+                    project.id,
+                    serde_json::to_string(&project.team_ids)?
+                ],
             )?;
         }
         put_project(&tx, &repo, provider, observed_at, project)?;
@@ -155,7 +160,7 @@ impl SqliteStore {
         let mut item = record.item.clone();
         // Detail queries do not observe relative list order.
         if let Some(rank) = tx.query_row(
-            "SELECT json_extract(body,'$.rank') FROM pm_items WHERE repo=?1 AND provider=?2 AND id=?3 AND project_id IS ?4",
+            "SELECT rank FROM pm_items WHERE repo=?1 AND provider=?2 AND id=?3 AND project_id IS ?4",
             params![repo,provider,item.id,item.project_id], |row| row.get::<_,u32>(0),
         ).optional()? {
             item.rank = rank;
@@ -195,12 +200,21 @@ impl SqliteStore {
         project: &LinearProject,
         observed_at: i64,
     ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "INSERT INTO pm_projects(repo,provider,id,observed_at,body,archived) VALUES(?1,?2,?3,?4,?5,1)
-             ON CONFLICT(repo,provider,id) DO UPDATE SET archived=1",
-            params![repo, provider, project.id, observed_at, serde_json::to_string(project)?],
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction()?;
+        let exists: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pm_projects WHERE repo=?1 AND provider=?2 AND id=?3)",
+            params![repo, provider, project.id],
+            |row| row.get(0),
         )?;
+        if !exists {
+            put_project(&tx, repo, provider, observed_at, project)?;
+        }
+        tx.execute(
+            "UPDATE pm_projects SET archived=1 WHERE repo=?1 AND provider=?2 AND id=?3",
+            params![repo, provider, project.id],
+        )?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -237,7 +251,7 @@ impl SqliteStore {
             }
         }
         let mut query =
-            tx.prepare("SELECT repo,json_extract(body,'$.revision') FROM pm_items WHERE provider='linear' AND id=?1")?;
+            tx.prepare("SELECT repo,revision FROM pm_items WHERE provider='linear' AND id=?1")?;
         let rows = query
             .query_map([issue_id], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
@@ -264,7 +278,7 @@ impl SqliteStore {
         // Only a complete detail observation can repair it; list omission is ambiguous.
         conn.execute(
             "UPDATE pm_items SET needs_refresh=1 WHERE repo=?1 AND provider='linear' AND id=?2
-            AND observed_at=?3 AND json_extract(body,'$.revision') IS ?4",
+            AND observed_at=?3 AND revision IS ?4",
             params![
                 repo,
                 expected.issue_id,
@@ -282,9 +296,9 @@ impl SqliteStore {
     ) -> StoreResult<crate::store::LinearIssueEvidence> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(
-            "SELECT i.id,json_extract(i.body,'$.revision'),i.observed_at,
-             json_extract(p.body,'$.initiative_ids'),
-             json_extract(p.body,'$.team_ids'),json_extract(i.body,'$.team_id'),
+            "SELECT i.id,i.revision,i.observed_at,
+             p.initiative_ids,
+             p.team_ids,i.team_id,
              i.needs_refresh OR COALESCE(p.membership_unresolved,0) OR COALESCE(p.archived,0),
              EXISTS(SELECT 1 FROM task_deletions d JOIN waves w ON w.id=d.wave_id
                     WHERE w.repo=i.repo AND d.issue_id=i.id)
@@ -517,7 +531,7 @@ impl SqliteStore {
             // Read the whole Wave before adding claims so readable siblings survive.
             let observations = (|| -> StoreResult<_> {
                 let mut query = conn.prepare(
-                    "SELECT p.id,json_extract(p.body,'$.initiative_ids'),json_extract(p.body,'$.team_ids')
+                    "SELECT p.id,p.initiative_ids,p.team_ids
                      FROM pm_wave_projects m JOIN pm_projects p ON p.id=m.project_id
                      WHERE m.wave_id=?1 AND p.repo=?2 AND p.provider=?3
                      AND p.archived=0 AND p.membership_unresolved=0 ORDER BY m.position,p.id",
@@ -541,12 +555,12 @@ impl SqliteStore {
                     .collect::<StoreResult<Vec<_>>>()?;
                 project_claims.retain(|(_, initiatives, _)| initiatives.contains(&initiative));
                 let mut query = conn.prepare(
-                    "SELECT i.id,i.identifier,i.project_id,json_extract(i.body,'$.team_id')
+                    "SELECT i.id,i.identifier,i.project_id,i.team_id
                      FROM pm_items i JOIN pm_wave_projects m ON m.project_id=i.project_id
                      JOIN pm_projects p ON p.id=i.project_id AND p.repo=i.repo AND p.provider=i.provider
                      WHERE m.wave_id=?1 AND i.repo=?2 AND i.provider=?3 AND i.needs_refresh=0
                      AND p.archived=0 AND p.membership_unresolved=0
-                     AND EXISTS(SELECT 1 FROM json_each(p.body,'$.initiative_ids') WHERE value=?4)
+                     AND EXISTS(SELECT 1 FROM json_each(p.initiative_ids) WHERE value=?4)
                      AND NOT EXISTS(SELECT 1 FROM task_deletions d JOIN waves w ON w.id=d.wave_id
                                     WHERE w.repo=i.repo AND d.issue_id=i.id)
                      ORDER BY m.position,i.id",
@@ -625,13 +639,13 @@ impl SqliteStore {
 // Both durable projections require the same confirmed Initiative/Wave association.
 // A partial read supplies that association without advancing full-Wave freshness.
 const ACCEPTED_WAVE_PROJECTS: &str = "
-    SELECT p.id,p.body,p.observed_at,p.prose_json,m.wave_id FROM pm_projects p
+    SELECT p.*,m.wave_id FROM pm_projects p
     JOIN pm_wave_projects m ON m.project_id=p.id
     LEFT JOIN pm_wave_sync sync ON sync.wave_id=m.wave_id AND sync.provider=p.provider
     JOIN waves w ON w.id=m.wave_id AND w.repo=p.repo
     WHERE p.repo=?1 AND p.provider=?2 AND p.archived=0 AND p.membership_unresolved=0
-    AND json_array_length(p.body,'$.initiative_ids')=1
-    AND json_extract(p.body,'$.initiative_ids[0]')=
+    AND json_array_length(p.initiative_ids)=1
+    AND json_extract(p.initiative_ids,'$[0]')=
         CASE WHEN m.wave_id=?4 THEN ?5 ELSE sync.initiative END";
 
 /// Inputs select IDs only; project their accepted rows inside the ingestion transaction.
@@ -648,16 +662,13 @@ fn project_accepted_planning(
     let item_ids = serde_json::to_string(&items.iter().map(|i| &i.id).collect::<Vec<_>>())?;
     let mut query = tx.prepare(&format!(
         "WITH accepted AS ({ACCEPTED_WAVE_PROJECTS})
-         SELECT id,observed_at,wave_id,json_extract(body,'$.revision'),
-             json_extract(body,'$.slug'),json_extract(body,'$.name'),
-             json_extract(body,'$.summary'),json_quote(json_extract(body,'$.status')),
-             json_extract(body,'$.workflow'),json_extract(body,'$.krs'),
-             json_extract(body,'$.metric_targets'),json_extract(body,'$.initiative_ids'),
-             json_extract(body,'$.team_ids'),
-             CASE WHEN prose_json IS NOT NULL
-                       AND json_extract(prose_json,'$.revision') IS json_extract(body,'$.revision')
-                  THEN json_extract(prose_json,'$.value')
-                  ELSE json_extract(body,'$.description') END
+         SELECT id,observed_at,wave_id,revision,
+             slug,name,
+             summary,json_quote(status),
+             workflow,krs,
+             metric_targets,initiative_ids,
+             team_ids,
+             CASE WHEN description_revision IS revision THEN description END
          FROM accepted WHERE id IN (SELECT value FROM json_each(?3))"
     ))?;
     let observations = query
@@ -740,8 +751,8 @@ fn project_accepted_planning(
     for item in items {
         let observed = tx
             .query_row(
-                "SELECT json_extract(body,'$.revision'),json_extract(body,'$.name'),
-                json_extract(body,'$.description'),json_extract(body,'$.assignee'),project_id
+                "SELECT revision,name,
+                description,assignee,project_id
              FROM pm_items WHERE repo=?1 AND provider=?2 AND id=?3 AND needs_refresh=0",
                 params![repo, provider, item.id],
                 |row| {
@@ -772,14 +783,14 @@ fn project_accepted_planning(
     // their IDs, local order and pending disposition; new Tasks receive only Work.
     let mut query = tx.prepare(&format!(
         "WITH accepted AS ({ACCEPTED_WAVE_PROJECTS})
-         SELECT target.id,i.body,i.observed_at,p.id,i.id,
-             json_extract(i.body,'$.revision'),i.identifier,
-             json_extract(i.body,'$.name'),json_extract(i.body,'$.description'),
-             json_extract(i.body,'$.rank'),json_extract(i.body,'$.url'),
-             json_extract(i.body,'$.branch_name'),json_extract(i.body,'$.team_id'),
-             json_extract(i.body,'$.assignee'),json_extract(i.body,'$.due_date'),
-             json_extract(i.body,'$.state'),json_extract(i.body,'$.completed'),
-             json_extract(i.body,'$.completed_at') FROM pm_items i
+         SELECT target.id,json_object('revision',i.revision,'state',i.state,'completed',json(CASE i.completed WHEN 1 THEN 'true' ELSE 'false' END),'completed_at',i.completed_at),i.observed_at,p.id,i.id,
+             i.revision,i.identifier,
+             i.name,i.description,
+             i.rank,i.url,
+             i.branch_name,i.team_id,
+             i.assignee,i.due_date,
+             i.state,i.completed,
+             i.completed_at FROM pm_items i
          JOIN projects p ON p.external_project_id=i.project_id
          JOIN accepted observed ON observed.id=i.project_id AND observed.wave_id=p.wave_id
          LEFT JOIN tasks target ON target.external_issue_id=i.id
@@ -911,7 +922,7 @@ fn require_accepted_initiative(
     initiative: &str,
 ) -> StoreResult<()> {
     let initiatives: String = conn.query_row(
-        "SELECT json_extract(body,'$.initiative_ids') FROM pm_projects WHERE repo=?1 AND provider=?2 AND id=?3",
+        "SELECT initiative_ids FROM pm_projects WHERE repo=?1 AND provider=?2 AND id=?3",
         params![repo, provider, project_id],
         |row| row.get(0),
     )?;
@@ -933,8 +944,8 @@ fn validate_project_membership(
     // recorded even when rejecting the incoming facts rolls that transaction back.
     let previous = conn
         .query_row(
-            "SELECT json_extract(body,'$.revision'),json_extract(body,'$.initiative_ids'),
-                    json_extract(body,'$.team_ids')
+            "SELECT revision,initiative_ids,
+                    team_ids
              FROM pm_projects WHERE repo=?1 AND provider=?2 AND id=?3",
             params![repo, provider, project.id],
             |row| {
@@ -979,60 +990,93 @@ fn put_project(
     observed_at: i64,
     project: &LinearProject,
 ) -> StoreResult<()> {
-    let previous: Option<(String, i64, bool, Option<String>)> = conn
-        .query_row(
-            "SELECT body,observed_at,archived,prose_json FROM pm_projects WHERE repo=?1 AND provider=?2 AND id=?3",
-            params![repo, provider, project.id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-        )
-        .optional()?;
-    // A later list/detail response cannot undo a confirmed archive receipt.
-    if previous
-        .as_ref()
-        .is_some_and(|(_, _, archived, _)| *archived)
-    {
-        return Ok(());
-    }
+    let krs = serde_json::to_string(&project.krs)?;
+    let metric_targets = serde_json::to_string(&project.metric_targets)?;
+    let initiative_ids = serde_json::to_string(&project.initiative_ids)?;
+    let team_ids = serde_json::to_string(&project.team_ids)?;
+    let status = project.status.as_str();
+    let values = named_params! {
+        ":repo": repo, ":provider": provider, ":id": &project.id,
+        ":observed_at": observed_at,
+        ":slug": &project.slug,
+        ":name": &project.name,
+        ":summary": &project.summary,
+        ":workflow": &project.workflow,
+        ":status": &status,
+        ":krs": &krs,
+        ":metric_targets": &metric_targets,
+        ":initiative_ids": &initiative_ids,
+        ":team_ids": &team_ids,
+        ":description": &project.description,
+        ":revision": &project.revision,
+    };
     let pending_name_cutover: bool = conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM pm_project_name_cutover
          WHERE repo=?1 AND provider=?2 AND id=?3 AND converted_at IS NULL)",
         params![repo, provider, project.id],
         |row| row.get(0),
     )?;
+    let previous = conn
+        .query_row(
+            "SELECT revision,observed_at,archived,
+            ((slug IS NOT NULL AND slug IS NOT :slug) OR (name IS NOT NULL AND name IS NOT :name)),
+            (summary IS NOT NULL AND summary IS NOT :summary) OR (workflow IS NOT NULL AND workflow IS NOT :workflow) OR (status IS NOT NULL AND status IS NOT :status)
+            OR (description_revision IS revision AND description IS NOT NULL
+                AND :description IS NOT NULL AND description IS NOT :description),krs,metric_targets
+         FROM pm_projects WHERE repo=:repo AND provider=:provider AND id=:id",
+            named_params! { ":repo": repo, ":provider": provider, ":id": &project.id,
+            ":slug": &project.slug, ":name": &project.name, ":summary": &project.summary,
+            ":workflow": &project.workflow, ":status": &status, ":description": &project.description },
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, bool>(2)?,
+                    row.get::<_, bool>(3)?,
+                    row.get::<_, bool>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                ))
+            },
+        )
+        .optional()?;
     let revision = revision_nanos(project.revision.as_deref())?;
-    if let Some((previous, acquired, _, prose)) = previous {
-        let mut previous: LinearProject = serde_json::from_str(&previous)?;
-        if let Some(prose) = prose {
-            let prose: serde_json::Value = serde_json::from_str(&prose)?;
-            if prose["revision"].as_str() == previous.revision.as_deref() {
-                previous.description = Some(serde_json::from_value(prose["value"].clone())?);
-            }
+    if let Some((
+        previous,
+        acquired,
+        archived,
+        name_changed,
+        content_changed,
+        previous_krs,
+        previous_targets,
+    )) = previous
+    {
+        if archived {
+            return Ok(());
         }
-        let previous_revision = revision_nanos(previous.revision.as_deref())?;
+        let previous_revision = revision_nanos(previous.as_deref())?;
         if revision.is_some() && revision < previous_revision {
             return Ok(());
         }
-        let mut comparable = project.clone();
-        comparable.revision = previous.revision.clone();
-        // Relationship sets were checked independently; their traversal order is immaterial.
-        comparable.initiative_ids = previous.initiative_ids.clone();
-        comparable.team_ids = previous.team_ids.clone();
-        let mut previous_comparable = previous.clone();
-        if comparable.description.is_none() || previous.description.is_none() {
-            comparable.description = None;
-            previous_comparable.description = None;
-        }
-        if pending_name_cutover {
-            comparable.name.clone_from(&previous.name);
-            comparable.slug.clone_from(&previous.slug);
-        }
-        if comparable != previous_comparable
-            && (revision.is_none() || revision == previous_revision)
-        {
-            return Err(StoreError::InvalidData(format!(
-                "unordered or conflicting Project facts for {}; refresh planning",
-                project.id
-            )));
+        if revision.is_none() || revision == previous_revision {
+            let criteria_changed = previous_krs
+                .map(|value| serde_json::from_str::<Vec<crate::work::project::ProjectKR>>(&value))
+                .transpose()?
+                .is_some_and(|value| value != project.krs)
+                || previous_targets
+                    .map(|value| {
+                        serde_json::from_str::<Vec<crate::work::wave::metrics::MetricTarget>>(
+                            &value,
+                        )
+                    })
+                    .transpose()?
+                    .is_some_and(|value| value != project.metric_targets);
+            if content_changed || criteria_changed || (name_changed && !pending_name_cutover) {
+                return Err(StoreError::InvalidData(format!(
+                    "unordered or conflicting Project facts for {}; refresh planning",
+                    project.id
+                )));
+            }
         }
         if revision.is_none() && previous_revision.is_some()
             || revision == previous_revision && observed_at < acquired
@@ -1040,21 +1084,17 @@ fn put_project(
             return Ok(());
         }
     }
-    let prose = project.description.as_ref().map(|value| {
-        serde_json::json!({
-            "value": value, "revision": project.revision, "observed_at": observed_at
-        })
-        .to_string()
-    });
-    let mut body = serde_json::to_value(project)?;
-    body.as_object_mut()
-        .expect("Linear Project serializes as an object")
-        .remove("description");
     conn.execute(
-        "INSERT INTO pm_projects(repo,provider,id,observed_at,body,prose_json) VALUES(?1,?2,?3,?4,?5,?6)
-         ON CONFLICT(repo,provider,id) DO UPDATE SET observed_at=excluded.observed_at,body=excluded.body,
-         prose_json=COALESCE(excluded.prose_json,pm_projects.prose_json)",
-        params![repo,provider,project.id,observed_at,body.to_string(),prose],
+        "INSERT INTO pm_projects(repo,provider,id,observed_at,slug,name,summary,workflow,status,krs,metric_targets,initiative_ids,team_ids,description,revision,description_revision,description_observed_at)
+         VALUES(:repo,:provider,:id,:observed_at,:slug,:name,:summary,:workflow,:status,:krs,:metric_targets,:initiative_ids,:team_ids,:description,:revision,
+             CASE WHEN :description IS NOT NULL THEN :revision END,
+             CASE WHEN :description IS NOT NULL THEN :observed_at END)
+         ON CONFLICT(repo,provider,id) DO UPDATE SET
+         observed_at=excluded.observed_at,revision=excluded.revision,
+         slug=excluded.slug,name=excluded.name,summary=excluded.summary,workflow=excluded.workflow,status=excluded.status,krs=excluded.krs,metric_targets=excluded.metric_targets,initiative_ids=excluded.initiative_ids,team_ids=excluded.team_ids,
+         description=COALESCE(excluded.description,pm_projects.description),
+         description_revision=CASE WHEN excluded.description IS NOT NULL THEN excluded.revision ELSE description_revision END,
+         description_observed_at=COALESCE(excluded.description_observed_at,description_observed_at)", values,
     )?;
     if pending_name_cutover {
         conn.execute(
@@ -1102,57 +1142,65 @@ pub(super) fn put_item(
             return Ok(false);
         }
     }
-    let previous: Option<(String, i64)> = conn
-        .query_row(
-            "SELECT body,observed_at FROM pm_items WHERE repo=?1 AND provider=?2 AND id=?3",
-            params![repo, provider, item.id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .optional()?;
+    let previous = conn.query_row(
+        "SELECT revision,observed_at,identifier IS NOT :identifier OR claimed_project_id IS NOT :project_id OR url IS NOT :url OR name IS NOT :name OR description IS NOT :description OR completed IS NOT :completed OR state IS NOT :state OR team_id IS NOT :team_id OR assignee IS NOT :assignee OR (branch_name IS NOT NULL AND branch_name IS NOT :branch_name) OR (completed_at_observed AND completed_at IS NOT :completed_at) OR (due_date_observed AND due_date IS NOT :due_date),
+            state IS NOT :state OR completed IS NOT :completed
+         FROM pm_items WHERE repo=:repo AND provider=:provider AND id=:id",
+        named_params! { ":repo": repo, ":provider": provider, ":id": &item.id,
+            ":identifier": &item.identifier,
+            ":project_id": &item.project_id,
+            ":branch_name": &item.branch_name,
+            ":url": &item.url,
+            ":name": &item.name,
+            ":description": &item.description,
+            ":completed": &item.completed,
+            ":completed_at": &item.completed_at,
+            ":due_date": &item.due_date,
+            ":state": &item.state,
+            ":team_id": &item.team_id,
+            ":assignee": &item.assignee,
+        },
+        |row| Ok((row.get::<_,Option<String>>(0)?,row.get::<_,i64>(1)?,
+            row.get::<_,bool>(2)?,row.get::<_,bool>(3)?)),
+    ).optional()?;
     let mut status_changed = previous.is_none();
-    if let Some((previous, acquired)) = previous {
-        let previous_json: serde_json::Value = serde_json::from_str(&previous)?;
-        let has_completed_at = previous_json.get("completed_at").is_some();
-        let has_due_date = previous_json.get("due_date").is_some();
-        let previous: PmItem = serde_json::from_value(previous_json)?;
-        let previous_revision = revision_nanos(previous.revision.as_deref())?;
+    if let Some((previous, acquired, conflicting, changed)) = previous {
+        let previous_revision = revision_nanos(previous.as_deref())?;
         if revision < previous_revision {
             return Ok(false);
         }
-        if revision == previous_revision {
-            // Detail observations do not determine list order.
-            let mut comparable = item.clone();
-            comparable.rank = previous.rank;
-            comparable.revision = previous.revision.clone();
-            // Earlier observations did not request Linear's branch name.
-            // Enrich unknown placement without accepting conflicting known facts.
-            if previous.branch_name.is_none() {
-                comparable.branch_name = None;
-            }
-            if !has_completed_at {
-                comparable.completed_at = None;
-            }
-            if !has_due_date {
-                comparable.due_date = None;
-            }
-            if comparable != previous {
-                return Err(StoreError::InvalidData(format!(
-                    "conflicting planning facts at the same provider revision for {}; refresh planning", item.identifier
-                )));
-            }
+        if revision == previous_revision && conflicting {
+            return Err(StoreError::InvalidData(format!(
+                "conflicting planning facts at the same provider revision for {}; refresh planning",
+                item.identifier
+            )));
         }
-        status_changed = revision > previous_revision
-            && (item.state != previous.state || item.completed != previous.completed);
-        // For equal revisions, keep the later acquisition's list rank and freshness.
+        status_changed = revision > previous_revision && changed;
         if revision == previous_revision && observed_at < acquired {
             return Ok(false);
         }
     }
     conn.execute(
-        "INSERT INTO pm_items(repo,provider,id,identifier,project_id,observed_at,body) VALUES(?1,?2,?3,?4,?5,?6,?7)
-         ON CONFLICT(repo,provider,id) DO UPDATE SET identifier=excluded.identifier,
-         project_id=excluded.project_id,observed_at=excluded.observed_at,body=excluded.body",
-        params![repo,provider,item.id,item.identifier,item.project_id,observed_at,serde_json::to_string(item)?],
+        "INSERT INTO pm_items(repo,provider,id,observed_at,identifier,project_id,revision,branch_name,url,name,description,rank,completed,completed_at,due_date,state,team_id,assignee,claimed_project_id,completed_at_observed,due_date_observed,project_id_observed,assignee_observed)
+         VALUES(:repo,:provider,:id,:observed_at,:identifier,:project_id,:revision,:branch_name,:url,:name,:description,:rank,:completed,:completed_at,:due_date,:state,:team_id,:assignee,:project_id,1,1,1,1)
+         ON CONFLICT(repo,provider,id) DO UPDATE SET observed_at=excluded.observed_at,
+         identifier=excluded.identifier,project_id=excluded.project_id,revision=excluded.revision,branch_name=excluded.branch_name,url=excluded.url,name=excluded.name,description=excluded.description,rank=excluded.rank,completed=excluded.completed,completed_at=excluded.completed_at,due_date=excluded.due_date,state=excluded.state,team_id=excluded.team_id,assignee=excluded.assignee,
+         claimed_project_id=excluded.claimed_project_id,completed_at_observed=1,due_date_observed=1,project_id_observed=1,assignee_observed=1",
+        named_params! { ":repo": repo, ":provider": provider, ":id": &item.id,
+            ":observed_at": observed_at, ":rank": item.rank, ":revision": &item.revision,
+            ":identifier": &item.identifier,
+            ":project_id": &item.project_id,
+            ":branch_name": &item.branch_name,
+            ":url": &item.url,
+            ":name": &item.name,
+            ":description": &item.description,
+            ":completed": &item.completed,
+            ":completed_at": &item.completed_at,
+            ":due_date": &item.due_date,
+            ":state": &item.state,
+            ":team_id": &item.team_id,
+            ":assignee": &item.assignee,
+        },
     )?;
     if status_changed {
         // A newer authored status supersedes an old end trigger or writeback.
@@ -1227,7 +1275,7 @@ mod tests {
             .unwrap();
             conn.execute_batch(sql).unwrap();
             let retained: Vec<(String, String, i64)> = conn
-                .prepare("SELECT 'issue:'||id,body,observed_at FROM pm_items UNION ALL SELECT 'project:'||id,body,observed_at FROM pm_projects ORDER BY 1")
+                .prepare("SELECT 'issue:'||id,json_array(json_extract(body,'$.team_id'),json_extract(body,'$.project_id'),needs_refresh),observed_at FROM pm_items UNION ALL SELECT 'project:'||id,json_array(json_extract(body,'$.team_ids'),archived,membership_unresolved),observed_at FROM pm_projects ORDER BY 1")
                 .unwrap()
                 .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
                 .unwrap()
@@ -1266,7 +1314,7 @@ mod tests {
             assert_eq!(store.task(&task).unwrap().unwrap(), saved);
             let conn = store.conn.lock().unwrap();
             let after: Vec<(String, String, i64)> = conn
-                .prepare("SELECT 'issue:'||id,body,observed_at FROM pm_items UNION ALL SELECT 'project:'||id,body,observed_at FROM pm_projects ORDER BY 1")
+                .prepare("SELECT 'issue:'||id,json_array(team_id,claimed_project_id,needs_refresh),observed_at FROM pm_items UNION ALL SELECT 'project:'||id,json_array(json(team_ids),archived,membership_unresolved),observed_at FROM pm_projects ORDER BY 1")
                 .unwrap()
                 .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
                 .unwrap()
@@ -1314,11 +1362,8 @@ mod tests {
         {
             let conn = store.conn.lock().unwrap();
             // Rejected foreign evidence still matters even though Work keeps its owner.
-            conn.execute(
-                "UPDATE pm_items SET body=json_set(body,'$.team_id','foreign')",
-                [],
-            )
-            .unwrap();
+            conn.execute("UPDATE pm_items SET team_id='foreign'", [])
+                .unwrap();
         }
         assert!(validate().unwrap_err().to_string().contains("Team foreign"));
         {
@@ -1346,13 +1391,17 @@ mod tests {
         validate().unwrap();
         {
             let conn = store.conn.lock().unwrap();
-            conn.execute("UPDATE pm_projects SET archived=0,body=json_set(body,'$.initiative_ids',json('[\"removed\"]'))", []).unwrap();
+            conn.execute(
+                "UPDATE pm_projects SET archived=0,initiative_ids='[\"removed\"]'",
+                [],
+            )
+            .unwrap();
         }
         validate().unwrap();
         {
             let conn = store.conn.lock().unwrap();
             conn.execute(
-                "UPDATE pm_projects SET body=json_set(body,'$.initiative_ids',json(?1))",
+                "UPDATE pm_projects SET initiative_ids=?1",
                 [serde_json::to_string(&project.initiative_ids).unwrap()],
             )
             .unwrap();
@@ -1520,9 +1569,9 @@ mod tests {
             assert!(super::put_project(&conn, "/repo", "linear", 11, &conflict).is_err());
             super::put_project(&conn, "/repo", "linear", 9, &project).unwrap();
             let retained: String = conn
-                .query_row("SELECT body FROM pm_projects", [], |r| r.get(0))
+                .query_row("SELECT name FROM pm_projects", [], |r| r.get(0))
                 .unwrap();
-            assert_eq!(retained, original);
+            assert_eq!(retained, historical_name);
             // Failed outer work cannot spend the one-time exception.
             {
                 let tx = conn.transaction().unwrap();
@@ -1547,16 +1596,13 @@ mod tests {
                 )
                 .unwrap();
             assert_eq!(evidence, (original, 10, Some(12)));
-            let accepted = serde_json::to_value(&project).unwrap();
+            let accepted = project.name.clone();
             project.name = "Another name".into();
             assert!(super::put_project(&conn, "/repo", "linear", 13, &project).is_err());
             let retained: String = conn
-                .query_row("SELECT body FROM pm_projects", [], |r| r.get(0))
+                .query_row("SELECT name FROM pm_projects", [], |r| r.get(0))
                 .unwrap();
-            assert_eq!(
-                serde_json::from_str::<serde_json::Value>(&retained).unwrap(),
-                accepted
-            );
+            assert_eq!(retained, accepted);
             project.id = "post-cutover".into();
             super::put_project(&conn, "/repo", "linear", 13, &project).unwrap();
             project.name = "Conflict on a new record".into();
@@ -1565,9 +1611,67 @@ mod tests {
     }
 
     #[test]
+    fn confirming_refresh_uses_released_claim_instead_of_membership_index() {
+        let conn = Connection::open_in_memory().unwrap();
+        crate::store::migrations::apply_before_current_draft(&conn, "planning_peers");
+        let snapshot: crate::pm::PmSnapshot = serde_json::from_str(include_str!(
+            "../../../../../tests/fixtures/dto/task_history_planning.json"
+        ))
+        .unwrap();
+        let item = &snapshot.items[0];
+        conn.execute(
+            "INSERT INTO pm_items(repo,provider,id,identifier,project_id,observed_at,body)
+             VALUES('/repo','linear',?1,?2,'contradictory-index',17,?3)",
+            params![
+                item.id,
+                item.identifier,
+                serde_json::to_string(item).unwrap()
+            ],
+        )
+        .unwrap();
+        conn.execute_batch(&crate::store::migrations::current_draft_sql(
+            "planning_peers",
+        ))
+        .unwrap();
+        assert!(!super::put_item(&conn, "/repo", "linear", 16, item).unwrap());
+        let read = || {
+            conn.query_row(
+                "SELECT project_id,claimed_project_id,observed_at FROM pm_items",
+                [],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<String>>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, i64>(2)?,
+                    ))
+                },
+            )
+            .unwrap()
+        };
+        assert_eq!(
+            read(),
+            (
+                Some("contradictory-index".into()),
+                item.project_id.clone(),
+                17
+            )
+        );
+        assert!(super::put_item(&conn, "/repo", "linear", 18, item).unwrap());
+        assert_eq!(
+            read(),
+            (item.project_id.clone(), item.project_id.clone(), 18)
+        );
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM tasks", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+    }
+
+    #[test]
     fn task_history_enriches_only_absent_completion_dates_at_equal_revision() {
         let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch("CREATE TABLE pm_items(repo TEXT,provider TEXT,id TEXT,identifier TEXT,project_id TEXT,observed_at INTEGER,body TEXT,PRIMARY KEY(repo,provider,id)); CREATE TABLE pm_issue_changes(issue_id TEXT,revision_ns INTEGER,removed INTEGER);").unwrap();
+        crate::store::migrations::apply_before_current_draft(&conn, "planning_peers");
         let planning: crate::pm::PmSnapshot = serde_json::from_str(include_str!(
             "../../../../../tests/fixtures/dto/task_history_planning.json"
         ))
@@ -1581,20 +1685,19 @@ mod tests {
         let mut old = serde_json::to_value(&item).unwrap();
         old.as_object_mut().unwrap().remove("completed_at");
         conn.execute(
-            "INSERT INTO pm_items VALUES('/repo','linear',?1,?2,?3,1,?4)",
+            "INSERT INTO pm_items(repo,provider,id,identifier,project_id,observed_at,body) VALUES('/repo','linear',?1,?2,?3,1,?4)",
             params![item.id, item.identifier, item.project_id, old.to_string()],
         )
         .unwrap();
+        conn.execute_batch(&crate::store::migrations::current_draft_sql(
+            "planning_peers",
+        ))
+        .unwrap();
         assert!(super::put_item(&conn, "/repo", "linear", 2, &item).unwrap());
-        let observed: String = conn
-            .query_row("SELECT body FROM pm_items", [], |row| row.get(0))
+        let observed: Option<String> = conn
+            .query_row("SELECT completed_at FROM pm_items", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(
-            serde_json::from_str::<crate::pm::PmItem>(&observed)
-                .unwrap()
-                .completed_at,
-            item.completed_at
-        );
+        assert_eq!(observed, item.completed_at);
         item.completed_at = None;
         assert!(super::put_item(&conn, "/repo", "linear", 3, &item).is_err());
         item.revision = Some("2026-10-01T12:00:00Z".into());
@@ -1608,8 +1711,7 @@ mod tests {
     #[test]
     fn due_dates_enrich_absent_history_but_preserve_observed_null_at_equal_revision() {
         let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch("CREATE TABLE pm_items(repo TEXT,provider TEXT,id TEXT,identifier TEXT,project_id TEXT,observed_at INTEGER,body TEXT,PRIMARY KEY(repo,provider,id)); CREATE TABLE pm_issue_changes(issue_id TEXT,revision_ns INTEGER,removed INTEGER);").unwrap();
-        conn.execute_batch("CREATE TABLE tasks(id TEXT,external_issue_id TEXT,project_id TEXT,planning_completed INTEGER,completion_request INTEGER,completion_error TEXT); CREATE TABLE projects(id TEXT,wave_id TEXT); CREATE TABLE waves(id TEXT,repo TEXT); CREATE TABLE task_events(task_id TEXT,kind_json TEXT,created_at INTEGER);").unwrap();
+        crate::store::migrations::apply_before_current_draft(&conn, "planning_peers");
         let planning: crate::pm::PmSnapshot = serde_json::from_str(include_str!(
             "../../../../../tests/fixtures/dto/task_history_planning.json"
         ))
@@ -1618,21 +1720,20 @@ mod tests {
         let mut old = serde_json::to_value(&item).unwrap();
         old.as_object_mut().unwrap().remove("due_date");
         conn.execute(
-            "INSERT INTO pm_items VALUES('/repo','linear',?1,?2,?3,1,?4)",
+            "INSERT INTO pm_items(repo,provider,id,identifier,project_id,observed_at,body) VALUES('/repo','linear',?1,?2,?3,1,?4)",
             params![item.id, item.identifier, item.project_id, old.to_string()],
         )
         .unwrap();
+        conn.execute_batch(&crate::store::migrations::current_draft_sql(
+            "planning_peers",
+        ))
+        .unwrap();
         item.due_date = Some("2026-10-08".into());
         assert!(super::put_item(&conn, "/repo", "linear", 2, &item).unwrap());
-        let observed: String = conn
-            .query_row("SELECT body FROM pm_items", [], |row| row.get(0))
+        let observed: Option<String> = conn
+            .query_row("SELECT due_date FROM pm_items", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(
-            serde_json::from_str::<crate::pm::PmItem>(&observed)
-                .unwrap()
-                .due_date,
-            item.due_date
-        );
+        assert_eq!(observed, item.due_date);
         item.due_date = None;
         assert!(super::put_item(&conn, "/repo", "linear", 3, &item).is_err());
         item.id = "observed-null".into();

@@ -1847,7 +1847,7 @@ mod tests {
         for change in [
             "UPDATE pm_projects SET archived=1",
             "UPDATE pm_projects SET membership_unresolved=1",
-            "UPDATE pm_projects SET body='malformed'",
+            "UPDATE pm_projects SET initiative_ids='malformed'",
             "UPDATE pm_projects SET observed_at=18",
             "UPDATE pm_wave_sync SET initiative='different-initiative'",
         ] {

@@ -349,9 +349,9 @@ fn readiness_in(conn: &Connection, wave: &WaveId) -> StoreResult<ProjectReadines
             "SELECT p.id, p.pm_snapshot_synced_at,
              CASE WHEN w.current_project_id IS NULL THEN 'unconfigured'
                   WHEN p.id IS NULL OR p.project_name IS NULL OR p.project_slug IS NULL OR p.description IS NULL THEN 'unavailable'
-                  WHEN f.id IS NOT NULL AND NOT json_valid(f.body) THEN 'unavailable'
+                  WHEN f.id IS NOT NULL AND NOT json_valid(f.initiative_ids) THEN 'unavailable'
                   WHEN f.id IS NOT NULL AND (f.archived OR f.membership_unresolved OR p.pm_snapshot_synced_at IS NOT f.observed_at
-                    OR (s.wave_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM json_each(f.body,'$.initiative_ids') WHERE value=s.initiative)))
+                    OR (s.wave_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM json_each(f.initiative_ids) WHERE value=s.initiative)))
                     THEN 'unavailable'
                   WHEN p.status IN ('completed','canceled') THEN 'terminal'
                   WHEN p.status='started' THEN 'ready' ELSE 'inactive' END,

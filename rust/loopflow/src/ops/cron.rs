@@ -420,7 +420,7 @@ pub fn maintain_repository_tick(repo: &Path) -> OpsResult<()> {
     {
         return Ok(());
     }
-    let repo = crate::engine::worktrees::main_repo_root(repo)?;
+    let repo = crate::git::worktrees::main_repo_root(repo)?;
     let store = crate::store::sqlite::SqliteStore::open_read_only(
         &crate::store::production_database_path(),
     )

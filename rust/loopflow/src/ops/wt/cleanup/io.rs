@@ -357,10 +357,10 @@ fn execute(request: Request) -> OpsResult<serde_json::Value> {
             )
             .map_err(super::error)
         }
-        Request::Read(Read::Lease { repo, path }) => serde_json::to_value(
-            crate::engine::git::PreparedWorktreeLease::discover(&repo, &path)?,
-        )
-        .map_err(super::error),
+        Request::Read(Read::Lease { repo, path }) => {
+            serde_json::to_value(crate::git::PreparedWorktreeLease::discover(&repo, &path)?)
+                .map_err(super::error)
+        }
         Request::Read(Read::Normalize(path)) => {
             serde_json::to_value(crate::store::canonicalize_with_missing_tail(&path)?)
                 .map_err(super::error)
@@ -404,7 +404,7 @@ fn execute(request: Request) -> OpsResult<serde_json::Value> {
             // Keep Git and path resolution in the same cancellable process
             // group. A nested bounded_output would create an escaping group.
             let output = super::read_git(&repo, &["worktree", "list", "--porcelain", "-z"])?;
-            let registered = crate::engine::worktrees::parse_porcelain(&output)
+            let registered = crate::git::worktrees::parse_porcelain(&output)
                 .into_iter()
                 .map(|(path, branch)| {
                     crate::store::canonicalize_with_missing_tail(&path)

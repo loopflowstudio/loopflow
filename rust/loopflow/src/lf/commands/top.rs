@@ -3,7 +3,6 @@
 use std::collections::{HashMap, HashSet};
 use std::io::{IsTerminal, Write};
 use std::path::Path;
-use std::process::Command;
 use std::thread;
 use std::time::{Duration, Instant};
 

@@ -1623,7 +1623,7 @@ fn dispatch(
         )
     ) {
         if let Ok(directory) = std::env::current_dir() {
-            if loopflow::engine::worktrees::main_repo_root(&directory).is_ok() {
+            if loopflow::git::worktrees::main_repo_root(&directory).is_ok() {
                 if let Err(error) = loopflow::ops::cron::maintain_repository_tick(&directory) {
                     eprintln!("repository maintenance unavailable: {error}");
                 }

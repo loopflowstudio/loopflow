@@ -73,7 +73,7 @@ fn scheduled_cleanup(release_admission: bool) {
     let path = repo.create_named_worktree("landed").canonicalize().unwrap();
     let neighbor = repo.create_named_worktree("unfinished");
     fs::write(neighbor.join("notes"), "unfinished work").unwrap();
-    let head = loopflow::engine::git::rev_parse(&path, "HEAD").unwrap();
+    let head = loopflow::git::rev_parse(&path, "HEAD").unwrap();
     let connection = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     connection.execute("INSERT INTO pr_landings(id,repo,pr_number,worktree,branch,requested_head_sha,observed_head_sha,merge_commit,state,generation,created_at,updated_at) VALUES('00000000-0000-0000-0000-000000000003','example/cleanup',1,?1,'landed',?2,?2,?2,'merged',1,1,1)", rusqlite::params![path.to_str().unwrap(), head]).unwrap();
     connection
@@ -109,7 +109,7 @@ fn scheduled_cleanup(release_admission: bool) {
             .unwrap(),
     );
     let started_at = time::OffsetDateTime::now_utc().unix_timestamp();
-    connection.execute("INSERT INTO processes(lfid,trace_id,pid,cwd,started_at) VALUES('00000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000002',?1,?2,?3)", rusqlite::params![checkout_user.0.id(), path.to_str().unwrap(), started_at]).unwrap();
+    connection.execute("INSERT INTO processes(id,trace_id,pid,cwd,started_at) VALUES('00000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000002',?1,?2,?3)", rusqlite::params![checkout_user.0.id(), path.to_str().unwrap(), started_at]).unwrap();
     let receipts = home.path().join("runtime/exec-processes");
     fs::create_dir_all(&receipts).unwrap();
     fs::write(receipts.join("checkout-user.json"), serde_json::to_vec(&serde_json::json!({

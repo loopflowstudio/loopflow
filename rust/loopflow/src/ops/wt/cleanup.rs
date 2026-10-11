@@ -11,9 +11,7 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 use crate::durable::{WorkRef, WorkStatus};
-use crate::engine::git::{
-    worktree_remove_owned, PreparedWorktreeLease, WorktreeLease, WorktreeRemoval,
-};
+use crate::git::{worktree_remove_owned, PreparedWorktreeLease, WorktreeLease, WorktreeRemoval};
 use crate::journal::{process_evidence_at, ProcessIdentityEvidence};
 use crate::ops::{OpsError, OpsResult};
 use crate::store::{sqlite::SqliteStore, SharedStore};
@@ -295,7 +293,7 @@ impl RegistryObservations {
     }
 
     fn execution_blocks(&self, process: &crate::process::LfProcess) -> bool {
-        process_evidence_at(&self.store, &process.lfid, &self.home) != ProcessIdentityEvidence::Dead
+        process_evidence_at(&self.store, &process.id, &self.home) != ProcessIdentityEvidence::Dead
     }
 
     fn blocker(&self, path: &Path) -> OpsResult<Option<String>> {
@@ -334,7 +332,7 @@ impl RegistryObservations {
                 if normalized(Path::new(cwd))?.starts_with(path) && self.execution_blocks(process) {
                     return Ok(Some(format!(
                         "Process {} has live or unknown execution",
-                        process.lfid
+                        process.id
                     )));
                 }
             }
@@ -1264,7 +1262,7 @@ mod tests {
     use super::{
         apply_cleanup, observe, plan_cleanup, CleanupAction, CleanupBudget, CleanupDecision,
     };
-    use crate::engine::git::{acquire_worktree_lease, rev_parse};
+    use crate::git::{acquire_worktree_lease, rev_parse};
     use crate::ops::wt::git;
     use crate::store::{open_ephemeral_store, SharedStore, StorageConfig};
 
@@ -1457,7 +1455,7 @@ mod tests {
         for path in &older {
             std::fs::remove_file(path.join("unfinished")).unwrap();
         }
-        let admin = crate::engine::git::absolute_git_dir(&older[0]).unwrap();
+        let admin = crate::git::absolute_git_dir(&older[0]).unwrap();
         std::fs::write(admin.join("lf-cleanup-attempt"), "interrupted hint").unwrap();
         // Arrival rate exceeds the removal cap; both lexically earlier and
         // later names must wait behind the already deferred checkouts.
@@ -1539,7 +1537,7 @@ mod tests {
             super::run_cleanup_pass(&store, repo.path(), CleanupBudget::default()).unwrap();
         assert_eq!(report.removed, vec![path]);
         assert!(report.planned.iter().all(|item| item.path != primary));
-        assert!(!crate::engine::git::absolute_git_dir(&primary)
+        assert!(!crate::git::absolute_git_dir(&primary)
             .unwrap()
             .join("lf-cleanup-attempt")
             .exists());
@@ -1551,7 +1549,7 @@ mod tests {
         let _guard = crate::journal::TestLedgerGuard::new();
         let external = ExternalInspection::idle();
         let (repo, _directory, store, path) = fixture().await;
-        let admin = crate::engine::git::absolute_git_dir(&path).unwrap();
+        let admin = crate::git::absolute_git_dir(&path).unwrap();
         let mut receipt = begin_receipt(&store, &repo);
         let mut progress = receipt.progress();
         progress.pending_registrations.push(admin.clone());
@@ -1590,7 +1588,7 @@ mod tests {
         let _external = ExternalInspection::idle();
         let (repo, directory, store, path) = fixture().await;
         let neighbor = add_settled(&repo, &directory, "healthy-neighbor");
-        let admin = crate::engine::git::absolute_git_dir(&path).unwrap();
+        let admin = crate::git::absolute_git_dir(&path).unwrap();
         let marker = admin.join("lf-cleanup-attempt");
         fifo(&marker);
         let started = std::time::Instant::now();
@@ -1603,10 +1601,7 @@ mod tests {
         // The timed-out process neither owns admission nor has a continuation
         // into deletion. Both ownership domains are immediately available.
         drop(store.sqlite.lock_checkout(&path).unwrap());
-        drop(
-            crate::engine::git::acquire_worktree_lease(repo.path(), &path, "test after timeout")
-                .unwrap(),
-        );
+        drop(crate::git::acquire_worktree_lease(repo.path(), &path, "test after timeout").unwrap());
         std::fs::remove_file(&marker).unwrap();
         assert!(path.exists());
         let report =
@@ -1622,7 +1617,7 @@ mod tests {
         let mut stalled = Vec::new();
         for index in 0..8 {
             let path = add_settled(&repo, &directory, &format!("a-stalled-{index:02}"));
-            let admin = crate::engine::git::absolute_git_dir(&path).unwrap();
+            let admin = crate::git::absolute_git_dir(&path).unwrap();
             fifo(&admin.join("lf-cleanup-attempt"));
             stalled.push((path, admin));
         }
@@ -1684,7 +1679,7 @@ mod tests {
         let _external = ExternalInspection::idle();
         let (repo, directory, store, healthy) = fixture().await;
         let blocked = add_settled(&repo, &directory, "aaa-stalled");
-        let marker = crate::engine::git::absolute_git_dir(&blocked)
+        let marker = crate::git::absolute_git_dir(&blocked)
             .unwrap()
             .join("lf-cleanup-attempt");
         std::fs::write(&marker, "0").unwrap();
@@ -1726,7 +1721,7 @@ mod tests {
         for prefix in ["a", "b"] {
             for index in 0..32 {
                 let path = add_settled(&repo, &directory, &format!("{prefix}{index:02}"));
-                let marker = crate::engine::git::absolute_git_dir(&path)
+                let marker = crate::git::absolute_git_dir(&path)
                     .unwrap()
                     .join("lf-cleanup-attempt");
                 std::fs::write(&marker, "0").unwrap();
@@ -1827,7 +1822,7 @@ mod tests {
         let _external = ExternalInspection::idle();
         let (repo, directory, store, path) = fixture().await;
         let neighbor = add_settled(&repo, &directory, "healthy-neighbor");
-        let admin = crate::engine::git::absolute_git_dir(&path).unwrap();
+        let admin = crate::git::absolute_git_dir(&path).unwrap();
         let marker = admin.join("lf-cleanup-attempt");
         std::fs::write(&marker, "0").unwrap();
         std::env::set_var("LF_TEST_CLEANUP_STALL_HINT", &marker);
@@ -1940,7 +1935,7 @@ mod tests {
         let _external = ExternalInspection::idle();
         let (repo, directory, store, path) = fixture().await;
         let neighbor = add_settled(&repo, &directory, "healthy-neighbor");
-        let admin = crate::engine::git::absolute_git_dir(&path).unwrap();
+        let admin = crate::git::absolute_git_dir(&path).unwrap();
         // A directory cannot be replaced by the atomic hint-file rename.
         std::fs::create_dir(admin.join("lf-cleanup-attempt")).unwrap();
         let report =
@@ -1967,7 +1962,7 @@ mod tests {
             ));
         }
         for path in &blocked {
-            let admin = crate::engine::git::absolute_git_dir(path).unwrap();
+            let admin = crate::git::absolute_git_dir(path).unwrap();
             std::fs::create_dir(admin.join("lf-cleanup-attempt")).unwrap();
         }
         let healthy = add_settled(&repo, &directory, "zz-healthy");
@@ -2012,7 +2007,7 @@ mod tests {
             "failed candidates must also get fair retries"
         );
         let recovered = blocked.last().unwrap();
-        let admin = crate::engine::git::absolute_git_dir(recovered).unwrap();
+        let admin = crate::git::absolute_git_dir(recovered).unwrap();
         std::fs::remove_dir(admin.join("lf-cleanup-attempt")).unwrap();
         for _ in 0..4 {
             super::run_cleanup_pass(&store, repo.path(), CleanupBudget::default()).unwrap();
@@ -2105,8 +2100,7 @@ mod tests {
         let _external = ExternalInspection::idle();
         let (repo, directory, store, path) = fixture().await;
         let neighbor = add_settled(&repo, &directory, "healthy-neighbor");
-        let lease =
-            crate::engine::git::PreparedWorktreeLease::discover(repo.path(), &path).unwrap();
+        let lease = crate::git::PreparedWorktreeLease::discover(repo.path(), &path).unwrap();
         let fifo_path = directory.path().join("lock-ack");
         fifo(&fifo_path);
         // Interrupt both before file preparation and after descriptor transfer.
@@ -2145,7 +2139,7 @@ mod tests {
         let (repo, directory, store, healthy) = fixture().await;
         std::fs::write(healthy.join("unfinished"), "preserve").unwrap();
         let blocked = add_settled(&repo, &directory, "a-blocked");
-        let admin = crate::engine::git::absolute_git_dir(&blocked).unwrap();
+        let admin = crate::git::absolute_git_dir(&blocked).unwrap();
         let gitdir = admin.join("gitdir");
         let contents = std::fs::read(&gitdir).unwrap();
         std::fs::remove_file(&gitdir).unwrap();
@@ -2179,7 +2173,7 @@ mod tests {
         let (repo, directory, store, path) = fixture().await;
         let neighbor = add_settled(&repo, &directory, "neighbor");
         let plan = super::plan_selected(&store, repo.path(), Some(&path)).unwrap();
-        let admin = crate::engine::git::absolute_git_dir(&path).unwrap();
+        let admin = crate::git::absolute_git_dir(&path).unwrap();
         std::fs::write(
             admin.join("gitdir"),
             neighbor.join(".git").to_str().unwrap(),
@@ -2352,13 +2346,16 @@ mod tests {
         let (repo, _directory, store, path) = fixture().await;
         git(&path, &["push", "origin", "landed"]).unwrap();
         let mut process = crate::process::LfProcess {
-            lfid: crate::id::ProcessLfid::new(),
+            id: crate::id::LfProcessId::new(),
             pid: None,
+            kind: crate::process::ProcessKind::Lf,
+            agent_session_id: None,
+            os_started_at: None,
             trace_id: crate::id::TraceId::new(),
-            parent_process_lfid: None,
+            parent_lf_process_id: None,
             via_agent: None,
             caller_session_id: None,
-            caller_provider_generation: None,
+            caller_agent_process_id: None,
             command: Some("unknown execution".into()),
             repo: None,
             cwd: Some(path.to_string_lossy().into_owned()),
@@ -2492,7 +2489,7 @@ mod tests {
         let (repo, _directory, store, path) = fixture().await;
         git(&path, &["update-index", "--assume-unchanged", ".gitignore"]).unwrap();
         std::fs::write(path.join(".gitignore"), "uncommitted hidden edit").unwrap();
-        assert!(crate::engine::git::is_clean(&path).unwrap());
+        assert!(crate::git::is_clean(&path).unwrap());
         retained(
             &decision(&store, &repo, &path),
             "excluded from Git change detection",
@@ -3217,7 +3214,7 @@ mod tests {
             crate::store::sqlite::SqliteStore::open_ephemeral(&directory.path().join("release.db"))
                 .unwrap();
         let connection = rusqlite::Connection::open(directory.path().join("release.db")).unwrap();
-        connection.execute("INSERT INTO processes(lfid,trace_id,cwd,started_at) VALUES('00000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000002',?1,unixepoch())", [path.to_str().unwrap()]).unwrap();
+        connection.execute("INSERT INTO processes(id,trace_id,cwd,started_at) VALUES('00000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000002',?1,unixepoch())", [path.to_str().unwrap()]).unwrap();
         assert!(super::RegistryObservations::read(&release)
             .unwrap()
             .blocker(&path)

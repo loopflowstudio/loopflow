@@ -166,9 +166,10 @@ checkout-picker/split-slot controls and `showsRetainedTerminals`.
 are removed; native lifetime, shell and multiplexer coverage survives. Add
 Work-tab retention assertions with the pending rekey; do not restore the outer tree.
 
-Delete Session-as-page/global-selection branches and ordinary Session hierarchy
-rows where they compete with Work tabs. Keep Session discovery through Work's
-conversation actions, Waiting and diagnostic orphan inventory. Keep sidebar
+Deleted: Session-only presentation, Session hierarchy rows and their exclusive
+disambiguation/benchmark paths. Work menus and diagnostics retain conversations,
+including missing planning; Waiting is unchanged. Session-as-page/global-selection
+branches still need deletion with Work tabs. Keep sidebar
 started/history filtering and current legal actions. No Session tab names, no
 Machine tabs, no parallel “all terminals” workspace. Render Work details and its
 panes from one selected entry rather than maintaining both old and new screens.

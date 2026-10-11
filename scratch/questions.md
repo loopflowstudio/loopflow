@@ -46,8 +46,8 @@ dispatch; an unscoped ambiguous prefix still fails.
 
 ## Context budget
 
-Installed `lf context --skill realign` still assembles the old per-file JSON
-inventory: the October 10 recheck is 35,234 goal tokens, 19,234 over 16,000.
+Installed `lf context --skill compress` still assembles the old per-file JSON
+inventory: the October 10 recheck is 35,332 goal tokens, 19,332 over 16,000.
 The local input owner now emits every quoted path and present change state without
 per-file hashes, sizes or false fields. Applying that rendering to the complete
 captured goal yields 11,637 tokens / 52,254 bytes, preserving all steers. This is

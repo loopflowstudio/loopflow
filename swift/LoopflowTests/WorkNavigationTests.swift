@@ -19,9 +19,9 @@ struct WorkNavigationTests {
         let projection = WorkProjection(roadmaps: snapshot.waves, sessions: [idle, review])
         let wave = try #require(projection.waves.first)
         let rows = projection.outline(presentation: .full, collapsed: [wave.id], search: "", planningReadable: true)
-        let waveRow = try #require(rows.first { $0.workKey == wave.id })
+        let waveRow = try #require(rows.first { $0.id == wave.id })
         #expect(waveRow.inlineSessions.map(\.id) == ["idle", "review"])
-        #expect(!rows.contains { $0.workKey?.work.kind == .task && $0.inlineSessions.contains(where: { $0.id == "review" }) })
+        #expect(!rows.contains { $0.id.work.kind == .task && $0.inlineSessions.contains(where: { $0.id == "review" }) })
     }
 
     @Test("Checkout association groups independent Sessions despite different attribution")
@@ -95,7 +95,7 @@ struct WorkNavigationTests {
         let visible = model.visibleWork.waves.flatMap(\.tasks).flatMap(\.sessions)
         #expect(visible.map(\.id) == ["idle", "active", "review"])
         let outline = model.visibleWork.outline(presentation: .full, collapsed: [], search: "", planningReadable: true)
-        let taskRow = try #require(outline.first { $0.workKey?.work.id == "issue-review" })
+        let taskRow = try #require(outline.first { $0.id.work.id == "issue-review" })
         #expect(taskRow.inlineSessions.count == 3)
         #expect(model.paletteRows.filter { if case .session = $0.id { true } else { false } }.count == 3)
         model.navigation.showsHeadlessSessions = true
@@ -137,32 +137,46 @@ struct WorkNavigationTests {
         }
         let full = rows(.full)
         let compact = rows(.compact)
-        let flat = rows(.sessions)
-        // Task Sessions ride their Task row; Wave and unmatched Sessions stay leaves.
+        // Conversations ride Work menus; unavailable planning stays diagnostic.
         func sessionIds(_ rows: [WorkOutlineRow]) -> Set<String> {
-            Set(rows.flatMap { ($0.session.map { [$0.id] } ?? []) + $0.inlineSessions.map(\.id) })
+            Set(rows.flatMap { $0.inlineSessions.map(\.id) })
         }
         #expect(sessionIds(full) == sessionIds(compact))
-        #expect(sessionIds(full) == Set(flat.compactMap { $0.session?.id }))
-        #expect(compact.compactMap(\.workKey).allSatisfy { $0.work.kind == .task })
-        let review = try #require(compact.first { $0.workKey?.work == .task(id: "issue-review") })
+        #expect(compact.map(\.id).allSatisfy { $0.work.kind == .wave || $0.work.kind == .task })
+        let review = try #require(compact.first { $0.id.work == .task(id: "issue-review") })
         #expect(review.inlineSessions.map(\.id) == ["human"])
-        #expect(!compact.contains { $0.session?.id == "human" })
         // Upcoming work lives in the Wave plan, not the started working set.
-        #expect(!compact.contains { $0.workKey?.work == .task(id: "issue-available") })
-        #expect(flat.allSatisfy { $0.session != nil && $0.depth == 0 })
-        let human = try #require(flat.first { $0.session?.id == "human" })
-        #expect(human.ancestors.map(\.key.work.kind) == [.wave, .task])
+        #expect(!compact.contains { $0.id.work == .task(id: "issue-available") })
         let project = projection.waves[0].id
         let folded = rows(.compact, collapsed: [project])
-        #expect(folded.contains { $0.workKey == project })
+        #expect(folded.contains { $0.id == project })
         #expect(folded.contains { $0.inlineSessions.contains { $0.id == "human" } })
-        #expect(rows(.sessions, collapsed: [project]).map(\.id) == flat.map(\.id))
         #expect(rows(.compact, readable: false).map(\.id) == full.map(\.id))
         let searched = projection.outline(presentation: .compact, collapsed: [project], search: "human", planningReadable: true)
         #expect(searched.contains { $0.inlineSessions.contains { $0.id == "human" } })
-        let identifierSearch = projection.outline(presentation: .sessions, collapsed: [], search: "W2-131", planningReadable: true)
-        #expect(identifierSearch.compactMap { $0.session?.id } == ["human"])
+        let identifierSearch = projection.outline(presentation: .compact, collapsed: [], search: "W2-131", planningReadable: true)
+        #expect(identifierSearch.filter { $0.id.work.kind == .task }.flatMap { $0.inlineSessions.map(\.id) } == ["human"])
+    }
+
+    @Test("Wave conversations stay reachable in Compact and when searched by name")
+    func waveConversationMenu() async throws {
+        let conversation = try session("wave-conversation", work: .wave(id: "wave-1"))
+        var snapshot = try #require(JSONSerialization.jsonObject(with: Data(roadmapJSON().utf8)) as? [String: Any])
+        snapshot["waves"] = [try #require((snapshot["waves"] as? [[String: Any]])?.first)]
+        let source = ReadingSource(roadmap: String(decoding: try JSONSerialization.data(withJSONObject: snapshot), as: UTF8.self),
+            sessions: String(decoding: try JSONEncoder().encode([conversation]), as: UTF8.self))
+        let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+        await model.refresh()
+        var opened: [String] = []
+        for search in ["", conversation.title] {
+            model.navigation.search = search
+            let rows = model.visibleWork.outline(presentation: .compact, collapsed: [], search: search, planningReadable: true)
+            #expect(rows.first { $0.id.work == .wave(id: "wave-1") }?.inlineSessions.map(\.id) == [conversation.id])
+            let view = WorkNavigator(model: model, onOpenSession: { opened.append($0.id) })
+            let menu = try view.inspect().find(viewWithAccessibilityIdentifier: "work-session-count-wave-1")
+            try menu.find(button: conversation.title).tap()
+        }
+        #expect(opened == [conversation.id, conversation.id])
     }
 
     @Test("Compact keeps an empty Wave available for inspection and conversation")
@@ -176,8 +190,7 @@ struct WorkNavigationTests {
         let projection = WorkProjection(roadmaps: snapshot.waves, sessions: [])
         let rows = projection.outline(presentation: .compact, collapsed: [], search: "", planningReadable: true)
         #expect(rows.count == 1)
-        #expect(rows.first?.workKey?.work.kind == .wave)
-        #expect(projection.outline(presentation: .sessions, collapsed: [], search: "", planningReadable: true).isEmpty)
+        #expect(rows.first?.id.work.kind == .wave)
     }
 
     @Test("Compact preserves Wave context when planning is multiple, partial or unavailable",
@@ -203,28 +216,9 @@ struct WorkNavigationTests {
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: json))
         let projection = WorkProjection(roadmaps: snapshot.waves, sessions: [])
         let rows = projection.outline(presentation: .compact, collapsed: [], search: "", planningReadable: true)
-        let kinds = rows.compactMap { $0.workKey?.work.kind }
+        let kinds = rows.map { $0.id.work.kind }
         #expect(!kinds.contains(.project))
         #expect(kinds.filter { $0 == .wave }.count == (evidence == "multiple" ? 2 : 1))
-    }
-
-    @Test("Session list disambiguates same-named conversations and retains unknown ancestry")
-    func flatSessionsDisambiguate() throws {
-        let records = try [session("first", work: .task(id: "ts_review00000000000000000000000000")),
-                           session("second", work: .task(id: "ts_review00000000000000000000000000")),
-                           session("third", work: nil)].map { record in
-            var json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as? [String: Any])
-            json["title"] = "Conversation"
-            return try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: json))
-        }
-        let projection = WorkProjection(roadmaps: try roadmap().waves, sessions: records)
-        let rows = projection.outline(presentation: .sessions, collapsed: [], search: "", planningReadable: true)
-        #expect(rows.count == 2)
-        #expect(Set(rows.map(\.detail)).count == 2)
-        #expect(rows.first { $0.session?.id == "first" }?.detail?.contains("first") == true)
-        // A Session with no Work is an orphan, not an ancestry-less leaf.
-        #expect(!rows.contains { $0.session?.id == "third" })
-        #expect(projection.orphanSessions(search: "").map(\.id) == ["third"])
     }
 
     @Test("Orphan Sessions are reachable only through the diagnostic menu")
@@ -235,10 +229,8 @@ struct WorkNavigationTests {
         let projection = WorkProjection(roadmaps: try roadmap().waves, sessions: [attached, orphan, stray])
         for presentation in WorkPresentation.allCases {
             let rows = projection.outline(presentation: presentation, collapsed: [], search: "", planningReadable: true)
-            #expect(!rows.contains { $0.session?.id == "demo" })
-            #expect(rows.contains { $0.session?.id == "stray" })
             #expect(!rows.contains { $0.inlineSessions.contains { $0.id == "demo" } })
-            #expect(rows.allSatisfy { $0.session == nil || !$0.ancestors.isEmpty })
+            #expect(!rows.flatMap(\.inlineSessions).contains { $0.id == "stray" })
         }
         #expect(projection.orphanSessions(search: "").map(\.id) == ["demo"])
         #expect(projection.orphanSessions(search: "DEMO").map(\.id) == ["demo"])
@@ -247,7 +239,7 @@ struct WorkNavigationTests {
 
         let source = try ReadingSource(
             roadmap: roadmapJSON(),
-            sessions: String(decoding: try JSONEncoder().encode([attached, orphan]), as: UTF8.self))
+            sessions: String(decoding: try JSONEncoder().encode([attached, orphan, stray]), as: UTF8.self))
         let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
         await model.refresh()
         var opened: [String] = []
@@ -255,7 +247,8 @@ struct WorkNavigationTests {
         #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "work-orphans-open") }
         #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "session-row-demo") }
         try view.inspect().find(viewWithAccessibilityIdentifier: "debug-orphan-session-demo").button().tap()
-        #expect(opened == ["demo"])
+        try view.inspect().find(viewWithAccessibilityIdentifier: "debug-session-stray").button().tap()
+        #expect(opened == ["demo", "stray"])
         #expect(throws: (any Error).self) { try view.inspect().find(text: "Repository or unavailable ancestry") }
 
         // Zero orphans hides the section entirely.
@@ -266,8 +259,8 @@ struct WorkNavigationTests {
         _ = try view.inspect().find(viewWithAccessibilityIdentifier: "work-session-count-issue-review")
     }
 
-    @Test("Hierarchy rows open their Task; the Session list opens the exact Session")
-    func sessionLeavesOpenAcrossPresentations() async throws {
+    @Test("Hierarchy rows open Work; conversation menus open the exact Session")
+    func conversationMenusOpenAcrossPresentations() async throws {
         let model = try model()
         await model.refresh()
         model.select(.task(id: "issue-review"))
@@ -278,17 +271,15 @@ struct WorkNavigationTests {
             model.navigation.presentation = presentation
             let view = WorkNavigator(model: model, onOpenSession: { opened.append($0.id) },
                                           onOpenTask: { tasks.append($0) })
-            if presentation == .sessions {
-                try view.inspect().find(viewWithAccessibilityIdentifier: "session-row-human").button().tap()
-            } else {
-                try view.inspect().find(viewWithAccessibilityIdentifier: "work-task-issue-review").button().tap()
-                #expect(throws: (any Error).self) {
-                    try view.inspect().find(viewWithAccessibilityIdentifier: "session-row-human")
-                }
+            try view.inspect().find(viewWithAccessibilityIdentifier: "work-task-issue-review").button().tap()
+            #expect(throws: (any Error).self) {
+                try view.inspect().find(viewWithAccessibilityIdentifier: "session-row-human")
             }
+            let conversations = try view.inspect().find(viewWithAccessibilityIdentifier: "work-session-count-issue-review")
+            try conversations.find(button: "human").tap()
             #expect(model.selection == selected)
         }
-        #expect(opened == ["human"])
+        #expect(opened == ["human", "human"])
         #expect(tasks == [.task(id: "issue-review"), .task(id: "issue-review")])
     }
 
@@ -318,7 +309,7 @@ struct WorkNavigationTests {
         await model.refresh()
         func sidebar() -> [String] {
             model.projection.outline(presentation: .full, collapsed: [], search: "", planningReadable: true)
-                .compactMap { $0.workKey?.work.kind == .task ? $0.workKey?.work.id : nil }
+                .compactMap { $0.id.work.kind == .task ? $0.id.work.id : nil }
         }
         // Started (review), prepared-but-unstarted (now), upcoming (available),
         // completed (later): only started, incomplete work is in the working set.
@@ -370,8 +361,8 @@ struct WorkNavigationTests {
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: json))
         let projection = WorkProjection(roadmaps: snapshot.waves, sessions: [])
         let rows = projection.outline(presentation: .compact, collapsed: [], search: "", planningReadable: true)
-        #expect(rows.filter { $0.workKey?.work.kind == .task }.count == 20)
-        #expect(rows.filter { $0.workKey?.work.kind == .wave }.count == 3)
+        #expect(rows.filter { $0.id.work.kind == .task }.count == 20)
+        #expect(rows.filter { $0.id.work.kind == .wave }.count == 3)
         #expect(projection.waves.allSatisfy { $0.tasks.count == 50 })
         // A poll that re-reads identical evidence yields identical rows.
         let again = WorkProjection(roadmaps: snapshot.waves, sessions: [])
@@ -424,7 +415,7 @@ struct WorkNavigationTests {
         navigation.search = ""
         #expect(!navigation.isExpanded(group))
         navigation.content = .terminals
-        navigation.presentation = .sessions
+        navigation.presentation = .full
         model.setRepoPath("/src/context")
         model.select(.wave(id: "wave-2"))
         model.setRepoPath("/src/loopflow")
@@ -712,8 +703,11 @@ struct WorkNavigationTests {
         #expect(try bar.inspect().find(viewWithAccessibilityIdentifier: "breadcrumb-task").text().string() == "Task \(work.id)")
         for presentation in WorkPresentation.allCases {
             let rows = model.projection.outline(presentation: presentation, collapsed: [], search: work.id, planningReadable: false)
-            #expect(Set(rows.compactMap { $0.session?.id }) == ["first", "second"])
-            #expect(rows.filter { $0.session != nil }.allSatisfy { $0.ancestors.last?.key.work == work })
+            #expect(rows.flatMap(\.inlineSessions).isEmpty)
+            #expect(Set(model.visibleWork.unmatchedSessions.map(\.id)) == ["first", "second"])
+            let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
+            _ = try navigator.inspect().find(viewWithAccessibilityIdentifier: "debug-session-first")
+            _ = try navigator.inspect().find(viewWithAccessibilityIdentifier: "debug-session-second")
         }
 
         // Fresh discovery cannot depend on cached planning names or selection.

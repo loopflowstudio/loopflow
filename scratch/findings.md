@@ -109,14 +109,17 @@ This does not implement Work tabs or alter their deletion targets.
 
 Check: `cargo test -p loopflow --lib task_workspace_context_covers_committed_staged_unstaged_and_untracked_bytes` (LF variables cleared, closed stdin), `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo build -p loopflow --bin lf`, `git diff --check` — PASS (1 test); installed input adoption and native UI remain unproved.
 
-## Outer-layout deletion — October 10
+## Navigation deletions — October 10
 
-Removed the outer checkout tree, picker/split-slot controls, alternate retained-
-terminal route and Rust/Swift outer-layout DTOs. `WorkspaceIdentity` remains a
-location value. New Session explicitly selects repository content; existing Task
-panes and draft retention survive. Review removed two exclusive outer-slot tests
-and preserved the native shell/draft assertions without their obsolete split UI.
-This does not implement Work tabs: same-path Work still shares the old registry
-key. No tab hide/reopen or Work-key stale-target proof is claimed.
+Outer checkout layout/DTO deletion and its 78 Swift/6 Rust checks:
+`8cdf44da93:scratch/findings.md`, **Outer-layout deletion**.
+Session-only presentation and Session hierarchy rows are now deleted. Work rows
+retain conversation menus; Compact keeps Waves with conversations. Missing
+planning stays reachable through Debug → Sessions, without fabricated ancestry.
+Deleted flat-row benchmarks/disambiguation; native retention fixtures use
+diagnostics. Benchmark population versions distinguish the changed endpoints.
+An initial identifier-search assertion included the ancestor's roll-up; it now
+checks the matching Task menu. Work registry/tabs, Flow-log routing and exact-target
+DTOs remain unfinished. No native acceptance or admission decision follows.
 
-Check: `scripts/test_desktop.sh --filter 'DTOFixtureTests|WorktreeWorkspaceTests|TaskCaptureTests|DesktopPaneControlTests' -Xswiftc -gnone --no-parallel` — PASS (78 tests); `cargo test -p loopflow --test dto_fixtures desktop` — PASS (6); fmt, Clippy and diff check — PASS. Native: demo.
+Check: `scripts/test_desktop.sh --filter WorkNavigationTests -Xswiftc -gnone --no-parallel` — PASS (29 tests); native: demo; full Work cutover: implement.

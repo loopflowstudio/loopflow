@@ -140,14 +140,15 @@ Task rows and their counts show unfinished interactive Sessions in the Task chec
 including independent conversations and authored Flow reviews. **Show headless Sessions**
 includes background conversations; `lf session list --interactive all --history`
 inspects the full history. Filtering preserves retained terminals and drafts.
-Repo and Wave Sessions retain their own scopes. Collapsed Wave rows roll up Task
+Repo and Wave Sessions retain their own scopes. Wave rows include their conversations and roll up Task
 Sessions; choose a name to open it directly.
 **Available** means the conversation can be joined. Historical feedback remains
 readable without granting completion authority. Failed provider starts offer recovery.
 
-Use the outline menu for **Compact**, **Full hierarchy**, or **Sessions**.
-Repository conversations and Sessions with unavailable ancestry stay reachable
-below the outline. Sessions without a Task association are also available under
+Use the outline menu for **Compact** or **Full hierarchy**. Open a Task conversation
+from its Session-count menu; Task rows always open Work.
+Repository conversations and Sessions with unavailable planning stay reachable
+under **Debug → Sessions**, without inventing sidebar ancestry. Sessions without a Task association are also available under
 **Debug → Sessions → Orphan Sessions** in the repository menu, or `lf session list --orphan`.
 There is no creation opt-out from checkout association. **Task details** opens the description, comments and Run history.
 
@@ -396,7 +397,7 @@ codebase tree, and registry health.
 
 ## Code map
 
-- `LoopflowMac/Views/RepoView.swift` — one repository/Wave/Task/Session outline and retained workspace
+- `LoopflowMac/Views/RepoView.swift` — one repository/Wave/Task outline and retained workspace
 - `LoopflowMac/Views/SessionsView.swift` — every Session in a native split multiplexer
 - `Loopflow/Models/MultiplexerLayout.swift` — immutable pane split tree
 - `Loopflow/Models/MultiplexerStore.swift` — reference-owned layout, focus, zoom, and undo

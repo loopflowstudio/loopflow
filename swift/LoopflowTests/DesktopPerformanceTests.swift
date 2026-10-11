@@ -24,9 +24,9 @@ struct DesktopPerformanceTests {
         let samples = try #require(Int(environment["LF_DESKTOP_PERF_SAMPLES"] ?? "20"))
         let journal = try PerformanceJournal(url: output)
         let soakSeconds = Double(environment["LF_DESKTOP_PERF_SOAK_SECONDS"] ?? "0") ?? 0
-        let scenarios = ["full", "fold", "expand", "compact", "sessions", "filter", "scroll_refresh",
+        let scenarios = ["full", "fold", "expand", "compact", "filter", "scroll_refresh",
                          "flow_log_active", "flow_log_empty", "session_return", "combined_zoom", "combined_restore", "task_details", "task_flow", "task_history", "file_edit_refresh", "new_pty"]
-        try journal.write(["event": "plan", "population_version": "desktop-v4",
+        try journal.write(["event": "plan", "population_version": "desktop-v5",
                            "populations": ["small": 8, "large": 256], "samples": samples,
                            "scenarios": scenarios, "endpoint": "native_capture_ocr_and_pty_reply",
                            "poll_interval_ms": 5, "frame_hitches": NSNull(), "soak_seconds": soakSeconds,
@@ -123,8 +123,8 @@ struct DesktopPerformanceTests {
             throw PerformanceFailure("unavailable", "No started Task in this repository")
         }
         let template = listed.task.task
-        let scenarios = ["task_renamed", "task_created", "session_created", "session_renamed", "session_completed"]
-        try journal.write(["event": "plan", "population_version": "home-copy-v1",
+        let scenarios = ["task_renamed", "task_created"]
+        try journal.write(["event": "plan", "population_version": "home-copy-v2",
                            "populations": ["home": current.count], "samples": samples,
                            "scenarios": scenarios, "endpoint": "store_commit_to_native_capture_ocr",
                            "poll_interval_ms": 5, "frame_hitches": NSNull(),
@@ -146,7 +146,6 @@ struct DesktopPerformanceTests {
             for attempt in 0..<samples {
                 let label = String(format: "Probe %03d", attempt)
                 let task = "bench-\(run)-\(attempt)"
-                let session = "bench-session-\(run)-\(attempt)"
                 // The filter keeps the written row on screen whatever the Machine holds.
                 try search.setInput("Probe")
                 try picker.select(value: WorkPresentation.compact)
@@ -163,27 +162,6 @@ struct DesktopPerformanceTests {
                         json_set(body,'$.id','\(task)','$.identifier','BENCH-\(attempt)','$.name','\(fresh)','$.rank',0)
                     FROM pm_items WHERE id='\(template.id.sqlQuoted)';
                     """, ready: { window.contentText.contains { $0.contains(fresh) } })
-
-                // A conversation in the Wave: one bound to no Work is not in the outline.
-                try picker.select(value: WorkPresentation.sessions)
-                await model.refresh()
-                try await written("session_created", attempt, journal, window, store, sql: """
-                    BEGIN IMMEDIATE;
-                    INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,repo,interactive,wave_id)
-                    SELECT '\(session)','\(label)','human',unixepoch(),1,repo,repo,1,id FROM waves WHERE id='\(wave.sqlQuoted)';
-                    INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
-                    VALUES('\(session)','captured','run_\(UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased())',unixepoch(),'{}');
-                    UPDATE agent_sessions SET current_capture=last_insert_rowid() WHERE id='\(session)';
-                    COMMIT;
-                    """, ready: { shows(label) && model.sessions.value?.contains { $0.id == session } == true })
-                await model.refresh()
-                try await written("session_renamed", attempt, journal, window, store, sql: """
-                    UPDATE agent_sessions SET title='\(label) moved' WHERE id='\(session)';
-                    """, ready: { shows("\(label) moved") })
-                await model.refresh()
-                try await written("session_completed", attempt, journal, window, store, sql: """
-                    UPDATE agent_sessions SET completed_at=unixepoch() WHERE id='\(session)';
-                    """, ready: { !shows(label) && model.sessions.value?.contains { $0.id == session } == false })
 
                 // Outside every interval: the next attempt starts from the same Tasks.
                 try store.write("DELETE FROM pm_items WHERE id='\(task)'; \(restore)")
@@ -477,12 +455,9 @@ struct DesktopPerformanceTests {
             try await sample("compact", population, attempt, journal, window, action: {
                 try picker.select(value: WorkPresentation.compact)
             }, ready: { hasRendered(window, "work-task-perf-task-0") && !hasRendered(window, "work-wave-wave-1") })
-            try await sample("sessions", population, attempt, journal, window, action: {
-                try picker.select(value: WorkPresentation.sessions)
-            }, ready: { hasRendered(window, "session-row-perf-session-0") && !hasRendered(window, "work-task-perf-task-0") })
             try await sample("filter", population, attempt, journal, window, action: {
                 try search.setInput("Conversation 002")
-            }, ready: { hasRendered(window, "session-row-perf-session-2") && !hasRendered(window, "session-row-perf-session-0") })
+            }, ready: { hasRendered(window, "work-task-perf-task-2") && !hasRendered(window, "work-task-perf-task-0") })
             try #require(model.selection == .task(id: "perf-task-0"))
             try search.setInput("")
             try picker.select(value: WorkPresentation.compact)
@@ -887,7 +862,7 @@ struct DesktopPerformanceTests {
                         observation: () -> [String: Any] = { [:] },
                         input: () async throws -> Void = {}) async throws {
         let metric = scenario == "new_pty" ? "new_pty_capture_and_echo_ms"
-            : ["full", "fold", "expand", "compact", "sessions", "filter", "scroll_refresh"].contains(scenario)
+            : ["full", "fold", "expand", "compact", "filter", "scroll_refresh"].contains(scenario)
                 ? "hierarchy_interaction_ms" : "task_workspace_ready_ms"
         var record: [String: Any] = ["event": soaking ? "soak_sample_begin" : "begin", "id": "\(population)-\(scenario)-\(attempt)",
             "metric": metric, "scenario": scenario, "population": population, "attempt": attempt,
@@ -959,9 +934,6 @@ struct DesktopPerformanceTests {
         if id == "work-wave-wave-1" { return window.outlineText.contains { $0.localizedCaseInsensitiveContains("product") } }
         if let index = Int(id.replacingOccurrences(of: "work-task-perf-task-", with: "")) {
             return window.outlineText.contains { $0.contains(String(format: "Task %03d", index)) }
-        }
-        if let index = Int(id.replacingOccurrences(of: "session-row-perf-session-", with: "")) {
-            return window.outlineText.contains { $0.contains(String(format: "Conversation %03d", index)) }
         }
         // A Flow process's row shows its Flow's name.
         if id == "task-work-perf-flow-0" { return window.contentText.contains { $0.contains("benchflow") } }

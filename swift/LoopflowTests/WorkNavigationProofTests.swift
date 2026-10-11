@@ -606,7 +606,7 @@ struct WorkNavigationProofTests {
         draft.withCString { ghostty_surface_text(surfaces[0], $0, UInt(draft.utf8.count)) }
 
         for index in [1, 0] {
-            try view.inspect().find(viewWithAccessibilityIdentifier: "session-row-row-\(index)").button().tap()
+            try view.inspect().find(viewWithAccessibilityIdentifier: "debug-session-row-\(index)").button().tap()
             try await settle(window)
             #expect(window.firstResponder === terminals[index * 2])
             #expect(terminals[index * 2].window === window)

@@ -99,7 +99,7 @@ struct WorkNavigator: View {
                     forReadErrors
                     ForEach(rows) { row in outlineRow(row, orphans) }
                     if model.repoPath != nil, rows.isEmpty, model.workStatus == .current {
-                        Text(navigation.presentation == .sessions ? "No open Sessions." : "No matching Work.")
+                        Text("No matching Work.")
                             .foregroundStyle(palette.textSecondary).padding(8)
                     }
                 }
@@ -239,10 +239,10 @@ struct WorkNavigator: View {
     /// chevron and nothing else; a Task carries a dot only while it needs eyes
     /// (running, blocked, waiting on you) and a count only while Sessions exist.
     private func outlineRow(_ row: WorkOutlineRow, _ orphans: [SessionRecord]) -> some View {
-        let isWave = row.workKey?.work.kind == .wave
+        let isWave = row.id.work.kind == .wave
         return HStack(spacing: 6) {
-            if case .work(let subject, true, _) = row.content {
-                let key = subject.key
+            if row.hasChildren {
+                let key = row.id
                 Button {
                     Perf.begin(Perf.hierarchyInteraction, "fold", id: "outline")
                     model.navigation.toggle(key)
@@ -254,9 +254,6 @@ struct WorkNavigator: View {
                 }
                 .accessibilityLabel("Toggle \(row.title)")
                 .accessibilityIdentifier("work-disclose-\(key.work.kind.rawValue)-\(key.work.id)")
-            } else if row.session != nil {
-                Image(systemName: "terminal").font(.system(size: 11))
-                    .foregroundStyle(palette.textTertiary).frame(width: 14)
             } else {
                 // The slot stays so titles align whether or not a Task has a dot.
                 Circle().fill(taskTone(row)?.ink ?? .clear)
@@ -264,36 +261,26 @@ struct WorkNavigator: View {
                     .accessibilityHidden(true)
             }
             Button {
-                switch row.content {
-                case .session(let session): onOpenSession(session)
-                case .work(let subject, _, _):
-                    if subject.key.work.kind == .task, let onOpenTask {
-                        onOpenTask(subject.key.work)
-                    } else {
-                        model.select(subject.key.work)
-                    }
+                if row.id.work.kind == .task, let onOpenTask {
+                    onOpenTask(row.id.work)
+                } else {
+                    model.select(row.id.work)
                 }
             } label: {
-                HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
-                    Text(row.title)
-                        .font(isWave ? Typography.textStrong : Typography.text)
-                        .foregroundStyle(isWave
-                            ? (isSelected(row) ? palette.accentInk : palette.textSecondary)
-                            : palette.text)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    if let detail = row.detail {
-                        Text(detail).font(Typography.meta)
-                            .foregroundStyle(palette.textTertiary).lineLimit(1)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
+                Text(row.title)
+                    .font(isWave ? Typography.textStrong : Typography.text)
+                    .foregroundStyle(isWave
+                        ? (isSelected(row) ? palette.accentInk : palette.textSecondary)
+                        : palette.text)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
             }
             .help(row.title)
-            .accessibilityIdentifier(identifier(row))
-            if let key = row.workKey, !row.inlineSessions.isEmpty {
-                sessionCount(row.inlineSessions, work: key.work)
+            .accessibilityIdentifier("work-\(row.id.work.kind.rawValue)-\(row.id.work.id)")
+            if !row.inlineSessions.isEmpty {
+                sessionCount(row.inlineSessions, work: row.id.work)
             }
         }
         .padding(.horizontal, 6)
@@ -312,7 +299,7 @@ struct WorkNavigator: View {
             ForEach(row.inlineSessions) { session in
                 Button("Open \(session.title)") { onOpenSession(session) }
             }
-            if let key = row.workKey { subjectActions(key.work, title: row.title) }
+            subjectActions(row.id.work, title: row.title)
             ForEach(row.ancestors, id: \.key) { ancestor in
                 subjectActions(ancestor.key.work, title: ancestor.title)
             }
@@ -335,7 +322,7 @@ struct WorkNavigator: View {
         .menuStyle(.borderlessButton)
         .fixedSize()
         .help(names)
-        .accessibilityLabel("\(sessions.count) Task Sessions: \(names)")
+        .accessibilityLabel("\(sessions.count) Sessions: \(names)")
         .accessibilityIdentifier("work-session-count-\(work.id)")
     }
 
@@ -351,6 +338,12 @@ struct WorkNavigator: View {
     @ViewBuilder private func repositoryActions(_ orphans: [SessionRecord]) -> some View {
         Menu("Debug") {
             Menu("Sessions") {
+                // Partial planning must not strand conversations whose Work is
+                // missing. This menu reads the existing projection, not a new inventory.
+                ForEach(model.visibleWork.unmatchedSessions) { session in
+                    Button(session.title) { onOpenSession(session) }
+                        .accessibilityIdentifier("debug-session-\(session.id)")
+                }
                 Menu("Orphan Sessions") {
                     ForEach(orphans) { session in
                         Button(session.title) { onOpenSession(session) }
@@ -371,27 +364,20 @@ struct WorkNavigator: View {
         Task.detached { try? saveLoopflowState(LoopflowState(selectedRepoPath: path.normalizedFilePath)) }
     }
 
-    private func identifier(_ row: WorkOutlineRow) -> String {
-        switch row.id {
-        case .session(let id): "session-row-\(id)"
-        case .work(let key): "work-\(key.work.kind.rawValue)-\(key.work.id)"
-        }
-    }
-
     private func isSelected(_ row: WorkOutlineRow) -> Bool {
-        if let session = row.session { return model.navigation.selectedSessionId == session.id }
         // A Task row carrying the open Session inline keeps its location visible.
         if let selected = model.navigation.selectedSessionId {
             return row.inlineSessions.contains { $0.id == selected }
         }
-        return row.workKey?.work == model.selection
+        return row.id.work == model.selection
     }
 
     /// The dot a Task row carries while it needs eyes, from its shared Flow
     /// projection: running, blocked, or stalled. Stopped and idle rows
     /// carry nothing.
     private func taskTone(_ row: WorkOutlineRow) -> WorkTone? {
-        guard let work = row.workKey?.work, work.kind == .task, let found = model.task(id: work.id),
+        let work = row.id.work
+        guard work.kind == .task, let found = model.task(id: work.id),
               let execution = found.task.execution else { return nil }
         let state = execution.state.presentation
         return state.label == nil ? nil : state.tone

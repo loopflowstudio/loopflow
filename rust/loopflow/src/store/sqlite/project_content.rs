@@ -1,8 +1,7 @@
 //! Project content and stored Wave workflows share one transaction in every repository.
 
-use super::planning_write::{self, PlanningEdit as Edit};
-use crate::planning_exchange::{PlanningKind, PlanningObject};
-use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
+use super::planning_write::PlanningEdit as Edit;
+use rusqlite::{params, OptionalExtension, TransactionBehavior};
 
 use crate::durable::ProjectId;
 use crate::id::WaveId;
@@ -43,7 +42,7 @@ impl SqliteStore {
                     .map(|description| Edit::ProjectDescription(Some(description.trim().into()))),
             )
             .collect();
-        write_edits(&tx, project, &edits)?;
+        PlanningChanges::Project(project).save(&tx, &edits)?;
         tx.commit()?;
         Ok(())
     }
@@ -86,7 +85,7 @@ impl SqliteStore {
         )?;
         crate::workflow::parse_workflow(name, definition, std::path::Path::new(&repo))
             .map_err(StoreError::InvalidData)?;
-        write_edits(&tx, project, &[Edit::Workflow(name.into())])?;
+        PlanningChanges::Project(project).save(&tx, &[Edit::Workflow(name.into())])?;
         tx.execute(
             "INSERT INTO wave_workflows(wave_id,name,content)
                 SELECT wave_id,?2,?3 FROM projects WHERE id=?1
@@ -107,9 +106,8 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        write_edits(
+        PlanningChanges::Project(project).save(
             &tx,
-            project,
             &[
                 Edit::Workflow(workflow.into()),
                 Edit::Krs(krs.to_vec()),
@@ -119,32 +117,6 @@ impl SqliteStore {
         tx.commit()?;
         Ok(())
     }
-}
-
-/// Save the same typed values to local Work, Git history and Linear receipts.
-pub(super) fn write_edits(
-    conn: &Connection,
-    project: &ProjectId,
-    edits: &[Edit],
-) -> StoreResult<()> {
-    let object = PlanningObject {
-        kind: PlanningKind::Project,
-        id: project.to_string(),
-    };
-    let current = planning_write::read(conn, &object)?;
-    for edit in edits {
-        let field = super::planning_changes::linear_field(edit)
-            .ok_or_else(|| StoreError::InvalidData("Project edit has no Linear field".into()))?;
-        let previous = current
-            .iter()
-            .find(|previous| previous.field() == edit.field())
-            .ok_or_else(|| {
-                StoreError::InvalidData("Project edit belongs to another owner".into())
-            })?;
-        PlanningChanges::Project(project).record(conn, field, previous.value()?, edit.value()?)?;
-    }
-    planning_write::local(conn, PlanningKind::Project, project.as_str(), edits)?;
-    Ok(())
 }
 
 #[cfg(test)]

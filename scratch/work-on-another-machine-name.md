@@ -196,6 +196,15 @@ Readiness also returns local identity. The surviving reader orders by shared ran
 creation time and ID rather than edit time. Provider adapters compare explicit
 bindings. Rotation retains original receipt bytes and local execution is unchanged.
 
+Project and Task saves now derive receipts from one typed edit slice through
+`PlanningChanges::save`; Project's separate `write_edits` and Task's parallel JSON
+receipt construction are deleted. Task editing no longer reconstructs a
+`PmItem` merely to save local fields. Ordering and disposition keep their distinct
+receipt owners. The public offline fixture now binds its Project normally: raw
+SQL selection disagreed with the Git journal and foreground acquisition removed
+that unsaved selection. This removes a writer-side reader dependency, not the
+remaining Task/status/snapshot projection stack.
+
 Project save compression removes `write_content` and the parallel hand-built
 receipt values. Name/summary, workflow selection, content edits and rotation use
 one typed edit slice for receipts and the common writer, sharing acquisition's
@@ -332,12 +341,12 @@ Earlier baseline detail: `c8fe4628a:scratch/work-on-another-machine-name.md`.
   cut. Regenerate them after the entire accepted reduction, before review-only
   republication. No readiness or landing follows from this persistence checkpoint.
 
-Checks: worktree CLI build, fmt, `cargo clippy --all-targets -- -D warnings`, diff check and six isolated canonical-fields/acquisition/ownership/sweep/import tests pass; gate owns affected/materialized/Desktop verification.
+Checks: `cargo build -p loopflow --bin lf`, fmt, `cargo clippy --all-targets -- -D warnings`, diff check and five focused offline Task/Project edit, refile, older-acknowledgment and assignee-clear tests pass with LF authority cleared; gate owns affected/materialized/Desktop verification.
 
-Context: authored memory/scratch fit. The October 10 `lf context --skill implement`
-query reports a 19,455-token generated Task seed/steer/workspace source against
-16,000 (3,455 over):
-`.lf/tmp/context/7d4146b163c480851d621ac59ee291b9956535cc7344a46da5b03958280a5c8d.md`.
+Context: authored memory/scratch fit. The October 10 `lf context --skill compress`
+query reports a 19,453-token generated Task seed/steer/workspace source against
+16,000 (3,453 over):
+`.lf/tmp/context/b904b39986709f86f10a412a41d49626f98842a24eeacf8bd4ab25b407c1aa29.md`.
 The overflow is retained Task history/generated metadata, not authored scratch;
 no history or limit changed.
 

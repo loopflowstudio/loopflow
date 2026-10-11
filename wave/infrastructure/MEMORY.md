@@ -631,9 +631,9 @@ Outages buffer locally, without fallback/publisher election. One typed writer
 owns local/imported fields; execution/attempts stay local. Preserve causality,
 losers and uncertainty. Gate/installation remain unproved.
 
-Jack accepted the full audit; partial work is not review-ready. Projects retain
-IDs, bindings and rank; saves/acquisition share typed receipts. One Markdown parser
-replaces model patching. Acquisition returns canonical Task, not `ResolvedTask`;
+Jack requires the full audit before review. Retain IDs, bindings and rank. Typed
+edits supply save receipts; fixtures must seed selection through the writer, not
+contradictory SQL. One parser replaces model patching. Acquisition returns canonical Task;
 snapshot/status still manufacture provider-shaped Work. Partial fields retain
 revision/age; omission proves no settlement. Follow-ups retain uncertain effects,
 never synthetic comment success. Git candidates prove no application/publication;

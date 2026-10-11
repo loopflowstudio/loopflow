@@ -103,9 +103,8 @@ impl SqliteStore {
                         "destination is no longer available".into(),
                     ));
                 }
-                super::project_content::write_edits(
+                PlanningChanges::Project(&successor).save(
                     &tx,
-                    &successor,
                     &[
                         Edit::ProjectName(Some(input.project_name.clone())),
                         Edit::ProjectStatus(crate::work::project::ProjectStatus::Started),
@@ -172,9 +171,8 @@ impl SqliteStore {
             )?;
             if let Some(predecessor) = predecessor {
                 let id = ProjectId::from_raw(predecessor);
-                super::project_content::write_edits(
+                PlanningChanges::Project(&id).save(
                     &tx,
-                    &id,
                     &[Edit::ProjectStatus(
                         crate::work::project::ProjectStatus::Completed,
                     )],

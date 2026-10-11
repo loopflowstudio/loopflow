@@ -1698,11 +1698,17 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             .unwrap();
         let project_id = store.list_projects(Some(wave.id())).unwrap()[0].id.clone();
         let conn = rusqlite::Connection::open(&path).unwrap();
-        conn.execute(
-            "UPDATE waves SET current_project_id=?2 WHERE id=?1",
-            rusqlite::params![wave.id(), project_id.as_str()],
-        )
-        .unwrap();
+        lf(
+            repo.path(),
+            home.path(),
+            &[
+                "wave",
+                "bind-project",
+                "product",
+                project_id.as_str(),
+                "--json",
+            ],
+        );
         if !mapped {
             conn.execute(
                 "UPDATE projects SET external_project_id=NULL WHERE id=?1",

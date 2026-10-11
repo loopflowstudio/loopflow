@@ -3,7 +3,6 @@
 use super::planning_write::{self, PlanningEdit as Edit};
 use crate::planning_exchange::PlanningKind;
 use rusqlite::TransactionBehavior;
-use serde_json::Value;
 
 use crate::durable::{ProjectId, TaskId};
 use crate::planning::PlanningChange;
@@ -85,18 +84,7 @@ impl SqliteStore {
                 "a Task with recorded work retains its owning Wave".into(),
             ));
         }
-        planning_write::local(
-            &tx,
-            PlanningKind::Task,
-            id.as_str(),
-            &[Edit::TaskProject(destination.to_string())],
-        )?;
-        PlanningChanges::Task(id).record(
-            &tx,
-            "project_id",
-            serde_json::json!(current.project_id),
-            serde_json::json!(destination),
-        )?;
+        PlanningChanges::Task(id).save(&tx, &[Edit::TaskProject(destination.to_string())])?;
         super::durable::inherit_task_placement(
             &tx,
             &super::children::task_on(&tx, id)?.ok_or(StoreError::NotFound)?,
@@ -127,49 +115,17 @@ impl SqliteStore {
         {
             return Err(StoreError::InvalidData("Task title cannot be empty".into()));
         }
-        let current = super::plan_read::task_in(&tx, id)?
-            .record
-            .ok_or(StoreError::NotFound)?
-            .item;
-        let mut changed = false;
-        for (field, previous, value) in [
-            (
-                "name",
-                Value::String(current.name),
-                patch.name.as_ref().map(|v| Value::String(v.clone())),
-            ),
-            (
-                "description",
-                Value::String(current.description),
-                patch.description.as_ref().map(|v| Value::String(v.clone())),
-            ),
-            (
-                "assignee",
-                serde_json::to_value(current.assignee)?,
-                patch
-                    .assignee
-                    .as_ref()
-                    .map(serde_json::to_value)
-                    .transpose()?,
-            ),
-        ] {
-            if let Some(value) = value {
-                changed |= PlanningChanges::Task(id).record(&tx, field, previous, value)?;
-            }
+        let mut edits = Vec::new();
+        if let Some(value) = &patch.name {
+            edits.push(Edit::TaskTitle(Some(value.clone())));
         }
-        if changed {
-            let mut edits = Vec::new();
-            if let Some(value) = &patch.name {
-                edits.push(Edit::TaskTitle(Some(value.clone())));
-            }
-            if let Some(value) = &patch.description {
-                edits.push(Edit::TaskDescription(Some(value.clone())));
-            }
-            if let Some(value) = &patch.assignee {
-                edits.push(Edit::TaskAssignee(value.clone()));
-            }
-            planning_write::local(&tx, PlanningKind::Task, id.as_str(), &edits)?;
+        if let Some(value) = &patch.description {
+            edits.push(Edit::TaskDescription(Some(value.clone())));
         }
+        if let Some(value) = &patch.assignee {
+            edits.push(Edit::TaskAssignee(value.clone()));
+        }
+        PlanningChanges::Task(id).save(&tx, &edits)?;
         if let Some(rank) = patch.rank {
             super::planning_order::reorder_in(&tx, &task.project_id, id, rank)?;
         }

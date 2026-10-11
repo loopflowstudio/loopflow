@@ -1,14 +1,14 @@
 //! Field receipts share one protocol; each object's table retains its foreign key.
 
 use super::planning_write::{self, PlanningEdit as Edit};
-use crate::planning_exchange::PlanningKind;
+use crate::planning_exchange::{PlanningKind, PlanningObject};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::Value;
 
 use super::SqliteStore;
 use crate::durable::{ProjectId, TaskId};
 use crate::planning::PlanningChange;
-use crate::store::StoreResult;
+use crate::store::{StoreError, StoreResult};
 
 impl SqliteStore {
     pub(crate) fn planning_field_owners(
@@ -176,6 +176,34 @@ pub(crate) enum PlanningChanges<'a> {
 }
 
 impl<'a> PlanningChanges<'a> {
+    /// Save one typed edit slice to Work, Git history and Linear field receipts.
+    /// The caller owns the transaction, including any selection or ordering changes.
+    pub(super) fn save(self, conn: &Connection, edits: &[Edit]) -> StoreResult<()> {
+        if edits.is_empty() {
+            return Ok(());
+        }
+        let kind = match self {
+            Self::Task(_) => PlanningKind::Task,
+            Self::Project(_) => PlanningKind::Project,
+        };
+        let object = PlanningObject {
+            kind,
+            id: self.owner().1.to_owned(),
+        };
+        let current = planning_write::read(conn, &object)?;
+        for edit in edits {
+            let field = linear_field(edit)
+                .ok_or_else(|| StoreError::InvalidData("Edit has no Linear field".into()))?;
+            let previous = current
+                .iter()
+                .find(|previous| previous.field() == edit.field())
+                .ok_or_else(|| StoreError::InvalidData("Edit belongs to another owner".into()))?;
+            self.record(conn, field, previous.value()?, edit.value()?)?;
+        }
+        planning_write::local(conn, kind, &object.id, edits)?;
+        Ok(())
+    }
+
     // A matching attempted write can arrive through either acquisition or readback.
     // Rebase later saves before conflict reconciliation; never acknowledge them.
     fn observe_attempts(self, conn: &Connection, observed: &Value) -> StoreResult<()> {

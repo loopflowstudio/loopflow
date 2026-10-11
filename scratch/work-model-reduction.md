@@ -169,6 +169,11 @@ transport conflict addresses/encoding from it. Delete the second kind/field sche
 repeated string-field switches, and needless JSON-inside-JSON values for Team IDs,
 Initiative IDs and comment authors. The exact enum grouping is implementation's job.
 
+Task/Project saves and Task refiling now derive Linear receipts from the same typed
+edit slice as the writer; Task saves no longer read `plan_read::task_in`. The
+Project-only save forwarding and parallel Task JSON receipt values are deleted.
+The journal/address conversion described above remains required.
+
 Keep atomic disposition updates, comment identity, ownership validation, and the
 transaction boundary covering local changes/imports. Serialization at the actual
 Git or Linear boundary is necessary. A comment stays subordinate to a Task, not a

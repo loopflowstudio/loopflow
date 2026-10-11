@@ -627,21 +627,20 @@ acceptance remain at
 Jack Heart selected one repository transport: Linear, shared or default user-keyed
 Git. One typed writer owns local/imported Work; outages buffer without fallback or election.
 Execution/attempts stay local; preserve causal losers and uncertainty.
-Jack requires the entire accepted model/deletion audit before another PR review:
-canonical Work, private observations, typed journal, bindings, ordinary follow-ups
-and one cron list. Renamed models/summaries are insufficient; gate/install unproved.
+Jack requires the full accepted deletion audit before review: Work, private
+observations, typed journal, bindings, ordinary follow-ups and one cron list.
+Renames are insufficient; gate/install unproved.
 
-Summaries, creation, rotation, export and status read canonical Work.
-Acquisition state/age differs from delivery. Foreign observations grant no
-ownership; invalidation, removal and pending membership retain their meaning.
-Git candidates prove no publication.
+`96607a9a46`: canonical status/create and CLI/Swift acquisition evidence.
+Availability/age, admission and delivery differ. Foreign observations grant no
+ownership; omission is not deletion. Delivery needs the revision accepted into
+Work, not merely observed. Candidates prove no publication.
 
-Jack assigned LOO-427's combined reduction here (`bd295866bb`); stack order is
-unresolved. Preserve tabs, Machine ownership/admission; adapt delegation to the
-surviving writer/released frontier.
+Jack assigned LOO-427 here (`bd295866bb`); stack order is unresolved. Preserve
+tabs, Machine ownership/admission; adapt delegation to the writer/released frontier.
 [Design and audit](../../scratch/work-on-another-machine-name.md) own remaining
-implementation and #1491's review boundary. Cron retains installed ownership and
-nonzero operation failures ([Release evidence](release/MEMORY.md)). No landing,
+implementation and #1491's review boundary. Cron retains installed ownership, not
+file location; operation failures stay nonzero ([Release evidence](release/MEMORY.md)). No landing,
 installation, schedule activation or real export. Prior proofs:
 `41378adacf:wave/infrastructure/MEMORY.md`.
 

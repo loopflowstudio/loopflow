@@ -226,7 +226,8 @@ binding and sync evidence is required; Swift consumes that contract. Saved due
 dates and prose no longer depend on provider inventory in these surfaces. Execution,
 checkout and Workflow reads remain independent. Source checks are recorded below.
 
-Task status now returns canonical Task and Project records, not `PmTaskRecord`.
+`96607a9a46` completes the requested status/create reader cut after `18520565d6`:
+Task status returns canonical Task and Project records, not `PmTaskRecord`.
 CLI status retains local identity, due date and prose; Wave/roadmap/Work-frame
 summaries and Swift carry separate acquisition state and original observation time.
 Invalidation, positive removal and pending membership do not replace saved content
@@ -234,13 +235,17 @@ or move captured Workflow/Process history. A foreign observation without owned W
 returns evidence and no Task; its original record stays in the acquisition store.
 Status/wait share async store reads; duplicate lookup/inspection wrappers are deleted.
 
-Still required: delete `plan_read::task_in` / `project_in`, whose remaining production
-consumer is field-delivery revision checking, and convert their fixtures to canonical
-reads or actual provider observations. These projections still overwrite dates and
-fabricate Projects, though status no longer uses them. `PmSnapshot`/provider hierarchy,
-bindings, ordinary follow-ups, cron and typed journal remain required before review.
-Acquisition evidence is not execution eligibility or delivery success. The earlier
-counterexamples remain at `18520565d6:scratch/work-on-another-machine-name.md`.
+The next acquisition cut removes `planning_task` / `plan_read::{task_in,project_in}`
+and their fixture dependencies. Its sole production caller is
+`ops/planning_delivery.rs::observe`: after ingestion it compares the fetched
+revision with the revision accepted into Work. A raw observation revision cannot
+replace that fence: retaining a foreign or rejected observation is not accepting it.
+The replacement needs accepted-revision evidence without reconstructing Task/Project
+content. Then confine `PmSnapshot` and provider observations before bindings,
+ordinary follow-ups, cron and the remaining typed journal/provider-hierarchy audit.
+Acquisition availability, execution eligibility and delivery success remain separate;
+`require_task_planning_identity` still owns admission checks. Earlier counterexamples:
+`18520565d6:scratch/work-on-another-machine-name.md`.
 
 Rotation now consumes and returns canonical Tasks, including saved dates/prose and
 explicit bindings. It no longer reconstructs PM records, substitutes IDs or repeats
@@ -311,8 +316,8 @@ advance independently without refreshing that evidence. A later full observation
 at the partial revision can complete the field knowledge. Receipt baselines use the
 field's revision; the attempt fence still uses the current entity revision. The
 single `planning_peers` draft adds that evidence and prose receipts, preserving
-receipt bytes, identities, attempts and sequence high-water marks. Released SQL and
-LOO-406's draft remain unchanged.
+receipt bytes, identities, attempts and sequence high-water marks. Released
+`0.13.11.001_release.sql` remains unchanged; LOO-406 has no draft after `db36f20ba8`.
 
 **The structural acquisition prerequisite is not complete.** `PmProject` moved to
 concrete `pm::linear::LinearProject`, but ordinary `plan_read::project_in`,
@@ -341,11 +346,9 @@ use the existing read error and cached WorkReading; successful reads have defini
 pending state. No persistent state or import policy changes. The accepted typed
 edit/journal rewrite and preceding acquisition/cron/follow-up work remain open.
 
-The earlier pass still includes acquisition, concrete Linear bindings, ordinary
-Task/comment follow-ups and cron unification. The full deletion audit then removes
-remaining provider hierarchy, duplicate edit/journal vocabularies and Task
-projections. Whole-model patch reconciliation is already removed. Conditional retention requires a concrete fact,
-owner and populated conversion proof. No partial publication or readiness follows.
+Conditional retention in the remaining audit requires a concrete fact, owner and
+populated conversion proof. Whole-model patch reconciliation is already removed;
+remaining provider hierarchy and duplicate edit/journal vocabularies are not.
 
 Project ordering and invalidation review evidence remains at
 `7853a22f5c:scratch/work-on-another-machine-name.md`: shared rank wins over edit time;
@@ -380,21 +383,11 @@ Earlier baseline detail: `c8fe4628a:scratch/work-on-another-machine-name.md`.
   cut. Regenerate them after the entire accepted reduction, before review-only
   republication. No readiness or landing follows from this persistence checkpoint.
 
-Checks: CLI build, fmt/all-target Clippy, focused status/DTO/offline-save/projectless-status tests and `scripts/test_desktop.sh --filter taskAcquisitionEvidence` pass; broader verification stays gate-owned.
+Checks: `git diff --check` passes for prose realignment; `96607a9a46` retains build/Clippy/status/DTO/headless evidence, not rerun; broader verification stays gate-owned.
 
 
 Context: authored memory/scratch fit; generated Task seed/steers/workspace exceeds
-16,000 tokens by about 5,343. Authored edits cannot remove that stored input.
-
-## Delete — do not maintain
-
-- Ordinary `LinearProject` (formerly `PmProject`)/`PmItem` reads: use canonical Work;
-  preserve prose, bindings and historical events. Public ProjectContent, plan
-  wrappers, live iteration and public Issue comment/observation models are removed.
-- FollowThrough models, completion gates and dedicated UI: ordinary Tasks/comments;
-  preserve unfinished effects and history with their existing recovery owners.
-- WaveCronDef and duplicate cron command vocabulary: repository command list;
-  preserve due identities, timing and installed ownership without activating jobs.
+16,000 tokens by over 5,300. Authored edits cannot remove that stored input.
 
 Earlier transport evidence: `ae96102580e:scratch/work-on-another-machine-name.md`.
 The mixed model is superseded; its synthetic proofs establish no installed acceptance.

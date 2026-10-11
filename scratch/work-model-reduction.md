@@ -79,7 +79,9 @@ longer substitutes IDs or re-resolves a fabricated PM item.
 **Remaining:** `store/sqlite/plan_read.rs` reconstructs `LinearProject` (formerly `PmProject`)/`PmItem` for
 Task observations. `planning_wave` and its consumers are removed. Delete the remaining projections. `PmTaskRecord` / `PmTaskObservation` must cease being alternate Task
 read results, including the embedded Project clone inside a Task observation. Task status and
-summary consumers now return canonical content plus separate acquisition evidence.
+summary consumers return canonical content plus separate acquisition evidence
+(`96607a9a46`). The surviving delivery fence needs the revision accepted into Work,
+not merely the newest retained provider observation; the pursuit design owns this cut.
 
 **Evidence:** `project_in` still rebuilds a PM-shaped Project from typed columns;
 `task_in` reconstructs

@@ -51,16 +51,13 @@ existing shell-location owner for CLI, shortcuts and pane menus; missing remote
 location refuses before layout mutation. Work-keyed tabs, Flow-log query routing, outer-layout deletion and inspection/DTO
 cutover remain unimplemented. Files now resolves remote content directly, without link priming.
 
-**Content locations:** `94d5195497` makes terminal identity content-owned.
-`cf77ee325a` remote shell construction consumes the addressed content's retained owner
-observation, not workspace `executionLocation` (deleted). Session refresh keeps
-that observation only at the same location; shells and companion splits retain
-it through arrangement/Undo without replaying launch commands. Missing owners
-refuse. Flow-log readers, Work-keyed registry/tabs and exact-target DTOs remain
-checkout-led. Files consumes its recorded owner directly; local panes now capture their Task placement at opening. This is partial implementation, not Work-tab completion or native proof.
-
-**Passive entry:** `a1dfa07833`/`1e5b958d86` remove implicit Task Session
-acquisition and simplify inventory; explicit Session/Changes survives.
+**Completed prerequisites:** Session/shell and Files locations are content-owned;
+local Files retains its opening placement through missing planning and Close/Undo.
+Remote Files owns observation and transport reuse. Bare Task navigation acquires
+no Session; explicit Session/Changes still does. Evidence and failed attempts:
+[findings](findings.md#content-location-cuts--october-10). These prerequisites are
+not Work-tab completion or native acceptance. Continue with the registry/DTO and
+navigation cut below, not another preparatory location refactor.
 
 ### Experience and boundaries
 

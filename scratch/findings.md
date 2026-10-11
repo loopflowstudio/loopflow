@@ -67,67 +67,40 @@ Inventory simplification and its 49-test passing result remain at
 
 ## Content-location cuts — October 10
 
-Shell location moved into content in `d6640b8c68`; prior failures, compression and
-97-test result: `a82ffc1131:scratch/findings.md`, **Shell-location cut**.
-Session content now captures the record's Machine/path. Rendering, passive/input
-terminal lookup and Split no longer derive Session location from workspace identity.
-Fresh location changes renew the pane occurrence and retained Undo without changing
-focus, zoom or collapse. Missing rows retain evidence; an observed unknown location
-refuses. A changed record cannot silently redirect an old target.
+`92cd05cbf3:scratch/findings.md`, this heading, retains the detailed sequence,
+failed builds and prior commands. Current guarantees:
 
-Earlier failures: `d2f08c489d`, this heading; mapping compression: `94d5195497`.
-Workspace `executionLocation` is deleted. Shell construction follows the addressed
-content's owner; another same-path Task cannot redirect it. Undo retains location,
-not launch replay. Changed Session locations discard old owners; unavailable
-companions refuse. Companion reuse follows Task identity, renewing changed owners
-without replacing drafts.
+- Session/shell location belongs to content, not its enclosing checkout. Changed
+  locations renew occurrences and discard old owners without changing focus,
+  zoom or collapse. Missing inventory retains evidence; observed unknown refuses.
+  Undo retains location without replaying launch. Earlier shell failures and
+  97-test result: `a82ffc1131:scratch/findings.md`, **Shell-location cut**.
+- Files opens through its recorded owner without Session-link priming. Local
+  Files captures placement at opening, survives missing planning and supplies
+  the location for Split. Changed owners refuse without redirecting drafts.
+  Same-owner nonce/time refreshes reuse the store and transport. Changes readiness
+  matches Task identity and captures the exact occurrence, not locationless content.
+- `TaskFilesStore` owns remote observation and one awaited cleanup path for
+  disconnect, stale frames and owner loss. Release cancels observation; hiding
+  must retain the store. The release/three-ending fixtures passed (2 tests).
+- Task-owned CLI placement still resolves local filesystem operations; retained
+  pane location is not filesystem CAS. No configured peer or native proof.
 
-Checks first failed on remote-shell equality, then the new test's missing bundled
-lf. Fixed the expectation; the scenario now uses the existing owned-helper subprocess,
-never installed-helper fallback.
+The local Files fixture first failed on a missing inner `try`, then passed.
+Earlier remote-shell equality, missing bundled helper and local-Machine fixture
+failures remain in the archive. The fixture uses its owned helper, not an installed
+fallback. No failed attempt establishes a passing scenario.
 
-Files now routes remote reads from pane content, not priming or the selected checkout.
-Session-only opening retains owner evidence but creates no Files store. The same
-reader serves Changes opening and rendering; owner changes preserve drafts without
-redirecting them. Local Files now captures Task placement at opening (below). Review found Changes
-readiness comparing location-bearing content against locationless content; it now
-matches the Task and captures the exact pane incarnation. The first check exposed a
-local fixture with no local Machine identity; corrected the fixture, not routing.
-The new fixture reads peer bytes without priming and retains drafts on owner changes,
-missing owners and stale replies. No configured peer or native surface was exercised.
-Retained Files now checks location before building a transport, avoiding discarded
-remote/pinned query closures on every render. A fresh nonce/time for the same owner
-reuses the document store; changed owners still refuse without redirecting drafts.
-Work-keyed tabs, Flow-log readers, outer-layout
-deletion and DTO/navigation cutover remain. Admission remains unresolved.
+Check: `scripts/test_desktop.sh --filter 'TaskFilesTests/localFilesKeepTheirContentLocationAndDraftWithoutPlanning|MultiplexerStoreTests/fileLocationSurvivesLayoutChanges|DesktopPaneControlTests' -Xswiftc -gnone --no-parallel` — PASS (build, 22 tests; reused unchanged); full cutover: implement; native: demo.
 
-Earlier Files routing checks: `352270cc24:scratch/findings.md`, this heading (50-test and 1-test builds passed; native unproved).
+The earlier empty-error checkpoint failures are retained in `92cd05cbf3`; the
+subsequent `lf commit` succeeded as that revision. Pre-checkpoint bytes also survive
+in `/tmp/loo427-compress-ka0wKM/working.patch` and its `scratch/` copy.
 
-Remote Files observation now belongs directly to `TaskFilesStore`, without a
-one-field lifetime wrapper or duplicated transport cancellation. One awaited
-cleanup path handles disconnect, stale frames and owner loss. A suspended stream
-fixture proves releasing the store ends observation; hide/navigation still retain
-the store. This compression does not implement the Work-tab cutover above.
+**Next cut, not another location-preparation pass:** rekey the registry by Work,
+route Flow logs from content, integrate tabs/navigation and exact-target DTOs,
+then delete the outer checkout layout as the plan requires. `retainedPane` and
+`reconcileMembership` still encode checkout identity. Do not polish those
+predecessor rules. Admission remains independent and unresolved.
 
-Check: `scripts/test_desktop.sh --filter 'TaskFilesTests/(releasingFilesStoreEndsRemoteObservation|remoteEventsReconcileRetainedDraftsAndRejectLostOrStaleOwners)' -Xswiftc -gnone --no-parallel` — PASS (build, 2 tests including 3 stream endings); native: demo; Work-tab cutover: implement.
-
-Reconciliation at `b295ffba2f`: registry and exact targets remain checkout-keyed;
-Flow-log rendering discards content location and uses the window model. The
-observation cleanup is complete, not a substitute for the accepted Work-tab cut.
-Product has no child memory directories in this checkout. Infrastructure's
-LOO-412 memory retains transport limits; none supplies admission authority.
-Check: `git diff --check` — PASS (prose only; prior focused results above retained).
-
-Local Files now captures location in pane content at opening instead of deriving it
-on every render. Missing planning retains the store; changed locations refuse
-without redirecting drafts. Split follows Files content, not the enclosing checkout.
-Close/Undo retains location; a new location renews the content occurrence. Task-owned
-CLI placement still resolves filesystem operations; this is not filesystem CAS.
-The first build failed on a missing inner `try` in the new test, then passed.
-Registry rekeying, Work tabs/navigation, Flow-log routing, exact-target DTO cutover
-and outer-layout deletion remain unfinished. No native acceptance or admission change.
-
-Check: `scripts/test_desktop.sh --filter 'TaskFilesTests/localFilesKeepTheirContentLocationAndDraftWithoutPlanning|MultiplexerStoreTests/fileLocationSurvivesLayoutChanges|DesktopPaneControlTests' -Xswiftc -gnone --no-parallel` — PASS (build, 22 tests); full cutover: implement; native: demo.
-Checkpoint unavailable: installed `lf commit` and `target/debug/lf commit` both
-returned exit 1 with empty `Error:`. Existing scratch was copied to
-`/tmp/loo427-preserved-scratch/` before editing; no raw Git write or publication.
+Check: `git diff --check` — PASS (compression is prose-only; no new build needed).

@@ -46,9 +46,11 @@ dispatch; an unscoped ambiguous prefix still fails.
 
 ## Context budget
 
-Generated Work input is 34,955 tokens (18,955 over its 16,000-token limit at
-compression), from retained steers and workspace inventory. Authored scratch/memory fit. Editing them cannot shorten generated historical
-direction; the remaining goal overage needs its input owner. No limit was raised.
+The October 10 `lf context --skill compress` reading reports generated Work input
+at 34,981 tokens (18,981 over 16,000), from retained steers and workspace inventory.
+Authored scratch/memory fit. This generated source cannot be shortened by editing
+those files; its input owner must reduce the historical/inventory assembly without
+losing current direction. No limit was raised.
 
 ## Admission authority — October 9, unresolved
 
@@ -81,9 +83,8 @@ Identity is refreshed on opening/restoration, not by a new timer.
 
 ## Reversible preview limits — October 9
 
-Skill/inline context uses stored planning; launch may refresh Task comments.
-Flow context uses the fresh-start snapshot choice below. Bare-agent/new operator-checkout previews
-cannot prepare future checkouts. Remote previews are scoped to the addressed Machine;
+Preview reads current references; it does not freeze future hook input.
+Bare-agent/new operator-checkout previews cannot prepare future checkouts. Remote previews are scoped to the addressed Machine;
 identity failure precedes assembly. Authentication is outside preparation; local
 absence grants no first-start admission.
 

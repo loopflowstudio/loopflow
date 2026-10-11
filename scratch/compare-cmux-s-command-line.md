@@ -175,7 +175,7 @@ panes from one selected entry rather than maintaining both old and new screens.
 
 Cut over `Models/DesktopInspection.swift` inspections and Rust
 `lf/commands/desktop.rs` plus their DTO owners/fixtures in the same slice:
-replace outer checkout layouts with Work workspace identity, open/hidden state,
+expose Work workspace identity, open/hidden state,
 selected Work and exact pane tree; move location facts to contents. Internal
 `DesktopPaneTarget` must address Work workspace plus window/content/surface
 lifetimes, not path alone. A receipt names the affected Work/pane, never readiness.
@@ -190,9 +190,9 @@ key chords including Ctrl-C. Neither is part of this slice.
 ### Internal implementation order
 
 1. **THIS SLICE — Work workspace cutover.** Rekey the retained registry and
-   location-bearing contents; replace outer checkout selection with Work tabs;
+   location-bearing contents; add Work tabs after the outer-layout deletion;
    route sidebar, palette, links and companions through it. Update exact-target
-   inspection/DTOs and delete obsolete outer layout in the same coherent cut.
+   inspection/DTOs together. Outer-layout deletion is checkpointed as `5727532b1d`.
    No temporary dual layout authority or tab bar over checkout identities.
 2. Exercise retention, stale targeting and composed opening through the changed
    owners; adapt existing headless fixtures and docs. This is the same UI slice,

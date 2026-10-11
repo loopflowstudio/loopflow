@@ -2,7 +2,7 @@
 
 The [plan](compare-cmux-s-command-line.md) owns scope. Pre-Work-tab
 findings, failed attempts, log paths and earlier archive links are retained at
-`e4a324636:scratch/findings.md`, under the headings named below. 
+`e4a324636:scratch/findings.md`, under the headings named below.
 
 ## Retained evidence and limits
 

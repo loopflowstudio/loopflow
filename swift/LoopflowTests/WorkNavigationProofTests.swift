@@ -768,12 +768,12 @@ struct WorkNavigationProofTests {
         await model.refresh()
         let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
         let workspace = registry.workspace(for: fixtureWorkspace("/src/loopflow"))
-        workspace.multiplexer.load(sessionId: "navigation-split")
+        workspace.multiplexer.load(sessionId: "navigation-split", location: model.sessions.value?.first { $0.id == "navigation-split" }?.workspace?.identity)
         let sessionPane = workspace.multiplexer.focusedPaneId
         _ = workspace.multiplexer.split(sessionPane, axis: .vertical)
         workspace.multiplexer.newShell(location: workspace.identity)
         let shellPane = workspace.multiplexer.focusedPaneId
-        workspace.multiplexer.load(sessionId: "navigation-split")
+        workspace.multiplexer.load(sessionId: "navigation-split", location: model.sessions.value?.first { $0.id == "navigation-split" }?.workspace?.identity)
         let layout = workspace.multiplexer.layout
         let identities: [TerminalIdentity] = [.session("navigation-split", machineId: fixtureMachineId), .shell(shellPane, machineId: fixtureMachineId)]
         let terminals = identities.map { workspace.surfaces.view(for: $0) }

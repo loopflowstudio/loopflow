@@ -53,7 +53,23 @@ public final class MultiplexerStore {
 
     public func pane(forSessionId sessionId: String) -> PaneState? {
         layout.allPanes.first { pane in
-            pane.content == .session(id: sessionId)
+            pane.sessionId == sessionId
+        }
+    }
+
+    /// A fresh record changes the captured location without selecting a pane.
+    /// Renew the occurrence so targets captured before a move cannot send input.
+    public func updateSessionLocation(_ sessionId: String, location: WorkspaceIdentity?) {
+        func update(_ node: LayoutNode) -> LayoutNode {
+            guard let pane = node.allPanes.first(where: { $0.sessionId == sessionId }),
+                  pane.sessionLocation != location else { return node }
+            return node.replacingContent(of: pane.id, with: .session(id: sessionId, location: location))
+        }
+        let updated = update(layout)
+        if updated != layout { layout = updated }
+        if var closed = closedState {
+            closed.layout = update(closed.layout)
+            closedState = closed
         }
     }
 
@@ -67,13 +83,14 @@ public final class MultiplexerStore {
         }
     }
 
-    public func reveal(sessionId: String) {
+    public func reveal(sessionId: String, location: WorkspaceIdentity? = nil) {
+        updateSessionLocation(sessionId, location: location)
         if let pane = pane(forSessionId: sessionId) {
             setFocusedPane(pane.id)
         } else if focusedPane.content == .empty {
-            load(sessionId: sessionId)
+            load(sessionId: sessionId, location: location)
         } else {
-            _insert(.session(id: sessionId), beside: focusedPaneId)
+            _insert(.session(id: sessionId, location: location), beside: focusedPaneId)
         }
     }
 
@@ -135,7 +152,8 @@ public final class MultiplexerStore {
         self.closedState = nil
     }
 
-    public func load(sessionId: String) {
+    public func load(sessionId: String, location: WorkspaceIdentity? = nil) {
+        updateSessionLocation(sessionId, location: location)
         if let openPane = pane(forSessionId: sessionId) {
             if collapsedPaneIds.contains(openPane.id), openPane.id != focusedPaneId,
                case .session = focusedPane.content {
@@ -154,7 +172,7 @@ public final class MultiplexerStore {
 
         switch focusedPane.content {
         case .shell, .flowLog, .files:
-            _insert(.session(id: sessionId), beside: focusedPaneId)
+            _insert(.session(id: sessionId, location: location), beside: focusedPaneId)
             return
         case .empty, .session:
             break
@@ -162,7 +180,7 @@ public final class MultiplexerStore {
 
         layout = layout.replacingContent(
             of: focusedPaneId,
-            with: .session(id: sessionId)
+            with: .session(id: sessionId, location: location)
         )
         collapsedPaneIds.remove(focusedPaneId)
         closedState = nil
@@ -286,7 +304,7 @@ public final class MultiplexerStore {
     /// Removes confirmed resolved or moved Sessions without creating an undo entry.
     public func removeSessions(_ sessionIds: Set<String>) {
         let removes: (PaneState) -> Bool = { pane in
-            guard case .session(let id) = pane.content else { return false }
+            guard case .session(let id, _) = pane.content else { return false }
             return sessionIds.contains(id)
         }
         let stale = layout.allPanes.filter(removes)
@@ -369,7 +387,7 @@ public final class MultiplexerStore {
     }
 
     private struct ClosedState {
-        let layout: LayoutNode
+        var layout: LayoutNode
         let focusedPaneId: String
         let zoomedPaneId: String?
         let collapsedPaneIds: Set<String>

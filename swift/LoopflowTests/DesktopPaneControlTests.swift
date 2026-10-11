@@ -31,6 +31,36 @@ struct DesktopPaneControlTests {
             worktree: identity.worktree, pane: pane.id, incarnation: pane.incarnation)
     }
 
+    @Test("Session targets use captured location, never the enclosing workspace")
+    func sessionLocationOwnsTargetingAndSplit() throws {
+        let registry = SessionsWorkspaceRegistry(localMachineId: identity.machineId)
+        let workspace = registry.workspace(for: identity)
+        let peer = WorkspaceIdentity(machineId: "peer", worktree: identity.worktree)
+        workspace.multiplexer.load(sessionId: "conversation", location: peer)
+        let pane = workspace.multiplexer.focusedPane
+        #expect(workspace.terminal(for: pane) == .session("conversation", machineId: "peer"))
+        let before = workspace.multiplexer.layout
+        registry.reconcileMembership([])
+        #expect(workspace.multiplexer.layout == before)
+        #expect(throws: RegistryQueryError.self) { try workspace.split(pane.id, axis: .vertical) }
+        #expect(workspace.multiplexer.layout == before)
+        let router = WorkLinkRouter(), window = UUID()
+        register(router, window: window, registry: registry)
+        let stale = target(pane, window: window)
+        #expect(throws: RegistryQueryError.self) {
+            try router.controlPane(.init(target: stale, action: .hide))
+        }
+        workspace.multiplexer.updateSessionLocation("conversation", location: identity)
+        #expect(throws: RegistryQueryError.self) {
+            try router.controlPane(.init(target: stale, action: .hide))
+        }
+        let current = workspace.multiplexer.focusedPane
+        let split = try #require(try workspace.split(current.id, axis: .vertical))
+        #expect(split.shellLocation == identity)
+        workspace.multiplexer.updateSessionLocation("conversation", location: nil)
+        #expect(workspace.terminal(for: try #require(workspace.multiplexer.pane(forSessionId: "conversation"))) == nil)
+    }
+
     @Test func literalTextDoesNotInterpretEscapesOrAcceptControlKeys() throws {
         for text in ["", "héλ🙂 e\u{301}", #""$(literal)"; \n"#] {
             try validateDesktopLiteralText(text)
@@ -48,7 +78,7 @@ struct DesktopPaneControlTests {
         let companion = target(store.focusedPane, window: window)
         store.newShell(command: ["retained-command"], location: identity)
         let shell = target(store.focusedPane, window: window)
-        store.load(sessionId: "focused-elsewhere")
+        store.load(sessionId: "focused-elsewhere", location: identity)
         store.setCollapsed(paneId: shell.pane, collapsed: true)
         register(router, window: window, registry: registry)
         let before = store.layout, focus = store.focusedPaneId
@@ -107,7 +137,7 @@ struct DesktopPaneControlTests {
         let shell = store.focusedPane
         let request = DesktopTextRequest(target: target(shell, window: window), surface: "old-surface",
                                          region: region, maxBytes: 16)
-        store.load(sessionId: "other-session")
+        store.load(sessionId: "other-session", location: identity)
         store.setCollapsed(paneId: shell.id, collapsed: true)
         let before = store.layout, focus = store.focusedPane
         register(router, window: window, registry: registry)
@@ -141,7 +171,7 @@ struct DesktopPaneControlTests {
                 try router.readText(.init(target: request.target, surface: request.surface, region: .screen, maxBytes: bound))
             }
         }
-        store.load(sessionId: "replacement")
+        store.load(sessionId: "replacement", location: identity)
         let before = store.layout
         #expect(throws: RegistryQueryError.self) { try router.readText(request) }
         let current = DesktopTextRequest(target: target(store.focusedPane, window: window), surface: "surface", region: .screen, maxBytes: 16)
@@ -359,7 +389,7 @@ struct DesktopPaneControlTests {
         model.navigation.preparedTaskWorktrees[task.id] = identity
         let registry = SessionsWorkspaceRegistry(localMachineId: identity.machineId), router = WorkLinkRouter(), window = UUID()
         let workspace = registry.workspace(for: identity), store = workspace.multiplexer
-        store.load(sessionId: "retained-session")
+        store.load(sessionId: "retained-session", location: identity)
         let session = store.focusedPane
         let source = target(session, window: window)
         store.newShell(command: ["retained-shell-command"], location: identity)
@@ -419,7 +449,7 @@ struct DesktopPaneControlTests {
         let workspace = registry.workspace(for: identity), store = workspace.multiplexer
         store.newShell(command: ["fixture-shell"], location: identity)
         let shell = store.focusedPane
-        store.load(sessionId: "retained-draft")
+        store.load(sessionId: "retained-draft", location: identity)
         let session = store.focusedPane
         let layout = store.layout
         register(router, window: window, registry: registry)
@@ -447,7 +477,7 @@ struct DesktopPaneControlTests {
         let workspace = registry.workspace(for: identity), store = workspace.multiplexer
         store.newShell(command: ["fixture-shell"], location: identity)
         let shell = store.focusedPane
-        store.load(sessionId: "retained-session")
+        store.load(sessionId: "retained-session", location: identity)
         let session = store.focusedPane
         store.show(.files(taskId: "task"))
         let filesPane = store.focusedPane
@@ -507,9 +537,9 @@ struct DesktopPaneControlTests {
     @Test func staleSourceRejectsEveryActionWithoutChangingTheCurrentFocus() throws {
         let router = WorkLinkRouter(), registry = SessionsWorkspaceRegistry(), window = UUID()
         let store = registry.workspace(for: identity).multiplexer
-        store.load(sessionId: "old")
+        store.load(sessionId: "old", location: identity)
         let old = target(store.focusedPane, window: window)
-        store.load(sessionId: "replacement")
+        store.load(sessionId: "replacement", location: identity)
         store.newShell(location: identity)
         let peer = target(store.focusedPane, window: window)
         register(router, window: window, registry: registry)
@@ -531,9 +561,9 @@ struct DesktopPaneControlTests {
         let store = registry.workspace(for: identity).multiplexer
         store.newShell(location: identity)
         let shell = target(store.focusedPane, window: window)
-        store.load(sessionId: "old")
+        store.load(sessionId: "old", location: identity)
         let stale = target(store.focusedPane, window: window)
-        store.load(sessionId: "new")
+        store.load(sessionId: "new", location: identity)
         let peer = target(store.focusedPane, window: window)
         register(router, window: window, registry: registry)
         let before = store.layout
@@ -573,11 +603,11 @@ struct DesktopPaneControlTests {
     @Test func samePaneAndSessionAfterReplacementDoesNotReviveOldTarget() throws {
         let router = WorkLinkRouter(), registry = SessionsWorkspaceRegistry(), window = UUID()
         let store = registry.workspace(for: identity).multiplexer
-        store.load(sessionId: "a")
+        store.load(sessionId: "a", location: identity)
         let old = target(store.focusedPane, window: window)
         register(router, window: window, registry: registry)
-        store.load(sessionId: "b")
-        store.load(sessionId: "a")
+        store.load(sessionId: "b", location: identity)
+        store.load(sessionId: "a", location: identity)
         #expect(store.focusedPane.id == old.pane)
         #expect(store.focusedPane.incarnation != old.incarnation)
         #expect(throws: RegistryQueryError.self) {

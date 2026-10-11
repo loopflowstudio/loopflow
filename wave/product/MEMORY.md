@@ -116,8 +116,8 @@ Desktop proof. Mixed-provider exchange and first-start admission stay refused;
 remote-opening composition is recorded below.
 
 #1512 connects live clients or resumes native history after driver death, never
-from import. #1517 preserves opaque AgentSessionId bytes. Repairs/evidence:
-`829c9b993`, this heading. Neither proves takeover or native acceptance.
+from import; #1517 preserves opaque AgentSessionId bytes. Evidence/limits:
+`829c9b993`, this heading; no takeover or native acceptance.
 
 `e3ca861b1`: mounted-page/visibility observation replaces callbacks; request IDs
 fence registration only. Pre-registration failures survive.
@@ -170,13 +170,15 @@ Jack authorized Product follow-ups LOO-452 (shortcut customization, beyond LOO-4
 and LOO-453 (readiness/events); research:
 [the comparison](../../docs/reviews/terminal-command-comparison.md#rex-composition-and-discoverability-2026-10-10).
 
-Jack Heart (October 10) accepted Work-named repository/Wave/Task tabs over retained
-panes; close hides. Work-keyed cutover remains unimplemented. Passive Task navigation
-and bare remote links no longer acquire Sessions; explicit Session/Changes survives.
-His `ff61b6bc` correction selects shell-default Split, with no empty option.
-`d6640b8c68` retains Machine/path in shell content, preserving location through layout/Undo. Unknown refuses.
-Session/remote-shell consumers, registry and DTO cutover remain; 97 headless tests
-prove neither Work tabs nor native acceptance. Admission and other obligations remain.
+Jack Heart (October 10) accepted Work-named repository/Wave/Task tabs; close hides.
+Work-keyed cutover remains unimplemented. Passive Task navigation/bare remote links
+no longer acquire Sessions; explicit Session/Changes survives. `ff61b6bc` selects
+shell-default Split, no empty option. `d6640b8c68` retains shell Machine/path through
+layout/Undo; unknown refuses.
+Session content now captures recorded location for rendering, targeting and Split;
+changed readings fence old targets and Undo, while absent rows retain evidence.
+Remote-shell location, registry and DTO cutover remain. No native acceptance;
+admission unresolved.
 
 **Confirmation cannot elect execution.** `4c43550c2`: divergent revisions and
 independent refs both confirm, not Task allocation. `42990dea3` shares membership

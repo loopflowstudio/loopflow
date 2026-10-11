@@ -159,7 +159,7 @@ struct WorkDestinationTests {
             #expect(model.navigation.preparedTaskWorktrees[task.id] == remoteIdentity)
             #expect(model.taskOpening?.status == .opening)
             let remote = registry.workspace(for: remoteIdentity)
-            remote.multiplexer.load(sessionId: record.id)
+            remote.multiplexer.load(sessionId: record.id, location: record.workspace?.identity)
             let peerQuery = query.onMachine("peer", repository: "repository").recording { _ in }
             let sessionOnly = LinkedSession(generation: request.generation, record: record,
                 task: task, showsChanges: false, location: request.location)
@@ -355,7 +355,7 @@ struct WorkDestinationTests {
         #expect(model.taskOpening?.status == .opening) // selection is not native readiness
         let registry = SessionsWorkspaceRegistry()
         let workspace = registry.workspace(for: identity)
-        workspace.multiplexer.load(sessionId: record.id)
+        workspace.multiplexer.load(sessionId: record.id, location: record.workspace?.identity)
         let terminal = try #require(workspace.multiplexer.layout.allPanes.first)
         registry.prepareLinkedFiles(try #require(model.linkedSession), query: query)
         let files = workspace.files(taskId: try #require(task.runtime?.workId), issue: task.task.identifier, cwd: identity.worktree, query: query)
@@ -385,7 +385,7 @@ struct WorkDestinationTests {
         await model.openTaskLink(url)
         let request = try #require(model.linkedSession)
         let workspace = SessionsWorkspace(identity: try #require(record.workspace?.identity))
-        workspace.multiplexer.load(sessionId: record.id)
+        workspace.multiplexer.load(sessionId: record.id, location: record.workspace?.identity)
         workspace.multiplexer.show(.files(taskId: request.task.id), focus: false)
         let store = SessionsStore(repoPath: try #require(model.repoPath), query: query)
         store.reconcile([record])
@@ -423,7 +423,7 @@ struct WorkDestinationTests {
         await model.openTaskLink(url)
         let request = try #require(model.linkedSession)
         let workspace = SessionsWorkspace(identity: try #require(record.workspace?.identity))
-        workspace.multiplexer.load(sessionId: record.id)
+        workspace.multiplexer.load(sessionId: record.id, location: record.workspace?.identity)
         workspace.multiplexer.show(.files(taskId: request.task.id), focus: false)
         let store = SessionsStore(repoPath: try #require(model.repoPath), query: query)
         // An incomplete Session reading is not failure, but cannot hide a
@@ -442,7 +442,7 @@ struct WorkDestinationTests {
         await model.openTaskLink(url)
         let oldRequest = try #require(model.linkedSession)
         let workspace = SessionsWorkspace(identity: try #require(record.workspace?.identity))
-        workspace.multiplexer.load(sessionId: record.id)
+        workspace.multiplexer.load(sessionId: record.id, location: record.workspace?.identity)
         workspace.multiplexer.show(.files(taskId: oldRequest.task.id), focus: false)
         let oldStore = SessionsStore(repoPath: try #require(model.repoPath), query: query)
         oldStore.reconcile([record])
@@ -473,7 +473,7 @@ struct WorkDestinationTests {
         await model.openTaskLink(url)
         let request = try #require(model.linkedSession)
         let workspace = SessionsWorkspace(identity: try #require(record.workspace?.identity))
-        workspace.multiplexer.load(sessionId: record.id)
+        workspace.multiplexer.load(sessionId: record.id, location: record.workspace?.identity)
         workspace.multiplexer.show(.files(taskId: request.task.id), focus: false)
         let store = SessionsStore(repoPath: try #require(model.repoPath), query: query)
         store.reconcile([record])
@@ -1168,7 +1168,7 @@ struct WorkDestinationTests {
         let registry = SessionsWorkspaceRegistry(localMachineId: "fixture-machine")
         let identity = WorkspaceIdentity(machineId: "fixture-machine", worktree: path)
         let retained = registry.workspace(for: identity), store = retained.multiplexer
-        store.newShell(command: ["retained-command"])
+        store.newShell(command: ["retained-command"], location: identity)
         let pane = store.focusedPane
         let document = retained.files(taskId: "task", issue: "TASK", cwd: path).document("note.txt")
         document.editor.string = "unfinished draft"

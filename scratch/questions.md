@@ -6,13 +6,11 @@ window, macOS-only control and one PR. Native/configured-peer proof remains.
 
 ## Selected decisions and pane choices — October 8–9
 
-The plan owns Jack Heart’s Q1–Q3 decisions: execution-local operations/portable
-planning exchange, nearest-ancestor delegation with started Tasks pinned, and
-cursor insertion with Enter separate. Source: `7d5bcf939:scratch/questions.md`,
-Q1–Q3. Earlier visibility/arrangement/companion/read choices:
-`e4a324636:scratch/questions.md`, **Retained pane choices** references in
-`a81245920:scratch/questions.md`. Hiding/reading grants no acquisition authority;
-exclusive admission and native fidelity remain unproved.
+Jack Heart selected execution-local operations/portable planning, nearest-ancestor
+delegation with started Tasks pinned, and cursor insertion with Enter separate:
+`7d5bcf939:scratch/questions.md`, Q1–Q3. Retained pane choices and earlier sources:
+`a81245920:scratch/questions.md`, **Selected decisions and pane choices**.
+Hiding/reading grants no acquisition authority; admission and native proof remain.
 
 ## Command-map review — October 8
 
@@ -121,11 +119,6 @@ shell is usable even while planning loads. A plain Task request waits for its mo
 page, not optional Session preparation. Receipts are latest-per-locator/window,
 not a durable history; locators never become repository identity. This reversible
 endpoint definition leaves native usability and remote composition unproved.
-
-## Reversible Flow preview presentation — October 9
-
-Fresh-graph preview and separate native arguments remain in the plan; prior details:
-`7a36df4ea2:scratch/questions.md`, this heading. Preview grants no execution.
 
 ## Portable assignment choice — October 9
 

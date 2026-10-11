@@ -328,7 +328,7 @@ final class WorkModel {
         let sessionPane: PaneState?
         if case .shell(let id, _) = store.localTerminal(for: destination.record) {
             sessionPane = layout.pane(for: id)
-        } else { sessionPane = layout.allPanes.first { $0.content == .session(id: destination.record.id) } }
+        } else { sessionPane = layout.allPanes.first { $0.sessionId == destination.record.id } }
         var panes = [PaneState]()
         if let sessionPane { panes.append(sessionPane) }
         if destination.showsChanges,

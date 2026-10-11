@@ -66,19 +66,23 @@ outer-tree deletion and DTO cutover remain unfinished.
 Inventory simplification and its 49-test passing result remain at
 `a81245920:scratch/findings.md`, this heading.
 
-## Shell-location cut — October 10
+## Content-location cuts — October 10
 
-Shell content retains its creation Machine/path through move, hide and Close/Undo.
-Rendering, identity, exit and split use that location; unknown locations never fall
-back locally. Undo renews content identity without replaying launch. Compression
-moves location into `PaneContent.shell`, removing separate stored pane metadata and
-its propagation through insertion/replacement/Undo. Generic content replacement now
-retains shell location automatically; a Session cannot carry shell metadata.
-Desktop wire projections are unchanged. Prior failures, fixes and the 47-test result:
-`425a781c14:scratch/findings.md`, this heading.
+Shell location moved into content in `d6640b8c68`; prior failures, compression and
+97-test result: `a82ffc1131:scratch/findings.md`, **Shell-location cut**.
+Session content now captures the record's Machine/path. Rendering, passive/input
+terminal lookup and Split no longer derive Session location from workspace identity.
+Fresh location changes renew the pane occurrence and retained Undo without changing
+focus, zoom or collapse. Missing rows retain evidence; an observed unknown location
+refuses. A changed record cannot silently redirect an old target.
 
-This remains a partial cut, not Work tabs: registry rekeying, other pane locations,
-outer-layout deletion, navigation and DTO cutover remain. Native fixtures are adapted,
-not executed.
+Review found readiness compared whole Session content to ID-only content; it now
+matches Session ID. Native fixture setup now supplies recorded locations. Initial
+checks exposed two ID-only Session control fixtures and an older locationless shell
+fixture; corrected without restoring local fallback. These are headless results,
+not mounted Session/draft acceptance.
 
-Check: `scripts/test_desktop.sh --filter 'MultiplexerLayoutTests|MultiplexerStoreTests|DesktopPaneControlTests|DTOFixtureTests' -Xswiftc -gnone --no-parallel` PASS (build, 97 tests); native: demo; full cutover suites: gate after implementation.
+Still unfinished: Work-keyed registry/tabs, remote-shell command location, Files/log
+locations, outer-layout deletion and DTO/navigation cutover. Admission stays unresolved.
+
+Check: `scripts/test_desktop.sh --filter 'MultiplexerStoreTests|DesktopPaneControlTests|WorkDestinationTests' -Xswiftc -gnone --no-parallel` PASS (build, 97 tests); native: demo; complete cutover suites: gate.

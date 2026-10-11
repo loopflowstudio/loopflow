@@ -54,11 +54,12 @@ existing shell-location owner for CLI, shortcuts and pane menus; missing remote
 location refuses before layout mutation. Work-keyed tabs, non-shell locations, outer-layout deletion and inspection/DTO
 cutover remain unimplemented.
 
-**Shell locations (`d6640b8c68`):** `PaneContent.shell` owns Machine/path through
-layout changes. Rendering, exits and split consume it; unknown refuses. Sessions still derive Machine from workspace identity,
-and remote shell commands still use workspace-level `executionLocation`. Files/log
-queries and those consumers must move with the Work-keyed cutover; shell content
-alone does not make a mixed-location workspace usable. DTOs unchanged.
+**Content locations:** `d6640b8c68` puts shell Machine/path in content. Session
+content now captures its record's Machine/path too; observation, rendering and
+Split use it. Fresh readings renew changed occurrences, including Undo, without
+focus changes; absent rows retain locations. Unknown refuses. Remote shell command
+construction still uses workspace `executionLocation`; Files/log queries, registry
+rekeying and DTOs remain for the Work-keyed cutover. Neither content cut implements tabs.
 
 **Passive entry deletion:** `a1dfa07833` removes implicit primary-Session acquisition
 from Task navigation/refresh and bare links; explicit Session/Changes requests

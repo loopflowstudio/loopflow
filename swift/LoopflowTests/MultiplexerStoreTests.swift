@@ -6,6 +6,36 @@ import Testing
 @Suite("Multiplexer store")
 @MainActor
 struct MultiplexerStoreTests {
+    @Test("Session location travels through layout and Undo; a new reading fences old targets")
+    func sessionLocationSurvivesLayoutChanges() throws {
+        let store = MultiplexerStore()
+        let local = WorkspaceIdentity(machineId: "local", worktree: "/same/path")
+        let peer = WorkspaceIdentity(machineId: "peer", worktree: "/same/path")
+        store.load(sessionId: "conversation", location: peer)
+        let session = store.focusedPane
+        let shell = try #require(store.newShell(location: local))
+        store.move(session.id, beside: shell.id, axis: .horizontal)
+        store.setCollapsed(paneId: session.id, collapsed: true)
+        store.setZoom(shell.id, enabled: true)
+        #expect(store.layout.pane(for: session.id) == session)
+        store.close(session.id)
+        store.updateSessionLocation("conversation", location: local)
+        store.undoClose()
+        let restored = try #require(store.pane(forSessionId: "conversation"))
+        #expect(restored.sessionLocation == local)
+        #expect(restored.incarnation != session.incarnation)
+        #expect(store.focusedPaneId == shell.id)
+        #expect(store.zoomedPaneId == shell.id)
+        #expect(store.collapsedPaneIds.contains(session.id))
+        store.updateSessionLocation("conversation", location: local)
+        #expect(store.pane(forSessionId: "conversation") == restored)
+        store.updateSessionLocation("conversation", location: nil)
+        #expect(store.pane(forSessionId: "conversation")?.sessionLocation == nil)
+        #expect(store.pane(forSessionId: "conversation")?.incarnation != restored.incarnation)
+        let decoded = try JSONDecoder().decode(LayoutNode.self, from: JSONEncoder().encode(store.layout))
+        #expect(decoded == store.layout)
+    }
+
     @Test("Shell location survives arrangement and Undo without replaying its launch")
     func shellLocationSurvivesLayoutChanges() throws {
         let store = MultiplexerStore()

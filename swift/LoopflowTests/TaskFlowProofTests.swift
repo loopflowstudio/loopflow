@@ -290,7 +290,7 @@ struct TaskFlowTests {
         model.select(.task(id: task.id))
         model.navigation.content = .terminals
         try await eventually("the Task's Session is ensured and opened") {
-            panes.focusedPane.content == .session(id: "ensured-\(task.task.identifier)")
+            panes.focusedPane.sessionId == "ensured-\(task.task.identifier)"
         }
         #expect(await calls.calls.filter { $0.first == "session" && $0[1] == "ensure" }
             == [["session", "ensure", "--task", task.task.identifier, "--json"]])

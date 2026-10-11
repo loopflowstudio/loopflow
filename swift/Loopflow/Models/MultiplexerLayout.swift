@@ -12,7 +12,7 @@ public enum SplitAxis: String, Codable, Sendable, Equatable {
 
 public enum PaneContent: Codable, Sendable, Equatable {
     case empty
-    case session(id: String)
+    case session(id: String, location: WorkspaceIdentity? = nil)
     /// Unknown locations remain unavailable, never a local-shell fallback.
     case shell(location: WorkspaceIdentity?)
     /// Every Flow process of a Task.
@@ -29,6 +29,16 @@ public struct PaneState: Codable, Sendable, Identifiable, Equatable {
     /// Location travels with content, including replacement and Close/Undo.
     public var shellLocation: WorkspaceIdentity? {
         guard case .shell(let location) = content else { return nil }
+        return location
+    }
+
+    public var sessionId: String? {
+        guard case .session(let id, _) = content else { return nil }
+        return id
+    }
+
+    public var sessionLocation: WorkspaceIdentity? {
+        guard case .session(_, let location) = content else { return nil }
         return location
     }
 

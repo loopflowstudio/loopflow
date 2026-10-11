@@ -139,7 +139,7 @@ public struct DesktopLayoutInspection: Codable, Sendable, Equatable {
             switch state.content {
             case .empty: content = "empty"; subject = nil
             case .shell: content = "shell"; subject = nil
-            case .session(let id): content = "session"; subject = id
+            case .session(let id, _): content = "session"; subject = id
             case .files(let id): content = "files"; subject = id
             case .flowLog(let id): content = "flow_log"; subject = id
             }

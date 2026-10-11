@@ -210,7 +210,7 @@ struct DesktopNativeSessionTests {
         let registry = SessionsWorkspaceRegistry(localMachineId: try await query.localMachineId())
         let workspace = registry.workspace(for: try #require(owned.workspace).identity)
         let store = workspace.sessionStore(repoPath: fixture.repo, query: query)
-        workspace.multiplexer.load(sessionId: fixture.sessionId)
+        workspace.multiplexer.load(sessionId: fixture.sessionId, location: owned.workspace?.identity)
         workspace.multiplexer.newShell(location: workspace.identity)
         let layout = workspace.multiplexer.layout
         let files = workspace.files(taskId: fixture.taskId, issue: fixture.issue, cwd: fixture.checkout, query: query)

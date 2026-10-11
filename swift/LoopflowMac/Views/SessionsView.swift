@@ -36,7 +36,7 @@ final class SessionsWorkspace {
     func terminal(for pane: PaneState) -> TerminalIdentity? {
         switch pane.content {
         case .shell: pane.shellLocation.map { .shell(pane.id, machineId: $0.machineId) }
-        case .session(let id): .session(id, machineId: identity.machineId)
+        case .session(let id, let location): location.map { .session(id, machineId: $0.machineId) }
         case .empty, .files, .flowLog: nil
         }
     }
@@ -66,6 +66,12 @@ final class SessionsWorkspace {
         if case .shell(let location) = pane.content {
             guard let location else {
                 throw RegistryQueryError("Shell location is unavailable; no shell was opened.")
+            }
+            return location
+        }
+        if case .session(_, let location) = pane.content {
+            guard let location else {
+                throw RegistryQueryError("Session location is unavailable; no shell was opened.")
             }
             return location
         }
@@ -281,7 +287,8 @@ final class SessionsWorkspaceRegistry {
               let pane = workspace.multiplexer.layout.pane(for: target.pane),
               pane.incarnation == target.incarnation,
               pane.content != .shell(location: nil),
-              pane.shellLocation == nil || pane.shellLocation == identity else {
+              pane.shellLocation == nil || pane.shellLocation == identity,
+              pane.sessionId == nil || pane.sessionLocation == identity else {
             throw RegistryQueryError("The pane content was removed or replaced. Inspect Desktop again; no pane was changed.")
         }
         return (workspace, pane)
@@ -298,6 +305,9 @@ final class SessionsWorkspaceRegistry {
     /// Removing old placements never releases their native surfaces.
     func reconcileMembership(_ records: [SessionRecord]) {
         for (identity, workspace) in workspaces {
+            for record in records {
+                workspace.multiplexer.updateSessionLocation(record.id, location: record.workspace?.identity)
+            }
             let moved = Set(records.compactMap { record -> String? in
                 guard let location = record.workspace?.identity,
                       location.machineId == identity.machineId, location != identity else { return nil }
@@ -799,7 +809,7 @@ struct SessionsContentView: View {
                    let record = records.first(where: { $0.id == selected }),
                    let identity = record.workspace?.identity,
                    let prior = previousLocations[selected], prior != identity {
-                    workspaces.workspace(for: identity).multiplexer.reveal(sessionId: selected)
+                    workspaces.workspace(for: identity).multiplexer.reveal(sessionId: selected, location: identity)
                 }
             }
         }
@@ -957,7 +967,7 @@ struct SessionsContentView: View {
             store.surfaces.focus(.shell(id, machineId: machineId))
         } else {
             worktreeLayout.select(record.workspace?.identity ?? rootIdentity)
-            multiplexer.load(sessionId: record.id)
+            multiplexer.load(sessionId: record.id, location: record.workspace?.identity)
             if let machineId = record.workspace?.machineId {
                 store.surfaces.focus(.session(record.id, machineId: machineId))
             }
@@ -1078,7 +1088,7 @@ struct SessionsContentView: View {
 
     private var focusedProgramStatus: ProgramStatusRecords? {
         guard terminalsVisible else { return nil }
-        if case .session(let id) = multiplexer.focusedPane.content {
+        if case .session(let id, _) = multiplexer.focusedPane.content {
             return store.sessions.first { $0.id == id }?.record.programStatus
         }
         if let id = focusedProgramStatusSurface?.sessionId {
@@ -1095,7 +1105,7 @@ struct SessionsContentView: View {
         case .shell:
             guard let terminal = workspace.terminal(for: pane) else { return [] }
             return store.sessions.filter { store.localTerminal(for: $0.record) == terminal }
-        case .session(let id):
+        case .session(let id, _):
             return store.sessions.filter { $0.id == id }
         case .empty, .flowLog, .files:
             return []
@@ -1402,7 +1412,7 @@ private struct SessionPaneView: View {
     private var hovering: Bool { hover.paneId == pane.id }
 
     private var item: SessionItem? {
-        guard case .session(let id) = pane.content else { return nil }
+        guard case .session(let id, _) = pane.content else { return nil }
         return sessions.sessions.first { $0.id == id }
     }
 
@@ -1737,11 +1747,11 @@ private struct SessionPaneView: View {
 
     @ViewBuilder
     private func _terminal(item: SessionItem, surface: SessionRecord) -> some View {
-        if let machineId = surface.workspace?.machineId {
+        if let location = pane.sessionLocation, surface.workspace?.identity == location {
             GhosttyTerminalView(
-                workingDirectory: sessions.presentationDirectory(for: surface, checkout: workingDirectory),
+                workingDirectory: sessions.presentationDirectory(for: surface, checkout: location.worktree),
                 argv: surface.openArgv,
-                terminal: .session(surface.id, machineId: machineId),
+                terminal: .session(surface.id, machineId: location.machineId),
                 surfacePool: sessions.surfaces,
                 isFocused: isFocused,
                 onSurfaceCreated: {
@@ -1752,7 +1762,7 @@ private struct SessionPaneView: View {
             )
             .id(surface.id)
         } else {
-            Text("Session Machine unavailable")
+            Text("Session location unavailable")
         }
     }
 
@@ -1789,7 +1799,8 @@ private struct SessionPaneView: View {
         switch pane.content {
         case .session:
             item?.surface.flatMap { record in
-                record.workspace.map { .session(record.id, machineId: $0.machineId) }
+                guard record.workspace?.identity == pane.sessionLocation else { return nil }
+                return workspace.terminal(for: pane)
             }
         case .shell:
             workspace.terminal(for: pane)

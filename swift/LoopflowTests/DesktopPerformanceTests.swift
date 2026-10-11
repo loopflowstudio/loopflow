@@ -422,11 +422,11 @@ struct DesktopPerformanceTests {
         let files = workspace.files(taskId: "perf-work-0", issue: "perf-work-0", cwd: checkout.path, query: query)
         files.autosave = false
         let multiplexer = workspace.multiplexer
-        multiplexer.load(sessionId: "perf-session-0")
+        multiplexer.load(sessionId: "perf-session-0", location: model.sessions.value?.first { $0.id == "perf-session-0" }?.workspace?.identity)
         let sessionPane = multiplexer.focusedPaneId
         multiplexer.newShell(location: workspace.identity)
         let companionPane = multiplexer.focusedPaneId
-        multiplexer.load(sessionId: "perf-session-2")
+        multiplexer.load(sessionId: "perf-session-2", location: model.sessions.value?.first { $0.id == "perf-session-2" }?.workspace?.identity)
         let otherPane = multiplexer.focusedPaneId
         let identities: [TerminalIdentity] = [.session("perf-session-0", machineId: fixtureMachineId), .shell(companionPane, machineId: fixtureMachineId), .session("perf-session-2", machineId: fixtureMachineId)]
         let terminals = identities.map { registry.surfaces.view(for: $0) }
@@ -574,7 +574,7 @@ struct DesktopPerformanceTests {
                       terminals[0].surface == surfaces[0], terminals[1].surface == surfaces[1],
                       terminals[2].surface == surfaces[2],
                       model.navigation.selectedSessionId == first.id,
-                      multiplexer.focusedPane.content == .session(id: first.id) else { return false }
+                      multiplexer.focusedPane.sessionId == first.id else { return false }
                 return window.contentText.contains { $0.contains("Conversation 000") }
             }, input: {
                 try send(window, "\n")
@@ -674,7 +674,7 @@ struct DesktopPerformanceTests {
             try await wait(window) { window.firstResponder === terminals[0] }
             guard terminals.enumerated().allSatisfy({ $0.element.surface == surfaces[$0.offset] }),
                   multiplexer.layout.pane(for: companionPane)?.content == .shell(location: workspace.identity),
-                  multiplexer.layout.pane(for: otherPane)?.content == .session(id: other.id) else {
+                  multiplexer.layout.pane(for: otherPane)?.sessionId == other.id else {
                 throw PerformanceFailure("failed", "Retained terminal identity or companion changed")
             }
         }
@@ -737,7 +737,7 @@ struct DesktopPerformanceTests {
         let store = registry.workspace(for: WorkspaceIdentity(machineId: try #require(record.workspace).machineId, worktree: fixture.repo))
             .sessionStore(repoPath: fixture.repo, query: query)
         let multiplexer = workspace.multiplexer
-        multiplexer.load(sessionId: fixture.sessionId)
+        multiplexer.load(sessionId: fixture.sessionId, location: record.workspace?.identity)
         let sessionPane = multiplexer.focusedPaneId
         multiplexer.newShell(location: workspace.identity)
         let companion = multiplexer.focusedPaneId

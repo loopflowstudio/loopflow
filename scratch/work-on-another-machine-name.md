@@ -203,6 +203,25 @@ Linear field mapping. Rotation no longer reconstructs PM Project/Task records:
 its membership check supplies the exact previous Project. The later prose cut below extends receipts in this Task’s single draft;
 canonical observation ownership remains unfinished.
 
+### Next coherent cut — reconciled 2026-10-10 at `7ec3ff7dc4`
+
+The earlier feedback's missing prose round trip is implemented by `5bd501e6aa`;
+its ownership objection remains. `7ec3ff7dc4` unifies Task admission/refresh but
+still reads accepted provider caches. Neither commit completes direct acquisition.
+
+The next dependency is canonical Task fields and the Task/snapshot readers that
+still manufacture Projects. `plan_read::project_in` substitutes external/local IDs
+and sets description to `None`; `ResolvedTask` still carries `LinearProject` and
+`PmItem`. `task_in` reads `planning_due_date`, then overwrites it from the provider
+observation. This is source counterevidence to a single ordinary Work reader, not
+an executed due-date failure. Replacing only the Project type leaves the Task join
+and identity ambiguity intact. The coherent cut includes canonical Task fields,
+these readers and their callers, with concrete ownership/removal/age evidence kept
+outside domain content. Same-ID local/Git/Linear reads, saved prose and due dates,
+partial observations, pending membership and unchanged execution need composed proof.
+Bindings, ordinary follow-ups, cron and the remaining audit follow that prerequisite;
+none are optional. The full accepted scope and review-only boundary are unchanged.
+
 ### Project prose: composed behavior and remaining ownership cut
 
 October 10 implementation adds ordinary `lf project edit --description` saves,
@@ -312,15 +331,14 @@ Earlier baseline detail: `c8fe4628a:scratch/work-on-another-machine-name.md`.
   cut. Regenerate them after the entire accepted reduction, before review-only
   republication. No readiness or landing follows from this persistence checkpoint.
 
-Checks: `cargo build -p loopflow --bin lf`, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and five network-isolated acquisition/completion/membership/sweep tests pass; gate owns affected/materialized/Desktop verification.
+Checks: `git diff --check` passes (realign, prose only); prior build/fmt/Clippy and five isolated acquisition/completion/membership/sweep passes remain recorded at `7ec3ff7dc4`; gate owns affected/materialized/Desktop verification.
 
-Context: authored memory/scratch fit. The generated Task seed/steers and workspace
-manifest still exceed 16,000 tokens (19,468 observed at
-`.lf/tmp/context/f859f6dd553e69fbb8c537e5786ba6360ac461a63204e4fdee1c97ef74adbf57.md`).
-Authored-note curation cannot remove retained Task history or generated metadata;
-neither history nor a limit changed.
-
-
+Context: authored memory/scratch fit. `lf context --skill realign` on October 10
+reports a 19,582-token generated Task seed/steer/workspace source against 16,000
+(3,582 over). Its full source is
+`.lf/tmp/context/43da14d740ddb9bede011488ae271ba9c8c5d52c41e0cf635c71601dc571565c.md`.
+The overflow is retained Task history/generated metadata, not authored scratch;
+no history or limit changed.
 
 ## Delete — do not maintain
 

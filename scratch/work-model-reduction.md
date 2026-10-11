@@ -315,6 +315,18 @@ event decoding and unfinished effects until converted without loss. A Task saved
 before comment failure must survive; retry only the comment. Neither comments nor
 removal of the old gate grants process-control or checkout-deletion authority.
 
+Retained-effect counterexamples (`7ec3ff7dc4`, October 10): historical
+provider-UUID intents can predate a local Task and have no recorded network-attempt
+boundary. `retain_follow_through_export_in` retains their exact creation ID/input
+as attempted and unknown; conversion cannot mint a replacement. An `existing`
+intent never creates. Unconfirmed `sync_follow_through_relations` effects retain
+their original relation ID/input and confirmation history, not synthetic comment
+success. Conversion/retry twice must preserve the reserved local child with missing
+link, uncertain provider creation without a local child, and unconfirmed relation
+after both endpoints publish. Stable Task/comment identities and unchanged events
+are required proof, not executed results. Full source review:
+`7ec3ff7dc4:scratch/follow-up-recovery-review.md`.
+
 ## 14. Config, cron, naming and public documentation
 
 `config.rs::PmConfig` and `work/wave/config.rs::WavePmConfig` must stop duplicating

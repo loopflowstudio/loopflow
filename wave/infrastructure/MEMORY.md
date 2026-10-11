@@ -634,10 +634,10 @@ losers and uncertainty. Gate/installation remain unproved.
 Jack accepted the full One Work audit; partial work is not review-ready.
 Projects retain IDs, bindings and rank; saves/acquisition share typed receipts.
 One Markdown parser replaces model patching; ordinary LinearProject reads remain.
-Unified acquisition preserves legacy IDs, pending disposition and local order.
-Partial fields retain revision/age, never entity/write clocks. Omission proves no
-settlement. Git recovery reads the journal;
-candidates prove no application/publication; read errors retain cached content.
+Unified Task admission/refresh still retains provider-shaped readers. Partial
+fields retain revision/age; omission proves no settlement. Follow-up conversion
+retains uncertain creation/relation effects, never synthetic comment success.
+Git journal candidates prove no application/publication; read errors retain cache.
 
 Cron retains installed ownership and failure exits ([evidence](release/MEMORY.md)).
 [Remaining work](../../scratch/work-on-another-machine-name.md). Republish #1491

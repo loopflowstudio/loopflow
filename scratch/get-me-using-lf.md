@@ -163,8 +163,9 @@ no identity fallback, installed-CLI replacement or private-Machine substitution
 is added. The existing development app build/install remains.
 Real-data native acceptance still requires a compatible installed release.
 [The failed demo](work-first-demo.md) records the observed runtime mismatch; no
-new configured demo has succeeded. [Portfolio discovery](portfolio-discovery.md)
-is adjacent research only, with no Task filed or implementation authorization.
+new configured demo has succeeded. [Portfolio discovery](portfolio-discovery.md) records the prior-art investigation.
+Jack Heart added this outcome to LOO-462 on October 11; it is now the next
+implementation slice, not a separate Task or a second Portfolio surface.
 
 The consumer cut removes the generic composer, skill picker/storage/launch DTO,
 Debug Session inventory, orphan projection and Session-title search, including
@@ -210,6 +211,84 @@ a private Rust DTO import and an invalid provider model; Swift first ran before
 the capture existed. Those fixture failures are repaired, not native evidence.
 Review kept the unrelated Session in a separate checkout so Rust's real Task
 association cannot silently turn that case into a Task member.
+
+
+## This slice — one repository portfolio owned by lf
+
+Jack Heart requested default discovery of main repositories under `~/src`, a
+changeable discovery folder, or manual selection across folders/subfolders. Jack
+explicitly included the existing Portfolio UI: build on or replace it in this
+same cut. Jack selected the Portfolio view as the primary configuration surface:
+choose a discovery folder or individual repositories there without requiring CLI
+setup. The view must CALL the lf API for reads and mutations through RegistryQuery;
+it must not scan folders or write configuration itself. lf owns persistence and
+discovery, not a competing Swift list. Jack considered multiple discovery roots
+and said they are probably unnecessary; defer them in this slice.
+This extends LOO-462's Work-first experience through publication/demo, not landing.
+
+**Proposed concrete contract (reversible implementation choices):** one
+Machine-local portfolio selection, with folder and manual modes. Folder mode
+uses the existing `repo_root` (default `~/src`) and discovers immediate main Git
+checkouts, excluding linked worktrees. Manual mode uses explicit main-repository
+paths anywhere, including nested directories; it never silently unions folder
+scan results or the last opened repo. Preserve the inactive mode's settings when
+switching modes. Recursive folder scanning and per-repo folder exclusions are
+not required by the current request. No GitHub remote, Wave or Task is required.
+
+Use `lf portfolio` as the proposed owner: list/read JSON, select folder/manual
+mode, set the root, and add/remove explicit repositories. Final subcommand syntax
+comes from the existing CLI conventions, not a parallel Desktop API. Changing
+the folder reuses `repo_root`, never a second root preference. Portfolio membership
+and the open-window set are separate: opening a repo does not enroll it; removing
+one affects navigation only, not files, Work, live panes, Sessions or execution.
+Use existing repository identity and Git main-checkout normalization. Paths remain
+Machine-local locators, not portable identity or execution assignment.
+
+Rust owns selection persistence, normalization, enumeration and mutations. Use the
+existing Machine-local configuration writer for this preference; no new planning
+or execution table unless source investigation demonstrates a real need. Expose
+one typed reading through RegistryQuery, with selected mode/root, repository
+entries and truthful unavailable-path/read errors. Inspection creates no Work or
+conversations. Missing manual entries remain removable/unavailable, not silently
+deleted. A failed folder read is not an empty portfolio. Surface the same errors
+in CLI and Desktop; unknown state retains existing panes.
+
+**Existing UI, not a new window:** `LoopflowApp`'s `Window("Portfolio")` currently
+mounts `Views/WavesView.swift`. Adapt that view's repository rail and management
+controls, preserving its useful Wave/status contents. Provide folder/manual mode
+selection, a folder chooser, and add/remove individual repository controls here.
+Native pickers select paths only; shared lf operations validate and save them.
+Show pending/error state and render the authoritative result without requiring a
+terminal or silently assuming a write succeeded. `RepoView`, Open Repo/Move
+to Repo menus and repository windows consume the same shared membership. Keep
+window-local selection/last-opened presentation separate from membership. Respect
+configured data locations and normal installed CLI dispatch.
+
+**Delete in the cut:** Swift `PortfolioService` UserDefaults membership writer,
+`PortfolioDiscovery.repos`' hard-coded scan/persisted/launch union, and the
+portfolio-only `RepoScanner` duplication after surviving callers use the shared
+reader. Retain authored-Wave discovery until its own replacement exists. Reuse or
+reshape `PortfolioRepo` as the shared DTO rather than keeping two representations.
+The old `portfolioRepos` preference needs a one-time explicit import into shared
+manual membership; never discard it, auto-publish it or re-import on every refresh.
+Offer import only when shared selection is absent; CLI-authored selection wins.
+Remove obsolete exclusive tests; migrate behavior tests to the shared owner.
+
+**Order:** shared Rust selection/CLI and fixtures; cut all Desktop membership
+consumers and existing Portfolio controls over together; remove superseded owners;
+prove cross-surface round trips. Preserve the existing conversation-first work.
+
+**Proof:** isolated roots with two repos, a linked worktree and a nested repo;
+default/root-change selection excludes the worktree, manual mode selects across
+roots/subfolders, aliases deduplicate, errors retain entries, and reads launch
+nothing. Rust/Swift DTO fixtures agree. CLI edits update the existing Portfolio
+and repo menus; Desktop edits read back identically from CLI. Switch modes and
+remove membership while retaining an open conversation/draft. Run focused Rust
+portfolio tests and existing PortfolioServiceTests/RepoScannerTests replacements,
+WorkNavigationTests and DTO fixtures; gate owns wider suites. Native review shows
+configuration of both modes entirely from Portfolio, CLI readback of the same
+selection, and retained Work. Multiple discovery roots are deferred. No live
+migration or cleanup is authorized.
 
 ## Done when / unattended gate
 

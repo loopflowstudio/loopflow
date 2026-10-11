@@ -34,3 +34,17 @@ Accepted direction and implementation evidence live in `get-me-using-lf.md`.
   separate unplaced-Task preparation design is outstanding.
 - Inventory and unknown membership remain internally. Navigation suppression changes
   neither historical records nor retained surface ownership.
+
+## Portfolio scope — October 11
+
+Jack Heart included lf-owned portfolio management and the existing Portfolio UI
+in LOO-462. The plan proposes `lf portfolio`, immediate-child folder scanning,
+manual-only membership across arbitrary directories, and explicit one-time import
+of saved Desktop membership. These are reversible choices; no recursive discovery,
+folder exclusions, multiple named portfolios or repository-DAG revival is required.
+
+Jack Heart selected the existing Portfolio view as the primary configuration UI,
+explicitly calling the lf API for reads and mutations. No Swift configuration
+writer or independent scanner. Jack raised multiple roots as optional/probably
+unnecessary; defer them. Manual selection of repos across directories remains
+in scope and does not require multiple discovery roots.

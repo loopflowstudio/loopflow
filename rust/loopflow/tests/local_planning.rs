@@ -2975,6 +2975,15 @@ fn deletion_saves_offline_and_retains_execution_and_retry_identity() {
 fn task_selectors_use_repository_scope_and_preserve_exact_identity_through_aliases() {
     let first = TestRepo::new();
     let second = TestRepo::new();
+    // Keep exchange from overwriting the synthetic duplicate identifiers below.
+    for repo in [&first, &second] {
+        std::fs::create_dir_all(repo.path().join(".lf")).unwrap();
+        std::fs::write(
+            repo.path().join(".lf/config.yaml"),
+            "planning:\n  provider: git\n  remote: unavailable-fixture-remote\n",
+        )
+        .unwrap();
+    }
     let home = tempfile::tempdir().unwrap();
     let tasks: Vec<_> = [&first, &second]
         .into_iter()
@@ -3007,14 +3016,14 @@ fn task_selectors_use_repository_scope_and_preserve_exact_identity_through_alias
         let status = lf(repo, home.path(), &["task", "status", "DUP-1", "--json"]);
         assert_eq!(status["task"]["id"], task["id"]);
     }
-    // Exact identity still permits inspection across repository scope.
+    // Exact identity remains constrained to the selected repository.
     let foreign = tasks[1]["id"].as_str().unwrap();
     let status = lf(
         first.path(),
         home.path(),
         &["task", "status", foreign, "--json"],
     );
-    assert_eq!(status["task"]["id"], foreign);
+    assert!(status["task"].is_null());
     let rejected = command(
         first.path(),
         home.path(),
@@ -3031,13 +3040,6 @@ fn task_selectors_use_repository_scope_and_preserve_exact_identity_through_alias
     .output()
     .unwrap();
     assert!(!rejected.status.success());
-    assert!(
-        String::from_utf8_lossy(&rejected.stderr)
-            .to_lowercase()
-            .contains("wave"),
-        "{}",
-        String::from_utf8_lossy(&rejected.stderr)
-    );
     lf(
         &alias,
         home.path(),

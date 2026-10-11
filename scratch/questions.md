@@ -166,3 +166,10 @@ in shared planning; the existing no-owner first-start refusal then blocks launch
 Jack Heart subsequently selected minimum admission in LOO-427, superseding the
 LOO-414 dependency for ordinary first start. The slice above owns the repair;
 LOO-414 retains unavailable-authority recovery. Passing gate remains required.
+
+## Parent sync — October 11
+
+The parent selector fixture expected exact Task IDs to bypass repository scope.
+LOO-427 retains scoped full-ID resolution, including admission requests. Canonical
+repository aliases are accepted within that scope; the imported fixture now
+expects no Task when an exact ID belongs to a different repository.

@@ -115,3 +115,5 @@ Check: `scripts/test_desktop.sh --filter 'WorkCacheTests|WorkDestinationTests|Wo
 No full-pass receipt is claimed. Linux reconnect/installation remain CI-owned;
 native/configured proof retains the accepted owners. Generated installed context
 still exceeds its budget; authored notes fit, with no installation/history edits.
+
+Check: `cargo test -p loopflow --test local_planning task_selectors_use_repository_scope_and_preserve_exact_identity_through_aliases -- --exact` (LF_* unset, stdin closed) — PASS, 1 test; initial failures exposed parent scope expectations and exchange overwriting synthetic fixture data, repaired; broader checks remain gate/CI-owned.

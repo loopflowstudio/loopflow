@@ -32,6 +32,18 @@ impl Fixture {
         }
     }
 
+    pub(super) fn retained_task(
+        &self,
+        repo: &std::path::Path,
+        selector: &str,
+    ) -> crate::store::PmTaskRecord {
+        loopflow_test_support::retained_task_input(
+            &self.database,
+            &repo.to_string_lossy(),
+            selector,
+        )
+    }
+
     pub(super) fn wave_refresh_at(&self, wave: &Wave) -> Option<i64> {
         rusqlite::Connection::open(&self.database)
             .unwrap()
@@ -155,4 +167,31 @@ impl Drop for PlanningEnvironment {
             }
         }
     }
+}
+
+/// Refresh through the actual acquisition path, then retain its input for replay.
+pub(crate) async fn refresh_task_input(
+    repo: &std::path::Path,
+    selector: &str,
+    refresh: super::PmRefresh,
+) -> crate::ops::OpsResult<crate::store::PmTaskRecord> {
+    let read = super::inspect_task_planning_async(repo, selector, refresh).await?;
+    if read.observation.state != crate::store::PlanningState::Available {
+        return Err(crate::ops::OpsError::Message(
+            read.refresh_error.unwrap_or_else(|| {
+                format!(
+                    "Task {selector:?} planning is {:?}; refresh planning",
+                    read.observation.state
+                )
+            }),
+        ));
+    }
+    let store = super::pm_store().await?;
+    let database = store.sqlite.home_dir().unwrap().join("loopflow.db");
+    let scope = crate::repository::CanonicalRepo::discover(repo).unwrap();
+    Ok(loopflow_test_support::retained_task_input(
+        &database,
+        &scope.to_string(),
+        selector,
+    ))
 }

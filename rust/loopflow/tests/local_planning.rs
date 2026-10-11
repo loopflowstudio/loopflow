@@ -2351,11 +2351,12 @@ fn rotation_saves_membership_and_pending_effects_offline() {
                 [successor.as_str()],
             )
             .unwrap();
-            let mut echo = store
-                .pm_task_observation(&canonical.to_string(), "linear", "provider-issue")
-                .unwrap()
-                .record
-                .unwrap();
+            let mut echo: loopflow::store::PmTaskRecord =
+                loopflow_test_support::retained_task_input(
+                    &home.path().join("loopflow.db"),
+                    &canonical.to_string(),
+                    "provider-issue",
+                );
             let successor_plan = store.project(&successor).unwrap().unwrap();
             let project = echo.project.as_mut().unwrap();
             project.id = "exported-successor".into();
@@ -2419,11 +2420,12 @@ fn rotation_saves_membership_and_pending_effects_offline() {
             pending
         );
         if mapped {
-            let mut remote = store
-                .pm_task_observation(&canonical.to_string(), "linear", "provider-issue")
-                .unwrap()
-                .record
-                .unwrap();
+            let mut remote: loopflow::store::PmTaskRecord =
+                loopflow_test_support::retained_task_input(
+                    &home.path().join("loopflow.db"),
+                    &canonical.to_string(),
+                    "provider-issue",
+                );
             let project = remote.project.as_mut().unwrap();
             project.id = "third-provider-project".into();
             project.name = "Another plan".into();

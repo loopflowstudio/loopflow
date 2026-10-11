@@ -24,8 +24,8 @@ use crate::provider_auth::{
 };
 use crate::repository::RepoId;
 use crate::store::{
-    open_existing_store, open_store, PlanningState, PmSnapshotRow, PmTaskObservation, PmTaskRecord,
-    ProviderToken, ProviderTokenReplacement, StorageConfig, Store,
+    open_existing_store, open_store, LinearIssueEvidence, PlanningState, PmSnapshotRow,
+    PmTaskRecord, ProviderToken, ProviderTokenReplacement, StorageConfig, Store,
 };
 use crate::work::task::comment::TaskComment;
 use crate::work::task::Task;
@@ -595,8 +595,6 @@ mod task_comments_tests;
 
 /// Past this age an Auto read opportunistically refreshes before serving.
 pub(crate) const PM_SOFT_STALE_SECS: i64 = 60 * 60; // 1 hour
-/// Past this age a failed refresh is an error, not a silent cache fallback.
-const PM_HARD_STALE_SECS: i64 = 7 * 24 * 60 * 60; // 1 week
 /// Ceiling on an opportunistic refresh; exceeding it counts as a failure.
 const PM_REFRESH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
@@ -614,30 +612,6 @@ pub(crate) async fn refresh_wave(repo: &Path, wave: &str) -> OpsResult<()> {
             "Planning refresh exceeded its {}s deadline. Retry the PM operation; a pending credential write may still settle and will be re-read",
             PM_REFRESH_TIMEOUT.as_secs()
         ))),
-    }
-}
-
-/// How a read reconciles a cached snapshot of a given age, independent of I/O.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SnapshotPlan {
-    /// Serve the cache without touching the network.
-    ServeCache,
-    /// Refresh first. `hard` means a failed refresh is an error, not a fallback.
-    Refresh { hard: bool },
-}
-
-/// The freshness decision. `age` is `None` when no snapshot exists yet.
-fn plan_snapshot_read(mode: PmRefresh, age: Option<i64>) -> SnapshotPlan {
-    match mode {
-        PmRefresh::Never => SnapshotPlan::ServeCache,
-        PmRefresh::Force => SnapshotPlan::Refresh { hard: true },
-        PmRefresh::Auto => match age {
-            Some(age) if age < PM_SOFT_STALE_SECS => SnapshotPlan::ServeCache,
-            Some(age) => SnapshotPlan::Refresh {
-                hard: age >= PM_HARD_STALE_SECS,
-            },
-            None => SnapshotPlan::Refresh { hard: true },
-        },
     }
 }
 
@@ -1105,29 +1079,9 @@ pub fn list_pm_waves(repo: &Path) -> OpsResult<Vec<String>> {
         .collect())
 }
 
-/// Read planning under the existing managed freshness policy.
-pub(crate) async fn read_task_planning_async(
-    repo: &Path,
-    issue: &str,
-    refresh: PmRefresh,
-) -> OpsResult<PmTaskRecord> {
-    let read = inspect_task_planning_async(repo, issue, refresh).await?;
-    if read.observation.state == PlanningState::Available {
-        if let Some(record) = read.observation.record {
-            return Ok(record);
-        }
-    }
-    Err(OpsError::Message(read.refresh_error.unwrap_or_else(|| {
-        format!(
-            "Task {issue:?} planning is {:?}; refresh planning",
-            read.observation.state
-        )
-    })))
-}
-
 #[derive(Debug)]
 pub(crate) struct TaskPlanningInspection {
-    pub observation: PmTaskObservation,
+    pub observation: LinearIssueEvidence,
     pub refresh_error: Option<String>,
 }
 
@@ -1142,28 +1096,23 @@ pub(crate) async fn inspect_task_planning_async(
     require_linear_config(repo)?;
     let store = pm_store().await?;
     let existing = store
-        .pm_task_observation(&scope, "linear", issue)
+        .linear_issue_evidence(&scope, issue)
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?;
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    let age = existing
-        .record
-        .as_ref()
-        .map(|record| now - record.observed_at);
+    let age = existing.observed_at.map(|at| now - at);
     if existing.state == PlanningState::Removed
         || refresh == PmRefresh::Never
         || (existing.state == PlanningState::Available
-            && matches!(plan_snapshot_read(refresh, age), SnapshotPlan::ServeCache))
+            && refresh == PmRefresh::Auto
+            && age.is_some_and(|age| age < PM_SOFT_STALE_SECS))
     {
         return Ok(TaskPlanningInspection {
             observation: existing,
             refresh_error: None,
         });
     }
-    let selector = existing
-        .record
-        .as_ref()
-        .map_or(issue, |record| record.item.id.as_str());
+    let selector = existing.issue_id.as_deref().unwrap_or(issue);
     let fetch = async {
         let repository = resolve_repository_context(repo).await?;
         let mut observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
@@ -1172,19 +1121,25 @@ pub(crate) async fn inspect_task_planning_async(
             .issue_ownership(selector)
             .await
             .map_err(pm_to_ops)?;
-        let discovered_project = observation
+        let discovered_initiative = if let Some(project) = observation
             .as_ref()
             .and_then(|(_, project)| project.as_ref())
-            .or_else(|| {
-                existing
-                    .record
-                    .as_ref()
-                    .and_then(|record| record.project.as_ref())
-            });
+        {
+            Some(singular_project_initiative(project)?)
+        } else if let Some(project) = &existing.project_id {
+            let [initiative] = existing.initiative_ids.as_slice() else {
+                return Err(OpsError::Message(format!(
+                    "Linear Project {project} belongs to {} Initiatives; expected exactly one",
+                    existing.initiative_ids.len()
+                )));
+            };
+            Some(initiative.clone())
+        } else {
+            None
+        };
         let mut acquisition = None;
         let mut confirmed_wave = None;
-        if let Some(project) = discovered_project {
-            let initiative = singular_project_initiative(project)?;
+        if let Some(initiative) = discovered_initiative {
             let wave = wave_for_initiative(repo, &initiative)?;
             let locator = crate::work::wave::WaveLocator::discover(repo, &wave)
                 .map_err(|error| OpsError::Message(error.to_string()))?;
@@ -1210,9 +1165,9 @@ pub(crate) async fn inspect_task_planning_async(
             }
         }
         let Some((item, project)) = observation else {
-            if let Some(expected) = &existing.record {
+            if existing.issue_id.is_some() {
                 store
-                    .invalidate_pm_task(&scope, "linear", expected.clone(), acquisition)
+                    .invalidate_linear_issue(&scope, existing.clone(), acquisition)
                     .await
                     .map_err(|error| OpsError::Message(error.to_string()))?;
             }
@@ -1251,7 +1206,7 @@ pub(crate) async fn inspect_task_planning_async(
     };
     // Read again: an event may have invalidated the record while acquisition ran.
     let mut observation = store
-        .pm_task_observation(&scope, "linear", selector)
+        .linear_issue_evidence(&scope, selector)
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?;
     let refresh_error = match result {
@@ -1278,35 +1233,47 @@ pub(crate) async fn inspect_task_planning_async(
 }
 
 pub(crate) async fn acquire_task(repo: &Path, issue: &str, refresh: PmRefresh) -> OpsResult<Task> {
-    let record = read_task_planning_async(repo, issue, refresh).await?;
-    let item = record.item;
-    let project = record.project.ok_or_else(|| {
-        OpsError::Message(format!(
-            "task {} has no Project; planning can be inspected but managed work requires ownership",
-            item.identifier
-        ))
-    })?;
-    let initiative = singular_project_initiative(&project)?;
-    let wave = wave_for_initiative(repo, &initiative)?;
-    let team_id = repository_team_id(repo)?;
-    crate::pm::validate_project_ownership(&wave, &initiative, Some(&team_id), &project)
-        .map_err(|error| OpsError::Message(error.to_string()))?;
-    if item.team_id.as_deref() != Some(team_id.as_str()) {
+    let read = inspect_task_planning_async(repo, issue, refresh).await?;
+    let evidence = read.observation;
+    if evidence.state != PlanningState::Available {
+        return Err(OpsError::Message(read.refresh_error.unwrap_or_else(|| {
+            format!(
+                "Task {issue:?} planning is {:?}; refresh planning",
+                evidence.state
+            )
+        })));
+    }
+    let [initiative] = evidence.initiative_ids.as_slice() else {
         return Err(OpsError::Message(format!(
-            "task {} belongs to Team {}, expected repository Team {}",
-            item.identifier,
-            item.team_id.as_deref().unwrap_or("unmapped"),
-            team_id
+            "task {issue} has no Project with an unambiguous Initiative; planning can be inspected but managed work requires ownership"
+        )));
+    };
+    wave_for_initiative(repo, initiative)?;
+    let team = repository_team_id(repo)?;
+    if evidence.project_team_ids.as_slice() != [team.as_str()]
+        || evidence.team_id.as_deref() != Some(team.as_str())
+    {
+        return Err(OpsError::Message(format!(
+            "task {issue} and its Project must belong to repository Team {team}"
         )));
     }
     let store = pm_store().await?;
     let task = store
-        .get_task_by_issue(&item.id)
+        .get_task_by_issue(evidence.issue_id.as_deref().unwrap_or(issue))
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?
         .ok_or_else(|| {
             OpsError::Message("accepted planning did not retain the Task identity".into())
         })?;
+    let acquisition = store
+        .sqlite
+        .task_acquisition(&task.id)
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    if acquisition.state != PlanningState::Available {
+        return Err(OpsError::Message(format!(
+            "Task {issue} has invalid retained ownership; refresh planning"
+        )));
+    }
     Ok(task)
 }
 
@@ -3558,41 +3525,5 @@ mod tests {
         assert!(requests
             .iter()
             .any(|req| req.body.contains("commentCreate")));
-    }
-
-    #[test]
-    fn plan_snapshot_read_covers_every_band() {
-        use PmRefresh::{Auto, Force, Never};
-        use SnapshotPlan::{Refresh, ServeCache};
-
-        // Never never touches the network, at any age or with no snapshot.
-        assert_eq!(plan_snapshot_read(Never, None), ServeCache);
-        assert_eq!(
-            plan_snapshot_read(Never, Some(10 * PM_HARD_STALE_SECS)),
-            ServeCache
-        );
-        // Force always refreshes, and a failure is hard.
-        assert_eq!(plan_snapshot_read(Force, Some(0)), Refresh { hard: true });
-        assert_eq!(plan_snapshot_read(Force, None), Refresh { hard: true });
-        // Auto: fresh serves cache; soft-stale refreshes with fallback; hard-stale
-        // and a missing snapshot refresh hard.
-        assert_eq!(plan_snapshot_read(Auto, Some(0)), ServeCache);
-        assert_eq!(
-            plan_snapshot_read(Auto, Some(PM_SOFT_STALE_SECS - 1)),
-            ServeCache
-        );
-        assert_eq!(
-            plan_snapshot_read(Auto, Some(PM_SOFT_STALE_SECS)),
-            Refresh { hard: false }
-        );
-        assert_eq!(
-            plan_snapshot_read(Auto, Some(PM_HARD_STALE_SECS - 1)),
-            Refresh { hard: false }
-        );
-        assert_eq!(
-            plan_snapshot_read(Auto, Some(PM_HARD_STALE_SECS)),
-            Refresh { hard: true }
-        );
-        assert_eq!(plan_snapshot_read(Auto, None), Refresh { hard: true });
     }
 }

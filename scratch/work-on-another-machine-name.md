@@ -160,8 +160,8 @@ retains pending work; reconnect acquires before publishing. No agent turn is rep
 ## Implementation boundary — 2026-10-10
 
 TaskPlan/ProjectPlan and live Project iteration are removed. TaskComment is domain
-owned; comment observations are adapter-internal. Public content reads return Work;
-acquisition still reconstructs provider records; status/admission read narrow evidence.
+owned; comment observations are adapter-internal. Public content reads return Work; acquisition, status and admission read narrow
+retained evidence.
 Project now stores description,
 workflow, KRs and metric targets directly. The shared local/import writer and local
 readers no longer parse/render stored Markdown; prompt assembly renders on demand.
@@ -212,9 +212,9 @@ Task delivery already uses its accepted-into-Work revision fence. The preservati
 fixture now compares against the Task returned by insertion, not its unsaved
 constructor revision.
 
-**Delete — do not maintain:** escaping `PmTaskRecord`/`PmTaskObservation`, the
-duplicate provider hierarchy and typed journal vocabularies in the audit. Public
-snapshot inventory reads are deleted; acquisition confinement remains incomplete. Next come bindings, ordinary
+**Delete — do not maintain:** escaping `PmTaskRecord`, the duplicate provider
+hierarchy and typed journal vocabularies in the audit. Public snapshot inventory
+reads and ordinary Task provider reconstruction are deleted. Next come bindings, ordinary
 follow-ups, cron and the remaining audit. No partial publication or readiness.
 Earlier reader tracing, fixture corrections and exact proof limits remain at
 `dc0d82caa2:scratch/work-on-another-machine-name.md`, the two canonical-reader
@@ -248,9 +248,13 @@ Team, invalidation, removal and age. Unrelated malformed content cannot erase th
 facts. Review repaired the canonical Project join: a missing issue cannot hide
 independent archival or unresolved membership. Pending membership only affects display.
 Populated released-frontier and stale-response tests cover this boundary.
-The upstream merge omitted peer planning from Work-watch's clock; it now uses the
-planning cadence. Acquisition's provider-returning API, persistent hierarchy,
-typed journal, bindings, follow-ups and cron still precede gate and review.
+Task acquisition now returns Work using narrow retained Linear ownership/age.
+`PmTaskObservation`, `pm_task_observation_in` and `read_task_planning_async` are
+deleted. Revision-fenced absence, cancellation and foreign/unmapped facts survive;
+fixtures replay retained inputs directly. Rollback proof now includes canonical
+Project, provider input and Wave acquisition age. The persistent hierarchy, typed
+journal, bindings, follow-ups and cron still precede gate and review.
+The upstream Work-watch clock now includes the planning cadence.
 
 Main #1522 entered at `7d9bf0a4d8`, adding Claude recorded-answer Flow settlement.
 That merge establishes no fresh planning gate acceptance and grants no replay of
@@ -373,9 +377,9 @@ Writer transport/causal proofs: `eda4a98097` in this plan.
   republication. No readiness or landing follows from this persistence checkpoint.
 
 Prior applicable writer, released-seeding, DTO, rotation and Swift checks remain at
-`9dbd6fc2d8` in this plan; admission/lookup/launch checks at `f025e9b7ab`.
+`9dbd6fc2d8` and `dfd3b80611` in this plan; admission/lookup/launch checks at `f025e9b7ab`.
 Full audit, affected gate, fresh HTML and republication remain pending.
 
-Checks: `cargo test -p loopflow --test planning_exchange_tests` (4 passed), `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `cargo build -p loopflow --bin lf` passed with inherited `LF_*` cleared and stdin closed; `lf context` reports both scopes within limits.
+Checks: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo build -p loopflow --bin lf`, acquisition lib suite (19), SQL/migration/rollback cases (10), and `cargo test -p loopflow --test planning_lookup_tests` (1) pass; inherited LF authority cleared, stdin closed. Full gate deferred; context within limits.
 
 Earlier transport evidence: `0181133849` in this plan.

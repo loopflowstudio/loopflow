@@ -569,9 +569,11 @@ fn seed_provider_task(
         }));
         drop(state);
         super::refresh_wave(repo, "product").await?;
-        Ok(super::read_task_planning_async(repo, &id, PmRefresh::Force)
-            .await?
-            .item)
+        Ok(
+            super::test_fixture::refresh_task_input(repo, &id, PmRefresh::Force)
+                .await?
+                .item,
+        )
     })
 }
 
@@ -1335,17 +1337,7 @@ fn task_completion_ingestion_preserves_baseline_and_atomically_adopts_linear() {
     with_planning_task(|runtime, fixture, repo, task, state| {
         // Completion attempts foreground delivery; keep the receipt pending for ingestion.
         runtime.block_on(async { state.lock().await.field_outage = true });
-        let mut remote = fixture
-            .store
-            .sqlite
-            .pm_task_observation(
-                &repo.display().to_string(),
-                "linear",
-                task.linear_id.as_ref().unwrap().as_str(),
-            )
-            .unwrap()
-            .record
-            .unwrap();
+        let mut remote = fixture.retained_task(repo, task.linear_id.as_ref().unwrap().as_str());
         crate::ops::task::task_complete(repo, task.id.as_str(), Some("Saved offline")).unwrap();
         let delivery = fixture
             .store
@@ -1546,16 +1538,7 @@ fn task_completion_late_acknowledgement_preserves_explicit_reopening() {
             .unwrap();
         assert_ne!(reopened.id, completed.id);
         let mut late = fixture
-            .store
-            .sqlite
-            .pm_task_observation(
-                &repo.display().to_string(),
-                "linear",
-                task.linear_id.as_ref().unwrap().as_str(),
-            )
-            .unwrap()
-            .record
-            .unwrap()
+            .retained_task(repo, task.linear_id.as_ref().unwrap().as_str())
             .item;
         late.state = Some("canceled".into());
         late.revision = Some("2026-10-08T03:00:00Z".into());
@@ -2272,16 +2255,7 @@ fn task_completion_lost_reply_adopts_linear_reopening() {
         );
         // A delayed matching readback cannot erase an already observed collision.
         let mut late = fixture
-            .store
-            .sqlite
-            .pm_task_observation(
-                &repo.display().to_string(),
-                "linear",
-                task.linear_id.as_ref().unwrap().as_str(),
-            )
-            .unwrap()
-            .record
-            .unwrap()
+            .retained_task(repo, task.linear_id.as_ref().unwrap().as_str())
             .item;
         late.state = Some("completed".into());
         late.completed = true;
@@ -4788,7 +4762,7 @@ fn task_field_delivery_requires_revision_accepted_into_work() {
                     let mut provider = state.lock().await;
                     mark_issue_updated(&mut provider.issues[0]);
                     drop(provider);
-                    super::read_task_planning_async(repo, issue, PmRefresh::Force)
+                    super::test_fixture::refresh_task_input(repo, issue, PmRefresh::Force)
                         .await
                         .unwrap();
                 }
@@ -4831,13 +4805,7 @@ fn task_field_delivery_requires_revision_accepted_into_work() {
                     .unwrap();
                 assert!(!attempted);
                 if foreign {
-                    let retained = fixture
-                        .store
-                        .sqlite
-                        .pm_task_observation(&repo.display().to_string(), "linear", issue)
-                        .unwrap()
-                        .record
-                        .unwrap();
+                    let retained = fixture.retained_task(repo, issue);
                     assert_eq!(retained.item.project_id.as_deref(), Some("foreign-project"));
                     assert!(!fixture
                         .store

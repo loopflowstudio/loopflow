@@ -199,3 +199,41 @@ pub fn journal_files_under(root: &Path) -> Vec<PathBuf> {
     found.sort();
     found
 }
+
+/// Read retained provider input for replay and preservation assertions in fixtures.
+/// This never resolves Work or makes an acquisition/admission decision.
+pub fn retained_task_input<T: serde::de::DeserializeOwned>(
+    database: &Path,
+    repo: &str,
+    selector: &str,
+) -> T {
+    let conn = rusqlite::Connection::open(database).expect("fixture database");
+    retained_task_input_in(&conn, repo, selector)
+}
+
+pub fn retained_task_input_in<T: serde::de::DeserializeOwned>(
+    conn: &rusqlite::Connection,
+    repo: &str,
+    selector: &str,
+) -> T {
+    let (item, project, observed_at): (String, Option<String>, i64) = conn
+        .query_row(
+            "SELECT i.body,p.body,i.observed_at FROM pm_items i LEFT JOIN pm_projects p
+         ON p.repo=i.repo AND p.provider=i.provider AND p.id=i.project_id
+         WHERE i.repo=?1 AND i.provider='linear' AND (i.id=?2 OR i.identifier=?2)",
+            rusqlite::params![repo, selector],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .expect("retained fixture input");
+    let mut item: serde_json::Value = serde_json::from_str(&item).expect("issue input");
+    let project: serde_json::Value = project
+        .map(|body| serde_json::from_str(&body).expect("project input"))
+        .unwrap_or(serde_json::Value::Null);
+    if !project.is_null() {
+        item["project"] = project["slug"].clone();
+    }
+    serde_json::from_value(
+        serde_json::json!({"item":item,"project":project,"observed_at":observed_at}),
+    )
+    .expect("typed fixture input")
+}

@@ -3012,7 +3012,7 @@ pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
         } else if let Some(read) = inspection {
             // Foreign observations remain acquisition evidence, not owned Work.
             result.planning_state = read.observation.state;
-            result.observed_at = read.observation.record.map(|record| record.observed_at);
+            result.observed_at = read.observation.observed_at;
         }
         if result.planning_error.is_some()
             && result.planning_state == crate::store::PlanningState::Available

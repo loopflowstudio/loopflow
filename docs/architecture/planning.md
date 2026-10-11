@@ -102,6 +102,10 @@ ambiguous references return candidates instead of selecting a Task.
 Saved Tasks use the same checkout preparation and placement transaction with or
 without Linear. Checkout reads retained planning and branch metadata; it does not
 refresh Linear. An unknown provider alias still needs initial acquisition.
+Acquisition returns the saved Task. Its freshness and ownership lookup reads only
+retained Linear identity, revision, membership, invalidation, removal and age;
+it never reconstructs provider content. A delayed absent response invalidates only
+the exact issue revision and observation age it queried.
 Preparation uses the saved Task identity and title directly. New branch names retain
 the full Task UUID; default checkout names use up to four title words and an ID
 suffix. Retained provider branch names take precedence.

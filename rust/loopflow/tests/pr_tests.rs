@@ -491,15 +491,11 @@ fn task_snapshot_reads_its_current_parent_project() {
     repo.create_branch(branch);
     let task = register_task_with_pr(home.path(), repo.path(), branch, &base);
     let runtime = tokio::runtime::Runtime::new().expect("task runtime");
-    let mut observation = runtime
-        .block_on(task.store.pm_task_observation(
-            &repo.path().to_string_lossy(),
-            "linear",
-            &task.task.identifier,
-        ))
-        .unwrap()
-        .record
-        .unwrap();
+    let mut observation: loopflow::store::PmTaskRecord = loopflow_test_support::retained_task_input(
+        &task.database,
+        &repo.path().to_string_lossy(),
+        &task.task.identifier,
+    );
     let project = observation.project.as_mut().unwrap();
     project.slug = "current-project".into();
     project.revision = Some("2026-10-05T12:00:00Z".into());
@@ -919,15 +915,11 @@ fn task_pr_missing_cached_linear_url_refuses_before_remote_mutation() {
     push_branch(&repo, branch);
     let task = register_task_with_pr(home.path(), repo.path(), branch, &base);
     let runtime = tokio::runtime::Runtime::new().expect("task runtime");
-    let mut observation = runtime
-        .block_on(task.store.pm_task_observation(
-            &repo.path().to_string_lossy(),
-            "linear",
-            &task.task.identifier,
-        ))
-        .unwrap()
-        .record
-        .unwrap();
+    let mut observation: loopflow::store::PmTaskRecord = loopflow_test_support::retained_task_input(
+        &task.database,
+        &repo.path().to_string_lossy(),
+        &task.task.identifier,
+    );
     observation.item.url = None;
     observation.item.revision = Some("2026-09-30T00:00:00Z".into());
     runtime

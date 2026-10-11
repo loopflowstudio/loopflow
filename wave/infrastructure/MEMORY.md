@@ -622,11 +622,11 @@ Execution/attempts stay local; retain causal losers and uncertainty. Before revi
 finish private observations, typed journal, bindings, ordinary follow-ups and cron.
 
 `e3a3479df7` removes public snapshot reads; portfolio ownership reads use
-SQLite claims. Task status/admission now read narrow evidence;
-acquisition still reconstructs provider records. Delivery needs
+SQLite claims. Task status, admission and acquisition read narrow
+Linear evidence; ordinary provider readback is deleted. Delivery needs
 accepted revision plus archive/membership eligibility; foreign facts grant no ownership.
 Missing issue content cannot hide a canonical parent's archive or membership
-dispute. Independent observations keep their original ages. Typed values alone
+dispute. Independent observations retain their ages. Typed values alone
 are not a typed journal: field-addressed mutations still require reduction.
 Jack Heart excludes old-version support; an unshipped Git encoding needs no dual
 decoder. Released SQLite preservation and selected-format causal history remain

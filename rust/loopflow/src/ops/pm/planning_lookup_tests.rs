@@ -6,8 +6,9 @@ use axum::http::StatusCode;
 use serde_json::json;
 use tokio::sync::Barrier;
 
+use super::test_fixture::refresh_task_input;
 use super::test_fixture::{now, Fixture, PlanningEnvironment};
-use super::{inspect_task_planning_async, read_task_planning_async, PmRefresh, PM_TEST_CONTEXT};
+use super::{inspect_task_planning_async, PmRefresh, PM_TEST_CONTEXT};
 use crate::id::WaveId;
 use crate::pm::test_server::{json_response, spawn, QueuedResponse};
 use crate::pm::PmSnapshot;
@@ -75,7 +76,7 @@ async fn fresh_lookup_and_wave_list_share_planning_without_execution() {
     .await;
     PM_TEST_CONTEXT
         .scope(fixture.context(&url), async {
-            let record = read_task_planning_async(&repo, "FIX-1", PmRefresh::Auto)
+            let record = refresh_task_input(&repo, "FIX-1", PmRefresh::Auto)
                 .await
                 .unwrap();
             assert_eq!(record.item.name, "Inspect a planning-only Task");
@@ -124,7 +125,7 @@ async fn fresh_lookup_and_wave_list_share_planning_without_execution() {
                 .put_pm_snapshot(snapshot.clone(), None)
                 .await
                 .unwrap();
-            let refreshed = read_task_planning_async(&repo, "FIX-1", PmRefresh::Force)
+            let refreshed = refresh_task_input(&repo, "FIX-1", PmRefresh::Force)
                 .await
                 .unwrap();
             assert_eq!(refreshed.project, record.project);
@@ -158,7 +159,7 @@ async fn fresh_lookup_and_wave_list_share_planning_without_execution() {
             snapshot.synced_at += 2;
             fixture.store.put_pm_snapshot(snapshot, None).await.unwrap();
             assert_eq!(
-                read_task_planning_async(&repo, "fix-1", PmRefresh::Never)
+                refresh_task_input(&repo, "fix-1", PmRefresh::Never)
                     .await
                     .unwrap(),
                 edited
@@ -280,7 +281,7 @@ async fn projectless_task_is_inspectable_but_cannot_resolve_managed_ownership() 
     .await;
     PM_TEST_CONTEXT
         .scope(fixture.context(&url), async {
-            let record = read_task_planning_async(&repo, "FIX-1", PmRefresh::Auto)
+            let record = refresh_task_input(&repo, "FIX-1", PmRefresh::Auto)
                 .await
                 .unwrap();
             assert!(record.project.is_none());
@@ -324,16 +325,16 @@ async fn missing_and_unavailable_tasks_do_not_create_planning_or_execution() {
         .await;
         PM_TEST_CONTEXT
             .scope(fixture.context(&url), async {
-                let error = read_task_planning_async(&repo, "FIX-1", PmRefresh::Auto)
+                let error = refresh_task_input(&repo, "FIX-1", PmRefresh::Auto)
                     .await
                     .unwrap_err();
                 assert!(error.to_string().contains(diagnostic), "{error}");
                 assert!(fixture
                     .store
-                    .pm_task_observation(&repo.to_string_lossy(), "linear", "FIX-1")
+                    .linear_issue_evidence(&repo.to_string_lossy(), "FIX-1")
                     .await
                     .unwrap()
-                    .record
+                    .issue_id
                     .is_none());
                 assert!(fixture.store.list_tasks(None).await.unwrap().is_empty());
             })
@@ -367,7 +368,7 @@ async fn failed_refresh_preserves_the_last_observation_and_its_age() {
     .await;
     PM_TEST_CONTEXT
         .scope(fixture.context(&url), async {
-            let original = read_task_planning_async(&repo, "FIX-1", PmRefresh::Auto)
+            let original = refresh_task_input(&repo, "FIX-1", PmRefresh::Auto)
                 .await
                 .unwrap();
             let inspection = inspect_task_planning_async(&repo, "FIX-1", PmRefresh::Force)
@@ -377,16 +378,20 @@ async fn failed_refresh_preserves_the_last_observation_and_its_age() {
                 inspection.observation.state,
                 crate::store::PlanningState::Unavailable
             );
-            assert_eq!(inspection.observation.record.as_ref(), Some(&original));
+            assert_eq!(
+                inspection.observation.observed_at,
+                Some(original.observed_at)
+            );
+            assert_eq!(fixture.retained_task(&repo, "issue-1"), original);
             assert!(inspection
                 .refresh_error
                 .unwrap()
                 .contains("provider unavailable"));
-            assert!(read_task_planning_async(&repo, "FIX-1", PmRefresh::Force)
+            assert!(refresh_task_input(&repo, "FIX-1", PmRefresh::Force)
                 .await
                 .is_err());
             assert_eq!(
-                read_task_planning_async(&repo, "issue-1", PmRefresh::Never)
+                refresh_task_input(&repo, "issue-1", PmRefresh::Never)
                     .await
                     .unwrap(),
                 original
@@ -437,12 +442,12 @@ async fn omitted_detail_fields_do_not_clear_known_planning() {
     let (url, _) = spawn(responses).await;
     PM_TEST_CONTEXT
         .scope(fixture.context(&url), async {
-            let original = read_task_planning_async(&repo, "FIX-1", PmRefresh::Auto)
+            let original = refresh_task_input(&repo, "FIX-1", PmRefresh::Auto)
                 .await
                 .unwrap();
             for field in missing_fields {
                 let field = field.strip_prefix("project.").unwrap_or(field);
-                let error = read_task_planning_async(&repo, "FIX-1", PmRefresh::Force)
+                let error = refresh_task_input(&repo, "FIX-1", PmRefresh::Force)
                     .await
                     .unwrap_err();
                 assert!(
@@ -452,7 +457,7 @@ async fn omitted_detail_fields_do_not_clear_known_planning() {
                     "{error}"
                 );
                 assert_eq!(
-                    read_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
+                    refresh_task_input(&repo, "FIX-1", PmRefresh::Never)
                         .await
                         .unwrap(),
                     original
@@ -481,10 +486,10 @@ async fn missing_detail_invalidates_cached_admission_without_claiming_deletion()
     .await;
     PM_TEST_CONTEXT
         .scope(fixture.context(&url), async {
-            let original = read_task_planning_async(&repo, "FIX-1", PmRefresh::Auto)
+            let original = refresh_task_input(&repo, "FIX-1", PmRefresh::Auto)
                 .await
                 .unwrap();
-            assert!(read_task_planning_async(&repo, "FIX-1", PmRefresh::Force)
+            assert!(refresh_task_input(&repo, "FIX-1", PmRefresh::Force)
                 .await
                 .is_err());
             fixture
@@ -492,13 +497,13 @@ async fn missing_detail_invalidates_cached_admission_without_claiming_deletion()
                 .put_pm_snapshot(snapshot(wave.id(), &original), None)
                 .await
                 .unwrap();
-            assert!(read_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
+            assert!(refresh_task_input(&repo, "FIX-1", PmRefresh::Never)
                 .await
                 .is_err());
             assert_ne!(
                 fixture
                     .store
-                    .pm_task_observation(&repo.to_string_lossy(), "linear", "FIX-1")
+                    .linear_issue_evidence(&repo.to_string_lossy(), "FIX-1")
                     .await
                     .unwrap()
                     .state,
@@ -564,14 +569,15 @@ async fn automatic_refresh_reports_failure_with_retained_observation_age() {
                 crate::store::PlanningState::Unavailable
             );
             assert!(read.refresh_error.unwrap().contains("provider unavailable"));
-            assert_eq!(read.observation.record.as_ref(), Some(&record));
-            assert!(read_task_planning_async(&repo, "FIX-1", PmRefresh::Auto)
+            assert_eq!(read.observation.observed_at, Some(record.observed_at));
+            assert_eq!(fixture.retained_task(&repo, "issue-1"), record);
+            assert!(refresh_task_input(&repo, "FIX-1", PmRefresh::Auto)
                 .await
                 .unwrap_err()
                 .to_string()
                 .contains("provider unavailable"));
             assert_eq!(
-                read_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
+                refresh_task_input(&repo, "FIX-1", PmRefresh::Never)
                     .await
                     .unwrap(),
                 record
@@ -596,7 +602,7 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
     .await;
     PM_TEST_CONTEXT
         .scope(fixture.context(&url), async {
-            let original = read_task_planning_async(&repo, "FIX-1", PmRefresh::Auto)
+            let original = refresh_task_input(&repo, "FIX-1", PmRefresh::Auto)
                 .await
                 .unwrap();
             let scope = repo.to_string_lossy();
@@ -623,7 +629,7 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
                 .await
                 .unwrap();
             assert_eq!(
-                read_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
+                refresh_task_input(&repo, "FIX-1", PmRefresh::Never)
                     .await
                     .unwrap(),
                 confirmed
@@ -646,7 +652,7 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
                 .await
                 .is_err());
             assert_eq!(
-                read_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
+                refresh_task_input(&repo, "FIX-1", PmRefresh::Never)
                     .await
                     .unwrap(),
                 confirmed
@@ -663,13 +669,13 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
                 .put_pm_task(&scope, "linear", delayed, None, None)
                 .await
                 .unwrap();
-            assert!(read_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
+            assert!(refresh_task_input(&repo, "FIX-1", PmRefresh::Never)
                 .await
                 .is_err());
             assert_ne!(
                 fixture
                     .store
-                    .pm_task_observation(&repo.to_string_lossy(), "linear", "FIX-1")
+                    .linear_issue_evidence(&repo.to_string_lossy(), "FIX-1")
                     .await
                     .unwrap()
                     .state,
@@ -692,7 +698,7 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
                     .unwrap();
             }
             assert_eq!(
-                read_task_planning_async(&repo, "issue-1", PmRefresh::Never)
+                refresh_task_input(&repo, "issue-1", PmRefresh::Never)
                     .await
                     .unwrap(),
                 confirmed
@@ -703,7 +709,7 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
                 .observe_pm_issue_change("issue-1", None, false)
                 .await
                 .unwrap();
-            assert!(read_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
+            assert!(refresh_task_input(&repo, "FIX-1", PmRefresh::Never)
                 .await
                 .is_err());
             fixture
@@ -712,7 +718,7 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
                 .await
                 .unwrap();
             assert_eq!(
-                read_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
+                refresh_task_input(&repo, "FIX-1", PmRefresh::Never)
                     .await
                     .unwrap(),
                 confirmed
@@ -729,13 +735,13 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
                 .await
                 .unwrap();
             fixture.store.put_pm_snapshot(list, None).await.unwrap();
-            assert!(read_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
+            assert!(refresh_task_input(&repo, "FIX-1", PmRefresh::Never)
                 .await
                 .is_err());
             assert_ne!(
                 fixture
                     .store
-                    .pm_task_observation(&repo.to_string_lossy(), "linear", "FIX-1")
+                    .linear_issue_evidence(&repo.to_string_lossy(), "FIX-1")
                     .await
                     .unwrap()
                     .state,
@@ -755,7 +761,7 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
                 .put_pm_task(&scope, "linear", uncached, None, None)
                 .await
                 .unwrap();
-            assert!(read_task_planning_async(&repo, "FIX-2", PmRefresh::Never)
+            assert!(refresh_task_input(&repo, "FIX-2", PmRefresh::Never)
                 .await
                 .is_err());
             for task in fixture.store.list_tasks(None).await.unwrap() {
@@ -786,12 +792,20 @@ async fn inspection_retains_invalid_removed_and_absent_facts_without_admitting_w
     .await;
     PM_TEST_CONTEXT
         .scope(fixture.context(&url), async {
-            let original = read_task_planning_async(&repo, "FIX-1", PmRefresh::Auto)
+            let original = refresh_task_input(&repo, "FIX-1", PmRefresh::Auto)
                 .await
                 .unwrap();
             fixture
                 .store
-                .invalidate_pm_task(&repo.to_string_lossy(), "linear", original.clone(), None)
+                .invalidate_linear_issue(
+                    &repo.to_string_lossy(),
+                    fixture
+                        .store
+                        .linear_issue_evidence(&repo.to_string_lossy(), "issue-1")
+                        .await
+                        .unwrap(),
+                    None,
+                )
                 .await
                 .unwrap();
             let invalid = inspect_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
@@ -801,8 +815,9 @@ async fn inspection_retains_invalid_removed_and_absent_facts_without_admitting_w
                 invalid.observation.state,
                 crate::store::PlanningState::Invalid
             );
-            assert_eq!(invalid.observation.record.as_ref(), Some(&original));
-            assert!(read_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
+            assert_eq!(invalid.observation.observed_at, Some(original.observed_at));
+            assert_eq!(fixture.retained_task(&repo, "issue-1"), original);
+            assert!(refresh_task_input(&repo, "FIX-1", PmRefresh::Never)
                 .await
                 .is_err());
             let absent = inspect_task_planning_async(&repo, "FIX-1", PmRefresh::Force)
@@ -812,7 +827,8 @@ async fn inspection_retains_invalid_removed_and_absent_facts_without_admitting_w
                 absent.observation.state,
                 crate::store::PlanningState::Absent
             );
-            assert_eq!(absent.observation.record.as_ref(), Some(&original));
+            assert_eq!(absent.observation.observed_at, Some(original.observed_at));
+            assert_eq!(fixture.retained_task(&repo, "issue-1"), original);
             // Null is an absence observation, not a confirmed deletion receipt.
             fixture
                 .store
@@ -826,8 +842,9 @@ async fn inspection_retains_invalid_removed_and_absent_facts_without_admitting_w
                 removed.observation.state,
                 crate::store::PlanningState::Removed
             );
-            assert_eq!(removed.observation.record.as_ref(), Some(&original));
-            assert!(read_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
+            assert_eq!(removed.observation.observed_at, Some(original.observed_at));
+            assert_eq!(fixture.retained_task(&repo, "issue-1"), original);
+            assert!(refresh_task_input(&repo, "FIX-1", PmRefresh::Never)
                 .await
                 .is_err());
             for task in fixture.store.list_tasks(None).await.unwrap() {
@@ -862,7 +879,7 @@ async fn removal_during_absent_lookup_preserves_confirmed_evidence() {
     .await;
     PM_TEST_CONTEXT
         .scope(fixture.context(&url), async {
-            let original = read_task_planning_async(&repo, "FIX-1", PmRefresh::Auto)
+            let original = refresh_task_input(&repo, "FIX-1", PmRefresh::Auto)
                 .await
                 .unwrap();
             let (inspection, ()) = tokio::join!(
@@ -882,9 +899,13 @@ async fn removal_during_absent_lookup_preserves_confirmed_evidence() {
                 inspection.observation.state,
                 crate::store::PlanningState::Removed
             );
-            assert_eq!(inspection.observation.record.as_ref(), Some(&original));
+            assert_eq!(
+                inspection.observation.observed_at,
+                Some(original.observed_at)
+            );
+            assert_eq!(fixture.retained_task(&repo, "issue-1"), original);
             assert!(inspection.refresh_error.is_none());
-            assert!(read_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
+            assert!(refresh_task_input(&repo, "FIX-1", PmRefresh::Never)
                 .await
                 .is_err());
             for task in fixture.store.list_tasks(None).await.unwrap() {
@@ -912,7 +933,7 @@ async fn project_revisions_order_shared_facts_and_unordered_membership_stays_unr
     .await;
     PM_TEST_CONTEXT
         .scope(fixture.context(&url), async {
-            let original = read_task_planning_async(&repo, "FIX-1", PmRefresh::Auto)
+            let original = refresh_task_input(&repo, "FIX-1", PmRefresh::Auto)
                 .await
                 .unwrap();
             let mut list = snapshot(wave.id(), &original);
@@ -940,7 +961,7 @@ async fn project_revisions_order_shared_facts_and_unordered_membership_stays_unr
                 .put_pm_snapshot(list.clone(), None)
                 .await
                 .unwrap();
-            let stored = read_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
+            let stored = refresh_task_input(&repo, "FIX-1", PmRefresh::Never)
                 .await
                 .unwrap();
             assert_eq!(stored.project, newer.project);
@@ -999,10 +1020,11 @@ async fn project_revisions_order_shared_facts_and_unordered_membership_stays_unr
                 }
                 let evidence = fixture
                     .store
-                    .pm_task_observation(&repo.to_string_lossy(), "linear", "FIX-1")
+                    .linear_issue_evidence(&repo.to_string_lossy(), "FIX-1")
                     .await
                     .unwrap();
-                assert_eq!(evidence.record, Some(stored.clone()));
+                assert_eq!(evidence.observed_at, Some(stored.observed_at));
+                assert_eq!(fixture.retained_task(&repo, "issue-1"), stored);
                 assert_eq!(
                     evidence.state,
                     if revision != Some("2026-09-29T11:00:00Z") {
@@ -1018,13 +1040,13 @@ async fn project_revisions_order_shared_facts_and_unordered_membership_stays_unr
                 .put_pm_snapshot(list.clone(), None)
                 .await
                 .unwrap();
-            assert!(read_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
+            assert!(refresh_task_input(&repo, "FIX-1", PmRefresh::Never)
                 .await
                 .is_err());
             assert_ne!(
                 fixture
                     .store
-                    .pm_task_observation(&repo.to_string_lossy(), "linear", "FIX-1")
+                    .linear_issue_evidence(&repo.to_string_lossy(), "FIX-1")
                     .await
                     .unwrap()
                     .state,
@@ -1100,7 +1122,7 @@ async fn cold_detail_resolves_configured_wave_before_projecting() {
         .await;
         PM_TEST_CONTEXT
             .scope(fixture.context(&url), async {
-                read_task_planning_async(&repo, "FIX-1", PmRefresh::Force)
+                refresh_task_input(&repo, "FIX-1", PmRefresh::Force)
                     .await
                     .unwrap();
                 let original = fixture
@@ -1262,11 +1284,11 @@ async fn cancelled_acceptance(detail: bool) {
     assert!(recovered.moves.is_empty());
     let accepted = fixture
         .store
-        .pm_task_observation(&repo.to_string_lossy(), "linear", "FIX-1")
+        .linear_issue_evidence(&repo.to_string_lossy(), "FIX-1")
         .await
         .unwrap();
     assert!(
-        accepted.record.is_some(),
+        accepted.issue_id.is_some(),
         "cancelled caller's worker did not finish acceptance"
     );
     assert!(
@@ -1295,7 +1317,7 @@ async fn cold_detail_rechecks_team_after_acquiring_wave() {
     let record = PM_TEST_CONTEXT
         .scope(
             fixture.context(&url),
-            read_task_planning_async(&repo, "FIX-1", PmRefresh::Force),
+            refresh_task_input(&repo, "FIX-1", PmRefresh::Force),
         )
         .await
         .unwrap();
@@ -1326,7 +1348,7 @@ async fn delayed_absence_preserves_a_newer_accepted_task() {
     .await;
     PM_TEST_CONTEXT
         .scope(fixture.context(&url), async {
-            let mut confirmed = read_task_planning_async(&repo, "FIX-1", PmRefresh::Force)
+            let mut confirmed = refresh_task_input(&repo, "FIX-1", PmRefresh::Force)
                 .await
                 .unwrap();
             confirmed.item.revision = Some("2026-10-05T12:00:00Z".into());
@@ -1352,11 +1374,14 @@ async fn delayed_absence_preserves_a_newer_accepted_task() {
             // Stable-ID reobservation still finds a renamed Task after the requested identifier changes.
             let stored = fixture
                 .store
-                .pm_task_observation(&repo.to_string_lossy(), "linear", "issue-1")
+                .linear_issue_evidence(&repo.to_string_lossy(), "issue-1")
                 .await
                 .unwrap();
             assert_eq!(stored.state, crate::store::PlanningState::Available);
-            assert_eq!(stored.record.unwrap().item.identifier, "FIX-2");
+            assert_eq!(
+                fixture.retained_task(&repo, "issue-1").item.identifier,
+                "FIX-2"
+            );
             let inspection = inspection.unwrap();
             assert!(
                 inspection.refresh_error.is_none(),
@@ -1367,10 +1392,45 @@ async fn delayed_absence_preserves_a_newer_accepted_task() {
                 inspection.observation.state,
                 crate::store::PlanningState::Available
             );
-            assert_eq!(
-                inspection.observation.record.unwrap().item.identifier,
-                "FIX-2"
-            );
+            assert_eq!(inspection.observation.issue_id.as_deref(), Some("issue-1"));
         })
         .await;
+}
+
+#[tokio::test]
+async fn acquisition_reads_ownership_without_reconstructing_provider_content() {
+    let _lock = crate::journal::test_env_lock();
+    let _restore = PlanningEnvironment::isolate();
+    let fixture = Fixture::new().await;
+    std::env::set_var("LF_HOME", fixture.directory.path());
+    let (repo, wave) = fixture.planning_repo().await;
+    fixture.seed(now() + 3600).await;
+    let (url, _) = spawn(vec![
+        team_response(),
+        json_response(StatusCode::OK, issue(project())),
+        json_response(StatusCode::OK, issue(project())),
+    ])
+    .await;
+    PM_TEST_CONTEXT.scope(fixture.context(&url), async {
+        let task = super::acquire_task(&repo, "FIX-1", PmRefresh::Auto).await.unwrap();
+        let before = fixture.store.linear_issue_evidence(&repo.to_string_lossy(), "FIX-1").await.unwrap();
+        let project_before = fixture.store.get_project(&task.project_id).await.unwrap();
+        let wave_age = fixture.wave_refresh_at(&wave);
+        let conn = rusqlite::Connection::open(&fixture.database).unwrap();
+        conn.execute("UPDATE pm_items SET body=json_set(body,'$.name',json('[]'),'$.rank','unrelated bad content') WHERE id='issue-1'", []).unwrap();
+        conn.execute("UPDATE pm_projects SET body=json_set(body,'$.name',json('[]'),'$.krs','unrelated bad content') WHERE id='project-1'", []).unwrap();
+        assert_eq!(super::acquire_task(&repo, "issue-1", PmRefresh::Never).await.unwrap(), task);
+        assert_eq!(fixture.store.linear_issue_evidence(&repo.to_string_lossy(), "FIX-1").await.unwrap(), before);
+        for column in ["membership_unresolved", "archived"] {
+            conn.execute(&format!("UPDATE pm_projects SET {column}=1 WHERE id='project-1'"), []).unwrap();
+            assert!(super::acquire_task(&repo, "FIX-1", PmRefresh::Never).await.is_err());
+            let rejected = inspect_task_planning_async(&repo, "FIX-1", PmRefresh::Never).await.unwrap();
+            assert_eq!(rejected.observation.state, crate::store::PlanningState::Invalid);
+            assert_eq!(rejected.observation.observed_at, before.observed_at);
+            conn.execute(&format!("UPDATE pm_projects SET {column}=0 WHERE id='project-1'"), []).unwrap();
+        }
+        assert_eq!(fixture.store.get_task(&task.id).await.unwrap(), Some(task));
+        assert_eq!(fixture.store.get_project(&project_before.as_ref().unwrap().id).await.unwrap(), project_before);
+        assert_eq!(fixture.wave_refresh_at(&wave), wave_age);
+    }).await;
 }

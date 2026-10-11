@@ -278,7 +278,7 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
     PM_TEST_CONTEXT.sync_scope(PmTestContext {
         path: home.path().join("loopflow.db"), store: store.clone(), graphql_url: url,
     }, || {
-        let planning = runtime.block_on(crate::ops::pm::read_task_planning_async(repo.path(), "FIX-1", PmRefresh::Force)).unwrap();
+        let planning = runtime.block_on(crate::ops::pm::test_fixture::refresh_task_input(repo.path(), "FIX-1", PmRefresh::Force)).unwrap();
         store.sqlite.put_pm_snapshot(&crate::store::PmSnapshotRow {
             wave_id: wave.id().clone(), provider: "linear".into(), initiative: "initiative-1".into(),
             synced_at: time::OffsetDateTime::now_utc().unix_timestamp(),

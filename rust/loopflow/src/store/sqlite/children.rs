@@ -2457,11 +2457,11 @@ mod local_planning_tests {
         let store = SqliteStore {
             conn: Arc::new(Mutex::new(conn)),
         };
-        let observation = store
-            .pm_task_observation("/repo", "linear", "LOO-318")
-            .unwrap()
-            .record
-            .unwrap();
+        let observation: crate::store::PmTaskRecord = loopflow_test_support::retained_task_input_in(
+            &store.conn.lock().unwrap(),
+            "/repo",
+            "LOO-318",
+        );
         assert_eq!(
             serde_json::to_value(observation.item).unwrap(),
             payload["items"][0]

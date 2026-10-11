@@ -6,9 +6,7 @@ use crate::planning_exchange::PlanningKind;
 use crate::pm::linear::LinearProject;
 use crate::pm::PmItem;
 use crate::store::sqlite::SqliteStore;
-use crate::store::{
-    PlanningState, PmSnapshotRow, PmTaskObservation, PmTaskRecord, StoreError, StoreResult,
-};
+use crate::store::{PlanningState, PmSnapshotRow, PmTaskRecord, StoreError, StoreResult};
 use crate::work::project::ProjectId;
 
 impl SqliteStore {
@@ -256,37 +254,124 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn invalidate_pm_task(
+    pub fn invalidate_linear_issue(
         &self,
         repo: &str,
-        provider: &str,
-        expected: &PmTaskRecord,
+        expected: &crate::store::LinearIssueEvidence,
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         // A null detail response invalidates cached admission, not provider history.
         // Only a complete detail observation can repair it; list omission is ambiguous.
         conn.execute(
-            "UPDATE pm_items SET needs_refresh=1 WHERE repo=?1 AND provider=?2 AND id=?3
-            AND observed_at=?4 AND json_extract(body,'$.revision') IS ?5",
+            "UPDATE pm_items SET needs_refresh=1 WHERE repo=?1 AND provider='linear' AND id=?2
+            AND observed_at=?3 AND json_extract(body,'$.revision') IS ?4",
             params![
                 repo,
-                provider,
-                expected.item.id,
+                expected.issue_id,
                 expected.observed_at,
-                expected.item.revision
+                expected.revision
             ],
         )?;
         Ok(())
     }
 
-    pub fn pm_task_observation(
+    pub fn linear_issue_evidence(
         &self,
         repo: &str,
-        provider: &str,
         selector: &str,
-    ) -> StoreResult<PmTaskObservation> {
+    ) -> StoreResult<crate::store::LinearIssueEvidence> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        pm_task_observation_in(&conn, repo, provider, selector)
+        let mut query = conn.prepare(
+            "SELECT i.id,json_extract(i.body,'$.revision'),i.observed_at,
+             json_extract(p.body,'$.initiative_ids'),
+             json_extract(p.body,'$.team_ids'),json_extract(i.body,'$.team_id'),
+             i.needs_refresh OR COALESCE(p.membership_unresolved,0) OR COALESCE(p.archived,0),
+             EXISTS(SELECT 1 FROM task_deletions d JOIN waves w ON w.id=d.wave_id
+                    WHERE w.repo=i.repo AND d.issue_id=i.id)
+             OR EXISTS(SELECT 1 FROM pm_issue_changes c WHERE c.issue_id=i.id AND c.removed=1),p.id
+             FROM pm_items i LEFT JOIN pm_projects p
+             ON p.repo=i.repo AND p.provider=i.provider AND p.id=i.project_id
+             WHERE i.repo=?1 AND i.provider='linear' AND (i.id=?2 OR i.identifier=?2)",
+        )?;
+        let rows = query
+            .query_map(params![repo, selector], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, bool>(6)?,
+                    row.get::<_, bool>(7)?,
+                    row.get::<_, Option<String>>(8)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        if rows.len() > 1 {
+            return Err(StoreError::InvalidData(format!(
+                "ambiguous planning selector {selector:?}; use a Task UUID"
+            )));
+        }
+        let Some((
+            id,
+            revision,
+            observed_at,
+            initiatives,
+            teams,
+            team_id,
+            invalid,
+            removed,
+            project_id,
+        )) = rows.into_iter().next()
+        else {
+            let (removed, changed) = conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM pm_issue_changes WHERE issue_id=?1 AND removed=1)
+                 OR EXISTS(SELECT 1 FROM task_deletions d JOIN waves w ON w.id=d.wave_id
+                           WHERE w.repo=?2 AND (d.issue_id=?1 OR d.identifier=?1 COLLATE NOCASE)),
+                 EXISTS(SELECT 1 FROM pm_issue_changes WHERE issue_id=?1)",
+                params![selector, repo],
+                |row| Ok((row.get::<_, bool>(0)?, row.get::<_, bool>(1)?)),
+            )?;
+            return Ok(crate::store::LinearIssueEvidence {
+                issue_id: None,
+                revision: None,
+                observed_at: None,
+                project_id: None,
+                initiative_ids: Vec::new(),
+                project_team_ids: Vec::new(),
+                team_id: None,
+                state: if removed {
+                    PlanningState::Removed
+                } else if changed {
+                    PlanningState::Invalid
+                } else {
+                    PlanningState::Unavailable
+                },
+            });
+        };
+        Ok(crate::store::LinearIssueEvidence {
+            issue_id: Some(id),
+            revision,
+            observed_at: Some(observed_at),
+            project_id,
+            initiative_ids: initiatives
+                .map(|value| serde_json::from_str(&value))
+                .transpose()?
+                .unwrap_or_default(),
+            project_team_ids: teams
+                .map(|value| serde_json::from_str(&value))
+                .transpose()?
+                .unwrap_or_default(),
+            team_id,
+            state: if removed {
+                PlanningState::Removed
+            } else if invalid {
+                PlanningState::Invalid
+            } else {
+                PlanningState::Available
+            },
+        })
     }
 
     pub fn put_pm_snapshot(&self, snapshot: &PmSnapshotRow) -> StoreResult<()> {
@@ -535,80 +620,6 @@ impl SqliteStore {
         }
         Ok(())
     }
-}
-
-pub(super) fn pm_task_observation_in(
-    conn: &Connection,
-    repo: &str,
-    provider: &str,
-    selector: &str,
-) -> StoreResult<PmTaskObservation> {
-    let mut query = conn.prepare(
-            "SELECT i.body,p.body,i.observed_at,i.needs_refresh OR COALESCE(p.membership_unresolved,0) OR COALESCE(p.archived,0),
-             EXISTS(SELECT 1 FROM task_deletions d JOIN waves w ON w.id=d.wave_id
-                    WHERE w.repo=i.repo AND d.issue_id=i.id)
-             OR EXISTS(SELECT 1 FROM pm_issue_changes c WHERE c.issue_id=i.id
-                       AND i.provider='linear' AND c.removed=1)
-             FROM pm_items i LEFT JOIN pm_projects p
-             ON p.repo=i.repo AND p.provider=i.provider AND p.id=i.project_id
-             WHERE i.repo=?1 AND i.provider=?2 AND (i.id=?3 OR i.identifier=?3)",
-        )?;
-    let rows = query
-        .query_map(params![repo, provider, selector], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, Option<String>>(1)?,
-                row.get::<_, i64>(2)?,
-                row.get::<_, bool>(3)?,
-                row.get::<_, bool>(4)?,
-            ))
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
-    if rows.len() > 1 {
-        return Err(StoreError::InvalidData(format!(
-            "ambiguous planning selector {selector:?}; use a Task UUID"
-        )));
-    }
-    let Some((item, project, observed_at, invalid, removed)) = rows.into_iter().next() else {
-        let (removed, changed) = conn.query_row(
-                "SELECT EXISTS(SELECT 1 FROM pm_issue_changes WHERE issue_id=?1 AND removed=1 AND ?2='linear')
-                 OR EXISTS(SELECT 1 FROM task_deletions d JOIN waves w ON w.id=d.wave_id
-                           WHERE w.repo=?3 AND (d.issue_id=?1 OR d.identifier=?1 COLLATE NOCASE)),
-                 EXISTS(SELECT 1 FROM pm_issue_changes WHERE issue_id=?1 AND ?2='linear')",
-                params![selector, provider, repo], |row| Ok((row.get::<_, bool>(0)?, row.get::<_, bool>(1)?)),
-            )?;
-        return Ok(PmTaskObservation {
-            record: None,
-            state: if removed {
-                PlanningState::Removed
-            } else if changed {
-                PlanningState::Invalid
-            } else {
-                PlanningState::Unavailable
-            },
-        });
-    };
-    let mut item: PmItem = serde_json::from_str(&item)?;
-    let project: Option<LinearProject> = project
-        .map(|body| serde_json::from_str(&body))
-        .transpose()?;
-    if let Some(project) = &project {
-        item.project = Some(project.slug.clone());
-    }
-    Ok(PmTaskObservation {
-        record: Some(PmTaskRecord {
-            item,
-            project,
-            observed_at,
-        }),
-        state: if removed {
-            PlanningState::Removed
-        } else if invalid {
-            PlanningState::Invalid
-        } else {
-            PlanningState::Available
-        },
-    })
 }
 
 // Both durable projections require the same confirmed Initiative/Wave association.
@@ -1621,12 +1632,10 @@ mod tests {
             )
             .unwrap();
         let store = Store { sqlite };
-        let observation = store
-            .pm_task_observation("/repo", "linear", "fix-1")
-            .await
-            .unwrap();
+        let observation = store.linear_issue_evidence("/repo", "fix-1").await.unwrap();
         assert_eq!(observation.state, PlanningState::Available);
-        let detail = observation.record.unwrap();
+        let detail: crate::store::PmTaskRecord =
+            loopflow_test_support::retained_task_input(&database, "/repo", "fix-1");
         let list = crate::store::PmSnapshotRow {
             wave_id: wave.clone(),
             provider: "linear".into(),
@@ -1641,7 +1650,7 @@ mod tests {
         assert_eq!(detail.project.as_ref(), Some(&list.snapshot.projects[0]));
         assert_eq!(store.get_wave(&wave).await.unwrap().unwrap().id(), &wave);
         assert!(store.list_tasks(None).await.unwrap().is_empty());
-        assert!(!Connection::open(database)
+        assert!(!Connection::open(&database)
             .unwrap()
             .prepare("SELECT payload FROM pm_snapshots")
             .is_ok());
@@ -1649,12 +1658,15 @@ mod tests {
         // A delayed list cannot resurrect a confirmed removal in either reader.
         store.sqlite.conn.lock().unwrap().execute("INSERT INTO task_deletions(wave_id,issue_id,identifier,confirmed_at) VALUES(?1,'issue','FIX-1',1)", [&wave]).unwrap();
         store.put_pm_snapshot(list, None).await.unwrap();
-        let removed = store
-            .pm_task_observation("/repo", "linear", "FIX-1")
-            .await
-            .unwrap();
+        let removed = store.linear_issue_evidence("/repo", "FIX-1").await.unwrap();
         assert_eq!(removed.state, PlanningState::Removed);
-        assert_eq!(removed.record, Some(detail));
+        assert_eq!(removed.observed_at, Some(detail.observed_at));
+        assert_eq!(
+            loopflow_test_support::retained_task_input::<crate::store::PmTaskRecord>(
+                &database, "/repo", "FIX-1"
+            ),
+            detail
+        );
         assert!(store.list_tasks(None).await.unwrap().is_empty());
     }
 }

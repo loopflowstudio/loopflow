@@ -67,9 +67,16 @@ pub struct TaskAcquisition {
     pub observed_at: Option<i64>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct PmTaskObservation {
-    pub record: Option<PmTaskRecord>,
+/// Retained Linear acquisition facts, including observations without owned Work.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinearIssueEvidence {
+    pub issue_id: Option<String>,
+    pub revision: Option<String>,
+    pub observed_at: Option<i64>,
+    pub project_id: Option<String>,
+    pub initiative_ids: Vec<String>,
+    pub project_team_ids: Vec<String>,
+    pub team_id: Option<String>,
     pub state: PlanningState,
 }
 
@@ -411,17 +418,15 @@ impl Store {
         .await
     }
 
-    pub async fn pm_task_observation(
+    pub async fn linear_issue_evidence(
         &self,
         repo: &str,
-        provider: &str,
         selector: &str,
-    ) -> StoreResult<PmTaskObservation> {
+    ) -> StoreResult<LinearIssueEvidence> {
         let repo = repo.to_string();
-        let provider = provider.to_string();
         let selector = selector.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.pm_task_observation(&repo, &provider, &selector)
+            store.linear_issue_evidence(&repo, &selector)
         })
         .await
     }
@@ -455,17 +460,15 @@ impl Store {
         .await
     }
 
-    pub async fn invalidate_pm_task(
+    pub async fn invalidate_linear_issue(
         &self,
         repo: &str,
-        provider: &str,
-        expected: PmTaskRecord,
+        expected: LinearIssueEvidence,
         acquisition: Option<Arc<PlanningLocks>>,
     ) -> StoreResult<()> {
         let repo = repo.to_string();
-        let provider = provider.to_string();
         run_planning_write(&self.sqlite, acquisition, move |store| {
-            store.invalidate_pm_task(&repo, &provider, &expected)
+            store.invalidate_linear_issue(&repo, &expected)
         })
         .await
     }
@@ -2322,6 +2325,11 @@ mod tests {
         let snapshot = task_planning_snapshot(&wave, &project, &task);
         store.put_pm_snapshot(snapshot.clone(), None).await.unwrap();
         let retained = store.get_task(&task.id).await.unwrap().unwrap();
+        let retained_project = store.get_project(&project.id).await.unwrap();
+        let retained_age = wave_refresh_at(_directory.path(), &wave);
+        let database = _directory.path().join("registry.db");
+        let before: crate::store::PmTaskRecord =
+            loopflow_test_support::retained_task_input(&database, wave.repo(), &task.identifier);
         let other = Wave::new(crate::id::WaveId::new(), "other".into(), "/repo".into());
         store.create_wave(&other).await.unwrap();
         let mut foreign = make_project(&other);
@@ -2329,6 +2337,8 @@ mod tests {
         store.create_project(&foreign).await.unwrap();
         let mut response = snapshot.clone();
         response.synced_at = 2;
+        response.snapshot.projects[0].name = "Rejected Project name".into();
+        response.snapshot.projects[0].revision = Some("2026-10-05T12:00:01Z".into());
         response.snapshot.items[0].name = "Rejected issue title".into();
         response.snapshot.items[0].revision = Some("2026-10-05T12:00:01Z".into());
         let mut conflict = response.snapshot.projects[0].clone();
@@ -2336,15 +2346,28 @@ mod tests {
         response.snapshot.projects.push(conflict);
         assert!(store.put_pm_snapshot(response, None).await.is_err());
         let retained_observation = store
-            .pm_task_observation(wave.repo(), "linear", &task.identifier)
+            .linear_issue_evidence(wave.repo(), &task.identifier)
             .await
             .unwrap();
         assert_eq!(
-            retained_observation.record.unwrap().item,
-            snapshot.snapshot.items[0]
+            retained_observation.revision,
+            snapshot.snapshot.items[0].revision
         );
         assert_eq!(store.get_task(&task.id).await.unwrap().unwrap(), retained);
         assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
+        assert_eq!(
+            store.get_project(&project.id).await.unwrap(),
+            retained_project
+        );
+        assert_eq!(wave_refresh_at(_directory.path(), &wave), retained_age);
+        assert_eq!(
+            loopflow_test_support::retained_task_input::<crate::store::PmTaskRecord>(
+                &database,
+                wave.repo(),
+                &task.identifier
+            ),
+            before
+        );
     }
 
     #[tokio::test]
@@ -2403,7 +2426,7 @@ mod tests {
         newer.snapshot.projects.push(successor);
         store.put_pm_snapshot(newer, None).await.unwrap();
         let accepted = store
-            .pm_task_observation(wave.repo(), "linear", &task.identifier)
+            .linear_issue_evidence(wave.repo(), &task.identifier)
             .await
             .unwrap();
         let transferred = store.get_task(&task.id).await.unwrap().unwrap();
@@ -2424,7 +2447,7 @@ mod tests {
         assert!(store.put_pm_snapshot(delayed, None).await.is_err());
         assert_eq!(
             store
-                .pm_task_observation(wave.repo(), "linear", &task.identifier)
+                .linear_issue_evidence(wave.repo(), &task.identifier)
                 .await
                 .unwrap(),
             accepted
@@ -2558,14 +2581,16 @@ mod tests {
             .unwrap()
             .is_empty());
         let retained = store
-            .pm_task_observation(
-                wave.repo(),
-                "linear",
-                task.linear_id.as_ref().unwrap().as_str(),
-            )
+            .linear_issue_evidence(wave.repo(), task.linear_id.as_ref().unwrap().as_str())
             .await
             .unwrap();
-        assert_eq!(retained.record.unwrap().project, Some(current));
+        assert_eq!(retained.project_team_ids, current.team_ids);
+        let retained_input: crate::store::PmTaskRecord = loopflow_test_support::retained_task_input(
+            &_directory.path().join("registry.db"),
+            wave.repo(),
+            &task.identifier,
+        );
+        assert_eq!(retained_input.project, Some(current));
     }
 
     #[tokio::test]
@@ -2591,11 +2616,16 @@ mod tests {
             .put_pm_project(wave.id(), "linear", &snapshot.initiative, &confirmed, 10)
             .unwrap();
         let accepted = store
-            .pm_task_observation(wave.repo(), "linear", &task.identifier)
+            .linear_issue_evidence(wave.repo(), &task.identifier)
             .await
             .unwrap();
         assert_eq!(
-            accepted.record.as_ref().unwrap().project,
+            loopflow_test_support::retained_task_input::<crate::store::PmTaskRecord>(
+                &_directory.path().join("registry.db"),
+                wave.repo(),
+                &task.identifier
+            )
+            .project,
             Some(confirmed.clone())
         );
         assert_eq!(
@@ -2624,7 +2654,7 @@ mod tests {
         store.put_pm_snapshot(snapshot, None).await.unwrap();
         assert_eq!(
             store
-                .pm_task_observation(wave.repo(), "linear", &task.identifier)
+                .linear_issue_evidence(wave.repo(), &task.identifier)
                 .await
                 .unwrap(),
             accepted

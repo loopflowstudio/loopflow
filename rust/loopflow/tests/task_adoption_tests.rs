@@ -313,11 +313,12 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
             assert!(saved.iter().all(|flow| current.contains(flow)));
             let saved = current;
             let scope = repo.path().canonicalize().unwrap().display().to_string();
-            let original = runtime
-                .block_on(store.pm_task_observation(&scope, "linear", "FIX-1"))
-                .unwrap()
-                .record
-                .unwrap();
+            let original: loopflow::store::PmTaskRecord =
+                loopflow_test_support::retained_task_input(
+                    &home.path().join("loopflow.db"),
+                    &scope,
+                    "FIX-1",
+                );
             let task_before = runtime.block_on(store.get_task(&task.id)).unwrap();
             let pr_before = runtime.block_on(store.active_task_pr(&task.id)).unwrap();
             for (index, (condition, expected)) in [

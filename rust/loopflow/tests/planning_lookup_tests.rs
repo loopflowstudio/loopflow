@@ -8,6 +8,12 @@ use serde_json::json;
 #[test]
 fn task_status_reads_projectless_planning_without_allocating_execution() {
     let repo = TestRepo::new();
+    std::fs::create_dir_all(repo.path().join(".lf")).unwrap();
+    std::fs::write(
+        repo.path().join(".lf/config.yaml"),
+        "planning:\n  provider: linear\npm:\n  linear_team: team-1\n",
+    )
+    .unwrap();
     let home = tempfile::tempdir().unwrap();
     let database = home.path().join("loopflow.db");
     let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -60,12 +66,15 @@ fn task_status_reads_projectless_planning_without_allocating_execution() {
         ))
         .unwrap();
     runtime
-        .block_on(store.invalidate_pm_task(
-            &scope.to_string_lossy(),
-            "linear",
-            invalid.clone(),
-            None,
-        ))
+        .block_on(
+            store.invalidate_linear_issue(
+                &scope.to_string_lossy(),
+                runtime
+                    .block_on(store.linear_issue_evidence(&scope.to_string_lossy(), "FIX-3"))
+                    .unwrap(),
+                None,
+            ),
+        )
         .unwrap();
     let mut removed = record.clone();
     removed.item.id = "issue-4".into();

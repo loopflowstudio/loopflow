@@ -29,15 +29,12 @@ Evidence: `local_planning.rs`, `/tmp/loo412-selector-repro-result.json` and
 `/tmp/loo412-admission-parent-evidence-proof.txt`. Source/disposable proofs, no install.
 Jack Heart requires removing `planning.rs`, not merely renaming its hierarchy.
 
-## Remaining review checks
+## Remaining preservation checks
 
-Snapshot-reader deletion must retain rollback proof for canonical Project,
-relationship/observation age and Wave acquisition age, including delayed updates.
-Current assertions cover Task/PR only; check dedicated coverage before final gate.
-This is a coverage concern, not observed data loss.
-
-The stale `pm_show.json` documentation is removed. The Git-miss regression now
-asserts no Linear refresh error as well as Unavailable; its focused rerun passed.
+Task acquisition no longer reconstructs provider content. Its rollback fixture now
+compares canonical Project, retained provider input and Wave acquisition age as
+well as Task/PR. Persistent-hierarchy conversion still needs populated released
+0.13.11 proof for all independent observations and delayed updates.
 
 ## Git decoding repair — October 11
 

@@ -8,7 +8,7 @@ approval from Jack. This is accepted scope, with conditional deletions identifie
 ## Scope and outcome
 
 This audit and [the pursuit design](work-on-another-machine-name.md) are one
-accepted delivery scope. Canonical readers are implemented; acquisition and
+accepted delivery scope. Canonical readers and narrow acquisition evidence are implemented; persistent
 provider-hierarchy reduction comes next, followed by typed edits/journal, concrete
 bindings, ordinary follow-ups and one cron list. All precede Jack Heart's next
 review of PR #1491. Publication is review-only; landing, installation and export
@@ -75,9 +75,11 @@ acquisition state/age. No local/provider-ID substitution remains in that reader.
 **Removed:** `sqlite/children.rs` status/admission reconstruction through
 `pm_task_observation_in`. One narrow SQL read uses retained membership, Team,
 invalidation, removal and age evidence; pending local membership affects display,
-never admission. Unrelated provider content is not decoded. Remaining:
-`ops/pm.rs::inspect_task_planning_async` and `pm_task_observation_in` reconstruct
-provider records; confinement and persistent reduction remain.
+never admission. Acquisition now reads narrow Linear identity, revision, ownership,
+validity and age too. `PmTaskObservation`, `pm_task_observation_in` and
+`read_task_planning_async` are deleted. Cached acquisition returns canonical Work;
+delayed absence retains its revision/age fence and Wave-lock lifetime. Raw provider
+input replay lives only in fixtures. Persistent reduction remains.
 
 **Keep:** explicit missing, invalid, removed and unavailable evidence. A failed
 provider read must not erase cached Work or convert unknown state into absence.
@@ -86,8 +88,8 @@ create another generic reader framework simply to replace these functions.
 
 ## 3. Collapse accepted-provider-to-Work projection
 
-**Remove or shrink:** `store/sqlite/planning.rs::project_accepted_planning` and
-provider hierarchy readback through `pm_task_observation_in`.
+**Remove or shrink:** `store/sqlite/planning.rs::project_accepted_planning`.
+Ordinary provider hierarchy readback through `pm_task_observation_in` is deleted.
 The duplicate Task create/update projection branches and `item_edits` are removed:
 one accepted-observation query and typed edit slice now feed the common writer,
 retaining existing identity, rank, pending disposition and membership fences.
@@ -253,7 +255,8 @@ Remaining: selected-transport acquisition returns that same Task without overlap
 resolution wrappers or PM-context construction merely selecting another reader. Retain bounded refresh/lock behavior;
 The unused `pm_show` inventory/DTO and `load_show_snapshot`/`read_pm_snapshot`
 are deleted. Status sync refreshes before its canonical read; acquisition returns
-no inventory. `plan_snapshot_read` still governs Task acquisition.
+no inventory. The unused `SnapshotPlan` hard-refresh distinction and exclusive band test
+are deleted; actual acquisition failure retains its error.
 `PmPortfolioValidator` and ordinary portfolio reconstruction are deleted. The
 store checks narrow retained ownership claims directly; no inventory leaves it.
 `e3a3479df7` removed the public `pm_snapshot` reader and all callers. Fixtures

@@ -321,7 +321,7 @@ pub fn bind_task_planning(repo: &TestRepo) {
 
 #[allow(dead_code)] // Shared helper compiled into integration tests that do not need Task state.
 pub struct RegisteredTask {
-    database: std::path::PathBuf,
+    pub database: std::path::PathBuf,
     pub store: Store,
     pub task: Task,
     pub pr: TaskPr,

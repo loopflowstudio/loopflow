@@ -175,8 +175,7 @@ owners, including unavailable ones. Pane moves preserve locations, not execution
 transfer. Shell-default Split and
 no-acquisition bare navigation survive. Logs reuse the matching local stream or
 owner-pinned reads. Foreign physical Task IDs cannot disprove local correspondence;
-late preparation retains its original Work. Files reuses same-owner transports and
-refuses changed owners without redirecting drafts. Native acceptance/admission remain unproved. Failures: `2feed22e1109:wave/product/MEMORY.md`,
+late preparation retains its original Work. Files refuses changed owners without redirecting drafts. Native acceptance/admission remain unproved. Failures: `2feed22e1109:wave/product/MEMORY.md`,
 this paragraph; checks: `scratch/findings.md`, **Work-tab cutover**.
 
 **Confirmation cannot elect execution.** `4c43550c2`: divergent revisions and

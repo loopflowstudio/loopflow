@@ -386,6 +386,6 @@ Earlier focused proof: `9dbd6fc2d8`, `dfd3b80611`, `f025e9b7ab`,
 `dfa2cdafba`, `09709a05cc` in this plan. Persistence conversion, typed journal,
 bindings, follow-ups, cron, gate and review still precede republication.
 
-Checks: `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo build -p loopflow --bin lf` and 30 focused library tests (prose/export/order/ingestion/ownership/completion) pass with inherited LF authority cleared; full gate remains.
+Checks (LF cleared): `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, CLI build, Project baseline (5), reteam (5), acquisition and mapping tests pass; `cargo test -p loopflow --lib planning`: 112 passed, stale-revision fixture repaired and rerun passed. Full gate remains.
 
 Transport evidence: `0181133849` at this path.

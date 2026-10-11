@@ -116,21 +116,18 @@ into acquisition; do not drop checks for stale independent Team/Initiative facts
 
 ## 4. Remove cache joins from secondary SQL readers
 
-Convert these consumers along with the preceding cut:
+`PlanningChanges::observation` is deleted. Receipts read only their field baseline
+and revision; prose keeps its independent revision, deletion captures `deleted=false`,
+and membership normalizes to local identity. Reteam updates only Team evidence;
+issue invalidation reads revision without decoding unrelated content.
 
-- `sqlite/planning_changes.rs::observation`: pending-edit baselines from provider caches.
-- `sqlite/planning_order.rs::{observed_order,observe_in,project_members,current_members}`:
-  Project order JSON and issue membership from `pm_projects` / `pm_items`.
-- `sqlite/task_state_delivery.rs`: provider baseline for disposition delivery.
-- `sqlite/project_selection.rs::readiness`: synchronization and Project observations.
-- `store/sqlite.rs::repair_wave_repo`: repository moves across Work and provider tables.
-- `sqlite/revisions.rs`: update watched domains when owners/tables disappear.
-
-The replacements read Work plus the exact concrete evidence needed by each
-operation. `accepted_project_revision` also still joins `pm_projects` for archive
-and unresolved membership evidence; same-revision observations can be ineligible. Repository repair remains atomic and refuses conflicting identities;
-selection still respects unfinished rotation and current provider observations.
-An old observation remains old after conversion.
+**Delete — do not maintain:** retained JSON hierarchy and whole-observation
+comparisons in §3; remaining cache joins in `planning_order`,
+`task_state_delivery`, `project_selection`, `children` and acquisition. Convert
+`repair_wave_repo` and revision triggers together with their persistence owners.
+Same-revision archival/disputed membership must still refuse delivery. Preserve
+foreign/unmapped input, independent relation/removal facts and original ages.
+Populated released-frontier conversion remains.
 
 ## 5. Delete the internal Markdown storage round trip
 

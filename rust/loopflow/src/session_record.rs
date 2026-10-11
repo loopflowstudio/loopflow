@@ -223,30 +223,6 @@ impl ProviderSessionRef {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub(crate) struct ProviderClientRef {
-    schema_version: u32,
-    pub(crate) pid: u32,
-    pub(crate) terminal_id: Option<String>,
-    #[serde(with = "time::serde::rfc3339")]
-    pub(crate) started_at: OffsetDateTime,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum ProviderClientStopReason {
-    Retired,
-    Moved,
-    // Primary succession still completes its predecessor; old receipts remain readable.
-    Completed,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-struct ProviderClientStop {
-    schema_version: u32,
-    reason: ProviderClientStopReason,
-}
-
 #[derive(Serialize)]
 struct SessionContextArtifact<'a> {
     schema_version: u32,
@@ -1412,91 +1388,9 @@ pub(crate) fn write_provider_session(
     }).map_err(std::io::Error::other)
 }
 
-pub(crate) fn read_provider_clients(dir: &Path) -> std::io::Result<Vec<ProviderClientRef>> {
-    let root = dir.join("provider-clients");
-    let entries = match fs::read_dir(&root) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(error),
-    };
-    let mut clients = Vec::new();
-    for entry in entries {
-        let entry = entry?;
-        if !entry.file_type()?.is_file() {
-            continue;
-        }
-        let client: ProviderClientRef =
-            serde_json::from_slice(&fs::read(entry.path())?).map_err(std::io::Error::other)?;
-        if client.schema_version != SCHEMA_VERSION || client.pid <= 1 {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "invalid provider client reference",
-            ));
-        }
-        clients.push(client);
-    }
-    clients.sort_by_key(|client| client.pid);
-    Ok(clients)
-}
-
-pub(crate) fn write_provider_client(dir: &Path, pid: u32) -> std::io::Result<()> {
-    if pid <= 1 {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "provider client pid must identify a child process",
-        ));
-    }
-    let input = input_id_from_dir(dir)?;
-    if row_store(dir)
-        .map_err(std::io::Error::other)?
-        .session_for_artifact(&input)
-        .map_err(std::io::Error::other)?
-        .is_none()
-    {
-        return Err(std::io::Error::other(
-            "provider client has no admitted Session",
-        ));
-    }
-    remove_provider_client_stop(dir, pid)?;
-    let root = dir.join("provider-clients");
-    fs::create_dir_all(&root)?;
-    let path = root.join(format!("{pid}.json"));
-    let staging = root.join(format!(".{pid}-{}.staging", Uuid::new_v4()));
-    write_private_exclusive(
-        &staging,
-        &serde_json::to_vec_pretty(&ProviderClientRef {
-            schema_version: SCHEMA_VERSION,
-            pid,
-            terminal_id: current_terminal_id(),
-            started_at: OffsetDateTime::now_utc(),
-        })
-        .map_err(std::io::Error::other)?,
-    )?;
-    fs::rename(staging, path)?;
-    sync_dir(&root)
-}
-
-pub(crate) fn provider_client_matches(
-    client: &ProviderClientRef,
-    harness: &str,
-    pid: u32,
-    started_at: i64,
-    command: &str,
-) -> bool {
-    pid == client.pid
-        && (started_at - client.started_at.unix_timestamp()).abs() <= 5
-        && command.split_whitespace().any(|word| {
-            Path::new(word)
-                .file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name == harness || name.starts_with(&format!("{harness}-")))
-                || word.contains(&format!("/{harness}"))
-        })
-}
-
 /// A terminal marker is valid only on the PTY where the shell installed it.
 /// Inherited environment after app, SSH, or background handoff is not attachment.
-fn current_terminal_id() -> Option<String> {
+pub(crate) fn current_terminal_id() -> Option<String> {
     let id = std::env::var("LF_TERMINAL_ID")
         .ok()
         .filter(|id| !id.is_empty())?;
@@ -1513,75 +1407,6 @@ fn current_terminal_id() -> Option<String> {
         .to_str()
         .ok()?;
     (actual == expected).then_some(id)
-}
-
-pub(crate) fn read_provider_client_stop(
-    dir: &Path,
-    pid: u32,
-) -> std::io::Result<Option<ProviderClientStopReason>> {
-    let path = dir
-        .join("provider-client-stops")
-        .join(format!("{pid}.json"));
-    let bytes = match fs::read(path) {
-        Ok(bytes) => bytes,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(error),
-    };
-    let stop: ProviderClientStop = serde_json::from_slice(&bytes).map_err(std::io::Error::other)?;
-    if stop.schema_version != SCHEMA_VERSION {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "invalid provider client stop",
-        ));
-    }
-    Ok(Some(stop.reason))
-}
-
-pub(crate) fn write_provider_client_stop(
-    dir: &Path,
-    pid: u32,
-    reason: ProviderClientStopReason,
-) -> std::io::Result<()> {
-    if pid <= 1 {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "provider client pid must identify a child process",
-        ));
-    }
-    read_manifest(dir)?;
-    let root = dir.join("provider-client-stops");
-    fs::create_dir_all(&root)?;
-    let path = root.join(format!("{pid}.json"));
-    let staging = root.join(format!(".{pid}-{}.staging", Uuid::new_v4()));
-    write_private_exclusive(
-        &staging,
-        &serde_json::to_vec_pretty(&ProviderClientStop {
-            schema_version: SCHEMA_VERSION,
-            reason,
-        })
-        .map_err(std::io::Error::other)?,
-    )?;
-    fs::rename(staging, path)?;
-    sync_dir(&root)
-}
-
-pub(crate) fn remove_provider_client_stop(dir: &Path, pid: u32) -> std::io::Result<()> {
-    let root = dir.join("provider-client-stops");
-    let path = root.join(format!("{pid}.json"));
-    match fs::remove_file(path) {
-        Ok(()) => sync_dir(&root),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error),
-    }
-}
-
-pub(crate) fn remove_provider_client(dir: &Path, pid: u32) -> std::io::Result<()> {
-    let path = dir.join("provider-clients").join(format!("{pid}.json"));
-    match fs::remove_file(path) {
-        Ok(()) => sync_dir(&dir.join("provider-clients")),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error),
-    }
 }
 
 /// Who chose a Session's current title. A human name is never replaced by a
@@ -3194,8 +3019,7 @@ mod tests {
     use std::io::Write;
 
     use super::{
-        read_provider_clients, read_provider_session, remove_provider_client,
-        write_provider_client, AgentProcessRequest, CaptureHandle, SessionCaptureManifest,
+        read_provider_session, AgentProcessRequest, CaptureHandle, SessionCaptureManifest,
         SessionCaptureSpec, SubjectAttribution, TerminalReceipt,
     };
     use crate::agent::AgentCapabilities;
@@ -4404,27 +4228,6 @@ mod tests {
             [capture.artifact_key().as_str()],
         ).unwrap();
         assert_eq!(read_provider_session(&dir).unwrap(), Some(ambient));
-    }
-
-    #[test]
-    fn provider_clients_are_independent_and_remove_exactly() {
-        let home = tempfile::tempdir().unwrap();
-        let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
-        let dir = capture.artifact_dir();
-
-        write_provider_client(&dir, 101).unwrap();
-        write_provider_client(&dir, 202).unwrap();
-        assert_eq!(
-            read_provider_clients(&dir)
-                .unwrap()
-                .into_iter()
-                .map(|client| client.pid)
-                .collect::<Vec<_>>(),
-            [101, 202]
-        );
-
-        remove_provider_client(&dir, 101).unwrap();
-        assert_eq!(read_provider_clients(&dir).unwrap()[0].pid, 202);
     }
 
     #[test]

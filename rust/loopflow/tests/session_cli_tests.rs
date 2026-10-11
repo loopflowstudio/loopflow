@@ -448,7 +448,9 @@ fn native_title_callback_returns_while_store_is_busy() {
             })
             .unwrap();
         // Several prompt callbacks compete with the same held writer.
-        let children: Vec<_> = (0..4).map(|_| spawn_title_callback(home.path())).collect();
+        let children: Vec<_> = (0..4)
+            .map(|_| spawn_title_callback(home.path(), "native-plain"))
+            .collect();
         for child in children {
             let output = finish_title_callback(child);
             if exclusive {
@@ -484,7 +486,7 @@ fn native_title_callback_bounds_history_scans() {
         FROM history;",
         )
         .unwrap();
-    let output = finish_title_callback(spawn_title_callback(home.path()));
+    let output = finish_title_callback(spawn_title_callback(home.path(), "native-plain"));
     assert!(
         output.stdout.is_empty(),
         "incomplete history must not rename: {output:?}"
@@ -499,7 +501,7 @@ fn native_title_callback_bounds_history_scans() {
 fn native_title_callback_does_not_initialize_a_store() {
     let home = tempfile::tempdir().unwrap();
     std::fs::create_dir(home.path().join(".lf")).unwrap();
-    let output = finish_title_callback(spawn_title_callback(home.path()));
+    let output = finish_title_callback(spawn_title_callback(home.path(), "native-plain"));
     let title: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(
         title["hookSpecificOutput"]["sessionTitle"],
@@ -508,11 +510,12 @@ fn native_title_callback_does_not_initialize_a_store() {
     assert!(!home.path().join("loopflow.db").exists());
 }
 
-fn spawn_title_callback(home: &std::path::Path) -> std::process::Child {
+fn spawn_title_callback(home: &std::path::Path, thread: &str) -> std::process::Child {
     use std::io::Write;
     use std::process::Stdio;
 
     let mut child = command(home, &["__session-title", "claude"])
+        .env("HOME", home)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -522,7 +525,7 @@ fn spawn_title_callback(home: &std::path::Path) -> std::process::Child {
         child.stdin.take().unwrap(),
         "{}",
         serde_json::json!({
-            "cwd": home, "session_id": "native-plain",
+            "cwd": home, "session_id": thread,
             "hook_event_name": "UserPromptSubmit", "prompt": "Plan store migration"
         })
     )
@@ -549,9 +552,6 @@ fn finish_title_callback(mut child: std::process::Child) -> Output {
 
 #[test]
 fn native_title_callback_keeps_lf_as_the_naming_owner() {
-    use std::io::Write;
-    use std::process::Stdio;
-
     let home = tempfile::tempdir().unwrap();
     std::fs::create_dir(home.path().join(".lf")).unwrap();
     let (id, _, _) = prepare_conversation(home.path(), home.path(), "claude", "Original purpose");
@@ -563,31 +563,14 @@ fn native_title_callback_keeps_lf_as_the_naming_owner() {
         )
         .unwrap();
     for thread in ["native-owned", "native-plain"] {
-        let mut child = command(home.path(), &["__session-title", "claude"])
-            .env("HOME", home.path())
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
-        write!(
-            child.stdin.take().unwrap(),
-            "{}",
-            serde_json::json!({
-                "cwd": home.path(), "session_id": thread, "hook_event_name":"UserPromptSubmit",
-                "prompt":"A different request entirely"
-            })
-        )
-        .unwrap();
-        let output = child.wait_with_output().unwrap();
-        assert!(output.status.success(), "{output:?}");
+        let output = finish_title_callback(spawn_title_callback(home.path(), thread));
         if thread == "native-owned" {
             assert!(output.stdout.is_empty(), "{output:?}");
         } else {
             let title: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
             assert_eq!(
                 title["hookSpecificOutput"]["sessionTitle"],
-                "different request entirely"
+                "Plan store migration"
             );
         }
     }

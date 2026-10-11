@@ -570,11 +570,10 @@ impl SqliteStore {
         crate::performance::observe_sqlite(&conn);
         conn.busy_timeout(wait.min(Duration::from_secs(5)))?;
         conn.execute_batch("PRAGMA foreign_keys = ON;")?;
-        validate_process_schema(&conn)?;
         // An older ledger without the current process owner is not a writable
         // observation destination. Leave upgrade decisions to ordinary admission.
         conn.prepare(
-            "SELECT id, trace_id, started_at, completed_at, outcome, exit_code, pid FROM processes LIMIT 0",
+            "SELECT id, trace_id, parent_lf_process_id, started_at, completed_at, outcome, exit_code, pid FROM processes LIMIT 0",
         )?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),

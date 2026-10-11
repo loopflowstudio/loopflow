@@ -1740,8 +1740,8 @@ fn execute_command(
         Some(Commands::ContextBlock { delivery, moment }) => {
             loopflow::lf::commands::context::emit_block(delivery, *moment)
         }
-        Some(Commands::SessionTitle { provider }) => {
-            loopflow::lf::commands::session_history::name_native_session(provider)
+        Some(Commands::SessionTitle { .. }) => {
+            unreachable!("title callbacks dispatch before command admission")
         }
         Some(Commands::Session {
             cmd:

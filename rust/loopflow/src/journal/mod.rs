@@ -114,7 +114,6 @@ static PROCESS_START: OnceLock<Instant> = OnceLock::new();
 // An actual lf process keeps one identity across async and blocking workers.
 // Library callers retain the thread-scoped with_runtime lifetime above.
 static PROCESS_CONTEXT: Mutex<Option<ProcessContext>> = Mutex::new(None);
-static EARLY_OBSERVATION_ATTEMPTED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Clone)]
 struct ProcessContext {
@@ -279,7 +278,7 @@ pub fn with_process(run: impl FnOnce() -> anyhow::Result<()>) -> anyhow::Result<
         .set(Instant::now())
         .expect("one lf entry point per process");
     let result = run();
-    if current_context().is_none() && !EARLY_OBSERVATION_ATTEMPTED.load(Ordering::Relaxed) {
+    if current_context().is_none() {
         observe_process(&std::env::args().collect::<Vec<_>>());
     }
     crate::agent::wait_for_interrupt_cleanup();
@@ -305,10 +304,11 @@ pub fn observe_process(command: &[String]) {
 
 /// Observe a latency-sensitive callback without ordinary admission's write wait.
 pub fn observe_process_within(command: &[String], wait: Duration) {
-    if current_context().is_some() {
+    // Failed early observation must not be retried at exit with a longer wait.
+    static ATTEMPTED: AtomicBool = AtomicBool::new(false);
+    if current_context().is_some() || ATTEMPTED.swap(true, Ordering::Relaxed) {
         return;
     }
-    EARLY_OBSERVATION_ATTEMPTED.store(true, Ordering::Relaxed);
     let observe = || -> anyhow::Result<()> {
         let path = crate::store::database_path_from_env()?;
         let ledger = SqliteStore::open_existing_processes(&path, wait)?;

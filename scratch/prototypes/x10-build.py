@@ -108,7 +108,7 @@ main = f'''
 </section>
 <section class="pair">
   <h2>Stay in flow as you build an epic company-scale project as one super-powered human.</h2>
-  <p class="say">Loopflow is the marriage of a work model and a flow model: the what and the how. Your work is kept around workstreams and results, not meandering chats, and exactly what needs your attention is on screen. Configurable workflows take each Task from a design to a pull request you have tried and merged. <b>Every Task ends shipped.</b> You have to stay involved. You don’t have to micromanage the coding. You can zoom in and you can zoom out.</p>
+  <p class="say">Loopflow is the marriage of a work model and a flow model: the what and the how. Your work is kept around workstreams and results, not meandering chats. Loopflow brings your attention to where you matter most. Configurable workflows take each Task from a design to a pull request you have tried and merged. <b>Every Task ends shipped.</b> You have to stay involved. You don’t have to micromanage the coding. You can zoom in and you can zoom out.</p>
   <div class="ledger">
     <div><p class="eyebrow">What you do</p><ul><li>What to make</li><li>How it should work</li><li>Whether the design is right</li><li>Whether it works when you use it</li><li>When it is done</li></ul></div>
     <div><p class="eyebrow">What agents automate</p><ul><li>Writing the code</li><li>Keeping it tidy</li><li>Keeping up with the rest of the code</li><li>Opening the pull request</li><li>Running the checks and merging</li></ul></div>

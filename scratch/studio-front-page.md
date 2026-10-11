@@ -574,3 +574,5 @@ strip links to its own site in a new tab.
 - Jack Heart, for the section heading: "Stay in flow as build an epic company-scale project as one super-powered human." → set in `x10` as "Stay in flow as you build an epic company-scale project as one super-powered human." ("you" added).
 
 - Jack Heart, for the ledger's column titles: "What you do   What agents automate" → set in `x10`, replacing "Stays with you" and "Off your hands".
+
+- Jack Heart: "loopflow brings your attention to where you matter most." → placed in the `x10` section paragraph, replacing "exactly what needs your attention is on screen". Placement was Claude's guess; Jack did not say where it goes.

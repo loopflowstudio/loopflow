@@ -140,13 +140,8 @@ main = f'''
 </section>
 <section id="yours" class="reading">
   <h2>Free and open source (MIT).</h2>
-  <ul class="plain">
-{items([
-("What you need", "A Mac, a coding agent (Claude Code, Codex, or OpenCode), and a GitHub account."),
-("Your code", "It stays in your GitHub and on your Mac. Nothing is hosted, so there is nothing to move off later."),
-("A native Mac terminal", "Every pane is a real terminal running Claude Code, Codex, or OpenCode, with <code>lf</code> included."),
-])}
-  </ul>
+  <p class="say"><code>lf</code> has no servers, and everything is done through ephemeral processes (like sessions) and <code>ssh</code>. There is telemetry built for you to explore on your own machine, but the maintainers of <code>lf</code> do not receive any of this data in any way. <code>lf</code> can proxy jobs onto remote machines, but everything is done through <code>ssh</code>, not <code>http</code>.</p>
+  <p class="say">Currently requires <code>claude</code>, <code>codex</code> or <code>opencode</code>, and <code>github</code>. <code>linear</code> is an optional integration. Plays nicely with <code>herdr</code> and <code>cmux</code>.</p>
 </section>
 <section id="start" class="reading closing">
   <div class="get"><a class="button solid" href="/download">Download for Mac</a><span class="or">or the CLI</span><div class="install-row"><pre tabindex="0" aria-label="Install the lf command line" class="term"><span class="p">$</span> curl -fsSL https://loopflow.studio/install.sh | sh</pre><button type="button" data-copy="curl -fsSL https://loopflow.studio/install.sh | sh" aria-live="polite" class="copy">Copy</button></div></div>
@@ -158,6 +153,7 @@ extra = '''
 .home-page .pair h2{max-width:900px}.home-page .pair .halves .more{margin:0;border:0;padding:0}
 .home-page .works .under{margin:22px 0 0;font:500 14px var(--font-mono)}.home-page .works .under a{color:var(--text);text-decoration:underline;text-decoration-color:#b9b1a6;text-underline-offset:4px}.home-page .works .under a:hover{color:var(--wine)}
 .home-page .reading.closing{padding-top:8px}
+.home-page #yours .say{max-width:760px;margin:0 0 14px}.home-page #yours .say code{font-size:.88em}.home-page #yours{padding-bottom:28px}
 .home-page .pair .halves{margin-top:22px!important;align-items:start}.home-page .pair h2 em{font-style:italic}
 .home-page .get{display:flex;flex-wrap:wrap;align-items:center;gap:12px 16px;margin-top:26px}.home-page .get .or{font:500 11px var(--font-mono);text-transform:uppercase;letter-spacing:.1em;color:var(--text-secondary)}.home-page .get .install-row{margin:0;flex:0 1 auto}.home-page .get .term{margin:0}.home-page .home-hero .cost{margin:12px 0 6px}.home-page .closing .get{margin-top:0}
 .home-page .pair .halves article{padding:0!important;margin:0!important}

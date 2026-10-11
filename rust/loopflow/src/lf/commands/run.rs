@@ -16,7 +16,7 @@ use crate::prompt::process::ProcessPromptInput;
 use crate::prompt::PromptComponents;
 use crate::prompt::Surface;
 use crate::session_record::{
-    AgentProcessRequest, CaptureHandle, FinalAnswer, SessionCaptureSpec, SubjectAttribution,
+    AgentProcessRequest, CaptureHandle, SessionCaptureSpec, SubjectAttribution,
 };
 use anyhow::{anyhow, Result};
 use std::io::IsTerminal;
@@ -114,7 +114,6 @@ pub(crate) fn answer_bound(
     binding: &crate::ops::WorkBinding,
 ) -> Result<Option<String>> {
     run_bound_prompt(None, Some(message), cli, binding)
-        .map(|answer| answer.map(|answer| answer.text))
 }
 
 fn run_bound_prompt(
@@ -122,7 +121,7 @@ fn run_bound_prompt(
     message: Option<&str>,
     cli: &Cli,
     binding: &crate::ops::WorkBinding,
-) -> Result<Option<FinalAnswer>> {
+) -> Result<Option<String>> {
     let mut scoped;
     let binding = if resolve_skill(skill, cli, &binding.cwd)?
         .as_ref()
@@ -459,6 +458,7 @@ fn build_prompt_at(
     };
 
     let mut agent_config = prepared.config;
+    agent_config.output_schema = cli.output_schema.clone();
     if confine {
         agent_config.write_scope = crate::agent::AgentWriteScope::Worktree;
         agent_config.execution_boundary = Some(crate::agent::checkout_execution_boundary(
@@ -552,7 +552,7 @@ fn print_context_header(built: &PromptBuild, cli: &Cli) {
     );
 }
 
-fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
+fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<String>> {
     if !built.process.auto {
         info!("launching interactive vendor session");
         let capture = begin_capture(built, "tui", &built.agent_config, None)?;
@@ -1276,14 +1276,24 @@ mod tests {
         let provider = bin.join("claude");
         std::fs::write(
             &provider,
-            r#"#!/bin/sh
-printf '%s\n' "$LF_CAPTURE_KEY|${LF_RUN_DIR-unset}|${LF_TRACE_ID-unset}|${LF_PROCESS_ID-unset}" >> "$LF_TEST_RUN_EVIDENCE"
-if [ -n "${LF_TEST_ATTEMPT_FILE:-}" ] && [ ! -e "$LF_TEST_ATTEMPT_FILE" ]; then
-  touch "$LF_TEST_ATTEMPT_FILE"
-  printf '%s\n' '{"type":"result","is_error":true,"result":"service unavailable"}'
-  exit 1
-fi
-printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"output_tokens":3}}'
+            r#"#!/usr/bin/python3
+import json, os, sys
+from pathlib import Path
+if '--version' in sys.argv:
+    print('fixture')
+    sys.exit(0)
+for line in sys.stdin:
+    message = json.loads(line)
+    message['session_id'] = 'fixture-thread'
+    print(json.dumps(message), flush=True)
+    print(json.dumps({'type': 'system', 'subtype': 'init', 'session_id': 'fixture-thread'}), flush=True)
+    with open(os.environ['LF_TEST_RUN_EVIDENCE'], 'a') as evidence:
+        evidence.write('|'.join(os.environ.get(key, 'unset') for key in ['LF_CAPTURE_KEY', 'LF_RUN_DIR', 'LF_TRACE_ID', 'LF_PROCESS_ID']) + '\n')
+    attempt = os.environ.get('LF_TEST_ATTEMPT_FILE')
+    failed = attempt is not None and not Path(attempt).exists()
+    if failed:
+        Path(attempt).touch()
+    print(json.dumps({'type': 'result', 'uuid': 'fixture-result', 'session_id': 'fixture-thread', 'subtype': 'error_during_execution' if failed else 'success', 'is_error': failed, 'result': 'service unavailable' if failed else 'done', 'usage': {'input_tokens': 7, 'output_tokens': 3}}), flush=True)
 "#,
         )
         .unwrap();
@@ -1475,17 +1485,31 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         let provider = bin.join("claude");
         std::fs::write(
             &provider,
-            r#"#!/bin/sh
-if [ "${1:-}" = "--version" ]; then
-  printf '%s\n' 'claude test'
-  exit 0
-fi
-sleep "$LF_TEST_RESEARCH_DELAY"
-mkdir -p "$(dirname "$LF_TEST_RESEARCH_OUTPUT")"
-temporary="$LF_TEST_RESEARCH_OUTPUT.$LF_CAPTURE_KEY.tmp"
-printf '%s\n' "$LF_TEST_RESEARCH_CONTENT" > "$temporary"
-mv "$temporary" "$LF_TEST_RESEARCH_OUTPUT"
-printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"output_tokens":3}}'
+            r#"#!/usr/bin/env python3
+import json
+import os
+import sys
+import time
+from pathlib import Path
+
+if "--version" in sys.argv:
+    print("claude test")
+    sys.exit(0)
+for line in sys.stdin:
+    message = json.loads(line)
+    if message.get("type") != "user":
+        continue
+    message["session_id"] = "research-thread"
+    print(json.dumps(message), flush=True)
+    time.sleep(float(os.environ["LF_TEST_RESEARCH_DELAY"]))
+    output = Path(os.environ["LF_TEST_RESEARCH_OUTPUT"])
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output.with_name(output.name + "." + os.environ["LF_CAPTURE_KEY"] + ".tmp")
+    temporary.write_text(os.environ["LF_TEST_RESEARCH_CONTENT"] + "\n")
+    temporary.replace(output)
+    print(json.dumps({"type": "result", "uuid": message["uuid"],
+        "session_id": "research-thread", "subtype": "success", "result": "Done",
+        "usage": {"input_tokens": 7, "output_tokens": 3}}), flush=True)
 "#,
         )
         .unwrap();

@@ -641,8 +641,17 @@ hook = settings["hooks"]["SessionStart"][0]["hooks"][0]["command"]
 block = json.loads(subprocess.check_output(hook, shell=True))["hookSpecificOutput"]["additionalContext"]
 pathlib.Path(os.environ["LF_TEST_RESUME_PROOF"] + ".context").write_text(block)
 PYTHON
-cat > "$LF_TEST_RESUME_PROOF.input"
-printf '%s\n' '{"type":"result","session_id":"fixture-native","subtype":"success","result":"continued"}'
+python3 -c '
+import json, os, pathlib, sys
+message = json.loads(sys.stdin.readline())
+pathlib.Path(os.environ["LF_TEST_RESUME_PROOF"] + ".input").write_text(message["message"]["content"][0]["text"])
+message["session_id"] = "fixture-native"
+print(json.dumps(message), flush=True)
+print(json.dumps({"type":"system","subtype":"init","session_id":"fixture-native"}), flush=True)
+print(json.dumps({"type":"result","uuid":"continued","session_id":"fixture-native","subtype":"success","result":"continued"}), flush=True)
+for line in sys.stdin:
+    pass
+'
 "#,
     )
     .unwrap();

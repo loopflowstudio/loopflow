@@ -433,23 +433,17 @@ impl ProviderAccountRoute {
         Ok(())
     }
 
-    pub(crate) fn record_process_blocking(
+    pub(crate) fn pin_session_blocking(
         &self,
         agent_session: Option<AgentSessionId>,
-        signal: Option<RateLimitSignal>,
     ) -> Result<(), ProviderAccountError> {
-        if agent_session.is_none() && signal.is_none() {
+        let Some(agent_session) = agent_session else {
             return Ok(());
-        }
+        };
         _run_blocking_account(self.provider, "record", move |runtime| {
             runtime.block_on(async {
-                if let Some(signal) = signal {
-                    self.record_rate_limit(&signal).await?;
-                }
-                if let Some(agent_session) = agent_session {
-                    if let Err(error) = self.pin_session(&agent_session).await {
-                        tracing::warn!(%error, "failed to pin provider session account");
-                    }
+                if let Err(error) = self.pin_session(&agent_session).await {
+                    tracing::warn!(%error, "failed to pin provider session account");
                 }
                 Ok(())
             })

@@ -325,7 +325,7 @@ async fn task_comments_read_and_publish_without_starting_work() {
                 Some("2026-09-27T00:00:01Z"), Some("Keep inbound independent"),
                 json!({"id":"person-1","displayName":"Maya","name":null})));
             // Exercise the ordinary runner, including the native branch and
-            // Claude's batch subprocess branch. The stub never consumes stdin.
+            // Claude's stream-input harness.
             let _homes = crate::test_ambient::EnvGuard::clear(&["HOME", "LF_HOME", "LF_BIN", "PATH", "CODEX_HOME", "CLAUDE_CONFIG_DIR"]);
             let home = directory.path().join("home");
             std::fs::create_dir_all(&home).unwrap();
@@ -335,15 +335,7 @@ async fn task_comments_read_and_publish_without_starting_work() {
             std::fs::create_dir(&bin).unwrap();
             std::env::set_var("PATH", format!("{}:/usr/bin:/bin", bin.display()));
             std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
-            let script = r#"#!/bin/sh
-: > "$FIXTURE_STARTED"
-i=0
-while [ ! -e "$FIXTURE_STOP" ] && [ "$i" -lt 100 ]; do
-    /bin/sleep 0.1
-    i=$((i+1))
-done
-exit 0
-"#;
+            let script = include_str!("../../../tests/support/holding_provider.py");
             for name in ["claude", "codex"] {
                 let executable = bin.join(name);
                 std::fs::write(&executable, script).unwrap();

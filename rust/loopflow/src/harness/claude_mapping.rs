@@ -395,6 +395,28 @@ pub(super) fn process_line(
             } else {
                 Lifecycle::Completed
             };
+            if status == Lifecycle::Failed {
+                let message = event["result"]
+                    .as_str()
+                    .filter(|message| !message.is_empty())
+                    .map(str::to_owned)
+                    .or_else(|| {
+                        event["errors"].as_array().map(|errors| {
+                            errors
+                                .iter()
+                                .filter_map(Value::as_str)
+                                .collect::<Vec<_>>()
+                                .join("\n")
+                        })
+                    })
+                    .filter(|message| !message.is_empty())
+                    .unwrap_or_else(|| "Claude turn failed".to_string());
+                let _ = events.send(ConversationEvent::Error {
+                    code: "claude_result".to_string(),
+                    message,
+                    evidence: None,
+                });
+            }
             if let Some(usage) = usage {
                 let _ = events.send(ConversationEvent::UsageCheckpoint {
                     turn_id: turn_id.to_string(),
@@ -921,16 +943,19 @@ mod tests {
 
     #[test]
     fn process_line_result_error_marks_failed() {
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        let mut state = ReaderState::default();
-        let line = r#"{"type":"result","is_error":true,"result":"failed"}"#;
-
-        let result = process_line(line, "turn_1", &tx, &mut state);
-        assert_eq!(result, Some(Lifecycle::Failed));
-        assert!(
-            rx.try_recv().is_err(),
-            "an error result with no usage emits no events"
-        );
+        for line in [
+            r#"{"type":"result","is_error":true,"result":"failed"}"#,
+            r#"{"type":"result","is_error":true,"result":"","errors":["failed"]}"#,
+        ] {
+            let (tx, mut rx) = mpsc::unbounded_channel();
+            let mut state = ReaderState::default();
+            let result = process_line(line, "turn_1", &tx, &mut state);
+            assert_eq!(result, Some(Lifecycle::Failed));
+            assert!(
+                matches!(rx.try_recv().unwrap(), ConversationEvent::Error { message, .. } if message == "failed")
+            );
+            assert!(rx.try_recv().is_err());
+        }
     }
 
     #[test]

@@ -705,18 +705,13 @@ fn process_ci_fix(
     capture
         .finish(outcome)
         .map_err(|error| OpsError::Message(error.to_string()))?;
-    let conclusion = capture
-        .final_answer()
-        .ok()
-        .flatten()
-        .map(|answer| answer.text)
-        .unwrap_or_else(|| {
-            format!(
-                "No repair conclusion recorded for input {}; retained artifacts: {}",
-                capture.artifact_key(),
-                capture.artifact_dir().display()
-            )
-        });
+    let conclusion = capture.final_answer().ok().flatten().unwrap_or_else(|| {
+        format!(
+            "No repair conclusion recorded for input {}; retained artifacts: {}",
+            capture.artifact_key(),
+            capture.artifact_dir().display()
+        )
+    });
     let result = result.map_err(|error| {
         OpsError::Message(format!("ci-fix provider failed: {error}\n{conclusion}"))
     })?;

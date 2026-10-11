@@ -3643,7 +3643,7 @@ fn planning_fields_project_content_preserves_prose_and_task_assignee_can_be_clea
             assert!(content.contains(example));
             assert!(content.contains("Keep the introduction."));
             assert!(content.contains("## Notes\nKeep these notes."));
-            let parsed = crate::pm::project_document::parse_project_content(&content).unwrap();
+            let parsed = crate::pm::project_document::parse_project_document(&content).unwrap();
             assert_eq!(parsed.workflow, "code");
             assert!(parsed.krs[0].holds);
             assert_eq!(parsed.krs[0].text, "Keep working offline");

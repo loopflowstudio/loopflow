@@ -140,7 +140,8 @@ is flat. The redundant `save_content` forwarding layer is deleted. Migration par
 released Markdown before journal seeding; malformed content refuses without losing original bytes. Conversion and
 Linear edits share recognized field ranges, preserving fenced examples and unknown
 prose. The private `pm/project_document.rs` parser/renderer owns managed description
-sections; prompt assembly renders its own output. Preserve unrelated authored prose
+sections through one `ProjectDocument`; the nested `LinearProjectFields` and
+forwarding parser are deleted. Prompt assembly renders its own output. Preserve unrelated authored prose
 and partial-response omissions. Wave workflow definitions and a Task's captured
 Workflow are different responsibilities and remain separate.
 

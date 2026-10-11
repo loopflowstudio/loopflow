@@ -4,14 +4,6 @@ use super::{PmError, PmResult};
 use crate::work::project::ProjectKR;
 use crate::work::wave::metrics::MetricTarget;
 
-#[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(test, derive(serde::Serialize))]
-pub(crate) struct LinearProjectFields {
-    pub metric_targets: Vec<MetricTarget>,
-    pub workflow: String,
-    pub krs: Vec<ProjectKR>,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ProjectField {
     Workflow,
@@ -22,7 +14,9 @@ pub(crate) enum ProjectField {
 /// A Linear Markdown boundary, not a stored Project or another planning owner.
 #[derive(Debug)]
 pub(crate) struct ProjectDocument<'a> {
-    pub content: LinearProjectFields,
+    pub metric_targets: Vec<MetricTarget>,
+    pub workflow: String,
+    pub krs: Vec<ProjectKR>,
     source: &'a str,
     fields: Vec<(std::ops::Range<usize>, ProjectField)>,
 }
@@ -48,10 +42,6 @@ impl ProjectDocument<'_> {
         }
         result
     }
-}
-
-pub fn parse_project_content(content: &str) -> PmResult<LinearProjectFields> {
-    Ok(parse_project_document(content)?.content)
 }
 
 pub(crate) fn parse_project_document(source: &str) -> PmResult<ProjectDocument<'_>> {
@@ -188,25 +178,15 @@ pub(crate) fn parse_project_document(source: &str) -> PmResult<ProjectDocument<'
     if workflow.is_empty() {
         workflow = authored_as_flow;
     }
-    let content = LinearProjectFields {
+    crate::work::project::validate_metric_targets(&metric_targets).map_err(PmError::Message)?;
+    fields.sort_unstable_by_key(|(range, _)| range.start);
+    Ok(ProjectDocument {
         metric_targets,
         workflow,
         krs,
-    };
-    content.validate()?;
-    fields.sort_unstable_by_key(|(range, _)| range.start);
-    Ok(ProjectDocument {
-        content,
         source,
         fields,
     })
-}
-
-impl LinearProjectFields {
-    pub fn validate(&self) -> PmResult<()> {
-        crate::work::project::validate_metric_targets(&self.metric_targets)
-            .map_err(PmError::Message)
-    }
 }
 
 pub(crate) fn render_project_content(
@@ -243,74 +223,71 @@ pub(super) fn render_krs(krs: &[ProjectKR]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_project_content, render_project_content, LinearProjectFields};
+    use super::{parse_project_document, render_project_content};
     use crate::work::project::ProjectKR;
     use crate::work::wave::metrics::MetricTarget;
 
     #[test]
     fn project_content_without_workflow_preserves_krs() {
-        let content = parse_project_content("## KRs\n- [ ] Keep this proof\n").unwrap();
+        let content = parse_project_document("## KRs\n- [ ] Keep this proof\n").unwrap();
         assert!(content.workflow.is_empty());
         assert_eq!(content.krs[0].text, "Keep this proof");
         let rendered =
             render_project_content(&content.workflow, &content.krs, &content.metric_targets);
         assert!(!rendered.contains("flow:"));
-        assert_eq!(parse_project_content(&rendered).unwrap(), content);
+        let reparsed = parse_project_document(&rendered).unwrap();
+        assert_eq!(reparsed.workflow, content.workflow);
+        assert_eq!(reparsed.krs, content.krs);
+        assert_eq!(reparsed.metric_targets, content.metric_targets);
     }
 
     #[test]
     fn a_project_written_with_a_flow_line_names_that_workflow_until_rewritten() {
-        let earlier = parse_project_content("flow: research\n\n## KRs\n").unwrap();
+        let earlier = parse_project_document("flow: research\n\n## KRs\n").unwrap();
         assert_eq!(earlier.workflow, "research");
         assert!(
             render_project_content(&earlier.workflow, &earlier.krs, &earlier.metric_targets)
                 .contains("\n\nworkflow: research\n")
         );
-        let both = parse_project_content("flow: research\nworkflow: code\n").unwrap();
+        let both = parse_project_document("flow: research\nworkflow: code\n").unwrap();
         assert_eq!(both.workflow, "code");
     }
 
     #[test]
     fn project_content_round_trips_linear_markdown() {
-        let project = LinearProjectFields {
-            metric_targets: vec![MetricTarget {
-                metric_id: "throughput".into(),
-                target: crate::work::wave::metrics::Threshold::AtLeast { value: 0.95 },
-            }],
-            workflow: "feature".to_string(),
-            krs: vec![
-                ProjectKR {
-                    text: "One proof holds".to_string(),
-                    holds: true,
-                },
-                ProjectKR {
-                    text: "Another remains".to_string(),
-                    holds: false,
-                },
-            ],
-        };
-        let rendered =
-            render_project_content(&project.workflow, &project.krs, &project.metric_targets);
-        assert_eq!(parse_project_content(&rendered).unwrap(), project);
+        let targets = vec![MetricTarget {
+            metric_id: "throughput".into(),
+            target: crate::work::wave::metrics::Threshold::AtLeast { value: 0.95 },
+        }];
+        let krs = vec![
+            ProjectKR {
+                text: "One proof holds".into(),
+                holds: true,
+            },
+            ProjectKR {
+                text: "Another remains".into(),
+                holds: false,
+            },
+        ];
+        let rendered = render_project_content("feature", &krs, &targets);
+        let parsed = parse_project_document(&rendered).unwrap();
+        assert_eq!(parsed.workflow, "feature");
+        assert_eq!(parsed.krs, krs);
+        assert_eq!(parsed.metric_targets, targets);
 
         let local = "# Project Name\n\nA measured bet.\n\n## KRs\n\n- One proof holds\n  across wrapped lines.\n";
+        let parsed = parse_project_document(local).unwrap();
+        assert!(parsed.metric_targets.is_empty());
+        assert!(parsed.workflow.is_empty());
         assert_eq!(
-            parse_project_content(local).unwrap(),
-            LinearProjectFields {
-                metric_targets: Vec::new(),
-                workflow: String::new(),
-                krs: vec![ProjectKR {
-                    text: "One proof holds across wrapped lines.".to_string(),
-                    holds: false,
-                }],
-            }
+            parsed.krs,
+            vec![ProjectKR {
+                text: "One proof holds across wrapped lines.".into(),
+                holds: false,
+            }]
         );
     }
-}
 
-#[cfg(test)]
-mod chapter_content_tests {
-    use super::parse_project_content;
     #[test]
     fn project_markdown_rejects_ambiguous_targets() {
         let duplicate = r##"## Metric targets
@@ -319,7 +296,7 @@ mod chapter_content_tests {
  {"metric_id":"rate","target":{"kind":"at_most","value":0.1}}]
 ```
 "##;
-        assert!(parse_project_content(duplicate).is_err());
-        assert!(parse_project_content("## Metric targets\nnot JSON").is_err());
+        assert!(parse_project_document(duplicate).is_err());
+        assert!(parse_project_document("## Metric targets\nnot JSON").is_err());
     }
 }

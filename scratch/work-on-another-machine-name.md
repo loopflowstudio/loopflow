@@ -176,7 +176,12 @@ Workflow/checkout/effect evidence. These are source proofs, not installed accept
 
 Public ProjectContent is removed: ordinary operations take direct typed fields,
 Chapter input is flat, and ProjectStatus belongs to the domain. Linear/migration
-Markdown parsing stays private in `pm/project_document.rs`. Rotation compares
+Markdown parsing stays private in `pm/project_document.rs`. One `ProjectDocument`
+now supplies parsed fields and source ranges to both Linear and migration;
+`LinearProjectFields`, its parser/validation forwarding and test-only serialization
+are deleted. Field replacement renders only the selected typed value rather than
+mutating a second content model. Prose acquisition is still incomplete.
+Rotation compares
 retained JSON values without rewriting original receipt bytes; changed requests
 still refuse. The public edit fixture exposed a raw-SQL selection inconsistent
 with its journal; fixture setup now uses ordinary binding, not a production bypass.
@@ -235,8 +240,8 @@ edit/journal rewrite and preceding acquisition/cron/follow-up work remain open.
 
 The earlier pass still includes acquisition, concrete Linear bindings, ordinary
 Task/comment follow-ups and cron unification. The full deletion audit then removes
-remaining provider hierarchy, whole-model patching, duplicate edit/journal
-vocabularies and Task projections. Conditional retention requires a concrete fact,
+remaining provider hierarchy, duplicate edit/journal vocabularies and Task
+projections. Whole-model patch reconciliation is already removed. Conditional retention requires a concrete fact,
 owner and populated conversion proof. No partial publication or readiness follows.
 
 Review found edit-time ordering would reshuffle the replacement Project list;
@@ -278,13 +283,14 @@ Earlier baseline detail: `c8fe4628a:scratch/work-on-another-machine-name.md`.
   cut. Regenerate them after the entire accepted reduction, before review-only
   republication. No readiness or landing follows from this persistence checkpoint.
 
-Checks: `cargo build -p loopflow --bin lf`, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, and LF-scrubbed `cargo test -p loopflow --lib planning_fields_` pass (7 tests); earlier reader/journal checks remain at `73d6307f32:scratch/work-on-another-machine-name.md`; gate owns the affected/materialized matrix.
+Checks: `cargo build -p loopflow --bin lf`, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, and LF-scrubbed `cargo test -p loopflow --lib` filters `project_document`, `project_markdown`, `project_content`, `structured_project_conversion_refuses_unreadable_criteria_without_losing_original` pass; gate owns the affected/materialized matrix. Earlier typed-field checks: `9b6fe15676:scratch/work-on-another-machine-name.md`.
 
-Context: authored memory/scratch fit. `lf context --skill implement` reports the
-generated Task seed/steers and workspace manifest at 19,404 tokens (3,404 over its
+Context: authored memory/scratch fit. Before these edits, `lf context --skill compress` reported the
+generated Task seed/steers and workspace manifest at 19,403 tokens (3,403 over its
 16,000-token limit). Complete source:
-`.lf/tmp/context/acb2ff60ce34a571a6d4f2bd00a9c2937db3ab8f3d1cb0978e7952d5a9fc65d7.md`.
-Retained direction cannot be reduced by trimming authored notes; no limits changed.
+`.lf/tmp/context/9b38cc618d8f0252231dcdf15d6a17c9196a8b8d81798ee0b493e578c476abe2.md`.
+This generated source contains retained steers and the PR's file manifest; trimming
+authored notes cannot reduce it. No history or limits changed.
 
 ## Delete — do not maintain
 

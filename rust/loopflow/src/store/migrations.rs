@@ -780,8 +780,8 @@ fn convert_project_content(conn: &rusqlite::Connection) -> StoreResult<()> {
             rusqlite::params![
                 id,
                 document.rewrite(None, ""),
-                serde_json::to_string(&document.content.krs)?,
-                serde_json::to_string(&document.content.metric_targets)?
+                serde_json::to_string(&document.krs)?,
+                serde_json::to_string(&document.metric_targets)?
             ],
         )?;
     }
@@ -4723,7 +4723,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        let content = crate::pm::project_document::parse_project_content(&text).unwrap();
+        let content = crate::pm::project_document::parse_project_document(&text).unwrap();
         assert_eq!(content.krs, project.krs);
         assert_eq!(content.workflow, project.workflow);
         assert_eq!(content.metric_targets, project.metric_targets);

@@ -153,8 +153,7 @@ authors a save. Two-Home/file-Git and Store fixtures cover conflicts, narrower/f
 inheritance, clearing/no-echo and unchanged seeded execution, not running Flows.
 Earlier evidence/failed attempts: `829c9b993:wave/product/MEMORY.md`, this heading.
 
-Remote evidence: `d16fc62d8:wave/product/MEMORY.md`, this heading. Nonces fence replies, deadlines are per-peer,
-not a global inventory. Positive owners survive unavailable peers; conflicting
+Remote evidence: `d16fc62d8`, this heading. Nonces fence replies; per-peer deadlines imply no global inventory. Positive owners survive unavailable peers; conflicting
 positives refuse, negatives never admit start. Remote Session/Files/shells retain
 scene, owner, stdin and drafts; transport classification prevents local affordances.
 No replay, local fallback or filesystem CAS. Two-CLI/seeded fixtures establish
@@ -171,7 +170,7 @@ and LOO-453 (readiness/events); research:
 [the comparison](../../docs/reviews/terminal-command-comparison.md#rex-composition-and-discoverability-2026-10-10).
 
 Jack Heart (October 10) accepted Work-named repository/Wave/Task tabs; close hides.
-Work-keyed cutover remains unimplemented. Passive Task navigation/bare remote links
+Work-keyed cutover remains. Passive Task navigation/bare remote links
 no longer acquire Sessions; explicit Session/Changes survives. `ff61b6bc` selects
 shell-default Split, no empty option. `d6640b8c68` retains shell Machine/path through
 layout/Undo; unknown refuses.

@@ -290,8 +290,9 @@ local; there is one configured transport and no fallback transport or resident.
 an explicit optional `linear_id` binding. Project operations and rotation return
 canonical Work. Wave/roadmap/Work-frame Task summaries now read canonical Tasks, with local IDs,
 explicit optional Linear bindings and required sync evidence. `PmTaskSummary`,
-`planning_wave` and their dual-ID joins are removed. Remaining: Task status/detail
-and its provider-shaped local reconstruction; preserve the observation boundary.
+`planning_wave` and their dual-ID joins are removed. Creation now returns canonical Task and the CLI uses its title; `task_planning_item`
+is deleted. Placement/PR consumers read explicit branch/URL metadata. Remaining:
+Task status/detail and provider-shaped reconstruction; preserve observation validity.
 
 **Swift (under `swift/`):** `Models/WaveWorkMap.swift`'s Project/Task planning
 snapshots and `PlanningKeyResult`; `Models/WavePlan.swift`, `PlanningSync.swift`,

@@ -1049,7 +1049,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             if *json {
                 println!("{}", serde_json::to_string_pretty(&issue)?);
             } else {
-                println!("{} · {}", issue.id, issue.name);
+                println!("{} · {}", issue.id, issue.title);
             }
             if loopflow::config::load_config_or_default(Some(repo))
                 .pm

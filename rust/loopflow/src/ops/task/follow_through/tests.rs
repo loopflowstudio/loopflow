@@ -141,13 +141,7 @@ fn local_follow_up_retries_keep_identity_and_allow_independent_completion() {
                 .block_on(store.task_prs(&child.id))
                 .unwrap()
                 .is_empty());
-            assert_eq!(
-                super::super::task_planning_item(&store, &child)
-                    .unwrap()
-                    .due_date
-                    .as_deref(),
-                Some("2026-10-09")
-            );
+            assert_eq!(child.due_date.as_deref(), Some("2026-10-09"));
             // Retry arguments cannot change the pinned destination, identity or payload.
             task_follow_up(
                 repo.path(),
@@ -633,12 +627,7 @@ fn filing_is_atomic_and_reserved_recovery_keeps_the_original_chapter() {
     assert_eq!(child.project_id, task.project_id);
     assert_eq!(child.title, intent.title);
     assert_eq!(child.description, intent.notes);
-    assert_eq!(
-        super::super::task_planning_item(&store, &child)
-            .unwrap()
-            .due_date,
-        intent.due
-    );
+    assert_eq!(child.due_date, intent.due);
     assert_eq!(runtime.block_on(store.list_tasks(None)).unwrap().len(), 2);
     let mut unrelated = intent.clone();
     unrelated.key = "another".into();

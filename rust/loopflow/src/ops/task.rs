@@ -870,10 +870,10 @@ fn prepare_task(repo: &Path, issue: &str, options: TaskProcessOptions) -> OpsRes
             }
             // A retained provider branch may already own Git work. It is metadata,
             // not a reason to reacquire planning or allocate another Task.
-            let branch = source
-                .as_ref()
-                .map(|source| source.branch.clone())
-                .or(task_planning_item(&store, &task)?.branch_name);
+            let branch = source.as_ref().map(|source| source.branch.clone()).or(store
+                .sqlite
+                .task_issue_branch(&task.id)
+                .map_err(task_error)?);
             let placement =
                 prepare_task_placement(&main, &task, branch.as_deref(), &options).await?;
             place_prepared_task(&store, &task.id, placement).await?
@@ -1265,7 +1265,7 @@ pub fn task_create(
     wave: Option<&str>,
     title: Option<String>,
     report: Option<String>,
-) -> OpsResult<crate::pm::PmItem> {
+) -> OpsResult<Task> {
     let input = resolve_task_create_input(title.as_deref(), report.as_deref())?;
     let main = crate::git::worktrees::main_repo_root(repo).map_err(task_error)?;
     block_on_task(async {
@@ -1332,18 +1332,12 @@ pub fn task_create(
             .await
             .map_err(task_error)?;
         super::planning_sync::sync_after_save(&store, wave.repo()).await;
-        task_planning_item(&store, &task)
+        store
+            .get_task(&task.id)
+            .await
+            .map_err(task_error)?
+            .ok_or_else(|| task_error("Created Task is missing"))
     })
-}
-
-pub(crate) fn task_planning_item(store: &Store, task: &Task) -> OpsResult<crate::pm::PmItem> {
-    store
-        .sqlite
-        .planning_task(&task.id)
-        .map_err(task_error)?
-        .record
-        .map(|record| record.item)
-        .ok_or_else(|| task_error("Task planning is missing"))
 }
 
 pub fn resolve_task_create_input(
@@ -1808,8 +1802,10 @@ async fn _task_pr_context_from_store(store: &SharedStore, task: &Task) -> OpsRes
     let wave = owning_wave(store, task).await?;
     let url = if task.linear_id.is_some() {
         Some(
-            task_planning_item(store, task)?
-                .url
+            store
+                .sqlite
+                .task_issue_url(&task.id)
+                .map_err(task_error)?
                 .filter(|url| _valid_task_url(url))
                 .ok_or_else(|| _missing_task_pr_url(task, wave.slug()))?,
         )

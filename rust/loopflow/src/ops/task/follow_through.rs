@@ -148,13 +148,12 @@ async fn link_intent(
     let saved = crate::ops::pm::resolve_saved_task(repo, None, &intent.issue_id)
         .await?
         .1;
-    let item = super::task_planning_item(store, &saved)?;
     let link = FollowThroughLink {
         key: intent.key.clone(),
         issue_id: intent.issue_id.clone(),
         identifier: saved.identifier.clone(),
-        url: item.url,
-        due: item.due_date,
+        url: store.sqlite.task_issue_url(&saved.id).map_err(task_error)?,
+        due: saved.due_date.clone(),
     };
     store
         .sqlite

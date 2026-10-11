@@ -301,6 +301,8 @@ before connection. Planning setup is separate from direct local execution.
 
 Task creation and edits save locally, including during a Linear outage. Creation
 generates the Task ID; later edits, Project rotation and synchronization preserve it.
+`lf task create --json` returns the saved Task, with its local `id`, `project_id`,
+`title`, `description` and optional `linear_id` binding, not a Linear issue.
 Connected repositories report pending sync. Field receipts retain titles, notes, assignment and ordering
 with their provider baselines; observed conflicts adopt Linear and retire the losing
 intention. An active Task connection delivers mapped titles, notes, assignment,

@@ -377,6 +377,15 @@ impl SqliteStore {
         )?)
     }
 
+    pub(crate) fn task_issue_branch(&self, id: &TaskId) -> StoreResult<Option<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            "SELECT planning_branch_name FROM tasks WHERE id=?1",
+            [id.as_str()],
+            |row| row.get(0),
+        )?)
+    }
+
     pub fn task_by_issue(&self, issue: &str) -> StoreResult<Option<Task>> {
         match self.resolve_task_id(issue, None)? {
             Some(id) => self.task(&id),

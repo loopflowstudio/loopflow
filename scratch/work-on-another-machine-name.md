@@ -197,25 +197,25 @@ Readiness also returns local identity. The surviving reader orders by shared ran
 creation time and ID rather than edit time. Provider adapters compare explicit
 bindings. Rotation retains original receipt bytes and local execution is unchanged.
 
-`7e63c994d0` derives Task/Project save and rotation receipts from the same typed
-edit slice as the writer, through `PlanningChanges::save`. Task saves no longer
-read `plan_read::task_in`; the parallel JSON receipt construction, Project
-`write_edits`/`write_content` and rotation's PM reconstruction are deleted.
-Ordering and disposition keep distinct receipt owners. This removes writer-side
-reader dependencies, not the Task/status/snapshot stack or string-field journal.
-Offline fixtures bind through the writer: raw SQL selection contradicted the Git
-journal and foreground acquisition removed that unsaved selection. Earlier detail:
+`7e63c994d0` derives Task/Project save and rotation receipts from the writer's
+typed edits, deleting parallel JSON construction and writer-side PM reads.
+Ordering/disposition retain distinct receipt owners. Raw-SQL selection conflicted
+with the Git journal; fixtures now bind through the writer. Full evidence:
 `7e63c994d0:scratch/work-on-another-machine-name.md`.
 
 ### Canonical Task acquisition — October 10
 
-Task now reads its existing persisted rank, assignee, due date, state, completion
-and completion time directly. Creation saves those fields through the typed writer
-once, instead of capturing an incomplete initial Task and then correcting it.
-Acquisition returns the saved Task; `ResolvedTask` and `ops/task_pm.rs` are removed.
-Cold placement, comments, PR ownership and sweep consume that identity; sweep
-compares canonical Project IDs. Concrete Linear ownership validation remains at
-acquisition. No migration or execution write is added.
+Task reads persisted rank, assignee, due date, state and completion directly;
+creation writes these once. Acquisition and `lf task create --json` return the
+saved canonical Task with local IDs and explicit Linear binding. Create reloads
+after foreground exchange to include accepted synchronization. CLI text uses the
+saved title. `ResolvedTask`, `ops/task_pm.rs` and `task_planning_item` are removed.
+Placement reads the retained provider branch directly; PR context reuses the
+existing URL reader. The retained follow-up consumer reads canonical due dates
+and explicit URL metadata, without reconstructing an issue. The follow-through lifecycle still requires deletion.
+Cold placement, comments, PR ownership and sweep consume saved identity; sweep
+compares canonical Project IDs. Acquisition still validates Linear ownership.
+No schema, execution or acquisition-validity changes.
 
 ### Remaining reader cut — October 10
 
@@ -226,11 +226,11 @@ binding and sync evidence is required; Swift consumes that contract. Saved due
 dates and prose no longer depend on provider inventory in these surfaces. Execution,
 checkout and Workflow reads remain independent. Source checks are recorded below.
 
-Still required: `plan_read::task_in` and `project_in`, `task_planning_item`,
+Still required: `plan_read::task_in` and `project_in`,
 `TaskStatus.planning`/`PmTaskRecord` and cold status expose provider-shaped records.
 At `db36f20ba8`, the Task reader overwrites saved due dates from observations;
 the Project projection omits prose and substitutes provider IDs for local IDs.
-The coherent replacement includes CLI status/create and Swift consumers, not an
+The coherent replacement includes CLI status and Swift consumers, not an
 additional wrapper. Invalidation, positive removal, pending membership and original
 observation age must survive independently of content and delivery status.
 
@@ -381,11 +381,11 @@ Earlier baseline detail: `c8fe4628a:scratch/work-on-another-machine-name.md`.
   cut. Regenerate them after the entire accepted reduction, before review-only
   republication. No readiness or landing follows from this persistence checkpoint.
 
-Checks: network-isolated `cargo test -p loopflow --lib project_prose_receipt_migration_preserves_uncertain_effects` passes (1) at the merged frontier; `git diff --check` passes. Prior build/Clippy/rotation/export results: `c3c510f862` here; full populated conversion and affected suites remain gate-owned.
+Checks: CLI build, fmt, all-target Clippy and isolated `local_planning::task_creation_and_edits_save_offline_in_both_connection_modes` / `pr_tests::task_pr_missing_cached_linear_url_refuses_before_remote_mutation` pass; broader verification stays gate-owned. Prior merged-frontier receipt proof: `329abe7daa` here.
 
 
-Context: authored memory/scratch fit. Generated Task seed/steers/workspace remains
-about 21,159/16,000 tokens; no authored reduction can remove it. Limits/history unchanged.
+Context: authored memory/scratch fit; generated Task seed/steers/workspace exceeds
+16,000 tokens by about 5,168. Authored edits cannot remove that stored input.
 
 ## Delete — do not maintain
 

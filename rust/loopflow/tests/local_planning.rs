@@ -682,8 +682,9 @@ fn public_local_planning_survives_restart_with_generated_identity() {
     let created = lf(repo.path(), home.path(), &args);
     let identity = created["id"].as_str().unwrap().to_owned();
     loopflow::durable::TaskId::parse(&identity).unwrap();
-    assert!(created["team_id"].is_null());
-    assert!(created["url"].is_null());
+    assert!(created["linear_id"].is_null());
+    assert_eq!(created["title"], "Fix parser");
+    assert_eq!(created["description"], "Keep quoted input");
     let other = lf(
         repo.path(),
         home.path(),
@@ -1809,7 +1810,16 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
                 String::from_utf8_lossy(&output.stderr).contains("pending Linear sync"),
                 connected
             );
-            serde_json::from_slice::<Value>(&output.stdout).unwrap()
+            let created: Value = serde_json::from_slice(&output.stdout).unwrap();
+            let id = TaskId::parse(created["id"].as_str().unwrap()).unwrap();
+            let saved = store.task(&id).unwrap().unwrap();
+            assert_eq!(created, serde_json::to_value(saved).unwrap());
+            assert_eq!(created["title"], "Independent same title");
+            assert_eq!(created["description"], "Original notes");
+            assert_eq!(created["project_id"], project_id.as_str());
+            assert!(created.get("name").is_none());
+            assert!(created["worktree"].is_null());
+            created
         };
         let first = TaskId::parse(create()["id"].as_str().unwrap()).unwrap();
         let second = TaskId::parse(create()["id"].as_str().unwrap()).unwrap();

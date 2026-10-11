@@ -147,7 +147,18 @@ main = f'''
      graph pursue             <span class="c"># Skills in sequence: a Graph</span>
 
 <span class="p">$</span> <b>lf</b> pr open                  <span class="c"># a draft PR, opened for you</span>
-<span class="p">$</span> <b>lf</b> land --watch             <span class="c"># merge when checks pass; fix if not</span></pre>
+<span class="p">$</span> <b>lf</b> land --watch             <span class="c"># merge when checks pass; fix if not</span>
+
+<span class="p">$</span> <b>lf</b> account
+<span class="c">  claude  you@    </span><i class="bar"><i style="width:78%"></i></i><span class="c">  78% left</span>
+<span class="c">  claude  work@   </span><i class="bar"><i style="width:21%"></i></i><span class="c">  21% left</span>
+<span class="c">  codex   you@    </span><i class="bar"><i style="width:52%"></i></i><span class="c">  52% left</span>
+
+<span class="p">$</span> <b>lf</b> usage --wt slow-loop
+<span class="c">  3 sessions · 2 agents · 412k tokens · $4.18</span>
+
+<span class="p">$</span> <b>lf</b> --machine mini monitor
+<span class="c">  6 sessions running · 2 waiting on you</span></pre>
     </article>
   </div>
 </section>
@@ -172,6 +183,7 @@ extra = '''
 .home-page .pair h2{max-width:900px}.home-page .pair .halves .more{margin:0;border:0;padding:0}
 .home-page .works .under{margin:22px 0 0;font:500 14px var(--font-mono)}.home-page .works .under a{color:var(--text);text-decoration:underline;text-decoration-color:#b9b1a6;text-underline-offset:4px}.home-page .works .under a:hover{color:var(--wine)}
 .home-page .reading.closing{padding-top:8px}
+.home-page .clihero .term .bar{display:inline-block;width:120px;height:8px;border-radius:4px;background:#3a3434;vertical-align:middle;overflow:hidden}.home-page .clihero .term .bar i{display:block;height:100%;background:#e06c8b;border-radius:4px}
 .home-page .home-hero .rotating{background:linear-gradient(180deg,#fdf9fa,#f8eef1);box-shadow:inset 0 0 0 1px #722f3714,0 10px 24px -20px #722f3740}
 .home-page .rotating span{animation:rotate-five 10s cubic-bezier(.3,.7,.2,1) infinite}.home-page .rotating span:nth-child(5){animation-delay:8s}@keyframes rotate-five{0%{opacity:0;transform:translateY(.45em)}4%,17%{opacity:1;transform:none}20%,100%{opacity:0;transform:translateY(-.45em)}}.home-page .home-hero h1:has(.rotating){line-height:1.18}@media (max-width:700px){.home-page .home-hero h1 br.wide{display:none}}
 .home-page .trio h2{grid-column:1/-1;font-size:clamp(30px,3.2vw,42px);margin:0}

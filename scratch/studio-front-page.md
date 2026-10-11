@@ -725,3 +725,5 @@ strip links to its own site in a new tab.
 - Jack Heart: "Play at scale is nonsense i think" → `x12` header is back to "Scale yourself."
 
 - Jack Heart: "From soloist to maestro?" → set as the `x12` header, over "Conduct an orchestra of coding agents and hear every part clearly."
+
+- Jack Heart: "i feel like we might be a bit off the deep end. I like it, and it pushes up the uniqueness/pull. But like, have we lost just... the word loopflow? being clearly in teh coding agent space?" → in `x12` the header is again his "Loopflow is how you [design | implement | demo | ship] software with agents."; his line "Conduct an orchestra of coding agents and hear every part clearly." sits under it; "From soloist to maestro." becomes the heading of the Scale / Play / Craft section. Rule taken from this: the first thing on the page names Loopflow and says coding agents plainly; the musical image comes second.

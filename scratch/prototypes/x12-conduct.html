@@ -53,6 +53,7 @@
 .home-page .pair h2{max-width:900px}.home-page .pair .halves .more{margin:0;border:0;padding:0}
 .home-page .works .under{margin:22px 0 0;font:500 14px var(--font-mono)}.home-page .works .under a{color:var(--text);text-decoration:underline;text-decoration-color:#b9b1a6;text-underline-offset:4px}.home-page .works .under a:hover{color:var(--wine)}
 .home-page .reading.closing{padding-top:8px}
+.home-page .trio h2{grid-column:1/-1;font-size:clamp(30px,3.2vw,42px);margin:0}
 .home-page .works{padding-bottom:0}.home-page .belief{padding:84px 0 96px}.home-page .belief p{font:400 clamp(34px,4vw,54px)/1.08 var(--font-serif);letter-spacing:-.02em;color:var(--burgundy);margin:0;max-width:900px}.home-page .belief .get{margin-top:28px}
 .home-page .trio{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:40px 44px;padding-top:72px}
 .home-page .trio .eyebrow{color:var(--burgundy);margin:0 0 12px}
@@ -204,7 +205,8 @@
       </header>
 <main id="main-content" class="home">
 <section class="home-hero">
-  <h1>From soloist to maestro.</h1>
+  <h1 aria-label="Loopflow is how you design, implement, demo and ship software with agents.">
+  <span aria-hidden="true">Loopflow is how you <span class="rotating"><span>design</span><span>implement</span><span>demo</span><span>ship</span></span> software with agents.</span></h1>
   <p class="either">Conduct an orchestra of coding agents and hear every part clearly.</p>
   <div class="get"><a class="button solid" href="http://localhost:5001/download">Download for Mac</a><span class="or">or the CLI</span><div class="install-row"><pre tabindex="0" aria-label="Install the lf command line" class="term"><span class="p">$</span> curl -fsSL https://loopflow.studio/install.sh | sh</pre><button type="button" data-copy="curl -fsSL https://loopflow.studio/install.sh | sh" aria-live="polite" class="copy">Copy</button></div></div>
   <p class="cost">Free and open source (MIT)</p>
@@ -271,6 +273,7 @@
   </div>
 </section>
 <section class="trio">
+  <h2>From soloist to maestro.</h2>
   <article>
     <p class="eyebrow">Scale</p>
     <h3>You can’t play sixty instruments. You can conduct sixty players.</h3>

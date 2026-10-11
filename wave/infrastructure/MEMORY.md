@@ -632,12 +632,15 @@ cron list replaces WaveCronDef/GOAL declarations. Conversion retains labels,
 Machine, activation, dues, receipt classifications and child-held locks. Release
 remains Infrastructure-owned. Main #1523's terminal draft stays separate; conversion retains local liveness/placement.
 
-Materialized gate: 30/2,416 Rust failures; repaired affected checks pass, including
-conversion, simulated remote dispatch, Session preservation and headless Desktop.
-No full rerun.
-Unchanged website overflow keeps the aggregate gate red. Source-built offline
-Task/comment saves and readback pass. Browser rendering was unavailable. Real SSH, live Linear continuity, installation
-and schedule activation remain unproved and unauthorized. Hosted checks remain required.
+Hosted `72b1e98dd6`: Rust 2,412/2,415 passed; installation failed a stale
+preservation assertion. Website, Swift/UI and migration checks passed. CI repair
+updates disposable-Home isolation, canonical reconnect SQL, outage setup and
+post-acquisition preservation assertions. All four repaired cases plus migration
+checks pass in isolated Linux; fmt/Clippy/Ruff pass. New head still needs CI.
+Checks: `/tmp/loo412-ci-*`; earlier evidence: `6fabcd0734:scratch/`.
+Git pending/unconfirmed publication can return without a short-command warning;
+status retains the uncertainty. Jack approved landing after this disclosure.
+Real SSH, live Linear, installation and schedule activation remain unproved.
 
 ## Planning and launch preservation (curated 2026-10-02)
 

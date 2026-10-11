@@ -320,12 +320,11 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
                     &scope,
                     "FIX-1",
                 );
-            let task_before = runtime.block_on(store.get_task(&task.id)).unwrap();
             let pr_before = runtime.block_on(store.active_task_pr(&task.id)).unwrap();
             for (index, (condition, expected)) in [
                 ("canceled", "terminal"),
                 ("moved", "invalid ownership"),
-                ("team", "Team"),
+                ("team", "invalid ownership"),
                 ("removed", "deleted"),
             ]
             .into_iter()
@@ -358,6 +357,9 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
                         .block_on(store.observe_pm_issue_change("issue-1", None, true))
                         .unwrap();
                 }
+                // Acquisition may update shared content and state. Refusing execution
+                // must preserve the Task as it stands after that observation.
+                let task_before = runtime.block_on(store.get_task(&task.id)).unwrap();
                 let output = run(repo.path(), &["-b", "task", "run", "FIX-1"]);
                 assert!(
                     !output.status.success(),

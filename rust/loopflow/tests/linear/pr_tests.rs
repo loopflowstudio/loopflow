@@ -1486,6 +1486,8 @@ fn end_is_refused_while_a_published_pr_is_unmerged() {
 
 #[test]
 fn default_branch_refuses_pr_before_committing_or_pushing() {
+    let home = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
     let repo = TestRepo::new();
     let head = repo.head_sha();
     repo.create_file("notes.md", "unpublished\n");

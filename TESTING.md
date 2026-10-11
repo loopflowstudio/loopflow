@@ -966,6 +966,10 @@ local HTTPS proxy with synthetic Linear state and credentials. Its CA is trusted
 only by CLI children through `SSL_CERT_FILE`; macOS platform TLS ignores that
 setting, so reconnect executes only on Linux. The Rust harness still compiles on
 macOS; its tests are explicitly ignored there, not reported as behavioral passes.
+Include this fixture when changing Work storage or receipt field names: its SQL
+must read canonical Task fields, not retired provider JSON. To prove pending saves
+across a closed connection, make the peer unavailable during the save; short CLI
+commands attempt delivery even with Desktop closed.
 `task_abandonment` and `local_planning` cover
 portable local decisions and deletion, retry identity and retained execution in
 both connection modes without provider access. No installation or live provider is used.

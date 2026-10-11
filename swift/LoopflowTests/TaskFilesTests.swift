@@ -73,6 +73,25 @@ struct TaskFilesTests {
         #expect(document.text == "draft\ntwo\n")
     }
 
+    @Test func releasingFilesStoreEndsRemoteObservation() async throws {
+        let state = OSAllocatedUnfairLock(initialState: (started: false, ended: false))
+        let stream = AsyncThrowingStream<TaskFilesFrame, any Error>.makeStream()
+        stream.continuation.onTermination = { _ in state.withLock { $0.ended = true } }
+        let query = RegistryQuery(watchFiles: { _, _ in
+            state.withLock { $0.started = true }
+            return TaskFilesObservation(frames: stream.stream, cancel: { stream.continuation.finish() })
+        }, run: { _, _ in throw RegistryQueryError("No file read expected") })
+            .onMachine("peer", repository: "plan")
+        var store: TaskFilesStore? = TaskFilesStore(issue: "remote-task", cwd: "/peer/checkout", query: query)
+        weak var retained = store
+        store?.observeFiles()
+        try await eventually { state.withLock { $0.started } }
+        #expect(!state.withLock { $0.ended })
+        store = nil
+        #expect(retained == nil)
+        try await eventually { state.withLock { $0.ended } }
+    }
+
     @Test(arguments: ["disconnect", "stale", "changed-owner"])
     func remoteEventsReconcileRetainedDraftsAndRejectLostOrStaleOwners(ending: String) async throws {
         let peer = RemoteFilesFixture()

@@ -297,17 +297,16 @@ final class TaskFilesStore {
     private var savedPreference = true
     private var preferenceChanges: AnyCancellable?
     private var observation: TaskFileObservation?
-    private let remoteObservation = RemoteObservation()
-    private final class RemoteObservation {
-        var task: Task<Void, Never>?
-        deinit { task?.cancel() }
-    }
+    @ObservationIgnored private var remoteObservation: Task<Void, Never>?
+
     private var invalidation: Task<Void, Never>?
     private var changedPaths: Set<String> = []
     private var autosaves: [String: Task<Void, Never>] = [:]
     var autosave = true {
         didSet { for document in documents.values { scheduleSave(document) } }
     }
+
+    deinit { remoteObservation?.cancel() }
 
     func observeFiles() {
         if let machine = query.remoteMachine {
@@ -323,34 +322,31 @@ final class TaskFilesStore {
     }
 
     private func observeRemoteFiles(machine: String) {
-        guard remoteObservation.task == nil else { return }
+        guard remoteObservation == nil else { return }
         let request = UUID().uuidString
-        remoteObservation.task = Task { [weak self, query, issue, cwd] in
+        remoteObservation = Task { [weak self, query, issue, cwd] in
+            var observation: TaskFilesObservation?
             do {
-                let observation = try await query.watchTaskFiles(issue: issue, checkout: cwd, request: request)
-                do {
-                    for try await frame in observation.frames {
-                        try Task.checkCancellation()
-                        guard frame.request == request, frame.taskID == issue,
-                              frame.machineID == machine, frame.checkout == cwd else {
-                            throw RegistryQueryError("Stale or mismatched file observation; drafts retained. Reopen the Task.")
-                        }
-                        guard let self else { break }
-                        if frame.changed { self.error = nil; self.invalidate([""]) }
+                let opened = try await query.watchTaskFiles(issue: issue, checkout: cwd, request: request)
+                observation = opened
+                for try await frame in opened.frames {
+                    try Task.checkCancellation()
+                    guard frame.request == request, frame.taskID == issue,
+                          frame.machineID == machine, frame.checkout == cwd else {
+                        throw RegistryQueryError("Stale or mismatched file observation; drafts retained. Reopen the Task.")
                     }
-                    if !Task.isCancelled { throw RegistryQueryError("Live file observation disconnected; drafts retained. Refresh to reconnect.") }
-                } catch {
-                    await observation.cancel()
-                    throw error
+                    guard let self else { break }
+                    if frame.changed { self.error = nil; self.invalidate([""]) }
                 }
-                await observation.cancel()
+                if !Task.isCancelled { throw RegistryQueryError("Live file observation disconnected; drafts retained. Refresh to reconnect.") }
             } catch {
                 if let self, !Task.isCancelled {
                     self.invalidation?.cancel()
                     self.error = "Live file observation unavailable: \(error.localizedDescription)"
                 }
             }
-            self?.remoteObservation.task = nil
+            await observation?.cancel()
+            self?.remoteObservation = nil
         }
     }
 

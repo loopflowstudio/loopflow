@@ -1226,3 +1226,8 @@ Headless provider transport changes also run the research-artifact test
 and Linux `planning_reconnect_tests`. Their stand-ins must consume and echo the
 stream-input request before reporting success; sleeping and emitting an uncorrelated
 print-mode result can race the seed write and fail with a broken pipe.
+
+Headless shutdown checks run on Linux as well as macOS: fast provider exit must
+settle its owned lifeline watchdog without mistaking it for foreign work. Include
+`launch_nonzero_exit`, bare/default launch, mixed-provider Flow and headless resume;
+Session interactivity must not select an individual launch’s process-group policy.

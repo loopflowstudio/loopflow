@@ -498,6 +498,7 @@ impl SqliteStore {
         session: &str,
         expected: &SessionAttachment,
         command: &std::process::Command,
+        interactive: bool,
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -507,9 +508,13 @@ impl SqliteStore {
             .map(|arg| arg.to_string_lossy().into_owned())
             .collect::<Vec<_>>();
         let changed = tx.execute(
-            "UPDATE processes SET spawn_state='spawn_requested',command=?2
+            "UPDATE processes SET spawn_state='spawn_requested',command=?2,agent_interactive=?3
             WHERE id=?1 AND completed_at IS NULL AND spawn_state='reserved' AND pid IS NULL",
-            params![expected.agent_process_id, serde_json::to_string(&argv)?],
+            params![
+                expected.agent_process_id,
+                serde_json::to_string(&argv)?,
+                interactive
+            ],
         )?;
         if changed != 1 {
             return Err(StoreError::InvalidAuthority(
@@ -1645,6 +1650,7 @@ mod attachment_tests {
                 "conversation",
                 &first,
                 &std::process::Command::new("fixture"),
+                false,
             )
             .unwrap();
         store
@@ -1725,6 +1731,7 @@ mod attachment_tests {
                 "conversation",
                 &first,
                 &std::process::Command::new("fixture"),
+                false,
             )
             .unwrap();
         assert!(store
@@ -2067,7 +2074,7 @@ mod attachment_tests {
         let mut command = std::process::Command::new("codex");
         command.args(["app-server", "--listen", "unix:///fixture"]);
         store
-            .record_agent_process_launch(&session.id, &attachment, &command)
+            .record_agent_process_launch(&session.id, &attachment, &command, false)
             .unwrap();
         store
             .record_agent_process_identity(&session.id, &attachment, 4242, 123)

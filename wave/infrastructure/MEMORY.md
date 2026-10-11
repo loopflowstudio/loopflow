@@ -252,9 +252,6 @@ checkpoint CI skipped tests; Linux/installed acceptance remains unproved.
 Prior live-takeover evidence: `5e95ce9a4:wave/infrastructure/MEMORY.md`, this heading.
 Plan: `scratch/stop-and-take-over-claude.md`.
 
-Drafts must `depends_on` unreleased parents; name order broke materialized fixtures.
-Scratch-bearing PRs defer tests; TESTING.md owns gating.
-
 LOO-450: Jack selected ClaudeHarness, native schemas and predecessor deletion,
 approving landing with quieter output. Fenced native answers, replay/schema and
 fake-Flow proofs pass, not configured Task-to-publication or installation.

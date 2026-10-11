@@ -110,9 +110,13 @@ cannot discard an admitted child before the harness receives it. Failed recordin
 a failed exec retains any recorded identity without claiming provider execution.
 No post-spawn bind is needed. Codex reconnect holds the endpoint's FIFO;
 Claude and OpenCode currently use anonymous lifelines without that handoff path.
-Writers remain held until OS exit, even after attachment transfer;
-only the last holder's exit closes the lifeline and stops the group, including
-after SIGKILL. The lifeline does not itself enforce current attachment authority.
+The launcher records terminal versus headless mode on each AgentProcess; the
+Session’s historical interactive flag does not select its cleanup policy.
+Writers remain held across attachment transfer. Closing the last holder stops
+the group, including when OS exit or SIGKILL closes it. Under the attachment fence, a launcher settling its naturally exited provider
+releases its own retained writer and waits for the watchdog to finish the group.
+Without that owned writer, leader death grants no permission to stop survivors.
+The lifeline does not itself enforce current attachment authority.
 Headless launch requires the invocation's attachment: Claude, Codex and OpenCode
 refuse to start a provider without one, and their writes and signals have no
 unfenced path. Owned native launches use the same pre-exec recording channel under

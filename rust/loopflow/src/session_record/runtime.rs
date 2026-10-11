@@ -125,6 +125,7 @@ mod tests {
                 "resume",
                 &attached,
                 &std::process::Command::new("fixture"),
+                false,
             )
             .unwrap();
         let detached = store
@@ -254,6 +255,7 @@ mod tests {
                 "resume",
                 &attached,
                 &std::process::Command::new("fixture"),
+                false,
             )
             .unwrap();
         let detached = store
@@ -334,7 +336,7 @@ mod tests {
             let mut command = std::process::Command::new("/bin/sleep");
             command.env_clear().arg("60").process_group(0);
             store
-                .record_agent_process_launch("resume", &first, &command)
+                .record_agent_process_launch("resume", &first, &command, false)
                 .unwrap();
             let child = Child(command.spawn().unwrap());
             let pid = child.0.id();
@@ -414,7 +416,7 @@ mod tests {
             let mut command = std::process::Command::new("/bin/sleep");
             command.env_clear().arg("60").process_group(0);
             store
-                .record_agent_process_launch("resume", &attachment, &command)
+                .record_agent_process_launch("resume", &attachment, &command, false)
                 .unwrap();
             let mut child = Child(command.spawn().unwrap());
             let pid = child.0.id();
@@ -476,7 +478,7 @@ mod tests {
         let mut command = std::process::Command::new("/bin/sleep");
         command.env_clear().arg("60").process_group(0);
         store
-            .record_agent_process_launch("retry", &attachment, &command)
+            .record_agent_process_launch("retry", &attachment, &command, false)
             .unwrap();
         let child = Child(command.spawn().unwrap());
         let pid = child.0.id();

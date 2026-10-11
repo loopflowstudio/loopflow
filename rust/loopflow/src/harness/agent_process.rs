@@ -60,7 +60,7 @@ pub(crate) fn spawn(
             .to_string_lossy()
             .into_owned();
         store.with_session_attachment(session, attachment, || {
-            store.record_agent_process_launch(session, attachment, command.as_std())?;
+            store.record_agent_process_launch(session, attachment, command.as_std(), false)?;
             let spawned =
                 crate::os_process::spawn_agent_process(command, lifeline, record_identity(owner));
             if spawned.is_err() {
@@ -84,7 +84,7 @@ pub(crate) fn spawn_native(
     let (store, session, attachment) = owner;
     store
         .with_session_attachment(session, attachment, || {
-            store.record_agent_process_launch(session, attachment, &command)?;
+            store.record_agent_process_launch(session, attachment, &command, true)?;
             let spawned =
                 crate::os_process::spawn_native_agent_process(command, record_identity(owner));
             if spawned.is_err() {
@@ -318,6 +318,12 @@ fn close_agent_process(pid: u32, started: i64) -> Result<()> {
 
 // Leader death alone neither proves group death nor authorizes signaling helpers.
 fn confirmed_group_death(pid: u32) -> Result<()> {
+    if crate::os_process::release_agent_lifeline(pid) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while OsProcess::group_is_alive(pid)? && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+    }
     if OsProcess::group_is_alive(pid)? {
         return Err(anyhow!(
             "AgentProcess group {pid} survives its recorded leader"

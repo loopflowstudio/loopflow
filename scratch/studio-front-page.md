@@ -719,3 +719,5 @@ strip links to its own site in a new tab.
 - Jack Heart set the line under the `x12` header: "Conduct an orchestra of coding agents and hear every part clearly." It replaces the two-sentence line that included "use more agents more effectively".
 
 - Jack Heart: "ok well Waves is a musical word, how can we adjust that tagline to fit in and say teh right thing" → the `x12` section heading is "Arrange your coding sessions around waves that sustain and tasks that resolve." (Claude's wording: "arrange", "sustain" and "resolve" are music's own words for his long-lived and short-lived.) `x11` keeps his earlier heading.
+
+- Jack Heart: "Now Scale yourself feels like it needs to be more musical" → the `x12` header is "Play at scale." (Claude's wording), over his line "Conduct an orchestra of coding agents and hear every part clearly." Alternates offered: "From soloist to conductor.", "Scale yourself, and hear every part."

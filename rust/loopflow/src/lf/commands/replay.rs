@@ -137,17 +137,43 @@ mod tests {
 
     #[test]
     fn replay_uses_recorded_request_without_the_planning_store() {
+        replay_recorded_request("opencode");
+    }
+
+    #[test]
+    fn claude_replay_preserves_native_output_schema() {
+        replay_recorded_request("claude");
+    }
+
+    fn replay_recorded_request(harness: &str) {
         let _lock = crate::journal::test_env_lock();
         let home = tempfile::tempdir().unwrap();
         let bin = home.path().join("bin");
         std::fs::create_dir(&bin).unwrap();
         let evidence = home.path().join("replay-evidence");
-        let provider = bin.join("opencode");
-        std::fs::write(
-            &provider,
-            include_str!("../../../tests/support/opencode_server.py").replace("__WAIT__", "False"),
-        )
-        .unwrap();
+        let provider = bin.join(harness);
+        let provider_source = if harness == "claude" {
+            r#"#!/usr/bin/python3
+import json, os, sys
+if '--version' in sys.argv:
+    print('fixture')
+    sys.exit(0)
+schema = json.loads(sys.argv[sys.argv.index('--json-schema') + 1])
+assert schema == {'type': 'object', 'properties': {'decision': {'const': 'advance'}}, 'required': ['decision']}
+context = open(sys.argv[sys.argv.index('--append-system-prompt-file') + 1]).read()
+for line in sys.stdin:
+    message = json.loads(line)
+    with open(os.environ['LF_TEST_REPLAY_EVIDENCE'], 'w') as evidence:
+        json.dump({'capture': os.environ['LF_CAPTURE_KEY'], 'context': context, 'message': message, 'schema': schema}, evidence)
+    message['session_id'] = 'replay-thread'
+    print(json.dumps(message), flush=True)
+    print(json.dumps({'type': 'system', 'subtype': 'init', 'session_id': 'replay-thread'}), flush=True)
+    print(json.dumps({'type': 'result', 'uuid': 'replay-result', 'session_id': 'replay-thread', 'subtype': 'success', 'is_error': False, 'result': 'not the answer', 'structured_output': {'decision': 'advance'}}), flush=True)
+"#.to_string()
+        } else {
+            include_str!("../../../tests/support/opencode_server.py").replace("__WAIT__", "False")
+        };
+        std::fs::write(&provider, provider_source).unwrap();
         std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
 
         let path = std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(
@@ -164,14 +190,46 @@ mod tests {
         std::fs::create_dir(&decoy_home).unwrap();
         let registry = home.path().join("loopflow.db");
 
+        let account_id = if harness == "claude" {
+            let mut account = crate::provider_account::new_account(
+                crate::provider_auth::Provider::Claude,
+                crate::store::ProviderAccountId::parse("replay-fixture").unwrap(),
+                home.path().join("accounts/claude/replay-fixture"),
+                Some(crate::profile::EmailAddress::parse("replay@example.com").unwrap()),
+            );
+            crate::provider_account::identity::tests::write_claude_identity(&mut account);
+            tokio::runtime::Runtime::new().unwrap().block_on(async {
+                let store = crate::store::open_ephemeral_store(
+                    &crate::store::StorageConfig::sqlite(registry.clone()),
+                )
+                .await
+                .unwrap();
+                store.upsert_provider_account(&account).await.unwrap();
+            });
+            Some(account.account_id)
+        } else {
+            None
+        };
+
         let request = AgentProcessRequest {
             conversation_context: None,
             system_prompt: "recorded system".to_string(),
             task_prompt: "recorded task".to_string(),
             skill_invocation: None,
-            output_schema: None,
-            agent: "opencode:opencode/glm-5.2".to_string(),
-            account_id: None,
+            output_schema: (harness == "claude").then(|| {
+                serde_json::json!({
+                    "type": "object",
+                    "properties": {"decision": {"const": "advance"}},
+                    "required": ["decision"]
+                })
+            }),
+            agent: if harness == "claude" {
+                "claude"
+            } else {
+                "opencode:opencode/glm-5.2"
+            }
+            .to_string(),
+            account_id,
             max_turns: Some(3),
             write_scope: crate::agent::AgentWriteScope::Worktree,
             execution_boundary: None,
@@ -180,8 +238,8 @@ mod tests {
         };
         let source = CaptureHandle::begin_with_request(
             SessionCaptureSpec {
-                harness: "opencode".to_string(),
-                model: Some("opencode/glm-5.2".to_string()),
+                harness: harness.to_string(),
+                model: (harness == "opencode").then(|| "opencode/glm-5.2".to_string()),
                 surface: "headless".to_string(),
                 cwd: home.path().to_path_buf(),
                 repo: Some(home.path().to_path_buf()),

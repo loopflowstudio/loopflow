@@ -52,11 +52,6 @@ the warning. Main’s terminal context hooks and harness-only headless execution
 
 ## Remaining acceptance
 
-- Gate: affected launch/skill suites, including `context_launch_tests`, and
-  capture/replay with a non-null schema. Replay forwards the saved schema in code;
-  its existing OpenCode fixture uses `None`, so it does not prove schema preservation.
-  A Claude replay fixture must observe the saved schema at the provider boundary,
-  not only compare capture metadata.
 - Demo: the configured `lf -a claude task run <task> pursue` reaches `pr-publish`
   without a hand-run step. The fake-provider test runs a taskless authored Flow
   ending in `publish-proof`, not the Task workflow or a real publication.
@@ -71,12 +66,29 @@ Release's entry-point lesson applies: Flow success is not Task-to-publication pr
 October 10 reconciliation inspected Release's top-level goal and memory; that
 lesson applies here without transferring its release or schedule work to LOO-450.
 
-Checks: `cargo fmt`, `cargo clippy --all-targets -- -D warnings` and network-isolated `cargo test --offline -p loopflow --lib build_codex_command` pass (6 tests); prior native-answer/Claude-Flow/terminal/capture/usage proofs and the post-sync `context_launch_tests terminal_context_refreshes_without_replacing_instructions_or_losing_failed_sessions -- --exact` pass remain applicable. Gate owns wider launch/skill and non-null schema replay checks; configured demo remains open.
+Checks: network-isolated `scripts/test.py --reuse-passing --base 5f44fd9e7139e0e98874df36ce7b699bf6d0fa58` passed architecture/fmt/Clippy but timed out in stale EOF-waiting Rust fixtures; focused `cargo nextest run` launch/Flow/context/replay/repair selections passed across repairs (56 affected tests plus result-mapping checks); `cargo clippy --all-targets -- -D warnings` passed; `cd website && uv run python dev.py test` passed 76 tests after dependency preparation outside isolation; full materialized Rust matrix remains CI-owned.
 
 ## Delivery decision — October 10
 
 Jack Heart approved landing after reviewing the harness path and accepting quieter
 headless output: assistant text remains, but the old tool summaries and cost/time
 footer are no longer rendered. This authorizes `ship` and completion after verified
-merge; the configured live demo remains unproved, not a claimed pass. Gate retains
-ownership of the outstanding automated replay/launch checks.
+merge; the configured live demo remains unproved, not a claimed pass. The replay/launch checks pass after the gate repairs below; CI owns the full matrix.
+
+
+## Gate findings — October 10
+
+The replay fixture now reaches Claude with a non-null saved schema and a disposable
+recorded account; it retains the request and inherited capture identity without
+requiring planning Work. Old subprocess fixtures waited for stdin EOF, emitted no
+native final answer or read skill context from the retired channel. They now speak
+the native protocol and preserve launch, correction, reconnect and task-input proofs.
+Codex stand-ins publish a completed native message, not just deltas; correction
+fixtures retain the schema while checking the same Session is resumed.
+
+Gate also exposed a production regression: Claude's failed `result` supplied no
+harness error event, so deleting raw-output parsing lost transient retry diagnostics.
+The mapper now forwards failure text (or the native errors array), and the captured
+launch test proves a transient failure resumes successfully in the same Session.
+No print-mode path or answer fallback was restored. The two EOF fixture hangs used
+up the broad gate budget; their repaired large-input and saved-workspace checks pass.

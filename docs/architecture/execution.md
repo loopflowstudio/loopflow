@@ -188,7 +188,9 @@ turns. Headless Claude, Codex and OpenCode all use their harness; unknown provid
 names fail instead of selecting Claude. Flow decisions and final-answer reads use
 only correlated native `started`/`output`/successful `completed` rows. Capture
 prose remains history, never an answer fallback. Terminal launches retain native
-terminal behavior.
+terminal behavior. Headless human-readable output prints assistant text without
+the former tool summaries or cost/time footer. Failed Claude results retain their
+error messages for retry classification.
 
 The continuing AgentProcess retains its identity while each attachment
 receives a fresh opaque token, including reattachment of the same lf Process.

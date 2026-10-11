@@ -19,13 +19,17 @@ if '--version' in sys.argv:
 args = '\n'.join(sys.argv[1:]) + '\n'
 open(os.environ['TEST_ARGS'], 'w').write(args)
 context = open(sys.argv[sys.argv.index('--append-system-prompt-file') + 1]).read()
-open(os.environ['TEST_CONTEXT'], 'w').write(context)
+
 if '--input-format' in sys.argv:
     message = json.loads(sys.stdin.readline())
+    context += '\n' + message['message']['content'][0]['text']
+    open(os.environ['TEST_CONTEXT'], 'w').write(context)
     message['session_id'] = 'fixture'
     print(json.dumps(message), flush=True)
     print(json.dumps({'type': 'result', 'session_id': 'fixture', 'subtype': 'success', 'result': 'hello'}), flush=True)
 else:
+    context += '\n' + sys.argv[-1]
+    open(os.environ['TEST_CONTEXT'], 'w').write(context)
     print('hello')
 "#,
         )

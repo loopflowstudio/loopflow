@@ -2687,9 +2687,8 @@ if '--version' in sys.argv:
 sys.stderr = open(os.path.join(os.environ['LF_HOME'], 'provider-errors'), 'a', buffering=1)
 assert sys.argv[sys.argv.index('--input-format') + 1] == 'stream-json'
 context = open(sys.argv[sys.argv.index('--append-system-prompt-file') + 1]).read()
-deciding = '<lf:skill:decide-proof>' in context or '--resume' in sys.argv
 schema = json.loads(sys.argv[sys.argv.index('--json-schema') + 1]) if '--json-schema' in sys.argv else None
-assert (schema is not None) == deciding, (schema, deciding, sys.argv)
+deciding = schema is not None
 if deciding:
     assert schema['properties']['decision']['enum'] == ['advance', 'iterate', 'blocked']
 thread = sys.argv[sys.argv.index('--resume') + 1] if '--resume' in sys.argv else 'fixture-' + str(os.getpid())
@@ -2697,6 +2696,7 @@ for line in sys.stdin:
     message = json.loads(line)
     if message.get('shouldQuery') is False:
         continue
+    assert deciding == ('<lf:skill:decide-proof>' in message['message']['content'][0]['text'] or '--resume' in sys.argv)
     message['session_id'] = thread
     print(json.dumps(message), flush=True)
     print(json.dumps({'type': 'system', 'subtype': 'init', 'session_id': thread}), flush=True)

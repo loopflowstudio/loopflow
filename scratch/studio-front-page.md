@@ -608,3 +608,5 @@ strip links to its own site in a new tab.
 - Jack Heart corrected the closing text: "(like agent sessions)", not "(like sessions)". Set in `x11`.
 
 - Jack Heart: "lf has no servers." → its own sentence in the `x11` closing text. Claude takes it as his confirmation of the claim; it is still not checked against the code.
+
+- Jack Heart: "make currently reuqires two bullets" → in `x11`, "Currently requires:" is followed by two bullets (the coding agent; `github`); the Linear and herdr/cmux sentences follow as a line.

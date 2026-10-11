@@ -456,7 +456,9 @@ tests does not make the full PR ready to ship.
    test isolates them. The source-alias locality gap in item 1 is unchanged.
 
 3. **Composed acceptance.** Native provider launch/resume, a second release CLI
-   writer, full headless acceptance and regression matrix remain with gate. The
+   writer and the remaining acceptance matrix remain unproved. Gate passed the
+   affected collector, worktree, landing, receipt/doctor and scheduler tests;
+   both scheduled-cleanup CLI proofs passed in the disposable OS runner. The
    current fixture reads a native transcript but does not launch its provider.
    Appended/updated references and interrupted pages have projection-level proofs;
    the collector's multi-page fixture now composes heavier arrivals, transactional
@@ -474,7 +476,12 @@ Headless gate: `cargo test -p loopflow cleanup`,
 demo, post-merge edits, ignored user data, missing providers, unavailable process
 inspection, concurrent admission, missing paths, interrupted removal and repeated
 passes. Scheduler tests use generated service definitions and a test invocation;
-no login session or permission dialog required. DTO fixture tests accompany JSON
+no login session or permission dialog required. Run both installed-registry CLI
+proofs with `uv run python scripts/test_task_installation.py --test
+scheduled_cleanup_retries_a_busy_checkout_after_it_becomes_idle
+experimental_cleanup_discovers_release_checkout_admission`; `LF_HOME` alone does
+not isolate the OS account’s release registry. Both tests are deliberately ignored
+on the host. DTO fixture tests accompany JSON
 changes in each consumer language; the current cleanup report is Rust CLI-only
 with no Swift or Python consumer. Gate owns execution, not this design pass.
 
@@ -517,4 +524,4 @@ allocated bytes by category; observed free-space delta after collection; oldest
 eligible retention age. APFS sharing, hardlinks and concurrent writers mean
 directory sums are estimates, not guaranteed reclaimed bytes.
 
-Check: `cargo test -p loopflow --lib -- cleanup read_retry provider_conversation session_evidence` — 66 passed, 2 ignored (rerun after compress); `--ignored cleanup_evidence_cost_probe` — passed (5.1s observation); `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` — passed; integration suites, full acceptance and provider resume: gate; installed scheduler/upgrade: demo.
+Check (2026-10-10): network-isolated `cargo test -p loopflow` filters `cleanup`, `worktree`, `pr_landing`, `--lib cron`, `--test release_tests cleanup`, `--test dto_fixtures --test doctor_tests` passed their affected tests after the release-history JSON fixture repair and moving scheduled CLI proofs to the disposable OS runner (both passed); architecture, fmt, Clippy and Ruff passed. Native provider resume, a real release writer, loaded OS scheduling and published upgrade remain unproved; source-alias locality still blocks shipping.

@@ -72,8 +72,9 @@ design owns the proof and remaining cut; earlier missing-field tracing remains a
 **Removed:** `ops/project.rs::ProjectPlanning`, public `planning_project(s)` reads,
 and the Wave/roadmap Project inventory join. Selection, edit/workflow, rotation and
 CLI/Desktop Project summaries use canonical Work and explicit Linear bindings.
-The canonical list preserves shared rank rather than edit-time order. Project export
-now reads that canonical owner too.
+The canonical list preserves shared rank rather than edit-time order. Project and Task
+export read canonical Work. Rotation also consumes/returns canonical Tasks; it no
+longer substitutes IDs or re-resolves a fabricated PM item.
 
 **Remaining:** `store/sqlite/plan_read.rs` reconstructs `LinearProject` (formerly `PmProject`)/`PmItem` for
 Task observations. `planning_wave` and its consumers are removed. Delete the remaining projections. `PmTaskRecord` / `PmTaskObservation` must cease being alternate Task

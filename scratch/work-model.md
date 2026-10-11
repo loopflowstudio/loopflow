@@ -61,18 +61,12 @@ prove a provider exited or authorize cleanup. Local absence cannot prove peer ab
 
 ## Current source and evidence
 
-Plan wrappers and public Linear comment observations are removed. Task reads its
-shared fields directly; acquisition returns it without the deleted `ResolvedTask`.
-Ordinary provider-shaped snapshot/status readers remain. Project persistence also replaces internal Markdown with typed description,
-workflow, KRs and targets, including transactional conversion and peer fidelity
-proof. Public ProjectContent and its operation arguments are also removed; ProjectStatus
-is domain-owned. Linear/migration Markdown stays private; retained rotation receipts
-keep their original bytes. Canonical Project operations, rotation and CLI/Desktop summaries now read Work;
-the ProjectPlanning wrapper and public PM-shaped Project reads are removed. Shared
-rank survives the reader cut. Composed Linear prose saves now have focused proof. Task status projections and the adapter-only observation boundary remain;
-Wave/roadmap/Work-frame summaries now read canonical Tasks. This is partial implementation, not completion of the accepted model. The new audit identifies remaining storage, acquisition, Git,
-CLI/Desktop, config, skills and test cuts against the merged October 10 source.
-Its conditional deletions require behavioral proof before removing their evidence.
+The [pursuit design](work-on-another-machine-name.md) owns implementation status
+and focused evidence; the [audit](work-model-reduction.md) owns remaining deletion.
+Canonical Project/Task persistence and summary readers are implemented, not the
+full acquisition, status, journal or provider-cache cut. The detailed October 10
+checkpoint survives at `fc7f5cac81:scratch/work-model.md`. Conditional deletions
+still require retained-evidence ownership and populated conversion proof.
 
 The original full inventory and review sequence remain in
 [work-model.html](work-model.html), pinned to `c8fe4628affc13ac0553c14cd5bec5e5896369a1`.

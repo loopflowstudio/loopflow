@@ -234,6 +234,15 @@ invalidation, positive removal, pending membership and original observation age.
 The canonical snapshot cut does not complete acquisition or the deletion audit.
 Bindings, ordinary follow-ups, cron and typed journal/provider hierarchy remain.
 
+Rotation now consumes and returns canonical Tasks, including saved dates/prose and
+explicit bindings. It no longer reconstructs PM records, substitutes IDs or repeats
+the Task lookup. Membership receipts and writes share the typed `save` path.
+Task export likewise reads canonical Work and captures only shared creation-field
+baselines; retained attempted inputs are unchanged. This removes those consumers,
+not `plan_read`, Task status or the provider hierarchy. Offline public rotation
+covers both transport configurations/mapping states and transaction/retry preservation;
+export fixtures cover retained input and later saves.
+
 ### LOO-427 integration coordination — October 10
 
 Jack Heart requested the combined reduction in LOO-412. LOO-427's clean gate-repaired
@@ -361,10 +370,10 @@ Earlier baseline detail: `c8fe4628a:scratch/work-on-another-machine-name.md`.
   cut. Regenerate them after the entire accepted reduction, before review-only
   republication. No readiness or landing follows from this persistence checkpoint.
 
-Checks: `cargo build -p loopflow --bin lf`, focused Wave/public canonical-read/DTO tests and `swift test --package-path swift --filter DTOFixtureTests` pass; `cargo fmt`, `cargo clippy --all-targets -- -D warnings` and diff checks pass. Gate owns affected/materialized verification.
+Checks: `cargo build -p loopflow --bin lf`, network-isolated `cargo test -p loopflow --test local_planning rotation_` (2), `--lib planning_export_` (5), `--lib ops::chapter::tests::un` (2) pass; fmt/diff and all-target Clippy pass. Gate owns affected/materialized verification; prior Wave/DTO/Swift evidence: `fc7f5cac81` here.
 
 Context: memory and scratch fit; generated Task seed/steers/workspace measured
-21,269/16,000 tokens, 5,269 over. Authored curation cannot remove this generated
+21,256/16,000 tokens, 5,256 over. Authored curation cannot remove this generated
 history/metadata; no history or limit changed.
 
 ## Delete — do not maintain
@@ -383,3 +392,5 @@ The mixed model is superseded; its synthetic proofs establish no installed accep
 Mixed-design/demo/recovery details and proof limits remain at
 `7853a22f5c:scratch/work-on-another-machine-name.md`; synthetic provider evidence
 and a seeded Workflow prove no configured acceptance or dispatch.
+
+Earlier reduction comparison: `fc7f5cac81:scratch/simplification-opportunities.md`.

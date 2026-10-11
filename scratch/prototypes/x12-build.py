@@ -128,7 +128,7 @@ main = f'''
   </div>
 </section>
 <section class="pair clihero">
-  <h2><code>lf</code>: the CLI for shipping software with coding agents.</h2>
+  <h2><code>lf</code>: the workflow CLI for shipping software with coding agents.</h2>
   <div class="halves">
     <article>
       <p>Underneath Loopflow’s work-centered API is <code>lf</code>: a universal interface for agent sessions across providers, and the software engineering process between the sessions. It cuts the branch, opens the pull request and gets it merged. One command says where an agent runs, on whose login, with which model, on which piece of work, and what it does.</p>

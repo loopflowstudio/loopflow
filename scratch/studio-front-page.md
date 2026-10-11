@@ -759,3 +759,5 @@ strip links to its own site in a new tab.
 - Jack Heart set the CLI heading: "lf: the CLI for software engineering workflows with coding agents". Set in `x12`.
 
 - Jack Heart: "or the CLI for shipping software with coding agents?" → set as the `x12` CLI heading, replacing "…for software engineering workflows with coding agents".
+
+- Jack Heart: "the workflow CLI for shipping... ?" → the `x12` CLI heading is "`lf`: the workflow CLI for shipping software with coding agents."

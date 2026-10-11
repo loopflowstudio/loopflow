@@ -1,31 +1,76 @@
 {
   "base": "906576f39d4f0dc0c1c7e87c6ecbc178a44fb3e8",
-  "head": "2588b1ca277e1a1a080488b3a31abaae82505685",
+  "head": "c8fe4628affc13ac0553c14cd5bec5e5896369a1",
   "working_tree": false,
   "sources": [
     {
       "path": "rust/loopflow/src/engine/config.rs",
-      "sha256": "85604faabab8357f1427a288492289589a53bb05f77993c14ec5c82d2e4eead2",
+      "symbol": "PlanningConfig",
+      "revision": "c8fe4628affc13ac0553c14cd5bec5e5896369a1",
       "start": 176,
       "end": 185,
-      "base_start": null,
-      "text": "pub enum PlanningConfig {\n    Git {\n        #[serde(default = \"default_planning_remote\")]\n        remote: String,\n        /// Omit for this user's stable personal ref.\n        #[serde(default)]\n        shared: Option<String>,\n    },\n    Linear {},\n}\n"
+      "text": "pub enum PlanningConfig {\n    Git {\n        #[serde(default = \"default_planning_remote\")]\n        remote: String,\n        /// Omit for this user's stable personal ref.\n        #[serde(default)]\n        shared: Option<String>,\n    },\n    Linear {},\n}",
+      "sha256": "85604faabab8357f1427a288492289589a53bb05f77993c14ec5c82d2e4eead2"
+    },
+    {
+      "path": "rust/loopflow/src/ops/planning_sync.rs",
+      "symbol": "sync_after_save",
+      "revision": "c8fe4628affc13ac0553c14cd5bec5e5896369a1",
+      "start": 45,
+      "end": 76,
+      "text": "pub(crate) async fn sync_after_save(store: &Store, repo: &str) {\n    let attempt = async {\n        let config = crate::engine::config::load_config(Some(Path::new(repo)))\n            .map_err(message)?\n            .unwrap_or_default();\n        match config.planning_transport() {\n            crate::engine::config::PlanningConfig::Git { .. } => {\n                publish_repository(store, repo).await\n            }\n            crate::engine::config::PlanningConfig::Linear {} => {\n                tokio::time::timeout(std::time::Duration::from_secs(5), async {\n                    super::planning_export::sync_repository_exports(store, repo).await?;\n                    let (fields, comments, state) = tokio::join!(\n                        super::planning_delivery::sync_repository_fields(store, repo),\n                        super::linear_observe::sync_repository_deliveries(store, repo, false),\n                        super::linear_observe::sync_repository_deliveries(store, repo, true)\n                    );\n                    fields?;\n                    comments?;\n                    state?;\n                    Ok(())\n                })\n                .await\n                .map_err(message)?\n            }\n        }\n    };\n    if let Err(error) = attempt.await {\n        tracing::debug!(%error, \"planning synchronization pending after local save\");\n        eprintln!(\"Saved locally; planning synchronization pending. See `lf planning status`.\");\n    }\n}",
+      "sha256": "6284208b62eda4b81d7a718561b0542d9a2b4c739d974937b5c963df02ce0d99"
     },
     {
       "path": "rust/loopflow/src/store/sqlite/task_content.rs",
-      "sha256": "42c98c06ea71d02a1c779201fa2ace3b6c6cdd5d9739b4bfda92a67706f5366d",
+      "symbol": "SqliteStore::edit_task",
+      "revision": "c8fe4628affc13ac0553c14cd5bec5e5896369a1",
       "start": 160,
       "end": 172,
+      "text": "        if changed {\n            let mut edits = Vec::new();\n            if let Some(value) = &patch.name {\n                edits.push(Edit::TaskTitle(Some(value.clone())));\n            }\n            if let Some(value) = &patch.description {\n                edits.push(Edit::TaskDescription(Some(value.clone())));\n            }\n            if let Some(value) = &patch.assignee {\n                edits.push(Edit::TaskAssignee(value.clone()));\n            }\n            planning_write::local(&tx, PlanningKind::Task, id.as_str(), &edits)?;\n        }",
       "base_start": 141,
-      "text": "        if changed {\n            let mut edits = Vec::new();\n            if let Some(value) = &patch.name {\n                edits.push(Edit::TaskTitle(Some(value.clone())));\n            }\n            if let Some(value) = &patch.description {\n                edits.push(Edit::TaskDescription(Some(value.clone())));\n            }\n            if let Some(value) = &patch.assignee {\n                edits.push(Edit::TaskAssignee(value.clone()));\n            }\n            planning_write::local(&tx, PlanningKind::Task, id.as_str(), &edits)?;\n        }\n"
+      "base_end": 148,
+      "base_text": "        if changed {\n            tx.execute(\n                \"UPDATE tasks SET issue_title=COALESCE(?2,issue_title),issue_description=COALESCE(?3,issue_description),\n                 planning_assignee=CASE WHEN ?4 THEN ?5 ELSE planning_assignee END,\n                 planning_revision=planning_revision+1,updated_at=?6 WHERE id=?1\",\n                params![id.as_str(),patch.name,patch.description,patch.assignee.is_some(),patch.assignee.as_ref().and_then(|v|v.as_deref()),now_unix()],\n            )?;\n        }",
+      "sha256": "42c98c06ea71d02a1c779201fa2ace3b6c6cdd5d9739b4bfda92a67706f5366d"
+    },
+    {
+      "path": "rust/loopflow/src/store/sqlite/planning_peers.rs",
+      "symbol": "import_peer_planning \u2192 planning_write::write",
+      "revision": "c8fe4628affc13ac0553c14cd5bec5e5896369a1",
+      "start": 246,
+      "end": 255,
+      "text": "                    planning_write::ensure_record(&save, repo, object, edits)?;\n                    require_repository(&save, repo, object)?;\n                    // Wave selection points to Projects inserted later in this import.\n                    let selected: Vec<_> = edits\n                        .iter()\n                        .filter(|e| !matches!(e, PlanningEdit::WaveProject(_)))\n                        .cloned()\n                        .collect();\n                    planning_write::write(&save, object, &selected, WriteOrigin::Import)?;\n                    require_repository(&save, repo, object)?;",
+      "sha256": "11935462ac8d34d286aa0103f13d6109b30f9bd136aef21326271e9aae63b4f9"
+    },
+    {
+      "path": "rust/loopflow/src/store/sqlite/planning_write.rs",
+      "symbol": "write: capture only local changes",
+      "revision": "c8fe4628affc13ac0553c14cd5bec5e5896369a1",
+      "start": 317,
+      "end": 322,
+      "text": "    if matches!(origin, WriteOrigin::Local) {\n        // Initial rows and every subsequent write use this same typed snapshot.\n        capture(conn, object)?;\n    }\n    Ok(!changed.is_empty())\n}",
+      "sha256": "e737578ea4c9cd78238229f97c2f6b55e55db4716d4d05ad4026a8c9fb1cc876"
     },
     {
       "path": "rust/loopflow/src/ops/run.rs",
-      "sha256": "5c4f5d36f83e444e2184f827f5d880b939f953cf4877416ee059efb00479e99c",
+      "symbol": "resolve_work_selection",
+      "revision": "c8fe4628affc13ac0553c14cd5bec5e5896369a1",
       "start": 126,
       "end": 128,
+      "text": "    if let Some(value) = selection.task {\n        let value = value.trim();\n        let task = crate::ops::task::resolve_task(store, repo, value).await?;",
       "base_start": 126,
-      "text": "    if let Some(value) = selection.task {\n        let value = value.trim();\n        let task = crate::ops::task::resolve_task(store, repo, value).await?;\n"
+      "base_end": 133,
+      "base_text": "    if let Some(value) = selection.task {\n        let value = value.trim();\n        let task = if let Ok(id) = TaskId::parse(value) {\n            store.get_task(&id).await.map_err(run_error)?\n        } else {\n            store.get_task_by_issue(value).await.map_err(run_error)?\n        }\n        .ok_or_else(|| run_error(format!(\"Task {value:?} is not registered\")))?;",
+      "sha256": "5c4f5d36f83e444e2184f827f5d880b939f953cf4877416ee059efb00479e99c"
+    },
+    {
+      "path": "rust/loopflow/src/ops/task/remote.rs",
+      "symbol": "TaskSource::require_checkout",
+      "revision": "c8fe4628affc13ac0553c14cd5bec5e5896369a1",
+      "start": 57,
+      "end": 66,
+      "text": "    pub fn require_checkout(&self, task: &Task) -> OpsResult<()> {\n        let worktree = task.worktree()?;\n        let branch = crate::engine::git::current_branch(worktree)?;\n        if branch.as_deref() != Some(&self.branch) || !is_ancestor(worktree, &self.commit, \"HEAD\")?\n        {\n            return Err(task_error(format!(\"Task {} needs branch {} at commit {}; run `lf sync` in {} before continuing; existing work is preserved\", self.identifier, self.branch, self.commit, worktree.display())));\n        }\n        Ok(())\n    }\n}",
+      "sha256": "c64c933f78f7f3e8812c8cbc996e0436dd72c0e90e12da0c2de4df38cb943c3b"
     }
   ]
 }

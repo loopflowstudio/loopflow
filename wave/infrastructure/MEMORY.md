@@ -705,24 +705,18 @@ No branch binary may migrate the installed Home; fixtures prove no installed out
 Exact constraints and archived evidence: `b2228bce8:wave/infrastructure/MEMORY.md`
 under this heading, retaining the October 4 source and original caveat references.
 
-## Task deletion and command ownership (LOO-305, curated 2026-10-08)
+## Task deletion and command ownership (LOO-305, curated 2026-10-10)
 
-Jack Heart selected provider/local deletion, command consolidation and saved-Flow
-delivery; execution settlement stayed deferred. Decisions, proofs and the incident:
-`423ff2ec2:wave/infrastructure/MEMORY.md` under this heading. Current mechanics:
+Jack Heart selected provider/local deletion and command consolidation; execution
+settlement stayed deferred. Full decisions, proofs and incident:
+`58de9907b6:wave/infrastructure/MEMORY.md`, this heading. Current mechanics:
 [CLI](../../docs/lf.md), [planning](../../docs/architecture/planning.md).
-
-Fresh ownership authorizes deletion; acknowledgement or explicit trash confirms it.
-Missing membership proves neither. Preserve terminal times, Done outcomes, PRs,
-Git and positive confirmation across stale reads. Completion and planning have
-separate writers; retry retains merged-PR evidence and original completion time.
-Planning-only creation needs no checkout or agent. Allocation failure preserves
-created identity; upstream tracking never defines checkout identity.
-
-The deletion demo removed LOO-299–302 but migrated the installed Home and broke
-its older CLI. Jack forbade branch-binary access and promotion: use disposable
-Homes without inherited authority. Removal is not termination. Exact incident:
-`abd039b2a818669c43e7c189f6a37382335639f2:wave/infrastructure/MEMORY.md`.
+Fresh ownership authorizes deletion; acknowledgment or trash confirms it, never
+missing membership. Preserve Done outcomes, terminal times, PR/Git evidence and
+positive confirmation across retries/stale reads. Allocation failure retains created
+identity. Removal is not termination. The demo migrated the installed Home and broke
+its CLI; Jack forbade branch-binary access/promotion. Use disposable Homes without
+inherited authority.
 
 ## Task convergence (LOO-319, curated 2026-10-07)
 

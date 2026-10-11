@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="A structural reduction of Loopflow PM and Planning models into one Work model, typed edits and concrete transports."><title>One Work model · Structural redesign</title><style>
+:root{color-scheme:light;--paper:#fafbf8;--ink:#242d29;--muted:#637067;--rule:#d4dbd2;--accent:#28634b;--wash:#eef2eb}
+*{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:28px}
+body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.65 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+a{color:var(--accent);text-underline-offset:3px}a:hover{text-decoration-thickness:2px}
+a:focus-visible, .table-scroll:focus-visible{outline:2px solid var(--accent);outline-offset:4px}
+.skip{position:absolute;left:16px;top:-100px;background:white;padding:12px}.skip:focus{top:12px}
+.layout{max-width:1440px;margin:auto;display:grid;grid-template-columns:260px minmax(0,1fr);gap:64px;padding:48px 40px 100px}
+aside{position:sticky;top:32px;align-self:start;max-height:calc(100vh - 64px);overflow-y:auto;padding-right:12px}
+.eyebrow{font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin:0 0 18px}
+nav{display:grid;gap:2px}nav a{display:block;text-decoration:none;font-size:13px;line-height:1.5;padding:7px 0}nav a:hover{text-decoration:underline}
+aside footer{border-top:1px solid var(--rule);margin-top:22px;padding-top:16px;font-size:12px;color:var(--muted)}
+main{min-width:0;max-width:1000px}h1{font-size:clamp(34px,4vw,48px);line-height:1.12;letter-spacing:-.035em;margin:0 0 20px;font-weight:650}
+h1+p{font-size:12px;color:var(--muted);overflow-wrap:anywhere}h2{border-top:1px solid var(--rule);padding-top:30px;margin:50px 0 18px;font-size:25px;line-height:1.25;letter-spacing:-.02em}
+h3{font-size:19px;margin:30px 0 12px;line-height:1.35}p{margin:0 0 18px;max-width:85ch}strong{font-weight:650}
+code{font:0.88em/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:var(--wash);border-radius:3px;padding:2px 4px;overflow-wrap:anywhere}
+pre{background:var(--wash);border:1px solid var(--rule);border-radius:6px;overflow-x:auto;padding:22px;margin:24px 0;font-size:13px;line-height:1.65}
+pre code{padding:0;background:none;overflow-wrap:normal;font-size:inherit}
+.table-scroll{overflow-x:auto;margin:22px 0 28px;border:1px solid var(--rule);border-radius:6px}
+table{width:100%;border-collapse:collapse;font-size:14px;line-height:1.55}th,td{padding:12px 14px;text-align:left;vertical-align:top;border-bottom:1px solid var(--rule)}th{background:var(--wash);font-size:12px;font-weight:650}td:first-child{min-width:160px}tr:last-child td{border-bottom:0}td p{margin:0}li{margin:10px 0}ol{padding-left:22px}
+@media(max-width:1050px){.layout{gap:32px;grid-template-columns:210px minmax(0,1fr);padding:32px 24px 64px}table{font-size:13px}th,td{padding:10px}}
+@media(max-width:760px){.layout{display:block;padding:28px 18px 60px}aside{position:static;max-height:none;margin-bottom:36px;border-bottom:1px solid var(--rule);padding-bottom:24px}nav{grid-template-columns:repeat(2,minmax(0,1fr));gap:2px 16px}aside footer{display:none}h2{font-size:23px;margin-top:38px}pre{padding:14px;font-size:12px}table{min-width:620px}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+@media print{body{background:white;font-size:10pt}.layout{display:block;padding:0}aside,.skip{display:none}main{max-width:none}h1{font-size:28pt}h2{font-size:17pt;break-after:avoid;margin-top:24pt;padding-top:16pt}h3{break-after:avoid}pre{white-space:pre-wrap;font-size:8pt;break-inside:avoid}pre code{white-space:pre-wrap}.table-scroll{overflow:visible;border:0}table{min-width:0;font-size:9pt}tr{break-inside:avoid}th,td{padding:7px}a{color:inherit}p{orphans:3;widows:3}}
+
+main>p:first-of-type{color:var(--muted);font-size:13px}td:first-child{width:25%}h2+ p strong{color:var(--accent)}
+</style></head><body><a class="skip" href="#one-work-model">Skip to document</a><div class="layout"><aside><p class="eyebrow">LOO-412 · Accepted design</p><nav aria-label="Document sections"><a href="#1-where-the-extra-models-came-from">1. Where the extra models came from</a><a href="#2-the-proposed-center">2. The proposed center</a><a href="#3-what-disappears-or-gets-smaller">3. What disappears or gets smaller</a><a href="#4-one-read-path-and-one-edit-vocabulary">4. One read path and one edit vocabulary</a><a href="#5-keep-transport-evidence-beside-work">5. Keep transport evidence beside Work</a><a href="#6-walk-the-behavior-through-the-smaller-model">6. Walk the behavior through the smaller model</a><a href="#7-implement-in-the-order-that-deletes-the-most-duplication">7. Implement in the order that deletes the most duplication</a></nav><footer>One domain model<br>One typed edit vocabulary<br>Concrete transport adapters<br><br><a href="work-model.html">Current type inventory</a></footer></aside><main id="document"><h1 id="one-work-model">One Work model</h1>
+<p><strong>Accepted design · LOO-412 · October 10, 2026</strong></p>
+<p>Jack Heart requested a deeper reduction of the <code>Pm*</code> and <code>Planning*</code> types. This proposal starts from one principle: <strong>a Project is a Project and a Task is a Task, whether saved offline, read from Linear, or received through Git.</strong> Transport changes how records arrive; it should not create another hierarchy of work.</p>
+<p>Jack Heart accepted this structural direction on October 10. Finish the existing passes in the <a href="work-on-another-machine-name.md">pursuit design</a>, then take the <a href="work-model-reduction.md">queued deletion audit</a>. Implementation owns the exact <code>WorkEdit</code> shape; the sketch below is illustrative. This adds no concurrent writer or automatic Flow restart. The original diagnosis is pinned to <code>c8fe4628a</code>; the audit covers the newer merged source.</p>
+<h2 id="1-where-the-extra-models-came-from">1. Where the extra models came from</h2>
+<p>The current code describes the same Project through three overlapping shapes:</p>
+<pre><code class="language-text">Project.plan: ProjectPlan       durable identity + a partial payload
+ProjectContent                 workflow + KRs + metric targets
+PmProject                      full provider-shaped view, also used locally
+</code></pre>
+<p>The follow-up audit also found persistent duplication: <code>pm_projects</code> and <code>pm_items</code> hold provider-shaped records, then accepted values are projected into Work rows. Ordinary local readers reconstruct PM-shaped views from those Work rows again. Remove that round trip while retaining concrete observations for foreign, unmapped, partial and stale provider facts; those facts must not silently acquire Work ownership.</p>
+<p>The strongest example is the local content path. KRs and targets are rendered into <code>project_prompt_context</code>; readers parse that prose back into <code>ProjectContent</code>, then construct <code>PmProject</code>. The workflow name also exists as its own column. Ordinary local work is going through a provider-description encoding even when no provider is involved.</p>
+<p>The Task side has the same split: <code>Task.plan: TaskPlan</code> contains title/description, while <code>PmItem</code> carries a broader field set and can use a provider ID or a local ID. Git exchange adds another object address (<code>PlanningKind</code> + <code>PlanningObject</code>) and a parallel field vocabulary.</p>
+<p>Those transport records have useful jobs. They should describe changes to Work, rather than becoming another set of Work objects.</p>
+<p>Sources: <a href="https://github.com/loopflowstudio/loopflow/blob/c8fe4628affc13ac0553c14cd5bec5e5896369a1/rust/loopflow/src/work/project.rs">Project</a>, <a href="https://github.com/loopflowstudio/loopflow/blob/c8fe4628affc13ac0553c14cd5bec5e5896369a1/rust/loopflow/src/planning.rs">plan payloads</a>, <a href="https://github.com/loopflowstudio/loopflow/blob/c8fe4628affc13ac0553c14cd5bec5e5896369a1/rust/loopflow/src/store/sqlite/project_content.rs">local content reader</a>, <a href="https://github.com/loopflowstudio/loopflow/blob/c8fe4628affc13ac0553c14cd5bec5e5896369a1/rust/loopflow/src/store/sqlite/plan_read.rs">local Project/Task projections</a>, <a href="https://github.com/loopflowstudio/loopflow/blob/c8fe4628affc13ac0553c14cd5bec5e5896369a1/rust/loopflow/src/engine/planning_exchange.rs">exchange schema</a>.</p>
+<h2 id="2-the-proposed-center">2. The proposed center</h2>
+<p>One domain model, with a single durable identity for each local object:</p>
+<pre><code class="language-text">Wave
+  id, name, parent?, selected_project?
+  goal and memory references
+
+Project
+  id, wave_id
+  name, summary, description, status
+  workflow?, krs: [ProjectKR], metric_targets: [MetricTarget]
+
+Task
+  id, project_id
+  identifier, title, description
+  disposition, assignee?, due_date?, order
+
+TaskComment
+  id, task_id
+  body, author, created_at
+</code></pre>
+<p>This is a conceptual field sketch, not a migration-ready schema. Existing timestamps, deletion evidence and necessary fields still need disposition. A Task's Wave can be derived from its Project; if retained for efficient reads, ownership writes must validate it.</p>
+<p>A comment belongs to a Task. It does not become a fourth top-level Work scope. Tasks belong to Projects; Projects belong to Waves. Provider IDs never replace these domain IDs in ordinary read results.</p>
+<p><strong>Attach local activity to this Work rather than making Work carry all of it.</strong> Checkout placement, captured Workflow, Sessions, Processes and PR delivery records remain local records keyed to the Task. A Task's workflow preference is different from the captured Workflow and its current position.</p>
+<pre><code class="language-text">                     one local Work store
+                              │
+               Wave → Project → Task → Comments
+                              │
+                   associated local activity
+                   Workflow / Sessions / Processes
+                              │
+                       never replicated
+
+        selected transport exchanges shared Work fields
+                   Git ref     OR     Linear
+</code></pre>
+<p>There is no <code>PmWave → PmProject → PmItem</code> domain tree alongside this tree, and no separately writable “Planning Project.” An adapter may deserialize a provider response without giving that shape a second lifecycle or public API.</p>
+<h2 id="3-what-disappears-or-gets-smaller">3. What disappears or gets smaller</h2>
+<div class="table-scroll" role="region" aria-label="Model comparison" tabindex="0"><table>
+<thead>
+<tr>
+<th>Current types</th>
+<th>Proposed destination</th>
+<th>What this removes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ProjectPlan</code></td>
+<td>Fields directly on <code>Project</code>; integration metadata beside it</td>
+<td>The partial Project hidden behind <code>plan</code>.</td>
+</tr>
+<tr>
+<td><code>ProjectContent</code></td>
+<td>KRs, targets and workflow directly on <code>Project</code></td>
+<td>The local render/parse round trip and a second public content model.</td>
+</tr>
+<tr>
+<td><code>PmProject</code></td>
+<td>Local readers return <code>Project</code>; a private <code>LinearProject</code> handles actual Linear responses if needed</td>
+<td>Provider-shaped types leaking into ordinary local reads.</td>
+</tr>
+<tr>
+<td><code>TaskPlan</code></td>
+<td>Fields directly on <code>Task</code></td>
+<td>Another payload object with no independent identity.</td>
+</tr>
+<tr>
+<td><code>PmItem</code>, <code>PmItemUpdate</code></td>
+<td><code>Task</code> plus the common typed edit API</td>
+<td>A second Task view used as the domain model and a competing patch vocabulary.</td>
+</tr>
+<tr>
+<td><code>PmTaskRecord</code></td>
+<td>A Task read, optionally joined to its Project for display</td>
+<td>Passing an embedded Project copy around as if it owned the Task.</td>
+</tr>
+<tr>
+<td><code>PmSnapshot</code>, <code>PmSnapshotRow</code></td>
+<td>A query result containing ordinary Projects/Tasks; acquisition metadata stays with the acquisition</td>
+<td>A special hierarchy whose types depend on where data came from.</td>
+</tr>
+<tr>
+<td><code>PmWave</code></td>
+<td>Wave domain record; Linear Initiative response private to the adapter</td>
+<td>Confusion between a Workstream and a provider response.</td>
+</tr>
+<tr>
+<td><code>WavePmConfig</code>, <code>PmConfig</code></td>
+<td>Explicit Linear Initiative/Team bindings</td>
+<td>Generic PM configuration and duplicated provider choice.</td>
+</tr>
+<tr>
+<td><code>PmKr</code>, <code>ChapterMetricTarget</code></td>
+<td><code>ProjectKR</code>, <code>MetricTarget</code></td>
+<td>PM/Chapter vocabulary in criteria. The target's comparison can use <code>Threshold</code>.</td>
+</tr>
+<tr>
+<td><code>FollowThroughIntent</code>, <code>FollowThroughLink</code>, <code>FollowThrough</code></td>
+<td>Ordinary Tasks and comments; existing operation recovery</td>
+<td>A special follow-up lifecycle and completion ritual.</td>
+</tr>
+<tr>
+<td><code>IssueComment</code>, <code>IssueObservation</code></td>
+<td><code>TaskComment</code> in the domain; private Linear response/observation types</td>
+<td>A second comment vocabulary outside the adapter.</td>
+</tr>
+<tr>
+<td><code>PlanningKind</code>, <code>PlanningObject</code></td>
+<td>Identity supplied by the typed edit being exchanged</td>
+<td>Another independent registry of domain kinds and IDs.</td>
+</tr>
+<tr>
+<td><code>PlanningEdit</code>, field parts of <code>PlanningChange</code> and <code>PlanningMutation</code></td>
+<td>One typed <code>WorkEdit</code> payload</td>
+<td>Separate descriptions of what a Work field edit means.</td>
+</tr>
+<tr>
+<td><code>PlanningSnapshot</code></td>
+<td>Git's retained change journal</td>
+<td>Misrepresenting a journal as another current Work snapshot. The journal itself still has a job.</td>
+</tr>
+<tr>
+<td><code>PeerPlanningRecord</code>, <code>PeerPlanningValue</code></td>
+<td>Recovery views over journal entries and referenced Work</td>
+<td>Another record inventory maintained for peers. Keep inspection of losing edits.</td>
+</tr>
+<tr>
+<td><code>PlanningPart</code></td>
+<td>Roadmap query over Work</td>
+<td>An independent “Planning” presentation category for the ordinary Work list.</td>
+</tr>
+</tbody>
+</table></div>
+<p>The intended saving comes from deleting conversions, readers, duplicate field definitions and lifecycle rules. A rename with the same conversions underneath would leave the problem intact.</p>
+<p>Sources: <a href="https://github.com/loopflowstudio/loopflow/blob/c8fe4628affc13ac0553c14cd5bec5e5896369a1/rust/loopflow/src/pm/mod.rs">PM-shaped models</a>, <a href="https://github.com/loopflowstudio/loopflow/blob/c8fe4628affc13ac0553c14cd5bec5e5896369a1/rust/loopflow/src/planning.rs">pending changes</a>, <a href="https://github.com/loopflowstudio/loopflow/blob/c8fe4628affc13ac0553c14cd5bec5e5896369a1/rust/loopflow/src/store/sqlite/planning_write.rs">common writer</a>, <a href="https://github.com/loopflowstudio/loopflow/blob/c8fe4628affc13ac0553c14cd5bec5e5896369a1/rust/loopflow/src/store/planning_peers.rs">peer recovery views</a>.</p>
+<h2 id="4-one-read-path-and-one-edit-vocabulary">4. One read path and one edit vocabulary</h2>
+<p>The public operations should be recognizable from the objects being changed:</p>
+<pre><code class="language-rust">// Illustrative API, not a new generic repository framework.
+store.project(project_id) -&gt; Option&lt;Project&gt;
+store.task(task_id) -&gt; Option&lt;Task&gt;
+store.task_comments(task_id) -&gt; Vec&lt;TaskComment&gt;
+
+store.apply(edit) -&gt; Result&lt;...&gt;
+</code></pre>
+<p>Typed edits identify their own owner. There is no need for each caller to provide a kind, an untyped object ID, a field string and a JSON value independently:</p>
+<pre><code class="language-rust">// Examples, not the complete edit enum.
+enum WorkEdit {
+    ProjectName { project: ProjectId, name: String },
+    ProjectKrs { project: ProjectId, krs: Vec&lt;ProjectKR&gt; },
+    TaskTitle { task: TaskId, title: String },
+    TaskDisposition { task: TaskId, disposition: TaskDisposition },
+    TaskComment { task: TaskId, comment: TaskComment },
+}
+</code></pre>
+<p>Creation, deletion and relationship changes must use the same typed boundary, with their existing transactional rules. SQL remains the one owner. The writer validates ownership, updates the row and records the needed local change/effect evidence atomically.</p>
+<p>Both transports translate their inputs to these edits. The origin still matters: applying an observed remote value must not manufacture a new locally authored edit or inherit someone else's delivery attempt.</p>
+<p>For Git, an immutable change envelope retains <strong>change ID, typed edit, causal parents and clock</strong>. Derive the conflict address from the edit. In particular, comments need their own comment ID in that address; two different comments must not compete for one generic Task “comment” slot.</p>
+<p>This retains the real distributed requirement while deleting <code>kind + object + field</code> as a separately maintained domain vocabulary. Exact serialization, conflict keys and conversion of retained journal entries need proof before replacing the current format.</p>
+<p>UI snapshots can join Work with sync status or local activity. They are disposable read projections, with no independent write path. A smaller list DTO is fine when it avoids loading large data; it should not redefine the Project.</p>
+<h2 id="5-keep-transport-evidence-beside-work">5. Keep transport evidence beside Work</h2>
+<p>“Fewer types” cannot mean losing information about an uncertain write or stale response. The useful split is between <strong>Work content</strong> and <strong>evidence about exchanging that content</strong>.</p>
+<div class="table-scroll" role="region" aria-label="Model comparison" tabindex="0"><table>
+<thead>
+<tr>
+<th>Belongs on Work</th>
+<th>Belongs to an integration or local operation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Task title, description, comments, disposition</td>
+<td>Linear object/comment IDs, author IDs and provider revisions</td>
+</tr>
+<tr>
+<td>Project KRs, targets, workflow preference</td>
+<td>Provider acquisition time and retained invalidation/removal evidence</td>
+</tr>
+<tr>
+<td>Wave parent and Project selection</td>
+<td>Pending/uncertain delivery and exact creation identity</td>
+</tr>
+<tr>
+<td>Stable domain identities and relationships</td>
+<td>Git destination, fetched/imported/published revisions, causal history</td>
+</tr>
+</tbody>
+</table></div>
+<p>A Linear binding is keyed to the existing Work identity. It is not another Project that owns Tasks. A Git journal entry describes an edit to existing Work; it is not another object that needs its own domain placement and lifecycle.</p>
+<p>Keep <strong>two concrete transport implementations</strong> behind the existing configuration choice. Linear needs provider baselines, revision ordering and readback of uncertain effects. Git needs causal reconciliation and publication readback. A universal synchronization state machine would add machinery without removing either requirement.</p>
+<p>The reduction is in the shared domain and write vocabulary. Transport receipts can stay specialized and local. Reuse the existing creation/comment-delivery owners rather than inventing a new universal outbox just to make the types look symmetrical.</p>
+<p><code>PlanningSyncStatus</code> is already Linear-specific: expose it as Linear delivery evidence when relevant. <code>PeerPlanningStatus</code> describes a Git destination, not a Machine peer. If the UI needs one sync-status field, a tagged Linear/Git reading can wrap the concrete results; that wrapper owns no data.</p>
+<p><code>PlanningState</code> describes fact availability. Keep that information at the read boundary; it must not compete with Task disposition or observed execution status. Introduce a shared <code>Read&lt;T&gt;</code> wrapper only if real callers need the same shape—not as a prerequisite for this redesign.</p>
+<p>Sources: <a href="https://github.com/loopflowstudio/loopflow/blob/c8fe4628affc13ac0553c14cd5bec5e5896369a1/rust/loopflow/src/planning.rs">Linear change evidence</a>, <a href="https://github.com/loopflowstudio/loopflow/blob/c8fe4628affc13ac0553c14cd5bec5e5896369a1/rust/loopflow/src/store/sqlite/planning_export.rs">creation recovery</a>, <a href="https://github.com/loopflowstudio/loopflow/blob/c8fe4628affc13ac0553c14cd5bec5e5896369a1/rust/loopflow/src/engine/planning_git.rs">Git publication</a>, <a href="https://github.com/loopflowstudio/loopflow/blob/c8fe4628affc13ac0553c14cd5bec5e5896369a1/rust/loopflow/src/store/mod.rs">fact availability</a>.</p>
+<h2 id="6-walk-the-behavior-through-the-smaller-model">6. Walk the behavior through the smaller model</h2>
+<h3 id="a-worker-files-a-follow-up-while-disconnected">A worker files a follow-up while disconnected</h3>
+<ol>
+<li>It creates an ordinary Task locally using a retained creation ID.</li>
+<li>It saves a comment on the source Task linking to that stable Task identity.</li>
+<li>Both writes are durable even if the configured transport is down.</li>
+<li>Reconnection delivers the pending changes. A provider issue identifier can be displayed once its mapping is known; the domain Task ID remains unchanged.</li>
+<li>If creation succeeded but the response was lost, the existing receipt owns readback. If only the comment failed, retrying that comment does not recreate the Task.</li>
+</ol>
+<p>There is no follow-through object to resolve and no <code>--none</code> declaration when nothing remains. Pending effects remain visible through normal operation status.</p>
+<h3 id="linear-changes-a-project-description">Linear changes a Project description</h3>
+<p>The Linear adapter observes a specific provider revision and separates authored prose from the supported KRs/targets/workflow representation. It updates the same local Project through typed edits, preserving pending local changes and unrelated provider content according to the existing reconciliation rules.</p>
+<p>Local readers do not reparse Linear-flavored Markdown to rediscover the Project. Prompt text is rendered from the Project. An incomplete response cannot clear fields it did not observe.</p>
+<h3 id="a-remote-task-is-completed">A remote Task is completed</h3>
+<p>The receiving Machine applies shared disposition. Its local captured Workflow position, Sessions, Processes and checkout stay untouched. “The work is done” remains independent from “this local process exited.” No transport receipt grants cleanup authority.</p>
+<h3 id="a-git-merge-contains-competing-edits">A Git merge contains competing edits</h3>
+<p>Git's journal keeps both edits and their causes. Deterministic conflict selection remains available, with losing values inspectable. If an otherwise chosen edit violates Work ownership, the import keeps the evidence and surfaces that projection failure. A failed projection cannot become an accepted ancestor for the next local edit.</p>
+<p>This behavior requires a journal and import evidence. It does not require a second Project/Task hierarchy.</p>
+<h2 id="7-implement-in-the-order-that-deletes-the-most-duplication">7. Implement in the order that deletes the most duplication</h2>
+<p><strong>First, make ordinary local Work independent of provider-shaped types.</strong> Flatten Project/Task payloads, store structured criteria directly, and have local reads return the domain objects. Move actual Linear response types behind the adapter. This is the largest conceptual reduction and overlaps the approved pursuit.</p>
+<p><strong>Then make the writer the sole field vocabulary.</strong> Have local operations, Linear acquisition and Git import use the same typed edits. Derive Git conflict addresses and serialized edit validation from those types; delete the redundant exchange schema only after retained journal conversion is proved.</p>
+<p><strong>Then simplify projections and names.</strong> Roadmap readers query Work. Recovery readers inspect changes and receipts. Remove unused <code>iteration</code>, obsolete follow-through lifecycle and duplicate reader/patch types. Rename the remaining transport-specific structures according to their actual job.</p>
+<p>For each cut, preserve domain IDs, provider mappings, authored text, criteria, selected Project, pending/uncertain effects and historical evidence. Existing legacy Task IDs do not get unified by a naming cleanup. Released SQL stays immutable; the Task owns one final migration draft.</p>
+<p>Useful proof is behavioral: a Project edited offline and through Linear is read as the same Project; a Git-imported Task can be edited through the ordinary writer; reconnect never repeats creation; comments retain authorship; imported completion leaves local execution unchanged. Test the released frontier with populated records, plus transport failures at actual operation boundaries.</p>
+<h3 id="implementation-responsibilities">Implementation responsibilities</h3>
+<ul>
+<li>Choose the precise shared <code>WorkEdit</code> shape and derive its conflict address, including subordinate comments. Jack delegated this detail; it is not an outstanding approval.</li>
+<li>Establish which Git documents already exist, and prove retained documents convert without losing causal or routing history.</li>
+<li>Choose the smallest concrete Linear observation storage that preserves required evidence without reproducing a writable Work hierarchy. The deletion audit names conditional table removals and their proof.</li>
+</ul>
+<p>The proposal does not add a provider framework, universal effect lifecycle, new Work scope, or distributed execution ownership. It aims to leave one model that ordinary operations use directly.</p>
+<p><a href="work-model-reduction.md">Deletion audit and queued pass</a> · <a href="work-model.html">Original type inventory</a> · <a href="work-on-another-machine-name.md">Existing pursuit scope</a> · <a href="https://github.com/loopflowstudio/loopflow/pull/1491">PR #1491</a></p>
+</main></div></body></html>

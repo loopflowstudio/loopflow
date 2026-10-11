@@ -108,8 +108,8 @@ main = f'''
 </section>
 <section class="pair">
   <h2>Stay in flow as you build an epic company-scale project as one super-powered human.</h2>
-  <p class="say">Coding agents can do amazing things for you, but they ask amazing focus of you. How can you, a human with a single locus of attention, stay in sync with an entire parallel agent swarm?</p>
-  <p class="say">Shipping tens of thousands of lines is the easy part. Making them lines worth keeping — lines you don’t revert next month — is the hard part. Loopflow helps you do that by arranging your agent sessions around the work they represent. You don’t have to keep them open, or remember why you wanted to do this massive change in the first place.</p>
+  <p class="say">Coding agents can do amazing things for you, but they ask amazing focus of you. How can you, a human with a single locus of attention, stay in sync with an entire parallel agent swarm? Shipping tens of thousands of lines is the easy part. Making them lines worth keeping — lines you don’t revert next month — is the hard part.</p>
+  <p class="say">Loopflow helps you do that by arranging your agent sessions around clear work boundaries: long-lived areas of responsibility and objectives (“Waves”) and concrete outcomes (“Tasks”). You don’t have to keep every session window open for fear of it disappearing, or remember why you wanted to do this massive change in the first place.</p>
   <p class="say">Loopflow is the marriage of a user experience designed around your work and a flow model: the what and the how. Your work is kept around workstreams and results, not meandering chats. Loopflow brings your attention to where you matter most. Configurable workflows take each Task from a design to a pull request you have tried and merged. <b>Every Task ends shipped.</b> You have to stay involved. You don’t have to micromanage the coding. You can zoom in and you can zoom out.</p>
   <div class="ledger">
     <div><p class="eyebrow">What you do</p><ul><li>What to make</li><li>How it should work</li><li>Whether the design is right</li><li>Whether it works when you use it</li><li>When it is done</li></ul></div>

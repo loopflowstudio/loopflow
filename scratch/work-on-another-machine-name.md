@@ -155,116 +155,41 @@ five-second bound; Git subprocesses retain their own deadlines and effect locks.
 Foreground CLI/Desktop/Session lifetimes keep exchange active. Disconnection
 retains pending work; reconnect acquires before publishing. No agent turn is replayed.
 
-## Implementation boundary — 2026-10-10
+## Implementation boundary — October 11
 
-TaskPlan/ProjectPlan and live Project iteration are removed. TaskComment is domain
-owned; comment observations are adapter-internal. Public content reads return Work; acquisition, status and admission read narrow
-retained evidence.
-Project now stores description,
-workflow, KRs and metric targets directly. The shared local/import writer and local
-readers no longer parse/render stored Markdown; prompt assembly renders on demand.
-The one Task draft converts released content before seeding causal history, retaining
-saved workflow selection, observation age, mappings and pending delivery. Invalid
-criteria roll back the conversion. Review exposed fenced examples being mistaken
-for fields. Migration and Linear edits now share boundary-aware field ranges,
-preserving nested backtick/tilde examples, unknown paragraphs and target/KR
-preambles. The resolved note is retained at
-`1b67da0cfe:scratch/project-conversion-review.md`.
-Tests cover multiline KR fidelity across restart
-and Git import, transactional failure, released content conversion and retained local
-Workflow/checkout/effect evidence. These are source proofs, not installed acceptance.
+Canonical Work owns direct Project/Task content, status, criteria and comments.
+ProjectPlan, TaskPlan, ProjectContent, live iteration, ordinary PM inventories and
+dual-ID readers are removed. Linear Markdown stays at acquisition/delivery and
+released conversion boundaries, preserving fences, unknown prose and partial fields.
+Prose retains independent revision/age. Exact completed cuts and contrary evidence:
+`1930805f40:scratch/work-on-another-machine-name.md`, Implementation boundary.
 
-Public ProjectContent is removed; ordinary operations take typed fields and
-ProjectStatus belongs to the domain. Private `pm/project_document.rs` owns
-Linear/migration parsing through one `ProjectDocument`; field replacement
-renders only the selected value. Rotation retains original receipt bytes and
-refuses changed requests. Exact input-boundary and fixture corrections:
-`1d97aa98b2:scratch/work-on-another-machine-name.md`. These do not finish
-snapshot confinement.
+The Task draft replaces whole provider JSON bodies with concrete observations.
+Private Linear acceptance persists observations and Work in one transaction; projection
+reads retained IDs. Contradictory ownership, foreign/unmapped facts, independent
+membership/removal, archive/invalidation and original ages remain. Rejection dispute
+markers outlive rollback; blocking writers retain Wave locks after cancellation.
+Delivery requires accepted Work revision plus archive/membership eligibility.
+Historical receipts retain bytes; new disposition conflicts keep state evidence only.
 
-Canonical Project readers retain local IDs, optional Linear bindings, sync evidence
-and shared rank. Selection, rotation and CLI/Desktop no longer join inventories.
-Exact reader-cut evidence: `b4e54f7d44:scratch/work-on-another-machine-name.md`.
+Concrete `linear.team` and `linear.initiative` replace duplicate provider bindings.
+The generic `pm` facade and nested Wave context are now removed. Linear operations
+use `linear/` and `ops/linear.rs`; TaskUpdate and TaskComments belong to the domain.
+Task comments and saved lookup belong to `ops/task.rs`; refiling returns canonical
+Task. PlanningSync, store access and Wave locks belong to `ops/planning_sync.rs`.
+The duplicate global issue resolver is removed. Git lookup misses cannot select
+Linear, and Linear refresh skips unmapped local Projects without changing them.
+Existing credential fencing, receipt recovery, lock names and refresh ages remain.
 
-`7e63c994d0` in this plan records typed save/rotation receipts, distinct ordering/
-disposition owners and the repaired fixture that bypassed the writer.
-
-### Canonical readers and retained provider persistence — October 11
-
-Canonical Project/Task/status/roadmap/Work-frame readers preserve local identity,
-optional Linear bindings, shared ordering and independent acquisition validity/age.
-Creation reloads saved Work after exchange; rotation/export retain uncertain inputs
-and later saves. Ordinary provider reconstruction, `planning_task`, `plan_read`,
-`ResolvedTask`, `task_pm`, `planning_wave`, `PmTaskSummary` and
-`task_planning_item` are deleted. Exact reader and receipt evidence remains at
-`17314daeb5:scratch/work-on-another-machine-name.md`, this heading.
-
-Delivery requires a revision accepted into Work and independent eligibility:
-same-revision archival or unresolved membership still refuses delivery without
-consuming the local save. Foreign observations grant no ownership or execution
-authority. Adapter confinement, typed journal, ordinary follow-ups and cron
-remain one delivery scope before gate and review.
-
-### Reconciled acquisition boundary
-
-`fe5262b093` removed Project delivery's provider return; eligibility still needs
-`pm_projects` archive and unresolved-membership evidence, including same-revision
-rejection. `94cb65b569` deleted `pm_show`, `load_show_snapshot` and `read_pm_snapshot`.
-`1d97aa98b2` removed planning-only placement restrictions without changing execution
-admission or sorted locks. Proof detail: `f9f9da7d3a` in this plan.
-
-Ownership and acquisition cuts retain contradictory claims, malformed sibling
-isolation, foreign/unmapped facts, invalidation, archival, independent removal and
-original ages. Pending membership affects display, never admission. Revision-fenced
-absence and cancellation retain their Wave-lock lifetime. Projection and receipts
-read typed fields; no ordinary reader reconstructs a provider model. Work-watch
-includes planning cadence. Exact cuts/proof limits: `fbc9c60e62` in this plan,
-this heading, including the retained `e0f716aa54` through `f0932031e5` references.
-
-`fbc9c60e62` removes `pm_projects.body` and `pm_items.body` in
-`planning_peers.sql`, replacing live whole-object decoding with field comparisons
-and direct column readers. Prose retains separate revision/age; omitted issue
-membership and dates retain presence separately from observed null. Foreign and
-unmapped observations remain unowned; archive, invalidation, independent removal,
-Wave membership/order and original ages retain their owners. Historical receipts
-keep their original bytes. New disposition conflicts record the supplied state
-fields instead of reconstructing a whole issue. Review found that membership
-comparison and receipt baselines must use the retained provider claim, not its
-index; confirming-refresh and absent/null receipt fixtures cover that correction.
-Conversion refuses unsupported scalar types before dropping source evidence;
-compound fields retain JSON encoding. Arrays-as-names and boolean ranks cannot
-silently become valid Work; failure rolls back schema and original rows.
-
-`56ea6db9c1` supplies repository `linear.team` and Wave `linear.initiative`.
-The redundant provider selector, legacy rejection/cleanup and mixed-authority
-validation are removed. Reteam confirms remote ownership without committing
-unrelated checkout edits. Connect selects repository Linear even with personal Git;
-ordinary explicit Git saves no longer print misleading Linear pending notices.
-Historical SQL/input remain intact. This does not complete adapter confinement.
-
-`1d0bda8d7f` removed snapshot/detail envelopes and builders, retaining transaction
-and cancellation-safe lock lifetime, detail rank and independent revision/age.
-`9a0da6823d` removes provider-selector arguments from Project, issue,
-reteam, archival, ordering and projection paths. Projection takes IDs and batches
-receipt attachment from accepted rows; fetched models supply no Work values.
-Released storage discriminators and observation evidence remain intact.
-
-Private `pm/linear/acceptance.rs` now owns fetched-input acceptance. Public Store
-inventory/issue APIs and the unused archival API are removed. `PmItem` is deleted;
-Linear issue/Project response types are crate-private. Work projection still reads
-accepted rows in the same transaction; dispute marking and cancellation-safe locks
-retain their boundaries. Ordering receives accepted local IDs; new state conflict
-receipts keep only revision/state/completion evidence, preserving old receipt bytes.
-Private acquisition fixtures compile within the library and build their CLI through
-Cargo artifact output. Execution fixtures seed fixed admission facts; all share
-one environment lock. Installation selectors follow the moved library modules.
-
-Still required: PM orchestration, target-bearing edits/journal, ordinary follow-ups
-and one cron list; populated Session-turn/live-control preservation, affected gate
-and fresh +/- HTML review before review-only republication. Visibility alone does not complete the audit.
+Remaining: target-bearing typed edits/journal, ordinary follow-ups and one cron list;
+materialized/headless affected gate and fresh +/- HTML review before review-only
+republication. Populated Session/attachment preservation is covered below. Concrete adapter naming alone does not
+finish the remaining writer/delivery hierarchy. No installation was performed.
 
 Main `7d9bf0a4d8` supplies Claude recorded-answer settlement, not planning gate
-acceptance or stopped-Flow replay authority.
+acceptance or stopped-Flow replay authority. Private CLI fixtures build through Cargo
+artifact output, never guessed stale paths; earlier fixture and acceptance proofs are
+recorded at `1930805f40` in this plan.
 
 ### Released migration frontier — October 10
 
@@ -276,9 +201,14 @@ The populated `provider_columns_preserve_released_observations_and_local_executi
 fixture starts here: foreign/partial observations, contradictory membership,
 independent removal/order/age, Task identity/path, captured Workflow, Process and
 uncertain state/comment receipts survive. Invalid scalar conversion rolls back
-schema and original rows. It seeds no Session turns or live controls; those and
-broader delayed/independent observations remain gate obligations. Earlier receipt
-proof retains uncertain inputs and sequence high-water marks. None proves installation.
+schema and original rows. The fixture now retains completed and unresolved Session
+turns, unpublished input, native identity, selected capture/Session, AgentProcess
+ancestry, attachment token/endpoint and pending-input/open-tool activity. The same
+fixture on a Git recipient proves repeated completion/content import preserves
+those rows and an uncertain local cancellation attempt. This is populated storage
+proof, not a configured provider-control or installation trial. Earlier receipt
+proof retains uncertain inputs and sequence high-water marks; broader observations
+and materialized/headless acceptance remain gate obligations.
 
 Main #1523 entered at `c77e72b6b7` after the recorded checks. Its separate
 `process_terminal.sql` draft adds local Process terminal placement; it is not a
@@ -386,9 +316,9 @@ Writer transport/causal proofs: `eda4a98097` in this plan.
   follows the entire reduction and affected gate, before review-only republication.
 
 Earlier focused proof: `9dbd6fc2d8`, `dfd3b80611`, `f025e9b7ab`,
-`dfa2cdafba`, `09709a05cc` in this plan. PM orchestration, typed journal,
+`dfa2cdafba`, `09709a05cc` in this plan. Typed journal,
 follow-ups, cron, gate and review still precede republication.
 
-Prior focused checks: `9a0da6823d` and `0e0b347231` at this path. Current: fmt, CLI build and all-target Clippy pass; `cargo test -p loopflow --lib` filters `pm::linear::acceptance` (7), `local_planning` (29), `task_completion_` (15), `planning_order_` (10), cancellation-lock, PR-create and Flow-launch proofs pass. External PR-authority and fresh-Cargo Flow-launch pass; Python runner tests (6), Ruff pass. LF authority cleared/stdin closed. Full gate follows the audit.
+Prior checks and fixture limits: `1930805f40` at this path. Current command/result: `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo build -p loopflow --bin lf` pass; LF-cleared/headless `cargo nextest run -p loopflow --lib` filters Linear/local planning (181) and writer/chapter (10) pass. Nextest marked the pure `unreviewed_backlog_remains_while_started_work_moves` test leaky; it creates no child or I/O, so no fixture-owned handle repair is identified. Retain this runner observation for gate; no retry or timeout change was added. Final populated migration/import and selected-Git-miss checks pass (3). Full gate follows the audit.
 
 Transport evidence: `0181133849` at this path; earlier simulated adoption: `5960415b3:scratch/remote-task-demo.md` (not real SSH or integrated acceptance).

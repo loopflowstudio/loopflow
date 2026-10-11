@@ -27,19 +27,25 @@ creates no cleanup commit. Exact source proofs and prior counterevidence:
 
 ## Next implementation boundary — October 11
 
-October 11 operator review:
-response structs/acceptance are now crate-private; wider Work edit/API ownership
-remains unfinished. Relocation does not finish Jack Heart's deletion audit.
+The generic PM facade and nested Wave context are removed; ordinary Task
+lookup/comments and foreground exchange now have domain/planning owners. Git
+misses stay on Git. Linear refresh retains unmapped local Projects without lookup.
+Populated migration/import fixtures now cover Session turns, capture reservations,
+attachment claims/activity and an uncertain local cancellation receipt. This proves
+stored preservation, not configured provider control.
+Typed edits/journal, historical follow-through effects and cron conversion remain
+required before gate and republication. Earlier acquisition/fixture review findings:
+`1930805f40:scratch/questions.md`; no installation or stopped-Flow replay occurred.
 
-Review exposed stale-binary risk after moving CLI suites under `lib.rs`: deriving
-`target/<profile>/lf` neither built nor refreshed it. The repair uses Cargo JSON
-artifact output after an offline build in each fixture process; no guessed path.
-Installation selectors target the moved library modules. The Flow-launch proof
-passes using Cargo’s fresh artifact; no installation was performed.
+## Unresolved operator review — October 11
 
-Source repair: `acceptance::observe_task_state` now saves only revision/state/
-completion evidence in new conflict receipts, matching acquisition. Historical
-receipt bytes remain unchanged; 15 `task_completion_` checks pass (event 1828637).
-Completed conversion findings: `b6df256d0f:scratch/questions.md`. Populated
-Session-turn/live-control proof, typed journal, follow-ups, cron and final review
-remain required by the design.
+The moved `ops/task.rs::resolve_saved_task` now uses the shared fallible
+`planning_sync::planning_store`. This restores the previous store-opening semantics;
+source readback confirms the repair. CLI admission can initialize a fresh registry,
+so the earlier finding never established a public cold-start failure.
+
+Jack Heart expects `planning.rs` to disappear with the model reduction. Root
+`src/planning.rs` is deleted; the remaining SQLite module combines Linear observation
+and accepted-Work projection. Give surviving responsibilities their concrete owners
+while deleting duplicate translation in the typed-writer cut; relocation alone is
+not completion.

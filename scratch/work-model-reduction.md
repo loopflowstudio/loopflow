@@ -9,7 +9,7 @@ approval from Jack. This is accepted scope, with conditional deletions identifie
 
 This audit and [design](work-on-another-machine-name.md) share one delivery scope.
 Canonical readers, concrete observation columns and private acquisition exist.
-Remaining: PM orchestration, typed edits/journal, ordinary follow-ups and one cron list. Concrete
+Remaining: typed edits/journal, ordinary follow-ups and one cron list. Concrete
 bindings are implemented (§14). All precede Jack Heart's next
 review of PR #1491. Publication is review-only; landing, installation and export
 of actual Work to the public repository remain unauthorized.
@@ -43,7 +43,7 @@ ProjectPlan, TaskPlan, live Project iteration and public ProjectContent are remo
 ProjectKR, MetricTarget and domain TaskComment are implemented.
 
 **Locations:** `work/project.rs`, `work/task/mod.rs`, `work/task/comment.rs`,
-`pm/mod.rs` and their SQL serialization in `store/sqlite/`. The root
+`linear/mod.rs` and their SQL serialization in `store/sqlite/`. The root
 `planning.rs` module is deleted; §11 records its surviving owners.
 
 Project persists description, workflow, KRs and targets directly; Task persists
@@ -53,7 +53,7 @@ Linear mappings. Whole Task records still cannot travel because they carry local
 
 Project ingestion/association return no provider record; `plan_read` and the public
 `pm_snapshot` inventory reader are deleted. Production snapshot builders are removed.
-Private `pm/linear/acceptance.rs` owns fetched-input acceptance; ordinary Store
+Private `linear/acceptance.rs` owns fetched-input acceptance; ordinary Store
 readers/writers expose no fetched model. Composed Project prose saves,
 delivery and readback preserve field revision/age across partial observations;
 that proof does not satisfy the structural cut. Earlier tracing:
@@ -115,7 +115,7 @@ execution fixtures seed fixed admission evidence without opening production APIs
 Rejected membership remains marked outside acceptance; cancellation retains its
 writer lock. Foreign/unmapped facts, contradictory claims, independent removal,
 partial fields and original ages remain stored. Whole-table removal still requires
-another existing owner retaining every fact. The PM orchestration hierarchy remains.
+another existing owner retaining every fact. The typed writer/delivery hierarchy remains.
 `pm_wave_sync`, `pm_wave_projects`, `pm_issue_changes`, relation observations and
 `pm_project_name_cutover` retain independent evidence, not ordinary Work content.
 
@@ -137,8 +137,8 @@ the current columns; the pursuit design owns the current check result.
 ## 5. Delete the internal Markdown storage round trip
 
 **Locations:** `sqlite/project_content.rs::{update_project_content,select_project_workflow}`, `sqlite/planning_write.rs`'s
-special Project reads/writes and `ops/chapter.rs`. The former `pm/mod.rs` Markdown
-functions now live privately in `pm/project_document.rs` for Linear and migration.
+special Project reads/writes and `ops/chapter.rs`. The former `linear/mod.rs` Markdown
+functions now live privately in `linear/project_document.rs` for Linear and migration.
 
 Structured persistence and removal of `read_content`/writer Markdown assembly
 are implemented. Ordinary operations now take typed fields directly; Chapter input
@@ -147,7 +147,7 @@ are deleted. Project saves and rotation derive receipts from the typed edits,
 sharing acquisition’s Linear field mapping; rotation no longer reads PM projections. Migration parses
 released Markdown before journal seeding; malformed content refuses without losing original bytes. Conversion and
 Linear edits share recognized field ranges, preserving fenced examples and unknown
-prose. The private `pm/project_document.rs` parser/renderer owns managed description
+prose. The private `linear/project_document.rs` parser/renderer owns managed description
 sections through one `ProjectDocument`; the nested `LinearProjectFields` and
 forwarding parser are deleted. Prompt assembly renders its own output. Preserve unrelated authored prose
 and partial-response omissions. Wave workflow definitions and a Task's captured
@@ -157,7 +157,7 @@ Workflow are different responsibilities and remain separate.
 
 **Locations:** `sqlite/planning_write.rs`, `planning_exchange.rs`,
 `sqlite/task_content.rs`, `sqlite/project_content.rs`, `ops/task.rs::TaskEdit`,
-`ops/planning_delivery.rs::task_input`, `pm/linear.rs::project_field_input`.
+`ops/planning_delivery.rs::task_input`, `linear/mod.rs::project_field_input`.
 
 Current `PlanningEdit` generates kind/field/value/from_value/fields while callers
 also pass `PlanningObject {kind,id}`. `PlanningMutation` repeats the field address
@@ -246,31 +246,20 @@ errors keep their distinct owners. No schema or historical evidence is removed.
 
 ## 10. Unify selectors and acquisition orchestration
 
-**Locations:** `ops/pm.rs::{PmContext,RepositoryPmContext,resolve_saved_task,
-inspect_task_planning_async,acquire_task,resolve_owned_issue,
-list_pm_waves,list_local_waves}`,
-`ops/planning_sync.rs::find_task`, `ops/run.rs`, `ops/task/remote.rs`.
+**Removed:** the generic `pm` facade, nested `PmContext`/Deref wrapper,
+`resolve_owned_issue`'s duplicate global issue lookup, and `PmUpdateResult`.
+TaskUpdate and TaskComments belong to `work/task`; ordinary lookup/comments live
+in `ops/task.rs`. Refiling returns canonical Task. Linear acquisition and setup
+have concrete `linear/` and `ops/linear.rs` owners. Git misses remain on the selected
+transport; unmapped local Projects cannot become failed Linear lookups.
 
-Task status, planning lookup and repository routing now use the canonical scoped
-selector, including repository aliases; explicit Task IDs retain their identity.
-`dfa2cdafba` makes `acquire_task` return canonical Work after narrow retained
-evidence checks. `inspect_task_planning_async` remains the bounded refresh owner;
-its name is not evidence of provider reconstruction. Remaining: overlapping
-transport/context orchestration and escaping ingestion shapes. Retain refresh/lock behavior.
-The unused `pm_show` inventory/DTO and `load_show_snapshot`/`read_pm_snapshot`
-are deleted. Status sync refreshes before its canonical read; acquisition returns
-no inventory. The unused `SnapshotPlan` hard-refresh distinction and exclusive band test
-are deleted; actual acquisition failure retains its error.
-`PmPortfolioValidator` and ordinary portfolio reconstruction are deleted. The
-store checks narrow retained ownership claims directly; no inventory leaves it.
-`e3a3479df7` removed the public `pm_snapshot` reader and all callers. Fixtures
-read canonical Work or concrete retained evidence and replay fetched inputs;
-private acquisition is implemented; provider orchestration remains a required cut.
-
-`PmResolvedTask`, both `pm_resolve_task` wrappers and `ResolvedTask` are deleted;
-`ops/task_pm.rs` is removed. Acquisition validates concrete Linear ownership and
-returns the saved Task. The acquisition/lookup split and provider-shaped ingestion
-inputs remain.
+Canonical scoped selectors retain repository aliases and legacy IDs. Bounded refresh
+continues to retain unknown, removed, invalid and unavailable evidence and original
+ages. Private acceptance retains transactions, ownership validation and lock lifetime.
+Snapshot envelopes/builders, ordinary portfolio reconstruction and public Store
+provider inputs remain deleted. `PmResolvedTask`, `ResolvedTask`, `task_pm`,
+`pm_show` and its DTO remain deleted. Prior reader/acceptance tracing:
+`1930805f40:scratch/work-model-reduction.md`, sections 1–4 and 10.
 
 Linear setup, OAuth, Team/Initiative mapping and reteam are real integration
 operations. Keep them concrete. A local lookup cannot infer that another Machine
@@ -286,11 +275,11 @@ and chapter rotation; execution admission and sorted planning locks remain.
 `ops/linear_observe.rs::PlanningSync`.
 
 Root `planning.rs` is removed: `NewTask` belongs to `work/task`, Linear IDs and
-`LinearBindingError` to `pm`, and receipt/status types to `store/planning_sync`.
+`LinearBindingError` to `linear`, and receipt/status types to `store/planning_sync`.
 No compatibility reexports remain. Remove redundant content copies used for display and
 duplicate field translation. Keep immutable creation inputs where an uncertain
-external effect really needs them. Move the foreground exchange coordinator to
-its actual owner; its current Linear-named module also handles Git.
+external effect really needs them. PlanningSync, store opening and Wave locks now belong to
+`ops/planning_sync.rs`; Linear observation no longer owns Git exchange.
 
 Do not unify creation, comments, ordering, deletion and disposition into a new
 universal effect lifecycle merely for symmetry. Their existing receipts,
@@ -386,7 +375,7 @@ Affected Rust suites include `local_planning`, `planning_exchange_tests`,
 `planning_git_tests`, `planning_foreground_tests`, `planning_reconnect_tests`,
 `planning_setup_tests`, `planning_lookup_tests`, `task_remote_tests`, `work_watch`,
 `dto_fixtures`, `task_follow_through_tests`, `task_flow_launch_tests`, `status_tests`,
-plus `ops/pm/` and SQLite unit tests and `pm/linear_follow_through_tests.rs`.
+plus `ops/linear/` and SQLite unit tests and `linear/linear_follow_through_tests.rs`.
 Check root `tests/fixtures/dto/`, including pm_show, planning_sync, local_task,
 task_status, task_history_planning and work_frame. Swift DTOFixtureTests,
 DesktopHeadlessTests, WorkNavigationTests, WaveLensTests, TaskFlowProofTests and
@@ -395,7 +384,7 @@ alignment in the same diff as public removals.
 
 ## Proof and stop conditions
 
-Remaining order: PM orchestration; typed writer/journal; follow-ups and cron;
+Remaining order: typed writer/journal; follow-ups and cron;
 gate and review. Each cut deletes its replaced paths in the same diff.
 
 Before dropping persistent state, inventory the released frontier and current

@@ -640,7 +640,7 @@ creation/relation effects, never synthetic comment success. Git candidates prove
 no application/publication; read errors retain cache.
 
 Cron retains installed ownership independently of file location and nonzero
-operation failures ([Release evidence](release/MEMORY.md), reread October 10).
+operation failures ([evidence](release/MEMORY.md)).
 [Remaining audit](../../scratch/work-on-another-machine-name.md) precedes #1491's
 review-only republication. No landing, installation, schedule
 activation or real Work export. Prior proofs: `41378adacf:wave/infrastructure/MEMORY.md`.

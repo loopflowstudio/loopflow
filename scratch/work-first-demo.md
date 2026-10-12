@@ -283,4 +283,4 @@ Removed the reachable Session-presence shortcut that admitted unstarted Tasks
 into the sidebar. Recorded Started plus shared unresolved execution now owns
 membership; retained Sessions and Wave plans remain intact. Review confirmed
 this removes a second inference of Started without mutating historical records.
-Check: `scripts/test_desktop.sh --filter WorkNavigationTests -Xswiftc -gnone --no-parallel` — PASS, 37 tests; `git diff --check` — PASS. Native packaging of this final correction remains.
+Check: `scripts/test_desktop.sh --filter WorkNavigationTests -Xswiftc -gnone --no-parallel` — PASS, 37 tests; diff check PASS. Repackaged/launched the correction; native view still loads. Installed reader remains the dependency. Requested permission to rehearse a compatible CLI installation before any live change; no permission received yet.

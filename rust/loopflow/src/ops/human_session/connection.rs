@@ -194,10 +194,6 @@ async fn read_connection(
             {
                 report.impediments.push(error.to_string());
             }
-        } else if session.completed_at.is_some() {
-            report
-                .impediments
-                .push(format!("session {:?} is already complete", session.id));
         }
         report.unavailable.push(
             "Provider/account launch readiness is not inspected; no credentials are prepared"

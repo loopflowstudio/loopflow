@@ -432,7 +432,7 @@ Stop headless Claude/OpenCode and resume history; connect to Codex live
 
 ## lf session ensure
 
-Find or start the one ongoing conversation of this repository, a Wave or a Task
+Find or prepare the one ongoing conversation of this repository, a Wave or a Task
 
 | Argument | What it does |
 |---|---|

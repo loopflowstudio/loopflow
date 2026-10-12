@@ -183,7 +183,6 @@ impl Cli {
                     | SessionCommand::Open { json: false, .. }
                     | SessionCommand::Ensure { .. }
                     | SessionCommand::Replace { .. }
-                    | SessionCommand::ServeConversation { .. }
             ),
             Some(Commands::Commit { message, .. }) => message.is_none(),
             Some(Commands::Sync(args)) => !args.plan && !args.abort && !args.manual,
@@ -884,7 +883,7 @@ pub enum SessionCommand {
         #[arg(long = "try", conflicts_with = "replace")]
         try_open: bool,
     },
-    /// Find or start the one ongoing conversation of this repository, a Wave or a Task
+    /// Find or prepare the one ongoing conversation of this repository, a Wave or a Task
     Ensure {
         /// The Wave's conversation instead of the repository's
         #[arg(short = 'w', long)]
@@ -929,9 +928,6 @@ pub enum SessionCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Run one prepared conversation in its durable terminal
-    #[command(name = "serve-conversation", hide = true)]
-    ServeConversation { input: String },
 }
 
 #[derive(Subcommand, Debug)]

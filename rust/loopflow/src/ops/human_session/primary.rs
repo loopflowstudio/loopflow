@@ -6,15 +6,13 @@ use std::path::Path;
 use anyhow::{anyhow, bail, Context, Result};
 
 use super::{
-    capture_is_prepared, conversation_background_name, conversation_process_is_running,
-    lock_session_process, publish_prepared_input, session_not_found, start_durable_session,
-    surface, SessionRecord,
+    lock_session_process, publish_prepared_input, session_not_found, surface, SessionRecord,
 };
 use crate::session::{LfSession, PrimaryScope, TitleSource, WorkSource};
 use crate::store::SharedStore;
 
 /// Find or admit the primary conversation of a Wave, or of the repository
-/// itself, and start its terminal once. The repository's needs no Wave, Task
+/// itself, and prepare its first input. The repository's needs no Wave, Task
 /// or planning provider.
 pub(crate) async fn ensure(
     store: &SharedStore,
@@ -39,7 +37,7 @@ pub(crate) async fn ensure(
     let _lock = lock_scope(&scope).await?;
     session.cwd = ensure_scope_worktree(&session.cwd, &scope)?.path;
     let session = store.ensure_primary_session(&scope, None, session).await?;
-    start(store, session).await
+    prepare(store, session).await
 }
 
 /// A Task's primary is one of its own conversations: the one already chosen,
@@ -80,7 +78,7 @@ pub(crate) async fn ensure_task(
     let session = store
         .ensure_primary_session(&scope, None, task_session(store, &binding, id)?)
         .await?;
-    start(store, session).await
+    prepare(store, session).await
 }
 
 /// Give the scope a fresh conversation. The predecessor's provider stops
@@ -120,7 +118,7 @@ pub(crate) async fn replace(store: &SharedStore, id: &str) -> Result<SessionReco
     let session = store
         .ensure_primary_session(&scope, Some(id), successor)
         .await?;
-    start(store, session).await
+    prepare(store, session).await
 }
 
 pub(crate) fn ensure_scope_worktree(
@@ -145,18 +143,16 @@ pub(super) async fn admit_workspace(
     let Some(scope) = store.sqlite.primary_scope(&session.id)? else {
         return Ok(session);
     };
-    if conversation_process_is_running(&session.id).await?
-        || store
-            .sqlite
-            .session_summary(
-                &session.id,
-                time::OffsetDateTime::now_utc().unix_timestamp(),
-            )?
-            .is_some_and(|summary| {
-                summary.agent_process_id.is_some()
-                    && summary.agent_process_evidence
-                        != crate::journal::ProcessIdentityEvidence::Dead
-            })
+    if store
+        .sqlite
+        .session_summary(
+            &session.id,
+            time::OffsetDateTime::now_utc().unix_timestamp(),
+        )?
+        .is_some_and(|summary| {
+            summary.agent_process_id.is_some()
+                && summary.agent_process_evidence != crate::journal::ProcessIdentityEvidence::Dead
+        })
     {
         return Ok(session);
     }
@@ -261,16 +257,15 @@ fn conversation(cwd: &Path, agent: Option<&str>, skill: &str, title: String) -> 
     }
 }
 
-/// Publish the admitted input and launch it unless a launcher already holds
-/// it. A failed start keeps the prepared input for the next caller.
-async fn start(store: &SharedStore, session: LfSession) -> Result<SessionRecord> {
-    let session = if conversation_process_is_running(&session.id).await? {
-        session
-    } else {
-        let id = session.id.clone();
-        let _launch = tokio::task::spawn_blocking(move || lock_session_process(&id)).await??;
-        admit_workspace(store, session).await?
-    };
+/// Prepare the first input; connecting owns the foreground provider launch.
+async fn prepare(store: &SharedStore, session: LfSession) -> Result<SessionRecord> {
+    let id = session.id.clone();
+    let _launch = tokio::task::spawn_blocking(move || lock_session_process(&id)).await??;
+    let session = store
+        .session(&session.id)
+        .await?
+        .ok_or_else(|| session_not_found(&session.id))?;
+    let session = admit_workspace(store, session).await?;
     let session = if session.input_published {
         session
     } else {
@@ -280,29 +275,6 @@ async fn start(store: &SharedStore, session: LfSession) -> Result<SessionRecord>
             crate::session_record::SessionFlowMembership::Independent,
         )?
     };
-    if capture_is_prepared(&session.artifact_key)?
-        && !conversation_process_is_running(&session.id).await?
-    {
-        let lf = crate::os_process::resolve_pinned_lf_binary()?;
-        let argv = vec![
-            lf.to_string_lossy().to_string(),
-            "session".to_string(),
-            "serve-conversation".to_string(),
-            session.artifact_key.to_string(),
-        ];
-        start_durable_session(
-            &conversation_background_name(&session.id),
-            &session.cwd,
-            &argv,
-        )
-        .await
-        .with_context(|| {
-            format!(
-                "launch primary Session {}; run the same command to retry",
-                session.id
-            )
-        })?;
-    }
     surface(store, &session).await
 }
 
@@ -329,10 +301,8 @@ async fn lock_scope(scope: &PrimaryScope) -> Result<std::fs::File> {
 #[cfg(test)]
 mod tests {
     use super::{ensure, replace};
-    use crate::ops::human_session::tests::{
-        SessionHome, CONVERSATION_LAUNCHERS, FAILED_CONVERSATION_LAUNCHERS,
-    };
-    use crate::ops::human_session::{action_test::NativeClients, conversation_background_name};
+    use crate::ops::human_session::tests::SessionHome;
+    use crate::ops::human_session::{action_test::NativeClients, capture_is_prepared};
 
     async fn wave(
         store: &crate::store::SharedStore,
@@ -344,7 +314,7 @@ mod tests {
     }
 
     #[test]
-    fn ensure_finds_the_same_wave_conversation_and_launches_once() {
+    fn ensure_prepares_the_same_wave_conversation_without_launching() {
         let _lock = crate::journal::test_env_lock();
         let home = SessionHome::new();
         tokio::runtime::Runtime::new().unwrap().block_on(async {
@@ -355,55 +325,22 @@ mod tests {
             let first = ensure(&store, repo.path(), Some("infrastructure"))
                 .await
                 .unwrap();
-            // The simulated launcher refuses a duplicate start, so a second
-            // launch attempt would fail this call.
             let second = ensure(&store, repo.path(), Some("infrastructure"))
                 .await
                 .unwrap();
 
             assert_eq!(first.id, second.id);
-            assert!(CONVERSATION_LAUNCHERS
-                .lock()
+            assert!(store
+                .sqlite
+                .session_attachment(&first.id)
                 .unwrap()
-                .contains(&conversation_background_name(&first.id)));
+                .is_none());
             let session = store.session(&first.id).await.unwrap().unwrap();
             assert!(session.interactive && session.input_published);
+            assert!(capture_is_prepared(&session.artifact_key).unwrap());
             assert_eq!(session.skill.as_deref(), Some("wave-session"));
             assert_eq!(session.wave_id.as_ref(), Some(wave.id()));
             assert_eq!(session.task_id, None);
-        });
-    }
-
-    #[test]
-    fn failed_start_keeps_the_session_for_the_next_ensure() {
-        let _lock = crate::journal::test_env_lock();
-        let home = SessionHome::new();
-        tokio::runtime::Runtime::new().unwrap().block_on(async {
-            let store = home.store().await;
-            let repo = loopflow_test_support::TestRepo::new();
-            wave(&store, &repo).await;
-
-            // The launcher name derives from an id admitted inside ensure; fail
-            // every launcher by admitting first, then failing that name.
-            let admitted = ensure(&store, repo.path(), Some("infrastructure"))
-                .await
-                .unwrap();
-            let name = conversation_background_name(&admitted.id);
-            CONVERSATION_LAUNCHERS.lock().unwrap().remove(&name);
-            FAILED_CONVERSATION_LAUNCHERS
-                .lock()
-                .unwrap()
-                .insert(name.clone());
-            assert!(ensure(&store, repo.path(), Some("infrastructure"))
-                .await
-                .is_err());
-
-            FAILED_CONVERSATION_LAUNCHERS.lock().unwrap().clear();
-            let retried = ensure(&store, repo.path(), Some("infrastructure"))
-                .await
-                .unwrap();
-            assert_eq!(retried.id, admitted.id);
-            assert!(CONVERSATION_LAUNCHERS.lock().unwrap().contains(&name));
         });
     }
 

@@ -966,7 +966,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         if conn.execute(
             "UPDATE agent_sessions SET input_published=1 WHERE id=?1 AND current_capture=?2
-             AND input_published=0 AND completed_at IS NULL",
+             AND input_published=0",
             params![id, captured],
         )? != 1
         {
@@ -978,7 +978,8 @@ impl SqliteStore {
     }
 
     /// Replace captured input, retaining the conversation's workspace, native
-    /// history, title, feedback and assignment.
+    /// history, title, feedback and assignment. Explicit opening may retry a
+    /// retired conversation without making it primary again.
     pub fn replace_session_input(
         &self,
         expected_input: Option<i64>,
@@ -990,7 +991,7 @@ impl SqliteStore {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let previous = session_in(&tx, &session.id)?.ok_or(StoreError::NotFound)?;
         if previous.captured != expected_input
-            || previous.completed_at.is_some()
+            || previous.completed_at != session.completed_at
             || previous.task_id != session.task_id
             || previous.wave_id != session.wave_id
         {
@@ -1403,9 +1404,9 @@ pub(super) fn replace_input_in(
         process,
     )?);
     conn.execute("UPDATE agent_sessions SET current_capture=?2,input_published=?3,skill=?4,provider=?5,model=?6
-        WHERE id=?1 AND completed_at IS NULL",
+        WHERE id=?1 AND completed_at IS ?7",
         params![session.id,session.captured,session.input_published,
-            session.skill,session.provider,session.model])?;
+            session.skill,session.provider,session.model,session.completed_at])?;
     Ok(())
 }
 
@@ -1588,6 +1589,38 @@ mod metadata_tests {
             )
             .unwrap();
         assert!(store.session_summaries(&filter, 0).unwrap().is_empty());
+    }
+
+    #[test]
+    fn retrying_retired_input_preserves_completion_and_rejects_stale_snapshots() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let first = store.test_session("retired", &crate::session_record::new_artifact_key());
+        let mut next = first.clone();
+        next.artifact_key = crate::session_record::new_artifact_key();
+        next.input_published = false;
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET completed_at=10 WHERE id='retired'",
+                [],
+            )
+            .unwrap();
+        let before = store.session_history("retired", 0, 100).unwrap();
+        assert!(store
+            .replace_session_input(first.captured, next.clone())
+            .is_err());
+        assert_eq!(store.session_history("retired", 0, 100).unwrap(), before);
+
+        next.completed_at = Some(10);
+        let next = store.replace_session_input(first.captured, next).unwrap();
+        store.publish_capture(&next.id, next.captured).unwrap();
+        let retained = store.session("retired").unwrap().unwrap();
+        assert_eq!(retained.completed_at, Some(10));
+        assert!(retained.input_published);
+        assert_ne!(retained.captured, first.captured);
     }
 
     #[test]

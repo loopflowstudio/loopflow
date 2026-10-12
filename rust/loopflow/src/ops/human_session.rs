@@ -508,27 +508,6 @@ impl<'a> NativeSession<'a> {
     }
 }
 
-pub(crate) async fn serve_conversation(store: &SharedStore, artifact_key: &String) -> Result<()> {
-    let session = store
-        .session_for_artifact(artifact_key)
-        .await?
-        .ok_or_else(|| anyhow!("Conversation input {artifact_key} no longer exists"))?;
-    let launch_lock = lock_session_process(&session.id)?;
-    let session = store
-        .session(&session.id)
-        .await?
-        .ok_or_else(|| anyhow!("Conversation input {artifact_key} no longer exists"))?;
-    if session.completed_at.is_some() {
-        bail!("session {:?} is already resolved", session.id);
-    }
-    if session.artifact_key != *artifact_key || !capture_is_prepared(&session.artifact_key)? {
-        // Another launcher already published this Session. Do not replace or
-        // infer death of its native client; explicit open owns native resume.
-        return Ok(());
-    }
-    serve_locked(store, &session, launch_lock).await
-}
-
 fn session_token(session: &LfSession) -> HumanSessionToken {
     HumanSessionToken::Primary {
         id: session.id.clone(),
@@ -882,9 +861,6 @@ async fn open_waiting(store: &SharedStore, id: &str) -> Result<()> {
         .session(id)
         .await?
         .ok_or_else(|| session_not_found(id))?;
-    if session.completed_at.is_some() {
-        bail!("session {id:?} is already complete");
-    }
     let session = primary::admit_workspace(store, session).await?;
     let mut launch_lock = Some(launch_lock);
     let token = session_token(&session);
@@ -1247,61 +1223,6 @@ fn human_open_argv(id: &str) -> Result<Vec<String>> {
 
 const PRIMARY_MESSAGE: &str = "<lf:primary-session>\nThis is the one ongoing primary conversation of its repository, Wave or Task. Reconcile current evidence, then work with the user.\n</lf:primary-session>";
 
-#[cfg(not(test))]
-async fn conversation_process_is_running(id: &str) -> Result<bool> {
-    let status = tokio::process::Command::new("tmux")
-        .args([
-            "has-session",
-            "-t",
-            &format!("={}", conversation_background_name(id)),
-        ])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .await
-        .context("inspect conversation launcher")?;
-    match status.code() {
-        Some(0) => Ok(true),
-        Some(1) => Ok(false),
-        _ => bail!("inspect conversation launcher: tmux exited with {status}"),
-    }
-}
-
-#[cfg(test)]
-async fn conversation_process_is_running(id: &str) -> Result<bool> {
-    Ok(tests::CONVERSATION_LAUNCHERS
-        .lock()
-        .unwrap()
-        .contains(&conversation_background_name(id)))
-}
-
-#[cfg(not(test))]
-async fn start_durable_session(name: &str, cwd: &Path, argv: &[String]) -> Result<()> {
-    crate::os_process::start_home_session(name, cwd, argv).await
-}
-
-#[cfg(test)]
-async fn start_durable_session(name: &str, _cwd: &Path, argv: &[String]) -> Result<()> {
-    if !argv.iter().any(|arg| arg == "serve-conversation") {
-        return Ok(());
-    }
-    if tests::FAILED_CONVERSATION_LAUNCHERS
-        .lock()
-        .unwrap()
-        .contains(name)
-    {
-        bail!("simulated Session launch failure");
-    }
-    if !tests::CONVERSATION_LAUNCHERS
-        .lock()
-        .unwrap()
-        .insert(name.to_string())
-    {
-        bail!("simulated duplicate Session launcher");
-    }
-    Ok(())
-}
-
 pub(crate) fn lock_session_process(id: &str) -> Result<File> {
     let directory = crate::store::lf_home_dir().join(LAUNCH_LOCK_DIRECTORY);
     fs::create_dir_all(&directory).context("create Session directory")?;
@@ -1328,10 +1249,6 @@ pub(crate) fn lock_session_process(id: &str) -> Result<File> {
         }
     }
     Ok(file)
-}
-
-fn conversation_background_name(id: &str) -> String {
-    format!("lf-human-{}", id.chars().take(12).collect::<String>())
 }
 
 fn active_session_token() -> Result<HumanSessionToken> {
@@ -1947,19 +1864,12 @@ mod tests {
         }
     }
 
-    use std::collections::HashSet;
     use std::ffi::OsString;
-    use std::sync::{LazyLock, Mutex};
 
     use super::{human_open_argv, session_is_resumable};
     use crate::session::LfSession;
     use crate::store::{open_ephemeral_store, SharedStore, StorageConfig};
     use crate::work::task::TaskId;
-
-    pub(super) static CONVERSATION_LAUNCHERS: LazyLock<Mutex<HashSet<String>>> =
-        LazyLock::new(|| Mutex::new(HashSet::new()));
-    pub(super) static FAILED_CONVERSATION_LAUNCHERS: LazyLock<Mutex<HashSet<String>>> =
-        LazyLock::new(|| Mutex::new(HashSet::new()));
 
     pub(super) struct SessionHome {
         home: tempfile::TempDir,
@@ -1969,8 +1879,6 @@ mod tests {
 
     impl SessionHome {
         pub(super) fn new() -> Self {
-            CONVERSATION_LAUNCHERS.lock().unwrap().clear();
-            FAILED_CONVERSATION_LAUNCHERS.lock().unwrap().clear();
             let ambient = crate::test_ambient::EnvGuard::new();
             let home = tempfile::tempdir().unwrap();
             let previous = ["LF_HOME", "LF_BIN"]
@@ -2007,8 +1915,6 @@ mod tests {
                     None => std::env::remove_var(key),
                 }
             }
-            CONVERSATION_LAUNCHERS.lock().unwrap().clear();
-            FAILED_CONVERSATION_LAUNCHERS.lock().unwrap().clear();
         }
     }
 

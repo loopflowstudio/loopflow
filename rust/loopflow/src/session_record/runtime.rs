@@ -59,6 +59,88 @@ mod tests {
     }
 
     #[test]
+    fn native_resume_requires_observed_death_and_preserves_history() {
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let (home, store, detached) = resume_fixture();
+        let attached = store
+            .claim_session_attachment("resume", Some(&detached), &LfProcessId::new(), false)
+            .unwrap();
+        let mut command = std::process::Command::new("/bin/sleep");
+        command.env_clear().arg("60");
+        let mut child = Child(
+            crate::harness::agent_process::spawn_native(
+                command,
+                &(store.clone(), "resume".into(), attached.clone()),
+            )
+            .unwrap(),
+        );
+        let detached = store
+            .release_session_attachment("resume", &attached)
+            .unwrap();
+        let sql = rusqlite::Connection::open(home.path().join("store.db")).unwrap();
+        sql.execute(
+            "UPDATE agent_sessions SET provider_thread='saved-native' WHERE id='resume'",
+            [],
+        )
+        .unwrap();
+        let before = store.process(&attached.agent_process_id).unwrap().unwrap();
+
+        // A live foreground provider must not be stopped or launched twice.
+        assert!(crate::session_record::resume_session_agent_process(
+            &store,
+            "resume",
+            &LfProcessId::new(),
+        )
+        .is_err());
+        assert!(child.0.try_wait().unwrap().is_none());
+        assert_eq!(
+            store.process(&attached.agent_process_id).unwrap(),
+            Some(before.clone())
+        );
+        assert_eq!(
+            store.session_attachment("resume").unwrap(),
+            Some(detached.clone())
+        );
+
+        child.0.kill().unwrap();
+        child.0.wait().unwrap();
+        // Missing identity still grants no launch, even after this child died.
+        sql.execute(
+            "UPDATE processes SET pid=NULL WHERE id=?1",
+            [&attached.agent_process_id],
+        )
+        .unwrap();
+        assert!(crate::session_record::resume_session_agent_process(
+            &store,
+            "resume",
+            &LfProcessId::new(),
+        )
+        .is_err());
+        sql.execute(
+            "UPDATE processes SET pid=?2 WHERE id=?1",
+            rusqlite::params![attached.agent_process_id, before.pid],
+        )
+        .unwrap();
+
+        let next = crate::session_record::resume_session_agent_process(
+            &store,
+            "resume",
+            &LfProcessId::new(),
+        )
+        .unwrap();
+        assert_ne!(next.agent_process_id, attached.agent_process_id);
+        assert_eq!(
+            store.session_thread("resume").unwrap(),
+            Some("saved-native".into())
+        );
+        let ended = store.process(&attached.agent_process_id).unwrap().unwrap();
+        assert_eq!(ended.pid, before.pid);
+        assert_eq!(ended.os_started_at, before.os_started_at);
+        assert!(ended.completed_at.is_some());
+        assert!(ended.outcome.is_none());
+    }
+
+    #[test]
     fn resume_detached_live_agent_uses_recorded_settings_and_preserves_history() {
         let _ambient = crate::test_ambient::EnvGuard::new();
         let (home, store, detached) = resume_fixture();

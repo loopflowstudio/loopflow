@@ -93,7 +93,7 @@ pub fn create_or_update_pr(
     progress: &impl Progress,
 ) -> OpsResult<PrResult> {
     reject_control_plane_pr(repo)?;
-    crate::ops::commit::prepare_persistent_publication(repo)?;
+    crate::ops::commit::restart_landed_persistent(repo)?;
     if !gh_available() {
         return Err(OpsError::Message("gh CLI not found".to_string()));
     }

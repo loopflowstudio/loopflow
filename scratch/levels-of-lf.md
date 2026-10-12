@@ -122,17 +122,31 @@ repository-ownership boundary is preserved: Work context alone never authorizes 
 writes; selected Flow procedures own memory maintenance. Standalone skills keep
 proposed Wave changes in scratch.
 
-Writing scratch remains available. Repository-only `scratch.managed: true`
-opts into cleanup, stacked-child note isolation and persistent untracking.
-Default scratch follows ordinary Git behavior. No directory-existence heuristic
-or global opt-in: leftover notes cannot change ownership. The Loopflow repository
-opts in explicitly to preserve its existing CI policy. Delete the unconditional
-cleanup/untracking and special scratch merge/classification paths by gating them
-on this one policy; preserve managed lifecycle behavior and uncommitted edits.
+Jack revised the ownership mechanism on 2026-10-12: use the Git diff, with no
+scratch configuration or reserved directory. Skills keep their existing paths.
+Cleanup removes added scratch files; files present at the base and edits to them
+survive. Detected renames and `.gitkeep` are preserved. All checkouts use
+ordinary Git behavior for scratch. `lf pr submit` and `lf pr land` invoke
+`lf scratch clear` during preparation; it is also available independently.
+Default Flows need no extra step. PR open and publish do not run general scratch
+cleanup. Scratch writing and automatic context inclusion remain unchanged.
+Stacked checkouts and merges use normal Git behavior for inherited content.
 
-Acceptance adds real delivery, commit, sync and stacked-checkout coverage for
-ordinary and managed scratch, plus repository-only configuration tests. No new
-schema. Publication and delivery have not been requested.
+Delete `ScratchConfig`, `managed_scratch`, the repository opt-in, wholesale
+scratch removal/untracking and blanket merge restoration. Use one diff-based
+path selection in the explicit cleanup command. Untracked files outside
+Git's diff are not claimed by cleanup; ordinary delivery checkpointing stages
+its selected work before cleanup. No ownership manifest, new schema, enrollment
+or additional setup.
+
+Broader audit: keep automatic Work association and skill loading, but remove
+onboarding's forced three-way choice. Preserve useful defaults and direct skill
+execution. Scratch curation may edit existing documents; delivery alone removes
+only added paths. Work association remains context, not a newly selected
+procedure. Wave memory's Flow boundary remains Jack's accepted requirement.
+
+Implemented correction: diff cleanup shared by submit/land and the standalone
+command, with reconciled fixtures and docs. Validation is recorded below.
 
 ## Done when
 
@@ -144,7 +158,7 @@ live account, display, or person is required. Run `cargo fmt --check` and
 `cargo clippy --all-targets -- -D warnings` for the Rust cutover.
 
 Base contract: 1,037 → 282 words (73% reduction).
-Checks: focused Rust prompt/provenance, context reader/launch, Session CLI, command-reference and golden tests — 17 passed; `uv run pytest python/tests/test_instruction_levels.py` — 16 passed; nine decision inputs rendered and missing-response scoring failed as expected; Rust formatting/Clippy and Python Ruff passed. Live model evaluations remain for a selected provider environment.
+Checks: focused Rust cleanup CLI, submit/land, commit, sync, Task checkout/handoff, Flow, command discovery/docs, automatic scratch-context and prompt-golden checks passed; `uv run pytest python/tests/test_instruction_levels.py -q` — 16 passed; nine inputs rendered; `cargo clippy --all-targets -- -D warnings`, `cargo fmt --check`, and `git diff --check` passed. Live model evaluations remain unrun.
 
 ## Instruction explanations and decision evaluations
 

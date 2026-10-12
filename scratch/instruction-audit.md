@@ -121,17 +121,22 @@ Wave operation, S1–S5 and split-wave guidance now name that boundary; standalo
 procedures retain proposals in scratch. This is agent instruction scope, not a
 filesystem sandbox or a ban on explicitly requested Wave CRUD APIs.
 
-Scratch writing remains available. A repository-only `scratch.managed` flag
-replaces inferred ownership. The affected paths are `land::clear_scratch`,
-persistent commit/publication untracking, `task::finish_task_checkout`,
-`sync::plan_sync`/reset and Git's child/persistent scratch merge handling.
-Default false preserves normal Git behavior; the Loopflow repo explicitly
-opts in to its existing lifecycle. No existence heuristic or global opt-in.
+2026-10-12 — Jack rejected the repository-wide scratch opt-in. Replacement:
+cleanup selects added scratch paths from the Git diff; pre-existing paths and
+edits survive. Delete the flag, global directory removal/untracking and blanket
+scratch merge restoration. Skills retain their usual writing paths. No manifest
+or reserved directory. `lf pr submit` and `lf pr land` invoke the same cleanup operation exposed as
+`lf scratch clear`; default Flows need no extra step. Ordinary commits and PR
+open/publish keep scratch in every checkout; automatic Markdown context inclusion stays unchanged.
 
-Review preserved persistent branch restart independently of scratch ownership,
-and moved the scratch-policy read ahead of Git merge so conflicted config cannot
-interrupt merge recovery. Skill purpose remains the first body line so skill
-discovery continues to describe the operation rather than its write boundary.
+Broader audit found onboarding unnecessarily asked users to classify themselves
+as launcher/Desktop/custom-client users. `init` now infers the needed capability
+and defaults to getting a plain launch working. Existing Work continues without
+another opt-in. Automatic WorkContext selection, explicit-skill deduplication,
+read-only provenance and optional evaluation tooling add no setup requirements
+and remain. The accepted Flow-only Wave-maintenance boundary remains; no new
+filesystem access controls are added. Existing scratch may be edited as needed;
+cleanup authority is narrower than ordinary editing authority.
 
 Instruction provenance now uses the resolved Task/Wave association directly.
 Opt-out takes precedence over deduplication; selecting a skill still records its

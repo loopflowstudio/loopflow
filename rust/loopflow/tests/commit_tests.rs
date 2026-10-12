@@ -201,14 +201,11 @@ fn commit_generates_message_when_none() {
 fn persistent_selection_preserves_scratch_and_unrelated_index() {
     let _env = EnvGuard::new(&[]);
     let repo = TestRepo::new();
-    repo.create_file(".lf/config.yaml", "scratch:\n  managed: true\n");
-    repo.stage_all();
-    repo.commit("Enable managed scratch");
-    repo.push();
     repo.create_file("scratch/design.md", "private design\n");
     repo.create_file("scratch/.gitkeep", "");
     repo.stage_all();
     repo.commit("existing scratch");
+    repo.push();
     let persistent = loopflow::git::worktrees::ensure_agent_worktree(
         repo.path(),
         loopflow::git::worktrees::WorktreeSegment::parse("repo").unwrap(),
@@ -240,7 +237,7 @@ fn persistent_selection_preserves_scratch_and_unrelated_index() {
             "scratch",
             "other.md"
         ]),
-        "scratch/.gitkeep\n"
+        "scratch/.gitkeep\nscratch/design.md\n"
     );
     assert_eq!(git(&["show", ":other.md"]), "staged\n");
     assert_eq!(
@@ -251,20 +248,16 @@ fn persistent_selection_preserves_scratch_and_unrelated_index() {
         std::fs::read_to_string(persistent.path.join("scratch/design.md")).unwrap(),
         "latest private plan\n"
     );
-    let before = git(&["rev-parse", "HEAD"]);
-    let error = commit_selected(
+    commit_selected(
         &persistent.path,
         &["scratch/design.md".into()],
-        Some("Save local scratch"),
+        Some("Update existing research"),
     )
-    .unwrap_err()
-    .to_string();
-    assert!(error.contains("scratch/ stays local"), "{error}");
-    assert!(
-        error.contains("move durable notes outside scratch/"),
-        "{error}"
+    .unwrap();
+    assert_eq!(
+        git(&["show", "HEAD:scratch/design.md"]),
+        "latest private plan\n"
     );
-    assert_eq!(git(&["rev-parse", "HEAD"]), before);
     assert_eq!(git(&["show", ":other.md"]), "staged\n");
     commit_workflow(
         &persistent.path,
@@ -275,13 +268,13 @@ fn persistent_selection_preserves_scratch_and_unrelated_index() {
     .unwrap();
     assert_eq!(
         git(&["ls-tree", "-r", "--name-only", "HEAD", "--", "scratch"]),
-        "scratch/.gitkeep\n"
+        "scratch/.gitkeep\nscratch/design.md\n"
     );
     assert!(persistent.path.join("scratch/design.md").exists());
 }
 
 #[test]
-fn persistent_workspace_commits_ordinary_scratch() {
+fn persistent_workspace_checkpoints_added_scratch_until_explicit_cleanup() {
     let _env = EnvGuard::new(&[]);
     let repo = TestRepo::new();
     let persistent = loopflow::git::worktrees::ensure_agent_worktree(
@@ -302,7 +295,13 @@ fn persistent_workspace_commits_ordinary_scratch() {
     )
     .unwrap();
     assert_eq!(
+        std::fs::read_to_string(persistent.path.join("scratch/design.md")).unwrap(),
+        "repository content"
+    );
+    assert_eq!(
         git_output(&persistent.path, &["show", "HEAD:scratch/design.md"]),
         "repository content"
     );
+    assert_eq!(loopflow::ops::scratch::clear(&persistent.path).unwrap(), 1);
+    assert!(!persistent.path.join("scratch/design.md").exists());
 }

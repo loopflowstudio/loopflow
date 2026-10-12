@@ -1,5 +1,3 @@
-scratch:
-  managed: true
 # Definitions do not activate jobs. Explicit cron sync installs on the placed Machine.
 crons:
 - name: telemetry-daily

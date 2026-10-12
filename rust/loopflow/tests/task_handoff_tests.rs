@@ -51,12 +51,8 @@ fn receipts(child: &Task) -> Vec<Value> {
 }
 
 #[test]
-fn checkout_hands_each_child_only_its_selected_design_with_source_receipt() {
+fn checkout_hands_each_child_its_selected_design_and_preserves_inherited_notes() {
     let repo = TestRepo::new();
-    repo.create_file(".lf/config.yaml", "scratch:\n  managed: true\n");
-    repo.stage_all();
-    repo.commit("Enable managed scratch");
-    repo.push();
     let home = tempfile::tempdir().unwrap();
     let target = tempfile::tempdir().unwrap();
     let _env = EnvGuard::with_lf_home(&[], home.path());
@@ -113,7 +109,7 @@ fn checkout_hands_each_child_only_its_selected_design_with_source_receipt() {
             .unwrap(),
             content
         );
-        assert!(!child
+        assert!(child
             .worktree
             .as_ref()
             .unwrap()

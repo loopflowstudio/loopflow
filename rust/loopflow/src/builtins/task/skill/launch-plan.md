@@ -116,7 +116,7 @@ names the choices, `lf task run <issue> <flow>` picks one, and naming a
 workflow takes it up from its start. `lf --task <issue> run <flow>` runs any
 Flow without moving the Task.
 Preserve intent, constraints, and done-when
-proof in durable records so the Task remains useful after any configured scratch cleanup.
+proof in durable records so the Task remains useful after cleanup of added scratch files.
 
 Finish with a short accounting of the selected work and its design/evidence
 path, Tasks launched, and follow-ups intentionally deferred.

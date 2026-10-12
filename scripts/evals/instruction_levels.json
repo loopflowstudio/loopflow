@@ -130,7 +130,7 @@
     "work_task": "EVAL-1",
     "skill": "pr-submit",
     "no_loopflow": false,
-    "context": "The PR is ready for reviewer handoff. There is no scratch.managed setting in repo config. scratch/ contains tracked project research alongside the current design. No Flow is selected.",
+    "context": "The PR is ready for reviewer handoff. The branch edits scratch/research.md, which existed at the base, and adds scratch/design.md. Cleanup should retain the edited research and remove only the added design. No Flow is selected.",
     "request": "Prepare this PR for my merge click.",
     "required": [
       "prepare_delivery"

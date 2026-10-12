@@ -21,11 +21,12 @@ The launch prompt identifies the reviewer.
 Never expose credential values. Use Loopflow's account commands; do not read
 tokens from dotfiles or environment variables.
 
-## Choose the path first
+## Start from the request
 
-Use the request and any existing Task association. If the intended path is
-unclear, ask whether the user wants the launcher, managed work in Desktop, or
-work APIs in their own client. Do not inspect planning merely to answer this.
+Use the request, installed tools and existing Work association to infer what
+needs setup. With no further direction, make a plain agent launch work. Ask only
+when a concrete setup choice cannot be inferred; do not ask the user to select
+a usage level. Continue existing Work without requiring another opt-in.
 
 For launcher, Skill, Flow, worktree or PR use, check `lf --version`, installed
 agent availability, and only the accounts needed for the requested operation.

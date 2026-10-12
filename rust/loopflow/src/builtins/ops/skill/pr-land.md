@@ -15,7 +15,8 @@ lf land                 # prepare, request exact-head auto-merge, return
 lf land --wait-and-fix  # wait for merge and repair failing CI
 ```
 
-The operation owns preparation, sync, publication, and exact-head auto-merge.
+The operation checkpoints the change, clears added scratch files, syncs, publishes,
+and requests exact-head auto-merge. Existing scratch files and edits remain.
 It consumes valid prepared copy or generates it through pr-message; use explicit
 title/body only for an intentional override. Check the resulting PR's scope,
 claims and evidence limits. Do not duplicate its Git/GitHub mutations or launch

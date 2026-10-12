@@ -20,9 +20,17 @@
 
 - Jack required `wave/` writes to belong to selected Loopflow Flows, not merely
   Work API usage. Standalone memory procedures retain proposals in scratch.
-- Jack permits writing scratch and wants cleanup optional. Chosen mechanism:
-  repo-only `scratch.managed: true`, default false, covering deletion and
-  removal from published history. Directory existence never determines ownership.
+- 2026-10-12 — Jack rejected `scratch.managed`, reserved directories and ownership
+  manifests. Use the Git diff: delete added scratch files at cleanup, retain
+  existing files and edits. Skills keep writing to their existing paths without
+  configuration. `lf pr submit` and `lf pr land` invoke
+  `lf scratch clear` automatically; the command is also available independently.
+  PR open and publish do not run general scratch cleanup.
+  Writing and automatic context inclusion remain defaults. This supersedes
+  the earlier repository-opt-in design.
+- Jack asked that the same lesson apply across the branch: infer useful behavior
+  from existing context, preserve defaults, and avoid enrollment questions or
+  setup requirements that make ordinary use harder.
 
 - Jack requested continuation into instruction explanations and decision
   evaluations. Existing capture decisions own explanations; no user-level mode

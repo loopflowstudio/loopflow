@@ -107,7 +107,7 @@ Do not take the first N commits and call that the history.
   config.yaml             # Model, context defaults
   skills/                 # Skill prompts
   flows/                  # Flow definitions
-scratch/                  # working notes (optional managed cleanup)
+scratch/                  # working notes; default delivery clears added files
 wave/                     # Wave goals and memory (persists)
 ~/.lf/                    # Global config, skills, and the local store
   loopflow.db             # Local identity and execution history

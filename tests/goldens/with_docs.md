@@ -98,9 +98,11 @@ not authorize writes to `wave/`. Keep proposed memory updates in local notes
 outside that procedure; never start a Flow merely to obtain write authority.
 Never guess a Wave merely to complete a template.
 
-Scratch cleanup follows repository configuration: `scratch.managed: true` in
-`.lf/config.yaml` opts into temporary notes. Otherwise scratch is ordinary
-repository content. Do not clear it manually as part of delivery.
+Use scratch freely for plans and notes; its Markdown enters context automatically.
+`lf pr submit` and `lf pr land` invoke `lf scratch clear` during preparation.
+It removes added files from the work's diff and retains existing files and edits.
+The command is also available on its own. PR open and publish do not run general scratch cleanup. Do not clear
+the directory manually.
 
 Keep routine progress in this conversation and local notes. Task descriptions
 hold the current problem, outcome and constraints; deliberate new direction

@@ -1765,6 +1765,13 @@ fn execute_command(
         Some(Commands::Wt { cmd }) => {
             in_repo_runtime(args, |_| loopflow::lf::commands::ops::run_wt(cmd))
         }
+        Some(Commands::Scratch {
+            cmd: loopflow::lf::ScratchCommand::Clear,
+        }) => in_repo_runtime(args, |repo| {
+            let count = loopflow::ops::scratch::clear(repo)?;
+            println!("Cleared {count} added scratch files.");
+            Ok(())
+        }),
         Some(Commands::Commit {
             message,
             push,

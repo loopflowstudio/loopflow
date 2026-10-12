@@ -78,10 +78,10 @@ impl CiState {
     }
 }
 
-/// The required check `lf pr land` greens itself, by clearing `scratch/`.
+/// The required check submit/land green through `lf scratch clear`.
 ///
 /// See [`CiCheck::land_time_precondition`] for what this class means and the one
-/// rule for admitting a name to it. `crate::ops::land::clear_scratch` is the step
+/// rule for admitting a name to it. `crate::ops::scratch::clear` is the step
 /// that resolves this check; `land_time_precondition_names_a_real_ci_job` pins
 /// this literal against `.github/workflows/ci.yml`.
 const LAND_TIME_PRECONDITION_CHECK: &str = "scratch-clear";
@@ -96,16 +96,16 @@ pub struct CiCheck {
 
 impl CiCheck {
     /// Whether this check asserts a *land-time precondition* — a condition
-    /// `lf pr land` establishes itself, so no repair turn can green it.
+    /// submit/land establishes, without a code repair turn.
     ///
     /// This is the one class of required check a Task body cannot act on.
     /// `scratch-clear` fails whenever `scratch/` holds anything but `.gitkeep`,
     /// which is true of a PR carrying its own design doc before delivery, and
-    /// `crate::ops::land::clear_scratch` is what greens it, not a code change. A
+    /// `crate::ops::scratch::clear` is what greens it, not a code change. A
     /// body woken to "repair" it could only delete the Task's design artifact,
-    /// to green a check land greens anyway.
+    /// before the selected delivery procedure needs to clean it.
     ///
-    /// A name belongs here only when an `lf pr land` step is what resolves it.
+    /// A name belongs here only when the delivery operation resolves it.
     /// This is not a catalogue of CI jobs, and it is not a mute button for checks
     /// that are merely hard to fix: a check anyone *could* fix by changing the
     /// tree does not belong here, however annoying it is.

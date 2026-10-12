@@ -89,7 +89,7 @@ Make the change easy to review.
    current change. Optional cached copy lives in `scratch/pr-title.txt`,
    `scratch/pr-body.md` and `scratch/.pr-copy-ref` (current HEAD SHA).
    Publication consumes these files before its first commit or push. Preserve
-   consequential evidence at its lasting owner before any configured scratch cleanup.
+   consequential evidence at its lasting owner before cleanup of added scratch files.
 
 3. **Update README and docs**
    - If user-facing behavior changed, docs must reflect it

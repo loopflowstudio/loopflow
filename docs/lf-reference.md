@@ -131,7 +131,7 @@ Push and create or update a draft PR, then open its GitHub page. Existing ready 
 
 ## lf pr submit
 
-Prepare a PR to land: sync, apply configured scratch cleanup, mark ready, and assign it to you. Nothing merges until you click merge on GitHub
+Prepare a PR to land: sync, clear added scratch files, mark ready, and assign it to you. Nothing merges until you click merge on GitHub
 
 | Argument | What it does |
 |---|---|
@@ -203,7 +203,7 @@ Create a low-level sibling worktree
 |---|---|
 | `<name>` | Worktree name |
 | `--plan` | Print the placement plan without creating a worktree Default: false. |
-| `--persistent` | Keep this workspace after delivery; managed scratch stays local Default: false. |
+| `--persistent` | Keep this workspace after delivery Default: false. |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
@@ -272,6 +272,22 @@ Merge upstream into the current branch (default: main or stack parent)
 | `--adopt` | Explicitly claim a raw sync that has no Loopflow owner Default: false. |
 | `<onto>` | Branch to sync onto |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf scratch
+
+Manage working notes
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
+## lf scratch clear
+
+Remove scratch files added in this branch's diff, keeping existing files and edits
+
+| Argument | What it does |
+|---|---|
 | `--help / -h` | Print help |
 
 ## lf commit

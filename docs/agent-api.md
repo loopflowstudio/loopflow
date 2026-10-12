@@ -93,10 +93,8 @@ completion — resolve that inline. The current process and worktree are the
 default execution surface.
 
 `--stack-on` forks the child's worktree from the parent Task's active PR, records
-the fork commit, and applies repository scratch policy. With
-`scratch.managed: true`, it adds a `Clear inherited scratch` commit before execution.
-Parent syncs keep the child's scratch, including its deletions. The parent retains
-its own notes. The child's PR targets the parent's branch until
+the fork commit, and inherits the parent's files. Scratch follows the same Git
+merge behavior as other content, including edits to existing notes. The child's PR targets the parent's branch until
 merge, then `lf sync` merges main using the recorded fork as the comparison base.
 Child edits survive the parent's squash landing without replay.
 

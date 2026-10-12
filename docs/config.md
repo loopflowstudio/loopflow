@@ -79,26 +79,21 @@ config files.
 
 ## Scratch lifecycle
 
-```yaml
-# .lf/config.yaml — repository opt-in
-scratch:
-  managed: true
+```bash
+lf scratch clear   # remove checkpointed scratch additions; retain existing files and edits
 ```
 
-By default, `scratch/` is ordinary repository content. Agents can keep notes
-there and read them as context; committing, syncing, creating a stacked checkout,
-and preparing a PR preserve its normal Git behavior.
+Skills write plans and notes to `scratch/` without setup, and recursive Markdown
+there enters agent context automatically. Scratch follows ordinary Git behavior
+in every checkout. No scratch setting is required.
 
-Set `scratch.managed: true` to give Loopflow ownership of temporary notes:
-non-persistent PR preparation clears them; stacked Task checkouts clear inherited
-notes and keep their own during parent updates; persistent workspaces retain
-notes on disk but omit them from commits and publication. `.gitkeep` survives
-PR cleanup. This setting applies to the whole directory.
-
-Only the repository's `.lf/config.yaml` can enable this policy. Personal config,
-Task association, and the presence or absence of old notes do not enable it.
-A missed cleanup never changes the configured policy. Repositories enforcing
-an empty scratch directory in CI should enable it explicitly.
+`lf pr submit` and `lf pr land` invoke this cleanup during preparation, so default
+Flows need no extra step. It is also available on its own. Publishing a draft or
+ready PR does not run general scratch cleanup; PR-copy handoff artifacts retain
+their existing lifecycle. Cleanup uses the existing Task diff base
+or the branch's merge base with main; it removes only added files, preserving
+existing files, edits, detected renames and `.gitkeep`. Untracked files outside
+the checkpoint remain. Repeating cleanup makes no empty commit.
 
 ## Context budgets
 

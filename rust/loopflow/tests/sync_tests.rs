@@ -806,19 +806,15 @@ fn explicit_onto_is_the_only_alternate_base() {
 }
 
 #[test]
-fn dirty_scratch_only_branch_resets_to_base() {
+fn untracked_scratch_is_not_assumed_to_be_disposable() {
     let _env = EnvGuard::new(&[]);
     let repo = TestRepo::new();
-    repo.create_file(".lf/config.yaml", "scratch:\n  managed: true\n");
-    repo.stage_all();
-    repo.commit("Enable managed scratch");
-    repo.push();
     repo.create_branch("feature");
     repo.create_file("scratch/design.md", "notes");
 
     let plan = plan_sync(repo.path(), None, None).expect("plan sync");
-    assert_eq!(plan.class, SyncClass::ScratchOnly);
-    assert_eq!(plan.strategy, SyncStrategy::ResetToBase);
+    assert_eq!(plan.class, SyncClass::CleanAuthored);
+    assert_eq!(plan.strategy, SyncStrategy::MergeTarget);
     assert_eq!(plan.unique_commits, 0);
 }
 
@@ -826,10 +822,6 @@ fn dirty_scratch_only_branch_resets_to_base() {
 fn modified_scratch_file_keeps_its_leading_path_character() {
     let _env = EnvGuard::new(&[]);
     let repo = TestRepo::new();
-    repo.create_file(".lf/config.yaml", "scratch:\n  managed: true\n");
-    repo.stage_all();
-    repo.commit("Enable managed scratch");
-    repo.push();
     repo.create_file("scratch/notes.md", "original\n");
     repo.stage_all();
     repo.commit("add scratch notes");
@@ -838,7 +830,7 @@ fn modified_scratch_file_keeps_its_leading_path_character() {
     repo.create_file("scratch/notes.md", "evolved\n");
 
     let plan = plan_sync(repo.path(), None, None).expect("plan sync");
-    assert_eq!(plan.class, SyncClass::ScratchOnly);
+    assert_eq!(plan.class, SyncClass::CleanAuthored);
     assert!(plan
         .changed_files
         .iter()
@@ -921,94 +913,9 @@ fn long_branch_resolves_one_merge_and_keeps_the_resolution() {
 }
 
 #[test]
-fn stacked_scratch_stays_with_child_across_parent_updates() {
-    let _env = EnvGuard::new(&[]);
-    let repo = TestRepo::new();
-    repo.create_file(".lf/config.yaml", "scratch:\n  managed: true\n");
-    repo.stage_all();
-    repo.commit("Enable managed scratch");
-    repo.push();
-    repo.create_branch("parent");
-    repo.create_file("scratch/design.md", "parent design\n");
-    repo.stage_all();
-    repo.commit("Parent notes");
-    let mut fork = repo.head_sha();
-    repo.create_branch("child");
-    git(repo.path(), &["rm", "-r", "scratch"]);
-    repo.commit("Clear inherited scratch");
-    let first_child_commit = repo.head_sha();
-
-    for revision in 1..=3 {
-        repo.checkout("parent");
-        repo.create_file(
-            "scratch/design.md",
-            &format!("parent revision {revision}\n"),
-        );
-        if revision == 2 {
-            git(repo.path(), &["mv", "scratch/new.md", "scratch/renamed.md"]);
-        } else {
-            repo.create_file("scratch/new.md", &format!("parent addition {revision}\n"));
-        }
-        repo.stage_all();
-        repo.commit("Parent updates notes");
-        let target = repo.head_sha();
-        repo.checkout("child");
-        if revision > 1 {
-            repo.create_file("scratch/local.md", "uncommitted child notes\n");
-            repo.create_file("scratch/draft.md", "untracked child notes\n");
-        }
-        sync_with_recovery(
-            repo.path(),
-            &SyncOptions {
-                onto: "parent".into(),
-                push: false,
-                fork_base: Some(fork),
-            },
-            &NullProgress,
-        )
-        .unwrap();
-        assert!(!repo.path().join("scratch/design.md").exists());
-        assert!(!repo.path().join("scratch/renamed.md").exists());
-        assert_eq!(git(repo.path(), &["rev-parse", "HEAD^2"]), target);
-        assert!(loopflow::git::is_ancestor(repo.path(), &first_child_commit, "HEAD").unwrap());
-        if revision == 1 {
-            assert!(!repo.path().join("scratch").exists());
-            repo.create_file("scratch/new.md", "child's own notes\n");
-            repo.create_file("scratch/local.md", "committed child notes\n");
-            repo.stage_all();
-            repo.commit("Child notes");
-        } else {
-            assert_eq!(
-                std::fs::read_to_string(repo.path().join("scratch/new.md")).unwrap(),
-                "child's own notes\n"
-            );
-            assert_eq!(
-                std::fs::read_to_string(repo.path().join("scratch/local.md")).unwrap(),
-                "uncommitted child notes\n"
-            );
-            assert_eq!(
-                std::fs::read_to_string(repo.path().join("scratch/draft.md")).unwrap(),
-                "untracked child notes\n"
-            );
-            repo.create_file("scratch/local.md", "committed child notes\n");
-            std::fs::remove_file(repo.path().join("scratch/draft.md")).unwrap();
-        }
-        fork = target;
-    }
-    assert_eq!(
-        git(repo.path(), &["show", "parent:scratch/design.md"]),
-        "parent revision 3"
-    );
-}
-
-#[test]
 fn child_edits_survive_live_parent_sync_then_squash_landing() {
     let _env = EnvGuard::new(&[]);
     let repo = TestRepo::new();
-    repo.create_file(".lf/config.yaml", "scratch:\n  managed: true\n");
-    repo.stage_all();
-    repo.commit("Enable managed scratch");
-    repo.push();
     repo.create_branch("parent");
     repo.create_file("shared.txt", "parent first\n");
     repo.stage_all();
@@ -1019,8 +926,6 @@ fn child_edits_survive_live_parent_sync_then_squash_landing() {
     repo.commit("parent final");
     let fork = repo.head_sha();
     repo.create_branch("child");
-    git(repo.path(), &["rm", "-r", "scratch"]);
-    repo.commit("Clear inherited scratch");
     repo.create_file("shared.txt", "child edits the parent line\n");
     repo.stage_all();
     repo.commit("child edits");
@@ -1073,9 +978,12 @@ fn child_edits_survive_live_parent_sync_then_squash_landing() {
     );
     assert_eq!(
         git(repo.path(), &["diff", "--name-only", "origin/main...HEAD"]),
-        "scratch/design.md\nshared.txt"
+        "shared.txt"
     );
-    assert!(!repo.path().join("scratch").exists());
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("scratch/design.md")).unwrap(),
+        "updated parent design\n"
+    );
 }
 
 #[test]
@@ -1308,10 +1216,6 @@ fn saved_flow_sync_follows_task_parent_and_skips_an_already_contained_head() {
 fn persistent_refresh_preserves_local_plans_and_followup_after_merge() {
     let _env = EnvGuard::new(&[]);
     let repo = TestRepo::new();
-    repo.create_file(".lf/config.yaml", "scratch:\n  managed: true\n");
-    repo.stage_all();
-    repo.commit("Enable managed scratch");
-    repo.push();
     let persistent = loopflow::git::worktrees::ensure_agent_worktree(
         repo.path(),
         loopflow::git::worktrees::WorktreeSegment::parse("repo").unwrap(),
@@ -1371,10 +1275,6 @@ fn persistent_refresh_preserves_local_plans_and_followup_after_merge() {
 fn persistent_memory_conflict_keeps_private_scratch_and_recovery() {
     let _env = EnvGuard::new(&[]);
     let repo = TestRepo::new();
-    repo.create_file(".lf/config.yaml", "scratch:\n  managed: true\n");
-    repo.stage_all();
-    repo.commit("Enable managed scratch");
-    repo.push();
     repo.create_file("memory.md", "base\n");
     repo.stage_all();
     repo.commit("base memory");
@@ -1427,8 +1327,12 @@ fn persistent_memory_conflict_keeps_private_scratch_and_recovery() {
 fn ordinary_scratch_changes_are_authored_work() {
     let _env = EnvGuard::new(&[]);
     let repo = TestRepo::new();
+    repo.create_file("scratch/research.md", "existing research");
+    repo.stage_all();
+    repo.commit("Repository research");
+    repo.push();
     repo.create_branch("feature");
-    repo.create_file("scratch/design.md", "repository content");
+    repo.create_file("scratch/research.md", "updated research");
     let plan = plan_sync(repo.path(), None, None).unwrap();
     assert_eq!(plan.class, SyncClass::CleanAuthored);
     assert_eq!(plan.strategy, SyncStrategy::MergeTarget);
@@ -1471,4 +1375,35 @@ fn stacked_sync_merges_ordinary_scratch_from_the_parent() {
         std::fs::read_to_string(repo.path().join("scratch/child.md")).unwrap(),
         "child design"
     );
+}
+
+#[test]
+fn independently_added_scratch_is_merged_without_losing_either_version() {
+    let _env = EnvGuard::new(&[]);
+    let repo = TestRepo::new();
+    repo.create_branch("feature");
+    repo.create_file("scratch/design.md", "local notes\n");
+    repo.stage_all();
+    repo.commit("Local notes");
+    repo.checkout("main");
+    repo.create_file("scratch/design.md", "upstream notes\n");
+    repo.stage_all();
+    repo.commit("Upstream notes");
+    repo.push();
+    repo.checkout("feature");
+    let plan = plan_sync(repo.path(), None, None).unwrap();
+    assert_eq!(plan.strategy, SyncStrategy::MergeTarget);
+    let result = sync_with_recovery(
+        repo.path(),
+        &SyncOptions {
+            onto: "origin/main".into(),
+            push: false,
+            fork_base: None,
+        },
+        &NullProgress,
+    );
+    assert!(matches!(result, Err(OpsError::SyncConflict { .. })));
+    let notes = std::fs::read_to_string(repo.path().join("scratch/design.md")).unwrap();
+    assert!(notes.contains("local notes"));
+    assert!(notes.contains("upstream notes"));
 }

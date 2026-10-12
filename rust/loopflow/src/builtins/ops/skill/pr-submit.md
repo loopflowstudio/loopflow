@@ -19,8 +19,9 @@ or `-r <org/team>` on the existing PR. Do not infer reviewers from assignees.
 Read `lf pr reviews` for requests and review submissions; inline discussion stays
 on the PR page. Publishing and submitting do not themselves request reviews.
 
-After verified merge, an open Task can be completed when its outcome is satisfied.
-Optional later work uses ordinary Task creation; no disposition is required. A Task has at most one PR; additional delivery belongs to another Task.
+For an associated Task, leave completion to its selected work procedure after
+verified merge. A Task has at most one PR; additional accepted delivery belongs
+to another Task. Taskless delivery creates no Task or follow-up filing obligation.
 Repair a reported conflict in this checkout using the existing sync operation,
 then retry. Preserve actual errors and uncertain external effects.
 

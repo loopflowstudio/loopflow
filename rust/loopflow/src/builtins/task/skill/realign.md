@@ -42,6 +42,11 @@ Bring the plan and the implementation into agreement with what the work has taug
    When a change needs a product decision, show the exact choice and leave it
    unresolved. Do not silently promote a proposal into an accepted decision.
 
+   Maintain `.lf/wave/` only as part of a selected Loopflow Flow that calls for it.
+   Standalone reconciliation and Work association alone leave it read-only;
+   record proposed Wave changes in scratch instead. The memory curation below
+   applies only inside that Flow procedure.
+
    Before curating the selected Wave's memory, inspect `.lf/wave/<address>/` with
    ordinary filesystem tools for immediate child directories containing
    `MEMORY.md`, including scopes without a `GOAL.md` or registry entry. Read
@@ -87,7 +92,7 @@ the caller.
 
 Run `lf context` to read memory and scratch size targets, their configuration
 sources, and current usage. Read complete sources before curating them.
-Curate Wave memory gradually. When it exceeds either limit, retire the largest
+Within the selected Flow's memory procedure, curate Wave memory gradually. When it exceeds either limit, retire the largest
 stale sections to git history first and bring it just under both limits. Stop
 once it fits; do not rewrite the whole memory toward a smaller target or shrink
 an in-budget memory merely for size. Continue correcting stale guidance and

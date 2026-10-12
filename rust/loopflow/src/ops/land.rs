@@ -139,8 +139,7 @@ fn prepare_pr(
         }
         Integration::Completed => {}
     }
-    // Refuse an already-empty Task before scratch cleanup can manufacture a
-    // bookkeeping-only `.gitkeep` commit or any GitHub command observes it.
+    // Refuse an already-empty Task before cleanup or any GitHub command observes it.
     crate::ops::task::require_task_pr_range_nonempty(&repo_root)?;
     let pr_exists = if options.local {
         false

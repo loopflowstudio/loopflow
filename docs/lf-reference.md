@@ -274,6 +274,22 @@ Merge upstream into the current branch (default: main or stack parent)
 | `<onto>` | Branch to sync onto |
 | `--help / -h` | Print help |
 
+## lf scratch
+
+Manage working notes
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
+## lf scratch clear
+
+Remove scratch files added in this branch's diff, keeping existing files and edits
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
 ## lf commit
 
 Commit changes
@@ -1861,6 +1877,7 @@ Inspect a process or Session by identity
 | `--final` | Print a Session's last recorded provider conclusion Default: false. |
 | `--input` | Inspect an exact retained input belonging to this Session |
 | `--context` | Print only what the step's submitted input was made of, by source Default: false. |
+| `--instructions` | Explain recorded instruction inclusion and omission Default: false. |
 | `--help / -h` | Print help |
 
 ## lf history usage

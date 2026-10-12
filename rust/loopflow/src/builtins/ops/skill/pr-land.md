@@ -16,7 +16,8 @@ lf land                 # prepare, request exact-head auto-merge, return
 lf land --wait-and-fix  # wait for merge and repair failing CI
 ```
 
-The operation owns preparation, sync, publication, and exact-head auto-merge.
+The operation checkpoints the change, clears added scratch files, syncs, publishes,
+and requests exact-head auto-merge. Existing scratch files and edits remain.
 It consumes valid prepared copy or generates it through pr-message; use explicit
 title/body only for an intentional override. Check the resulting PR's scope,
 claims and evidence limits. Do not duplicate its Git/GitHub mutations or launch
@@ -31,11 +32,12 @@ releases the landing lock. Timeout leaves intent intact and returns held;
 interruption returns stopped. Neither reports merge.
 A successful handoff proves neither merge nor Task completion.
 
-Verified merge leaves an open Task available for optional follow-up work. Register
+For an associated Task, verified merge leaves an open Task available for optional follow-up work. Register
 new work through ordinary Task creation when useful, then `lf task complete` when
 the outcome is satisfied. No follow-up disposition is required. `ship` runs gate
 and waited landing; the Workflow's end requests completion. Additional PR work
 needs another Task, stacked when dependent; a Task never rotates to a second PR.
+Taskless delivery needs no synthetic Task.
 
 If sync or CI fails, use the named recovery path in this checkout and retry.
 Rerunning land retries a retained blocker without inventing an empty commit.

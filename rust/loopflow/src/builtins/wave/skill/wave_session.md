@@ -77,9 +77,8 @@ lf pr publish
 ```
 
 Selected-path commits preserve unrelated staged and unstaged edits. The PR
-contains the whole committed range. Persistent commit and publication untrack
-scratch without deleting local files. Scratch,
-including PR copy, and edits made after the selected commit survive delivery.
+contains the whole committed range, including selected scratch files. Notes and
+edits made after the selected commit survive publication.
 
 After merge, the next `lf commit` or `lf pr publish` restarts the branch from
 main and replays unpublished first-parent changes, including merge resolutions.
@@ -91,5 +90,7 @@ Missing checkouts recover committed state only. Live conversations retain their
 placement until an idle attachment boundary permits adoption of the persistent workspace.
 
 `lf wt create <name> --persistent` creates or reuses an independent document workspace.
-PR landing clears scratch in non-persistent workspaces, whether or not a Task is
-associated. Memory updates need no PR or distribution schedule.
+`lf pr submit` and `lf pr land` invoke `lf scratch clear`, removing only added
+scratch files. Existing files and edits remain; PR open and publish do not run general scratch cleanup.
+Wave context is read-only outside a selected Loopflow Flow that maintains it;
+keep proposed changes in scratch.

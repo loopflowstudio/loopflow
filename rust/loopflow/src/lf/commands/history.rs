@@ -79,8 +79,11 @@ pub enum HistoryCommand {
         #[arg(long)]
         input: Option<String>,
         /// Print only what the step's submitted input was made of, by source
-        #[arg(long, conflicts_with_all = ["events", "final_answer"])]
+        #[arg(long, conflicts_with_all = ["events", "final_answer", "instructions"])]
         context: bool,
+        /// Explain recorded instruction inclusion and omission
+        #[arg(long, conflicts_with_all = ["events", "final_answer", "context"])]
+        instructions: bool,
     },
     /// Show direct provider-authored usage from recorded Session inputs
     Usage {
@@ -170,6 +173,7 @@ pub fn run(command: &HistoryCommand) -> anyhow::Result<()> {
             final_answer,
             input,
             context,
+            instructions,
         } => show(
             id,
             *json,
@@ -177,6 +181,7 @@ pub fn run(command: &HistoryCommand) -> anyhow::Result<()> {
             *final_answer,
             input.as_deref(),
             *context,
+            *instructions,
         ),
         HistoryCommand::List {
             json,
@@ -260,6 +265,7 @@ fn show(
     final_answer: bool,
     input: Option<&str>,
     context: bool,
+    instructions: bool,
 ) -> anyhow::Result<()> {
     let process = tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_store(&storage_config_from_env()?).await?;
@@ -286,8 +292,8 @@ fn show(
     match process {
         Some(process) => {
             anyhow::ensure!(
-                !events && !final_answer && !context,
-                "--events, --final and --context inspect Session evidence; Processes record command outcomes"
+                !events && !final_answer && !context && !instructions,
+                "--events, --final, --context and --instructions inspect Session evidence; Processes record command outcomes"
             );
             if !json {
                 print_process(&process);
@@ -300,6 +306,7 @@ fn show(
             events,
             final_answer,
             context,
+            instructions,
             json,
         ),
     }

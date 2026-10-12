@@ -51,7 +51,7 @@ fn receipts(child: &Task) -> Vec<Value> {
 }
 
 #[test]
-fn checkout_hands_each_child_only_its_selected_design_with_source_receipt() {
+fn checkout_hands_each_child_its_selected_design_and_preserves_inherited_notes() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     let target = tempfile::tempdir().unwrap();
@@ -109,7 +109,7 @@ fn checkout_hands_each_child_only_its_selected_design_with_source_receipt() {
             .unwrap(),
             content
         );
-        assert!(!child
+        assert!(child
             .worktree
             .as_ref()
             .unwrap()

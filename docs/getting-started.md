@@ -56,7 +56,8 @@ this Machine. The store must be writable even for unbound work. Native history
 retains provider outcomes and usage; Process records the command result. Add repo
 docs explicitly with `--docs` and changed file bodies with `--diff files`.
 
-`LOOPFLOW.md` ships as default operating guidance for every run; opt out with `--no-loopflow`.
+`LOOPFLOW.md` supplies launcher guidance; Task- and Wave-associated launches
+also receive Work guidance. Standalone native skills retain their own instructions.
 
 Or try the demo repo:
 

@@ -108,7 +108,7 @@ Do not take the first N commits and call that the history.
   skills/                 # Skill prompts
   flows/                  # Flow definitions
   wave/                   # Wave goals and memory (persists)
-scratch/                  # PR scratchpad (cleared on merge)
+scratch/                  # working notes; default delivery clears added files
 ~/.lf/                    # Global config, skills, and the local store
   loopflow.db             # Local identity and execution history
 ```

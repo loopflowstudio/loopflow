@@ -31,7 +31,7 @@ This is the governing document of the loopflow codebase. Contributors and agents
 
 **Both:**
 - Mock side effects, but don't test mock wiring or reshape production code for tests
-- Design docs go under `scratch/`; `lf land` clears scratch in non-persistent workspaces; persistent workspaces keep it local
+- Design docs go under `scratch/`; `lf pr submit` and `lf pr land` invoke `lf scratch clear`, removing added files while retaining existing files and edits
 - Auto runs are headless: make executive decisions and keep moving, note genuinely ambiguous choices in `scratch/questions.md`
 
 **Secrets:**
@@ -144,7 +144,7 @@ When editing `README.md` files:
 When editing docs in `scratch/`:
 - Focus on what's left to build, not what's done
 - `lf realign` updates the existing plan, code, and relevant memory; keep unresolved findings with the work
-- `lf land` clears scratch in non-persistent workspaces; persistent workspaces keep it local
+- `lf pr submit` and `lf pr land` invoke `lf scratch clear`, removing added files while retaining existing files and edits
 
 When changing the SQLite schema:
 - Keep one draft per Task: `uv run python scripts/new_migration.py <name>` creates it or prints the one the branch already has
@@ -417,7 +417,7 @@ def open_warp(path: Path) -> None:
 
 Give each module a `README.md` for users. Use inline comments for maintainers. Don't duplicate what's in the code.
 
-Start features with a design doc under `scratch/`. After implementation, `lf realign` updates the existing plan, code, and relevant memory. `lf land` clears scratch in non-persistent workspaces; persistent workspaces keep it local. The code and its README should speak for themselves.
+Start features with a design doc under `scratch/`. After implementation, `lf realign` updates the existing plan, code, and relevant memory. `lf pr submit` and `lf pr land` invoke `lf scratch clear`, removing added files while retaining existing files and edits. The code and its README should speak for themselves.
 
 ## User-Facing Documentation
 

@@ -3,8 +3,20 @@ requires: a design or findings that may warrant implementation
 produces: an execution decision and any Task handoffs
 action_style: procedural
 ---
-Turn the design into an execution decision using the Task controls that already
-exist. Do not create a manifest, receipt, marker, or new planning state.
+Turn the design into an execution decision. Continue the caller's chosen way
+of working; use Task controls for existing or explicitly requested managed work.
+Do not create a manifest, receipt, marker, or new planning state.
+
+## Taskless work
+
+When no Task is associated and the request does not ask for managed work, keep
+selected implementation in this checkout. Follow the caller's Flow or continue
+implementation directly; retain independent later ideas in the design. Report
+that decision and finish this step. Do not look up a Wave or create Tasks merely
+because a Flow, such as `incident`, includes this skill.
+
+For existing or explicitly requested managed work, read `lf help skill work` and
+continue below.
 
 ## Orientation
 
@@ -104,7 +116,7 @@ names the choices, `lf task run <issue> <flow>` picks one, and naming a
 workflow takes it up from its start. `lf --task <issue> flow <flow>` runs any
 Flow without moving the Task.
 Preserve intent, constraints, and done-when
-proof in durable records so the Task remains useful after `scratch/` is cleared.
+proof in durable records so the Task remains useful after cleanup of added scratch files.
 
 Finish with a short accounting of the selected work and its design/evidence
 path, Tasks launched, and follow-ups intentionally deferred.

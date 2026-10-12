@@ -240,8 +240,7 @@ Check: five Rust Task-membership tests and 17 Swift Session/stream tests PASS; r
 
 ## Full sidebar opening pass — October 12
 
-All 13 listed Tasks were clicked across the bundled native candidates, not just
-prepared in JSON. Codex hook review appeared for LOO-312/367/371/378/382/330,
+All 13 Tasks were clicked in bundled native candidates, not just prepared in JSON. Codex hook review appeared for LOO-312/367/371/378/382/330,
 lf-12be237, lf-9c03797 and lf-8fed729. No trust choice or Task Flow action was
 submitted. LOO-380 opened Claude and began its configured Task conversation;
 preserve that active surface, not another app restart. LOO-462 correctly refuses

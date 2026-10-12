@@ -9,10 +9,13 @@ pub fn env_lock() -> &'static std::sync::Mutex<()> {
     LOCK.get_or_init(|| std::sync::Mutex::new(()))
 }
 
-/// Build the current CLI and use Cargo's artifact path, including custom target directories.
+/// Use the runner's prepared CLI, or build it with Cargo's target-directory selection.
 pub fn lf_binary() -> &'static str {
     static BINARY: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     BINARY.get_or_init(|| {
+        if let Ok(binary) = std::env::var("LOOPFLOW_TEST_LF") {
+            return binary;
+        }
         let mut command = Command::new(env!("CARGO"));
         command
             .args([

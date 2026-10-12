@@ -125,7 +125,7 @@ jobs:
       - name: Run Rust tests
         if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
         run: |
-          /usr/bin/time -v cargo --config "target.\"cfg(all())\".runner = [\"uv\", \"run\", \"--no-sync\", \"python\", \"$PWD/scripts/test_network.py\"]" nextest run --all --no-fail-fast
+          LOOPFLOW_TEST_LF="$PWD/target/debug/lf" /usr/bin/time -v cargo --config "target.\"cfg(all())\".runner = [\"uv\", \"run\", \"--no-sync\", \"python\", \"$PWD/scripts/test_network.py\"]" nextest run --all --no-fail-fast
       - name: Prove checkout refresh through the CLI
         if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
         run: |

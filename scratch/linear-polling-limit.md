@@ -18,7 +18,7 @@ Deleted `pm` modules stay deleted. Delta ingestion and mutation responses use `L
 
 ## Remaining
 
-October 11 implementation reconciles #1491 in place and preserves both committed changes. `lf sync --continue` recorded merge `7b2eaac166` but retained its operation because the additional integration edits still needed a checkpoint. Implementation is complete; gate and delivery remain.
+October 11 implementation reconciles #1491 in place and preserves both committed changes. `lf sync --continue` recorded merge `7b2eaac166`; its dirty-state check required checkpointing the additional integration edits as `b0788f4efb`. A subsequent continuation reports no sync in progress. Both original commits and pinned main are ancestors of the integrated head. Implementation is complete; gate and delivery remain.
 
 Gate owns independent-process contention, native turn-hook execution, watcher backoff and migration from the released frontier. Fixtures cover pagination/comment-only changes, receipt uncertainty, shared freshness and idle-agent request counts. Live before/after measurement and rejected-request quota accounting remain unproved; no usable Doppler access token was found in the preceding implementation.
 

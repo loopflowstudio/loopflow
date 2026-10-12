@@ -727,7 +727,12 @@ def test_checkout_observation_preserves_read_boundary_and_detects_changes(tmp_pa
         return performance._checkout_inputs(database, prefix, policy, git)
 
     first = observe()
-    env = {"HOME": str(tmp_path), "PATH": "/usr/bin:/bin", "GIT_OPTIONAL_LOCKS": "0"}
+    env = {
+        "HOME": str(tmp_path),
+        "PATH": "/usr/bin:/bin",
+        "GIT_OPTIONAL_LOCKS": "0",
+        "GIT_CONFIG_NOSYSTEM": "1",
+    }
     result = subprocess.run(
         prefix + [str(git), "-C", str(alias), "status", "--porcelain"], env=env, capture_output=True
     )

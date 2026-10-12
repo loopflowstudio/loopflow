@@ -35,14 +35,10 @@ after using Python SQLite; not an app latency benchmark). Five Rust task-work te
 pass, including candidate filtering preserving historical association outside the
 checkout. The branch CLI was rebuilt and repackaged in the isolated app.
 
-Verified native result: `/tmp/loopflow-20261011-201523.png` shows a populated
-Growth/Infrastructure Task sidebar and “Choose Work” in the repository tab, not the
-loading spinner. Native inspection reports `reading: current`; its opening receipt
-still incorrectly reports cancellation. Visible conversation counts/dropdowns remain,
-and repo-tab conversation-first behavior is not demonstrated. These are review
-findings, not acceptance. Other Waves below the viewport and full exact Task membership
-have not yet been visually verified. The macOS “cmux was prevented from modifying…”
-notification is retained as an unexplained observation, not proof of a successful write.
+First populated capture `/tmp/loopflow-20261011-201523.png` showed Growth and
+Infrastructure but still had Session counts; no conversation or full-inventory
+proof. Canceled opening receipt and unexplained cmux permission notification:
+`9a23582588:scratch/work-first-demo.md`, **Review priority**.
 
 Check: `cargo test -p loopflow --lib store::sqlite::task_work::tests` — 5 passed;
 `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` — pass.
@@ -281,5 +277,9 @@ models (Portfolio is new). A generic decode failure therefore does not establish
 version incompatibility. LocalLineObservation now retains the decoder's field/path
 error instead of Foundation's opaque localized message; its wrong-type regression
 identifies `sequence`. Check: WorkObservationTransportTests PASS (8); diff check PASS.
-Installed read: `/tmp/loo462-live-wire/`. Production Swift decodes the branch snapshot;
-live output remains pending.
+Installed read `/tmp/loo462-live-wire/` finished in 690 s: both live frames decode
+with current Swift, as do 100 Session records. The earlier live app predates main
+sync; current wire compatibility is proved, usable loading/opening is not.
+Screen locked: native review unavailable.
+Current app staged at `loo462-native.FgtDmE/staged/Loopflow Work Demo.app` under
+/private/tmp; Old app unchanged; no install/takeover.

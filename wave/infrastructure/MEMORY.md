@@ -384,23 +384,26 @@ Five Python gate cases await CI. Installation unproved. Plan: `scratch/loo-446.m
 LOO-442's unexplained gate failures and LOO-400 history:
 `585cf52cd:wave/infrastructure/MEMORY.md`, LOO-441 and LOO-442 headings.
 
-## Terminal conversation recovery (LOO-409, 2026-10-07)
+## Terminal conversation recovery (curated 2026-10-12)
 
-Jack Heart authorized autonomous repair through landing. Installed v0.13.9
-revision `6448e3c9e7` recorded reservation and spawn-request receipts for LOO-386's
-first input `ca3b3cf9be254e118f314fef934cd2e9`; the later two admission errors
-were retries. Its TUI returned successfully without native history. The terminal
-path discarded its temporary client receipt without retaining a provider process.
-This contradicts the proposed initial-generation mismatch.
+Jack Heart authorized both repairs through landing. LOO-409's discarded receipt
+contradicted the generation-mismatch theory; evidence/ownership:
+`9ccaac2e48:wave/infrastructure/MEMORY.md`, this section.
+Its legacy Session lacks exact process evidence.
 
-Record native provider identity at spawn and observed exit at wait; failed spawn
-is positive non-start evidence, not a provider exit. Commit reservation with the
-attachment claim. Native fallback must use the same ownership checks as first launch;
-remote clients cannot stand in for their surviving provider. Fast terminal exit
-must preserve successfully published native history between opener probes.
-LOO-408 owns completion, LOO-324 native/account discovery, LOO-400 terminology.
-CLI/PTY proofs pass; installed reconnect still fails. No migration. The legacy
-Session lacks exact process evidence; lf success proves no provider exit.
+Record native identity at spawn and exit at wait; failed spawn proves non-start,
+launcher success proves no provider exit. Commit reservation with attachment;
+fallback shares first-launch authority and preserves fast-published native history.
+
+lf-8fed729 prepares primary input in ensure/replace; connect owns foreground
+launch, removing the tmux launcher. Exact interactive PID/birth observed dead
+permits fenced settlement without inventing success. Live/unknown providers grant
+no duplicate launch or signaling; headless group rules remain. Explicit retry of
+a retired Session without native history retains completion and successor selection.
+These are implementation choices under Jack's outcome, not separate approvals.
+Stand-in CLI/native-resume proofs pass; installed recovery of the two reported
+Sessions and real Codex interaction remain unproved. Release's operation-entry
+lesson applies: source proofs and installation alone establish no recovery.
 
 ## Storage footprint (LOO-390, 2026-10-07)
 

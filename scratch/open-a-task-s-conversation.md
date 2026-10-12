@@ -1,9 +1,10 @@
 # Open a Task's conversation
 
 Jack Heart requested autonomous repair of lf-8fed729 on October 12, 2026.
-The supplied directive requires ensure → connect, replace → connect, recovery
+The accepted outcome requires ensure → connect, replace → connect, recovery
 of stranded interactive providers, and no duplicate live provider. No prior
-design was supplied; this is the implementation design.
+design was supplied; this is the implementation design, reconciled October 12.
+Launch timing remains an implementation assumption, not a separate product approval.
 
 Prepare the primary Session and input in `ensure`/`replace`; `connect` owns
 the foreground launch. Keep scope/launch locks, Task selection, native history,
@@ -21,9 +22,11 @@ settle under the existing attachment fence. A live or unknown interactive
 provider cannot authorize resume, signaling, or another launch. Headless
 process-group death rules remain unchanged. Death does not invent success.
 
-## Delete — do not maintain
+## Implemented
 
-All targets below are removed; no remaining predecessor path.
+Commits `d3a00bf0ca` and `fac6e65141` implement preparation and recovery.
+The checkout is clean at `9ccaac2e48`; the earlier uncommitted-work description
+has been superseded by these checkpoints. All targets below are removed.
 
 - Primary `start` background launch: replace with input preparation.
 - `serve-conversation` hidden command and its sole serving function; the unused
@@ -47,11 +50,21 @@ snapshot. Input replacement validates completion once at admission; the SQL
 writer runs in that same transaction and needs no second completion predicate.
 The CI-repair caller also loads its Session inside the writer's transaction.
 
+Reconciliation found no further bounded code mismatch. Main through `2f6945ed04`
+is integrated, including on-demand planning acquisition and scoped agent guidance;
+neither changes foreground launch ownership. Release's child memory reinforces
+that operation-entry proofs and installed acceptance are separate: installation
+of 0.13.13 does not establish recovery by this branch's later repair.
+
 ## Remaining
 
 - Gate: affected Session/connection/store suites and automated acceptance;
   installed recovery of the two reported Sessions and real Codex terminal
   interaction remain unproved. Stand-in CLI tests establish source behavior.
+- Installed acceptance retains both reported IDs: `e9fc442cdda14454aa65f5d16d98bd7f`
+  and `2030b31b03704d0191762b53b32f22fe`. Retrying the retired first Session must
+  retain completion and the successor's primary selection. A still-live provider
+  must remain singular; missing identity remains unresolved, not dead.
 - Publication and landing remain with the supplied Flow's later steps.
 
-Checks: `cargo test -p loopflow --lib` with `primary::tests`/`retrying_retired_input` filters and `cargo test -p loopflow --test session_lifecycle_tests ensured_` — 9 passed; unchanged native-resume proof reused; `cargo fmt`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` pass; broader suites and installed acceptance deferred to gate/CI.
+Checks: prior focused Cargo tests (9 passed), native-resume proof, fmt and Clippy reused for unchanged Rust; `git diff --check` and `lf context` pass after reconciliation; broader suites remain with gate/CI and installed terminal acceptance with demo/review.

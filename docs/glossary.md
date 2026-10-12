@@ -27,7 +27,7 @@ first, then the engineering words it borrows.
 | **Data directory** | Local Loopflow state in `~/.lf` by default; explicit `LF_HOME` selects a disposable experiment. |
 | **Steer** | A message you send to work that is already running, to change its direction. |
 | **Harness**, **provider** | The AI coding tool Loopflow drives: Claude Code, Codex, or OpenCode. |
-| **Scratch** | The `scratch/` folder, for working notes. It is cleared when the work lands. |
+| **Scratch** | The `scratch/` folder, for working notes. Repository `scratch.managed: true` opts into cleanup at delivery. |
 
 Historical capture paths and immutable receipts retain their encoding; see
 [cutover status](architecture-reference.md#cutover-status). They are not a fourth

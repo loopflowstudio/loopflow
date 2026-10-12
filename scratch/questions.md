@@ -17,3 +17,9 @@
   user-facing copy. Docs now teach the available commands; agent guidance names
   the trigger for loading Work context. The internal boundary remains in tests
   and the skills that would otherwise enroll work.
+
+- Jack required `wave/` writes to belong to selected Loopflow Flows, not merely
+  Work API usage. Standalone memory procedures retain proposals in scratch.
+- Jack permits writing scratch and wants cleanup optional. Chosen mechanism:
+  repo-only `scratch.managed: true`, default false, covering deletion and
+  removal from published history. Directory existence never determines ownership.

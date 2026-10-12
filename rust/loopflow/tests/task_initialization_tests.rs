@@ -22,90 +22,116 @@ fn unbound_command(cli: &Path, repo: &Path, args: &[&str]) -> Command {
 }
 
 #[test]
-fn stacked_checkout_starts_with_one_scratch_deletion_commit() {
-    let repo = TestRepo::new();
-    let home = tempfile::tempdir().unwrap();
-    let target = tempfile::tempdir().unwrap();
-    let _env = EnvGuard::with_lf_home(&[], home.path());
-    repo.create_branch("parent");
-    repo.create_file("scratch/design.md", "parent design");
-    repo.create_file("scratch/review/notes.md", "parent review");
-    repo.stage_all();
-    repo.commit("Parent notes");
-    let parent_head = repo.head_sha();
-    let parent = register_task_with_pr(home.path(), repo.path(), "parent", &parent_head);
-    let child =
-        support::register_sibling_task(&parent, "INF-124", "child", &target.path().join("child"));
-    let worktree = child.worktree.as_ref().unwrap();
-    let runtime = tokio::runtime::Runtime::new().unwrap();
-    let mut parent_pr = parent.pr.clone();
-    parent_pr.publication = Some(PrPublication {
-        requested_at: parent_pr.created_at,
-        presentation: None,
-        github: Some(GithubPr {
-            number: 41,
-            url: "https://github.com/fixture/repo/pull/41".into(),
-            head_sha: Some(parent_pr.base_commit.clone()),
-        }),
-        merge: None,
-    });
-    runtime
-        .block_on(parent.store.update_task_pr(&parent_pr))
-        .unwrap();
-    rusqlite::Connection::open(home.path().join("loopflow.db"))
-        .unwrap()
-        .execute("DELETE FROM task_prs WHERE task_id=?1", [child.id.as_str()])
-        .unwrap();
-    runtime
-        .block_on(parent.store.stack_task_placement(&child, &parent.pr.id))
-        .unwrap();
-
-    let checkout = || {
-        loopflow::ops::task::task_checkout(
-            repo.path(),
+fn stacked_checkout_clears_only_managed_scratch_once() {
+    for managed in [false, true] {
+        let repo = TestRepo::new();
+        repo.create_file(
+            ".lf/config.yaml",
+            &format!("scratch:\n  managed: {managed}\n"),
+        );
+        repo.stage_all();
+        repo.commit("Enable managed scratch");
+        repo.push();
+        let home = tempfile::tempdir().unwrap();
+        let target = tempfile::tempdir().unwrap();
+        let _env = EnvGuard::with_lf_home(&[], home.path());
+        repo.create_branch("parent");
+        repo.create_file("scratch/design.md", "parent design");
+        repo.create_file("scratch/review/notes.md", "parent review");
+        repo.stage_all();
+        repo.commit("Parent notes");
+        let parent_head = repo.head_sha();
+        let parent = register_task_with_pr(home.path(), repo.path(), "parent", &parent_head);
+        let child = support::register_sibling_task(
+            &parent,
             "INF-124",
-            loopflow::ops::task::TaskCheckoutOptions::default(),
-        )
-        .unwrap()
-    };
-    checkout();
-    assert!(!worktree.join("scratch").exists());
-    assert!(runtime
-        .block_on(parent.store.active_task_pr(&child.id))
-        .unwrap()
-        .is_none());
-    assert_eq!(
-        loopflow::git::rev_parse(worktree, "HEAD^").unwrap(),
-        parent_head
-    );
-    let subject = Command::new("git")
-        .current_dir(worktree)
-        .args(["log", "-1", "--format=%s"])
-        .output()
-        .unwrap();
-    assert!(subject.status.success());
-    assert_eq!(
-        String::from_utf8_lossy(&subject.stdout).trim(),
-        "Clear inherited scratch"
-    );
-    let child_head = loopflow::git::rev_parse(worktree, "HEAD").unwrap();
-    fs::create_dir(worktree.join("scratch")).unwrap();
-    fs::write(worktree.join("scratch/design.md"), "child design").unwrap();
-    checkout();
-    assert_eq!(
-        loopflow::git::rev_parse(worktree, "HEAD").unwrap(),
-        child_head
-    );
-    assert_eq!(
-        fs::read_to_string(worktree.join("scratch/design.md")).unwrap(),
-        "child design"
-    );
-    assert_eq!(repo.head_sha(), parent_head);
-    assert_eq!(
-        fs::read_to_string(repo.path().join("scratch/design.md")).unwrap(),
-        "parent design"
-    );
-    assert!(repo.path().join("scratch/review/notes.md").exists());
+            "child",
+            &target.path().join("child"),
+        );
+        let worktree = child.worktree.as_ref().unwrap();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let mut parent_pr = parent.pr.clone();
+        parent_pr.publication = Some(PrPublication {
+            requested_at: parent_pr.created_at,
+            presentation: None,
+            github: Some(GithubPr {
+                number: 41,
+                url: "https://github.com/fixture/repo/pull/41".into(),
+                head_sha: Some(parent_pr.base_commit.clone()),
+            }),
+            merge: None,
+        });
+        runtime
+            .block_on(parent.store.update_task_pr(&parent_pr))
+            .unwrap();
+        rusqlite::Connection::open(home.path().join("loopflow.db"))
+            .unwrap()
+            .execute("DELETE FROM task_prs WHERE task_id=?1", [child.id.as_str()])
+            .unwrap();
+        runtime
+            .block_on(parent.store.stack_task_placement(&child, &parent.pr.id))
+            .unwrap();
+
+        let checkout = || {
+            loopflow::ops::task::task_checkout(
+                repo.path(),
+                "INF-124",
+                loopflow::ops::task::TaskCheckoutOptions::default(),
+            )
+            .unwrap()
+        };
+        checkout();
+        assert_eq!(worktree.join("scratch").exists(), !managed);
+        if !managed {
+            assert_eq!(
+                fs::read_to_string(worktree.join("scratch/design.md")).unwrap(),
+                "parent design"
+            );
+        }
+        assert!(runtime
+            .block_on(parent.store.active_task_pr(&child.id))
+            .unwrap()
+            .is_none());
+        if managed {
+            assert_eq!(
+                loopflow::git::rev_parse(worktree, "HEAD^").unwrap(),
+                parent_head
+            );
+            let subject = Command::new("git")
+                .current_dir(worktree)
+                .args(["log", "-1", "--format=%s"])
+                .output()
+                .unwrap();
+            assert!(subject.status.success());
+            assert_eq!(
+                String::from_utf8_lossy(&subject.stdout).trim(),
+                "Clear inherited scratch"
+            );
+        } else {
+            assert_eq!(
+                loopflow::git::rev_parse(worktree, "HEAD").unwrap(),
+                parent_head
+            );
+        }
+        let child_head = loopflow::git::rev_parse(worktree, "HEAD").unwrap();
+        fs::create_dir_all(worktree.join("scratch")).unwrap();
+        fs::write(worktree.join("scratch/design.md"), "child design").unwrap();
+        checkout();
+        assert_eq!(
+            loopflow::git::rev_parse(worktree, "HEAD").unwrap(),
+            child_head
+        );
+        assert_eq!(
+            fs::read_to_string(worktree.join("scratch/design.md")).unwrap(),
+            "child design"
+        );
+        assert_eq!(repo.head_sha(), parent_head);
+        assert_eq!(
+            fs::read_to_string(repo.path().join("scratch/design.md")).unwrap(),
+            "parent design"
+        );
+        assert!(repo.path().join("scratch/review/notes.md").exists());
+    }
 }
 
 #[test]

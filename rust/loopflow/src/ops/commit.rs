@@ -60,7 +60,8 @@ pub fn commit_selected(repo: &Path, paths: &[String], message: Option<&str>) -> 
         message.ok_or_else(|| OpsError::Message("selected-path commits require -m".into()))?;
     let _mutation = crate::ops::task::lock_task_pr_mutation(repo)?;
     restart_landed_persistent(repo)?;
-    let persistent = crate::git::worktrees::is_persistent_worktree(repo)?;
+    let local_scratch = crate::git::worktrees::is_persistent_worktree(repo)?
+        && crate::config::managed_scratch(repo)?;
     let directory = tempfile::tempdir()?;
     let index = directory.path().join("index");
     let inherit_index = |command: &mut Command| {
@@ -75,16 +76,16 @@ pub fn commit_selected(repo: &Path, paths: &[String], message: Option<&str>) -> 
     if !paths.is_empty() {
         let mut args = vec!["add", "-A", "--"];
         args.extend(selected.iter().map(String::as_str));
-        if persistent {
+        if local_scratch {
             args.push(":(top,exclude)scratch");
         }
         run(&args)?;
     }
-    if persistent {
+    if local_scratch {
         run(UNTRACK_SCRATCH)?;
     }
     if run(&["diff", "--cached", "--name-only"])?.trim().is_empty() {
-        return Err(OpsError::Message(if persistent {
+        return Err(OpsError::Message(if local_scratch {
             "Nothing selected to commit. scratch/ stays local in persistent workspaces; \
              move durable notes outside scratch/ and select those files."
                 .into()
@@ -95,7 +96,7 @@ pub fn commit_selected(repo: &Path, paths: &[String], message: Option<&str>) -> 
     commit(repo, message, &inherit_index)?;
     let mut reset = vec!["reset", "-q", "HEAD", "--"];
     reset.extend(selected.iter().map(String::as_str));
-    if persistent {
+    if local_scratch {
         reset.push(":(top)scratch");
     }
     git_stdout(repo, &reset).map_err(|error| {
@@ -120,6 +121,9 @@ pub(crate) fn prepare_persistent_publication(repo: &Path) -> OpsResult<()> {
         return Ok(());
     }
     restart_landed_persistent(repo)?;
+    if !crate::config::managed_scratch(repo)? {
+        return Ok(());
+    }
     let tracked = git_stdout(
         repo,
         &["ls-tree", "-r", "--name-only", "HEAD", "--", "scratch"],
@@ -131,7 +135,9 @@ pub(crate) fn prepare_persistent_publication(repo: &Path) -> OpsResult<()> {
 }
 
 pub(crate) fn untrack_persistent_scratch(repo: &Path) -> OpsResult<()> {
-    if !crate::git::worktrees::is_persistent_worktree(repo)? {
+    if !crate::git::worktrees::is_persistent_worktree(repo)?
+        || !crate::config::managed_scratch(repo)?
+    {
         return Ok(());
     }
     git_stdout(repo, UNTRACK_SCRATCH)?;
@@ -161,7 +167,9 @@ pub fn commit_workflow(
 
     if options.add {
         progress.status("Staging changes...");
-        if crate::git::worktrees::is_persistent_worktree(repo)? {
+        if crate::git::worktrees::is_persistent_worktree(repo)?
+            && crate::config::managed_scratch(repo)?
+        {
             git_stdout(repo, &["add", "-A", "--", ".", ":(top,exclude)scratch"])?;
         } else {
             stage_all(repo, inherit_git)?;

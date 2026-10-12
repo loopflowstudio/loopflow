@@ -6,7 +6,8 @@ is no SDK. The verbs are the same binary you use; every read surface takes
 launcher contract (`LOOPFLOW.md`) in its context. Work-associated launches also
 receive the `work` skill body. Read `lf help skill work` before using Task, Wave or
 Project APIs in an existing conversation. Choose the commands and Skills that
-fit the requested work.
+fit the requested work. Work context does not select a Flow or authorize Wave
+memory maintenance; the selected Loopflow Flow owns that procedure.
 
 ## Install the external skill
 
@@ -77,7 +78,8 @@ completion — resolve that inline. The current process and worktree are the
 default execution surface.
 
 `--stack-on` forks the child's worktree from the parent Task's active PR, records
-the fork commit, and adds a `Clear inherited scratch` commit before execution.
+the fork commit, and applies repository scratch policy. With
+`scratch.managed: true`, it adds a `Clear inherited scratch` commit before execution.
 Parent syncs keep the child's scratch, including its deletions. The parent retains
 its own notes. The child's PR targets the parent's branch until
 merge, then `lf sync` merges main using the recorded fork as the comparison base.
@@ -143,9 +145,10 @@ skills. Edit their definition or goal when the guidance should persist.
 
 ## Memory
 
-`wave/<name>/MEMORY.md` is the Wave's durable memory. Read or edit it through
-the ordinary repository workflow; the file is truth, running Wave or not, and
-there is no separate CLI or server surface for it.
+`wave/<name>/MEMORY.md` is the Wave's durable memory. Read it for context;
+a selected Loopflow Flow maintains it through ordinary file edits. Standalone
+Work use keeps proposed changes in scratch. The file remains the source of
+truth; there is no separate memory CLI or server surface.
 
 Remove registered or planning-only Tasks with `lf task delete ISSUE`. Repeat the same command
 after an incomplete operation, even after planning refresh or chapter replacement.

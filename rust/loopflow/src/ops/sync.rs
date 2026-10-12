@@ -97,13 +97,15 @@ pub fn plan_sync(
     changed_files.sort();
 
     let protected = changed_files.iter().any(|path| is_protected_path(path));
-    let scratch_only = !changed_files.is_empty()
+    let managed_scratch = crate::config::managed_scratch(repo)?;
+    let scratch_only = managed_scratch
+        && !changed_files.is_empty()
         && changed_files
             .iter()
             .all(|path| path.starts_with(Path::new("scratch")));
     let has_non_scratch_changes = changed_files
         .iter()
-        .any(|path| !path.starts_with(Path::new("scratch")));
+        .any(|path| !managed_scratch || !path.starts_with(Path::new("scratch")));
 
     let (class, strategy) = if branch == default_branch {
         let strategy = if crate::git::is_ancestor(repo, &base_ref, "HEAD")? {
@@ -143,7 +145,8 @@ pub fn plan_sync(
         strategy
     };
 
-    let scratch_stashed = !persistent
+    let scratch_stashed = managed_scratch
+        && !persistent
         && matches!(strategy, SyncStrategy::ResetToBase)
         && repo.join("scratch").exists();
 
@@ -656,9 +659,11 @@ pub(crate) fn restart_landed_persistent(repo: &Path) -> OpsResult<bool> {
 }
 
 fn reset_to_base(repo: &Path, plan: &SyncPlan, progress: &impl Progress) -> OpsResult<()> {
-    if !plan.scratch_stashed && crate::git::worktrees::is_persistent_worktree(repo)? {
+    if !crate::config::managed_scratch(repo)?
+        || (!plan.scratch_stashed && crate::git::worktrees::is_persistent_worktree(repo)?)
+    {
         progress.status(&format!(
-            "{} has landed; restarting it from {}...",
+            "Resetting {} to {} while preserving local edits...",
             plan.branch, plan.base_ref
         ));
         // --keep moves the branch without touching uncommitted edits, and

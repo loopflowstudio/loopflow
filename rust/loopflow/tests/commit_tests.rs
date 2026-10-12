@@ -201,6 +201,10 @@ fn commit_generates_message_when_none() {
 fn persistent_selection_preserves_scratch_and_unrelated_index() {
     let _env = EnvGuard::new(&[]);
     let repo = TestRepo::new();
+    repo.create_file(".lf/config.yaml", "scratch:\n  managed: true\n");
+    repo.stage_all();
+    repo.commit("Enable managed scratch");
+    repo.push();
     repo.create_file("scratch/design.md", "private design\n");
     repo.create_file("scratch/.gitkeep", "");
     repo.stage_all();
@@ -274,4 +278,31 @@ fn persistent_selection_preserves_scratch_and_unrelated_index() {
         "scratch/.gitkeep\n"
     );
     assert!(persistent.path.join("scratch/design.md").exists());
+}
+
+#[test]
+fn persistent_workspace_commits_ordinary_scratch() {
+    let _env = EnvGuard::new(&[]);
+    let repo = TestRepo::new();
+    let persistent = loopflow::git::worktrees::ensure_agent_worktree(
+        repo.path(),
+        loopflow::git::worktrees::WorktreeSegment::parse("repo").unwrap(),
+    )
+    .unwrap();
+    std::fs::create_dir_all(persistent.path.join("scratch")).unwrap();
+    std::fs::write(
+        persistent.path.join("scratch/design.md"),
+        "repository content",
+    )
+    .unwrap();
+    loopflow::ops::commit_selected(
+        &persistent.path,
+        &["scratch/design.md".into()],
+        Some("Save design"),
+    )
+    .unwrap();
+    assert_eq!(
+        git_output(&persistent.path, &["show", "HEAD:scratch/design.md"]),
+        "repository content"
+    );
 }

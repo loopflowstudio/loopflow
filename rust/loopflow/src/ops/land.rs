@@ -547,7 +547,9 @@ pub(crate) fn resolve_repos(repo: &Path, worktree: Option<&str>) -> OpsResult<(P
 /// see [`crate::work::task::CiCheck::land_time_precondition`], which keeps the landing
 /// supervisor from launching `ci-fix` against work only this function can do.
 fn clear_scratch(repo: &Path, progress: &impl Progress) -> OpsResult<()> {
-    if crate::git::worktrees::is_persistent_worktree(repo)? {
+    if !crate::config::managed_scratch(repo)?
+        || crate::git::worktrees::is_persistent_worktree(repo)?
+    {
         return Ok(());
     }
     let scratch = repo.join("scratch");

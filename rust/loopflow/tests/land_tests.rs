@@ -439,60 +439,85 @@ fn land_cleans_up_remote_branch() {
 }
 
 #[test]
-fn land_clears_scratch_and_preserves_gitkeep() {
-    let _env = EnvGuard::new(&[]);
-    let repo = TestRepo::new();
-    repo.create_branch("feature");
-    repo.create_file("feature.txt", "feature");
-    repo.stage_all();
-    repo.commit("feature work");
-    push_branch(&repo, "feature");
+fn land_clears_scratch_only_when_the_repository_opts_in() {
+    for setting in [None, Some(false), Some(true)] {
+        let _env = EnvGuard::new(&[]);
+        let repo = TestRepo::new();
+        if let Some(managed) = setting {
+            repo.create_file(
+                ".lf/config.yaml",
+                &format!("scratch:\n  managed: {managed}\n"),
+            );
+            repo.stage_all();
+            repo.commit("Configure scratch policy");
+            repo.push();
+        }
+        let managed = setting == Some(true);
+        repo.create_branch("feature");
+        repo.create_file("feature.txt", "feature");
+        repo.stage_all();
+        repo.commit("feature work");
+        push_branch(&repo, "feature");
 
-    let scratch = repo.path().join("scratch");
-    fs::create_dir_all(scratch.join("nested")).expect("create nested scratch dir");
-    fs::write(scratch.join("notes.md"), "review notes").expect("write scratch note");
-    fs::write(scratch.join("nested").join("todo.md"), "todo").expect("write nested scratch note");
-    let status = Command::new("git")
-        .args(["add", "scratch"])
-        .current_dir(repo.path())
-        .status()
-        .expect("git add scratch");
-    assert!(status.success(), "git add scratch should succeed");
-    let status = Command::new("git")
-        .args(["commit", "-m", "add scratch docs"])
-        .current_dir(repo.path())
-        .status()
-        .expect("git commit scratch");
-    assert!(status.success(), "git commit scratch should succeed");
+        let scratch = repo.path().join("scratch");
+        fs::create_dir_all(scratch.join("nested")).expect("create nested scratch dir");
+        fs::write(scratch.join("notes.md"), "review notes").expect("write scratch note");
+        fs::write(scratch.join("nested").join("todo.md"), "todo")
+            .expect("write nested scratch note");
+        let status = Command::new("git")
+            .args(["add", "scratch"])
+            .current_dir(repo.path())
+            .status()
+            .expect("git add scratch");
+        assert!(status.success(), "git add scratch should succeed");
+        let status = Command::new("git")
+            .args(["commit", "-m", "add scratch docs"])
+            .current_dir(repo.path())
+            .status()
+            .expect("git commit scratch");
+        assert!(status.success(), "git commit scratch should succeed");
 
-    land(
-        repo.path(),
-        &LandOptions {
-            strict: true,
-            local: true,
-            create_pr: false,
-            wait_and_fix: false,
-            worktree: None,
-            commit_message: None,
-            pr_title: None,
-            pr_body: None,
-            agent: None,
-        },
-        &NullProgress,
-    )
-    .expect("land should clear scratch");
+        land(
+            repo.path(),
+            &LandOptions {
+                strict: true,
+                local: true,
+                create_pr: false,
+                wait_and_fix: false,
+                worktree: None,
+                commit_message: None,
+                pr_title: None,
+                pr_body: None,
+                agent: None,
+            },
+            &NullProgress,
+        )
+        .expect("land follows the scratch policy");
 
-    let scratch_entries = fs::read_dir(repo.path().join("scratch"))
-        .expect("read scratch after land")
-        .map(|entry| {
-            entry
-                .expect("scratch entry")
-                .file_name()
-                .to_string_lossy()
-                .into_owned()
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(scratch_entries, vec![".gitkeep"]);
+        let scratch_entries = fs::read_dir(repo.path().join("scratch"))
+            .expect("read scratch after land")
+            .map(|entry| {
+                entry
+                    .expect("scratch entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect::<Vec<_>>();
+        if managed {
+            assert_eq!(scratch_entries, vec![".gitkeep"]);
+        } else {
+            assert_eq!(
+                fs::read_to_string(scratch.join("notes.md")).unwrap(),
+                "review notes"
+            );
+            assert_eq!(
+                fs::read_to_string(scratch.join("nested/todo.md")).unwrap(),
+                "todo"
+            );
+            assert!(!scratch.join(".gitkeep").exists());
+        }
+    }
 }
 
 #[test]
@@ -667,6 +692,10 @@ fi
 #[test]
 fn land_preserves_checkpoint_history_and_pushes_the_final_tree_once() {
     let repo = TestRepo::new();
+    repo.create_file(".lf/config.yaml", "scratch:\n  managed: true\n");
+    repo.stage_all();
+    repo.commit("Enable managed scratch");
+    repo.push();
     repo.create_branch("feature");
     repo.create_file("first.txt", "first");
     repo.stage_all();
@@ -764,6 +793,10 @@ fn land_preserves_checkpoint_history_and_pushes_the_final_tree_once() {
 #[test]
 fn land_refuses_when_clearing_scratch_leaves_no_authored_change() {
     let repo = TestRepo::new();
+    repo.create_file(".lf/config.yaml", "scratch:\n  managed: true\n");
+    repo.stage_all();
+    repo.commit("Enable managed scratch");
+    repo.push();
     repo.create_file("scratch/.gitkeep", "");
     repo.stage_all();
     repo.commit("track scratch");
@@ -2056,6 +2089,10 @@ fn persistent_submit_keeps_scratch_and_post_commit_edits() {
     let gh = gh_no_pr_script();
     let _env = EnvGuard::new(&[("gh", &gh)]);
     let repo = TestRepo::new();
+    repo.create_file(".lf/config.yaml", "scratch:\n  managed: true\n");
+    repo.stage_all();
+    repo.commit("Enable managed scratch");
+    repo.push();
     let persistent = loopflow::git::worktrees::ensure_agent_worktree(
         repo.path(),
         loopflow::git::worktrees::WorktreeSegment::parse("repo").unwrap(),

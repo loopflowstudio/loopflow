@@ -46,7 +46,7 @@ to repository policy. Desktop and custom clients use the same destinations.
 | Scratch context visibility and cross-checkout limits | Base context mechanics, concise |
 | Design paths, question paths, durable conclusions before cleanup | Design/delivery skills |
 | Skills vs repo guide vs config ownership | Prompt-authoring/init skills |
-| Wave GOAL/MEMORY editing, children, realign | Work and memory-authoring skills |
+| Wave GOAL/MEMORY editing, children, realign | Read-only Work context; writes belong to selected Flow procedures |
 | No miscellaneous handoffs or maintainer rules in customer skills | Repo contributor policy/prompt-authoring skill |
 
 ## Sources that can undo the split
@@ -112,3 +112,23 @@ clients. The split must distinguish API semantics from selected procedures.
 The CLI smoke review found `lf help work` resolves to `lf monitor work`.
 All guidance uses `lf help skill work`; the regression test compares that
 help body with the preloaded contract.
+
+## Repository ownership refinement
+
+Jack's 2026-10-11 refinement keeps `wave/` maintenance inside selected Loopflow
+Flows. Work association alone cannot enable it. Work, implement, realign,
+Wave operation, S1–S5 and split-wave guidance now name that boundary; standalone
+procedures retain proposals in scratch. This is agent instruction scope, not a
+filesystem sandbox or a ban on explicitly requested Wave CRUD APIs.
+
+Scratch writing remains available. A repository-only `scratch.managed` flag
+replaces inferred ownership. The affected paths are `land::clear_scratch`,
+persistent commit/publication untracking, `task::finish_task_checkout`,
+`sync::plan_sync`/reset and Git's child/persistent scratch merge handling.
+Default false preserves normal Git behavior; the Loopflow repo explicitly
+opts in to its existing lifecycle. No existence heuristic or global opt-in.
+
+Review preserved persistent branch restart independently of scratch ownership,
+and moved the scratch-policy read ahead of Git merge so conflicted config cannot
+interrupt merge recovery. Skill purpose remains the first body line so skill
+discovery continues to describe the operation rather than its write boundary.

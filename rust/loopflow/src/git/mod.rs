@@ -1017,6 +1017,10 @@ pub fn merge(
         }
         _ => None,
     };
+    let preserve_scratch = (fork_base.is_some()
+        || crate::git::worktrees::is_persistent_worktree(worktree)?)
+        && crate::config::managed_scratch(worktree)
+            .map_err(|error| GitError::Io(error.to_string()))?;
     let merge_target = comparison.as_deref().unwrap_or(target);
     let output = run_git(
         worktree,
@@ -1035,8 +1039,6 @@ pub fn merge(
         // Git has populated the index/worktree with its normal three-way merge.
         // Record the real target before either committing or handing off recovery.
         write_merge_target(worktree, target)?;
-        let preserve_scratch =
-            fork_base.is_some() || crate::git::worktrees::is_persistent_worktree(worktree)?;
         if preserve_scratch {
             // Scratch belongs to the child, including deletions and cleanly
             // merged parent additions. Restoring changed scratch paths also resolves

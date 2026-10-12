@@ -432,7 +432,7 @@ lf task complete EXP-12
 Record independently accepted later work as ordinary Tasks and linking comments.
 A saved Task survives a failed comment; retry only the comment against that Task.
 Complete the delivered source outcome without waiting for its follow-ups. Preserve
-accepted later checks in PR copy before landing clears scratch.
+accepted later checks in PR copy before any configured scratch cleanup.
 
 Task and comment saves work locally. The configured transport delivers them while
 connected; an outage leaves local changes pending. Historical uncertain filings
@@ -641,14 +641,15 @@ They display a workspace without gaining Task membership. Moved checkouts are
 rediscovered; missing checkouts recover committed branch state. Live conversations
 keep their placement until their attached LfProcess is idle.
 
-Persistent workspaces retain scratch locally through commit, sync, publication and
-landing. A scratch-only selection with no committable changes explains that policy
+With repository `scratch.managed: true`, persistent workspaces retain scratch
+locally through commit, sync, publication and landing. A scratch-only selection with no committable changes explains that policy
 and suggests moving durable notes outside `scratch/`. In ordinary Task worktrees,
 selected scratch files are committed. Selected-path commits preserve unrelated
 staged edits. Publication pushes
 the committed range, leaving later local edits alone. Inspect the complete range
-before publishing. PR landing clears scratch in non-persistent workspaces, whether
-or not the work belongs to a Task.
+before publishing. With that policy, PR landing clears scratch in non-persistent
+workspaces, whether or not the work belongs to a Task. Without the opt-in,
+scratch follows ordinary Git behavior in every workspace.
 
 If a sync resolver creates a file where an untracked file was stashed, sync restores
 the original and keeps the resolver's file beside it as `<name>.lf-sync-1` (or the

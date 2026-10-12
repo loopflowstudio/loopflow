@@ -231,9 +231,19 @@ pub struct CronDef {
     pub schedule: String,
 }
 
+/// Repository consent to Loopflow's temporary-note lifecycle.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScratchConfig {
+    #[serde(default)]
+    pub managed: bool,
+}
+
 /// Main configuration struct.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
+    #[serde(default)]
+    pub scratch: ScratchConfig,
     #[serde(default)]
     pub crons: Option<Vec<CronDef>>,
     #[serde(default)]
@@ -347,6 +357,7 @@ impl Default for AutomationConfig {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            scratch: ScratchConfig::default(),
             planning: None,
             crons: None,
             context_budgets: Default::default(),
@@ -512,6 +523,11 @@ pub fn load_repo_config(repo_root: &Path) -> Result<Option<Config>, LoadError> {
         .map_err(|error| LoadError::InvalidFlow(format!("Config validation error: {error}")))
 }
 
+/// Scratch ownership belongs to the repository; personal defaults cannot claim it.
+pub fn managed_scratch(repo: &Path) -> Result<bool, LoadError> {
+    Ok(load_repo_config(repo)?.is_some_and(|config| config.scratch.managed))
+}
+
 /// Get config or default if no config files exist.
 pub fn load_config_or_default(repo_root: Option<&Path>) -> Config {
     load_config(repo_root).ok().flatten().unwrap_or_default()
@@ -519,6 +535,32 @@ pub fn load_config_or_default(repo_root: Option<&Path>) -> Config {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn scratch_management_requires_repository_consent() {
+        let _lock = crate::journal::test_env_lock();
+        let home = tempfile::tempdir().unwrap();
+        let repo = tempfile::tempdir().unwrap();
+        let _home =
+            crate::lf::commands::flow::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        std::fs::write(
+            home.path().join("config.yaml"),
+            "scratch:\n  managed: true\n",
+        )
+        .unwrap();
+        assert!(!super::managed_scratch(repo.path()).unwrap());
+        std::fs::create_dir(repo.path().join(".lf")).unwrap();
+        let config = repo.path().join(".lf/config.yaml");
+        for (contents, expected) in [
+            ("scratch:\n  managed: false\n", false),
+            ("scratch:\n  managed: true\n", true),
+        ] {
+            std::fs::write(&config, contents).unwrap();
+            assert_eq!(super::managed_scratch(repo.path()).unwrap(), expected);
+        }
+        std::fs::write(config, "scratch: invalid").unwrap();
+        assert!(super::managed_scratch(repo.path()).is_err());
+    }
+
     #[test]
     fn native_resume_keeps_history_with_its_provider() {
         let _lock = crate::journal::test_env_lock();

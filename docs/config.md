@@ -77,6 +77,29 @@ config files.
 | Account's own provider home | `--isolate` / `--shared` | `isolate: true` |
 | Review FlowStep terminal | — | global-only `session.terminal: Ghostty` |
 
+## Scratch lifecycle
+
+```yaml
+# .lf/config.yaml — repository opt-in
+scratch:
+  managed: true
+```
+
+By default, `scratch/` is ordinary repository content. Agents can keep notes
+there and read them as context; committing, syncing, creating a stacked checkout,
+and preparing a PR preserve its normal Git behavior.
+
+Set `scratch.managed: true` to give Loopflow ownership of temporary notes:
+non-persistent PR preparation clears them; stacked Task checkouts clear inherited
+notes and keep their own during parent updates; persistent workspaces retain
+notes on disk but omit them from commits and publication. `.gitkeep` survives
+PR cleanup. This setting applies to the whole directory.
+
+Only the repository's `.lf/config.yaml` can enable this policy. Personal config,
+Task association, and the presence or absence of old notes do not enable it.
+A missed cleanup never changes the configured policy. Repositories enforcing
+an empty scratch directory in CI should enable it explicitly.
+
 ## Context budgets
 
 ```bash

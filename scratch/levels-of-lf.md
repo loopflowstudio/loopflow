@@ -115,8 +115,23 @@ onboarding/continuation/delivery instructions, external harness skill and docs.
 No follow-up Tasks or client integrations. Lower-level worktree/PR/Flow commands
 retain existing mechanics; no Task creation path was added.
 
-Local implementation and focused verification are complete. Jack reviews the
-concrete diff; publication and delivery have not been requested.
+The instruction split and repository ownership refinement are implemented.
+Jack's 2026-10-11
+repository-ownership boundary is preserved: Work context alone never authorizes `wave/`
+writes; selected Flow procedures own memory maintenance. Standalone skills keep
+proposed Wave changes in scratch.
+
+Writing scratch remains available. Repository-only `scratch.managed: true`
+opts into cleanup, stacked-child note isolation and persistent untracking.
+Default scratch follows ordinary Git behavior. No directory-existence heuristic
+or global opt-in: leftover notes cannot change ownership. The Loopflow repository
+opts in explicitly to preserve its existing CI policy. Delete the unconditional
+cleanup/untracking and special scratch merge/classification paths by gating them
+on this one policy; preserve managed lifecycle behavior and uncommitted edits.
+
+Acceptance adds real delivery, commit, sync and stacked-checkout coverage for
+ordinary and managed scratch, plus repository-only configuration tests. No new
+schema. Publication and delivery have not been requested.
 
 ## Done when
 
@@ -127,5 +142,5 @@ first work-API use, resume, opt-out, and provider delivery behavior. No network,
 live account, display, or person is required. Run `cargo fmt --check` and
 `cargo clippy --all-targets -- -D warnings` for the Rust cutover.
 
-Base contract: 1,037 → 282 words (73% reduction); work contract: 589 words.
-Checks: `cargo test -p loopflow` with prompt/builtin/skill-launch/Flow/export filters and context/golden/default-conversation targets — 152 focused tests passed; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `target/debug/lf help skill work` passed.
+Base contract: 1,037 → 282 words (73% reduction).
+Checks: `cargo test -p loopflow` with config/builtins filters and golden_prompt, commit_tests, land_tests, sync_tests, task_initialization_tests, task_handoff_tests targets — 97 focused tests passed (cleanup fixture corrected and rerun); `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `lf context` passed; prior two-tier prompt checks remain applicable.

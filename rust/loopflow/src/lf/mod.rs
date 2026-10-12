@@ -1255,7 +1255,7 @@ pub enum PrCommand {
         #[arg(long = "body")]
         body: Option<String>,
     },
-    /// Prepare a PR to land: sync, clear scratch, mark ready, and assign it
+    /// Prepare a PR to land: sync, apply configured scratch cleanup, mark ready, and assign it
     /// to you. Nothing merges until you click merge on GitHub.
     Submit {
         #[arg(long)]
@@ -1836,7 +1836,7 @@ pub enum WtCommand {
         /// Print the placement plan without creating a worktree
         #[arg(long)]
         plan: bool,
-        /// Keep this workspace after delivery and keep scratch local
+        /// Keep this workspace after delivery; managed scratch stays local
         #[arg(long)]
         persistent: bool,
     },

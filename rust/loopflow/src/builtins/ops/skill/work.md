@@ -58,9 +58,15 @@ outcomes in separate Tasks, with links; a Task owns at most one PR. No Task is
 required for ordinary PR delivery.
 
 Read the supplied brief, accepted design and relevant Wave memory. Keep working
-plans in scratch and durable decisions in their owning documents. Edit named
-`wave/<address>/GOAL.md` and `MEMORY.md` in this checkout; reconcile them through
-`realign`. Never guess a Wave merely to complete a template.
+plans in scratch. Wave context is read-only unless the selected Loopflow Flow
+calls for maintaining it. Task/Wave association and use of Work APIs alone do
+not authorize writes to `wave/`. Keep proposed memory updates in local notes
+outside that procedure; never start a Flow merely to obtain write authority.
+Never guess a Wave merely to complete a template.
+
+Scratch cleanup follows repository configuration: `scratch.managed: true` in
+`.lf/config.yaml` opts into temporary notes. Otherwise scratch is ordinary
+repository content. Do not clear it manually as part of delivery.
 
 Keep routine progress in this conversation and local notes. Task descriptions
 hold the current problem, outcome and constraints; deliberate new direction

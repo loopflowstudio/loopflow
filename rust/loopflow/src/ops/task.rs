@@ -989,7 +989,10 @@ async fn finish_task_checkout(store: &SharedStore, task: &Task) -> OpsResult<()>
     }) {
         // The first child commit owns the deletion. A retry after that commit
         // but before CheckoutReady must preserve any notes the child has since made.
-        if task.parent_pr_id.is_some() && rev_parse(task.worktree()?, "HEAD")? == task.base_commit {
+        if task.parent_pr_id.is_some()
+            && crate::config::managed_scratch(task.worktree()?)?
+            && rev_parse(task.worktree()?, "HEAD")? == task.base_commit
+        {
             git_output_bytes(
                 task.worktree()?,
                 &["rm", "-r", "-f", "--ignore-unmatch", "--", "scratch"],

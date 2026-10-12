@@ -4,6 +4,10 @@ produces: wave/<child>/ directories
 ---
 Decompose a wave into smaller, independent waves. Move future responsibility into the children; retain the parent's history and any active delivery until it settles.
 
+Writes to `wave/` belong to the selected Loopflow Flow's procedure. Outside
+that Flow, keep proposed Wave changes in scratch; Work association alone
+does not select memory maintenance.
+
 ## Orientation
 
 Before starting, orient yourself in this branch:

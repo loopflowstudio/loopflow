@@ -131,7 +131,7 @@ Push and create or update a draft PR, then open its GitHub page. Existing ready 
 
 ## lf pr submit
 
-Prepare a PR to land: sync, clear scratch, mark ready, and assign it to you. Nothing merges until you click merge on GitHub
+Prepare a PR to land: sync, apply configured scratch cleanup, mark ready, and assign it to you. Nothing merges until you click merge on GitHub
 
 | Argument | What it does |
 |---|---|
@@ -203,7 +203,7 @@ Create a low-level sibling worktree
 |---|---|
 | `<name>` | Worktree name |
 | `--plan` | Print the placement plan without creating a worktree Default: false. |
-| `--persistent` | Keep this workspace after delivery and keep scratch local Default: false. |
+| `--persistent` | Keep this workspace after delivery; managed scratch stays local Default: false. |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 

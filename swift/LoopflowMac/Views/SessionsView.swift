@@ -1809,6 +1809,7 @@ private struct SessionPaneView: View {
                     }
                     .buttonStyle(.bordered)
                     .tint(TerminalPalette.accent)
+                    .foregroundStyle(TerminalPalette.foreground)
                     .disabled(action.unavailableReason != nil)
                     .help(action.unavailableReason ?? action.help)
                     .accessibilityLabel("Move session here")

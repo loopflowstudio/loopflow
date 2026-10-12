@@ -62,8 +62,8 @@ fn lf_process_ids_in(selector: &str, candidates: Option<&str>) -> String {
     format!("WITH members AS MATERIALIZED ({})
         SELECT ae.id FROM processes ae JOIN ({}) tw ON ({}) WHERE 1{}
         UNION SELECT se.lf_process_id FROM session_events se INDEXED BY session_process_membership WHERE se.session_id IN (SELECT id FROM members) AND se.lf_process_id IS NOT NULL{}
-        UNION SELECT p.attached_lf_process_id FROM processes p WHERE p.agent_session_id IN (SELECT id FROM members) AND p.attached_lf_process_id IS NOT NULL{}
-        UNION SELECT p.id FROM processes p WHERE p.agent_session_id IN (SELECT id FROM members){}",
+        UNION SELECT p.attached_lf_process_id FROM processes p WHERE p.kind='agent' AND p.agent_session_id IN (SELECT id FROM members) AND p.attached_lf_process_id IS NOT NULL{}
+        UNION SELECT p.id FROM processes p WHERE p.kind='agent' AND p.agent_session_id IN (SELECT id FROM members){}",
         session_ids(selector), tasks(selector), checkout("ae.cwd"),
         within("ae.id"), within("se.lf_process_id"), within("p.attached_lf_process_id"), within("p.id"))
 }
@@ -82,7 +82,7 @@ pub(super) fn task_of_process(
                     SELECT session_id AS id FROM session_events INDEXED BY session_process_membership
                         WHERE lf_process_id=?1
                     UNION SELECT agent_session_id FROM processes
-                        WHERE attached_lf_process_id=?1 AND agent_session_id IS NOT NULL)
+                        WHERE kind='agent' AND attached_lf_process_id=?1 AND agent_session_id IS NOT NULL)
                  SELECT tw.id FROM tasks tw JOIN processes e ON e.id=?1
                  WHERE ({}) OR EXISTS(SELECT 1 FROM agent_sessions a
                     WHERE a.id IN (SELECT id FROM members) AND ({}))
@@ -820,16 +820,31 @@ mod tests {
         // Flow reads restrict candidates without losing historical association
         // when the candidate ran outside the Task's checkout.
         let candidates = super::lf_process_ids_in("?1", Some("SELECT ?2"));
-        let selected = conn
-            .prepare(&candidates)
-            .unwrap()
-            .query_map(params![task.as_str(), finished.as_str()], |row| {
-                row.get::<_, String>(0)
-            })
-            .unwrap()
-            .collect::<rusqlite::Result<Vec<_>>>()
+        let read_candidates = || {
+            let mut statement = conn.prepare(&candidates).unwrap();
+            let selected = statement
+                .query_map(params![task.as_str(), finished.as_str()], |row| {
+                    row.get::<_, String>(0)
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            assert_eq!(selected, vec![finished.to_string()]);
+            statement.get_status(rusqlite::StatementStatus::VmStep)
+        };
+        let before = read_candidates();
+        for _ in 0..2_000 {
+            conn.execute(
+                "INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?2,'/unrelated',1)",
+                params![LfProcessId::new(), TraceId::new()],
+            )
             .unwrap();
-        assert_eq!(selected, vec![finished.to_string()]);
+        }
+        let after = read_candidates();
+        assert!(
+            after <= before * 2,
+            "Unrelated commands increased Flow membership work: {before} → {after}"
+        );
     }
 
     #[tokio::test]

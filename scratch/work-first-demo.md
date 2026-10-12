@@ -29,25 +29,10 @@ active execution and conditional rollback, never overwrite a live database copy.
 
 ### Installed cleanup and Workflow rendering
 
-The private app now permits read-only access to user skill-definition directories,
-not provider credentials/history or provider execution. Native Product view renders
-the feature Workflow (start, design, demo, end); the earlier sandbox error is gone.
-No app code or installed configuration changed for this correction.
-
-Live backup: `live-before-376-cleanup.db` in the demo directory, SQLite-consistent
-and mode 0600. Initial live completion saved a request but refused unresolved old
-follow-through scope. No completion was claimed from that failed command. The
-installed binary was then rehearsed against `installed-rehearsal-home` with that
-backup's original schema: record no further performance follow-up under Jack Heart's
-October 7 retirement/closure decision, then complete. Both returned exit 0; the
-checkout was retained for unresolved execution. Early sandbox dispatch and obsolete
-`--repo` spelling attempts failed before the successful rehearsal and are logged.
-
-Applied the same supported follow-through/completion operations to live LOO-376.
-Fresh read shows `planning_state=completed`, `planning_completed=1`, no pending
-completion request/error. Its final cleanup process is still being observed; the
-snapshot's unresolved process IDs never established live liveness. Other Tasks and
-historical Sessions were not retired. No snapshot was restored over the live store.
+The earlier read-only app sandbox and initial LOO-376 completion refusal/rehearsal
+are retained at `bf19dc0b5f:scratch/work-first-demo.md`, this heading. Supported
+live completion succeeded after the rehearsal; no whole-store restore or other
+Task/Session retirement. The final retained-checkout evidence is below.
 
 ### Verified live result and legacy cleanup
 
@@ -261,3 +246,19 @@ use only the latter. Same-directory frames plus repeated Machine confirmation
 must preserve Task selection and planning. No wire change or second identity store.
 
 Check: foreground wait regression PASS after fixing missing fixture database; Clippy initially rejected awaiting with the test environment lock, then PASS after using a scoped runtime; fmt/diff PASS. Fixed native launcher remained alive over five minutes before trust, unlike the two timed-out attempts. Seven Swift stream tests PASS, including directory/ID regression; final candidate PID 44643 renders all 13 Tasks and opens LOO-312 into Codex’s hook-trust prompt, still alive past 30 seconds. Jack Heart must choose trust; no choice was submitted. Full Task-by-Task native acceptance remains incomplete.
+
+## Native follow-through — October 12
+
+CI Task lf-12be237 opens its exact prepared primary and waits for hook trust.
+LOO-462 shows its correct active-elsewhere Session and explicit Move here; no takeover. Its button inherited dark
+text on the dark terminal, now uses TerminalPalette.foreground like other actions.
+
+“Reading workflow…” remains. Three real Task frames decode through Swift, ruling
+out a wire failure. Native monitor sample (`monitor-native-sample.txt` in the audit
+directory) instead spends time in Flow membership during planning. The attachment
+UNION scans all 301,226 Processes although only 3,370 are agents and existing
+partial indexes own those lookups. Add the missing agent-kind predicate, including
+reverse membership. Regression adds 2,000 unrelated commands and checks unchanged
+candidate membership with bounded VM work. No schema or live data change.
+
+Check: five Rust Task-membership tests and 17 Swift Session/stream tests PASS; real attachment lookup 114.6 ms scan → 0.08 ms indexed, same row. All-target Clippy/fmt/diff PASS. Candidate PID 44545 now renders LOO-462’s demo Workflow and readable Move here; no broader performance claim.

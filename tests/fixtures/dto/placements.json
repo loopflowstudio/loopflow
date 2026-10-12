@@ -1,0 +1,41 @@
+[
+  {
+    "work": {
+      "kind": "task",
+      "id": "task_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb"
+    },
+    "source": {
+      "kind": "wave",
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    },
+    "provenance": "explicit",
+    "machine_id": "home_cccccccccccc4ccc8ccccccccccccccc",
+    "placed_at": "2026-10-08T00:00:00Z"
+  },
+  {
+    "work": {
+      "kind": "task",
+      "id": "task_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb"
+    },
+    "source": {
+      "kind": "task",
+      "id": "task_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb"
+    },
+    "provenance": "legacy",
+    "machine_id": "home_cccccccccccc4ccc8ccccccccccccccc",
+    "placed_at": "2026-10-08T00:00:00Z"
+  },
+  {
+    "work": {
+      "kind": "wave",
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    },
+    "source": {
+      "kind": "wave",
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    },
+    "provenance": "local_default",
+    "machine_id": "home_cccccccccccc4ccc8ccccccccccccccc",
+    "placed_at": "2026-10-08T00:00:00Z"
+  }
+]

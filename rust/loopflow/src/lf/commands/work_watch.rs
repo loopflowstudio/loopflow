@@ -81,7 +81,7 @@ pub enum WorkContent {
     Heartbeat(Heartbeat),
 }
 
-/// `lf roadmap --all` and `lf wave list --all --current`, read together.
+/// `lf wave show --all` and `lf wave list --all --current`, read together.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanningPart {
     pub roadmap: RoadmapSnapshot,

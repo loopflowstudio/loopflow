@@ -28,7 +28,7 @@ Task Work ----> managed worktree ----> commits
                                           |
                                  checks / repair / merge
                                           |
-                             file follow-ups or record none
+                             optional ordinary Task creation
                                           |
                                     complete Task
 ```
@@ -286,7 +286,7 @@ and event, while legacy status contexts keep their own identities.
 A blocked landing stays observable: later checks still settle its merge, and
 checks that stop failing clear the block. Rerun `lf arm` or `lf land`
 after resolving a blocker to resume under a fresh generation, including when
-the SHA has not changed. Use `lf mon show SESSION --final` to inspect a repair's
+the SHA has not changed. Use `lf history show SESSION --final` to inspect a repair's
 conclusion.
 
 Repairs return `published` or `blocked` with a summary in their final answer.

@@ -27,12 +27,12 @@ struct SessionChromeProofTests {
         try #require(GhosttyManager.shared.state == .ready)
         let repo = "/src/loopflow"
         let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
-        let workspace = registry.workspace(for: fixtureWorkspace(repo))
+        let workspace = fixtureWork(registry, fixtureWorkspace(repo))
         var terminals: [GhosttyMetalView] = []
         for _ in 0..<2 {
-            workspace.multiplexer.newShell()
+            workspace.multiplexer.newShell(location: workspace.location)
             let pane = workspace.multiplexer.focusedPaneId
-            let terminal = registry.surfaces.view(for: .shell(pane))
+            let terminal = registry.surfaces.view(for: .shell(pane, machineId: fixtureMachineId))
             terminal.frame = CGRect(x: 0, y: 0, width: 400, height: 350)
             terminal.workingDirectory = NSTemporaryDirectory()
             terminal.command = buildWorkspaceShellCommand(id: pane, argv: ["/bin/cat"], env: [:])
@@ -58,9 +58,9 @@ struct SessionChromeProofTests {
         let sessions = String(decoding: try JSONSerialization.data(withJSONObject: [value]), as: UTF8.self)
         let query = RegistryQuery { args, _ in
             switch (args.first, args.dropFirst().first) {
-            case ("roadmap", _): return roadmap
+            case ("wave", "show"): return roadmap
             case ("wave", "list"): return "[]"
-            case ("activity", _): return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
+            case ("history", _): return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             case ("session", "list"): return #"{"entries":\#(sessions),"next":null}"#
             default: throw RegistryQueryError("Session chrome must not launch or mutate: \(args)")
             }
@@ -91,14 +91,6 @@ struct SessionChromeProofTests {
             let label = try view.inspect().find(viewWithAccessibilityIdentifier: "session-flow-membership").button()
                 .labelView().text().string()
             #expect(label.contains("feature / realign"))
-        }
-        #expect(throws: Never.self, "Session worktree location") {
-            let location = try view.inspect().find(viewWithAccessibilityIdentifier: "worktree-chip")
-                .menu().labelView().find(text: "loopflow")
-            #expect(try location.string() == "loopflow")
-        }
-        #expect(throws: (any Error).self) {
-            try view.inspect().find(viewWithAccessibilityIdentifier: "task-worktree-location")
         }
         #expect(throws: (any Error).self) {
             _ = try view.inspect().find(viewWithAccessibilityIdentifier: "session-action-complete")
@@ -162,22 +154,22 @@ struct SessionChromeProofTests {
         try #require(GhosttyManager.shared.state == .ready)
         let repo = "/tmp"
         let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
-        let workspace = registry.workspace(for: fixtureWorkspace(repo))
-        workspace.multiplexer.newShell()
+        let workspace = fixtureWork(registry, fixtureWorkspace(repo))
+        workspace.multiplexer.newShell(location: workspace.location)
         let pane = workspace.multiplexer.focusedPaneId
-        let terminal = registry.surfaces.view(for: .shell(pane))
+        let terminal = registry.surfaces.view(for: .shell(pane, machineId: fixtureMachineId))
         terminal.frame = CGRect(x: 0, y: 0, width: 600, height: 400)
         terminal.workingDirectory = NSTemporaryDirectory()
         terminal.command = buildWorkspaceShellCommand(id: pane, argv: ["/bin/cat"], env: [:])
         terminal.createSurface(manager: GhosttyManager.shared)
-        defer { registry.surfaces.release(.shell(pane)) }
+        defer { registry.surfaces.release(.shell(pane, machineId: fixtureMachineId)) }
         let surface = try #require(terminal.surface)
         let query = RegistryQuery { args, _ in
             switch args.first {
-            case "roadmap": return #"{"generated_at":1,"waves":[]}"#
+            case "wave" where args.dropFirst().first == "show": return #"{"generated_at":1,"waves":[]}"#
             case "wave" where args.dropFirst().first == "list": return "[]"
             case "session": return #"{"entries":[],"next":null}"#
-            case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
+            case "history": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             default: throw RegistryQueryError("Keybinds must not launch or mutate: \(args)")
             }
         }
@@ -214,7 +206,7 @@ struct SessionChromeProofTests {
         try await settle(window)
         #expect(workspace.multiplexer.layout.allPanes.map(\.id) == [pane])
         #expect(workspace.multiplexer.focusedPaneId == pane)
-        #expect(!registry.surfaces.hasSurface(.shell(split)))
+        #expect(!registry.surfaces.hasSurface(.shell(split, machineId: fixtureMachineId)))
 
         // Shift-D reaches AppKit as "D"; the binding must still split down.
         try press("D", keyCode: 2, modifiers: [.command, .shift], in: window)
@@ -237,12 +229,12 @@ struct SessionChromeProofTests {
         try #require(GhosttyManager.shared.state == .ready)
         let repo = "/src/loopflow"
         let registry = SessionsWorkspaceRegistry()
-        let workspace = registry.workspace(for: WorkspaceIdentity(machineId: "local", worktree: repo))
+        let workspace = fixtureWork(registry, WorkspaceIdentity(machineId: "local", worktree: repo))
         var terminals: [GhosttyMetalView] = []
         for _ in 0..<2 {
-            workspace.multiplexer.newShell()
+            workspace.multiplexer.newShell(location: workspace.location)
             let pane = workspace.multiplexer.focusedPaneId
-            let terminal = registry.surfaces.view(for: .shell(pane))
+            let terminal = registry.surfaces.view(for: .shell(pane, machineId: fixtureMachineId))
             terminal.frame = CGRect(x: 0, y: 0, width: 400, height: 350)
             terminal.workingDirectory = NSTemporaryDirectory()
             terminal.command = buildWorkspaceShellCommand(id: pane, argv: ["/bin/cat"], env: [:])
@@ -267,7 +259,7 @@ struct SessionChromeProofTests {
         let flows = try String(contentsOf: repoRoot.appendingPathComponent("tests/fixtures/dto/flow_catalog.json"), encoding: .utf8)
         let inventory = PaletteSessionInventory(sessions)
         let query = RegistryQuery { args, _ in
-            if args.first == "roadmap" { return roadmap }
+            if args.prefix(2) == ["wave", "show"] { return roadmap }
             if args.first == "session" { return try await inventory.read() }
             if args.first == "flow" { return flows }
             if args.first == "wave" { return "[]" }

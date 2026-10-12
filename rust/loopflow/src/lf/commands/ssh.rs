@@ -1,43 +1,117 @@
 //! Run a command on an added machine using credentials resident there.
 //! Login transfers are separate foreground commands; this script contains no secrets.
 
+use crate::durable::TaskExecutionRoute;
 use crate::lf::Cli;
 use crate::ops::task::remote::TaskSource;
 use crate::provider_account::selection::AccountSelection;
 use anyhow::{anyhow, Context};
 use clap::Parser;
-use std::io::Write;
+use std::io::IsTerminal;
 use std::process::{Command, Stdio};
 
 pub const EXPECTED_MACHINE_ID_ENV: &str = "LF_EXPECTED_MACHINE_ID";
 
-pub fn run(target: &str, forward_agent: bool, lf_args: &[String]) -> anyhow::Result<()> {
-    let mut cli = parse_remote_command(lf_args)?;
-    cli.agent = crate::config::agent_override().or(cli.agent);
-    let inherited_selection = AccountSelection::from_env()?;
+pub fn run(
+    target: &str,
+    forward_agent: bool,
+    cli: &Cli,
+    lf_args: &[String],
+    task_route: Option<TaskExecutionRoute>,
+) -> anyhow::Result<()> {
+    let preview = cli.context
+        || cli.explain
+        || matches!(
+            cli.command,
+            Some(crate::lf::Commands::Task {
+                cmd: crate::lf::TaskCommand::Location { .. }
+                    | crate::lf::TaskCommand::Admission { claim: None, .. }
+            })
+        );
+    // These operations use the addressed Machine's own records and accounts.
+    // Inspection and file editing must never prepare or transfer a provider login.
+    let resident_operation = matches!(
+        &cli.command,
+        Some(crate::lf::Commands::Session {
+            cmd: crate::lf::SessionCommand::List { .. }
+                | crate::lf::SessionCommand::Open { .. }
+                | crate::lf::SessionCommand::Ensure { .. }
+        }) | Some(crate::lf::Commands::Task {
+            cmd: crate::lf::TaskCommand::Location { .. }
+                | crate::lf::TaskCommand::Admission { .. }
+                | crate::lf::TaskCommand::Shell { .. }
+                | crate::lf::TaskCommand::WatchFiles { .. }
+                | crate::lf::TaskCommand::Files { .. }
+                | crate::lf::TaskCommand::File { .. }
+                | crate::lf::TaskCommand::Diff { .. }
+                | crate::lf::TaskCommand::Save { .. }
+        }) | Some(crate::lf::Commands::Wave {
+            cmd: crate::lf::WaveCommand::Show { .. }
+        })
+    );
     let runtime = tokio::runtime::Runtime::new()?;
-    let task_source = runtime.block_on(resolve_task_source(cli.task.as_deref()))?;
-    let source_json = task_source
+    let source = if preview || resident_operation {
+        None
+    } else {
+        runtime.block_on(resolve_task_source(cli.task.as_deref()))?
+    };
+    let target = if preview || resident_operation {
+        let store = crate::store::read_existing_registry()?
+            .ok_or_else(|| anyhow!("Machine unavailable: local registry is absent"))?;
+        runtime.block_on(super::machine::find_machine(&store, target))?
+    } else {
+        runtime.block_on(resolve_target(target, forward_agent))?
+    };
+    // Automatic routing already chose both Machine and plan. Keep that reading
+    // together rather than combining its Machine with a second plan reading.
+    let routed = task_route.is_some();
+    let work_route = match task_route {
+        Some(route) => Some(route),
+        // A path/name addresses the destination's filesystem, not the caller's.
+        None if cli.repo.is_some() => None,
+        None => super::work_route::resolve(cli)?,
+    };
+    if let Some(route) = &work_route {
+        if route.machine_id != target.id {
+            return Err(anyhow!(
+                "Task executes on Machine {}, not {}; delegation does not move existing work",
+                route.machine_id,
+                target.id
+            ));
+        }
+    }
+    let repository = cli
+        .repository
         .as_ref()
-        .map(serde_json::to_string)
-        .transpose()?;
-    let target = runtime.block_on(resolve_target(target, forward_agent))?;
-    let selection = runtime.block_on(super::machine_credentials::prepare_launch(
-        &target,
-        &inherited_selection,
-        &cli,
-    ))?;
+        .or(work_route.as_ref().map(|route| &route.repository_id));
+    // Preview forwards only authored selectors. Account lookup/connection and
+    // isolation preparation belong to launch, on neither side of this read.
+    let selection = if preview || resident_operation {
+        None
+    } else {
+        Some(
+            runtime
+                .block_on(super::machine_credentials::prepare_launch(
+                    &target,
+                    &AccountSelection::from_env()?,
+                    cli,
+                ))?
+                .env_value()?,
+        )
+    };
+    let source_json = source.as_ref().map(serde_json::to_string).transpose()?;
     let user_name = crate::config::participant_name()?.unwrap_or_default();
-    let selection = selection.env_value()?;
     let mut extra_env = vec![
         (EXPECTED_MACHINE_ID_ENV, target.id.as_str()),
         (crate::config::USER_NAME_ENV, user_name.as_str()),
-        (
-            crate::provider_account::selection::ACCOUNT_SELECTION_ENV,
-            selection.as_str(),
-        ),
-        crate::provider_account::activation::isolation_env(true),
     ];
+    if let Some(selection) = selection.as_deref() {
+        extra_env.push((
+            crate::provider_account::selection::ACCOUNT_SELECTION_ENV,
+            selection,
+        ));
+        extra_env.push(crate::provider_account::activation::isolation_env(true));
+    }
     let agent = crate::config::agent_override();
     if let Some(agent) = agent.as_deref() {
         extra_env.push((crate::config::AGENT_OVERRIDE_ENV, agent));
@@ -45,28 +119,79 @@ pub fn run(target: &str, forward_agent: bool, lf_args: &[String]) -> anyhow::Res
     if let Some(source) = source_json.as_deref() {
         extra_env.push((crate::lf::TASK_SOURCE_ENV, source));
     }
-    let cmd = std::iter::once("lf".to_string())
-        .chain(resident_args(lf_args, &cli, task_source.as_ref()))
-        .collect::<Vec<_>>();
+    let mut cmd = vec!["lf".to_string()];
+    if cli.repository.is_none() {
+        if let Some(repository) = repository {
+            cmd.extend(["--repository".into(), repository.to_string()]);
+        }
+    }
+    cmd.extend(if preview {
+        lf_args.to_vec()
+    } else {
+        resident_args(lf_args, cli, routed, source.as_ref())
+    });
+    if matches!(
+        &cli.command,
+        Some(crate::lf::Commands::Task {
+            cmd: crate::lf::TaskCommand::Location { .. }
+        })
+    ) {
+        let bytes = runtime.block_on(request(&target, &cmd[1..]))?;
+        print!("{}", String::from_utf8(bytes)?);
+        return Ok(());
+    }
+    if matches!(
+        &cli.command,
+        Some(crate::lf::Commands::Session {
+            cmd: crate::lf::SessionCommand::Open { json: true, .. }
+        })
+    ) && !preview
+    {
+        let bytes = runtime.block_on(request(&target, &cmd[1..]))?;
+        let mut record: crate::ops::human_session::SessionRecord = serde_json::from_slice(&bytes)?;
+        anyhow::ensure!(
+            record
+                .workspace
+                .as_ref()
+                .is_some_and(|workspace| workspace.machine_id == target.id),
+            "Session reply does not belong to the addressed Machine"
+        );
+        if !record.open_argv.is_empty() {
+            let script = build_preamble(
+                &target.route,
+                None,
+                &record.open_argv,
+                &[(EXPECTED_MACHINE_ID_ENV, target.id.as_str())],
+            );
+            record.open_argv = ssh_argv(&target.route, forward_agent, &script, true)?;
+        }
+        println!("{}", serde_json::to_string(&record)?);
+        return Ok(());
+    }
     let preamble = build_preamble(
         &target.route,
-        target
-            .repo
-            .as_deref()
-            .expect("added machines have a repository"),
+        if repository.is_some() || cli.repo.is_some() {
+            None
+        } else {
+            target.repo.as_deref()
+        },
         &cmd,
         &extra_env,
     );
     run_ssh(&target.route, forward_agent, &preamble)
 }
 
-fn resident_args(args: &[String], cli: &Cli, source: Option<&TaskSource>) -> Vec<String> {
+fn resident_args(
+    args: &[String],
+    cli: &Cli,
+    routed: bool,
+    source: Option<&TaskSource>,
+) -> Vec<String> {
+    // Automatic Work routing carries the resolved plan, not a path on this Machine.
+    let task_flag = cli.task.as_ref().map(|task| format!("--task={task}"));
+    let mut remove_repo = routed && cli.repo.is_some();
     let mut remaining = cli.account.len() + cli.only_account.len();
     let mut shared = cli.shared;
-    let task_flag = cli
-        .task
-        .as_ref()
-        .map(|selector| format!("--task={selector}"));
     let mut result = Vec::new();
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
@@ -75,7 +200,12 @@ fn resident_args(args: &[String], cli: &Cli, source: Option<&TaskSource>) -> Vec
             result.extend(iter.cloned());
             break;
         }
-        if remaining > 0 && matches!(arg.as_str(), "--account" | "--only-account") {
+        if remove_repo && arg == "--repo" {
+            iter.next();
+            remove_repo = false;
+        } else if remove_repo && arg.starts_with("--repo=") {
+            remove_repo = false;
+        } else if remaining > 0 && matches!(arg.as_str(), "--account" | "--only-account") {
             iter.next();
             remaining -= 1;
         } else if remaining > 0
@@ -157,7 +287,7 @@ async fn resolve_task_source(selector: Option<&str>) -> anyhow::Result<Option<Ta
     Ok(source)
 }
 
-fn parse_remote_command(lf_args: &[String]) -> anyhow::Result<Cli> {
+pub fn parse_remote_command(lf_args: &[String]) -> anyhow::Result<Cli> {
     if lf_args.first().is_some_and(|arg| arg == "lf") {
         return Err(anyhow!(
             "the remote `lf` is implicit; use `lf --machine <target> <args...>` without `-- lf`"
@@ -201,25 +331,30 @@ pub(super) async fn resolve_target(
     Ok(machine)
 }
 
-fn build_preamble(host: &str, repo: &str, cmd: &[String], extra_env: &[(&str, &str)]) -> String {
+fn build_preamble(
+    host: &str,
+    repo: Option<&str>,
+    cmd: &[String],
+    extra_env: &[(&str, &str)],
+) -> String {
     let mut lines = vec![super::machine::REMOTE_PATH.to_string()];
     for (name, value) in extra_env {
         lines.push(format!("export {name}={}", sh_quote(value)));
     }
-    lines.push("LF_REACHED_MACHINE_ID=$(lf machine id) || exit 1".to_string());
-    lines.push(r#"[ "$LF_REACHED_MACHINE_ID" = "$LF_EXPECTED_MACHINE_ID" ] || { echo 'remote machine identity changed' >&2; exit 1; }"#.to_string());
-    let path = if repo.starts_with('/') {
-        sh_quote(repo)
-    } else {
-        format!(
-            "\"$HOME\"/{}",
-            sh_quote(repo.strip_prefix("~/").unwrap_or(repo))
-        )
-    };
-    lines.push(format!(
-        "cd -- {path} || {{ echo {} >&2; exit 1; }}",
-        sh_quote(&format!("no repo {repo} on {host}"))
-    ));
+    if let Some(repo) = repo {
+        let path = if repo.starts_with('/') {
+            sh_quote(repo)
+        } else {
+            format!(
+                "\"$HOME\"/{}",
+                sh_quote(repo.strip_prefix("~/").unwrap_or(repo))
+            )
+        };
+        lines.push(format!(
+            "cd -- {path} || {{ echo {} >&2; exit 1; }}",
+            sh_quote(&format!("no repo {repo} on {host}"))
+        ));
+    }
     lines.push(format!(
         "exec {}",
         cmd.iter()
@@ -263,55 +398,139 @@ fn command_result(dest: &str, code: Option<i32>) -> anyhow::Result<()> {
     }
 }
 
-/// Pipe the preamble into `ssh [-A] <host> bash -s`, streaming stdout/stderr and
-/// classifying the remote exit code. Agent forwarding (`-A`) is opt-in. Bounded
-/// so an unreachable or misconfigured host fails fast instead of hanging.
+/// Carry the script as an argument: stdin belongs to file drafts or terminal input.
+fn ssh_argv(
+    dest: &str,
+    forward_agent: bool,
+    preamble: &str,
+    terminal: bool,
+) -> anyhow::Result<Vec<String>> {
+    let mut args = crate::machine_route::bounded_ssh_args(dest, forward_agent)?;
+    if terminal {
+        for arg in &mut args {
+            if arg == "-T" {
+                *arg = "-tt".into();
+            }
+        }
+    }
+    let mut argv = vec!["ssh".into()];
+    argv.extend(args);
+    argv.push(preamble.into());
+    Ok(argv)
+}
+
 fn run_ssh(dest: &str, forward_agent: bool, preamble: &str) -> anyhow::Result<()> {
-    let mut child = Command::new("ssh")
-        .args(crate::machine_route::bounded_ssh_args(dest, forward_agent)?)
-        .arg("bash -s")
-        .stdin(Stdio::piped())
+    let argv = ssh_argv(
+        dest,
+        forward_agent,
+        preamble,
+        std::io::stdin().is_terminal(),
+    )?;
+    let status = Command::new(&argv[0])
+        .args(&argv[1..])
+        .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
-        .spawn()
-        .context("failed to spawn ssh")?;
+        .status()
+        .context("ssh did not complete")?;
+    command_result(dest, status.code())
+}
 
-    let written = child
-        .stdin
-        .take()
-        .ok_or_else(|| anyhow!("ssh stdin unavailable"))?
-        .write_all(preamble.as_bytes());
-    if written.is_err() {
-        let _ = child.kill();
-    }
-    let status = child.wait().context("ssh did not complete");
-    written.context("failed to write preamble to ssh")?;
-    command_result(dest, status?.code())
+/// One bounded request through the ordinary SSH envelope. No probes, credentials,
+/// provider launch or local fallback; callers validate the request-bound reply.
+pub(crate) async fn request(
+    machine: &crate::durable::Machine,
+    args: &[String],
+) -> anyhow::Result<Vec<u8>> {
+    let cmd = std::iter::once("lf".to_string())
+        .chain(args.iter().cloned())
+        .collect::<Vec<_>>();
+    let preamble = build_preamble(
+        &machine.route,
+        None,
+        &cmd,
+        &[(EXPECTED_MACHINE_ID_ENV, machine.id.as_str())],
+    );
+    let mut child = tokio::process::Command::new("ssh");
+    child
+        .args(crate::machine_route::bounded_ssh_args(
+            &machine.route,
+            false,
+        )?)
+        .arg(preamble)
+        .stdin(Stdio::null())
+        .kill_on_drop(true);
+    let output = tokio::time::timeout(std::time::Duration::from_secs(20), child.output())
+        .await
+        .context("Machine command unavailable: peer timed out")??;
+    anyhow::ensure!(
+        output.status.success(),
+        "Machine command unavailable: {}",
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    Ok(output.stdout)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{build_preamble, command_result, parse_remote_command, resident_args, sh_quote};
+    use super::{build_preamble, command_result, parse_remote_command, resident_args};
 
     #[test]
-    fn quotes_shell_data_without_forwarding_credentials() {
-        assert_eq!(sh_quote("it's here"), "'it'\\''s here'");
+    fn repository_addressed_transport_preserves_arguments_without_entering_machine_default() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join(".local/bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let lf = bin.join("lf");
+        std::fs::write(&lf, "#!/bin/sh\nprintf '%s\\n' \"$PWD\" \"$@\"\n").unwrap();
+        std::fs::set_permissions(&lf, std::fs::Permissions::from_mode(0o755)).unwrap();
         let script = build_preamble(
-            "mini",
-            "~/project's checkout",
-            &["lf".into(), "session".into(), "list".into()],
-            &[("LF_EXPECTED_MACHINE_ID", "home_test")],
+            "fixture",
+            None,
+            &[
+                "lf".into(),
+                "--repository".into(),
+                "repo_exact".into(),
+                "--task".into(),
+                "task_exact".into(),
+                ":".into(),
+                "literal 'draft'; $(false)".into(),
+            ],
+            &[("LF_EXPECTED_MACHINE_ID", "home_fixture")],
         );
-        assert!(script.contains("machine identity changed"));
-        assert!(!script.contains("TOKEN"));
-        assert!(!script.contains("LEASE"));
+        let output = std::process::Command::new("/bin/bash")
+            .args(["-c", &script])
+            .env_clear()
+            .env("HOME", dir.path())
+            .env("PATH", "/usr/bin:/bin")
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let text = String::from_utf8(output.stdout).unwrap();
+        let lines = text.lines().collect::<Vec<_>>();
+        assert_eq!(
+            lines[0],
+            dir.path().canonicalize().unwrap().to_str().unwrap()
+        );
+        assert_eq!(
+            &lines[1..],
+            &[
+                "--repository",
+                "repo_exact",
+                "--task",
+                "task_exact",
+                ":",
+                "literal 'draft'; $(false)"
+            ]
+        );
     }
 
     #[test]
     fn remote_preferences_cannot_relax_the_resident_account_restriction() {
         let args = ["--account", "person@", "--shared", "skill", "implement"].map(str::to_string);
         assert_eq!(
-            resident_args(&args, &parse_remote_command(&args).unwrap(), None),
+            resident_args(&args, &parse_remote_command(&args).unwrap(), false, None),
             ["--isolate", "skill", "implement"]
         );
     }
@@ -328,7 +547,7 @@ mod tests {
         ]
         .map(str::to_string);
         assert_eq!(
-            resident_args(&args, &parse_remote_command(&args).unwrap(), None),
+            resident_args(&args, &parse_remote_command(&args).unwrap(), false, None),
             [
                 "--isolate",
                 "skill",
@@ -340,38 +559,18 @@ mod tests {
         );
     }
     #[test]
-    fn remote_task_identity_rewrite_preserves_literal_prompt_flags() {
-        let source = crate::ops::task::remote::TaskSource {
-            task_id: crate::durable::TaskId::new(),
-            identifier: "FIX-1".into(),
-            issue_id: Some("provider-issue".into()),
-            branch: "fix".into(),
-            commit: "fixture".into(),
-        };
-        for selector in [vec!["--task", "FIX-1"], vec!["--task=FIX-1"]] {
-            let args: Vec<String> = selector
-                .into_iter()
-                .chain(["--shared", "skill", "implement", "--", "--task", "FIX-1"])
-                .map(str::to_string)
-                .collect();
+    fn repository_paths_stay_on_explicit_machine_but_not_automatic_work_routes() {
+        for selection in [vec!["--repo", "~/src/remote"], vec!["--repo=~/src/remote"]] {
+            let mut args = selection;
+            args.extend([
+                "--task", "LOO-427", "skill", "debug", "--", "--repo", "literal",
+            ]);
+            let args = args.into_iter().map(str::to_owned).collect::<Vec<_>>();
             let cli = parse_remote_command(&args).unwrap();
+            assert_eq!(resident_args(&args, &cli, false, None), args);
             assert_eq!(
-                resident_args(&args, &cli, Some(&source)),
-                [
-                    format!(
-                        "--task={}",
-                        source
-                            .issue_id
-                            .as_deref()
-                            .unwrap_or(source.task_id.as_str())
-                    ),
-                    "--isolate".into(),
-                    "skill".into(),
-                    "implement".into(),
-                    "--".into(),
-                    "--task".into(),
-                    "FIX-1".into(),
-                ]
+                resident_args(&args, &cli, true, None),
+                ["--task", "LOO-427", "skill", "debug", "--", "--repo", "literal"]
             );
         }
     }

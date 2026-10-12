@@ -1,4 +1,4 @@
-//! `lf wave list`, `lf wave status`, and `lf roadmap` — read the wave registry (`store`).
+//! `lf wave list`, `lf wave status`, and `lf wave show` — read the wave registry (`store`).
 //!
 //! `lf wave list` lists durable Wave identities, authored goals, Task counts and
 //! Machine placement. `lf wave status [wave]` adds current Projects, Task conditions,
@@ -219,7 +219,7 @@ pub struct TaskConditionSnapshot {
 }
 
 /// Stable references for one Task, shared verbatim by `lf wave status` and
-/// `lf roadmap`. The issue URL is cached PM evidence. Workspace evidence comes
+/// `lf wave show`. The issue URL is cached PM evidence. Workspace evidence comes
 /// from the durable Task and outlives its execution and final PR.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskReferenceSnapshot {
@@ -371,7 +371,7 @@ pub enum RoadmapSection {
     Later,
 }
 
-/// `lf roadmap` — every Wave's plan joined to durable Work and local delivery
+/// `lf wave show` — every Wave's plan joined to durable Work and local delivery
 /// evidence, bucketed by planning section.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RoadmapSnapshot {
@@ -444,13 +444,33 @@ fn print_projects(projects: &Evidence<ProjectSummary>) {
     match projects {
         Evidence::Unavailable { reason } => println!("  projects unavailable: {reason}"),
         Evidence::Ok { items, .. } => {
-            for project in items.iter().filter(|project| project.current) {
+            for project in items {
                 println!(
-                    "  project   {} ({}) · workflow {}",
-                    project.name, project.id, project.workflow
+                    "  chapter   {} ({}) · {} · {} · workflow {}",
+                    project.name,
+                    project.id,
+                    if project.current {
+                        "current"
+                    } else {
+                        "historical"
+                    },
+                    project.status.as_str(),
+                    project.workflow
                 );
                 for line in project.sync.lines() {
                     println!("    {line}");
+                }
+                for target in &project.metric_targets {
+                    use crate::work::wave::metrics::Threshold;
+                    let comparison = match target.target {
+                        Threshold::AtLeast { .. } => ">=",
+                        Threshold::AtMost { .. } => "<=",
+                    };
+                    println!(
+                        "    target {} {comparison} {}",
+                        target.metric_id,
+                        target.target.value()
+                    );
                 }
                 for kr in &project.krs {
                     println!("  [{}] {}", if kr.holds { "x" } else { " " }, kr.text);
@@ -616,18 +636,18 @@ pub(crate) async fn wave_detail(store: &SharedStore, wave: &Wave) -> Result<Wave
     })
 }
 
-/// `lf roadmap [wave]` — the machine-wide intent plane. Every Wave (or one, when
+/// `lf wave show [wave]` — the machine-wide intent plane. Every Wave (or one, when
 /// scoped) with its plan joined to live evidence and each row bucketed into a
 /// section. Deterministic and local: one runtime observation for the whole
 /// read and bounded Git probes for Task Work, after a fresh team check. `lf wave status`
 /// answers "is it healthy"; this answers "what is being worked on and what
 /// could be".
-pub fn roadmap(wave: Option<&str>, task: Option<&str>, json: bool, all: bool) -> Result<()> {
+pub fn show(wave: Option<&str>, task: Option<&str>, json: bool, all: bool) -> Result<()> {
     let include_history = wave.is_some() || task.is_some();
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let evaluation_time = now();
-        let Some(store) = open_existing_store().await.map(std::sync::Arc::new) else {
+        let Some(store) = crate::store::read_existing_registry()?.map(std::sync::Arc::new) else {
             if task.is_some() {
                 anyhow::bail!("Task lookup unavailable: local registry could not be opened");
             }
@@ -697,7 +717,7 @@ pub fn roadmap(wave: Option<&str>, task: Option<&str>, json: bool, all: bool) ->
     })
 }
 
-/// `lf roadmap --all`: every current Wave in every repository.
+/// `lf wave show --all`: every current Wave in every repository.
 pub(crate) async fn roadmap_all(store: &SharedStore) -> Result<RoadmapSnapshot> {
     let waves = store
         .list_waves(None)
@@ -789,10 +809,11 @@ struct SharedTaskReads {
 impl SharedTaskReads {
     async fn read(store: &SharedStore) -> Result<Self> {
         let checkouts = store.task_checkouts().await?;
-        ask_checkouts_ahead(&checkouts);
+        let local_machine = store.local_machine().await?.id;
+        ask_checkouts_ahead(&checkouts, &local_machine);
         Ok(Self {
             checkouts,
-            local_machine: store.local_machine().await?.id,
+            local_machine,
         })
     }
 }
@@ -800,13 +821,17 @@ impl SharedTaskReads {
 /// Git is asked about each existing checkout in turn by the Task details. A
 /// process that retains answers asks about several checkouts at once first,
 /// so the details find them waiting; any other process would only ask twice.
-fn ask_checkouts_ahead(checkouts: &[crate::store::sqlite::TaskCheckout]) {
+fn ask_checkouts_ahead(
+    checkouts: &[crate::store::sqlite::TaskCheckout],
+    local_machine: &crate::durable::MachineId,
+) {
     const AT_ONCE: usize = 8;
     if !crate::git::retains_reads() {
         return;
     }
     let existing = checkouts
         .iter()
+        .filter(|checkout| checkout.machine_id.as_ref() == Some(local_machine))
         .map(|checkout| checkout.worktree.as_path())
         .filter(|worktree| worktree.is_dir())
         .collect::<Vec<_>>();
@@ -3201,7 +3226,7 @@ mod tests {
                         Some(&TaskActionEvidence {
                             status: runtime.status.work_status(),
                             execution: None,
-                            completion_refusal: Some("Merged · Follow-through pending"),
+                            completion_refusal: Some("Pull request has not merged"),
                             ..actions
                         }),
                         None,

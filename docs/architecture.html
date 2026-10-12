@@ -1408,7 +1408,7 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
 .home-page .more a { text-decoration: underline; text-underline-offset: 4px; }
 .home-hero h1 + .install-row { margin-top: 34px; }
 /* One word of the headline cycles in a tinted chip; each holds a quarter of the loop. */
-.home-hero h1:has(.rotating) { font-size: clamp(30px, 4.3vw, 60px); white-space: nowrap; }
+.home-hero h1:has(.rotating) { font-size: clamp(30px, 4.3vw, 60px); }
 .home-page .rotating { display: inline-grid; justify-items: center; vertical-align: baseline; overflow: hidden; padding: .04em .22em .1em; margin: 0 .04em; border-radius: .2em; background: linear-gradient(180deg, #fbf2f4, #f1dce2); box-shadow: inset 0 0 0 1px #722f371f, 0 14px 30px -18px #722f3766; }
 .home-page .rotating span { grid-area: 1 / 1; opacity: 0; animation: rotate-word 8s cubic-bezier(.3, .7, .2, 1) infinite; }
 .home-page .rotating span:nth-child(2) { animation-delay: 2s; }
@@ -2079,7 +2079,7 @@ lf --wave &lt;wave&gt; wave-operate &quot;ship invoices first&quot;
 lf wave status product
 </code></pre>
 <p><code>task run</code> places the Task, then runs a fresh Flow in its checkout exactly as
-<code>lf --task ISSUE run FLOW</code> does, returning when the Flow ends; it never
+<code>lf --task ISSUE flow FLOW</code> does, returning when the Flow ends; it never
 continues an earlier one. Repository rotation converges every Wave on the
 requested Project name, preserving active Task identity and execution. Direct
 questions and helpers use attributed LfSessions without gaining Flow

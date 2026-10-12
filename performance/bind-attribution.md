@@ -30,8 +30,8 @@ carrying Session history has been in use; rerun the report then.
 
 ## What post-hoc would change
 
-- **Task totals** (`lf usage --task`, the `--weekly` Task breakdown, `lf mon show`,
-  `lf activity`): a Task's past weeks grow on the day a Session is bound.
+- **Task totals** (`lf usage --task`, the `--weekly` Task breakdown, `lf history show`,
+  `lf history`): a Task's past weeks grow on the day a Session is bound.
 - **Wave totals**: grow only when the bound Session had no Wave. Bind keeps an
   existing Wave, so usage never leaves one Wave for another.
 - **Published Wave readings** (`context-*`): unchanged. They are machine-wide

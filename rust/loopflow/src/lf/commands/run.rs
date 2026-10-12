@@ -7,6 +7,7 @@ use crate::agent::AgentConfig;
 use crate::agent::ProcessConfig;
 use crate::config::parse_agent;
 use crate::flow::Skill;
+use crate::lf::commands::context::preview::PromptPreview;
 use crate::lf::commands::util::launch_session;
 use crate::lf::output::{format_context_header, format_reproducible_command, Colors};
 use crate::lf::Cli;
@@ -35,12 +36,7 @@ use tracing::{debug, info, instrument, trace};
 #[instrument(skip(cli, message), fields(skill = ?skill, has_message = message.is_some()))]
 pub fn run(repo_root: &Path, skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<()> {
     if let Some(binding) = implicit_binding(cli)? {
-        let mut bound = cli.process_options();
-        bound.wave = Some(binding.wave_name.clone());
-        if bound.agent.is_none() {
-            bound.agent = binding.agent.clone();
-        }
-        return run_bound_prompt(skill, message, &bound, &binding).map(|_| ());
+        return run_bound_prompt(skill, message, cli, &binding).map(|_| ());
     }
     let mut built = build_prompt(repo_root, skill, message, cli)?;
     built.subjects = cli.work_subject_selector().into_iter().collect();
@@ -56,6 +52,50 @@ pub fn run(repo_root: &Path, skill: Option<&str>, message: Option<&str>, cli: &C
 
     print_context_header(&built, cli);
     run_prompt(&built, cli).map(|_| ())
+}
+
+pub(crate) fn preview_prompt(
+    cwd: &Path,
+    skill: Option<&str>,
+    message: Option<&str>,
+    cli: &Cli,
+    binding: Option<&crate::ops::WorkBinding>,
+    captured: bool,
+) -> Result<PromptPreview> {
+    anyhow::ensure!(
+        operator_scope(skill, cli, cwd, binding)?.is_none(),
+        "context unavailable before the operator's scope checkout is prepared; preview from its existing checkout"
+    );
+    let built = match binding {
+        Some(binding) => build_bound_prompt(skill, message, cli, binding)?,
+        None => build_prompt_at(
+            skill,
+            message,
+            message.unwrap_or_default(),
+            cli,
+            cwd.to_path_buf(),
+            None,
+            captured,
+        )?,
+    };
+    Ok(PromptPreview {
+        checkout: built.repo_root,
+        system_prompt: crate::agent::system_prompt_with_structured_replies(&built.agent_config),
+        task_prompt: built.agent_config.task_prompt,
+        skill_invocation: built.agent_config.skill_invocation,
+        references: built
+            .components
+            .docs
+            .iter()
+            .chain(&built.components.summaries)
+            .map(
+                |doc| crate::lf::commands::context::preview::ContextReference {
+                    path: doc.path.clone(),
+                    content: doc.content.clone(),
+                },
+            )
+            .collect(),
+    })
 }
 
 /// `lf -b session resume ID MESSAGE`: one more headless turn of a conversation,
@@ -88,7 +128,15 @@ pub fn resume(id: &str, message: &str, cli: &Cli) -> Result<()> {
         .map(|wave| wave.slug().to_string());
     // Continuation belongs to the saved conversation, even when invoked from
     // another Task's checkout. Do not rediscover Work from the caller's cwd.
-    let mut built = build_prompt_at(None, Some(message), message, &turn, session.cwd, None)?;
+    let mut built = build_prompt_at(
+        None,
+        Some(message),
+        message,
+        &turn,
+        session.cwd,
+        None,
+        false,
+    )?;
     let (_, saved) = crate::session_record::resolve_manifest(
         &crate::store::lf_home_dir(),
         &session.artifact_key,
@@ -126,35 +174,31 @@ fn run_bound_prompt(
     binding: &crate::ops::WorkBinding,
 ) -> Result<Option<String>> {
     let mut scoped;
-    let binding = if resolve_skill(skill, cli, &binding.cwd)?
-        .as_ref()
-        .map(|skill| skill.name.as_str())
-        == Some("wave-operate")
-        && cli.bound_cwd.is_none()
-        && cli.task.is_none()
-        && cli.wt.is_none()
-        && crate::repository::CanonicalRepo::discover(&binding.cwd)?.as_path()
-            == binding.cwd.canonicalize()?
-    {
-        if let crate::durable::WorkRef::Wave(id) = &binding.work {
-            scoped = binding.clone();
-            scoped.cwd = crate::ops::human_session::ensure_scope_worktree(
-                &binding.cwd,
-                &crate::session::PrimaryScope::Wave(id.clone()),
-            )?
-            .path;
-            &scoped
-        } else {
-            binding
-        }
+    let binding = if let Some(scope) = operator_scope(skill, cli, &binding.cwd, Some(binding))? {
+        scoped = binding.clone();
+        scoped.cwd = crate::ops::human_session::ensure_scope_worktree(&binding.cwd, &scope)?.path;
+        &scoped
     } else {
         binding
     };
+    let built = build_bound_prompt(skill, message, cli, binding)?;
+    print_context_header(&built, cli);
+    run_prompt(&built, cli)
+}
+
+/// Preview and launch enrich the same selected Work; only launch prepares a checkout.
+fn build_bound_prompt(
+    skill: Option<&str>,
+    message: Option<&str>,
+    cli: &Cli,
+    binding: &crate::ops::WorkBinding,
+) -> Result<PromptBuild> {
     let mut launch = cli.process_options();
+    launch.wave = Some(binding.wave_name.clone());
+    launch.agent = binding.agent.clone().or(launch.agent);
     let arguments = message.unwrap_or_default();
     let message = if let crate::durable::WorkRef::Task(id) = &binding.work {
         launch.task = Some(id.to_string());
-        launch.agent = binding.agent.clone().or(launch.agent);
         message.unwrap_or_default().to_owned()
     } else {
         bound_message(binding, message)
@@ -176,8 +220,7 @@ fn run_bound_prompt(
         source: binding.source,
     });
 
-    print_context_header(&built, cli);
-    run_prompt(&built, cli)
+    Ok(built)
 }
 
 /// An `lf` launch inside a registered Task's checkout binds to that Task unless
@@ -236,23 +279,9 @@ fn build_prompt(
     cli: &Cli,
 ) -> Result<PromptBuild> {
     let start = Instant::now();
-    let repo_root = repo_root.to_path_buf();
-    let repo_root = if resolve_skill(skill, cli, &repo_root)?
-        .as_ref()
-        .map(|skill| skill.name.as_str())
-        == Some("repo-operate")
-        && cli.bound_cwd.is_none()
-        && cli.task.is_none()
-        && cli.wt.is_none()
-        && crate::repository::CanonicalRepo::discover(&repo_root)?.as_path()
-            == repo_root.canonicalize()?
-    {
-        let scope = crate::session::PrimaryScope::Repository(
-            crate::repository::CanonicalRepo::discover(&repo_root)?,
-        );
-        crate::ops::human_session::ensure_scope_worktree(&repo_root, &scope)?.path
-    } else {
-        repo_root
+    let repo_root = match operator_scope(skill, cli, repo_root, None)? {
+        Some(scope) => crate::ops::human_session::ensure_scope_worktree(repo_root, &scope)?.path,
+        None => repo_root.to_path_buf(),
     };
     debug!(elapsed_ms = start.elapsed().as_millis(), "found repo root");
     build_prompt_at(
@@ -262,6 +291,38 @@ fn build_prompt(
         cli,
         repo_root,
         None,
+        cli.skill_input.is_some(),
+    )
+}
+
+/// Decide checkout preparation from the resolved skill, not its CLI alias.
+/// Preview observes this same decision but never creates the scope checkout.
+fn operator_scope(
+    skill: Option<&str>,
+    cli: &Cli,
+    cwd: &Path,
+    binding: Option<&crate::ops::WorkBinding>,
+) -> Result<Option<crate::session::PrimaryScope>> {
+    use crate::durable::WorkRef;
+    use crate::session::PrimaryScope;
+
+    if cli.bound_cwd.is_some() || cli.task.is_some() || cli.wt.is_some() {
+        return Ok(None);
+    }
+    let skill = resolve_skill(skill, cli, cwd)?;
+    let scope = match (skill.as_ref().map(|skill| skill.name.as_str()), binding) {
+        (Some("repo-operate"), None) => {
+            PrimaryScope::Repository(crate::repository::CanonicalRepo::discover(cwd)?)
+        }
+        (Some("wave-operate"), Some(binding)) => match &binding.work {
+            WorkRef::Wave(id) => PrimaryScope::Wave(id.clone()),
+            _ => return Ok(None),
+        },
+        _ => return Ok(None),
+    };
+    Ok(
+        (crate::repository::CanonicalRepo::discover(cwd)?.as_path() == cwd.canonicalize()?)
+            .then_some(scope),
     )
 }
 
@@ -292,12 +353,20 @@ fn build_bound_prompt_at(
             crate::trace::ContextAssetKind::Goal,
             crate::trace::ContextScope::Task,
         )),
+        cli.skill_input.is_some(),
     )?;
-    if message != arguments {
+    if message != arguments && !cli.context {
         let path = crate::prompt::write_prompt_log(repo_root, message, "work-direction", None)?;
         if let Some(context) = &mut built.agent_config.conversation_context {
             context.references.push(path);
         }
+    }
+    if message != arguments && cli.context {
+        built.components.summaries.push(crate::prompt::Document {
+            path: "work-direction (saved at launch)".into(),
+            content: message.into(),
+            source: crate::prompt::DocumentSource::Summary,
+        });
     }
     Ok(built)
 }
@@ -315,9 +384,12 @@ fn prepare_task_input(
     let Some(id) = &cli.task else { return Ok(None) };
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
-        let store = std::sync::Arc::new(
-            crate::store::open_store(&crate::store::storage_config_from_env()?).await?,
-        );
+        let store = std::sync::Arc::new(if cli.context {
+            crate::store::read_existing_registry()?
+                .ok_or_else(|| anyhow!("Task input unavailable: no local registry"))?
+        } else {
+            crate::store::open_store(&crate::store::storage_config_from_env()?).await?
+        });
         let task = store
             .get_task_by_issue(id)
             .await?
@@ -326,7 +398,9 @@ fn prepare_task_input(
             .get_wave(&task.wave_id)
             .await?
             .ok_or_else(|| anyhow!("Task Wave is missing"))?;
-        crate::ops::linear_observe::sync_repository(&store, wave.repo()).await;
+        if !cli.context {
+            crate::ops::linear_observe::sync_repository(&store, wave.repo()).await;
+        }
         let task = store
             .get_task(&task.id)
             .await?
@@ -343,6 +417,7 @@ fn build_prompt_at(
     cli: &Cli,
     repo_root: PathBuf,
     message_context: Option<(crate::trace::ContextAssetKind, crate::trace::ContextScope)>,
+    captured: bool,
 ) -> Result<PromptBuild> {
     let is_interactive = is_interactive_run(cli, skill, message);
     let task_input = prepare_task_input(cli)?;
@@ -389,7 +464,23 @@ fn build_prompt_at(
             .then(crate::work::wave::context::resolve_ambient_wave_name)
             .flatten()
     });
-    let prepared = prepare_process_prompt(
+    // Ordinary third-party skills need their own instructions, not the Work
+    // operating manual. Captured Flows and attributed Work retain that guidance.
+    let standalone_native = task_input.is_none()
+        && wave.is_none()
+        && !captured
+        && message_context.is_none()
+        && discovered_skill.as_ref().is_some_and(|skill| {
+            skill.source.as_ref().is_some_and(|source| {
+                source.dialect != crate::skills::catalog::SkillDialect::Loopflow
+            })
+        });
+    let prepare = if cli.context {
+        crate::prompt::process::preview_process_prompt
+    } else {
+        prepare_process_prompt
+    };
+    let prepared = prepare(
         &config,
         ProcessPromptInput {
             repo_root: repo_root.clone(),
@@ -400,13 +491,11 @@ fn build_prompt_at(
             wave,
             message: message.map(|value| value.to_string()),
             skill_arguments: arguments.to_string(),
-            no_loopflow: cli.no_loopflow,
+            no_loopflow: standalone_native,
             agent: task_input
                 .as_ref()
                 .and_then(|(_, seed)| seed.task.agent.clone())
                 .or_else(|| cli.agent.clone()),
-            cwd: Some(repo_root.clone()),
-            max_turns: cli.max_turns,
             yolo_mode: cli.yolo || config.yolo,
             source_overrides: ContextSourceOverrides {
                 diff_files: cli.diff_files_setting(),
@@ -454,7 +543,7 @@ fn build_prompt_at(
 
     let mut agent_config = prepared.config;
     agent_config.output_schema = cli.output_schema.clone();
-    if confine {
+    if confine && !cli.context {
         agent_config.write_scope = crate::agent::AgentWriteScope::Worktree;
         agent_config.execution_boundary = Some(crate::agent::checkout_execution_boundary(
             &repo_root,
@@ -524,18 +613,12 @@ fn print_context_header(built: &PromptBuild, cli: &Cli) {
     }
     let colors = Colors::new();
     let header = format_context_header(&built.context, &built.components);
-    let cli_agent = if cli.agent.is_some() {
-        built.agent_config.agent.as_deref()
-    } else {
-        None
-    };
     let command = format_reproducible_command(
         built.skill_name.as_deref(),
         built.components.wave.as_deref(),
         &cli.docs,
         cli.clipboard,
-        cli.no_loopflow,
-        cli_agent,
+        built.agent_config.agent.as_deref(),
     );
     eprintln!(
         "{dim}{header}\n\n  {command}{reset}",
@@ -1046,30 +1129,12 @@ fn relay_directives(relay: &std::path::Path, target: &str) {
     }
 }
 
-pub fn split_skill_args(args: &[String]) -> Result<(String, Vec<String>)> {
-    let first = args.first().ok_or_else(|| anyhow!("no skill specified"))?;
-
-    let mut skill = first.clone();
-    let skill_args = args.iter().skip(1).cloned().collect::<Vec<_>>();
-
-    // Trailing colon is a separator: `implement: add auth` → skill="implement"
-    if let Some(stripped) = skill.strip_suffix(':') {
-        skill = stripped.to_string();
-    }
-
-    if skill.is_empty() {
-        return Err(anyhow!("no skill specified"));
-    }
-
-    Ok((skill, skill_args))
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
         attributed_context, begin_capture, build_bound_prompt_at, build_prompt, build_prompt_at,
         is_interactive_run, is_interactive_run_with_tty, run_headless_prompt, run_prompt,
-        split_skill_args, PromptBuild,
+        PromptBuild,
     };
 
     use crate::agent::{run_agent, AgentCapabilities, AgentConfig, ProcessConfig};
@@ -1768,6 +1833,7 @@ for line in sys.stdin:
             &cli,
             repo.path().to_path_buf(),
             None,
+            false,
         )
         .unwrap();
 
@@ -1812,6 +1878,7 @@ for line in sys.stdin:
             &cli,
             repo.path().to_path_buf(),
             None,
+            false,
         )
         .unwrap();
 
@@ -1905,33 +1972,5 @@ for line in sys.stdin:
             .assets
             .iter()
             .all(|asset| asset.kind != ContextAssetKind::Assembly));
-    }
-
-    #[test]
-    fn split_skill_args_handles_trailing_colon() {
-        let args = vec![
-            "implement:".to_string(),
-            "add".to_string(),
-            "logs".to_string(),
-        ];
-        let (skill, rest) = split_skill_args(&args).expect("split args");
-        assert_eq!(skill, "implement");
-        assert_eq!(rest, vec!["add".to_string(), "logs".to_string()]);
-    }
-
-    #[test]
-    fn split_skill_args_preserves_namespaced_skill() {
-        let args = vec!["team/explain-code".to_string()];
-        let (skill, rest) = split_skill_args(&args).expect("split args");
-        assert_eq!(skill, "team/explain-code");
-        assert!(rest.is_empty());
-    }
-
-    #[test]
-    fn split_skill_args_preserves_namespaced_skill_with_args() {
-        let args = vec!["gstack/office-hours".to_string(), "auth flow".to_string()];
-        let (skill, rest) = split_skill_args(&args).expect("split args");
-        assert_eq!(skill, "gstack/office-hours");
-        assert_eq!(rest, vec!["auth flow".to_string()]);
     }
 }

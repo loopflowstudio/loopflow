@@ -33,6 +33,50 @@ credentials from Doppler. Download it back and compare its checksum with the
 build's, then update the URL and checksum in `Package.swift`.
 Use a new artifact version whenever the patch changes.
 
+## Bounded text
+
+```sh
+# In the patched Ghostty source; terminal-only proof, including on Linux.
+zig build test-lib-vt -Demit-lib-vt=true -Dtest-filter='bounded text'
+```
+
+`0004-bounded-text.patch` adds `ghostty_surface_read_text_bounded`. Supply a
+selection for viewport or scrollback, or NULL for the current text/command-block
+selection. Supply the destination buffer and its byte capacity. The result gives
+bytes written and whether content was truncated; it is not NUL-terminated.
+An empty terminal/selection succeeds with zero bytes, while an invalid explicit
+selection fails. The prefix always ends at a complete UTF-8 scalar.
+
+The existing `ScreenFormatter` writes directly to fixed caller storage and stops
+when it fills. Neither the reader nor its formatter allocates a full string or
+pin map. The renderer lock covers selection resolution and extraction. Reading
+an invalidated command-block selection no longer releases its tracked pin:
+selection changes, reset and teardown keep that ownership. Clipboard/Quick Look
+retain their existing unbounded API and viewport metadata.
+
+`Package.swift` selects the published `GhosttyKit-a60e9e2-lf3.xcframework.zip`.
+Its public download matches SwiftPM checksum
+`dfa0e65b216cccbee132b1d579bc2bd646fda34b2822fe8e00b0306b70bada7f`.
+The October 9 macOS build passed 270 patch tests (four skipped) and exported the
+bounded reader for arm64 and x86_64. Reset now releases command-block selection
+directly; the prior suite failed because passive reads no longer did that cleanup.
+Desktop reads viewport, full scrollback or current selection into fixed storage,
+then copies only the written UTF-8 prefix. Empty selection succeeds. Native pane
+fixtures compile but require a display; headless checks do not prove mounted reads.
+
+On Linux, also compile the embedded C entry point (the terminal-only test does
+not compile it):
+
+```sh
+zig build -Dapp-runtime=none -Dfont-backend=fontconfig_freetype -Drenderer=opengl -Demit-lib-vt=false
+nm -D zig-out/lib/ghostty-internal.so | grep ' T ghostty_surface_read_text_bounded$'
+```
+
+Prepare lazy dependencies with networking enabled before an isolated build.
+Use the discovery-capable Fontconfig backend: `freetype` alone does not compile
+upstream's embedded app. This verifies Linux libraries, not a macOS framework,
+native surface reads or publication readiness.
+
 ## Program Status
 
 `0003-program-status.patch` forwards validated OSC 7501 reports from Ghostty's

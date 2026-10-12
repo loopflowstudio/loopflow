@@ -43,9 +43,12 @@ pub(crate) mod project_content;
 mod project_rotation;
 pub(crate) mod project_selection;
 mod project_transitions;
+mod repositories;
 mod revisions;
 mod session_events;
 pub(crate) mod sessions;
+pub(crate) mod task_admission;
+
 mod steers;
 mod task_comments;
 mod task_content;
@@ -140,9 +143,22 @@ pub(crate) fn read_nonterminal_task_worktrees(path: &Path) -> StoreResult<Vec<Pa
     )?;
     crate::performance::observe_sqlite(&conn);
     conn.execute_batch("PRAGMA query_only = ON; PRAGMA busy_timeout = 5000;")?;
-    let mut statement = conn.prepare(&format!(
-        "SELECT t.worktree FROM tasks t WHERE t.worktree IS NOT NULL AND t.worktree != '' AND {}",
+    // This guard reads the installed release without migrating it. Its completion
+    // owner may still be the Workflow, rather than the candidate's planning field.
+    let planning_completion: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('tasks') WHERE name='planning_completed')",
+        [],
+        |row| row.get(0),
+    )?;
+    let open = if planning_completion {
         durable::task_open_sql("t")
+    } else {
+        "t.abandoned_at IS NULL AND NOT EXISTS(SELECT 1 FROM task_workflows wf \
+         WHERE wf.task_id=t.id AND wf.node='end' AND wf.edge IS NULL)"
+            .to_owned()
+    };
+    let mut statement = conn.prepare(&format!(
+        "SELECT t.worktree FROM tasks t WHERE t.worktree IS NOT NULL AND t.worktree != '' AND ({open})"
     ))?;
     let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
     rows.map(|row| row.map(PathBuf::from).map_err(StoreError::from))
@@ -730,7 +746,6 @@ impl SqliteStore {
             "UPDATE waves SET promoted_at=COALESCE(promoted_at,?2) WHERE id=?1",
             params![wave.id(), wave.promoted_at().map(|at| at.unix_timestamp())],
         )?;
-        durable::create_wave_work(&tx, wave.id(), created_at)?;
         wave_definitions::import_workflows_on(&tx, wave.id().as_str(), Path::new(wave.repo()))?;
         tx.commit()?;
         Ok(())
@@ -1745,62 +1760,6 @@ impl SqliteStore {
             })
             .optional()?;
         wave.transpose()
-    }
-
-    pub(crate) fn repair_wave_repo(
-        &self,
-        wave_id: &WaveId,
-        expected_repo: &str,
-        target_repo: &str,
-    ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current = tx
-            .query_row(
-                "SELECT repo, slug FROM wave_addresses WHERE id = ?1",
-                params![wave_id],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-            )
-            .optional()?
-            .ok_or_else(|| StoreError::InvalidData(format!("Wave {wave_id} is not registered")))?;
-        if current.0 == target_repo {
-            tx.commit()?;
-            return Ok(());
-        }
-        if current.0 != expected_repo {
-            return Err(StoreError::InvalidData(format!(
-                "Wave {wave_id} repository changed from {expected_repo} while its canonical path was being repaired"
-            )));
-        }
-        let collision = tx
-            .query_row(
-                "SELECT id FROM wave_addresses
-                 WHERE repo = ?1 AND slug = ?2 AND id != ?3 AND retired_at IS NULL",
-                params![target_repo, current.1, wave_id],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()?;
-        if let Some(collision) = collision {
-            return Err(StoreError::InvalidData(format!(
-                "cannot repair Wave {wave_id} repository to {target_repo}: locator belongs to Wave {collision}"
-            )));
-        }
-        // Canonicalization changes one repository identity, including every Wave
-        // and shared planning entity under that alias. Move them atomically;
-        // uniqueness conflicts must preserve both observations, never merge them.
-        for table in [
-            "waves",
-            "pm_projects",
-            "pm_items",
-            "pm_project_name_cutover",
-        ] {
-            tx.execute(
-                &format!("UPDATE {table} SET repo = ?2 WHERE repo = ?1"),
-                params![expected_repo, target_repo],
-            )?;
-        }
-        tx.commit()?;
-        Ok(())
     }
 
     pub fn find_waves_by_slug(&self, slug: &str) -> StoreResult<Vec<Wave>> {

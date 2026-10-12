@@ -3,7 +3,7 @@
 //! Work owns authored Project content and Tasks. Linear refresh accepts provider
 //! facts through the shared writer; ordinary readers consume saved Work.
 
-use super::planning_sync::{lock_wave_planning, planning_store, storage_config_from_env};
+use super::planning_sync::{lock_wave_planning, planning_store};
 use crate::linear::LinearIssue;
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
@@ -1738,11 +1738,13 @@ pub(crate) async fn rename(
 pub fn list_local_waves(repo: &Path) -> OpsResult<Vec<String>> {
     let canonical = crate::repository::CanonicalRepo::discover(repo)
         .map_err(|error| OpsError::Message(error.to_string()))?;
-    let StorageConfig::Sqlite { path } = storage_config_from_env()?;
-    match std::fs::metadata(&path) {
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(OpsError::Message(error.to_string())),
-        Ok(_) => {}
+    let crate::store::StorageConfig::Sqlite { path } =
+        super::planning_sync::storage_config_from_env()?;
+    if !path
+        .try_exists()
+        .map_err(|error| OpsError::Message(error.to_string()))?
+    {
+        return Ok(Vec::new());
     }
     let store = crate::store::sqlite::SqliteStore::open_read_only(&path)
         .map_err(|error| OpsError::Message(error.to_string()))?;

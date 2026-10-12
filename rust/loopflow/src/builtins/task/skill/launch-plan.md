@@ -101,7 +101,7 @@ pursuit; `feature` drafts the design first; both land an accepted PR through
 conversation, never Flow steps. A Task on a workflow takes only an edge
 leaving its current node: bare `lf task run <issue>` takes the only one or
 names the choices, `lf task run <issue> <flow>` picks one, and naming a
-workflow takes it up from its start. `lf --task <issue> run <flow>` runs any
+workflow takes it up from its start. `lf --task <issue> flow <flow>` runs any
 Flow without moving the Task.
 Preserve intent, constraints, and done-when
 proof in durable records so the Task remains useful after `scratch/` is cleared.

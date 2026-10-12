@@ -153,7 +153,7 @@ public struct FlowProcessDetail: Decodable, Sendable, Hashable {
     }
 }
 
-public struct TaskRunControl: Decodable, Sendable, Hashable {
+public struct TaskRunControl: Codable, Sendable, Hashable {
     public let unavailable: String?
 }
 

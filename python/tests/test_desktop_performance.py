@@ -41,12 +41,13 @@ def test_cleanup_closes_descendant_pipes_even_after_leader_exit(leader_exited: b
         performance._stop(process)
         # EOF requires the surviving descendant to close its inherited pipes.
         assert process.communicate(timeout=5) == ("", "")
-    finally:
+    except BaseException:
         try:
             os.killpg(process.pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
         process.wait()
+        raise
 
 
 @pytest.mark.parametrize("termination", ["signal", "timeout"])
@@ -686,6 +687,8 @@ def test_git_outcomes_keep_failed_and_unfinished_children(tmp_path: Path) -> Non
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS sandbox boundary")
 def test_checkout_observation_preserves_read_boundary_and_detects_changes(tmp_path: Path) -> None:
+    if os.environ.get("LOOPFLOW_NETWORK_ISOLATED"):
+        pytest.skip("macOS cannot nest sandboxes; gate runs this self-isolating proof separately")
     tmp_path = tmp_path.resolve()
     checkout = tmp_path / "checkout"
     checkout.mkdir()
@@ -724,7 +727,12 @@ def test_checkout_observation_preserves_read_boundary_and_detects_changes(tmp_pa
         return performance._checkout_inputs(database, prefix, policy, git)
 
     first = observe()
-    env = {"HOME": str(tmp_path), "PATH": "/usr/bin:/bin", "GIT_OPTIONAL_LOCKS": "0"}
+    env = {
+        "HOME": str(tmp_path),
+        "PATH": "/usr/bin:/bin",
+        "GIT_OPTIONAL_LOCKS": "0",
+        "GIT_CONFIG_NOSYSTEM": "1",
+    }
     result = subprocess.run(
         prefix + [str(git), "-C", str(alias), "status", "--porcelain"], env=env, capture_output=True
     )

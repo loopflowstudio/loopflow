@@ -82,9 +82,9 @@ as one PR; one large honest PR beats an artificially staged series.
 6. Publish each child with `lf pr publish` without waiting for its parent to
    merge. Use `lf sync` for parent code updates and after its squash merge;
    the child retains its Task, branch, PR, Session and design while targeting main.
-   Land authorized work through `ship`: gate and waited landing. Preserve accepted
-   unverified outcomes in PR copy before scratch cleanup. Record independent later
-   work as ordinary Tasks and linking comments, then confirm source completion.
-   Inspect live work and receipts after a failure; retry only the unfinished write.
+   Land authorized work through `ship`: gate and waited landing. Its Workflow
+   endpoint requests completion. Preserve accepted unverified outcomes in PR copy
+   before scratch cleanup. Optional later work uses ordinary Task creation.
+   If finishing stops, inspect live work and retry completion alone after merge.
    Retire a superseded original PR only after its code and intended outcome have
    owners and the caller's authority covers abandonment; preserve unrelated work.

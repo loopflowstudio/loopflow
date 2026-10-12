@@ -1,10 +1,15 @@
 //! Inspect memory and scratch size targets without restricting launch input.
 
+pub mod preview;
+pub use crate::ops::human_session::{
+    OpenMode, SessionConnectAction, SessionConnectExplanation, SessionConnectIntent,
+};
+
 use std::io::Read;
 use std::os::fd::AsRawFd;
 use std::time::{Duration, Instant};
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use serde::Serialize;
 
 use crate::config::load_config;
@@ -75,6 +80,188 @@ pub fn run(json: bool, wave: Option<&str>, task: Option<&str>) -> Result<()> {
         );
     }
     Ok(())
+}
+
+/// Explain stored identity without creating a repository plan or preparing Work.
+pub fn explain(
+    wave: Option<&str>,
+    task: Option<&str>,
+    session: Option<&str>,
+    process: Option<&str>,
+) -> Result<crate::ops::context::ContextExplanation> {
+    anyhow::ensure!(
+        (wave.is_some() || task.is_some()) as usize
+            + session.is_some() as usize
+            + process.is_some() as usize
+            <= 1,
+        "select Work, a Session, or a Process, not several independent targets"
+    );
+    let cwd = std::env::current_dir()?;
+    let runtime = tokio::runtime::Runtime::new()?;
+    Ok(runtime.block_on(async {
+        use crate::ops::context::ContextExplanation;
+        match read_registry() {
+            Ok(store) => {
+                crate::ops::context::explain_context(
+                    &store,
+                    &cwd,
+                    crate::ops::WorkSelection { task, wave },
+                    session,
+                    process,
+                )
+                .await
+            }
+            Err(error) => ContextExplanation::unavailable(error),
+        }
+    }))
+}
+
+/// Read invocation effects and missing evidence using the same read-only registry.
+pub fn explain_task_run(
+    task: Option<&str>,
+    options: &crate::ops::task::TaskProcessOptions,
+) -> Result<crate::ops::task::TaskRunExplanation> {
+    let cwd = std::env::current_dir()?;
+    let runtime = tokio::runtime::Runtime::new()?;
+    Ok(runtime.block_on(async {
+        match read_registry() {
+            Ok(store) => {
+                crate::ops::task::explain_task_run(
+                    &store,
+                    &cwd,
+                    crate::ops::WorkSelection {
+                        task,
+                        wave: options.wave.as_deref(),
+                    },
+                    options,
+                )
+                .await
+            }
+            Err(error) => crate::ops::task::TaskRunExplanation {
+                resolution: crate::ops::context::ContextExplanation::unavailable(&error),
+                action: None,
+                impediments: Vec::new(),
+                unavailable: vec![error.to_string()],
+            },
+        }
+    }))
+}
+
+fn read_registry() -> Result<crate::store::SharedStore> {
+    crate::store::read_existing_registry()
+        .map_err(|error| anyhow!("Local registry unavailable: {error}"))?
+        .map(std::sync::Arc::new)
+        .ok_or_else(|| anyhow!("Local registry is absent"))
+}
+
+/// Explain connection without admitting a provider conversation or acquiring its client.
+pub fn explain_session_connect(
+    id: Option<&str>,
+    replace: bool,
+    try_open: bool,
+    prepare_only: bool,
+) -> Result<SessionConnectExplanation> {
+    let cwd = std::env::current_dir()?;
+    let runtime = tokio::runtime::Runtime::new()?;
+    Ok(runtime.block_on(async {
+        match read_registry() {
+            Ok(store) => {
+                crate::ops::human_session::explain_connect(
+                    &store,
+                    &cwd,
+                    id,
+                    OpenMode::from_flags(replace, try_open),
+                    prepare_only,
+                )
+                .await
+            }
+            Err(error) => SessionConnectExplanation::unavailable(error),
+        }
+    }))
+}
+
+/// Explain a position change without recording a move or reconciling completion.
+pub fn explain_task_move(
+    task: &str,
+    wave: Option<&str>,
+    node: &str,
+    reason: Option<&str>,
+) -> Result<crate::ops::task::TaskMoveExplanation> {
+    let cwd = std::env::current_dir()?;
+    let runtime = tokio::runtime::Runtime::new()?;
+    Ok(runtime.block_on(async {
+        match read_registry() {
+            Ok(store) => {
+                crate::ops::task::explain_task_move(
+                    &store,
+                    &cwd,
+                    crate::ops::WorkSelection {
+                        task: Some(task),
+                        wave,
+                    },
+                    node,
+                    reason,
+                )
+                .await
+            }
+            Err(error) => crate::ops::task::TaskMoveExplanation {
+                resolution: crate::ops::context::ContextExplanation::unavailable(&error),
+                action: None,
+                impediments: Vec::new(),
+                unavailable: vec![error.to_string()],
+            },
+        }
+    }))
+}
+
+/// Read planning intent without importing, saving, or synchronizing a record.
+pub fn explain_task_planning(
+    task: Option<&str>,
+    wave: Option<&str>,
+    request: &crate::ops::task::TaskPlanningRequest<'_>,
+) -> Result<crate::ops::task::TaskPlanningExplanation> {
+    let cwd = std::env::current_dir()?;
+    let runtime = tokio::runtime::Runtime::new()?;
+    Ok(runtime.block_on(async {
+        match read_registry() {
+            Ok(store) => {
+                crate::ops::task::explain_task_planning(
+                    &store,
+                    &cwd,
+                    crate::ops::WorkSelection { task, wave },
+                    request,
+                )
+                .await
+            }
+            Err(error) => crate::ops::task::TaskPlanningExplanation::unavailable(error),
+        }
+    }))
+}
+
+/// Inspect checkout preparation without acquiring a lease or fetching refs.
+pub fn explain_task_checkout(
+    task: Option<&str>,
+    options: &crate::ops::task::TaskProcessOptions,
+) -> Result<crate::ops::task::TaskCheckoutExplanation> {
+    let cwd = std::env::current_dir()?;
+    let runtime = tokio::runtime::Runtime::new()?;
+    Ok(runtime.block_on(async {
+        match read_registry() {
+            Ok(store) => {
+                crate::ops::task::explain_task_checkout(
+                    &store,
+                    &cwd,
+                    crate::ops::WorkSelection {
+                        task,
+                        wave: options.wave.as_deref(),
+                    },
+                    options,
+                )
+                .await
+            }
+            Err(error) => crate::ops::task::TaskCheckoutExplanation::unavailable(error),
+        }
+    }))
 }
 
 /// Provider callbacks use launch-owned authority rather than the current client.

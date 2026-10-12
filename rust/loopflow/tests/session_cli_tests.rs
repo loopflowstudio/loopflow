@@ -55,7 +55,7 @@ fn session_cli_uses_one_truthful_resolution_contract() {
 
     let removed = run(
         home.path(),
-        &["monitor", "show", "historical-input", "--resume"],
+        &["history", "show", "historical-input", "--resume"],
     );
     assert!(!removed.status.success());
     assert!(String::from_utf8_lossy(&removed.stderr).contains("unexpected argument '--resume'"));
@@ -192,7 +192,7 @@ fn prepared_conversation_keeps_captured_input_without_a_run_before_provider_star
     assert!(dir.join("prepared").exists());
     assert!(!dir.join("provider-clients").exists());
     assert!(!dir.join("terminal.json").exists());
-    let inspected = run(home.path(), &["monitor", "show", &id, "--json"]);
+    let inspected = run(home.path(), &["history", "show", &id, "--json"]);
     assert!(
         inspected.status.success(),
         "{}",
@@ -698,14 +698,7 @@ fn headless_resume_preserves_a_held_owners_capture_on_both_harnesses() {
         ));
         let output = command(
             home.path(),
-            &[
-                "--batch",
-                "--no-loopflow",
-                "session",
-                "resume",
-                &id,
-                "another instruction",
-            ],
+            &["--batch", "session", "resume", &id, "another instruction"],
         )
         .current_dir(&cwd)
         .env("PATH", std::env::join_paths(paths).unwrap())
@@ -806,14 +799,7 @@ for line in sys.stdin:
     .unwrap();
     let output = command(
         home.path(),
-        &[
-            "-b",
-            "--no-loopflow",
-            "session",
-            "resume",
-            &id,
-            "Continue here",
-        ],
+        &["-b", "session", "resume", &id, "Continue here"],
     )
     .current_dir(&caller)
     .env("PATH", path)

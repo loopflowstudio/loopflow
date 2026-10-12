@@ -496,6 +496,8 @@ async fn planning_graphql(
 
 #[tokio::test]
 async fn project_workflow_uses_stored_definition_offline() {
+    use crate::ops::project::{self, PlanTarget};
+
     let fixture = Fixture::new().await;
     let (repo, wave) = planning_repo(&fixture).await;
     let definition = "nodes: {}\nedges: [{from: start, to: end}]\n";
@@ -503,10 +505,14 @@ async fn project_workflow_uses_stored_definition_offline() {
     std::fs::write(&source, definition).unwrap();
     LINEAR_TEST_CONTEXT
         .scope(fixture.context("http://127.0.0.1:1"), async {
-            let selected =
-                crate::ops::project::workflow(&repo, "project-1", Some("code"), Some(&source))
-                    .await
-                    .unwrap();
+            let selected = crate::ops::project::set_workflow(
+                &repo,
+                PlanTarget::Project("project-1"),
+                "code",
+                Some(&source),
+            )
+            .await
+            .unwrap();
             assert_eq!(selected.0.workflow, "code");
             assert_eq!(selected.0.linear_id.as_ref().unwrap().as_str(), "project-1");
             assert_eq!(
@@ -520,7 +526,7 @@ async fn project_workflow_uses_stored_definition_offline() {
             );
             std::fs::remove_file(&source).unwrap();
             assert_eq!(
-                crate::ops::project::workflow_source(&repo, "project-1", "code")
+                project::workflow_source(&repo, PlanTarget::Project("project-1"), "code")
                     .await
                     .unwrap(),
                 definition
@@ -534,7 +540,7 @@ async fn project_workflow_uses_stored_definition_offline() {
                     .as_deref(),
                 Some(definition)
             );
-            let catalog = crate::ops::project::workflow_catalog(&repo, Some("project-1"))
+            let catalog = project::workflow_catalog(&repo, Some(wave.id().as_str()))
                 .await
                 .unwrap();
             let entries = catalog
@@ -2586,7 +2592,7 @@ fi
             });
             if merge.is_some() {
                 runtime.block_on(fixture.store.insert_task_pr(&pr)).unwrap();
-                // Observe the merge before recording the accepted disposition.
+                // Observe the merge without requesting completion.
                 // Provider completion itself is the operation exercised below.
                 runtime
                     .block_on(crate::ops::task::reconcile_delivered_task(
@@ -4590,7 +4596,7 @@ fn project_prose_save_delivers_and_settles_without_changing_managed_fields() {
             let task_before = fixture.store.sqlite.task(&task.id).unwrap().unwrap();
             assert_eq!(before.description, "Before.\n\n## Notes\nAfter.");
             for prose in ["  New purpose.\n\n```yaml\nworkflow: example\n```\n  ", ""] {
-                let (saved, _) = crate::ops::project::edit(repo, task.project_id.as_str(), None, None, Some(prose)).await.unwrap();
+                let (saved, _) = crate::ops::project::edit(repo, crate::ops::project::PlanTarget::Project(task.project_id.as_str()), None, None, Some(prose)).await.unwrap();
                 assert_eq!(saved.description, prose.trim());
                 assert_eq!(saved.id, before.id);
                 assert_eq!(saved.workflow, before.workflow);

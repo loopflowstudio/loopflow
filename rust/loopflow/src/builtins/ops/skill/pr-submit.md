@@ -14,9 +14,8 @@ creates or updates the PR, marks it ready and assigns the reviewer. It consumes
 valid prepared copy or generates it through pr-message. Supply explicit copy
 only for an intentional override, then check the returned scope and proof claims.
 
-After verified merge, the Task's landing Flow or next
-Task/Wave operation files linked follow-ups or records none needed, then completes
-it. A Task has at most one PR; additional delivery belongs to another Task.
+After verified merge, an open Task can be completed when its outcome is satisfied.
+Optional later work uses ordinary Task creation; no disposition is required. A Task has at most one PR; additional delivery belongs to another Task.
 Repair a reported conflict in this checkout using the existing sync operation,
 then retry. Preserve actual errors and uncertain external effects.
 

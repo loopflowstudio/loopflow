@@ -22,8 +22,14 @@ extension Notification.Name {
 }
 
 enum TerminalIdentity: Hashable, Sendable {
-    case session(String)
-    case shell(String)
+    case session(String, machineId: String)
+    case shell(String, machineId: String)
+
+    var machineId: String {
+        switch self {
+        case .session(_, let machineId), .shell(_, let machineId): machineId
+        }
+    }
 }
 
 struct GhosttyTerminalTitle {

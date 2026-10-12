@@ -1,6 +1,4 @@
-// Repository rail, Wave list, and the selected Wave's work map + conversation.
-// Discovery is a periodic registry query (`lf wave list`); Work and Session
-// motion stream directly from that Wave's listener.
+// Portfolio's repository rail and Wave inspectors. Tasks open in their repository window.
 
 import SwiftUI
 import Loopflow
@@ -17,19 +15,12 @@ private final class WindowModel {
 
 struct WavesView: View {
     let portfolioService: PortfolioService
-    @State private var sessionWorkspaces = SessionsWorkspaceRegistry()
-    /// The window's one workspace model: the Work list and the Task sheet both
-    /// read it, and it opens from the saved workspace like every other window.
+    /// The Work list and Wave inspectors share this window's readings.
     /// Built when a window first renders: the app describes this view at every
     /// launch, and a model decodes the saved workspace.
     @State private var window = WindowModel()
     private var model: WorkModel { window.model }
-    @State private var showsTaskWorkspace = false
-
-    /// A repo to pre-select on appear (from `--repo`, a deep link, or the repo
-    /// window). Collapsed to its main worktree for reads — the on-disk `wave/`
-    /// dir holds quick-launch templates that live on main by design.
-    var initialRepoPath: String? = nil
+    let openTask: (String, String) -> Void
 
     @Environment(\.palette) private var palette
 
@@ -47,7 +38,6 @@ struct WavesView: View {
     @State private var selection: RepoFilter = .all
     @State private var selectedWaveId: String?
     @State private var isShowingCreate = false
-    @State private var didApplyInitialRepo = false
     @State private var didRestoreStickyRepo = false
 
     /// All waves across every repo: registry rows merged with Waves authored on
@@ -130,15 +120,6 @@ struct WavesView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(palette.background)
-        .sheet(isPresented: $showsTaskWorkspace, onDismiss: { model.setRepoPath(roadmapRepoPath) }) {
-            if let repo = model.repoPath {
-                VStack {
-                    HStack { Spacer(); Button("Done") { showsTaskWorkspace = false } }.padding()
-                    SessionsView(model: model, repoPath: repo, workspaces: sessionWorkspaces)
-                }
-                .frame(minWidth: 1100, minHeight: 700)
-            }
-        }
         .task { await model.keepWorkCurrent() }
         .onChange(of: model.workScope) { _, _ in model.syncWorkScope() }
         .onChange(of: selectedWave?.id, initial: true) { _, _ in
@@ -164,15 +145,9 @@ struct WavesView: View {
             .environment(\.palette, palette)
         }
         .task {
-            let initialMain = await registerInitialRepoIfNeeded()
             await refreshRepos()
             await refreshAuthoredWaves()
-            if let initialMain, !didApplyInitialRepo {
-                didApplyInitialRepo = true
-                selection = .repo(initialMain)
-            } else {
-                restoreStickyRepoSelectionIfNeeded()
-            }
+            restoreStickyRepoSelectionIfNeeded()
             ensureRepoStates()
             await syncRepoStates()
         }
@@ -323,16 +298,12 @@ struct WavesView: View {
                 onActivateProject: { model.activateProject(id: wave.id, name: wave.name, repo: waveRepoPath(for: wave)) },
                 onClose: { selectedWaveId = nil },
                 onOpenTask: { id in
-                    model.setRepoPath(waveRepoPath(for: wave))
-                    model.select(.task(id: id))
-                    showsTaskWorkspace = true
+                    openTask(waveRepoPath(for: wave), id)
                 }
             )
             .id(waveSelectionId(wave))
-            .environment(sessionWorkspaces)
         } else {
             RoadmapView(model: model, onOpenWave: openRoadmapWave)
-            .environment(sessionWorkspaces)
         }
     }
 
@@ -398,26 +369,8 @@ struct WavesView: View {
         try await state.createWave(name: name)
     }
 
-    /// Register the launch-provided repo so it shows in the rail, and return its
-    /// main-worktree path for pre-selection.
-    private func registerInitialRepoIfNeeded() async -> String? {
-        guard let initialRepoPath, !didApplyInitialRepo else { return nil }
-        if AppTestMode.shouldBypassRegistry { return nil }
-        let readPath = await Task.detached {
-            PortfolioDiscovery.resolveLaunchRepo(initialRepoPath)
-        }.value
-        guard let readPath else { return nil }
-        if !portfolioService.repos.contains(where: { $0.path.normalizedFilePath == readPath }) {
-            portfolioService.addRepo(URL(fileURLWithPath: readPath))
-        }
-        return readPath
-    }
-
-    /// Source the rail directly from a `~/src` scan of main (non-worktree) repos,
-    /// every time. A launch-provided `initialRepoPath` is merged in via
-    /// `resolveLaunchRepo`, which accepts only Git working-tree roots and always
-    /// collapses a linked worktree to its main checkout.
-    /// Runs the git/FS work off the main thread.
+    /// Discover Portfolio repositories off the main thread; workspace opening
+    /// belongs to the identity-keyed scene, not this utility window.
     private func refreshRepos() async {
         if AppTestMode.shouldBypassRegistry {
             repos = portfolioService.repos
@@ -425,7 +378,7 @@ struct WavesView: View {
         }
 
         repos = await PortfolioDiscovery.repos(
-            initialRepoPath: initialRepoPath,
+            initialRepoPath: nil,
             persistedRepos: portfolioService.repos
         )
     }
@@ -713,5 +666,5 @@ private struct CreateWaveSheet: View {
 }
 
 #Preview {
-    WavesView(portfolioService: PortfolioService())
+    WavesView(portfolioService: PortfolioService(), openTask: { _, _ in })
 }

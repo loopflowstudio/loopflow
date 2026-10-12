@@ -52,6 +52,7 @@ def main() -> int:
         for name in list(os.environ):
             if name.startswith("LF_"):
                 del os.environ[name]
+        os.environ["LOOPFLOW_NETWORK_ISOLATED"] = "1"
         os.environ["GIT_ALLOW_PROTOCOL"] = "file"
         os.environ["GIT_TERMINAL_PROMPT"] = "0"
         os.execvp(arguments[0], arguments)

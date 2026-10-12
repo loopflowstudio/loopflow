@@ -16,7 +16,18 @@ final class PaneHover {
     var paneId: String?
 }
 
-/// One window's terminal workspace for a checkout: the pane layout and the
+extension PaneState {
+    /// Content owns terminal identity; workspace placement grants no location fallback.
+    var terminal: TerminalIdentity? {
+        switch content {
+        case .shell(let location, _): location.map { .shell(id, machineId: $0.machineId) }
+        case .session(let id, let location, _): location.map { .session(id, machineId: $0.machineId) }
+        case .empty, .files, .flowLog: nil
+        }
+    }
+}
+
+/// One window's retained workspace for Work: the pane layout and the
 /// pool of live surfaces behind it.
 @MainActor
 @Observable
@@ -32,15 +43,107 @@ final class SessionsWorkspace {
         multiplexer.setCollapsed(paneId: paneId, collapsed: collapsed)
     }
 
+    var key: WorkWorkspaceKey
+    var title: String
+    var location: WorkspaceIdentity?
+    var presentation = WorkNavigation.WorkspacePresentation()
+    let localMachineId: String?
+
+    @discardableResult
+    func newShell(beside pane: String? = nil, focus: Bool = true) throws -> PaneState? {
+        let (location, execution) = try shellLocation(beside: pane ?? multiplexer.focusedPaneId)
+        let command = try shellCommand(at: location, execution: execution)
+        return multiplexer.newShell(command: command, location: location, execution: execution, beside: pane, focus: focus)
+    }
+
+    @discardableResult
+    func split(_ pane: String, axis: SplitAxis, focus: Bool = true) throws -> PaneState? {
+        let (location, execution) = try shellLocation(beside: pane)
+        let command = try shellCommand(at: location, execution: execution)
+        return multiplexer.split(pane, axis: axis, command: command, location: location, execution: execution, focusNewPane: focus)
+    }
+
+    private func shellLocation(beside paneId: String) throws -> (WorkspaceIdentity, TaskLocationObservation?) {
+        guard let pane = multiplexer.layout.pane(for: paneId) else {
+            throw RegistryQueryError("The addressed pane disappeared; no shell was opened.")
+        }
+        if pane.content == .empty {
+            guard let location else {
+                throw RegistryQueryError("Prepare this Work's location before opening a shell.")
+            }
+            return (location, nil)
+        }
+        guard let location = pane.content.location else {
+            throw RegistryQueryError("Pane location is unavailable; no shell was opened.")
+        }
+        return (location, pane.executionLocation)
+    }
+
+    private func shellCommand(at identity: WorkspaceIdentity, execution: TaskLocationObservation?) throws -> [String] {
+        if identity.machineId == localMachineId { return [] }
+        guard let location = execution, location.machineID == identity.machineId,
+              case .recorded(let task, let checkout) = location.location,
+              checkout == identity.worktree else {
+            throw RegistryQueryError("Reopen the remote Task before adding a shell; no local shell was opened.")
+        }
+        return [try LocalWaveAgentLauncher.controlLfPath(), "--machine", location.machineID,
+            "--repository", location.repositoryID, "task", "shell", task,
+            "--checkout", identity.worktree]
+    }
     let multiplexer = MultiplexerStore()
     let hover = PaneHover()
-    private var taskFiles: [String: TaskFilesStore] = [:]
+    private var taskFiles: [String: (store: TaskFilesStore, execution: TaskLocationObservation?)] = [:]
 
-    func files(taskId: String, issue: String, cwd: String, query: RegistryQuery = RegistryQueryLocal.shared) -> TaskFilesStore {
-        if let files = taskFiles[taskId] { return files }
+    func files(taskId: String, issue: String, cwd: String, query: RegistryQuery = RegistryQueryLocal.shared, execution: TaskLocationObservation? = nil) -> TaskFilesStore {
+        if let files = taskFiles[taskId] { return files.store }
         let files = TaskFilesStore(issue: issue, cwd: cwd, query: query)
-        taskFiles[taskId] = files
+        taskFiles[taskId] = (files, execution)
         return files
+    }
+    /// Resolve Files from its content, not the selected checkout or a previous link.
+    func files(for content: PaneContent, task: RoadmapTask?, query: RegistryQuery) throws -> TaskFilesStore {
+        guard case .files(let taskId, let location, let execution) = content else {
+            throw RegistryQueryError("The addressed pane is not Files.")
+        }
+        let issue: String
+        let checkout: String
+        if let execution {
+            guard [taskId, task?.runtime?.workId, task?.task.identifier].compactMap({ $0 }).contains(execution.taskID) else {
+                throw RegistryQueryError("The pane's recorded owner belongs to another Task; no files were read.")
+            }
+            guard case .recorded(let ownerTask, let path?) = execution.location else {
+                throw RegistryQueryError("Task location is unavailable. Retained drafts have not moved.")
+            }
+            issue = ownerTask
+            checkout = path
+        } else {
+            guard let recorded = location, recorded.machineId == localMachineId,
+                  query.remoteMachine == nil else {
+                throw RegistryQueryError("Task file location is unavailable. Reopen the Task; no local fallback was used.")
+            }
+            if let current = task?.reference.workspace?.identity, current != recorded {
+                throw RegistryQueryError("The Task file location changed. Its previous drafts are retained, not redirected.")
+            }
+            issue = task?.runtime?.workId ?? taskId
+            checkout = recorded.worktree
+        }
+        if let entry = taskFiles[taskId] {
+            let retained = entry.store
+            guard entry.execution?.repositoryID == execution?.repositoryID,
+                  entry.execution?.taskID == execution?.taskID,
+                  entry.execution?.location == execution?.location,
+                  retained.cwd == checkout,
+                  retained.query.remoteMachine == (execution?.machineID ?? query.remoteMachine),
+                  execution == nil || retained.issue == issue else {
+                throw RegistryQueryError("The Task file location changed. Its previous drafts are retained, not redirected.")
+            }
+            return retained
+        }
+        // Retained documents keep their original transport; build it only once.
+        let fileQuery = execution.map {
+            query.onMachine($0.machineID, repository: $0.repositoryID).pinTaskLocation(to: $0)
+        } ?? query
+        return files(taskId: taskId, issue: issue, cwd: checkout, query: fileQuery, execution: execution)
     }
     let surfaces: GhosttySurfacePool
     private var surfaceClosed: AnyCancellable?
@@ -54,17 +157,22 @@ final class SessionsWorkspace {
         return store
     }
 
-    init(surfaces: GhosttySurfacePool = GhosttySurfacePool()) {
+    init(key: WorkWorkspaceKey, title: String, location: WorkspaceIdentity?, localMachineId: String?, surfaces: GhosttySurfacePool = GhosttySurfacePool()) {
+        self.key = key
+        self.title = title
+        self.location = location
+        self.localMachineId = localMachineId
         self.surfaces = surfaces
         // The workspace outlives SessionsView, including while a shell exits
         // on the Work screen or while another repository is selected.
         surfaceClosed = NotificationCenter.default.publisher(for: .ghosttySurfaceClosed)
             .sink { [weak self] notification in
                 guard let terminal = notification.object as? TerminalIdentity,
-                      case .shell(let paneId) = terminal else { return }
+                      case .shell(let paneId, _) = terminal else { return }
                 MainActor.assumeIsolated {
                     guard let self,
-                          self.multiplexer.layout.pane(for: paneId)?.content == .shell
+                          let pane = self.multiplexer.layout.pane(for: paneId),
+                          pane.terminal == terminal
                     else { return }
                     self.multiplexer.close(paneId)
                 }
@@ -80,8 +188,7 @@ final class SessionsWorkspace {
 @Observable
 final class SessionsWorkspaceRegistry {
     // Observable only for environment delivery; lazy creation must not invalidate views.
-    @ObservationIgnored private var workspaces: [WorkspaceIdentity: SessionsWorkspace] = [:]
-    @ObservationIgnored private var layouts: [WorkspaceIdentity: WorktreeLayoutStore] = [:]
+    @ObservationIgnored private var workspaces: [WorkWorkspaceKey: SessionsWorkspace] = [:]
     let surfaces = GhosttySurfacePool()
     private(set) var localMachineId: String?
     private(set) var machineError: String?
@@ -93,43 +200,216 @@ final class SessionsWorkspaceRegistry {
         catch { machineError = error.localizedDescription }
     }
 
-    func layout(for repoPath: WorkspaceIdentity) -> WorktreeLayoutStore {
-        if let layout = layouts[repoPath] { return layout }
-        let layout = WorktreeLayoutStore(path: repoPath)
-        layouts[repoPath] = layout
-        return layout
-    }
+    private(set) var openWork: [WorkWorkspaceKey] = []
+    private(set) var selectedWork: WorkWorkspaceKey?
 
-    var paths: [WorkspaceIdentity] { Array(workspaces.keys).sorted { ($0.machineId, $0.worktree) < ($1.machineId, $1.worktree) } }
+    var keys: [WorkWorkspaceKey] { Array(workspaces.keys) }
 
-    func path(containingShell id: String) -> WorkspaceIdentity? {
-        workspaces.first { $0.value.multiplexer.layout.pane(for: id)?.content == .shell }?.key
-    }
+    func retained(_ key: WorkWorkspaceKey) -> SessionsWorkspace? { workspaces[key] }
 
-    func removeSessions(_ ids: Set<String>) {
-        for workspace in workspaces.values {
-            workspace.multiplexer.removeSessions(ids)
-        }
-    }
-
-    /// A repository reading establishes moves, not absence from the whole window.
-    /// Removing old placements never releases their native surfaces.
-    func reconcileMembership(_ records: [SessionRecord]) {
-        let locations = Dictionary(uniqueKeysWithValues: records.compactMap { record in
-            record.workspace.map { (record.id, $0.identity) }
-        })
-        for (identity, workspace) in workspaces {
-            let moved = Set(locations.compactMap { id, location in location != identity ? id : nil })
-            workspace.multiplexer.removeSessions(moved)
-        }
-    }
-
-    func workspace(for repoPath: WorkspaceIdentity) -> SessionsWorkspace {
-        if let existing = workspaces[repoPath] { return existing }
-        let workspace = SessionsWorkspace(surfaces: surfaces)
-        workspaces[repoPath] = workspace
+    @discardableResult
+    func open(_ key: WorkWorkspaceKey, title: String, location: WorkspaceIdentity?) -> SessionsWorkspace {
+        let workspace = workspace(for: key, title: title, location: location)
+        if selectedWork != key { surfaces.clearFocus() }
+        if !openWork.contains(key) { openWork.append(key) }
+        selectedWork = key
         return workspace
     }
+
+    func hide(_ key: WorkWorkspaceKey) {
+        guard let index = openWork.firstIndex(of: key) else { return }
+        openWork.remove(at: index)
+        if selectedWork == key {
+            surfaces.clearFocus()
+            selectedWork = openWork.isEmpty ? nil : openWork[max(0, index - 1)]
+        }
+    }
+
+    func inspect() -> [DesktopWorkspaceInspection] {
+        workspaces.values.sorted { ($0.key.repository, $0.key.kind.rawValue, $0.key.id) < ($1.key.repository, $1.key.kind.rawValue, $1.key.id) }.map { workspace in
+            let panes = workspace.multiplexer
+            return DesktopWorkspaceInspection(work: workspace.key, title: workspace.title,
+                isOpen: openWork.contains(workspace.key), selected: selectedWork == workspace.key,
+                layout: DesktopLayoutInspection(panes.layout) { pane in
+                    pane.terminal.flatMap { surfaces.surfaceIncarnation(for: $0) }
+                }, focusedPane: panes.focusedPaneId,
+                zoomedPane: panes.zoomedPaneId, hiddenPanes: panes.collapsedPaneIds.sorted())
+        }
+    }
+
+    /// Record the Session owner; only explicit Changes opens a Files companion.
+    @discardableResult
+    func openLinkedFiles(_ destination: LinkedSession, in key: WorkWorkspaceKey, query: RegistryQuery) throws -> TaskFilesStore? {
+        guard let identity = destination.record.workspace?.identity else { return nil }
+        let workspace = workspace(for: key, title: destination.task.task.name, location: identity)
+        workspace.multiplexer.updateSessionLocation(destination.record.id, location: identity, execution: destination.location)
+        guard destination.showsChanges else { return nil }
+        let content = PaneContent.files(taskId: destination.task.id, location: identity, execution: destination.location)
+        let files = try workspace.files(for: content, task: destination.task, query: query)
+        files.showsChanges = true
+        workspace.multiplexer.show(content, focus: false)
+        return files
+    }
+
+    func readText(_ request: DesktopTextRequest) throws -> DesktopTextReading {
+        let (workspace, pane) = try retainedPane(for: request.target)
+        let store = workspace.multiplexer
+        let result: DesktopTextResult
+        if let terminal = pane.terminal {
+            result = try surfaces.readText(request, terminal: terminal)
+        } else {
+            result = .unavailable(reason: .notTerminal)
+        }
+        return DesktopTextReading(request: request, observedAt: Int64(Date().timeIntervalSince1970),
+            hidden: selectedWork != workspace.key || !store.isVisible(pane),
+            result: result)
+    }
+
+    @discardableResult
+    func controlPane(_ request: DesktopPaneCommand, model: WorkModel) throws -> String {
+        let target = request.target
+        let (workspace, pane) = try retainedPane(for: target)
+        let store = workspace.multiplexer
+        // Validate both ends before changing anything. Moving a view is not
+        // reassociating its Work or transferring a client to another checkout.
+        func peer(_ other: DesktopPaneTarget) throws {
+            guard other.repository == target.repository, other.window == target.window,
+                  other.work == target.work,
+                  other.pane != target.pane else {
+                throw RegistryQueryError("Choose two distinct panes in the same retained workspace; no pane was changed.")
+            }
+            _ = try retainedPane(for: other)
+        }
+        var result: PaneState? = pane
+        switch request.action {
+        case .text(let surface, let text):
+            guard let terminal = pane.terminal else {
+                throw RegistryQueryError("The addressed pane is not a terminal; no input was sent.")
+            }
+            try surfaces.insertText(text, terminal: terminal, surface: surface)
+        case .key(let surface, let key):
+            guard let terminal = pane.terminal else {
+                throw RegistryQueryError("The addressed pane is not a terminal; no input was sent.")
+            }
+            try surfaces.sendKey(key, terminal: terminal, surface: surface)
+        case .shell:
+            result = try workspace.newShell(beside: target.pane, focus: false)
+        case .files(let task), .flowLog(let task):
+            guard let projection = model.task(id: task), workspace.key.kind == .task,
+                  (workspace.key.id == projection.task.id || workspace.key.id == projection.task.runtime?.workId),
+                  let identity = pane.content.location ?? workspace.location,
+                  (model.navigation.preparedTaskWorktrees[projection.task.id]
+                    ?? projection.task.reference.workspace?.identity ?? identity) == identity else {
+                throw RegistryQueryError("The Task is not associated with this checkout. Inspect its recorded workspace; no pane was changed.")
+            }
+            let content: PaneContent = if case .files = request.action {
+                .files(taskId: projection.task.id, location: identity, execution: pane.executionLocation)
+            } else {
+                .flowLog(taskId: projection.task.id, location: identity, execution: pane.executionLocation)
+            }
+            result = store.show(content, beside: target.pane, focus: false)
+        case .hide: workspace.setCollapsed(paneId: target.pane, collapsed: true)
+        case .restore: workspace.setCollapsed(paneId: target.pane, collapsed: false)
+        case .focus:
+            open(workspace.key, title: workspace.title, location: workspace.location)
+            model.select(workspace.key.reference)
+            store.setFocusedPane(target.pane)
+            if let terminal = pane.terminal { surfaces.focus(terminal) }
+        case .split(let axis): result = try workspace.split(target.pane, axis: axis, focus: false)
+        case .move(let destination, let axis):
+            try peer(destination)
+            store.move(target.pane, beside: destination.pane, axis: axis)
+        case .resize(let toward, let ratio):
+            try peer(toward)
+            guard ratio.isFinite, (0.1...0.9).contains(ratio) else {
+                throw RegistryQueryError("Split ratio must be between 0.1 and 0.9; no pane was changed.")
+            }
+            store.updateRatio(between: target.pane, and: toward.pane, ratio: ratio)
+        case .zoom(let enabled): store.setZoom(target.pane, enabled: enabled)
+        }
+        guard let result else { throw RegistryQueryError("The addressed pane disappeared; inspect Desktop before retrying.") }
+        return result.id
+    }
+
+    private func retainedPane(for target: DesktopPaneTarget) throws -> (SessionsWorkspace, PaneState) {
+        guard target.repository == target.work.repository,
+              let workspace = workspaces[target.work],
+              let pane = workspace.multiplexer.layout.pane(for: target.pane),
+              pane.incarnation == target.incarnation else {
+            throw RegistryQueryError("The pane content was removed or replaced. Inspect Desktop again; no pane was changed.")
+        }
+        return (workspace, pane)
+    }
+
+    func key(containingShell id: String, machineId: String) -> WorkWorkspaceKey? {
+        workspaces.first {
+            guard let pane = $0.value.multiplexer.layout.pane(for: id) else { return false }
+            return pane.terminal == .shell(id, machineId: machineId)
+        }?.key
+    }
+
+    /// A partial inventory can update content location, never remove a Work tab.
+    func reconcileMembership(_ records: [SessionRecord]) {
+        for workspace in workspaces.values {
+            for record in records {
+                let belongs: Bool?
+                switch workspace.key.kind {
+                case .task:
+                    let tasks = Set(record.taskIds + [record.workspace?.taskId, record.work?.kind == .task ? record.work?.id : nil].compactMap { $0 })
+                    belongs = tasks.isEmpty ? nil : tasks.contains(workspace.key.id)
+                case .wave: belongs = record.waveId.map { $0 == workspace.key.id }
+                case .repository: belongs = nil
+                }
+                // A peer's physical Task ids cannot disprove the local Work
+                // correspondence carried by an explicitly opened remote pane.
+                if belongs == false, record.workspace?.machineId == localMachineId {
+                    workspace.multiplexer.removeSessions([record.id])
+                }
+                else { workspace.multiplexer.updateSessionLocation(record.id, location: record.workspace?.identity) }
+            }
+        }
+    }
+
+    /// One native occurrence per window. A deliberate eligible Work opening can
+    /// relocate presentation, but neither copies a surface nor binds the Session.
+    func revealSession(_ record: SessionRecord, in workspace: SessionsWorkspace) {
+        for other in workspaces.values where other !== workspace {
+            other.multiplexer.removeSessions([record.id])
+        }
+        workspace.multiplexer.reveal(sessionId: record.id, location: record.workspace?.identity)
+    }
+
+    func reassociateRepository(from previous: String, to repository: String) {
+        for key in keys where key.repository == previous {
+            canonicalize(key, as: WorkWorkspaceKey(repository: repository, kind: key.kind,
+                id: key.kind == .repository ? repository : key.id))
+        }
+    }
+
+    func key(containingSession id: String) -> WorkWorkspaceKey? {
+        workspaces.first { $0.value.multiplexer.pane(forSessionId: id) != nil }?.key
+    }
+
+    func canonicalize(_ previous: WorkWorkspaceKey, as key: WorkWorkspaceKey) {
+        guard previous != key, workspaces[key] == nil, let workspace = workspaces.removeValue(forKey: previous) else { return }
+        workspace.key = key
+        workspaces[key] = workspace
+        openWork = openWork.map { $0 == previous ? key : $0 }
+        if selectedWork == previous { selectedWork = key }
+    }
+
+    func workspace(for key: WorkWorkspaceKey, title: String, location: WorkspaceIdentity?) -> SessionsWorkspace {
+        if let existing = workspaces[key] {
+            if existing.title != title { existing.title = title }
+            if let location, existing.location != location { existing.location = location }
+            return existing
+        }
+        let workspace = SessionsWorkspace(key: key, title: title, location: location,
+            localMachineId: localMachineId, surfaces: surfaces)
+        workspaces[key] = workspace
+        return workspace
+    }
+
 }
 
 struct SessionItem: Identifiable, Equatable {
@@ -161,15 +441,35 @@ struct SessionItem: Identifiable, Equatable {
 }
 
 @MainActor
-final class SessionsStore: ObservableObject {
-    @Published private(set) var sessions: [SessionItem] = []
+@Observable
+final class SessionsStore {
+    private(set) var sessions: [SessionItem] = []
 
     let surfaces: GhosttySurfacePool
 
     let repoPath: String
     let query: RegistryQuery
+    private var executionLocations: [String: TaskLocationObservation] = [:]
+
+    func retainLocation(_ location: TaskLocationObservation, for record: SessionRecord) {
+        executionLocations[record.id] = location
+    }
+
+    func query(for record: SessionRecord) -> RegistryQuery {
+        guard let location = executionLocations[record.id] else { return query }
+        return query.onMachine(location.machineID, repository: location.repositoryID)
+    }
+
+    func taskSubject(for record: SessionRecord) -> WorkReference? {
+        executionLocations[record.id].map { .task(id: $0.taskID) }
+    }
+
+    func presentationDirectory(for record: SessionRecord, checkout: String) -> String {
+        executionLocations[record.id] == nil ? checkout : repoPath
+    }
+
     private let metrics: SessionsLatencyMetrics
-    private var hasRecordedSessionsLoad = false
+    @ObservationIgnored private var hasRecordedSessionsLoad = false
 
     init(
         repoPath: String,
@@ -225,7 +525,15 @@ final class SessionsStore: ObservableObject {
             return
         }
         do {
-            let surface = try await query.openSession(
+            let record = sessions[index].record
+            let executionQuery = query(for: record)
+            if let location = executionLocations[id] {
+                let current = try await executionQuery.taskLocation(task: location.taskID, repository: location.repositoryID, machine: location.machineID)
+                guard current.location == location.location else {
+                    throw RegistryQueryError("The recorded execution location changed; reopen the Task before connecting.")
+                }
+            }
+            let surface = try await executionQuery.openSession(
                 id: id,
                 replacing: replacing,
                 cwd: repoPath
@@ -267,8 +575,10 @@ final class SessionsStore: ObservableObject {
     }
 
     func localTerminal(for record: SessionRecord) -> TerminalIdentity? {
-        if surfaces.hasSurface(.session(record.id)) { return .session(record.id) }
-        return record.terminalIds.lazy.map { TerminalIdentity.shell($0) }
+        guard let machineId = record.workspace?.machineId else { return nil }
+        let session = TerminalIdentity.session(record.id, machineId: machineId)
+        if surfaces.hasSurface(session) { return session }
+        return record.terminalIds.lazy.map { TerminalIdentity.shell($0, machineId: machineId) }
             .first(where: surfaces.hasSurface)
     }
 
@@ -279,11 +589,9 @@ final class SessionsStore: ObservableObject {
         }
     }
 
-
-
-    /// Release a surface only after its Session is confirmed absent.
-    func releaseSurface(_ id: String) {
-        surfaces.release(.session(id))
+    func recordPaneFailure(_ id: String, reason: String) {
+        guard let index = _index(id), sessions[index].state == .prepared else { return }
+        sessions[index].state = .failed(reason)
     }
 
     /// A retained surface's child ended — provider exit or an external
@@ -292,9 +600,9 @@ final class SessionsStore: ObservableObject {
     /// whose own pool still holds a live surface for this Session (it just
     /// took the client over) is unaffected.
     func noteSurfaceClosed(_ terminal: TerminalIdentity) {
-        guard case .session(let id) = terminal,
+        guard case .session(let id, let machineId) = terminal,
               !surfaces.hasSurface(terminal),
-              let index = _index(id)
+              let index = _index(id), sessions[index].record.workspace?.machineId == machineId
         else { return }
         switch sessions[index].state {
         case .prepared, .live:
@@ -349,18 +657,25 @@ struct SessionsView: View {
     let model: WorkModel
     let repoPath: String
     let workspaces: SessionsWorkspaceRegistry
+    var repository: String? = nil
+    @State private var resolvedRepository: String?
+    @State private var repositoryError: String?
     var query: RegistryQuery = RegistryQueryLocal.shared
 
     var body: some View {
+        let taskPage = model.linkedTaskPage
         Group {
-            if let home = workspaces.localMachineId {
+            if let home = workspaces.localMachineId, let repository = repository ?? resolvedRepository {
                 SessionsContentView(model: model, repoPath: repoPath, workspaces: workspaces,
-                                    machineId: home, query: query)
+                                    machineId: home, repository: repository, query: query)
             } else {
                 HStack {
                     WorkNavigator(model: model, onOpenSession: { _ in })
-                    if let error = workspaces.machineError {
+                    if let error = workspaces.machineError ?? repositoryError {
                         ContentUnavailableView("Workspace unavailable", systemImage: "folder", description: Text(error))
+                            .task(id: taskPage) {
+                                if let request = taskPage { model.finishTaskPage(request, error: error) }
+                            }
                     } else {
                         ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
@@ -369,6 +684,10 @@ struct SessionsView: View {
         }
         .task {
             await workspaces.refreshMachine(query: query)
+            if repository == nil {
+                do { resolvedRepository = try await query.repositoryIdentity(cwd: repoPath).id }
+                catch { repositoryError = error.localizedDescription }
+            }
             if let home = workspaces.localMachineId, workspaces.machineError == nil { model.confirmMachine(home) }
         }
     }
@@ -379,25 +698,24 @@ struct SessionsContentView: View {
     let machineId: String
     private var rootIdentity: WorkspaceIdentity { WorkspaceIdentity(machineId: machineId, worktree: store.repoPath) }
     private var currentIdentity: WorkspaceIdentity {
-        if navigation.showsRetainedTerminals {
-            return worktreeLayout.focusedPath ?? rootIdentity
-        }
-        if navigation.selectedSessionId != nil {
-            return selectedWorkspace?.identity ?? worktreeLayout.focusedPath ?? rootIdentity
-        }
-        return taskIdentity ?? worktreeLayout.focusedPath ?? rootIdentity
+        selectedWorkspace?.identity ?? taskIdentity ?? rootIdentity
     }
-    private var workspace: SessionsWorkspace { workspaces.workspace(for: currentIdentity) }
+    let repository: String
+    private var currentKey: WorkWorkspaceKey { key(for: model.selection) }
+    private func key(for reference: WorkReference?) -> WorkWorkspaceKey {
+        model.workspaceKey(for: reference, repository: repository)
+    }
+    private func title(for key: WorkWorkspaceKey) -> String { model.workspaceTitle(key) }
+    private var workspace: SessionsWorkspace {
+        workspaces.workspace(for: currentKey, title: title(for: currentKey),
+            location: currentKey.kind == .task ? taskIdentity : rootIdentity)
+    }
     @Bindable var model: WorkModel
     private let workspaces: SessionsWorkspaceRegistry
     private let query: RegistryQuery
-    private let worktreeLayout: WorktreeLayoutStore
-    @ObservedObject private var store: SessionsStore
-    @State private var layoutRevision = 0
+    private let store: SessionsStore
     @State private var restorePaletteFocus = true
     @State private var launchError: String?
-    /// Tasks this window already asked `lf session ensure --task` about.
-    @State private var ensuredTasks: Set<String> = []
     @State private var launchErrorTitle = "Could not start conversation"
     @Environment(\.palette) private var palette
 
@@ -415,26 +733,22 @@ struct SessionsContentView: View {
         guard model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath else { return nil }
         return store.sessions.first { $0.id == navigation.selectedSessionId }?.record.workspace
     }
-    private var availablePaths: [WorkspaceIdentity] {
-        worktreeLayout.knownPaths.union(store.sessions.compactMap { $0.record.workspace?.identity }).sorted { ($0.machineId, $0.worktree) < ($1.machineId, $1.worktree) }
-    }
-
     init(model: WorkModel, repoPath: String, workspaces: SessionsWorkspaceRegistry,
-         machineId: String, query: RegistryQuery = RegistryQueryLocal.shared) {
+         machineId: String, repository: String, query: RegistryQuery = RegistryQueryLocal.shared) {
         self.machineId = machineId
+        self.repository = repository
         self.model = model
         self.workspaces = workspaces
         self.query = query
-        worktreeLayout = workspaces.layout(for: WorkspaceIdentity(machineId: machineId, worktree: repoPath))
-        let store = workspaces.workspace(for: WorkspaceIdentity(machineId: machineId, worktree: repoPath)).sessionStore(repoPath: repoPath, query: query)
-        _store = ObservedObject(wrappedValue: store)
+        model.bindWorkspaces(workspaces, repository: repository)
+        let root = model.workspaceKey(for: nil, repository: repository)
+        let store = workspaces.workspace(for: root, title: URL(fileURLWithPath: repoPath).lastPathComponent,
+            location: WorkspaceIdentity(machineId: machineId, worktree: repoPath)).sessionStore(repoPath: repoPath, query: query)
+        self.store = store
     }
 
     private var navigation: WorkNavigation { model.navigation }
-    private var usesWorktreeLayout: Bool {
-        navigation.showsRetainedTerminals || taskPath == nil && fileTask == nil
-    }
-    private var terminalsVisible: Bool { model.selection?.kind == .task || navigation.content == .terminals }
+    private var terminalsVisible: Bool { workspaces.selectedWork != nil && (model.selection?.kind == .task || workspace.presentation.content == .terminals) }
     private var fileTask: TaskProjection? {
         // A departing repository view must not mount the next repository's
         // retained terminals while SwiftUI replaces its hierarchy.
@@ -443,21 +757,25 @@ struct SessionsContentView: View {
     }
 
     var body: some View {
-        let _ = layoutRevision
+        let taskPage = model.linkedTaskPage
         VStack(spacing: 0) {
             HStack(spacing: 0) {
                 WorkNavigator(model: model, onOpenSession: openSession, onConversation: { work in
                     model.select(work)
                     startConversation()
                 }, onNewShell: {
-                    if worktreeLayout.focusedPath == nil { worktreeLayout.select(rootIdentity) }
-                    multiplexer.newShell()
+                    newShell(in: workspace)
                     navigation.content = .terminals
                 }, onShowTerminals: { navigation.content = .terminals }, onOpenTask: openTask, onNewSession: launchSessionSkill)
                     .frame(width: 320)
                 Rectangle().fill(palette.border).frame(width: 1)
                 HSplitView {
                     VStack(spacing: 0) {
+                        workTabs
+                        if workspaces.selectedWork == nil {
+                            ContentUnavailableView("No Work open", systemImage: "rectangle.on.rectangle",
+                                description: Text("Open a repository, Wave or Task from the sidebar."))
+                        } else {
                         WorkBreadcrumbBar(
                             model: model,
                             crumb: model.breadcrumb,
@@ -466,10 +784,9 @@ struct SessionsContentView: View {
                             programStatus: focusedProgramStatus,
                             programStatusError: focusedProgramStatusSurface?.observationError
                         ) {
-                            if taskPath != nil && !navigation.showsRetainedTerminals { workspaceCreation }
+                            if taskPath != nil { workspaceCreation }
                             if terminalsVisible {
-                                if usesWorktreeLayout { worktreeChip }
-                                else if let taskPath {
+                                if let taskPath {
                                     Text(URL(fileURLWithPath: taskPath).lastPathComponent)
                                         .font(Typography.code(11)).lineLimit(1)
                                         .frame(maxWidth: 180).layoutPriority(-3)
@@ -483,18 +800,24 @@ struct SessionsContentView: View {
                                 }
                             }
                         }
-                        if terminalsVisible, !navigation.showsRetainedTerminals, let task = fileTask,
+                        if terminalsVisible, let task = fileTask,
                            let wave = model.task(id: task.task.id)?.wave.wave {
                             TaskWorkflowHeader(model: model, task: task.task, wave: wave, work: model.taskWork[task.task.id])
+                                .task(id: taskPage) {
+                                    if let request = taskPage,
+                                       request.taskID == task.task.id, request.repo == store.repoPath.normalizedFilePath {
+                                        model.finishTaskPage(request)
+                                    }
+                                }
                             if taskPath != nil { missingCheckout }
                         }
                         ZStack {
                             Group {
-                                if let taskPath, !navigation.showsRetainedTerminals {
-                                    WorktreeTerminalsView(workspace: workspace,
+                                if let taskPath {
+                                    WorkspacePanesView(workspace: workspace,
                                         path: taskPath, isFocused: terminalsVisible, sessions: store)
-                                        .id(taskIdentity)
-                                } else if fileTask != nil && !navigation.showsRetainedTerminals {
+                                        .id(currentKey)
+                                } else if fileTask != nil {
                                     VStack(spacing: Spacing.md) {
                                         if let task = fileTask { Text(task.task.task.description) }
                                         Button("Prepare workspace") { prepareTaskWorkspace(conversation: false) }
@@ -502,10 +825,8 @@ struct SessionsContentView: View {
                                         if let error = launchError { Text(error).foregroundStyle(Color.statusWarning) }
                                     }.padding()
                                 } else {
-                                    WorktreeNodeView(
-                                        node: worktreeLayout.layout, layout: worktreeLayout,
-                                        workspaces: workspaces, isActive: terminalsVisible,
-                                        showsStrips: worktreeLayout.layout.isSplit, sessions: store)
+                                    WorkspacePanesView(workspace: workspace,
+                                        path: currentIdentity.worktree, isFocused: terminalsVisible, sessions: store)
 
                                 }
                             }
@@ -530,6 +851,7 @@ struct SessionsContentView: View {
                         }
                         .frame(maxWidth: .infinity)
                         .clipped()
+                        }
                     }
                 }
             }
@@ -538,7 +860,7 @@ struct SessionsContentView: View {
         .tint(palette.accent)
         .environment(model)
         .overlay {
-            if terminalsVisible, navigation.palette == nil, usesWorktreeLayout || taskPath != nil {
+            if terminalsVisible, navigation.palette == nil {
                 SessionsShortcutMonitor { _handle($0) }
                     .allowsHitTesting(false).frame(width: 0, height: 0)
             }
@@ -564,49 +886,21 @@ struct SessionsContentView: View {
                 EmptyView()
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .multiplexerStoreDidChange)) { notification in
-            guard notification.object is MultiplexerStore else { return }
-            layoutRevision += 1
-        }
         .onChange(of: multiplexer.focusedPaneId) { _, _ in
             guard terminalsVisible, model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath else { return }
             if !focusedPaneSessions.contains(where: { $0.id == navigation.selectedSessionId }) {
                 navigation.selectedSessionId = focusedPaneSessions.first?.id
             }
         }
-        .onChange(of: taskIdentity, initial: true) { _, _ in
-            if navigation.selectedSessionId == nil, let work = model.selection, work.kind == .task {
-                enterTask(work)
-            }
-        }
         .onChange(of: model.sessions.value, initial: true) { _, records in
             guard model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath,
                   let records else { return }
-            let previousLocations = Dictionary(uniqueKeysWithValues: store.sessions.map { ($0.id, $0.record.workspace?.identity) })
             store.reconcile(records)
-            if model.sessions.errorMessage == nil {
-                workspaces.reconcileMembership(records)
-                if let work = model.selection, work.kind == .task {
-                    enterTask(work)
-                }
-                if let selected = navigation.selectedSessionId,
-                   let record = records.first(where: { $0.id == selected }),
-                   let identity = record.workspace?.identity,
-                   let prior = previousLocations[selected], prior != identity {
-                    workspaces.workspace(for: identity).multiplexer.reveal(sessionId: selected)
-                }
-            }
+            if model.sessions.errorMessage == nil { workspaces.reconcileMembership(records) }
         }
-        .onChange(of: model.linkedSession, initial: true) { _, record in
-            guard let record,
-                  model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath else { return }
-            model.linkedSession = nil
-            store.reconcile(model.sessions.value ?? [])
-            openSession(record)
-        }
-        .onChange(of: store.sessions.map(\.id)) { previous, ids in
-            for id in Set(previous).subtracting(ids) { store.releaseSurface(id) }
-            workspaces.removeSessions(Set(previous).subtracting(ids))
+
+        .onChange(of: model.linkedSession, initial: true) { _, destination in
+            if let destination { openLinkedSession(destination) }
         }
         .onReceive(NotificationCenter.default.publisher(for: .ghosttySurfaceClosed)) { notification in
             guard let terminal = notification.object as? TerminalIdentity else { return }
@@ -630,17 +924,50 @@ struct SessionsContentView: View {
         .accessibilityIdentifier("sessions-surface")
     }
 
+    private var workTabs: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 0) {
+                ForEach(workspaces.openWork, id: \.self) { key in
+                    HStack(spacing: Spacing.sm) {
+                        Button(title(for: key)) { selectTab(key) }
+                            .buttonStyle(.plain)
+                        Button { closeTab(key) } label: { Image(systemName: "xmark").font(.system(size: 9)) }
+                            .buttonStyle(.plain).accessibilityLabel("Close \(title(for: key)) tab")
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 8)
+                    .background(workspaces.selectedWork == key ? palette.surface : palette.background)
+                }
+            }
+        }
+        .accessibilityIdentifier("work-tabs")
+    }
+
+    private func selectTab(_ key: WorkWorkspaceKey) {
+        model.select(key.reference)
+    }
+
+    private func closeTab(_ key: WorkWorkspaceKey) {
+        if workspaces.selectedWork == key { model.dismissTaskLink() }
+        workspaces.hide(key)
+        if let selected = workspaces.selectedWork { selectTab(selected) }
+        else { store.surfaces.clearFocus() }
+    }
+
+    private func newShell(in workspace: SessionsWorkspace) {
+        do { try workspace.newShell() }
+        catch { launchErrorTitle = "Could not open shell"; launchError = error.localizedDescription }
+    }
+
     /// One menu changes what the multiplexer shows: a shell, the Task's files
     /// or its Flow process log.
     private var workspaceCreation: some View {
         Menu {
-            Button("New shell", systemImage: "terminal") { multiplexer.newShell() }
-                .disabled(taskIdentity?.machineId != machineId)
+            Button("New shell", systemImage: "terminal") { newShell(in: workspace) }
                 .accessibilityIdentifier("work-add-shell")
             if let task = fileTask?.task.id {
-                Button("Files", systemImage: "doc") { multiplexer.show(.files(taskId: task)) }
+                Button("Files", systemImage: "doc") { multiplexer.show(.files(taskId: task, location: taskIdentity, execution: multiplexer.focusedPane.executionLocation)) }
                     .accessibilityIdentifier("work-add-files")
-                Button("Flow processes", systemImage: "list.bullet.rectangle") { multiplexer.show(.flowLog(taskId: task)) }
+                Button("Flow processes", systemImage: "list.bullet.rectangle") { multiplexer.show(.flowLog(taskId: task, location: taskIdentity, execution: multiplexer.focusedPane.executionLocation)) }
                     .accessibilityIdentifier("work-add-flow-log")
             }
         } label: { Image(systemName: "plus") }
@@ -713,105 +1040,106 @@ struct SessionsContentView: View {
             model.beginSessionBinding(record)
         case .flowLog(let id):
             openTask(.task(id: id))
-            multiplexer.show(.flowLog(taskId: id))
+            multiplexer.show(.flowLog(taskId: id, location: taskIdentity, execution: multiplexer.focusedPane.executionLocation))
         }
         model.remember(destination)
     }
 
+    private func openLinkedSession(_ destination: LinkedSession) {
+        guard model.linkedSession == destination,
+              model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath else { return }
+        let record = destination.record
+        model.linkedSession = nil
+        if let location = destination.location { store.retainLocation(location, for: record) }
+        store.reconcile(model.sessions.value ?? [])
+        openSession(record, preservingOpening: true)
+        let files: TaskFilesStore?
+        do { files = try workspaces.openLinkedFiles(destination, in: currentKey, query: store.query) }
+        catch {
+            model.failLinkedOpening(destination, reason: error.localizedDescription)
+            return
+        }
+        let openingWorkspace = workspace
+        if files != nil, let zoomed = openingWorkspace.multiplexer.zoomedPaneId {
+            openingWorkspace.multiplexer.setZoom(zoomed, enabled: false)
+        }
+        Task { await model.connectLinkedOpening(destination, store: store, workspace: openingWorkspace, files: files) }
+    }
+
     private func openSession(_ record: SessionRecord) {
-        let subject = model.projection.subject(for: record.id)
-        model.select(subject)
+        openSession(record, preservingOpening: false)
+    }
+
+    private func openSession(_ record: SessionRecord, preservingOpening: Bool) {
+        let subject: WorkReference?
+        if let selected = model.selection, selected.kind == .task,
+           record.taskIds.contains(key(for: selected).id) || record.workspace?.taskId == key(for: selected).id {
+            subject = selected
+        } else if let selected = model.selection, selected.kind == .wave, record.waveId == selected.id {
+            subject = selected
+        } else { subject = store.taskSubject(for: record) ?? model.projection.subject(for: record.id) }
+        if let retained = workspaces.key(containingSession: record.id) {
+            if !preservingOpening { model.select(retained.reference, preservingOpening: false) }
+        } else if !preservingOpening { model.select(subject, preservingOpening: false) }
         Perf.begin(Perf.taskWorkspaceReady, "session", id: record.id)
-        navigation.selectedSessionId = record.id
-        navigation.content = .terminals
         // Place the opening/error/elsewhere pane immediately. A slow preparation
         // must never change focus after the human selects another subject.
-        if case .shell(let id) = store.localTerminal(for: record),
-           let path = workspaces.path(containingShell: id) {
-            worktreeLayout.select(path)
-            multiplexer.setCollapsed(paneId: id, collapsed: false)
-            multiplexer.setFocusedPane(id)
-            store.surfaces.focus(.shell(id))
+        if case .shell(let id, let machineId) = store.localTerminal(for: record),
+           let key = workspaces.key(containingShell: id, machineId: machineId),
+           let retained = workspaces.retained(key) {
+            model.select(key.reference, preservingOpening: preservingOpening)
+            let panes = retained.multiplexer
+            panes.setCollapsed(paneId: id, collapsed: false)
+            panes.setFocusedPane(id)
+            store.surfaces.focus(.shell(id, machineId: machineId))
         } else {
-            worktreeLayout.select(record.workspace?.identity ?? rootIdentity)
-            multiplexer.load(sessionId: record.id)
-            store.surfaces.focus(.session(record.id))
+            workspaces.revealSession(record, in: workspace)
+            if let machineId = record.workspace?.machineId {
+                store.surfaces.focus(.session(record.id, machineId: machineId))
+            }
         }
+        navigation.selectedSessionId = record.id
+        navigation.content = .terminals
         store.beginPaneLoad(record.id)
-        Task { @MainActor in await store.select(record.id) }
+        if !preservingOpening { Task { @MainActor in await store.select(record.id) } }
     }
 
     private func openTask(_ work: WorkReference) {
         model.select(work)
         navigation.content = .terminals
-        enterTask(work)
-    }
-
-    /// A Task opens on its one Session. The store names the primary once
-    /// `lf session ensure --task` has chosen or started it; until then this
-    /// asks, once per Task in this window.
-    private func enterTask(_ work: WorkReference) {
-        guard let identity = taskIdentity, let task = fileTask else { return }
-        let panes = workspaces.workspace(for: identity).multiplexer
-        if let session = focusedPaneSessions.first {
-            navigation.selectedSessionId = session.id
-            return
-        }
-        guard panes.layout.allPanes.allSatisfy({ $0.content == .empty }) else { return }
-        let sessions = model.visibleSessions.filter { $0.primaryScope == nil && $0.workspace?.identity == identity }
-        if let primary = sessions.first(where: { $0.taskPrimary && $0.state != .closed }) {
-            openSession(primary)
-            return
-        }
-        guard identity.machineId == machineId, model.sessions.errorMessage == nil, model.sessions.value != nil,
-              ensuredTasks.insert(task.task.id).inserted else { return }
-        let (taskId, issue, origin) = (task.task.id, task.task.task.identifier, navigation)
-        Task { @MainActor in
-            do {
-                let ensured = try await query.ensureTaskSession(issue: issue, cwd: identity.worktree)
-                origin.taskSessionErrors[taskId] = nil
-                await model.refresh()
-                guard model.selection == work, origin.selectedSessionId == nil,
-                      panes.layout.allPanes.allSatisfy({ $0.content == .empty }),
-                      let record = model.sessions.value?.first(where: { $0.id == ensured.id }) else { return }
-                openSession(record)
-            } catch {
-                origin.taskSessionErrors[taskId] = error.localizedDescription
-            }
-        }
+        navigation.selectedSessionId = focusedPaneSessions.first?.id
     }
 
     private func launchSessionSkill(_ launch: SessionSkillLaunch) {
         do {
             let lf = try LocalWaveAgentLauncher.controlLfPath()
             let identity = WorkspaceIdentity(machineId: machineId, worktree: launch.repoPath)
-            worktreeLayout.select(identity)
-            navigation.showsRetainedTerminals = true
+            model.select(nil)
             navigation.content = .terminals
-            workspaces.workspace(for: identity).multiplexer.newShell(command: launch.arguments(lf: lf))
+            workspace.multiplexer.newShell(command: launch.arguments(lf: lf), location: identity)
         } catch { launchError = error.localizedDescription }
     }
 
     private func startConversation() {
         guard let conversationScope = model.conversationScope else { return }
-        do { try launch(conversationScope, in: navigation) }
+        do { try launch(conversationScope, in: workspace) }
         catch {
             launchErrorTitle = "Could not start conversation"
             launchError = error.localizedDescription
         }
     }
 
-    /// `navigation` belongs to the repository that requested the launch; a
-    /// launch that finishes after the human switched repositories must not
-    /// redirect the repository now on screen.
-    private func launch(_ scope: ConversationScope, in navigation: WorkNavigation, identity requestedIdentity: WorkspaceIdentity? = nil) throws {
+    /// Capture the Work entry before preparation; a late reply may populate
+    /// that entry, but cannot select or redirect the workspace now on screen.
+    private func launch(_ scope: ConversationScope, in workspace: SessionsWorkspace, identity requestedIdentity: WorkspaceIdentity? = nil) throws {
         let lf = try LocalWaveAgentLauncher.controlLfPath()
-        let identity = requestedIdentity ?? taskIdentity ?? WorkspaceIdentity(machineId: machineId, worktree: scope.repoPath)
+        guard let identity = requestedIdentity ?? workspace.location else {
+            throw RegistryQueryError("Prepare this Work's location before opening a conversation.")
+        }
         guard identity.machineId == machineId else { throw RegistryQueryError("Open a conversation on its owning Machine") }
-        worktreeLayout.select(identity)
-        navigation.content = .terminals
-        workspaces.workspace(for: identity).multiplexer.newShell(
-            command: ConversationLaunch(scope: scope).arguments(lf: lf))
+        workspace.presentation.content = .terminals
+        workspace.location = identity
+        workspace.multiplexer.newShell(command: ConversationLaunch(scope: scope).arguments(lf: lf), location: identity)
     }
 
     /// An independent conversation with Task context in the Task's checkout.
@@ -820,6 +1148,8 @@ struct SessionsContentView: View {
     private func newTaskSession(_ taskId: String) async throws {
         guard let found = model.task(id: taskId) else { return }
         let origin = navigation
+        let key = key(for: .task(id: taskId))
+        let entry = workspaces.workspace(for: key, title: found.task.task.name, location: found.task.reference.workspace?.identity)
         let issue = found.task.task.identifier
         let checkout: WorkspaceIdentity
         if let workspace = found.task.reference.workspace, workspace.localExists == true, let identity = workspace.identity {
@@ -831,68 +1161,16 @@ struct SessionsContentView: View {
             }.value
             origin.preparedTaskWorktrees[taskId] = checkout
         }
-        try launch(.task(repo: checkout.worktree, id: issue), in: origin, identity: checkout)
-    }
-
-    /// The focused worktree as a quiet mono chip; its menu holds every
-    /// worktree action, so no slot needs a header of its own.
-    private var worktreeChip: some View {
-        let slot = worktreeLayout.focusedSlotId
-        let path = worktreeLayout.focusedPath
-        return Menu {
-            ForEach(availablePaths, id: \.self) { candidate in
-                Button(URL(fileURLWithPath: candidate.worktree).lastPathComponent) {
-                    worktreeLayout.select(candidate, in: slot)
-                }
-            }
-            Divider()
-            if let path {
-                Button("New shell in this worktree") {
-                    worktreeLayout.focus(slot)
-                    workspaces.workspace(for: path).multiplexer.newShell()
-                }
-                .accessibilityLabel("New shell in worktree")
-            }
-            Button("Split worktrees right") { worktreeLayout.split(slot, axis: .vertical) }
-                .accessibilityLabel("Split worktrees right")
-            Button("Split worktrees down") { worktreeLayout.split(slot, axis: .horizontal) }
-                .accessibilityLabel("Split worktrees down")
-            Button("Hide this worktree") { worktreeLayout.close(slot) }
-                .help("Its terminals keep running")
-                .accessibilityLabel("Hide worktree")
-        } label: {
-            HStack(spacing: 5) {
-                Image(systemName: "folder").font(.system(size: 10))
-                Text(path.map { URL(fileURLWithPath: $0.worktree).lastPathComponent } ?? "Choose worktree")
-                    .font(Typography.code(11))
-                    .lineLimit(1)
-            }
-            .foregroundStyle(palette.textSecondary)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 2)
-            .background(palette.surface, in: RoundedRectangle(cornerRadius: 4))
-            .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(palette.border))
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help(path?.worktree ?? "Choose a worktree for this slot")
-        .accessibilityLabel("Worktree")
-        .accessibilityIdentifier("worktree-chip")
+        try launch(.task(repo: checkout.worktree, id: issue), in: entry, identity: checkout)
     }
 
     private var focusedProgramStatusSurface: ProgramStatusSurface? {
-        let pane = multiplexer.focusedPane
-        switch pane.content {
-        case .session(let id): return store.surfaces.programStatus(for: .session(id))
-        case .shell: return store.surfaces.programStatus(for: .shell(pane.id))
-        case .empty, .flowLog, .files: return nil
-        }
+        multiplexer.focusedPane.terminal.flatMap { store.surfaces.programStatus(for: $0) }
     }
 
     private var focusedProgramStatus: ProgramStatusRecords? {
         guard terminalsVisible else { return nil }
-        if case .session(let id) = multiplexer.focusedPane.content {
+        if case .session(let id, _, _) = multiplexer.focusedPane.content {
             return store.sessions.first { $0.id == id }?.record.programStatus
         }
         if let id = focusedProgramStatusSurface?.sessionId {
@@ -907,8 +1185,9 @@ struct SessionsContentView: View {
         let pane = multiplexer.focusedPane
         switch pane.content {
         case .shell:
-            return store.sessions.filter { store.localTerminal(for: $0.record) == .shell(pane.id) }
-        case .session(let id):
+            guard let terminal = pane.terminal else { return [] }
+            return store.sessions.filter { store.localTerminal(for: $0.record) == terminal }
+        case .session(let id, _, _):
             return store.sessions.filter { $0.id == id }
         case .empty, .flowLog, .files:
             return []
@@ -920,18 +1199,23 @@ struct SessionsContentView: View {
         case .empty, .flowLog, .files:
             return
         case .shell:
-            store.surfaces.release(.shell(pane.id))
+            if let terminal = pane.terminal { store.surfaces.release(terminal) }
         case .session:
             return
         }
     }
 
+    private func split(_ axis: SplitAxis) {
+        do { try workspace.split(multiplexer.focusedPaneId, axis: axis) }
+        catch { launchErrorTitle = "Could not split pane"; launchError = error.localizedDescription }
+    }
+
     private func _handle(_ shortcut: SessionsShortcut) {
         switch shortcut {
         case .splitRight:
-            _ = multiplexer.split(multiplexer.focusedPaneId, axis: .vertical)
+            split(.vertical)
         case .splitDown:
-            _ = multiplexer.split(multiplexer.focusedPaneId, axis: .horizontal)
+            split(.horizontal)
         case .close:
             _destroySurface(in: multiplexer.focusedPane)
             multiplexer.close(multiplexer.focusedPaneId)
@@ -945,79 +1229,13 @@ struct SessionsContentView: View {
     }
 }
 
-private struct WorktreeNodeView: View {
-    let node: WorktreeLayout
-    let layout: WorktreeLayoutStore
-    let workspaces: SessionsWorkspaceRegistry
-    let isActive: Bool
-    /// Split worktrees name themselves on a strip; a single worktree is named
-    /// by the toolbar chip and gets no chrome of its own.
-    let showsStrips: Bool
-    @ObservedObject var sessions: SessionsStore
-
-    var body: some View { content }
-
-    private var content: AnyView {
-        switch node {
-        case .leaf(let id, let path):
-            return AnyView(VStack(spacing: 0) {
-                if showsStrips {
-                    HStack(spacing: 8) {
-                        Image(systemName: "folder").font(.system(size: 10))
-                        Text(path.map { URL(fileURLWithPath: $0.worktree).lastPathComponent } ?? "Choose worktree")
-                            .font(Typography.code(11))
-                            .lineLimit(1)
-                        Spacer()
-                    }
-                    .foregroundStyle(layout.focusedSlotId == id ? TerminalPalette.foreground : TerminalPalette.dim)
-                    .padding(.horizontal, 12)
-                    .frame(height: 24)
-                    .background(TerminalPalette.background)
-                    .contentShape(Rectangle())
-                    .onTapGesture { layout.focus(id) }
-                    .accessibilityIdentifier("worktree-strip-\(id)")
-                    Rectangle().fill(TerminalPalette.divider).frame(height: 1)
-                }
-                if let path {
-                    WorktreeTerminalsView(
-                        workspace: workspaces.workspace(for: path), path: path.worktree,
-                        isFocused: isActive && layout.focusedSlotId == id,
-                        sessions: sessions
-                    )
-                    .id(path)
-                    .simultaneousGesture(TapGesture().onEnded { layout.focus(id) })
-                } else {
-                    ContentUnavailableView("Choose a worktree", systemImage: "folder",
-                                           description: Text("Choose a worktree from the toolbar to restore its conversation and terminals."))
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(TerminalPalette.background)
-                        .environment(\.colorScheme, .dark)
-                }
-            }
-            .accessibilityIdentifier("worktree-slot-\(id)"))
-        case .split(let axis, let first, let second):
-            if axis == .vertical {
-                return AnyView(HSplitView { child(first); child(second) })
-            }
-            return AnyView(VSplitView { child(first); child(second) })
-        }
-    }
-
-    private func child(_ node: WorktreeLayout) -> WorktreeNodeView {
-        WorktreeNodeView(node: node, layout: layout, workspaces: workspaces, isActive: isActive,
-                         showsStrips: showsStrips, sessions: sessions)
-    }
-}
-
-private struct WorktreeTerminalsView: View {
+private struct WorkspacePanesView: View {
     let workspace: SessionsWorkspace
     let path: String
     let isFocused: Bool
-    @ObservedObject var sessions: SessionsStore
-    @State private var revision = 0
+    let sessions: SessionsStore
 
     var body: some View {
-        let _ = revision
         let store = workspace.multiplexer
         Group {
         if let layout = store.zoomedPaneId == nil ? store.visibleLayout : store.layout {
@@ -1033,12 +1251,12 @@ private struct WorktreeTerminalsView: View {
         }
         }
         .environment(workspace)
-        .onReceive(NotificationCenter.default.publisher(for: .multiplexerStoreDidChange)) { notification in
-            if let source = notification.object as? MultiplexerStore, source === store {
-                revision += 1
-                Perf.endAfterCommit(Perf.retainedWorkspaceAction, id: "workspace")
-            }
-        }
+        .onChange(of: store.zoomedPaneId) { _, _ in endWorkspaceAction() }
+        .onChange(of: store.collapsedPaneIds) { _, _ in endWorkspaceAction() }
+    }
+
+    private func endWorkspaceAction() {
+        Perf.endAfterCommit(Perf.retainedWorkspaceAction, id: "workspace")
     }
 }
 
@@ -1047,7 +1265,7 @@ private struct MultiplexerView: View {
     let focusedPaneId: String
     let zoomedPaneId: String?
     let workingDirectory: String
-    @ObservedObject var sessions: SessionsStore
+    let sessions: SessionsStore
     let store: MultiplexerStore
     let hover: PaneHover
 
@@ -1056,7 +1274,7 @@ private struct MultiplexerView: View {
             if let zoomedPaneId, let pane = layout.pane(for: zoomedPaneId) {
                 SessionPaneView(
                     pane: pane,
-                    isFocused: !focusedPaneId.isEmpty,
+                    isFocused: pane.id == focusedPaneId,
                     workingDirectory: workingDirectory,
                     sessions: sessions,
                     store: store,
@@ -1083,7 +1301,7 @@ private struct MultiplexerNodeView: View {
     let node: LayoutNode
     let focusedPaneId: String
     let workingDirectory: String
-    @ObservedObject var sessions: SessionsStore
+    let sessions: SessionsStore
     let store: MultiplexerStore
     let hover: PaneHover
 
@@ -1196,13 +1414,14 @@ private struct SplitDivider: View {
 }
 
 private struct SessionPaneView: View {
+    @State private var shellError: String?
     @Environment(WorkModel.self) private var model
     @Environment(SessionsWorkspace.self) private var workspace
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let pane: PaneState
     let isFocused: Bool
     let workingDirectory: String
-    @ObservedObject var sessions: SessionsStore
+    let sessions: SessionsStore
     let store: MultiplexerStore
     let hover: PaneHover
     @State private var bellRinging = false
@@ -1211,7 +1430,7 @@ private struct SessionPaneView: View {
     private var hovering: Bool { hover.paneId == pane.id }
 
     private var item: SessionItem? {
-        guard case .session(let id) = pane.content else { return nil }
+        guard case .session(let id, _, _) = pane.content else { return nil }
         return sessions.sessions.first { $0.id == id }
     }
 
@@ -1235,6 +1454,11 @@ private struct SessionPaneView: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(_title), \(isFocused ? "active" : "open")")
         .accessibilityIdentifier(item.map { "session-pane-\($0.id)" } ?? "session-pane-empty")
+        .alert("Could not open shell", isPresented: Binding(
+            get: { shellError != nil }, set: { if !$0 { shellError = nil } }
+        )) {
+            Button("OK") { shellError = nil }
+        } message: { Text(shellError ?? "") }
         .onReceive(NotificationCenter.default.publisher(for: .ghosttyTerminalBell)) { notification in
             guard let terminal = notification.object as? TerminalIdentity,
                   terminal == _terminalIdentity else { return }
@@ -1281,10 +1505,10 @@ private struct SessionPaneView: View {
             if isFocused && hovering {
                 HStack(spacing: 2) {
                     stripButton("rectangle.split.2x1", label: "Split right", id: "pane-split-right", help: "Split right (⌘D)") {
-                        _ = store.split(pane.id, axis: .vertical)
+                        split(.vertical)
                     }
                     stripButton("rectangle.split.1x2", label: "Split down", id: "pane-split-down", help: "Split down (⌘⇧D)") {
-                        _ = store.split(pane.id, axis: .horizontal)
+                        split(.horizontal)
                     }
                     stripButton("xmark", label: "Close view", id: "pane-close", help: closeHelp, disabled: !store.canClose) {
                         closePane()
@@ -1309,20 +1533,26 @@ private struct SessionPaneView: View {
 
     @ViewBuilder
     private var paneActions: some View {
-        Button("Split right (⌘D)") { _ = store.split(pane.id, axis: .vertical) }
-        Button("Split down (⌘⇧D)") { _ = store.split(pane.id, axis: .horizontal) }
+        Button("Split right (⌘D)") { split(.vertical) }
+        Button("Split down (⌘⇧D)") { split(.horizontal) }
         Button(store.zoomedPaneId == pane.id ? "Exit zoom (⌘⇧↩)" : "Zoom pane (⌘⇧↩)") { store.toggleZoom(pane.id) }
         Divider()
         Button("Close view (⌘W)") { closePane() }.disabled(!store.canClose)
     }
 
     private var closeHelp: String {
-        pane.content == .shell ? "Close this shell (⌘W)" : "Close this view; the Session keeps running (⌘W)"
+        if case .shell = pane.content { return "Close this shell (⌘W)" }
+        return "Close this view; the Session keeps running (⌘W)"
+    }
+
+    private func split(_ axis: SplitAxis) {
+        do { try workspace.split(pane.id, axis: axis) }
+        catch { shellError = error.localizedDescription }
     }
 
     private func closePane() {
         if case .shell = pane.content {
-            sessions.surfaces.release(.shell(pane.id))
+            if let terminal = pane.terminal { sessions.surfaces.release(terminal) }
         }
         store.close(pane.id)
     }
@@ -1358,8 +1588,9 @@ private struct SessionPaneView: View {
 
     private var paneSessions: [SessionItem] {
         if case .shell = pane.content {
+            guard let terminal = pane.terminal else { return [] }
             return sessions.sessions.filter {
-                sessions.localTerminal(for: $0.record) == .shell(pane.id)
+                sessions.localTerminal(for: $0.record) == terminal
             }
         }
         return item.map { [$0] } ?? []
@@ -1371,7 +1602,6 @@ private struct SessionPaneView: View {
         // context. Companion shells retain the current breadcrumb.
         guard paneSessions.count == 1, let session = paneSessions.first,
               model.navigation.selectedSessionId != session.id else { return }
-        model.select(model.projection.subject(for: session.id))
         model.navigation.selectedSessionId = session.id
         model.navigation.content = .terminals
     }
@@ -1392,29 +1622,41 @@ private struct SessionPaneView: View {
                 emptyWorkspace
             }
         case .shell:
-            GhosttyTerminalView(
-                workingDirectory: workingDirectory,
-                argv: store.shellCommands[pane.id] ?? [],
-                terminal: .shell(pane.id),
-                surfacePool: sessions.surfaces,
-                isFocused: isFocused,
-                onFocus: focusPane
-            )
-            .id(pane.id)
-        case .flowLog(let taskId):
-            FlowProcessLog(model: model, taskId: taskId)
+            if let location = pane.content.location, let terminal = pane.terminal {
+                let isLocal = location.machineId == workspace.localMachineId
+                if !isLocal && store.shellCommands[pane.id] == nil {
+                    Text("Reopen the Task and add a new remote shell. No local shell was opened.")
+                } else {
+                    GhosttyTerminalView(
+                        workingDirectory: isLocal ? location.worktree : NSHomeDirectory(),
+                        argv: store.shellCommands[pane.id] ?? [],
+                        terminal: terminal,
+                        surfacePool: sessions.surfaces,
+                        isFocused: isFocused,
+                        onFocus: focusPane
+                    )
+                    .id(pane.id)
+                }
+            } else {
+                Text("Shell location is unavailable. Add a new shell in this Work.")
+            }
+        case .flowLog(let taskId, let location, let execution):
+            FlowProcessLog(model: model, taskId: taskId, location: location, execution: execution,
+                query: sessions.query)
+                .id(pane.incarnation)
                 .background(PaneFocusTarget(isFocused: isFocused))
                 .simultaneousGesture(TapGesture().onEnded { store.setFocusedPane(pane.id) })
-        case .files(let taskId):
+        case .files(let taskId, _, _):
             let task = model.task(id: taskId)?.task
-            let key = task?.runtime?.workId ?? task?.task.identifier ?? taskId
-            TaskFilesView(
-                store: workspace.files(taskId: key, issue: key, cwd: workingDirectory, query: sessions.query),
-                prURL: task?.pr?.publication?.github?.url,
-                checkoutBase: task?.reference.workspace?.baseCommit
-            )
-            .environment(\.colorScheme, .light)
-            .simultaneousGesture(TapGesture().onEnded { store.setFocusedPane(pane.id) })
+            switch Result(catching: { try workspace.files(for: pane.content, task: task, query: sessions.query) }) {
+            case .success(let files):
+                TaskFilesView(store: files, prURL: task?.pr?.publication?.github?.url,
+                    checkoutBase: task?.reference.workspace?.baseCommit)
+                    .environment(\.colorScheme, .light)
+                    .simultaneousGesture(TapGesture().onEnded { store.setFocusedPane(pane.id) })
+            case .failure(let error):
+                Text(error.localizedDescription).textSelection(.enabled)
+            }
         }
     }
 
@@ -1425,7 +1667,8 @@ private struct SessionPaneView: View {
             Text("Choose a session from the outline or open a shell.")
         } actions: {
             Button {
-                store.newShell()
+                do { try workspace.newShell() }
+                catch { shellError = error.localizedDescription }
             } label: {
                 Label("New shell", systemImage: "terminal")
             }
@@ -1524,18 +1767,24 @@ private struct SessionPaneView: View {
 
     @ViewBuilder
     private func _terminal(item: SessionItem, surface: SessionRecord) -> some View {
-        GhosttyTerminalView(
-            workingDirectory: workingDirectory,
-            argv: surface.openArgv,
-            terminal: .session(surface.id),
-            surfacePool: sessions.surfaces,
-            isFocused: isFocused,
-            onSurfaceCreated: {
-                sessions.recordPaneLive(item.id)
-            },
-            onFocus: focusPane
-        )
-        .id(surface.id)
+        if let location = pane.content.location, surface.workspace?.identity == location,
+           let terminal = pane.terminal {
+            GhosttyTerminalView(
+                workingDirectory: sessions.presentationDirectory(for: surface, checkout: location.worktree),
+                argv: surface.openArgv,
+                terminal: terminal,
+                surfacePool: sessions.surfaces,
+                isFocused: isFocused,
+                onSurfaceCreated: {
+                    sessions.recordPaneLive(item.id)
+                },
+                onSurfaceFailed: { reason in sessions.recordPaneFailure(item.id, reason: reason) },
+                onFocus: focusPane
+            )
+            .id(surface.id)
+        } else {
+            Text("Session location unavailable")
+        }
     }
 
     /// A pane hosting exactly one conversation is named by that Session;
@@ -1570,9 +1819,12 @@ private struct SessionPaneView: View {
     private var _terminalIdentity: TerminalIdentity? {
         switch pane.content {
         case .session:
-            item?.surface.map { .session($0.id) }
+            item?.surface.flatMap { record in
+                guard record.workspace?.identity == pane.content.location else { return nil }
+                return pane.terminal
+            }
         case .shell:
-            .shell(pane.id)
+            pane.terminal
         case .empty, .flowLog, .files:
             nil
         }
@@ -1643,13 +1895,6 @@ private struct PaneFocusTarget: NSViewRepresentable {
                 window?.makeFirstResponder(nil)
             }
         }
-    }
-}
-
-private extension WorktreeLayout {
-    var isSplit: Bool {
-        if case .split = self { return true }
-        return false
     }
 }
 

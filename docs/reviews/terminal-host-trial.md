@@ -1,5 +1,8 @@
 # Terminal-host adoption trial · 2026-10-07
 
+Inline `# lf-doc: ambiguous` comments annotate retired spellings for today's
+command checker; they were not part of the recorded trial commands.
+
 **Interactive Flows now preserve the native agent UI.** Jack Heart exercised the
 fixed binary in cmux and herdr. Separate account-free fixtures cover CLI transport
 and planning boundaries. His earlier cmux Task Flow published
@@ -23,7 +26,7 @@ attention and post-answer clearing, and his preference to prioritize interactive
 Sessions over headless Flows. They preserve the failed Flow launch and later fixed-binary demonstrations.
 These are manual review receipts, separate from automated fixtures. The different prompt/path does not resolve either
 original Task launch failure. The review owns preserving its active screenshots.
-Jack subsequently reported that both `lf -m claude run ux-flow` and its `-i`
+Jack subsequently reported that both `lf -m claude run ux-flow # lf-doc: ambiguous` and its `-i`
 variant streamed steps instead of opening the native conversation UI. Before
 the review Session's repair, checkout [`Cli::step_args`](../../rust/loopflow/src/lf/mod.rs) added
 `--batch`, which the [Flow skill launcher](../../rust/loopflow/src/lf/commands/flow.rs)

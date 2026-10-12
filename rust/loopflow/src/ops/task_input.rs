@@ -155,6 +155,6 @@ pub(crate) fn task_seed(
 ) -> String {
     let context = crate::ops::render_task_context(task, project, pr, wave_name);
     format!(
-        "{context}\n\nA Task has zero or one pull request. After merge, record independent later work as Tasks and comments; complete the delivered outcome. Dependent pull requests belong to separate stacked Tasks."
+        "{context}\n\nA Task has zero or one pull request. Merge leaves the Task open until completion. Optional later work uses ordinary Task creation; no follow-up disposition is required. Dependent pull requests belong to separate stacked Tasks."
     )
 }

@@ -282,14 +282,10 @@ also admits nonterminal Tasks with associated Sessions, so visibility alone does
 not prove Started. This reachable working-set rule still needs reconciliation;
 no additional Task disposition was inferred or changed.
 
-The existing click path calls session ensure and connects the returned primary.
-A failure before mounting any Session left the generic empty pane offering New
-shell after the alert was dismissed. Task workspaces now retain that failure and
-opening progress through the existing conversation state; Retry targets the Task,
-not the repository. Empty Task panes no longer offer the unrelated shell fallback.
-Retained layouts/clients are unchanged. This repairs error presentation, not the
-missing checkout or the private demo's deliberately blocked provider access.
-The running demo has not been replaced with this change; native continuation
-remains unproved.
+Before mounting a Session, failure left the empty pane offering New shell after
+alert dismissal. Task workspaces now retain the error/progress; Retry targets
+the Task. Empty Task panes no longer offer shells. Layouts/clients are unchanged.
+This repairs presentation, not missing checkouts or sandbox-blocked providers.
+The running demo has not been replaced; native continuation remains unproved.
 
 Check: `scripts/test_desktop.sh --filter WorkDestinationTests -Xswiftc -gnone --no-parallel` — PASS, 51 tests; regression retains failure after navigation/dismissal. Earlier builds failed on an optional WorkReference in the inline Retry action; extraction and optional binding fixed it. `git diff --check` — PASS. Native demo remains separate.

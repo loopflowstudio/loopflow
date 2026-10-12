@@ -765,8 +765,11 @@ struct SessionsContentView: View {
         self.query = query
         model.bindWorkspaces(workspaces, repository: repository)
         let root = model.workspaceKey(for: nil, repository: repository)
-        let store = workspaces.workspace(for: root, title: URL(fileURLWithPath: repoPath).lastPathComponent,
-            location: WorkspaceIdentity(machineId: machineId, worktree: repoPath)).sessionStore(repoPath: repoPath, query: query)
+        // Match SessionsStore's resolved location so view reconstruction cannot
+        // alternate it with a caller alias and invalidate rendering indefinitely.
+        let resolvedPath = WaveOrigin.resolve(repoPath)
+        let store = workspaces.workspace(for: root, title: URL(fileURLWithPath: resolvedPath).lastPathComponent,
+            location: WorkspaceIdentity(machineId: machineId, worktree: resolvedPath)).sessionStore(repoPath: resolvedPath, query: query)
         self.store = store
     }
 

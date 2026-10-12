@@ -49,14 +49,23 @@ pub(super) fn session_tasks(session: &str) -> String {
 }
 
 pub(super) fn lf_process_ids(selector: &str) -> String {
+    lf_process_ids_in(selector, None)
+}
+
+fn lf_process_ids_in(selector: &str, candidates: Option<&str>) -> String {
+    let within = |column: &str| match candidates {
+        Some(query) => format!(" AND {column} IN ({query})"),
+        None => String::new(),
+    };
     // History and attachments share one query-local membership; the partial
     // index skips retained events that name no Process.
     format!("WITH members AS MATERIALIZED ({})
-        SELECT ae.id FROM processes ae JOIN ({}) tw ON ({})
-        UNION SELECT se.lf_process_id FROM session_events se INDEXED BY session_process_membership WHERE se.session_id IN (SELECT id FROM members) AND se.lf_process_id IS NOT NULL
-        UNION SELECT p.attached_lf_process_id FROM processes p WHERE p.agent_session_id IN (SELECT id FROM members) AND p.attached_lf_process_id IS NOT NULL
-        UNION SELECT p.id FROM processes p WHERE p.agent_session_id IN (SELECT id FROM members)",
-        session_ids(selector), tasks(selector), checkout("ae.cwd"))
+        SELECT ae.id FROM processes ae JOIN ({}) tw ON ({}) WHERE 1{}
+        UNION SELECT se.lf_process_id FROM session_events se INDEXED BY session_process_membership WHERE se.session_id IN (SELECT id FROM members) AND se.lf_process_id IS NOT NULL{}
+        UNION SELECT p.attached_lf_process_id FROM processes p WHERE p.agent_session_id IN (SELECT id FROM members) AND p.attached_lf_process_id IS NOT NULL{}
+        UNION SELECT p.id FROM processes p WHERE p.agent_session_id IN (SELECT id FROM members){}",
+        session_ids(selector), tasks(selector), checkout("ae.cwd"),
+        within("ae.id"), within("se.lf_process_id"), within("p.attached_lf_process_id"), within("p.id"))
 }
 
 /// Prefer the deepest checkout when membership names more than one Task.
@@ -92,7 +101,10 @@ pub(super) fn flows_of_task(
 ) -> StoreResult<Vec<crate::ops::flow_process::FlowProcess>> {
     super::flow_inventory::flows_in(
         conn,
-        &format!("e.id IN ({})", lf_process_ids("?1")),
+        &format!(
+            "e.id IN ({})",
+            lf_process_ids_in("?1", Some("SELECT lf_process_id FROM flow_processes"))
+        ),
         &[&task.as_str()],
     )
 }
@@ -805,6 +817,19 @@ mod tests {
             after.0 <= before.0 * 2 && after.1 <= before.1 * 2,
             "Events naming no Process increased membership work: {before:?} → {after:?}"
         );
+        // Flow reads restrict candidates without losing historical association
+        // when the candidate ran outside the Task's checkout.
+        let candidates = super::lf_process_ids_in("?1", Some("SELECT ?2"));
+        let selected = conn
+            .prepare(&candidates)
+            .unwrap()
+            .query_map(params![task.as_str(), finished.as_str()], |row| {
+                row.get::<_, String>(0)
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(selected, vec![finished.to_string()]);
     }
 
     #[tokio::test]

@@ -379,3 +379,12 @@ activation while removing duplicate membership reads.
 Check (October 11 realign): `git diff --check` and `lf context` — pass, both context budgets fit; prose-only reconciliation reuses prior focused evidence, integrated suites belong to gate and native review awaits a compatible installed release.
 
 Check (October 11 publication, `73d2861c1e`): network-isolated `cargo test -p loopflow --test session_lifecycle_tests --test dto_fixtures --test documented_commands --test portfolio_cli_tests` — 65 passed, one Linux-only ignored; `cargo test -p loopflow --lib portfolio::tests` — 3 passed; `LOOPFLOW_PORTFOLIO_TEST_BIN="$PWD/target/debug/lf" scripts/test_desktop.sh --filter 'WorkNavigationTests|WorkNavigationProofTests|WorktreeWorkspaceTests|DTOFixtureTests|PortfolioServiceTests|PortfolioRepoStateTests|WorkDestinationTests|WorkCacheTests|WorkModelTests|SessionControlsTests|SessionChromeProofTests' -Xswiftc -gnone` — successful 193-test run including CLI readback, display diagnostics skipped; `uv run pytest python/tests/test_loopflow_dev.py -q` — 8 passed; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, Ruff and diff whitespace — pass; native review still requires compatible installed identity/portfolio commands.
+
+## Current review order — October 11
+
+Jack Heart prioritized the populated Loopflow repo, Wave and Task views: correct
+Wave/Task visibility and minimal buttons/chrome. Get those main views feeling right
+before revising Portfolio. The repository/Portfolio view remains in scope and is
+wanted, but its present design is not accepted. The isolated empty-clone demo failed
+to establish the requested experience; see `work-first-demo.md` for the freeze,
+focused repair evidence and remaining native proof.

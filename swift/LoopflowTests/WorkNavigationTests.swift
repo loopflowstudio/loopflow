@@ -9,6 +9,26 @@ import ViewInspector
 @Suite("Unified Work and Session navigation")
 @MainActor
 struct WorkNavigationTests {
+    @Test("Repository view reconstruction keeps the Session store's resolved location")
+    func repositoryViewKeepsResolvedLocation() throws {
+        let repo = "/workspace-alias-\(UUID().uuidString)"
+        WaveOrigin.remember(origin: repo)
+        let alias = repo + "/"
+        let query = RegistryQuery { _, _ in throw RegistryQueryError("No reads expected") }
+        let model = WorkModel(query: query, repoPath: alias)
+        let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
+        let key = model.workspaceKey(for: nil, repository: "repo")
+        for _ in 0..<3 {
+            let view = SessionsContentView(model: model, repoPath: alias, workspaces: registry,
+                                          machineId: fixtureMachineId, repository: "repo", query: query)
+            let root = try #require(registry.retained(key))
+            let store = root.sessionStore(repoPath: alias, query: query)
+            #expect(root.location?.worktree == store.repoPath)
+            _ = view.body
+            #expect(root.location?.worktree == store.repoPath)
+        }
+    }
+
     @Test("Persisted repo entry survives partial reads, hide-all and Work navigation")
     func composedWorkFirstEntry() async throws {
         let path = URL(fileURLWithPath: #filePath).deletingLastPathComponent()

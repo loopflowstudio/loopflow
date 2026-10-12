@@ -10,9 +10,9 @@ use crate::store::{open_store, storage_config_from_env, Store};
 pub fn run(command: &SessionCommand) -> anyhow::Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
     let worktree = match command {
-        SessionCommand::Open { json: false, .. }
-        | SessionCommand::Resume { .. }
-        | SessionCommand::ServeConversation { .. } => Some(crate::repo::working_directory()?),
+        SessionCommand::Open { json: false, .. } | SessionCommand::Resume { .. } => {
+            Some(crate::repo::working_directory()?)
+        }
         _ => None,
     };
     let Some(worktree) = worktree else {
@@ -235,10 +235,6 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
                 );
             }
             Ok(())
-        }
-        SessionCommand::ServeConversation { input } => {
-            let store = open_shared_store().await?;
-            crate::ops::human_session::serve_conversation(&store, input).await
         }
     }
 }

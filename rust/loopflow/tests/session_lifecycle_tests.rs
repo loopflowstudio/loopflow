@@ -36,17 +36,6 @@ impl Fixture {
         )
         .unwrap();
         std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
-        // Reviews use a background launcher; record requests without a display.
-        let tmux = bin.join("tmux");
-        std::fs::write(
-            &tmux,
-            format!(
-                "#!/bin/sh\necho \"$@\" >> '{}'\nif [ \"$1\" = has-session ]; then exit 1; fi\n",
-                home.path().join("tmux.log").display()
-            ),
-        )
-        .unwrap();
-        std::fs::set_permissions(&tmux, std::fs::Permissions::from_mode(0o755)).unwrap();
         Self {
             home,
             repo: TestRepo::new(),
@@ -910,6 +899,128 @@ fn binding_starts_the_task_once_without_reattributing_prior_work() {
 }
 
 #[test]
+fn ensured_and_replaced_task_conversations_open_and_recover_unrecorded_native_exits() {
+    let fixture = Fixture::new(false);
+    support::register_task_with_pr(
+        fixture.home.path(),
+        fixture.repo.path(),
+        "main",
+        &fixture.repo.head_sha(),
+    );
+    let first = fixture.json(&[
+        "-a", "opencode", "session", "ensure", "--task", "INF-123", "--json",
+    ]);
+    assert!(fixture.launches().is_empty());
+    assert!(first["agent_process_id"].is_null());
+
+    let mut session = first;
+    for replacement in [false, true] {
+        if replacement {
+            let previous = session["id"].as_str().unwrap();
+            let before = fixture.launches();
+            session = fixture.json(&["-a", "opencode", "session", "replace", previous, "--json"]);
+            assert_eq!(fixture.launches(), before);
+            assert!(session["agent_process_id"].is_null());
+        }
+        let id = session["id"].as_str().unwrap();
+        let opened = fixture.run(&["session", "connect", id]);
+        assert!(opened.status.success(), "{opened:?}");
+        assert_eq!(
+            fixture.session_row(fixture.launches().last().unwrap()).0,
+            id
+        );
+
+        // Model the installed failure: the native provider exited, but its
+        // launcher never recorded that fact. Its identity and history survive.
+        for command in ["connect", "resume"] {
+            let agent: String = fixture
+                .db()
+                .query_row(
+                    "SELECT agent_process_id FROM agent_sessions WHERE id=?1",
+                    [id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            fixture.db().execute(
+                "UPDATE processes SET completed_at=NULL,outcome=NULL,spawn_state='spawn_requested'
+                 WHERE id=?1 AND agent_interactive=1",
+                [&agent],
+            ).unwrap();
+            let before = fixture.launches().len();
+            let reopened = fixture.run(&["session", command, id]);
+            assert!(reopened.status.success(), "{reopened:?}");
+            assert_eq!(fixture.launches().len(), before + 1);
+            assert_eq!(
+                fixture.session_row(fixture.launches().last().unwrap()).0,
+                id
+            );
+            let (completed, outcome): (bool, Option<String>) = fixture
+                .db()
+                .query_row(
+                    "SELECT completed_at IS NOT NULL,outcome FROM processes WHERE id=?1",
+                    [&agent],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            assert!(completed);
+            assert!(
+                outcome.is_none(),
+                "observed death is not a successful outcome"
+            );
+        }
+    }
+}
+
+#[test]
+fn ensured_conversation_recovers_native_exit_before_history_is_published() {
+    for retired in [false, true] {
+        let fixture = Fixture::new(false);
+        support::register_task_with_pr(
+            fixture.home.path(),
+            fixture.repo.path(),
+            "main",
+            &fixture.repo.head_sha(),
+        );
+        let session = fixture.json(&[
+            "-a", "opencode", "session", "ensure", "--task", "INF-123", "--json",
+        ]);
+        let id = session["id"].as_str().unwrap();
+        let provider = fixture.home.path().join("bin/opencode");
+        let script = std::fs::read_to_string(&provider).unwrap();
+        std::fs::write(&provider, script.replace(
+            "    print(\"message=created id=ses_\" + os.environ[\"LF_CAPTURE_KEY\"], file=sys.stderr)",
+            "    pass  # exit without publishing native history",
+        )).unwrap();
+        let failed = fixture.run(&["session", "connect", id]);
+        assert!(!failed.status.success());
+        assert!(String::from_utf8_lossy(&failed.stderr).contains("before becoming resumable"));
+        let previous = fixture.launches()[0].clone();
+        fixture
+            .db()
+            .execute(
+                "UPDATE processes SET completed_at=NULL,outcome=NULL,spawn_state='spawn_requested'
+             WHERE id=(SELECT agent_process_id FROM agent_sessions WHERE id=?1)",
+                [id],
+            )
+            .unwrap();
+        let successor =
+            retired.then(|| fixture.json(&["-a", "opencode", "session", "replace", id, "--json"]));
+        std::fs::write(provider, script).unwrap();
+
+        let opened = fixture.run(&["session", "connect", id]);
+        assert!(opened.status.success(), "{opened:?}");
+        let launches = fixture.launches();
+        assert_eq!(launches.len(), 2);
+        assert_ne!(launches[1], previous);
+        assert_eq!(fixture.session_row(&previous).0, id);
+        assert_eq!(fixture.session_row(&launches[1]).0, id);
+        let primary = fixture.json(&["session", "ensure", "--task", "INF-123", "--json"]);
+        assert_eq!(primary["id"], successor.as_ref().unwrap_or(&session)["id"]);
+        assert_eq!(fixture.session_row(&launches[1]).3, retired);
+    }
+}
+
+#[test]
 fn a_task_primary_is_one_of_its_own_conversations() {
     let fixture = Fixture::new(false);
     let sole_path = fixture.repo.create_named_worktree("task-sole");
@@ -1006,7 +1117,7 @@ fn a_task_primary_is_one_of_its_own_conversations() {
     assert_eq!(primary(&["INF-124"])["id"], newest.as_str());
 
     // Reading inventory creates nothing; asking for the primary of a Task
-    // with no conversation starts one in its checkout.
+    // with no conversation prepares one in its checkout.
     let before = fixture.count("agent_sessions");
     assert!(members("INF-125").is_empty());
     assert_eq!(fixture.count("agent_sessions"), before);

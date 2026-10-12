@@ -1231,6 +1231,11 @@ fixture under the corrected executable context before completing the suite.
 inside that boundary. Integration `EnvGuard` uses `CARGO_BIN_EXE_lf`, not the
 installed CLI directory, so its provider stand-ins remain first on PATH.
 
+After a materialized run, a direct test can reuse `loopflow-test-support` with
+the deleted temporary checkout embedded in `CARGO_MANIFEST_DIR`. If fixture CLI
+construction fails with `No such file or directory`, run
+`cargo clean -p loopflow-test-support` before the focused rerun.
+
 Default-runtime selection reads the OS account's installation records. Use the
 installation harness for default-runtime proofs; never replace the machine's
 selection to make tests pass. Flow/Session tests with an explicit experimental

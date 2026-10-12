@@ -236,7 +236,7 @@ pub(super) fn stop((store, session, attachment): &AttachmentOwner) -> Result<()>
 }
 
 /// Called with the exact attachment locked, never with SQLite held across I/O.
-/// Foreground providers settle through their launcher, never headless group control.
+/// Foreground providers may be observed dead, but never use headless group control.
 pub(crate) fn close_session_agent_process(store: &SqliteStore, session: &str) -> StoreResult<bool> {
     let Some(attachment) = store.session_attachment(session)? else {
         return Ok(false);
@@ -248,12 +248,12 @@ pub(crate) fn close_session_agent_process(store: &SqliteStore, session: &str) ->
     else {
         return Ok(false);
     };
-    if agent.interactive {
-        return Ok(false);
-    }
     let Some((pid, started)) = agent.process.pid.zip(agent.process.os_started_at) else {
         return Ok(false);
     };
+    if agent.interactive {
+        return Ok(process_identity_evidence(pid, started) == ProcessIdentityEvidence::Dead);
+    }
     match process_identity_evidence(pid, started) {
         ProcessIdentityEvidence::Dead => {
             return confirmed_group_death(pid)

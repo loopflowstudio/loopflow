@@ -254,9 +254,7 @@ SQL expression crashes decoding. Treat null as not-reserved, not an observed exi
 Neither record can yet authorize ordinary replacement. Command receipts:
 `427-native-commands.json`, `389-native-commands.json` in the audit directory.
 
-Retain a bounded final-screen excerpt before releasing an ended Session surface,
-using the existing lf3 reader; show terminal-ended output through refresh until
-explicit reopen or fresh live ownership. Do not infer failure from prose or exit
-alone. No new transcript store or retained dead PTY. Review caught truncation and
-empty-output handling; label truncation and unavailable output explicitly.
-Check: final 18 Swift Session/stream tests and legacy-null Rust regression PASS; fmt/all-target Clippy/diff PASS. Native excerpt remains unproved; the app stays running to preserve Claude. No unknown-process retirement or demo acceptance.
+Ended Sessions retain a bounded final-screen excerpt through refresh until reopen
+or fresh live ownership. Reuse lf3; no transcript store, dead PTY retention or
+failure inference from prose. Label truncation and unavailable output.
+Check: 18 Swift Session/stream tests, legacy-null Rust regression, fmt/all-target Clippy/diff PASS. Native owned failing-child diagnostic PASS after exercising production pool exit detection (first attempt omitted it and timed out); `/tmp/loo462-ended-native-test{,2}.log`. Real app remains unchanged to preserve Claude; no unknown-process retirement or demo acceptance.

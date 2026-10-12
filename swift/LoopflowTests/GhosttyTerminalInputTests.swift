@@ -550,6 +550,40 @@ struct GhosttyTerminalInputTests {
         #expect(copied() == nil)
     }
 
+    @Test("A failed Session child retains its final output before releasing the surface")
+    @MainActor
+    func endedSessionRetainsTerminalOutput() async throws {
+        _ = NSApplication.shared
+        let manager = GhosttyManager.shared
+        manager.initialize()
+        let pool = GhosttySurfacePool()
+        let identity = TerminalIdentity.session("failed-opening-proof", machineId: fixtureMachineId)
+        let view = pool.view(for: identity)
+        view.setFrameSize(CGSize(width: 800, height: 400))
+        view.workingDirectory = NSTemporaryDirectory()
+        view.command = "/bin/sh -c 'printf \"Error: owned opening failed\\n\"; sleep 0.2; exit 1'"
+        try await confirmation("final output retained") { confirmed in
+            let observer = NotificationCenter.default.addObserver(
+                forName: .ghosttySurfaceClosed, object: nil, queue: nil
+            ) { notification in
+                guard notification.object as? TerminalIdentity == identity else { return }
+                #expect((notification.userInfo?["output"] as? String)?.contains("Error: owned opening failed") == true)
+                confirmed()
+            }
+            defer { NotificationCenter.default.removeObserver(observer); pool.release(identity) }
+            view.createSurface(manager: manager)
+            _ = try #require(view.surface)
+            let deadline = ContinuousClock.now + .seconds(5)
+            while view.surface != nil, ContinuousClock.now < deadline {
+                manager.tick()
+                _ = pool.hasSurface(identity)
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            #expect(view.surface == nil)
+            #expect(!pool.hasSurface(identity))
+        }
+    }
+
     @Test("releasing a retained terminal affects only its owning window")
     @MainActor
     func releaseSurfaceIsWindowLocal() async throws {

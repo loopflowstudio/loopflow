@@ -1239,6 +1239,7 @@ mod tests {
                  INSERT INTO tasks VALUES ('legacy-unplaced', '', NULL, NULL);
                  INSERT INTO tasks VALUES ('running', '/repo.running', NULL, NULL);
                  INSERT INTO tasks VALUES ('waiting', '/repo.waiting', NULL, NULL);
+                 INSERT INTO tasks VALUES ('planned', NULL, NULL, NULL);
                  INSERT INTO tasks VALUES ('completed', '/repo.completed', NULL, 1);
                  INSERT INTO tasks VALUES ('abandoned', '/repo.abandoned', 1, NULL);
                  INSERT INTO task_workflows VALUES ('running', 'review', 2);

@@ -1146,12 +1146,12 @@ pub(crate) fn attributed_context(
         omitted(
             "LOOPFLOW.md",
             ContextDecisionKind::Excluded,
-            "--no-loopflow disables automatic guidance",
+            "automatic guidance disabled for this input",
         );
         omitted(
             "work",
             ContextDecisionKind::Excluded,
-            "--no-loopflow disables automatic guidance",
+            "automatic guidance disabled for this input",
         );
     } else if components.work.is_none() {
         omitted(

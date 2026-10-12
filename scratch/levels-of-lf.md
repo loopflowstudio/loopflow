@@ -195,3 +195,5 @@ selection and scoring; live provider runs remain a separate headless check.
 Acceptance: focused prompt/provenance and CLI tests, evaluation runner tests,
 formatting and Clippy. Delete the unexplained Work boolean and opaque automatic
 instruction reasons; reuse existing captured decisions and rendering machinery.
+
+Sync verification (2026-10-12): `cargo test -p loopflow --test context_launch_tests` (8 passed), `cargo test -p loopflow --test session_cli_tests instruction_inspection_reports_recorded_reasons_and_missing_evidence` (1 passed), and `cargo test -p loopflow --lib work_guidance_is_additive_opt_out_and_loadable_as_a_skill` (1 passed); inherited `LF_*` unset, stdin closed; broader checks remain with gate/CI.

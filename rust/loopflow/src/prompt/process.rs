@@ -384,7 +384,7 @@ Test skill body.
             let (decision, reason) = if no_loopflow {
                 (
                     crate::trace::ContextDecisionKind::Excluded,
-                    "--no-loopflow disables automatic guidance",
+                    "automatic guidance disabled for this input",
                 )
             } else if !work {
                 (

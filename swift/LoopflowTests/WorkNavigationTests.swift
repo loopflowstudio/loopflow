@@ -286,7 +286,7 @@ struct WorkNavigationTests {
         }
     }
 
-    @Test("Task navigation and counts show unfinished interactive participation")
+    @Test("Task membership retains unfinished interactive participation")
     func taskVisibilityDoesNotRequireAttention() async throws {
         let original = try session("idle", work: .task(id: "ts_review00000000000000000000000000"))
         let value = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any])
@@ -326,7 +326,7 @@ struct WorkNavigationTests {
         }
         #expect(roots.count == 1)
         #expect(try roots.first?.accessibilityIdentifier() == "work-repository-/src/loopflow")
-        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "work-session-count-issue-review")
+        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "work-task-issue-review")
     }
 
     @Test("Compression promotes leaves without changing identity or hiding upcoming Tasks")
@@ -382,10 +382,11 @@ struct WorkNavigationTests {
             let rows = model.visibleWork.outline(presentation: .compact, collapsed: [], search: search, planningReadable: true)
             #expect(rows.first { $0.id.work == .wave(id: "wave-1") }?.inlineSessions.map(\.id) == [conversation.id])
             let view = WorkNavigator(model: model, onOpenSession: { opened.append($0.id) })
-            let menu = try view.inspect().find(viewWithAccessibilityIdentifier: "work-session-count-wave-1")
-            try menu.find(button: conversation.title).tap()
+            #expect(throws: (any Error).self) {
+                try view.inspect().find(viewWithAccessibilityIdentifier: "work-session-count-wave-1")
+            }
         }
-        #expect(opened == [conversation.id, conversation.id])
+        #expect(opened.isEmpty)
     }
 
     @Test("Compact keeps an empty Wave available for inspection and conversation")
@@ -464,10 +465,10 @@ struct WorkNavigationTests {
         await model.refreshSessions()
         #expect(model.projection.unmatchedSessions.isEmpty)
         #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "work-orphans-open") }
-        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "work-session-count-issue-review")
+        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "work-task-issue-review")
     }
 
-    @Test("Hierarchy rows open Work; conversation menus open the exact Session")
+    @Test("Hierarchy rows open Work without numeric conversation controls")
     func conversationMenusOpenAcrossPresentations() async throws {
         let model = try model()
         await model.refresh()
@@ -483,11 +484,12 @@ struct WorkNavigationTests {
             #expect(throws: (any Error).self) {
                 try view.inspect().find(viewWithAccessibilityIdentifier: "session-row-human")
             }
-            let conversations = try view.inspect().find(viewWithAccessibilityIdentifier: "work-session-count-issue-review")
-            try conversations.find(button: "human").tap()
+            #expect(throws: (any Error).self) {
+                try view.inspect().find(viewWithAccessibilityIdentifier: "work-session-count-issue-review")
+            }
             #expect(model.selection == selected)
         }
-        #expect(opened == ["human", "human"])
+        #expect(opened.isEmpty)
         #expect(tasks == [.task(id: "issue-review"), .task(id: "issue-review")])
     }
 
@@ -530,6 +532,35 @@ struct WorkNavigationTests {
         #expect(sidebar() == ["issue-review"])
         // All planned Tasks remain reachable in the Wave plan.
         #expect(model.projection.waves[0].tasks.count == 4)
+    }
+
+    @Test("Terminal Task conversations remain retained without keeping settled work in the sidebar")
+    func terminalConversationsDoNotKeepTasksCurrent() throws {
+        let records = [try session("retained", work: .task(id: "ts_review00000000000000000000000000"))]
+        for state in ["completed", "canceled", "duplicate"] {
+            for unresolved in [false, true] {
+                var json = try #require(JSONSerialization.jsonObject(with: Data(roadmapJSON().utf8)) as? [String: Any])
+                var waves = try #require(json["waves"] as? [[String: Any]])
+                var tasks = try #require(waves[0]["tasks"] as? [String: Any])
+                var items = try #require(tasks["items"] as? [[String: Any]])
+                let index = try #require(items.firstIndex { ($0["task"] as? [String: Any])?["id"] as? String == "issue-review" })
+                var task = try #require(items[index]["task"] as? [String: Any])
+                task["state"] = state
+                task["completed"] = state == "completed"
+                items[index]["task"] = task
+                var condition = try #require(items[index]["condition"] as? [String: Any])
+                condition["unresolved_execution"] = unresolved
+                items[index]["condition"] = condition
+                tasks["items"] = items
+                waves[0]["tasks"] = tasks
+                json["waves"] = waves
+                let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: json))
+                let projection = WorkProjection(roadmaps: snapshot.waves, sessions: records)
+                let retained = try #require(projection.waves[0].tasks.first { $0.id.work.id == "issue-review" })
+                #expect(retained.sessions.map(\.id) == ["retained"])
+                #expect(retained.inWorkingSet == unresolved)
+            }
+        }
     }
 
     @Test("Many started Tasks across Waves populate the sidebar while every planned Task stays reachable")

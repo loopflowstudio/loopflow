@@ -185,7 +185,7 @@ struct WorkNavigator: View {
 
     /// One row component at two levels. A Wave is a sans section head with a
     /// chevron and nothing else; a Task carries a dot only while it needs eyes
-    /// (running, blocked, waiting on you) and a count only while Sessions exist.
+    /// (running, blocked, waiting on you). Conversations stay in the workspace.
     private func outlineRow(_ row: WorkOutlineRow) -> some View {
         let isWave = row.id.work.kind == .wave
         return HStack(spacing: 6) {
@@ -227,9 +227,6 @@ struct WorkNavigator: View {
             }
             .help(row.title)
             .accessibilityIdentifier("work-\(row.id.work.kind.rawValue)-\(row.id.work.id)")
-            if !row.inlineSessions.isEmpty {
-                sessionCount(row.inlineSessions, work: row.id.work)
-            }
         }
         .padding(.horizontal, 6)
         .frame(minHeight: 28)
@@ -254,24 +251,6 @@ struct WorkNavigator: View {
             Divider()
             repositoryActions()
         }
-    }
-
-    /// Open an exact available conversation from its Task or collapsed Wave.
-    private func sessionCount(_ sessions: [SessionRecord], work: WorkReference) -> some View {
-        let names = sessions.map(\.title).joined(separator: ", ")
-        return Menu {
-            ForEach(sessions) { session in
-                Button(session.title) { onOpenSession(session) }
-            }
-        } label: {
-            Label("\(sessions.count)", systemImage: "bubble.left")
-                .font(Typography.meta).foregroundStyle(palette.accentInk)
-        }
-        .menuStyle(.borderlessButton)
-        .fixedSize()
-        .help(names)
-        .accessibilityLabel("\(sessions.count) Sessions: \(names)")
-        .accessibilityIdentifier("work-session-count-\(work.id)")
     }
 
     @ViewBuilder private func subjectActions(_ work: WorkReference, title: String) -> some View {

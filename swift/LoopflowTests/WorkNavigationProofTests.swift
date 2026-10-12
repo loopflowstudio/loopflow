@@ -197,8 +197,8 @@ struct WorkNavigationProofTests {
                 (try? $0.accessibilityIdentifier().hasPrefix("work-disclose-wave-")) == true
             }.count == 3)
             #expect(throws: (any Error).self) { try outline.find(WaveLensView.self) }
-            // Counts only where Sessions exist.
-            _ = try outline.find(viewWithAccessibilityIdentifier: "work-session-count-task-0-0")
+            // Conversations do not add numeric controls to Work navigation.
+            #expect(throws: (any Error).self) { try outline.find(viewWithAccessibilityIdentifier: "work-session-count-task-0-0") }
             #expect(throws: (any Error).self) { try outline.find(viewWithAccessibilityIdentifier: "work-session-count-task-0-7") }
             // Diagnostic Sessions do not consume main navigation space.
             #expect(throws: (any Error).self) { try outline.find(viewWithAccessibilityIdentifier: "work-orphans-open") }

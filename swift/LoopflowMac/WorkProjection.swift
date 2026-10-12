@@ -21,6 +21,9 @@ struct TaskProjection: Identifiable {
     /// when its start predates recorded evidence. Locally done or abandoned
     /// Work has left it even while planning has not caught up.
     var inWorkingSet: Bool {
+        if task.task.isTerminal {
+            return started && task.condition.unresolvedExecution
+        }
         if !sessions.isEmpty { return true }
         return started && task.condition.unresolvedExecution
     }
@@ -220,7 +223,7 @@ extension WorkProjection {
                     let taskMatches = matches(taskSubject.title) || matches(task.task.task.identifier)
                         || matches(waveSubject.title)
                     guard taskMatches else { continue }
-                    // Open Sessions ride the Task row as a count and names.
+                    // Retain exact conversations for contextual opening, not tallies.
                     appendWork(taskSubject, depth: waveDepth, ancestors: ancestors,
                                hasChildren: false, sessions: task.sessions)
                 }

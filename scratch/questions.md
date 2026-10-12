@@ -1,7 +1,9 @@
 # LOO-462 decisions still open
 
 Reconciled October 11, 2026. Jack Heart authorized implementation through
-publication for demo review on October 10, not landing or live cleanup.
+publication for demo review on October 10, not landing. October 11 authorizes
+real-data cleanup after rehearsal in the private copy; specific uncertain
+dispositions remain for review.
 Accepted direction and implementation evidence live in `get-me-using-lf.md`.
 
 ## Product review

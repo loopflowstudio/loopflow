@@ -388,3 +388,39 @@ before revising Portfolio. The repository/Portfolio view remains in scope and is
 wanted, but its present design is not accepted. The isolated empty-clone demo failed
 to establish the requested experience; see `work-first-demo.md` for the freeze,
 focused repair evidence and remaining native proof.
+
+## Sidebar cleanup and recurrence — October 11
+
+Jack Heart rejected numeric conversation controls and requested a minimal visible
+working set. Remove sidebar Session counts/dropdowns; retain exact conversations
+in their Work and contextual opening. Jack authorized real-database cleanup after
+figuring out and rehearsing the specific changes in the private copy. This supersedes
+the blanket live-cleanup hold, not the requirement to preserve active work and review
+uncertain cases. No actual live cleanup has occurred.
+
+Keep two tracks separate: iteration debris from retired implementations/experiments
+can receive a one-time restorable repair; states reachable through ordinary current
+use need a lifecycle/visibility correction and regression proof. Unknown provenance
+is neither a deletion candidate nor evidence of recurrence.
+
+Read-only audit of the copied Loopflow data found 358 Tasks, 32 with unfinished
+interactive conversations: 22 completed, two canceled, seven unstarted in planning,
+and one with unknown planning state. Every one has recorded Started evidence.
+This is a snapshot, not current process liveness. Exact inventory is retained at
+`/private/tmp/loo462-native.FgtDmE/sidebar-data-audit.json`.
+
+Confirmed recurring bug: Task completion is independent of Session completion,
+but `inWorkingSet` returned true for any associated visible conversation, ahead of
+Task state. Settled completed/canceled/duplicate Tasks now stay out of ordinary
+navigation unless shared execution evidence remains unresolved. Conversations,
+Wave plan/history, retained panes and binding are not changed. Tests cover all three
+terminal planning states with/without unresolved execution while retaining Sessions.
+
+Iteration candidates remain unclassified. LOO-276 under abandoned Wave `list`,
+with unknown planning state and retained conversation, warrants provenance inspection;
+neither its age nor its parent name authorizes deletion. The shared Work reader
+currently reports an unrelated parse error in main's `.lf/config.yaml`; audit must
+not interpret that unavailable planning as an empty inventory or repair another
+checkout's active contribution.
+
+Check: `scripts/test_desktop.sh --filter WorkNavigationTests -Xswiftc -gnone` — 36 passed after count removal and terminal-visibility regression; native populated re-review remains.

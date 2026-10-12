@@ -159,10 +159,12 @@ completed Work-first cut. The configured demo failed with an unrecognized
 removes its misleading runtime claim: `run`/`run-debug` now check
 the actual `repo identity --json` operation through the bundled helper before
 opening the app. This is ordinary repository registration, not an effect-free
-capability query. Normal installed dispatch and migration authority remain intact;
-no identity fallback, installed-CLI replacement or private-Machine substitution
-is added. The existing development app build/install remains.
-Real-data native acceptance still requires a compatible installed release.
+capability query. October 12 bundled selection supersedes installed forwarding;
+migration authority and data selection stay unchanged. No identity fallback,
+global installed-CLI replacement or private-Machine substitution is added.
+October 12: Jack Heart authorized bundled-runtime work for real-data demo;
+see work-first-demo.md **Bundled runtime**. The installed-release-only hold is
+superseded; schema and process-control boundaries remain.
 [The failed demo](work-first-demo.md) records the observed runtime mismatch; no
 new configured demo has succeeded. [Portfolio discovery](portfolio-discovery.md) records the prior-art investigation.
 Jack Heart added portfolio management to LOO-462 on October 11. The shared

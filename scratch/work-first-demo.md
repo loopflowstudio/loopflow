@@ -9,50 +9,15 @@ unaccepted; no live installation or landing is authorized. Current design:
 Empty-clone launch evidence: `53c4c156e3:scratch/work-first-demo.md`,
 **Isolated branch demo**. Jack Heart rejected it for populated Loopflow Work.
 
-## Review priority — October 11
+## Review priority
 
-Jack Heart reported that the isolated app did not load and would not quit, then
-force-quit it. The empty clone did not demonstrate the intended populated
-Loopflow repository experience. Jack redirected review to the main repo, Wave
-and Task views: verify the expected Waves and Tasks appear, and inspect whether
-new buttons or chrome have been added. Portfolio remains wanted but needs further
-revision; review it second, after the main views feel right. This is not native
-acceptance of either surface.
-
-Earlier redraw freeze and 44-test repair: `2a56c9937d:scratch/work-first-demo.md`,
-**Review priority**. Launch alone proved neither usability nor normal Quit.
-
-October 11 preparation, validation failures and denied Git execution remain at
-`9a23582588:scratch/work-first-demo.md`, **Review priority**. Copies preserved exact
-planning IDs; early windows did not prove rendering or conversation continuation.
-
-Loading repair: repeated samples located the delay in Flow membership reads. The
-snapshot holds 299,139 Processes and only 250 Flow records. Flow reads now restrict
-candidate process IDs before applying the unchanged shared checkout, Session-history
-and attachment membership rules. No schema/index or stored-history change. A direct
-snapshot SQL probe for LOO-462 returned the same five rows (0.19 s before, 0.057 s
-after using Python SQLite; not an app latency benchmark). Five Rust task-work tests
-pass, including candidate filtering preserving historical association outside the
-checkout. The branch CLI was rebuilt and repackaged in the isolated app.
-
-First populated capture, five Rust membership checks and failed native launch
-receipts: `9a23582588:scratch/work-first-demo.md`, **Review priority**. Those
-prove rendering/filtering primitives, not provider continuation or acceptance.
-
-October 11 sidebar revision (`63a20694d5`): removed numeric Session menus and fixed
-terminal Tasks remaining current solely through retained conversations. Rebuilt and
-launched the private app; direct capture `/tmp/loopflow-20261011-213145.png` still
-shows loading, not the revised populated inventory. A fresh shared-reader probe
-reports a YAML parse error in the separately changing main checkout's config.
-The data audit and 36 navigation tests establish the local correction, not a
-successful refreshed native demo. No source or destination database cleanup yet.
-
-Subsequent direct capture `/tmp/loopflow-20261011-213231.png` and native inspection
-show the revised populated sidebar with no numeric conversation controls and a
-current reading. The transient main config error cleared without edits here. This
-supersedes the failed refreshed-view observation above, not the recorded failure.
-The latest stopped-failure projection correction has focused Rust and Clippy passes;
-it has not yet been packaged into that captured app.
+Jack Heart requested real populated Loopflow Work before Portfolio, no added
+chrome or Session counts. Earlier failed launches, redraw freeze, SQL loading
+repair, measurements and screenshots remain at
+`946dae6203:scratch/work-first-demo.md`, **Review priority — October 11**.
+The shared Flow membership query now restricts candidate Processes before joining
+history. Its five passing Rust tests prove membership retention, not native speed.
+No previous launch or screenshot established real-provider continuation.
 
 ## October 11 native navigation and cleanup rehearsal
 
@@ -280,3 +245,25 @@ snapshot selects 11. Six extra completed Tasks have only old blocked Flow eviden
 LOO-440/412, lf-b978097/df7e403/cb9012a/6f396c0. `c229a29648` fixes that shared
 Rust projection; Desktop decoding compatibility does not deliver this unreleased
 behavior. Do not delete failed history or duplicate the fix in Swift.
+
+## Bundled runtime — October 12, in progress
+
+Jack Heart authorized the changes needed in this diff for a viable real-data demo,
+including bundled lf selection and its propagation into embedded terminals/Session
+children. This supersedes the installed-release-only demo hold. Desktop selects
+its own helper via LF_BIN; ordinary terminal defaults remain installed. Remove the
+external helper override and provenance-only store refusal, not schema validation
+or the exclusive migration boundary. Reattachment keeps an already-running
+provider's environment; it does not silently restart it for a new executable.
+
+Source includes main's unreleased `linear_team_checks` table. Real data has the
+released schema; no live table was added. Its Linear acquisition path and Flow
+schema revalidation still need composed proof before claiming all operations work.
+No global install, migration, provider takeover or additional cleanup performed.
+
+Check: bundled selection/shared-store Rust 7 PASS (initial over-specific filter ran zero, corrected); Desktop launcher/zsh 9 PASS; Python launcher 8 PASS; fmt, all-target Clippy, Ruff/diff PASS. Native preparation fixture remains display-only.
+Live bundled app PID 8749 finished refreshing with 12 rows (new CI Task since the
+11-row snapshot); Portfolio error gone. Clicking LOO-462 launched exact
+`session connect 955ff6f0a65047a18b191505e307fce1`; provider shows hook-trust review,
+left for Jack. His LOO-312 click reproduces missing-checkout opening failure;
+restoration sequencing and duplicate error UI remain. No schema migration.

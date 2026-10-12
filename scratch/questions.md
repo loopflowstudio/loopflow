@@ -26,7 +26,8 @@ Accepted direction and implementation evidence live in `get-me-using-lf.md`.
 
 - October 11 launcher repair: checking the same `repo identity --json` operation
   before launch may register the selected repository, just as opening Work does.
-  It preserves normal installed dispatch and explicit private-Machine selection;
+  October 12 supersedes installed dispatch with the app’s bundled helper;
+  explicit private-Machine selection still chooses data independently;
   command help alone cannot demonstrate the configured runtime's support.
 - First-use acquisition is considered once per retained repository workspace after
   fresh current planning, then full historical Wave inventory. Refresh, filtering and

@@ -32,6 +32,13 @@ enum GUIProcessEnvironment {
     static func enriched(_ env: [String: String]) -> [String: String] {
         var copy = env
         copy["PATH"] = enrichedPath(from: env["PATH"])
+        // Select this app's protocol for every child, including nested agent
+        // commands. Never inherit another app or shell's executable selection.
+        copy.removeValue(forKey: "LF_BIN")
+        if let helper = Bundle.main.url(forAuxiliaryExecutable: "lf") {
+            copy["LF_BIN"] = helper.path
+            copy["PATH"] = helper.deletingLastPathComponent().path + ":" + (copy["PATH"] ?? "")
+        }
         // The GUI is a new human control surface, not a continuation of the
         // Work process that opened it. Preserve Machine and account authority.
         for key in ["LF_WAVE_ID", "LF_RUN_ID", "LF_CAPTURE_KEY", "LF_PREPARED_CAPTURE", "LF_HUMAN_SESSION_RUN", "LF_RUN_DIR", "LF_TRACE_ID", "LF_PROCESS_ID",

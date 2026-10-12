@@ -104,8 +104,7 @@ struct LocalWaveAgentLauncherTests {
     func missingBundledHelperFails() {
         #expect {
             try LocalWaveAgentLauncher.controlLfPath(
-                bundled: nil,
-                developmentConfig: nil
+                bundled: nil
             )
         } throws: { error in
             guard error is LocalLfError else { return false }
@@ -114,21 +113,9 @@ struct LocalWaveAgentLauncherTests {
         }
     }
 
-    @Test("a development app uses its explicit machine lf gate")
-    func developmentAppUsesMachineGate() throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let config = directory.appending(path: "LoopflowDevControl.json")
-        try Data(#"{"lf_path":"/bin/sh"}"#.utf8).write(to: config)
-
-        let path = try LocalWaveAgentLauncher.controlLfPath(
-            bundled: nil,
-            developmentConfig: config
-        )
-
-        #expect(path == "/bin/sh")
+    @Test("the app selects its bundled helper")
+    func appUsesBundledHelper() throws {
+        #expect(try LocalWaveAgentLauncher.controlLfPath(bundled: URL(fileURLWithPath: "/bin/sh")) == "/bin/sh")
     }
 
     #if !SWIFT_PACKAGE

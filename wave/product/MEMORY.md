@@ -380,11 +380,13 @@ once redirected logs into prior Work. Overview sizing remains unreviewed.
 Rust/Swift capture proves primary reuse and retention, not native/provider usability.
 Cleanup still needs exact reviewed candidates and demonstrated isolated restoration.
 
-October 11's configured demo failed: installed `lf 0.13.11` rejected `repo identity`
-although bundled help succeeded. **Source syntax is not runtime support:** normal
-Machine dispatch forwards to installed lf. The launcher now checks the actual
-operation before opening; it may register the repository. A private fixture cannot replace Jack's real-repository
-review; no runtime bypass, live migration or native acceptance follows.
+October 12: Jack Heart authorized bundled lf throughout Desktop, embedded shells
+and new Session children to make the real-data demo viable. Installed 0.13.12
+still lacks branch Portfolio/filter/query changes; source help never proved the
+selected runtime. LF_BIN selects executable independently of LF_HOME. Existing
+provider reattachment retains its environment, not silent restart. Store schema
+validation/migration ownership and explicit takeover remain. Earlier failed demos:
+`946dae6203:scratch/work-first-demo.md`; no native acceptance or global install.
 
 October 11: Jack Heart included portfolio management in LOO-462. Portfolio configures
 lf-owned folder/manual membership through RegistryQuery: one `repo_root`, default
@@ -394,8 +396,7 @@ The implemented service shares one reading across windows; delayed reads seriali
 with mutations, failed discovery retains membership, and removing membership leaves
 Work/drafts intact. Authored-Wave discovery remains separate. Isolated CLI/Swift
 checks establish owner agreement, not native picker or menu acceptance. Configured
-review needs installed portfolio support as well as identity; the launcher tests
-identity only.
+review uses bundled portfolio/identity support; the launcher tests identity only.
 
 ## Session working set and Waiting (2026-10-03, revised 2026-10-06)
 

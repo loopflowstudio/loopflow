@@ -122,6 +122,7 @@ struct GhosttyShellBlockTests {
                 """
                 source ~/.zshrc
                 _loopflow_prompt
+                print -r -- "BUNDLED_PATH=$PATH"
                 _ghostty_deferred_init
                 print -Pn "$PS1"
                 _ghostty_preexec "loopflow-missing-command"
@@ -138,6 +139,7 @@ struct GhosttyShellBlockTests {
                 "GHOSTTY_SHELL_FEATURES": "",
                 "TERM": "xterm-256color",
                 "ZDOTDIR": bootstrap,
+                "LF_BIN": "/bundled app/Contents/MacOS/lf",
             ]
             let stdout = Pipe()
             process.standardOutput = stdout
@@ -156,6 +158,8 @@ struct GhosttyShellBlockTests {
                 remaining = remaining[range.upperBound...]
             }
         }
+
+        #expect(try run(rc: "PATH=/usr/bin:/bin\nPS1=custom\n").contains("BUNDLED_PATH=/bundled app/Contents/MacOS:/usr/bin:/bin"))
 
         // The stock prompt becomes a blank row, a concealed header row holding
         // the directory, then the command line.

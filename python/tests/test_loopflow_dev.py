@@ -30,7 +30,8 @@ def test_demo_launch_requires_work_opening_on_selected_runtime(
     cli.write_text(
         "#!/bin/sh\n"
         'case "$*" in *--help*) exit 0;; esac\n'
-        'if [ -n "$LF_AGENT_CALLER$LF_TASK$LF_BIN" ]; then exit 9; fi\n'
+        'if [ -n "$LF_AGENT_CALLER$LF_TASK" ]; then exit 9; fi\n'
+        'test "$LF_BIN" = "$0" || exit 9\n'
         f'test "$LF_HOME" = {shlex.quote(selected_home)} || exit 9\n'
         f'if [ "{supported}" = "True" ]; then printf \'{{}}\\n\'; exit 0; fi\n'
         "echo \"error: unrecognized subcommand 'identity'\" >&2\n"
@@ -71,7 +72,7 @@ def test_demo_launch_requires_work_opening_on_selected_runtime(
     if not supported:
         error = capsys.readouterr().err
         assert "unrecognized subcommand 'identity'" in error
-        assert "compatible published release" in error
+        assert "bundled CLI" in error
 
 
 @pytest.mark.parametrize(

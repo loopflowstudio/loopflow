@@ -6,7 +6,9 @@ private func enrichProcessPathForGUILaunch() {
     let existing = ProcessInfo.processInfo.environment
     let enriched = GUIProcessEnvironment.enriched(existing)
     for key in existing.keys where enriched[key] == nil { unsetenv(key) }
-    if let path = enriched["PATH"] { setenv("PATH", path, 1) }
+    for key in ["PATH", "LF_BIN"] {
+        if let value = enriched[key] { setenv(key, value, 1) }
+    }
 }
 
 @main

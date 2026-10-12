@@ -158,31 +158,9 @@ pub fn default_db_path() -> PathBuf {
 
 /// The selected Machine's database. A Machine has exactly one, at a fixed name.
 pub fn database_path_from_env() -> Result<PathBuf, std::io::Error> {
-    let path = default_db_path();
-    guard_development_database(&path, crate::build_info::provenance(), &machine_home_dir())?;
-    Ok(path)
-}
-
-fn guard_development_database(
-    path: &Path,
-    provenance: crate::build_info::BuildProvenance,
-    home: &Path,
-) -> Result<(), std::io::Error> {
-    if provenance.is_release() {
-        return Ok(());
-    }
-    let production = home.join(".lf/loopflow.db");
-    if !same_database_file(path, &production)? {
-        return Ok(());
-    }
-    Err(std::io::Error::new(
-        std::io::ErrorKind::PermissionDenied,
-        format!(
-            "development lf ({}) refuses production database {}; use an installed release lf",
-            crate::build_info::source_identity(),
-            production.display()
-        ),
-    ))
+    // Schema compatibility, not build provenance, decides whether a CLI can
+    // use this Machine. Ordinary opens still cannot advance its schema.
+    Ok(default_db_path())
 }
 
 /// Whether an open is the authorized owner of the shared migration frontier.
@@ -1201,10 +1179,10 @@ pub type SharedStore = Arc<Store>;
 #[cfg(test)]
 mod tests {
     use super::{
-        guard_development_database, may_apply_migrations, read_nonterminal_task_worktrees,
-        CredentialState, ProviderAccount, ProviderAccountId, RoutingState, StorageConfig,
+        may_apply_migrations, read_nonterminal_task_worktrees, CredentialState, ProviderAccount,
+        ProviderAccountId, RoutingState, StorageConfig,
     };
-    use crate::build_info::{BuildProvenance, MigrationAuthority};
+    use crate::build_info::MigrationAuthority;
     use crate::child::ChildRef;
     use crate::durable::{Author, WorkRef};
     use crate::id::WaveId;
@@ -1286,17 +1264,6 @@ mod tests {
     }
 
     #[test]
-    fn development_production_gate_has_no_override() {
-        let directory = tempfile::tempdir().unwrap();
-        let home = directory.path();
-        let production = home.join(".lf/loopflow.db");
-        assert!(
-            guard_development_database(&production, BuildProvenance::Development, home,).is_err()
-        );
-        guard_development_database(&production, BuildProvenance::Release, home).unwrap();
-    }
-
-    #[test]
     fn advancing_the_shared_frontier_is_exclusive_to_the_promotion_boundary() {
         use super::FrontierAdvance::{Authorized, Forbidden};
         let directory = tempfile::tempdir().unwrap();
@@ -1320,54 +1287,6 @@ mod tests {
         let isolated = home.join(".lf-dev/branch/loopflow.db");
         assert!(may_apply_migrations(&isolated, validation_only, home, Forbidden).unwrap());
         assert!(may_apply_migrations(&isolated, published, home, Forbidden).unwrap());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn development_production_gate_resolves_symlink_aliases() {
-        use std::os::unix::fs::symlink;
-
-        let directory = tempfile::tempdir().unwrap();
-        let home = directory.path().join("home");
-        let production_home = home.join(".lf");
-        std::fs::create_dir_all(&production_home).unwrap();
-        let alias = directory.path().join("store-alias");
-        symlink(&production_home, &alias).unwrap();
-
-        assert!(guard_development_database(
-            &alias.join("loopflow.db"),
-            BuildProvenance::Development,
-            &home,
-        )
-        .is_err());
-    }
-
-    #[test]
-    fn development_production_gate_normalizes_missing_parent_components() {
-        let directory = tempfile::tempdir().unwrap();
-        let home = directory.path().join("home");
-        std::fs::create_dir_all(home.join(".lf")).unwrap();
-
-        assert!(guard_development_database(
-            &home.join(".lf/new/../loopflow.db"),
-            BuildProvenance::Development,
-            &home,
-        )
-        .is_err());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn development_production_gate_rejects_existing_hard_link_alias() {
-        let directory = tempfile::tempdir().unwrap();
-        let home = directory.path().join("home");
-        let production = home.join(".lf/loopflow.db");
-        std::fs::create_dir_all(production.parent().unwrap()).unwrap();
-        std::fs::write(&production, b"database").unwrap();
-        let alias = directory.path().join("alias.db");
-        std::fs::hard_link(&production, &alias).unwrap();
-
-        assert!(guard_development_database(&alias, BuildProvenance::Development, &home,).is_err());
     }
 
     fn make_wave(repo: &str) -> Wave {

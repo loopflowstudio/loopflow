@@ -7,10 +7,10 @@ uv run python scripts/loopflow-dev.py run-debug    # launch with logs visible
 uv run python scripts/loopflow-dev.py test         # run Swift tests
 ```
 
-The development app bundles this checkout's CLI. Ordinary launches use the
-installed CLI and main Machine. For a branch demo, launch with an explicit private
-`LF_HOME`; that uses the matching source CLI on disposable data. A copied Machine
-retains real checkout paths, so file edits still affect those checkouts.
+The development app and its children use this checkout's bundled CLI against
+main-Machine data by default. Explicit `LF_HOME` selects separate data, not a
+different binary. A copied Machine retains real checkout paths, so file edits
+still affect those checkouts.
 Repository selectors list only Git main checkouts. Linked worktrees stay visible
 only through the Task Work that owns them.
 
@@ -437,19 +437,15 @@ so macOS permissions survive rebuilds. The app queries `lf` directly and starts
 only the selected Wave's `lf wave` process; it has no machine-wide service or
 remote-connection mode.
 
-The dev app uses the installed CLI and main `~/.lf` Machine. Its bundled source
-CLI forwards ordinary commands to that installation. Explicit `LF_HOME`
-experiments remain disposable and never become the app's default.
+The dev app selects its bundled helper with `LF_BIN`. New Sessions and agent
+children retain that selection; embedded shells restore its directory first on
+PATH after startup. Existing providers keep their environment when reattached.
+Nothing changes the global installed CLI or shell configuration.
 
 `run` and `run-debug` check `repo identity --json` through that helper before
-launching. This uses the same repository registration as opening Work; source
-`--help` alone cannot establish installed support. A missing command reports the
-release dependency and stops the launch. It checks repository registration only;
-other Desktop commands and native conversation usability still need validation.
-
-For a branch UI demo, select a private `LF_HOME` explicitly so the bundled CLI
-and UI use this checkout’s wire protocol. Its recorded checkout paths still
-refer to real files. A copied Machine does not prove live provider continuation.
+launching. This checks repository registration, not all Desktop actions. Schema
+compatibility is checked by the store; ordinary commands cannot migrate the main
+database. Private `LF_HOME` experiments remain disposable and explicit.
 
 | Command | What it does |
 | --- | --- |

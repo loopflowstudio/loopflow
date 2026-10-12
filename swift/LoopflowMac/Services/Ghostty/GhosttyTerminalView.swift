@@ -1574,6 +1574,9 @@ enum LoopflowZshBootstrap {
         # Runs once, after the user's rc files have had their say.
         _loopflow_prompt() {
             precmd_functions=(${precmd_functions:#_loopflow_prompt})
+            # Login rc files may replace PATH. Keep this app's lf first for
+            # nested commands without changing the user's shell configuration.
+            if [[ -n $LF_BIN ]]; then export PATH="${LF_BIN:h}:$PATH"; fi
             [[ $PROMPT == '\(macOSDefaultPrompt)' ]] || builtin return 0
             PROMPT=$'\\n%{\\e[8m%}\(GhosttyBlockHeader.marker)%\(GhosttyBlockHeader.maxLength)<\u{2026}<%~%<<%{\\e[28m%}\\n%F{\(accent)}\u{276F}%f '
             # The command is bold; zsh ends the highlight before output starts.
@@ -1592,16 +1595,24 @@ enum LoopflowZshBootstrap {
     /// the system may clear temporary files while the app stays open, and a
     /// ZDOTDIR without a `.zshenv` would skip the user's rc files.
     static func install() -> String? {
+        install(contents: zshenv, name: ".zshenv")?.deletingLastPathComponent().path
+    }
+
+    static func installBash() -> String? {
+        install(contents: """
+        source "$GHOSTTY_RESOURCES_DIR/shell-integration/bash/ghostty.bash"
+        if [[ -n $LF_BIN ]]; then export PATH="${LF_BIN%/*}:$PATH"; fi
+        """, name: "bash-env")?.path
+    }
+
+    private static func install(contents: String, name: String) -> URL? {
         let directory = terminalTemporaryDirectory()
-            .appendingPathComponent("loopflow-zsh", isDirectory: true)
+            .appendingPathComponent("loopflow-shell", isDirectory: true)
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            try zshenv.write(
-                to: directory.appendingPathComponent(".zshenv"),
-                atomically: true,
-                encoding: .utf8
-            )
-            return directory.path
+            let file = directory.appendingPathComponent(name)
+            try contents.write(to: file, atomically: true, encoding: .utf8)
+            return file
         } catch {
             return nil
         }
@@ -1627,11 +1638,11 @@ func buildWorkspaceShellCommand(id: String, argv: [String], env: [String: String
             bash)
                 export GHOSTTY_BASH_ENV="${ENV-}"
                 export GHOSTTY_BASH_INJECT=1
-                export ENV="$GHOSTTY_RESOURCES_DIR/shell-integration/bash/ghostty.bash"
+                export ENV=\(LoopflowZshBootstrap.installBash().map(shellEscape) ?? #""$GHOSTTY_RESOURCES_DIR/shell-integration/bash/ghostty.bash""#)
                 exec \(shellEscape(shell)) --posix -l
                 ;;
             fish)
-                exec \(shellEscape(shell)) -l -C 'source "$GHOSTTY_RESOURCES_DIR/shell-integration/fish/ghostty-shell-integration.fish"'
+                exec \(shellEscape(shell)) -l -C 'source "$GHOSTTY_RESOURCES_DIR/shell-integration/fish/vendor_conf.d/ghostty-shell-integration.fish"; if test -n "$LF_BIN"; set -gx PATH (dirname "$LF_BIN") $PATH; end'
                 ;;
         esac
     fi

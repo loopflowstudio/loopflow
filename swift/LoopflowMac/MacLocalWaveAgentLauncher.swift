@@ -8,10 +8,6 @@ struct LocalLfError: LocalizedError {
     let errorDescription: String?
 }
 
-private struct DevelopmentControlConfig: Decodable {
-    let lfPath: String
-}
-
 enum LocalWaveAgentLauncher {
     /// Run a filed Task on its workflow. `lf task run` owns Project lookup,
     /// worktree placement and Flow selection; the app does not reproduce them.
@@ -70,38 +66,10 @@ enum LocalWaveAgentLauncher {
         [lfPath, "task", "interrupt", issue]
     }
 
-    /// Return the CLI that owns the Machine this Mac client controls.
-    ///
-    /// Use an explicitly configured helper when present; otherwise use the
-    /// bundled CLI, which shares the app's protocol and selects its own Machine.
+    /// The app and its CLI are one build; never substitute an installed helper.
     static func controlLfPath(
-        bundled: URL? = Bundle.main.url(forAuxiliaryExecutable: "lf"),
-        developmentConfig: URL? = Bundle.main.url(
-            forResource: "LoopflowDevControl",
-            withExtension: "json"
-        )
+        bundled: URL? = Bundle.main.url(forAuxiliaryExecutable: "lf")
     ) throws -> String {
-        if let developmentConfig {
-            let config: DevelopmentControlConfig
-            do {
-                let data = try Data(contentsOf: developmentConfig)
-                let decoder = JSONDecoder()
-                decoder.keyDecodingStrategy = .convertFromSnakeCase
-                config = try decoder.decode(DevelopmentControlConfig.self, from: data)
-            } catch {
-                throw LocalLfError(
-                    errorDescription: "Loopflow Dev has an invalid machine control configuration: "
-                        + error.localizedDescription
-                )
-            }
-            guard FileManager.default.isExecutableFile(atPath: config.lfPath) else {
-                throw LocalLfError(
-                    errorDescription: "Loopflow Dev's machine lf is missing or not executable: "
-                        + config.lfPath
-                )
-            }
-            return config.lfPath
-        }
         guard let bundled, FileManager.default.isExecutableFile(atPath: bundled.path) else {
             throw LocalLfError(
                 errorDescription: "Loopflow.app is missing its executable bundled lf helper at Contents/MacOS/lf. "

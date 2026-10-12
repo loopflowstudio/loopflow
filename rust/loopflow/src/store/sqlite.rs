@@ -2179,6 +2179,21 @@ mod frontier_tests {
     }
 
     #[test]
+    fn development_build_uses_compatible_shared_work_without_migrating() {
+        let shared = SharedMachine::new();
+        let path = shared.shared_db();
+        open(&path, Published, &shared.home, Authorized).unwrap();
+        seed_current_wave(&path);
+        let before = frontier(&path);
+        let store = open(&path, ValidationOnly, &shared.home, Forbidden).unwrap();
+        let wave = Wave::new(WaveId::new(), "From app".into(), "/repo".into());
+        store.create_wave(&wave).unwrap();
+        assert_eq!(current_wave(&path), "Current");
+        assert_eq!(frontier(&path), before);
+        open(&path, Published, &shared.home, Forbidden).unwrap();
+    }
+
+    #[test]
     fn private_development_store_opens_with_the_current_work_schema() {
         let shared = SharedMachine::new();
         let path = shared.home.join("private/loopflow.db");

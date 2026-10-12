@@ -15,7 +15,7 @@ tmux show-environment -g | grep -E '^(LF|LOOPFLOW)_'       # what new tmux sessi
 | Variable | Set by | Read by | Policy |
 |---|---|---|---|
 | `LF_HOME` | A person, for an experiment; every lf launch path for its children; cron and CI-watch launchd plists; test fixtures | `store::lf_home_dir`, Desktop's observation client | Selects the data directory. Unset means `~/.lf`. The database is always `$LF_HOME/loopflow.db`. |
-| `LF_BIN` | lf launch paths, test fixtures | `os_process::resolve_lf_binary`, only when `LF_HOME` selects an experiment | Names the experiment's binary. Under the main Machine lf ignores it and uses the installed CLI, so a stale value cannot choose the wrong binary for ordinary work. |
+| `LF_BIN` | Desktop and lf launch paths, test fixtures | CLI dispatch and child launch | Explicit executable selection, independent of `LF_HOME`. Desktop sets its bundled helper; child Sessions and agents retain it. Without it, ordinary commands use the installed CLI. It grants no migration or process-control authority. |
 
 A source build with no explicit `LF_HOME` forwards to the installed CLI and
 main Machine before opening a store. Development builds refuse the main database.

@@ -58,7 +58,10 @@ GHOSTTY_ARTIFACT = "GhosttyKit-a60e9e2-lf3.xcframework.zip"
 
 
 def _app_environment(repo: Path) -> dict[str, str]:
-    env = {"LOOPFLOW_DEV_WAVE_REPO": str(repo)}
+    env = {
+        "LOOPFLOW_DEV_WAVE_REPO": str(repo),
+        "LF_BIN": str(DEV_APP / "Contents/MacOS/lf"),
+    }
     if value := os.environ.get("LF_HOME"):
         env["LF_HOME"] = value
     return env
@@ -341,10 +344,8 @@ def _check_repository_opening(repo: Path) -> bool:
 
     print(f"Loopflow Dev cannot open this repository:\n{detail}", file=sys.stderr)
     print(
-        "The bundled helper forwards main-Machine commands to the installed CLI. "
-        "If it does not recognize 'repo identity', the real-repository demo needs "
-        "a compatible published release. An explicitly selected private LF_HOME "
-        "uses the branch CLI on separate data; it does not validate the real repository demo.",
+        "The app uses its bundled CLI. Check the reported repository or schema error; "
+        "ordinary app commands never migrate the shared database.",
         file=sys.stderr,
     )
     return False
@@ -370,7 +371,8 @@ def cmd_run_debug(repo: Path = REPO_ROOT) -> int:
     print(f"Stream log: {LOOPFLOW_STREAM_LOG}")
     print(f"Bundled lf: {DEV_APP}/Contents/MacOS/lf")
     print(
-        "Main-Machine commands use the installed CLI; explicit private LF_HOME uses the branch CLI."
+        "The app and its children use the bundled CLI; "
+        "LF_HOME selects data, not a different binary."
     )
     print("Telemetry dashboard: Go → Telemetry (⌘1)")
     _print_run_debug_checklist()
@@ -627,7 +629,7 @@ def _apply_dev_identity(plist: Path) -> None:
 
 def _copy_bundled_tools(app_macos_dir: Path) -> None:
     # The app is a live operator surface even when its Swift shell is a dev
-    # build. Its bundled CLI forwards ordinary commands to the installed CLI;
+    # build. The app selects its bundled CLI for every child;
     # it has no authority to migrate the main Machine.
     target_dir = REPO_ROOT / "target" / "dev-app-control"
     cargo_cmd = [

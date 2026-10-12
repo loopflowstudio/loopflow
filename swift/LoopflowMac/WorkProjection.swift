@@ -17,14 +17,9 @@ struct TaskProjection: Identifiable {
     /// checkout, or a live process in the checkout never supplies it.
     var started: Bool { task.runtime?.started == true }
 
-    /// The started working set. A Task with open Sessions stays reachable even
-    /// when its start predates recorded evidence. Locally done or abandoned
-    /// Work has left it even while planning has not caught up.
+    /// Sessions remain available inside Work, but their presence cannot establish
+    /// that a Task started. Shared execution evidence keeps unsettled work visible.
     var inWorkingSet: Bool {
-        if task.task.isTerminal {
-            return started && task.condition.unresolvedExecution
-        }
-        if !sessions.isEmpty { return true }
         return started && task.condition.unresolvedExecution
     }
 }

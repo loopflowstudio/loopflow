@@ -17,7 +17,8 @@ Accepted direction and implementation evidence live in `get-me-using-lf.md`.
   home experience has not been selected.
 - Cleanup needs exact iteration-owned candidates, retention/restoration scope and
   a demonstrated isolated restore before deletion review. Unknown or interrupted
-  Sessions are not abandonment evidence. No live cleanup is authorized.
+  Sessions are not abandonment evidence. The exact LOO-376 and 126-row repairs
+  were applied after rehearsal (work-first-demo.md); no broader cleanup is authorized.
 - Provider onboarding remains a suggestion. Existing configured-primary errors and
   same-scope retry are the baseline; no new picker or setup checklist is selected.
 

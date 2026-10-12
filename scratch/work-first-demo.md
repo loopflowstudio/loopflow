@@ -8,25 +8,10 @@ unaccepted; no live installation or landing is authorized. Current design:
 
 ## Isolated branch demo — October 11
 
-Jack Heart requested a compiled branch CLI against a clone, then asked to launch
-it. Built the current branch and packaged it as `/private/tmp/loo462-native.FgtDmE/Loopflow Portfolio Demo.app`
-with separate bundle ID `com.loopflow.mac.demo.loo462`; existing Dev and production
-apps were left running. Fresh `LF_HOME`: `/private/tmp/loo462-native.FgtDmE/home`. Disposable clone:
-`/private/tmp/loo462-native.FgtDmE/repos/loopflow-demo`. The clone has no origin remote and its local config
-has no Linear binding; demo-only instructions prohibit operations on live Work.
-No existing database, provider history or credentials were copied.
-
-The private portfolio root is `/private/tmp/loo462-native.FgtDmE/repos`, not the real ~/src. The packaged
-CLI's actual `portfolio --json` and `repo identity --json` calls succeed under this
-Home and report only the clone. App launch succeeded and its process was observed;
-the Portfolio URL was sent explicitly to this app. Logs: `/private/tmp/loo462-native.FgtDmE/app.log` and
-`/tmp/loo462-isolated-package.log`. App log contains AttributeGraph cycle warnings;
-no rendered usability or user acceptance is inferred from launch success.
-
-Next review: Portfolio Folder/Manual controls, selecting the clone, then repository
-conversation entry. New provider conversations may use normal provider login; none
-of the live Loopflow history is present. This demonstrates the isolated composed
-branch, not installed real-data migration or existing conversation continuity.
+Initial empty-clone packaging, sandbox and launch evidence remains at
+`53c4c156e3:scratch/work-first-demo.md`, this heading. Jack Heart rejected that
+empty portfolio demonstration in favor of populated Loopflow Work. Neither
+launch success nor fixture input proves the real repository experience.
 
 ## Review priority — October 11
 
@@ -277,3 +262,25 @@ Workflow start, real Session takeover, installation or demo approval is inferred
 Native follow-up: typed an unsent “retained demo draft”, selected the Wave, then
 clicked the sidebar Task. The same provider conversation and exact draft returned
 without New shell or another launch. Left this isolated demo open for Jack.
+
+## Correct repository and Started membership — October 12
+
+Jack Heart's latest screenshot shows the isolated one-Task `loopflow-demo`, not
+Loopflow's Task inventory. Raising that window was the wrong demonstration.
+The configured-provider fixture proves input/retention only; the target remains
+the populated Loopflow repo with correct Task-to-conversation opening.
+
+Installed lf is now 0.13.12: actual repository identity succeeds, but
+`lf portfolio --json` still fails at root argument parsing. A separate copy of
+this diff's app, `Loopflow Work Demo.app` / `com.loopflow.mac.demo.loo462work`,
+was launched against `/Users/jack/src/loopflow` with ordinary installed dispatch,
+not copied data or a schema bypass. Native inspection still showed loading and
+the Portfolio command error. Reader sampling locates time in `flows_of_task`
+SQLite reads; no successful inventory or Task opening is claimed yet. Evidence:
+`/tmp/loo462-real-work-reader.sample.txt`, demo directory `real-work-app.log`.
+
+Removed the reachable Session-presence shortcut that admitted unstarted Tasks
+into the sidebar. Recorded Started plus shared unresolved execution now owns
+membership; retained Sessions and Wave plans remain intact. Review confirmed
+this removes a second inference of Started without mutating historical records.
+Check: `scripts/test_desktop.sh --filter WorkNavigationTests -Xswiftc -gnone --no-parallel` — PASS, 37 tests; `git diff --check` — PASS. Native packaging of this final correction remains.

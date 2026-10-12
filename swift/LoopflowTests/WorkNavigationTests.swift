@@ -534,6 +534,28 @@ struct WorkNavigationTests {
         #expect(model.projection.waves[0].tasks.count == 4)
     }
 
+    @Test("An associated conversation does not put an unstarted Task in the sidebar")
+    func unstartedConversationStaysInPlan() throws {
+        let records = [try session("retained", work: .task(id: "ts_review00000000000000000000000000"))]
+        var json = try #require(JSONSerialization.jsonObject(with: Data(roadmapJSON().utf8)) as? [String: Any])
+        var waves = try #require(json["waves"] as? [[String: Any]])
+        var tasks = try #require(waves[0]["tasks"] as? [String: Any])
+        var items = try #require(tasks["items"] as? [[String: Any]])
+        let index = try #require(items.firstIndex { ($0["task"] as? [String: Any])?["id"] as? String == "issue-review" })
+        var runtime = try #require(items[index]["runtime"] as? [String: Any])
+        runtime["started"] = false
+        items[index]["runtime"] = runtime
+        tasks["items"] = items
+        waves[0]["tasks"] = tasks
+        json["waves"] = waves
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: json))
+        let projection = WorkProjection(roadmaps: snapshot.waves, sessions: records)
+        let retained = try #require(projection.waves[0].tasks.first { $0.id.work.id == "issue-review" })
+        #expect(retained.sessions.map(\.id) == ["retained"])
+        #expect(!retained.inWorkingSet)
+        #expect(projection.subject(for: "retained") == .task(id: "issue-review"))
+    }
+
     @Test("Terminal Task conversations remain retained without keeping settled work in the sidebar")
     func terminalConversationsDoNotKeepTasksCurrent() throws {
         let records = [try session("retained", work: .task(id: "ts_review00000000000000000000000000"))]

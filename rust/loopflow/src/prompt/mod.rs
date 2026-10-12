@@ -1336,9 +1336,13 @@ const ALWAYS_EXCLUDE: &[&str] = &[
 ];
 
 fn should_exclude(repo_root: &Path, path: &Path, gitignore: &ignore::gitignore::Gitignore) -> bool {
-    if path
-        .components()
-        .any(|component| component.as_os_str() == ".lf")
+    let relative = path.strip_prefix(repo_root).unwrap_or(path);
+    // Wave definitions are authored documents; other .lf state stays out of
+    // explicit file context. Ambient Wave selection still controls discovery.
+    if !relative.starts_with(".lf/wave")
+        && path
+            .components()
+            .any(|component| component.as_os_str() == ".lf")
     {
         return true;
     }
@@ -1349,7 +1353,6 @@ fn should_exclude(repo_root: &Path, path: &Path, gitignore: &ignore::gitignore::
         }
     }
 
-    let relative = path.strip_prefix(repo_root).unwrap_or(path);
     gitignore
         .matched_path_or_any_parents(relative, path.is_dir())
         .is_ignore()

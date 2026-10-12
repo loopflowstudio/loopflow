@@ -241,3 +241,7 @@ Review also caught a nested checkout lock on explicit integration sync. The CLI
 now refreshes the default upstream once before entering preservation; explicit
 local targets still avoid unrelated network refresh. Python checkout fixtures
 exercise the unchanged single-snapshot contract.
+Gate found that explicit Wave document paths still met the old blanket `.lf`
+exclusion. Authored `.lf/wave` documents now participate in explicit context and
+source deduplication; other `.lf` state remains excluded. Existing context-delivery
+tests exercise distinct memory scopes and one copy of the Wave goal.

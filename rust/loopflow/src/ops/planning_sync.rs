@@ -65,14 +65,12 @@ pub(crate) async fn sync_after_save(store: &Store, repo: &str) {
             crate::config::PlanningConfig::Linear {} => {
                 tokio::time::timeout(std::time::Duration::from_secs(5), async {
                     super::planning_export::sync_repository_exports(store, repo).await?;
-                    let (fields, comments, state) = tokio::join!(
+                    let (fields, deliveries) = tokio::join!(
                         super::planning_delivery::sync_repository_fields(store, repo),
-                        super::linear_observe::sync_repository_deliveries(store, repo, false),
-                        super::linear_observe::sync_repository_deliveries(store, repo, true)
+                        super::linear_observe::sync_repository_deliveries(store, repo)
                     );
                     fields?;
-                    comments?;
-                    state?;
+                    deliveries?;
                     Ok(())
                 })
                 .await

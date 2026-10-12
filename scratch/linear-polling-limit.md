@@ -16,9 +16,11 @@ The original cut (`f1ab389a961417718f06f81615a47cec7e4bb0df`) removed per-agent 
 
 Deleted `pm` modules stay deleted. Delta ingestion and mutation responses use `LinearIssue`/`LinearProject` through typed acceptance, without `PmTaskRecord` or duplicate receipt storage. Existing creation identity, concurrent-save, revision-admission, conflict, prose and uncertain-response tests stay on the surviving owner. The incoming Project-adoption readback also uses its mutation payload; unchanged adoption uses its initial observation. Timer-only agent tests, including the embedded comment-runner polling scenario, are replaced by boundary request-count coverage. Comment reconnect/conflict/author coverage remains on explicit acquisition and local-save delivery.
 
+Compression removes the intermediate delta vector and per-occurrence observation copies: pages accumulate by issue, then produce one observation from the newest fields with all comments. The pagination fixture retains newer completion against older comment-page fields. Team membership is selected once per check. One pending-Task scan runs comments and state concurrently, replacing the boolean-selected double scan at both delivery boundaries. Existing receipt locks, timeouts and error handling remain the owners of delivery behavior.
+
 ## Remaining
 
-October 11 implementation reconciles #1491 in place and preserves both committed changes. `lf sync --continue` recorded merge `7b2eaac166`; its dirty-state check required checkpointing the additional integration edits as `b0788f4efb`. A subsequent continuation reports no sync in progress. Both original commits and pinned main are ancestors of the integrated head. Implementation is complete; gate and delivery remain.
+Implementation integrates #1491 at `b0788f4efb`; preservation and sync evidence remains in `scratch/questions.md` and `fe286293fb`. Gate and delivery remain.
 
 Gate owns independent-process contention, native turn-hook execution, watcher backoff and migration from the released frontier. Fixtures cover pagination/comment-only changes, receipt uncertainty, shared freshness and idle-agent request counts. Live before/after measurement and rejected-request quota accounting remain unproved; no usable Doppler access token was found in the preceding implementation.
 
@@ -26,4 +28,4 @@ Gate owns independent-process contention, native turn-hook execution, watcher ba
 
 After installing a build with this fix, restore the paused Linear team setting (formerly `pm.linear_team`, now `linear.team` with `planning.provider: linear`) by hand in the main checkouts of loopflow, etude, kata and fantasia. Jack reports it is commented out and uncommitted. Include this instruction in the PR description; do not alter those checkouts here.
 
-Checks: `cargo check -p loopflow --lib`, focused planning tests (64), new-issue adoption, comment delivery, rate-limit/pagination, Project adoption (8 passed; OS-install fixture skipped), both Git foreground fixtures, `cargo fmt --check`, and `cargo clippy --all-targets -- -D warnings` passed; gate/CI own broader acceptance and installed validation.
+Checks: `cargo test -p loopflow --lib` with filters `linear::team_changes`, `linear_on_demand`, and `task_comments_read_and_publish_without_starting_work` passed (7 tests; inherited `LF_*` cleared, stdin closed); `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` passed. Prior integration checks remain at `fe286293fb:scratch/linear-polling-limit.md`; gate/CI own broader acceptance and installed validation.

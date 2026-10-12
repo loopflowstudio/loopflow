@@ -1,4 +1,6 @@
 //! One paginated team delta, including comment-only changes.
+use std::collections::{btree_map::Entry, BTreeMap};
+
 use serde::Deserialize;
 use serde_json::json;
 
@@ -96,7 +98,26 @@ impl LinearClient {
         let mut comments_after = None;
         let mut read_issues = true;
         let mut read_comments = true;
-        let mut changes = Vec::new();
+        // An issue can occur on several comment pages or complete in this batch.
+        // Keep its latest fields and all comments together until ingestion.
+        let mut changes = BTreeMap::new();
+        let mut record = |node: IssueNode<ProjectNode>, mut comments: Vec<LinearComment>| {
+            let (issue, project) = node.into_ownership()?;
+            match changes.entry(issue.id.clone()) {
+                Entry::Vacant(entry) => {
+                    entry.insert((issue, project, comments));
+                }
+                Entry::Occupied(mut entry) => {
+                    let (saved, saved_project, saved_comments) = entry.get_mut();
+                    if issue.revision >= saved.revision {
+                        *saved = issue;
+                        *saved_project = project;
+                    }
+                    saved_comments.append(&mut comments);
+                }
+            }
+            Ok::<(), LinearError>(())
+        };
         while read_issues || read_comments {
             let page: Changes = self
                 .graphql(
@@ -113,7 +134,7 @@ impl LinearClient {
                     .issues
                     .ok_or_else(|| LinearError::Message("Linear issue delta is missing".into()))?;
                 for issue in page.nodes {
-                    changes.push(observation(issue, Vec::new())?);
+                    record(issue, Vec::new())?;
                 }
                 read_issues = page.page_info.has_next_page;
                 issues_after = continuation(page.page_info)?;
@@ -124,40 +145,26 @@ impl LinearClient {
                 })?;
                 for comment in page.nodes {
                     if let Some(issue) = comment.issue {
-                        changes.push(observation(issue, vec![comment.comment.into()])?);
+                        record(issue, vec![comment.comment.into()])?;
                     }
                 }
                 read_comments = page.page_info.has_next_page;
                 comments_after = continuation(page.page_info)?;
             }
         }
-        // One issue can occur on several comment pages or complete in the same
-        // batch. Apply its final fields and all comments together, before local
-        // completion makes it ineligible for the next check.
-        let mut by_issue = std::collections::BTreeMap::<
-            String,
-            (LinearIssue, Option<LinearProject>, LinearIssueObservation),
-        >::new();
-        for (issue, project, mut observation) in changes {
-            if let Some((saved, saved_project, previous)) = by_issue.get_mut(&issue.id) {
-                if observation.revision >= previous.revision {
-                    *saved = issue;
-                    *saved_project = project;
-                    previous.revision = observation.revision;
-                    previous.title = observation.title;
-                    previous.description = observation.description;
-                }
-                previous.comments.append(&mut observation.comments);
-            } else {
-                by_issue.insert(issue.id.clone(), (issue, project, observation));
-            }
-        }
-        for (_, _, observation) in by_issue.values_mut() {
-            observation
-                .comments
-                .sort_by(|a, b| a.revision.cmp(&b.revision).then(a.id.cmp(&b.id)));
-        }
-        Ok(by_issue.into_values().collect())
+        Ok(changes
+            .into_values()
+            .map(|(issue, project, mut comments)| {
+                comments.sort_by(|a, b| a.revision.cmp(&b.revision).then(a.id.cmp(&b.id)));
+                let observation = LinearIssueObservation {
+                    revision: issue.revision.clone().expect("Linear issue has a revision"),
+                    title: issue.name.clone(),
+                    description: issue.description.clone(),
+                    comments,
+                };
+                (issue, project, observation)
+            })
+            .collect())
     }
 }
 
@@ -168,20 +175,6 @@ fn continuation(page: PageInfo) -> LinearResult<Option<String>> {
         ));
     }
     Ok(page.end_cursor)
-}
-
-fn observation(
-    issue: IssueNode<ProjectNode>,
-    comments: Vec<LinearComment>,
-) -> LinearResult<(LinearIssue, Option<LinearProject>, LinearIssueObservation)> {
-    let (item, project) = issue.into_ownership()?;
-    let observation = LinearIssueObservation {
-        revision: item.revision.clone().expect("Linear issue has a revision"),
-        title: item.name.clone(),
-        description: item.description.clone(),
-        comments,
-    };
-    Ok((item, project, observation))
 }
 
 #[cfg(test)]
@@ -198,6 +191,10 @@ mod tests {
             "updatedAt":"2026-10-11T12:00:00Z","url":null,"prioritySortOrder":0.0,"sortOrder":1.0,
             "assignee":null,"state":{"type":"completed"},"team":{"id":"team-1"},"project":null});
         let comment = |id, revision| {
+            let mut issue = issue.clone();
+            issue["title"] = json!("Older fields from a comment page");
+            issue["updatedAt"] = json!(revision);
+            issue["state"] = json!({"type":"started"});
             json!({"id":id,"body":id,"createdAt":revision,"updatedAt":revision,
             "user":{"id":"author-1","displayName":"Maya","name":"Maya"},"issue":issue})
         };
@@ -223,6 +220,9 @@ mod tests {
             .unwrap();
         assert_eq!(changes.len(), 1);
         assert!(changes[0].0.completed);
+        assert_eq!(changes[0].0.name, "Completed with direction");
+        assert_eq!(changes[0].2.title, changes[0].0.name);
+        assert_eq!(changes[0].2.revision, "2026-10-11T12:00:00Z");
         let comments = &changes[0].2.comments;
         assert_eq!(
             comments

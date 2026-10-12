@@ -102,15 +102,19 @@ pub(crate) async fn check_repository(store: &Store, repository: &str) -> OpsResu
     let team = super::linear::repository_team_id(repo)?;
     let mut live = Vec::new();
     let mut finished = Vec::new();
-    let waves = store.list_waves(None).await.map_err(message)?;
+    let waves: Vec<_> = store
+        .list_waves(None)
+        .await
+        .map_err(message)?
+        .into_iter()
+        .filter(|wave| {
+            super::linear::repository_team_id(std::path::Path::new(wave.repo()))
+                .ok()
+                .as_ref()
+                == Some(&team)
+        })
+        .collect();
     for wave in &waves {
-        if super::linear::repository_team_id(std::path::Path::new(wave.repo()))
-            .ok()
-            .as_ref()
-            != Some(&team)
-        {
-            continue;
-        }
         for task in store.list_tasks(Some(wave.id())).await.map_err(message)? {
             let Some(issue) = task.linear_id else {
                 continue;
@@ -182,14 +186,7 @@ pub(crate) async fn check_repository(store: &Store, repository: &str) -> OpsResu
             waves
                 .iter()
                 .find(|wave| {
-                    super::linear::repository_team_id(std::path::Path::new(wave.repo()))
-                        .ok()
-                        .as_ref()
-                        == Some(&team)
-                        && super::linear::read_initiative(
-                            std::path::Path::new(wave.repo()),
-                            wave.slug(),
-                        )
+                    super::linear::read_initiative(std::path::Path::new(wave.repo()), wave.slug())
                         .is_some_and(|initiative| {
                             project
                                 .as_ref()
@@ -233,15 +230,8 @@ pub(crate) async fn sync_repository(store: &Store, repository: &str) -> bool {
         }
     };
     if tokio::time::timeout(Duration::from_secs(5), async {
-        for result in futures_util::future::join_all([
-            sync_repository_deliveries(store, repository, false),
-            sync_repository_deliveries(store, repository, true),
-        ])
-        .await
-        {
-            if let Err(error) = result {
-                tracing::debug!(%error, "planning delivery pending");
-            }
+        if let Err(error) = sync_repository_deliveries(store, repository).await {
+            tracing::debug!(%error, "planning delivery pending");
         }
         if let Err(error) = super::planning_export::sync_repository_exports(store, repository).await
         {
@@ -322,57 +312,47 @@ impl Drop for PlanningWatch {
     }
 }
 
-pub(super) async fn sync_repository_deliveries(
-    store: &Store,
-    repository: &str,
-    state: bool,
-) -> OpsResult<()> {
+pub(super) async fn sync_repository_deliveries(store: &Store, repository: &str) -> OpsResult<()> {
     if !connected(repository) {
         return Ok(());
     }
     let pending = store
         .sqlite
         .pending_planning_tasks(repository)
-        .map_err(|e| OpsError::Message(e.to_string()))?;
-    let results = futures_util::future::join_all(pending.iter().map(|task| async {
-        if state {
-            sync_task_state(store, task).await
-        } else {
-            sync_task_comments(store, task).await
+        .map_err(message)?;
+    futures_util::future::join_all(pending.iter().map(|task| async {
+        let (comments, state) = tokio::join!(
+            sync_task_comments(store, task),
+            sync_task_state(store, task)
+        );
+        for result in [comments, state] {
+            if let Err(error) = result {
+                tracing::debug!(%error, "planning delivery pending");
+            }
         }
     }))
     .await;
-    for result in results {
-        if let Err(error) = result {
-            tracing::debug!(%error, "planning delivery pending");
-        }
-    }
     Ok(())
 }
 
 pub(crate) async fn sync_task_state(store: &Store, task: &Task) -> OpsResult<()> {
-    let message = |error: &dyn std::fmt::Display| OpsError::Message(error.to_string());
     let path = store
         .sqlite
         .home_dir()
-        .map_err(|e| message(&e))?
+        .map_err(message)?
         .join("locks/task-state")
         .join(format!("{}.lock", task.id));
     let Some(_lock) = super::planning_delivery::lock_delivery(&path)? else {
         return Ok(());
     };
-    let Some(delivery) = store
-        .sqlite
-        .pending_task_state(&task.id)
-        .map_err(|e| message(&e))?
-    else {
+    let Some(delivery) = store.sqlite.pending_task_state(&task.id).map_err(message)? else {
         return Ok(());
     };
     let attempt = async {
         let task = store
             .get_task(&task.id)
             .await
-            .map_err(|e| message(&e))?
+            .map_err(message)?
             .ok_or_else(|| OpsError::Message("Task is missing".into()))?;
         let Some(issue) = &task.linear_id else {
             return Ok(());
@@ -380,12 +360,12 @@ pub(crate) async fn sync_task_state(store: &Store, task: &Task) -> OpsResult<()>
         let project = store
             .get_project(&task.project_id)
             .await
-            .map_err(|e| message(&e))?
+            .map_err(message)?
             .ok_or_else(|| OpsError::Message("Task Project is missing".into()))?;
         let wave = store
             .get_wave(&task.wave_id)
             .await
-            .map_err(|e| message(&e))?
+            .map_err(message)?
             .ok_or_else(|| OpsError::Message("Task Wave is missing".into()))?;
         if !connected(wave.repo()) {
             return Ok(());
@@ -396,7 +376,7 @@ pub(crate) async fn sync_task_state(store: &Store, task: &Task) -> OpsResult<()>
         let (observed, _) = client
             .issue_ownership(issue.as_str())
             .await
-            .map_err(|e| message(&e))?
+            .map_err(message)?
             .ok_or_else(|| OpsError::Message("Linked Linear issue is unavailable".into()))?;
         if observed.project_id.as_deref() != project.linear_id.as_ref().map(|id| id.as_str()) {
             return Err(OpsError::Message(
@@ -409,7 +389,7 @@ pub(crate) async fn sync_task_state(store: &Store, task: &Task) -> OpsResult<()>
             ));
         }
         if !crate::linear::acceptance::observe_task_state(&store.sqlite, &delivery, &observed)
-            .map_err(|e| message(&e))?
+            .map_err(message)?
         {
             return Ok(());
         }
@@ -421,31 +401,28 @@ pub(crate) async fn sync_task_state(store: &Store, task: &Task) -> OpsResult<()>
         let state_id = client
             .item_state_id(issue.as_str(), &delivery.target)
             .await
-            .map_err(|e| message(&e))?;
+            .map_err(message)?;
         if !store
             .sqlite
             .attempt_task_state(&delivery)
-            .map_err(|e| message(&e))?
+            .map_err(message)?
         {
             return Ok(());
         }
         // Linear has no expected-revision guard here. A reopening between the
-        // observation and this mutation can be overwritten; matching readback
+        // observation and this mutation can be overwritten; its acknowledgement
         // settles observed state, not the absence of an intervening edit.
         let confirmed = match client.set_item_state(issue.as_str(), &state_id).await {
             Ok(confirmed) => confirmed,
             Err(error) => {
                 if matches!(error, crate::linear::LinearError::RateLimited { .. }) {
-                    store
-                        .sqlite
-                        .reject_task_state(&delivery)
-                        .map_err(|e| message(&e))?;
+                    store.sqlite.reject_task_state(&delivery).map_err(message)?;
                 }
                 return Err(message(&error));
             }
         };
         if crate::linear::acceptance::observe_task_state(&store.sqlite, &delivery, &confirmed)
-            .map_err(|e| message(&e))?
+            .map_err(message)?
         {
             return Err(OpsError::Message(
                 "Linear state write remains uncertain; saved decision retained".into(),
@@ -464,15 +441,14 @@ pub(crate) async fn sync_task_state(store: &Store, task: &Task) -> OpsResult<()>
     store
         .sqlite
         .task_state_error(&delivery, &error)
-        .map_err(|e| message(&e))
+        .map_err(message)
 }
 
 pub(crate) async fn sync_task_comments(store: &Store, task: &Task) -> OpsResult<()> {
-    let message = |error: &dyn std::fmt::Display| OpsError::Message(error.to_string());
     let task = store
         .get_task(&task.id)
         .await
-        .map_err(|error| message(&error))?
+        .map_err(message)?
         .ok_or_else(|| OpsError::Message("Task is missing".into()))?;
     let Some(issue) = &task.linear_id else {
         return Ok(());
@@ -480,14 +456,14 @@ pub(crate) async fn sync_task_comments(store: &Store, task: &Task) -> OpsResult<
     let comments = store
         .sqlite
         .pending_task_comments(&task.id)
-        .map_err(|error| message(&error))?;
+        .map_err(message)?;
     if comments.is_empty() {
         return Ok(());
     }
     let wave = store
         .get_wave(&task.wave_id)
         .await
-        .map_err(|error| message(&error))?
+        .map_err(message)?
         .ok_or_else(|| OpsError::Message("Task Wave is missing".into()))?;
     if !connected(wave.repo()) {
         return Ok(());
@@ -509,7 +485,7 @@ pub(crate) async fn sync_task_comments(store: &Store, task: &Task) -> OpsResult<
         store
             .sqlite
             .record_comment_delivery(&comment.id, error.as_deref())
-            .map_err(|error| message(&error))?;
+            .map_err(message)?;
     }
     Ok(())
 }

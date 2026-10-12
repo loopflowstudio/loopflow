@@ -89,7 +89,7 @@ changed during this investigation. Installed repair remains unproved.
 | Sync ownership receipt after raw Git | Sync continuation validates pinned branch/HEAD; source only. Stale unlocked receipts are adoptable; live locks remain authority. |
 | Saved GitHub head / merge request | `request_task_pr_merge`, `invalidate_stale_merge_request`; source only. Fresh provider head must fence settlement, never inherit an old approval. |
 | Absent checkout / placement collision | Task preparation retains identity and requires explicit placement recovery; source only, no relocation in this change. |
-| Pruning with an unplaced Task | Gate reproduced four checkout-refresh failures: `protected_worktree_paths` reads the installed registry even with a disposable `LF_HOME`; `read_nonterminal_task_worktrees` decodes nullable `worktree` as `String`. The production read is read-only. This unchanged path remains unrepaired and needs a disposable OS-account proof. |
+| Pruning with an unplaced Task | Earlier gate reproduced four checkout-refresh failures: `protected_worktree_paths` reads the installed registry even with a disposable `LF_HOME`; `read_nonterminal_task_worktrees` decoded nullable `worktree` as `String`. Integrated main now excludes NULL and empty paths. The production read remains read-only; this fix is outside the publication change. |
 
 ## Implemented evidence and review findings
 
@@ -113,13 +113,26 @@ Release child memory was read in full: its operation-entry lesson supports real
 CLI coverage, and its installed v0.13.5 evidence applies only to #1459's older
 repair. It establishes no installation of this change.
 
-October 11 gate found no further defect in the changed publication code. All
+The pre-sync October 11 gate found no further defect in the changed publication code. All
 116 affected Rust tests passed under network isolation, including the five-case
 real-CLI demo and stack-fork preservation. Formatting, Clippy, Ruff and the
 architecture check passed. The broader Python suite passed 409 tests and failed five: the four pruning cases
 above, plus a nested macOS sandbox rejected with `Operation not permitted`.
 These reproduce the preceding gate's failures; they are not passing checks.
-Isolated CI owns the remaining verification. Current-main integration and its
-reported #1491 conflict still belong to delivery; this review does not establish
-merge readiness or installed Etude recovery.
+Isolated CI owns the remaining verification. Those results precede current-main
+integration and do not establish installed Etude recovery.
 
+After integration of main `83716f9015` into `75371f5ac9`, gate passed all 86
+tests in the landing, sync, Task PR authority and Task PR range suites under
+network isolation. The five stale-base CLI scenarios preserve every commit;
+the squash-parent regression preserves the child's integration fork. Formatting,
+Clippy, Ruff and architecture checks pass. No further publication-code defect
+was found; review corrected the obsolete pruning finding above.
+
+Python now passes 413 tests, including the four previously failing pruning
+cases. Its remaining nested macOS sandbox test cannot apply its policy
+(`Operation not permitted`) and remains deferred to capable CI. Headless website
+checks pass 74 tests and fail the unchanged homepage's 1,440 px overflow check
+(actual width 1,475 px), also previously recorded in Infrastructure memory.
+Neither suite is reported as fully passing. The full materialized Rust matrix
+remains CI-owned; installed Etude recovery and hosted delivery remain unproved.

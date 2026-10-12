@@ -1,8 +1,8 @@
 # Instructions at the right level
 
-Implementation, 2026-10-11. Jack Heart accepted the two-tier direction and
-requested the change. The work contract is a skill, preloaded for associated
-launches and readable on demand in an existing conversation.
+Accepted, 2026-10-11; reconciled 2026-10-12. Jack Heart accepted the two-tier
+direction and requested the change. The work contract is implemented as a
+skill, preloaded for associated launches and readable on demand.
 
 ## What to build
 
@@ -21,9 +21,10 @@ Desktop supplies the guided experience. These are three ways of using Loopflow,
 not three prompt presets. Desktop and custom clients share work semantics;
 the caller chooses how much procedure to adopt.
 
-## Placement
+## Scope
 
-Unresolved; no owning Wave supplied. No planning lookup required to design this.
+Taskless work in the existing checkout. Jack requested finishing the queue;
+the calling conversation owns landing afterward. No Wave was selected.
 
 ## The demo
 
@@ -116,7 +117,7 @@ taskless Flow execution requiring Linear; a tiny base prompt whose skills still
 force Task creation; work guidance existing only at fresh launch; JSON polluted
 by prose; hiding command semantics behind a user-level setting.
 
-## Remaining work
+## Implemented behavior
 
 One coherent local change: two-tier assembly, shared work skill, portable
 onboarding/continuation/delivery instructions, external harness skill and docs.
@@ -139,26 +140,29 @@ Default Flows need no extra step. PR open and publish do not run general scratch
 cleanup. Scratch writing and automatic context inclusion remain unchanged.
 Stacked checkouts and merges use normal Git behavior for inherited content.
 
-Delete `ScratchConfig`, `managed_scratch`, the repository opt-in, wholesale
-scratch removal/untracking and blanket merge restoration. Use one diff-based
-path selection in the explicit cleanup command. Untracked files outside
-Git's diff are not claimed by cleanup; ordinary delivery checkpointing stages
-its selected work before cleanup. No ownership manifest, new schema, enrollment
-or additional setup.
+One diff-based selector replaces the deleted scratch configuration and cleanup
+paths. Cleanup compares the base with committed HEAD; untracked and staged-only
+additions are outside that selection. Delivery checkpoints intended work before
+cleanup. Existing-file index and working edits survive. No ownership manifest,
+schema, enrollment or additional setup was added.
 
-Broader audit: keep automatic Work association and skill loading, but remove
-onboarding's forced three-way choice. Preserve useful defaults and direct skill
-execution. Scratch curation may edit existing documents; delivery alone removes
-only added paths. Work association remains context, not a newly selected
-procedure. Wave memory's Flow boundary remains Jack's accepted requirement.
-
-Implemented correction: diff cleanup shared by submit/land and the standalone
-command, with reconciled fixtures and docs. Validation is recorded below.
+Onboarding infers the requested capability instead of requiring a three-way
+choice. Automatic Work association, skill loading and direct skill execution
+remain. Scratch curation may edit existing documents; delivery removes only
+added paths. Work association remains context, not a selected procedure.
 
 Compression removes repeated opt-out and sync classification branches and
 redundant stacked-checkout fixture setup. Review corrected a comment that
 conflated product cleanup with hosted CI: this repository still requires an
 empty scratch tree except `.gitkeep`; its CI workflow and policy tests are unchanged.
+
+Compression was checkpointed in `90c8692fa3`; no interrupted edits remained at
+reconciliation. Main through `9d0d41f5e0` is integrated. Its unified history
+command now owns `lf history show SESSION --instructions`; `297901cee3` carries
+the feature and documentation there. Main also removed public `--no-loopflow`:
+`5341439ffe` updates omission explanations to describe the internal automatic
+guidance switch without naming a removed flag. Standalone native skills can
+omit automatic guidance; selected skills retain their own provenance.
 
 ## Done when
 
@@ -170,7 +174,11 @@ live account, display, or person is required. Run `cargo fmt --check` and
 `cargo clippy --all-targets -- -D warnings` for the Rust cutover.
 
 Base contract: 1,037 → 282 words (73% reduction).
-Checks: `cargo test -p loopflow --test task_initialization_tests --test sync_tests` (41 passed), `cargo test -p loopflow --lib work_guidance_is_additive` (1 passed), `uv run pytest python/tests/test_ci_proof.py -q` (35 passed), `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `git diff --check` passed; earlier cleanup/delivery/context checks remain applicable. Live model evaluations remain unrun.
+Earlier compression evidence at `90c8692fa3`: task initialization and sync tests
+passed (41), additive guidance passed (1), CI-policy tests passed (35), and fmt,
+Clippy and diff checks passed. Post-sync evidence records context launch (8),
+instruction inspection (1) and additive guidance (1) passing. These focused
+results do not establish the full post-sync gate or a live model evaluation.
 
 ## Instruction explanations and decision evaluations
 
@@ -196,4 +204,19 @@ Acceptance: focused prompt/provenance and CLI tests, evaluation runner tests,
 formatting and Clippy. Delete the unexplained Work boolean and opaque automatic
 instruction reasons; reuse existing captured decisions and rendering machinery.
 
-Sync verification (2026-10-12): `cargo test -p loopflow --test context_launch_tests` (8 passed), `cargo test -p loopflow --test session_cli_tests instruction_inspection_reports_recorded_reasons_and_missing_evidence` (1 passed), and `cargo test -p loopflow --lib work_guidance_is_additive_opt_out_and_loadable_as_a_skill` (1 passed); inherited `LF_*` unset, stdin closed; broader checks remain with gate/CI.
+## Remaining work and evidence limits
+
+- The queue's gate still owns affected-suite verification against the integrated
+  implementation, including the acceptance commands above. Existing results are
+  reusable only where their content and command plan remain applicable.
+- Hosted CI retains its empty-scratch policy. All three current scratch notes
+  are additions relative to main, so delivery cleanup can remove them without
+  weakening that policy or deleting pre-existing repository content.
+- Nine provider-neutral decision cases and a scorer exist. Live provider runs
+  remain unperformed; model/version and evaluation environment are unselected.
+  This is the outstanding evaluation choice, not evidence of failed behavior.
+- No bounded implementation repair was identified during reconciliation. The
+  instruction split, capture explanations and diff-based cleanup remain the
+  accepted implementation; publication and landing remain with the caller.
+
+Check (2026-10-12): `git diff --check` passed; `lf context` reports scratch within both targets, with one existing audit-table wording warning; no code changed and gate owns remaining verification.

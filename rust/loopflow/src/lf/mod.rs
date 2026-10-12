@@ -1,3 +1,5 @@
+/// Saved Task identity and pushed-code requirements for one SSH invocation.
+pub const TASK_SOURCE_ENV: &str = "LF_TASK_SOURCE";
 /// Explicit Work declaration inherited by descendants; checkout inference never writes it.
 pub const WORK_DECLARATION_ENV: &str = "LF_AS";
 
@@ -41,13 +43,16 @@ pub struct Cli {
     #[arg(short = 'c', long = "clipboard")]
     pub clipboard: bool,
 
-    /// Agent to use (harness or harness:model)
-    #[arg(short = 'a', long = "agent")]
+    /// Override agents named in Tasks, Flows and skills, including child commands (harness[:model])
+    #[arg(short = 'a', long = "agent", global = true)]
     pub agent: Option<String>,
 
     /// Captured skill and arguments supplied by the invoking Flow process.
     #[arg(long, hide = true)]
     pub skill_input: Option<std::path::PathBuf>,
+    /// Native final-answer schema supplied by a deciding step.
+    #[arg(long, hide = true, value_parser = |text: &str| serde_json::from_str::<serde_json::Value>(text))]
+    pub output_schema: Option<serde_json::Value>,
     #[arg(skip)]
     pub resolved_invocation: Option<crate::skills::invocation::SkillInvocation>,
 
@@ -133,10 +138,6 @@ pub struct Cli {
     #[arg(long, value_name = "TASK", conflicts_with = "wt")]
     pub task: Option<String>,
 
-    /// Give the agent only Task direction newer than this steer
-    #[arg(long = "steers-after", value_name = "STEER")]
-    pub steers_after: Option<i64>,
-
     /// Execute in an existing worktree by name or branch
     #[arg(long, value_name = "NAME", conflicts_with = "task")]
     pub wt: Option<String>,
@@ -155,6 +156,54 @@ pub struct Cli {
 }
 
 impl Cli {
+    pub fn may_launch_agent(&self) -> bool {
+        match &self.command {
+            None
+            | Some(Commands::External(_) | Commands::Run { .. } | Commands::Inline { .. })
+            | Some(Commands::Skill { .. } | Commands::Replay { .. } | Commands::Discord { .. }) => {
+                true
+            }
+            Some(Commands::Flow { cmd }) => matches!(cmd, FlowCommand::External(_)),
+            Some(Commands::Task { cmd }) => matches!(cmd, TaskCommand::Run { .. }),
+            Some(Commands::Session { cmd }) => matches!(
+                cmd,
+                SessionCommand::Resume { .. }
+                    | SessionCommand::Open { json: false, .. }
+                    | SessionCommand::Ensure { .. }
+                    | SessionCommand::Replace { .. }
+                    | SessionCommand::ServeConversation { .. }
+            ),
+            Some(Commands::Commit { message, .. }) => message.is_none(),
+            Some(Commands::Sync(args)) => !args.plan && !args.abort && !args.manual,
+            Some(Commands::Pr { cmd }) => matches!(
+                cmd,
+                Some(
+                    PrCommand::Open { .. }
+                        | PrCommand::Publish { .. }
+                        | PrCommand::Submit { .. }
+                        | PrCommand::Arm { .. }
+                        | PrCommand::Land { .. }
+                )
+            ),
+            Some(Commands::Repo { cmd }) => matches!(
+                cmd,
+                RepoCommand::Release {
+                    cmd: ReleaseCommand::Run { .. }
+                        | ReleaseCommand::Bump { .. }
+                        | ReleaseCommand::Notes { .. }
+                } | RepoCommand::Ci {
+                    cmd: Some(CiCommand::Watch {
+                        status: false,
+                        uninstall: false,
+                        ..
+                    }),
+                    ..
+                }
+            ),
+            Some(_) => false,
+        }
+    }
+
     /// Reject argument combinations the derive cannot express, as the usage
     /// errors they are, before anything runs.
     pub fn checked(self) -> Result<Self, clap::Error> {
@@ -220,20 +269,17 @@ impl Cli {
                 args.extend([flag.to_string(), value.get_name().to_string()]);
             }
         }
-        if let Some(agent) = &self.agent {
-            args.extend(["--agent".to_string(), agent.clone()]);
-        }
         if let Some(input) = &self.skill_input {
             args.extend([
                 "--skill-input".to_string(),
                 input.to_string_lossy().into_owned(),
             ]);
         }
+        if let Some(schema) = &self.output_schema {
+            args.extend(["--output-schema".to_string(), schema.to_string()]);
+        }
         if let Some(turns) = self.max_turns {
             args.extend(["--max-turns".to_string(), turns.to_string()]);
-        }
-        if let Some(steer) = self.steers_after {
-            args.extend(["--steers-after".to_string(), steer.to_string()]);
         }
         args
     }
@@ -247,6 +293,7 @@ impl Cli {
             clipboard: self.clipboard,
             agent: self.agent.clone(),
             skill_input: self.skill_input.clone(),
+            output_schema: self.output_schema.clone(),
             resolved_invocation: self.resolved_invocation.clone(),
             account: self.account.clone(),
             only_account: self.only_account.clone(),
@@ -263,7 +310,6 @@ impl Cli {
             forward_agent: self.forward_agent,
             wave: self.wave.clone(),
             task: self.task.clone(),
-            steers_after: self.steers_after,
             wt: self.wt.clone(),
             bound_cwd: self.bound_cwd.clone(),
             no_loopflow: self.no_loopflow,
@@ -501,13 +547,16 @@ pub enum SkillCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum ProjectCommand {
-    /// Update a Project's name or summary
+    /// Update a Project's name, summary or prose
     Edit {
         project: String,
         #[arg(long)]
         name: Option<String>,
         #[arg(long)]
         summary: Option<String>,
+        /// Authored prose; managed Workflow, KRs and targets stay unchanged
+        #[arg(long)]
+        description: Option<String>,
     },
     /// Select and inspect reusable Workflows
     Workflow {
@@ -601,6 +650,23 @@ impl SessionMode {
 
 #[derive(Subcommand, Debug)]
 pub enum SessionCommand {
+    /// Save a steer for this Session without starting a turn
+    Steer { id: String, message: String },
+    /// Inspect steer delivery or retry delivery
+    Steers {
+        id: String,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        retry: Option<String>,
+        #[arg(long, default_value_t = 0)]
+        after: i64,
+        #[arg(long, default_value_t = 32)]
+        limit: usize,
+        /// Read the complete steer
+        #[arg(long)]
+        source: Option<String>,
+    },
     /// Observe validated Program Status snapshots from an active local terminal
     ObserveStatus {
         id: String,
@@ -731,6 +797,13 @@ pub enum SessionCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum WaveCommand {
+    /// Save a steer for associated Sessions without starting a turn
+    Comment {
+        wave: String,
+        message: String,
+        #[arg(long, required = true)]
+        steer: bool,
+    },
     /// Rotate this Wave using its exact destination in a retained chapter plan
     NewChapter {
         wave: String,
@@ -853,27 +926,6 @@ pub enum TaskCommand {
     Reconcile {
         #[arg(long)]
         json: bool,
-    },
-    /// File or link follow-up Tasks after merge, then record the disposition
-    FollowUp {
-        issue: String,
-        #[arg(long, conflicts_with_all = ["existing", "none", "finish"], requires = "notes")]
-        title: Option<String>,
-        #[arg(long, requires = "title")]
-        notes: Option<String>,
-        #[arg(long, requires = "title")]
-        due: Option<String>,
-        #[arg(long)]
-        wave: Option<String>,
-        #[arg(long, conflicts_with_all = ["title", "none", "finish"])]
-        existing: Option<String>,
-        #[arg(long, conflicts_with_all = ["title", "existing", "finish"])]
-        none: Option<String>,
-        #[arg(long, conflicts_with_all = ["title", "existing", "none"])]
-        finish: Option<String>,
-        /// Stable obligation key; use a distinct key for each additional follow-up
-        #[arg(long)]
-        key: Option<String>,
     },
     /// Enable or hold CI repair for a Task without interrupting running work
     Automate {
@@ -1053,7 +1105,7 @@ pub enum TaskCommand {
     Comment {
         issue: String,
         message: Option<String>,
-        /// Deliver new direction even when publishing from an agent Session
+        /// Save a steer even when commenting from an agent Session
         #[arg(long, requires = "message")]
         steer: bool,
         #[arg(short = 'w', long)]
@@ -1108,8 +1160,7 @@ impl TaskCommand {
             | Self::Refile { issue, .. }
             | Self::Comment { issue, .. }
             | Self::Interrupt { issue, .. }
-            | Self::Wait { issue, .. }
-            | Self::FollowUp { issue, .. } => Some(issue),
+            | Self::Wait { issue, .. } => Some(issue),
         }
     }
 }
@@ -1207,9 +1258,6 @@ pub enum PrCommand {
     /// Publish a ready PR headlessly: push, create or refresh, print state + URL.
     /// Opens no review surface.
     Publish {
-        /// Agent to use (harness or harness:model)
-        #[arg(short = 'a', long = "agent")]
-        agent: Option<String>,
         #[arg(long = "title")]
         title: Option<String>,
         #[arg(long = "body")]
@@ -1218,9 +1266,6 @@ pub enum PrCommand {
     /// Push and create or update a draft PR, then open its GitHub page.
     /// Existing ready PRs stay ready; opening a draft does not publish it.
     Open {
-        /// Agent to use (harness or harness:model)
-        #[arg(short = 'a', long = "agent")]
-        agent: Option<String>,
         #[arg(long = "title")]
         title: Option<String>,
         #[arg(long = "body")]
@@ -1296,42 +1341,46 @@ pub enum CronCommand {
         #[arg(long)]
         reason: String,
     },
-    /// Install or replace a scheduled lf invocation
+    /// Install a named ordinary lf command on this Machine
     Add {
-        /// Wave name passed to `lf <flow> --wave <wave>` (ambient if omitted)
-        #[arg(short = 'w', long = "wave")]
-        wave: Option<String>,
-        /// Flow or skill name to run
-        #[arg(long = "flow")]
-        flow: String,
+        /// Stable job name, retained across command changes
+        name: String,
         /// Daily or every-minute cron expression, or a schedule alias
-        #[arg(long = "schedule", default_value = "daily")]
+        #[arg(long, default_value = "daily")]
         schedule: String,
+        /// Arguments passed to lf, after --
+        #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
+        command: Vec<String>,
     },
     /// List installed loopflow cron jobs
     List {
-        /// Only jobs for this Wave
-        #[arg(short = 'w', long = "wave")]
+        /// Only commands with this --wave selector
+        #[arg(short = 'w', long)]
         wave: Option<String>,
+        /// Only commands with this --task selector
+        #[arg(long)]
+        task: Option<String>,
         /// Emit machine-readable job state
         #[arg(long)]
         json: bool,
     },
-    /// Validate Machine authority and declared jobs without changing launchd
+    /// Validate configured commands and Machine placement without installing jobs
     Preflight {
-        /// Wave whose GOAL.md `crons:` are validated
-        #[arg(short = 'w', long = "wave")]
-        wave: String,
-    },
-    /// Reconcile installed launchd jobs to match a wave's declared `crons:`
-    Sync {
-        #[arg(
-            short = 'w',
-            long,
-            required_unless_present = "repo",
-            conflicts_with = "repo"
-        )]
+        /// Only commands with this --wave selector
+        #[arg(short = 'w', long)]
         wave: Option<String>,
+        /// Only commands with this --task selector
+        #[arg(long)]
+        task: Option<String>,
+    },
+    /// Reconcile installed jobs with the repository configuration's cron list
+    Sync {
+        /// Only commands with this --wave selector
+        #[arg(short = 'w', long, conflicts_with = "repo")]
+        wave: Option<String>,
+        /// Only commands with this --task selector
+        #[arg(long, conflicts_with = "repo")]
+        task: Option<String>,
         /// Install the finite repository Task check on this Machine
         #[arg(long)]
         repo: bool,
@@ -1419,7 +1468,34 @@ pub enum CiCommand {
 }
 
 #[derive(Subcommand, Debug)]
+pub enum PlanningCommand {
+    /// Show, explicitly create, or recover the same planning user key on another machine
+    Key {
+        #[arg(long, conflicts_with = "recover")]
+        new: bool,
+        #[arg(long, value_name = "UUID")]
+        recover: Option<String>,
+    },
+    /// Show selection, retained imports and held records without contacting Git
+    Status {
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
 pub enum RepoCommand {
+    /// Save a steer for associated Sessions without starting a turn
+    Comment {
+        message: String,
+        #[arg(long, required = true)]
+        steer: bool,
+    },
+    /// Inspect planning synchronization and personal identity
+    Planning {
+        #[command(subcommand)]
+        cmd: PlanningCommand,
+    },
     /// Connect a Wave to its Initiative and the repository's Team (Task prefix)
     Connect {
         /// Wave name (auto-detected if omitted)
@@ -2691,52 +2767,6 @@ mod tests {
         let cli = Cli::try_parse_from(["lf", "receipt", "show", "chat_turn:turn-3"])
             .expect("unknown names remain eligible for skill discovery");
         assert!(matches!(cli.command, Some(Commands::External(_))));
-    }
-
-    #[test]
-    fn pr_open_accepts_agent_override() {
-        for flag in ["--agent", "-a"] {
-            let cli = Cli::try_parse_from(["lf", "pr", "open", flag, "codex"]).expect("parse");
-            let Some(Commands::Pr {
-                cmd: Some(PrCommand::Open { agent, title, body }),
-            }) = cli.command
-            else {
-                panic!("expected pr command");
-            };
-
-            assert_eq!(agent.as_deref(), Some("codex"));
-            assert_eq!(title, None);
-            assert_eq!(body, None);
-        }
-    }
-
-    #[test]
-    fn top_level_agent_reaches_pr_open() {
-        let cli = Cli::try_parse_from(["lf", "-a", "codex", "pr", "open"]).expect("parse");
-        let Some(Commands::Pr {
-            cmd: Some(PrCommand::Open { agent, title, body }),
-        }) = cli.command
-        else {
-            panic!("expected pr command");
-        };
-
-        assert_eq!(cli.agent.as_deref(), Some("codex"));
-        assert_eq!(agent, None);
-        assert_eq!(title, None);
-        assert_eq!(body, None);
-    }
-
-    #[test]
-    fn flow_children_keep_the_selected_agent() {
-        for flag in ["--agent", "-a"] {
-            let cli = Cli::try_parse_from(["lf", flag, "claude:opus", "run", "code"])
-                .expect("parse agent selection");
-            let args = std::iter::once("lf".to_owned())
-                .chain(cli.process_options().step_args())
-                .chain(["skill".to_owned(), "debug".to_owned()]);
-            let child = Cli::try_parse_from(args).expect("parse child invocation");
-            assert_eq!(child.agent.as_deref(), Some("claude:opus"));
-        }
     }
 }
 

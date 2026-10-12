@@ -3,6 +3,7 @@
 import argparse
 import subprocess
 import tarfile
+import time
 from pathlib import Path
 
 PROOFS = {
@@ -14,6 +15,56 @@ PROOFS = {
     "installation_reaches_candidate_verdict_with_an_unreadable_task_registry": "global_commands",
     "early_observation_records_preflight": "process_ownership_tests",
 }
+
+
+LIB_PROOFS = {"task_adoption_tests", "flow_tests"}
+
+
+def _prepare_image(image: str) -> None:
+    failure = (
+        f"Infrastructure failure acquiring proof image {image}; installation tests did not run."
+    )
+    try:
+        cached = subprocess.run(
+            ["docker", "image", "inspect", image],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=10,
+        )
+        if cached.returncode == 0:
+            print(f"Using local proof image {image}", flush=True)
+            return
+
+        # Download and backoff share the cold-runner deadline, separate from startup.
+        deadline = time.monotonic() + 300
+        for delay in (15, 30, 60, None):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise SystemExit(f"{failure} Image download exceeded 300 seconds.")
+            result = subprocess.run(
+                ["docker", "pull", image],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=remaining,
+            )
+            print(result.stdout, end="", flush=True)
+            if result.returncode == 0:
+                return
+            throttled = any(
+                marker in result.stdout.lower()
+                for marker in ("toomanyrequests", "too many requests", "rate exceeded")
+            )
+            if not throttled:
+                raise SystemExit(failure)
+            if delay is None or deadline - time.monotonic() <= delay:
+                raise SystemExit(
+                    f"{failure} Registry rate limit persisted through bounded retries."
+                )
+            print(f"Registry rate limit for {image}; retrying in {delay} seconds.", flush=True)
+            time.sleep(delay)
+    except subprocess.TimeoutExpired:
+        raise SystemExit(f"{failure} Docker image acquisition timed out.") from None
 
 
 def main() -> None:
@@ -32,9 +83,7 @@ def main() -> None:
         raise SystemExit(
             "Docker did not respond within 10 seconds; no proof container was created."
         ) from None
-    # A cold runner downloads the image before it can create a container.
-    # Keep that network transfer outside the short local startup deadline.
-    subprocess.run(["docker", "pull", args.image], check=True, timeout=300)
+    _prepare_image(args.image)
     container = subprocess.check_output(
         [
             "docker",
@@ -70,9 +119,18 @@ def main() -> None:
             if copy.wait() != 0:
                 raise RuntimeError("copy disposable source snapshot")
         selected = {name: PROOFS[name] for name in args.test} if args.test else PROOFS
-        targets = " ".join(f"--test {target}" for target in sorted(set(selected.values())))
+        targets = " ".join(
+            sorted(
+                {
+                    "--lib" if target in LIB_PROOFS else f"--test {target}"
+                    for target in selected.values()
+                }
+            )
+        )
         checks = "\n".join(
-            f"timeout 180 cargo test -p loopflow --test {target} {name} "
+            f"timeout 180 cargo test -p loopflow "
+            f"{'--lib' if target in LIB_PROOFS else f'--test {target}'} "
+            f"{f'{target}::' if target in LIB_PROOFS else ''}{name} "
             "-- --exact --include-ignored --nocapture"
             for name, target in selected.items()
         )

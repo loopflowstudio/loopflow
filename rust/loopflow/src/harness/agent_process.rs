@@ -48,19 +48,24 @@ fn record_identity(
 /// through pre-exec recording, and retain failed attempts without inventing an
 /// observed exit. Synchronous admission cannot detach a launch on async cancellation.
 pub(crate) fn spawn(
-    command: tokio::process::Command,
+    mut command: tokio::process::Command,
     lifeline: Option<&std::path::Path>,
     owner: &AttachmentOwner,
 ) -> Result<tokio::process::Child> {
     let (store, session, attachment) = owner;
     super::dispatch::off_reactor(|| {
+        let capability = store.reserve_steer_adapter(session, attachment)?;
+        command.env(
+            crate::steer::PROVIDER_CONTEXT_ENV,
+            serde_json::to_string(&capability)?,
+        );
         let program = command
             .as_std()
             .get_program()
             .to_string_lossy()
             .into_owned();
         store.with_session_attachment(session, attachment, || {
-            store.record_agent_process_launch(session, attachment, command.as_std())?;
+            store.record_agent_process_launch(session, attachment, command.as_std(), false)?;
             let spawned =
                 crate::os_process::spawn_agent_process(command, lifeline, record_identity(owner));
             if spawned.is_err() {
@@ -78,13 +83,18 @@ pub(crate) fn spawn(
 /// own the provider; owned native launches use the same admission fence and
 /// pre-exec recording as headless launches.
 pub(crate) fn spawn_native(
-    command: std::process::Command,
+    mut command: std::process::Command,
     owner: &AttachmentOwner,
 ) -> Result<std::process::Child> {
     let (store, session, attachment) = owner;
+    let capability = store.reserve_steer_adapter(session, attachment)?;
+    command.env(
+        crate::steer::PROVIDER_CONTEXT_ENV,
+        serde_json::to_string(&capability)?,
+    );
     store
         .with_session_attachment(session, attachment, || {
-            store.record_agent_process_launch(session, attachment, &command)?;
+            store.record_agent_process_launch(session, attachment, &command, true)?;
             let spawned =
                 crate::os_process::spawn_native_agent_process(command, record_identity(owner));
             if spawned.is_err() {
@@ -318,6 +328,12 @@ fn close_agent_process(pid: u32, started: i64) -> Result<()> {
 
 // Leader death alone neither proves group death nor authorizes signaling helpers.
 fn confirmed_group_death(pid: u32) -> Result<()> {
+    if crate::os_process::release_agent_lifeline(pid) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while OsProcess::group_is_alive(pid)? && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+    }
     if OsProcess::group_is_alive(pid)? {
         return Err(anyhow!(
             "AgentProcess group {pid} survives its recorded leader"

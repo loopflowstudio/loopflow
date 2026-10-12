@@ -188,15 +188,26 @@ pub(crate) fn git_stdout(repo: &Path, args: &[&str]) -> Result<String, GitError>
 
 fn successful_stdout(args: &[&str], output: Output) -> Result<String, GitError> {
     if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let diagnostic = [stderr.trim(), stdout.trim()]
+            .into_iter()
+            .filter(|text| !text.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n");
         return Err(GitError::CommandFailed {
             command: format!("git {}", args.join(" ")),
-            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+            stderr: if diagnostic.is_empty() {
+                format!("failed with {} (no output)", output.status)
+            } else {
+                diagnostic
+            },
         });
     }
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
-fn git_stdout_inheriting(
+pub(crate) fn git_stdout_inheriting(
     repo: &Path,
     args: &[&str],
     inherit: &impl Fn(&mut Command),

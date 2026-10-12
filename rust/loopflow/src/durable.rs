@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 use crate::id::WaveId;
+use crate::steer::Steer;
 
 macro_rules! durable_id {
     ($name:ident, $prefix:literal) => {
@@ -72,6 +73,16 @@ impl ProjectId {
 }
 
 impl TaskId {
+    /// Linear UUIDs are also the creation UUID used by locally authored Tasks.
+    pub(crate) fn from_issue(id: &str) -> Self {
+        let uuid = uuid::Uuid::parse_str(id).unwrap_or_else(|_| {
+            uuid::Uuid::new_v5(
+                &uuid::Uuid::NAMESPACE_URL,
+                format!("https://linear.app/issue/{id}").as_bytes(),
+            )
+        });
+        Self(format!("task_{}", uuid.simple()))
+    }
     pub(crate) fn from_raw(value: impl Into<String>) -> Self {
         Self(value.into())
     }
@@ -127,6 +138,7 @@ pub struct Placement {
 #[serde(tag = "kind", content = "id", rename_all = "snake_case")]
 pub enum Author {
     User,
+    Named(String),
     Captured(i64),
     /// Historical selector preserved from pre-event attribution.
     #[serde(alias = "run")]
@@ -136,21 +148,12 @@ pub enum Author {
 impl std::fmt::Display for Author {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::User => f.write_str("user"),
+            Self::User => f.write_str("attribution unresolved"),
+            Self::Named(name) => f.write_str(name),
             Self::Captured(id) => write!(f, "session input {id}"),
             Self::Imported(selector) => write!(f, "imported {selector}"),
         }
     }
-}
-
-/// A steer projected from a Work's durable comment stream
-/// (`TaskEventKind::Steer` / `ProjectEventKind::Steer`). Not a durable entity —
-/// its identity is the event id, so ordering and change-detection use `id`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Steer {
-    pub id: i64,
-    pub author: Author,
-    pub text: String,
 }
 
 /// A steer comment surfaced for the cross-Work `lf activity` timeline: the read
@@ -350,13 +353,17 @@ impl FlowStepProcess {
 
 #[cfg(test)]
 mod tests {
-    use super::{render_steers, Steer, WorkStatus};
+    use super::{render_steers, WorkStatus};
     use crate::durable::Author;
+    use crate::steer::Steer;
 
     #[test]
     fn ordered_steers_render_as_one_input_projection() {
-        let steer = |id: i64, text: &str| Steer {
-            id,
+        let steer = |sequence: i64, text: &str| Steer {
+            id: crate::id::SteerId::new(),
+            sequence,
+            source: format!("fixture:{sequence}"),
+            revision: "1".into(),
             author: Author::User,
             text: text.to_string(),
         };

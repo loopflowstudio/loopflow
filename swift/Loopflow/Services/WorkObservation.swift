@@ -109,6 +109,11 @@ public struct WorkFrame: Decodable, Sendable {
         public let waves: [WaveSnapshot]
     }
 
+    public struct PeerPlanning: Decodable, Sendable {
+        public let repo: String
+        public let destinations: [PeerPlanningStatus]
+    }
+
     public struct Sessions: Decodable, Sendable {
         public let repo: String
         public let includesHeadless: Bool
@@ -151,6 +156,7 @@ public struct WorkFrame: Decodable, Sendable {
     /// A `nil` body is a reading that failed; `unavailable` says why.
     public enum Content: Sendable {
         case planning(Planning?)
+        case peerPlanning(PeerPlanning?)
         case sessions(Sessions?)
         case task(TaskPart?)
         case wave(WavePart?)
@@ -161,6 +167,7 @@ public struct WorkFrame: Decodable, Sendable {
         public var part: String {
             switch self {
             case .planning: "planning"
+            case .peerPlanning: "peer_planning"
             case .sessions: "sessions"
             case .task: "task"
             case .wave: "wave"
@@ -213,6 +220,7 @@ public struct WorkFrame: Decodable, Sendable {
         let part = try container.decode(String.self, forKey: .part)
         switch part {
         case "planning": content = .planning(try container.decode(Planning?.self, forKey: .body))
+        case "peer_planning": content = .peerPlanning(try container.decode(PeerPlanning?.self, forKey: .body))
         case "sessions": content = .sessions(try container.decode(Sessions?.self, forKey: .body))
         case "task": content = .task(try container.decode(TaskPart?.self, forKey: .body))
         case "wave": content = .wave(try container.decode(WavePart?.self, forKey: .body))

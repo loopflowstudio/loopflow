@@ -16,7 +16,7 @@ use crate::prompt::process::ProcessPromptInput;
 use crate::prompt::PromptComponents;
 use crate::prompt::Surface;
 use crate::session_record::{
-    AgentProcessRequest, CaptureHandle, FinalAnswer, SessionCaptureSpec, SubjectAttribution,
+    AgentProcessRequest, CaptureHandle, SessionCaptureSpec, SubjectAttribution,
 };
 use anyhow::{anyhow, Result};
 use std::io::IsTerminal;
@@ -65,6 +65,9 @@ pub fn resume(id: &str, message: &str, cli: &Cli) -> Result<()> {
     let session = store
         .session(id)?
         .ok_or_else(|| anyhow!("session {id:?} was not found"))?;
+    if let Some(provider) = session.provider.as_deref() {
+        crate::config::resume_model(provider, session.model.as_deref())?;
+    }
     let mut turn = cli.process_options();
     if turn.agent.is_none() {
         turn.agent = match (&session.provider, &session.model) {
@@ -114,7 +117,6 @@ pub(crate) fn answer_bound(
     binding: &crate::ops::WorkBinding,
 ) -> Result<Option<String>> {
     run_bound_prompt(None, Some(message), cli, binding)
-        .map(|answer| answer.map(|answer| answer.text))
 }
 
 fn run_bound_prompt(
@@ -122,7 +124,7 @@ fn run_bound_prompt(
     message: Option<&str>,
     cli: &Cli,
     binding: &crate::ops::WorkBinding,
-) -> Result<Option<FinalAnswer>> {
+) -> Result<Option<String>> {
     let mut scoped;
     let binding = if resolve_skill(skill, cli, &binding.cwd)?
         .as_ref()
@@ -331,7 +333,6 @@ fn prepare_task_input(
             &store,
             &task,
             wave.slug(),
-            cli.steers_after.unwrap_or(0),
         )
         .await?;
         Ok(Some((store, seed)))
@@ -356,10 +357,6 @@ fn build_prompt_at(
     };
     let confine = confine_checkout_agent(task_checkout, is_interactive);
     let task_message = task_input.as_ref().map(|(_, seed)| seed.message.clone());
-    let steers = task_input
-        .as_ref()
-        .map(|(_, seed)| seed.steers.clone())
-        .unwrap_or_default();
     let config_start = Instant::now();
     let config = crate::config::load_config(Some(&repo_root))?.unwrap_or_default();
     debug!(
@@ -422,7 +419,7 @@ fn build_prompt_at(
             summary: None,
             references: task_message
                 .as_ref()
-                .map(|text| vec![("Task brief and steers".into(), text.clone())])
+                .map(|text| vec![("Task brief".into(), text.clone())])
                 .unwrap_or_default(),
             client_context: Default::default(),
             related_repos: Vec::new(),
@@ -459,6 +456,7 @@ fn build_prompt_at(
     };
 
     let mut agent_config = prepared.config;
+    agent_config.output_schema = cli.output_schema.clone();
     if confine {
         agent_config.write_scope = crate::agent::AgentWriteScope::Worktree;
         agent_config.execution_boundary = Some(crate::agent::checkout_execution_boundary(
@@ -477,7 +475,6 @@ fn build_prompt_at(
             )
         })
     });
-    components.steers = steers;
     let deduplication_decisions = prepared.deduplication_decisions;
     let effective_system = crate::agent::system_prompt_with_structured_replies(&agent_config);
     let context = attributed_context(
@@ -552,7 +549,7 @@ fn print_context_header(built: &PromptBuild, cli: &Cli) {
     );
 }
 
-fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
+fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<String>> {
     if !built.process.auto {
         info!("launching interactive vendor session");
         let capture = begin_capture(built, "tui", &built.agent_config, None)?;
@@ -975,17 +972,6 @@ pub(crate) fn attributed_context(
         );
     }
     if let Some(message) = &components.message {
-        // Steers ride inside the launch message; claim them before it does.
-        if let Some(steers) = tagged_block(message, "<lf:steers>", "</lf:steers>") {
-            push(
-                steers,
-                Kind::Steer,
-                Scope::Task,
-                "steers".to_string(),
-                None,
-                "steers",
-            );
-        }
         let (kind, scope) = components
             .message_context
             .unwrap_or((Kind::UserMessage, Scope::User));
@@ -1004,20 +990,6 @@ pub(crate) fn attributed_context(
     }
 
     let mut decisions = deduplication_decisions.to_vec();
-    for steer in &components.steers {
-        decisions.push(ContextDecision {
-            position: decisions.len() as u32,
-            kind: Kind::Steer,
-            scope: Scope::Task,
-            label: steer.author.to_string(),
-            source_path: Some(format!("steer:{}", steer.id)),
-            decision: ContextDecisionKind::Included,
-            reason: "rendered in the launch goal".to_string(),
-            original_bytes: Some(steer.text.len() as u64),
-            original_tokens: Some(crate::prompt::count_tokens(&steer.text) as u64),
-            asset_position: None,
-        });
-    }
     if components.diff_tier == DiffTier::StatOnly {
         decisions.push(ContextDecision {
             position: decisions.len() as u32,
@@ -1276,14 +1248,24 @@ mod tests {
         let provider = bin.join("claude");
         std::fs::write(
             &provider,
-            r#"#!/bin/sh
-printf '%s\n' "$LF_CAPTURE_KEY|${LF_RUN_DIR-unset}|${LF_TRACE_ID-unset}|${LF_PROCESS_ID-unset}" >> "$LF_TEST_RUN_EVIDENCE"
-if [ -n "${LF_TEST_ATTEMPT_FILE:-}" ] && [ ! -e "$LF_TEST_ATTEMPT_FILE" ]; then
-  touch "$LF_TEST_ATTEMPT_FILE"
-  printf '%s\n' '{"type":"result","is_error":true,"result":"service unavailable"}'
-  exit 1
-fi
-printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"output_tokens":3}}'
+            r#"#!/usr/bin/python3
+import json, os, sys
+from pathlib import Path
+if '--version' in sys.argv:
+    print('fixture')
+    sys.exit(0)
+for line in sys.stdin:
+    message = json.loads(line)
+    message['session_id'] = 'fixture-thread'
+    print(json.dumps(message), flush=True)
+    print(json.dumps({'type': 'system', 'subtype': 'init', 'session_id': 'fixture-thread'}), flush=True)
+    with open(os.environ['LF_TEST_RUN_EVIDENCE'], 'a') as evidence:
+        evidence.write('|'.join(os.environ.get(key, 'unset') for key in ['LF_CAPTURE_KEY', 'LF_RUN_DIR', 'LF_TRACE_ID', 'LF_PROCESS_ID']) + '\n')
+    attempt = os.environ.get('LF_TEST_ATTEMPT_FILE')
+    failed = attempt is not None and not Path(attempt).exists()
+    if failed:
+        Path(attempt).touch()
+    print(json.dumps({'type': 'result', 'uuid': 'fixture-result', 'session_id': 'fixture-thread', 'subtype': 'error_during_execution' if failed else 'success', 'is_error': failed, 'result': 'service unavailable' if failed else 'done', 'usage': {'input_tokens': 7, 'output_tokens': 3}}), flush=True)
 "#,
         )
         .unwrap();
@@ -1475,17 +1457,31 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         let provider = bin.join("claude");
         std::fs::write(
             &provider,
-            r#"#!/bin/sh
-if [ "${1:-}" = "--version" ]; then
-  printf '%s\n' 'claude test'
-  exit 0
-fi
-sleep "$LF_TEST_RESEARCH_DELAY"
-mkdir -p "$(dirname "$LF_TEST_RESEARCH_OUTPUT")"
-temporary="$LF_TEST_RESEARCH_OUTPUT.$LF_CAPTURE_KEY.tmp"
-printf '%s\n' "$LF_TEST_RESEARCH_CONTENT" > "$temporary"
-mv "$temporary" "$LF_TEST_RESEARCH_OUTPUT"
-printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"output_tokens":3}}'
+            r#"#!/usr/bin/env python3
+import json
+import os
+import sys
+import time
+from pathlib import Path
+
+if "--version" in sys.argv:
+    print("claude test")
+    sys.exit(0)
+for line in sys.stdin:
+    message = json.loads(line)
+    if message.get("type") != "user":
+        continue
+    message["session_id"] = "research-thread"
+    print(json.dumps(message), flush=True)
+    time.sleep(float(os.environ["LF_TEST_RESEARCH_DELAY"]))
+    output = Path(os.environ["LF_TEST_RESEARCH_OUTPUT"])
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output.with_name(output.name + "." + os.environ["LF_CAPTURE_KEY"] + ".tmp")
+    temporary.write_text(os.environ["LF_TEST_RESEARCH_CONTENT"] + "\n")
+    temporary.replace(output)
+    print(json.dumps({"type": "result", "uuid": message["uuid"],
+        "session_id": "research-thread", "subtype": "success", "result": "Done",
+        "usage": {"input_tokens": 7, "output_tokens": 3}}), flush=True)
 "#,
         )
         .unwrap();
@@ -1867,68 +1863,6 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             asset.kind == ContextAssetKind::UserMessage
                 && turn[asset.byte_start as usize..asset.byte_end as usize].contains("Build it.")
         }));
-    }
-
-    #[test]
-    fn attributed_context_records_each_steer_and_its_author() {
-        let steers = vec![
-            crate::durable::Steer {
-                id: 7,
-                author: crate::durable::Author::User,
-                text: "keep the API stable".into(),
-            },
-            crate::durable::Steer {
-                id: 9,
-                author: crate::durable::Author::Captured(3),
-                text: "price it in $ first".into(),
-            },
-        ];
-        let components = PromptComponents {
-            message: Some(format!(
-                "Linear Task LOO-1: goal\n\n{}\n\nWave: demo",
-                crate::durable::render_steers(&steers)
-            )),
-            message_context: Some((ContextAssetKind::Goal, ContextScope::Task)),
-            steers,
-            ..Default::default()
-        };
-        let system = crate::prompt::format_prompt(&components);
-        let prepared = attributed_context(&components, &system, "", &[], None);
-
-        let block = prepared
-            .system
-            .as_ref()
-            .unwrap()
-            .assets
-            .iter()
-            .find(|asset| asset.kind == ContextAssetKind::Steer)
-            .expect("steers are their own asset");
-        let text = &system[block.byte_start as usize..block.byte_end as usize];
-        assert!(text.contains("keep the API stable") && text.ends_with("</lf:steers>"));
-        assert!(prepared
-            .system
-            .as_ref()
-            .unwrap()
-            .assets
-            .iter()
-            .filter(|asset| asset.kind == ContextAssetKind::Goal)
-            .all(
-                |asset| !system[asset.byte_start as usize..asset.byte_end as usize]
-                    .contains("keep the API stable")
-            ));
-        let recorded = prepared
-            .decisions
-            .iter()
-            .filter(|decision| decision.asset_position.is_none())
-            .map(|decision| (decision.source_path.as_deref(), decision.label.as_str()))
-            .collect::<Vec<_>>();
-        assert_eq!(
-            recorded,
-            [
-                (Some("steer:7"), "user"),
-                (Some("steer:9"), "session input 3")
-            ]
-        );
     }
 
     #[test]

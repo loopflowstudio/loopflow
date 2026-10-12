@@ -218,9 +218,14 @@ pub(crate) fn resume_session_with_env(
     remote: Option<NativeConnection>,
     attachment: Option<(String, crate::process::SessionAttachment)>,
 ) -> Result<()> {
+    let selected_model = crate::config::resume_model(harness, model)?;
     let user_name = crate::config::participant_name()?;
-    let mut command =
-        build_resume_session_command(harness, model, worktree, &provider_session.agent_session)?;
+    let mut command = build_resume_session_command(
+        harness,
+        selected_model.as_deref(),
+        worktree,
+        &provider_session.agent_session,
+    )?;
     command.attachment = attachment;
     command.remote = remote;
     if let Some(remote) = &command.remote {
@@ -318,7 +323,7 @@ pub(crate) fn require_provider_session_process(dir: &Path) -> Result<()> {
     if store.task_deleted(&task)? {
         bail!(
             "Task {} was deleted and cannot resume execution",
-            task.plan.identifier
+            task.identifier
         );
     }
     Ok(())
@@ -391,6 +396,8 @@ fn spawn_session_command_with_env(
     exact_account_id: Option<&crate::store::ProviderAccountId>,
     launch_lock: Option<File>,
 ) -> Result<()> {
+    let _planning_sync =
+        crate::ops::planning_sync::PlanningSync::start_for_directory(&command.cwd)?;
     let outcome = session_command_status_with_env(
         command,
         environment,
@@ -656,7 +663,7 @@ fn run_native_session(
             crate::session_record::PROVIDER_ACCOUNT_ID_ENV,
             route.account_id().as_str(),
         );
-        route.record_process_blocking(agent_session.cloned(), None)?;
+        route.pin_session_blocking(agent_session.cloned())?;
     }
     let capture_codex =
         command.program == "codex" && agent_session.is_none() && capture_dir.is_some();
@@ -746,7 +753,7 @@ fn run_native_session(
     // Record which home this conversation lives in, so reopening returns there.
     if let (Some(route), Some(capture_dir)) = (&account_route, capture_dir.as_deref()) {
         if let Ok(Some(session)) = crate::session_record::read_provider_session(capture_dir) {
-            if let Err(error) = route.record_process_blocking(Some(session.agent_session), None) {
+            if let Err(error) = route.pin_session_blocking(Some(session.agent_session)) {
                 tracing::warn!(%error, "failed to record the provider session's account home");
             }
         }

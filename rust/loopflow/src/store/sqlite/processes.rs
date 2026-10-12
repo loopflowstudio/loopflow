@@ -498,6 +498,7 @@ impl SqliteStore {
         session: &str,
         expected: &SessionAttachment,
         command: &std::process::Command,
+        interactive: bool,
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -507,9 +508,13 @@ impl SqliteStore {
             .map(|arg| arg.to_string_lossy().into_owned())
             .collect::<Vec<_>>();
         let changed = tx.execute(
-            "UPDATE processes SET spawn_state='spawn_requested',command=?2
+            "UPDATE processes SET spawn_state='spawn_requested',command=?2,agent_interactive=?3
             WHERE id=?1 AND completed_at IS NULL AND spawn_state='reserved' AND pid IS NULL",
-            params![expected.agent_process_id, serde_json::to_string(&argv)?],
+            params![
+                expected.agent_process_id,
+                serde_json::to_string(&argv)?,
+                interactive
+            ],
         )?;
         if changed != 1 {
             return Err(StoreError::InvalidAuthority(
@@ -568,6 +573,24 @@ impl SqliteStore {
         Ok(())
     }
 
+    /// Select the native conversation observed by the currently attached provider.
+    pub fn record_session_agent_session(
+        &self,
+        session: &str,
+        expected: &SessionAttachment,
+        thread: &AgentSessionId,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        require_attachment_in(&tx, session, expected)?;
+        tx.execute(
+            "UPDATE agent_sessions SET provider_thread=?2 WHERE id=?1",
+            params![session, thread],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn record_session_connection(
         &self,
         session: &str,
@@ -594,6 +617,16 @@ impl SqliteStore {
     // transaction across provider I/O. Do not unlink lock files: another process
     // may already have the inode open. Process exit releases ownership.
     pub(super) fn lock_session_attachment(&self, session: &str) -> StoreResult<File> {
+        self.lock_session_fence(session, false)
+    }
+
+    /// Independent transport writers may progress together, but neither may
+    /// cross a provider stop, replacement or attachment handoff.
+    pub(super) fn lock_session_dispatch(&self, session: &str) -> StoreResult<File> {
+        self.lock_session_fence(session, true)
+    }
+
+    fn session_fence_file(&self, session: &str) -> StoreResult<File> {
         let database = self
             .conn
             .lock()
@@ -616,11 +649,30 @@ impl SqliteStore {
             .write(true)
             .open(root.join(hex::encode(Sha256::digest(session.as_bytes()))))
             .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+        Ok(file)
+    }
+
+    pub(crate) fn try_lock_session_attachment(&self, session: &str) -> StoreResult<Option<File>> {
+        let file = self.session_fence_file(session)?;
+        match file.try_lock_exclusive() {
+            Ok(()) => Ok(Some(file)),
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => Ok(None),
+            Err(error) => Err(StoreError::InvalidData(error.to_string())),
+        }
+    }
+
+    fn lock_session_fence(&self, session: &str, shared: bool) -> StoreResult<File> {
+        let file = self.session_fence_file(session)?;
         // A synchronous caller must never wait indefinitely on a dispatch whose
         // reactor it might be driving. This bound uses the OS clock, not Tokio.
         let deadline = Instant::now() + Duration::from_secs(15);
         loop {
-            match file.try_lock_exclusive() {
+            let locked = if shared {
+                FileExt::try_lock_shared(&file)
+            } else {
+                file.try_lock_exclusive()
+            };
+            match locked {
                 Ok(()) => return Ok(file),
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                     if Instant::now() >= deadline {
@@ -644,6 +696,23 @@ impl SqliteStore {
         write: impl FnOnce() -> StoreResult<T>,
     ) -> StoreResult<T> {
         let _dispatch = self.lock_session_attachment(session)?;
+        {
+            let conn = self.conn.lock().expect("store mutex poisoned");
+            require_attachment_in(&conn, session, expected)?;
+        }
+        write()
+    }
+
+    /// The transport owns serialization of its writes. Hold shared exclusion
+    /// through the bounded write so synchronous provider hooks can also emit
+    /// before the provider drains its input.
+    pub(crate) fn with_session_dispatch<T>(
+        &self,
+        session: &str,
+        expected: &SessionAttachment,
+        write: impl FnOnce() -> StoreResult<T>,
+    ) -> StoreResult<T> {
+        let _dispatch = self.lock_session_dispatch(session)?;
         {
             let conn = self.conn.lock().expect("store mutex poisoned");
             require_attachment_in(&conn, session, expected)?;
@@ -1627,6 +1696,7 @@ mod attachment_tests {
                 "conversation",
                 &first,
                 &std::process::Command::new("fixture"),
+                false,
             )
             .unwrap();
         store
@@ -1707,6 +1777,7 @@ mod attachment_tests {
                 "conversation",
                 &first,
                 &std::process::Command::new("fixture"),
+                false,
             )
             .unwrap();
         assert!(store
@@ -1785,6 +1856,12 @@ mod attachment_tests {
         assert_eq!(first.provider_lf_process_id, third.provider_lf_process_id);
         assert_eq!(first.agent_process_id, third.agent_process_id);
         assert_ne!(first.token, third.token);
+        assert!(store
+            .record_session_agent_session("conversation", &first, &"stale-history".into())
+            .is_err());
+        store
+            .record_session_agent_session("conversation", &third, &"native-history".into())
+            .unwrap();
         assert_eq!(
             store.session_connection("conversation").unwrap(),
             Some(("endpoint".into(), "native-history".into()))
@@ -2043,7 +2120,7 @@ mod attachment_tests {
         let mut command = std::process::Command::new("codex");
         command.args(["app-server", "--listen", "unix:///fixture"]);
         store
-            .record_agent_process_launch(&session.id, &attachment, &command)
+            .record_agent_process_launch(&session.id, &attachment, &command, false)
             .unwrap();
         store
             .record_agent_process_identity(&session.id, &attachment, 4242, 123)

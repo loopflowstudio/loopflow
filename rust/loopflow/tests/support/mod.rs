@@ -1,23 +1,23 @@
 pub mod planning;
 
+use loopflow_test_support::env_lock;
 use std::env;
 use std::ffi::OsString;
 use std::fs;
 use std::path::Path;
-use std::sync::{Mutex, OnceLock};
 
 use base64::prelude::*;
 use loopflow::id::WaveId;
-use loopflow::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
-use loopflow::store::{PmSnapshotRow, StorageConfig, Store};
+use loopflow::linear::{LinearIssueId, LinearProjectId};
+use loopflow::store::{StorageConfig, Store};
 use loopflow::work::project::{Project, ProjectId};
-use loopflow::work::task::{PmWritebackState, Task, TaskId, TaskPr, TaskPrId};
+use loopflow::work::task::{LinearWritebackState, Task, TaskId, TaskPr, TaskPrId};
 use loopflow::work::wave::Wave;
 use loopflow_test_support::TestRepo;
 use tempfile::TempDir;
 use time::OffsetDateTime;
 
-mod ambient;
+pub mod ambient;
 
 #[allow(dead_code)] // Shared GitHub fixture compiled into multiple test crates.
 pub fn github_checks_page(head: &str, checks: &[(&str, &str, bool)]) -> String {
@@ -57,11 +57,6 @@ pub fn github_merge_response(
         "autoMergeRequest":request.map(|_| serde_json::json!({"enabledAt":"2026-09-29T00:00:00Z"})),
         "mergeQueueEntry":queued.map(|_| serde_json::json!({"id":"queue-entry"}))
     }}}}).to_string()
-}
-
-fn env_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
 }
 
 struct HomeOverride {
@@ -117,6 +112,7 @@ read -r turn_start
 echo '{"jsonrpc":"2.0","id":3,"result":{"turn":{"id":"turn-test"}}}'
 echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thread-test","turn":{"id":"turn-test","status":"inProgress"}}}'
 printf '%s\n' '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"thread-test","turnId":"turn-test","itemId":"message-test","delta":__OUTPUT__}}'
+printf '%s\n' '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thread-test","turnId":"turn-test","item":{"type":"agentMessage","id":"message-test","text":__OUTPUT__,"phase":"final_answer"}}}'
 echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-test","turn":{"id":"turn-test","status":"completed"}}}'
 if [ -n "$LF_TEST_CODEX_STDIO" ]; then exit 0; fi
 while read -r line; do :; done
@@ -219,6 +215,7 @@ impl EnvGuard {
         include_existing_path: bool,
     ) -> Self {
         let lock = env_lock().lock().unwrap_or_else(|err| err.into_inner());
+        let cli = loopflow_test_support::lf_binary();
         let bin = TempDir::new().expect("temp bin dir");
         for (name, content) in entries {
             write_executable(bin.path(), name, content);
@@ -236,7 +233,7 @@ impl EnvGuard {
         let previous_lf_home = env::var_os("LF_HOME");
         let ambient = ambient::EnvGuard::new();
         let previous_lf_bin = env::var_os("LF_BIN");
-        env::set_var("LF_BIN", env!("CARGO_BIN_EXE_lf"));
+        env::set_var("LF_BIN", cli);
         let lf_home = TempDir::new().expect("temp lf machine dir");
         env::remove_var("LF_HOME");
         if let Some(home) = home {
@@ -306,13 +303,10 @@ impl Drop for EnvGuard {
 
 #[allow(dead_code)] // Shared helper compiled into integration tests that do not need Task state.
 pub fn bind_task_planning(repo: &TestRepo) {
-    repo.create_file(
-        ".lf/config.yaml",
-        "pm:\n  provider: linear\n  linear_team: team-task-pr-tests\n",
-    );
+    repo.create_file(".lf/config.yaml", "linear:\n  team: team-task-pr-tests\n");
     repo.create_file(
         "wave/task-pr-tests/GOAL.md",
-        "---\npm:\n  linear_initiative: initiative-task-pr-tests\n---\nKeep work.\n",
+        "---\nlinear:\n  initiative: initiative-task-pr-tests\n---\nKeep work.\n",
     );
     repo.stage_all();
     repo.commit("Bind fixture planning before creating Task checkouts");
@@ -320,7 +314,7 @@ pub fn bind_task_planning(repo: &TestRepo) {
 
 #[allow(dead_code)] // Shared helper compiled into integration tests that do not need Task state.
 pub struct RegisteredTask {
-    database: std::path::PathBuf,
+    pub database: std::path::PathBuf,
     pub store: Store,
     pub task: Task,
     pub pr: TaskPr,
@@ -372,37 +366,36 @@ fn register_task_fixture(
     );
     let project = Project {
         id: ProjectId::new(),
-        plan: ProjectPlan {
-            summary: String::new(),
-            workflow: "feature".into(),
-            status: loopflow::pm::ProjectStatus::Started,
-            linear_id: Some(
-                LinearProjectId::new(format!("project-{}", WaveId::new())).expect("project id"),
-            ),
-            slug: "task-pr-tests".to_string(),
-            name: "Task PR tests".to_string(),
-            prompt_context: "Keep Task PR transitions durable.".to_string(),
-            pm_snapshot_synced_at: Some(now.unix_timestamp()),
-        },
+
+        summary: String::new(),
+        workflow: "feature".into(),
+        status: loopflow::work::project::ProjectStatus::Started,
+        linear_id: Some(
+            LinearProjectId::new(format!("project-{}", WaveId::new())).expect("project id"),
+        ),
+        slug: "task-pr-tests".to_string(),
+        name: "Task PR tests".to_string(),
+        description: "Keep Task PR transitions durable.".to_string(),
+        krs: Vec::new(),
+        metric_targets: Vec::new(),
+        pm_snapshot_synced_at: Some(now.unix_timestamp()),
+
         wave_id: wave.id().clone(),
-        iteration: 0,
         abandon_intent: None,
         created_at: now,
         updated_at: now,
     };
-    let mut task = Task {
+    let task = Task {
         id: TaskId::new(),
-        plan: TaskPlan {
-            revision: 0,
-            linear_id: Some(
-                LinearIssueId::new(format!("issue-{}", WaveId::new())).expect("issue id"),
-            ),
-            identifier: "INF-123".to_string(),
-            title: "Prove Task PR transitions".to_string(),
-            description: "Exercise the persisted lifecycle.".to_string(),
-            pm_snapshot_synced_at: Some(now.unix_timestamp()),
-        },
-        pm_writeback: PmWritebackState::Current,
+
+        revision: 0,
+        linear_id: Some(LinearIssueId::new(format!("issue-{}", WaveId::new())).expect("issue id")),
+        identifier: "INF-123".to_string(),
+        title: "Prove Task PR transitions".to_string(),
+        description: "Exercise the persisted lifecycle.".to_string(),
+        pm_snapshot_synced_at: Some(now.unix_timestamp()),
+
+        pm_writeback: LinearWritebackState::Current,
         wave_id: wave.id().clone(),
         project_id: project.id.clone(),
         worktree: Some(worktree.to_path_buf()),
@@ -414,6 +407,12 @@ fn register_task_fixture(
         abandon_intent: None,
         created_at: now,
         updated_at: now,
+        rank: 0,
+        assignee: None,
+        due_date: None,
+        state: None,
+        completed: false,
+        completed_at: None,
         observation: loopflow::work::task::Observation::NotRequired,
     };
     let mut pr = TaskPr {
@@ -448,52 +447,8 @@ fn register_task_fixture(
                 rusqlite::params![wave.id(), project.id.as_str()],
             )
             .expect("select fixture Project");
-        let pm_payload = serde_json::json!({
-            "projects": [{
-                "id": project.plan.linear_id.as_ref().unwrap().as_str(),
-                "slug": project.plan.slug.as_str(),
-                "name": project.plan.name.as_str(),
-                "summary": "",
-                "metric_targets": [],
-                "workflow": project.plan.workflow,
-                "status": project.plan.status,
-                "krs": [],
-                "initiative_ids": ["initiative-task-pr-tests"],
-                "team_ids": ["team-task-pr-tests"]
-            }],
-            "items": [{
-                "id": task.plan.linear_id.as_ref().unwrap().as_str(),
-                "identifier": task.plan.identifier.as_str(),
-                "url": "https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions",
-                "name": task.plan.title.as_str(),
-                "description": task.plan.description.as_str(),
-                "rank": 1,
-                "completed": false,
-                "project_id": project.plan.linear_id.as_ref().unwrap().as_str(),
-                "project": project.plan.slug.as_str(),
-                "team_id": "team-task-pr-tests",
-                "assignee": null
-            }]
-        });
-        store
-            .put_pm_snapshot(
-                PmSnapshotRow {
-                    wave_id: wave.id().clone(),
-                    provider: "linear".to_string(),
-                    initiative: "initiative-task-pr-tests".to_string(),
-                    synced_at: now.unix_timestamp(),
-                    snapshot: serde_json::from_value(pm_payload).unwrap(),
-                },
-                None,
-            )
-            .await
-            .expect("cache Task PR context");
-        task.id = store
-            .get_task_by_issue(task.plan.linear_id.as_ref().unwrap().as_str())
-            .await
-            .unwrap()
-            .unwrap()
-            .id;
+        planning::seed_unplaced_task(&home.join("loopflow.db"), &task);
+        planning::seed_linear_admission(&home.join("loopflow.db"), &wave, &project, &task);
         pr.task_id = task.id.clone();
         store
             .place_task(
@@ -539,10 +494,10 @@ pub fn register_sibling_task(
     let now = OffsetDateTime::now_utc();
     let mut task = registered.task.clone();
     task.id = TaskId::new();
-    task.plan.linear_id =
+    task.linear_id =
         Some(LinearIssueId::new(format!("issue-{}", WaveId::new())).expect("issue id"));
-    task.plan.identifier = identifier.to_string();
-    task.plan.title = format!("Sibling {identifier}");
+    task.identifier = identifier.to_string();
+    task.title = format!("Sibling {identifier}");
     task.workspace_slug = branch.to_string();
     task.branch = branch.to_string();
     task.worktree = Some(worktree.to_path_buf());

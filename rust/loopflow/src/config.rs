@@ -71,6 +71,27 @@ pub(crate) fn normalize_user_name(name: &str) -> Option<String> {
 /// Agents Loopflow can drive, in the order it prefers them.
 const KNOWN_AGENTS: [&str; 3] = ["codex", "claude", "opencode"];
 
+/// An explicit invocation-wide choice; definitions and defaults never set it.
+pub const AGENT_OVERRIDE_ENV: &str = "LF_AGENT_OVERRIDE";
+
+pub fn agent_override() -> Option<String> {
+    std::env::var(AGENT_OVERRIDE_ENV)
+        .ok()
+        .filter(|value| !value.is_empty())
+}
+
+pub(crate) fn resume_model(provider: &str, model: Option<&str>) -> anyhow::Result<Option<String>> {
+    let Some(agent) = agent_override() else {
+        return Ok(model.map(str::to_owned));
+    };
+    let (selected, model) = parse_agent(&agent);
+    anyhow::ensure!(
+        selected == provider,
+        "This Session's native history belongs to {provider}; it cannot resume with {selected}. Start a new Session with lf -a {agent} : <message>."
+    );
+    Ok(model)
+}
+
 /// Agent used when neither the caller, config, nor skill chooses one: the
 /// first known agent installed on this machine.
 pub fn default_agent() -> &'static str {
@@ -161,17 +182,62 @@ pub struct LinearConfig {
     pub team: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
-pub struct PmConfig {
-    #[serde(default)]
-    pub provider: Option<String>,
-    #[serde(default)]
-    pub linear_team: Option<String>,
+/// One synchronization destination for the repository's local planning.
+/// Repository configuration overrides the personal default as one value.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "provider", rename_all = "snake_case", deny_unknown_fields)]
+pub enum PlanningConfig {
+    Git {
+        #[serde(default = "default_planning_remote")]
+        remote: String,
+        /// Omit for this user's stable personal ref.
+        #[serde(default)]
+        shared: Option<String>,
+    },
+    Linear {},
+}
+
+fn default_planning_remote() -> String {
+    "origin".into()
+}
+
+impl Default for PlanningConfig {
+    fn default() -> Self {
+        Self::Git {
+            remote: default_planning_remote(),
+            shared: None,
+        }
+    }
+}
+
+impl Config {
+    pub fn planning_transport(&self) -> PlanningConfig {
+        self.planning.clone().unwrap_or_else(|| {
+            if self.linear.team.is_some() {
+                PlanningConfig::Linear {}
+            } else {
+                PlanningConfig::default()
+            }
+        })
+    }
+}
+
+/// An ordinary lf command scheduled by explicit installation on a Machine.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct CronDef {
+    pub name: String,
+    pub command: Vec<String>,
+    pub schedule: String,
 }
 
 /// Main configuration struct.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
+    #[serde(default)]
+    pub crons: Option<Vec<CronDef>>,
+    #[serde(default)]
+    pub planning: Option<PlanningConfig>,
     #[serde(default)]
     pub automation: AutomationConfig,
     #[serde(default)]
@@ -244,13 +310,9 @@ pub struct Config {
     #[serde(default)]
     pub release: ReleaseConfig,
 
-    /// Linear configuration for PM integration spikes.
+    /// Repository binding used by Linear synchronization.
     #[serde(default)]
     pub linear: LinearConfig,
-
-    /// PM provider selection.
-    #[serde(default)]
-    pub pm: Option<PmConfig>,
 
     /// Run provider conversations in the selected account's own home rather
     /// than the provider's native one. `--shared` overrides it per launch.
@@ -285,6 +347,8 @@ impl Default for AutomationConfig {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            planning: None,
+            crons: None,
             context_budgets: Default::default(),
             context_budget_sources: Default::default(),
             agent: None,
@@ -305,7 +369,6 @@ impl Default for Config {
             summary_tokens: default_summary_tokens(),
             release: ReleaseConfig::default(),
             linear: LinearConfig::default(),
-            pm: None,
             isolate: false,
         }
     }
@@ -438,8 +501,8 @@ fn global_config_path() -> PathBuf {
 
 /// Load only the repository-owned config, without inheriting user-global values.
 ///
-/// PM identity uses this path because a global Team binding must never become a
-/// repository's authority implicitly.
+/// Linear Team bindings use this path; personal transport defaults do not assign
+/// a repository to a Team.
 pub fn load_repo_config(repo_root: &Path) -> Result<Option<Config>, LoadError> {
     let Some(value) = load_yaml_file(&repo_root.join(".lf/config.yaml"))? else {
         return Ok(None);
@@ -456,6 +519,28 @@ pub fn load_config_or_default(repo_root: Option<&Path>) -> Config {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn native_resume_keeps_history_with_its_provider() {
+        let _lock = crate::journal::test_env_lock();
+        let _environment = crate::test_ambient::EnvGuard::clear(&[super::AGENT_OVERRIDE_ENV]);
+        assert_eq!(
+            super::resume_model("claude", Some("haiku"))
+                .unwrap()
+                .as_deref(),
+            Some("haiku")
+        );
+        std::env::set_var(super::AGENT_OVERRIDE_ENV, "claude:opus");
+        assert_eq!(
+            super::resume_model("claude", Some("haiku"))
+                .unwrap()
+                .as_deref(),
+            Some("opus")
+        );
+        let error = super::resume_model("codex", None).unwrap_err().to_string();
+        assert!(error.contains("native history belongs to codex"));
+        assert!(error.contains("Start a new Session"));
+    }
+
     use super::*;
 
     #[test]
@@ -896,19 +981,57 @@ supported_harnesses:
     }
 
     #[test]
-    fn load_repo_config_reads_repository_pm_authority() {
+    fn load_repo_config_reads_linear_team() {
         let temp = tempfile::tempdir().expect("create temp dir");
         let config_dir = temp.path().join(".lf");
         std::fs::create_dir_all(&config_dir).expect("create .lf dir");
         std::fs::write(
             config_dir.join("config.yaml"),
-            "pm:\n  provider: linear\n  linear_team: team-loo\n",
+            "linear:\n  team: team-loo\n",
         )
         .expect("write config");
 
         let config = load_repo_config(temp.path()).unwrap().unwrap();
-        let pm = config.pm.unwrap();
-        assert_eq!(pm.provider.as_deref(), Some("linear"));
-        assert_eq!(pm.linear_team.as_deref(), Some("team-loo"));
+        assert_eq!(config.linear.team.as_deref(), Some("team-loo"));
+    }
+}
+
+#[cfg(test)]
+mod planning_config_tests {
+    use super::{merge_config_values, Config, PlanningConfig};
+
+    #[test]
+    fn repository_transport_replaces_personal_provider_fields() {
+        let personal = serde_yaml_ng::from_str(
+            "planning:\n  provider: git\n  remote: private\n  shared: solo\n",
+        )
+        .unwrap();
+        let repository = serde_yaml_ng::from_str("planning:\n  provider: linear\n").unwrap();
+        let config: Config =
+            serde_yaml_ng::from_value(merge_config_values(Some(personal), Some(repository)))
+                .unwrap();
+        assert_eq!(config.planning_transport(), PlanningConfig::Linear {});
+        let selected: Config = serde_yaml_ng::from_str(
+            "linear:\n  team: team\nplanning:\n  provider: git\n  shared: employees\n",
+        )
+        .unwrap();
+        assert_eq!(
+            selected.planning_transport(),
+            PlanningConfig::Git {
+                remote: "origin".into(),
+                shared: Some("employees".into())
+            }
+        );
+        assert_eq!(
+            Config::default().planning_transport(),
+            PlanningConfig::Git {
+                remote: "origin".into(),
+                shared: None
+            }
+        );
+        assert!(serde_yaml_ng::from_str::<Config>(
+            "planning:\n  provider: linear\n  shared: employees\n"
+        )
+        .is_err());
     }
 }

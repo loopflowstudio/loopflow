@@ -135,7 +135,7 @@ mod tests {
     use time::OffsetDateTime;
 
     use super::{run_telemetry_scorecard, TelemetryScorecardEnvelope};
-    use crate::agent::stream::StreamEvent;
+    use crate::chat::types::{ConversationEvent, TurnUsage};
     use crate::id::WaveId;
     use crate::session_record::{CaptureHandle, SessionCaptureSpec, SessionFlowMembership};
     use crate::store::{open_store, storage_config_from_env};
@@ -162,10 +162,15 @@ mod tests {
             },
         )
         .unwrap();
-        capture.record_stream_event(&StreamEvent::Usage {
-            input_tokens: Some(12),
-            output_tokens: None,
-            cache_read_tokens: None,
+        capture.record_conversation(ConversationEvent::UsageCheckpoint {
+            turn_id: "provider-turn".to_string(),
+            usage: TurnUsage {
+                input_tokens: Some(12),
+                output_tokens: None,
+                cache_read_tokens: None,
+                ..TurnUsage::default()
+            },
+            final_receipt: false,
         });
         capture.finish("completed").unwrap();
         let store = crate::store::sqlite::SqliteStore::open_processes_read_only(

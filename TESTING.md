@@ -26,6 +26,18 @@ the token before expiry. The built-in `GITHUB_TOKEN` cannot enqueue PRs into
 the required merge queue. Successful PR CI explicitly enqueues the unchanged
 Dependabot head when it is not already queued; queue CI still gates merging.
 
+Linear acquisition fixtures live under `rust/loopflow/tests/linear/` and compile
+inside the library, where fetched response types stay private. Each fixture process
+builds the current CLI and takes its path from Cargo’s artifact output:
+
+```sh
+cargo test -p loopflow --lib local_planning
+cargo test -p loopflow --lib linear::acceptance
+```
+
+These fixtures still invoke the built CLI with disposable Homes. Shared execution
+fixtures seed fixed admission evidence; they do not expose acquisition APIs.
+
 CI Rust cache keys include the root workspace's build profiles, which the cache
 action's member-manifest discovery omits. Profile changes get fresh dependency
 caches; version-only releases retain them. Main publishes the shared caches;
@@ -88,17 +100,29 @@ paths too. Run `TMPDIR=/tmp cargo test -p loopflow --lib context_block` when
 changing them; macOS's longer default paths can hide an undersized fixture.
 
 The composed delivery fixture runs a real CLI/Flow against an isolated Home and
-simulated provider observations, local follow-up filing and independent completion,
+simulated provider observations, ordinary Task/comment saves and independent completion,
 then checks its captured CLI and monitor population in Rust
 and Swift. It builds the CLI with Cargo so a unit-test binary cannot accidentally
 launch an installed version. Regenerate its wire capture with
-`LOOPFLOW_UPDATE_LIFECYCLE_FIXTURE=1 cargo test -p loopflow --lib merged_follow_up_completion_and_arrival`,
+`LOOPFLOW_UPDATE_LIFECYCLE_FIXTURE=1 cargo test -p loopflow --lib ordinary_task_comments_and_completion_preserve_live_flow_and_arrival`,
 then run `cargo test -p loopflow --test dto_fixtures composed_lifecycle` and
-`swift test --package-path swift --filter 'composedTaskLifecycle|composedLifecycleDelivery'`.
+`swift test --package-path swift --filter 'composedTaskLifecycle|dueDate'`.
 
 Provider fixtures must read the launch's actual context channel. When a final
 sync adds fixtures that inspect a changed transport, run those focused tests
 before arming; the earlier gate did not cover the newly combined behavior.
+Context-hook changes also run `session_cli_tests`: resume callbacks supply the
+native Session identity and event payload, just like startup. Provider fixture
+scripts must fail when a callback fails, rather than report a successful turn
+with missing context evidence.
+Claude stream fixtures must acknowledge the input's UUID before completing its
+result, and stay alive until the harness closes stdin. Include
+`explicit_agent_wins_through_task_nested_flows_and_provider_children` when
+integrating Claude transport changes; bound the test so missing acknowledgements
+fail locally instead of exhausting the merge queue's deadline.
+Cross-provider replay fixtures must install stand-ins for both the recorded and
+override providers, with a fixture/system-only PATH. A developer's installed
+provider must neither satisfy a missing fixture nor receive a test launch.
 
 ## Quick Reference
 
@@ -518,7 +542,8 @@ For shared repository discovery or CLI dispatch changes, include the PM and
 Wave consumers in the focused check:
 
 ```bash
-cargo test -p loopflow --test wave_resolution_tests --test wave_resolution_matrix --test global_commands
+cargo test -p loopflow --lib wave_resolution
+cargo test -p loopflow --test global_commands
 ```
 
 When adding a command with `--wave`, classify its selection in
@@ -535,7 +560,7 @@ ownership tests. Empty registrations can be forgotten from their registered
 directory without Git metadata; Work operations still enforce repository ownership.
 
 ```bash
-cargo nextest run -p loopflow --test status_tests --test wave_repository_ownership --no-fail-fast
+cargo nextest run -p loopflow --lib -E 'test(status_tests::) | test(wave_repository_ownership::)' --no-fail-fast
 ```
 
 Task decision feedback has a focused store-and-Flow-runner check:
@@ -600,11 +625,32 @@ accounts or installed data. Ordinary retry, usage, binding and review behavior
 belong in `session_lifecycle_tests`; Chapter convergence belongs in
 `ops::chapter::tests`, including interrupted rotation and second-Machine sync.
 
-`planning_reconnect_tests` runs the public work-watch and Flow reconnect fixtures
-on Linux, using disposable TLS trust and synthetic Linear state. They exercise
-repository/Wave scope without Task selection, selection changes, stdin close/reopen,
-lost replies and independent propagation during rejected field delivery. The
-portable `work_watch` offline-completion test requires a foreground delivery error
+`planning_reconnect_tests` runs public work-watch and Flow reconnect against
+synthetic Linear on Linux, with disposable TLS trust. It covers lost replies,
+independent acquisition during failed delivery, local buffering and retained execution.
+Linear and Git planning run separately; no provider receipt crosses Git.
+`planning_setup_tests` proves configuration selection and personal-key recovery.
+`planning_foreground_tests` exercises disposable custom refs through public CLI and
+Session connections, including offline independent edits, comments, completion and
+unchanged execution. `planning_write` covers atomic local journal capture and import
+through the same typed writer. `task_remote_tests` exercises actual target CLI dispatch
+with simulated SSH/providers; it does not establish configured remote installation.
+
+`tests/e2e/codex_connect.py --codex "$(command -v codex)" --lf target/debug/lf
+--planning-peers --output <dir>` composes a real Codex engine with a synthetic
+Responses endpoint and disposable Git planning. It launches with `--task`, then
+imports edits, comments and completion for that same Task during live connect and
+explicit resume, including after killing the fixture's driver. Its historical
+Workflow is seeded; its Session, drivers and checkout are created by public commands.
+Exchange preserves Workflow/placement, live driver, Session/native identity and
+append-only history without starting an engine or provider turn. After imported
+completion, the current client explicitly starts and completes another turn on the
+same engine. The controlled protocol client is headless, not a rendered TUI or
+running Workflow-edge proof. Prepare the script's uv dependencies before
+running it through `scripts/test_network.py`.
+
+Only attempted effects acknowledge; equal-desired provider readback can instead
+retire an unattempted intention without another write. The portable `work_watch` offline-completion test requires a foreground delivery error
 with no Task selected; local frame propagation alone cannot establish sync lifetime.
 Run these through the same external-network denial wrapper as other CLI fixtures.
 
@@ -630,7 +676,7 @@ exercise acquisition in a different order from Task creation. Process-sensitive
 cleanup fixtures must observe child readiness before inspecting live executables.
 
 ```bash
-uv run python scripts/materialize_rust_tests.py -- cargo nextest run -p loopflow --lib -E 'test(ops::pm::task_planning_tests::)' --no-fail-fast
+uv run python scripts/materialize_rust_tests.py -- cargo nextest run -p loopflow --lib -E 'test(ops::linear::task_planning_tests::)' --no-fail-fast
 ```
 
 Every CLI fixture must select an explicit disposable `LF_HOME` and pin
@@ -785,7 +831,7 @@ provider/GitHub tests. Known live-check limits belong in Infrastructure memory.
 Landing changes also affect release finalization and Linear completion recovery:
 
 ```bash
-uv run python scripts/materialize_rust_tests.py -- cargo nextest run -p loopflow -E 'binary(release_tests) | test(ops::pm::task_planning_tests::task_completion) | test(ops::pr_landing::)' --no-fail-fast
+uv run python scripts/materialize_rust_tests.py -- cargo nextest run -p loopflow -E 'binary(release_tests) | test(ops::linear::task_planning_tests::task_completion) | test(ops::pr_landing::)' --no-fail-fast
 ```
 
 Detached repair proofs enter through the compiled CLI so admission records its
@@ -817,6 +863,10 @@ uv run python scripts/test_task_installation.py --test task_adopts_linear_checko
 ```
 
 Pass several names after `--test` to share one disposable build across related proofs.
+Agent-selection changes also require the container-only
+`declared_agent_can_start_another_tasks_flow` proof: saved Task defaults remain
+local, while explicit `-a` overrides child Tasks too. Ordinary Rust suites skip
+this installation-boundary proof.
 Every ordinary installation run first upgrades populated released planning and
 Task/PR fixtures through the combined drafts. Those checks retain zero/one/multiple
 historical PRs, pending completion delivery, a running Process and its Workflow,
@@ -826,6 +876,12 @@ logs its compiler version. When adopting a newer standard-library API or Clippy
 fix, verify the installation harness uses the same toolchain policy; a host lint
 pass does not verify the container build. Use `--image` to reproduce an older
 toolchain explicitly.
+
+Locally available images are reused, including between the two CI proof steps;
+run `docker pull public.ecr.aws/docker/library/rust:trixie` to refresh the default
+on a development machine. Cold pulls retry registry throttling with bounded
+backoff within a five-minute download budget. Exhausted acquisition reports an
+infrastructure failure before any installation tests run.
 
 CLI owner-tree changes must include `cargo test -p loopflow --lib flow::graph::tests`
 to verify builtin operation labels, plus the affected proofs above. The regular
@@ -864,9 +920,9 @@ a simulated installed executable. It runs in this disposable account because
 `pr_tests` suite covers changed-head auto-merge revocation and review
 continuity in an explicit experimental Machine.
 
-The separate planning CLI proof (`cargo test -p loopflow --test planning_lookup_tests`) runs planning-only `task status` by identifier and UUID against
+The separate planning CLI proof (`cargo test -p loopflow --lib planning_lookup_tests`) runs planning-only `task status` by identifier and UUID against
 normalized local planning, proving that inspection creates no execution or worktree.
-That CLI case exercises cached planning; `ops::pm::planning_lookup_tests` covers
+That CLI case exercises cached planning; `ops::linear::planning_lookup_tests` covers
 acquisition with simulated Linear responses, including missing Projects, partial
 responses, absence, and provider failure. Neither is configured live-provider proof.
 
@@ -924,7 +980,13 @@ cargo test -p loopflow --test planning_reconnect_tests
 Requires `uv`, Python and OpenSSL. The fixture uses an isolated Machine/store and
 local HTTPS proxy with synthetic Linear state and credentials. Its CA is trusted
 only by CLI children through `SSL_CERT_FILE`; macOS platform TLS ignores that
-setting, so reconnect is Linux-only. `task_abandonment` and `local_planning` cover
+setting, so reconnect executes only on Linux. The Rust harness still compiles on
+macOS; its tests are explicitly ignored there, not reported as behavioral passes.
+Include this fixture when changing Work storage or receipt field names: its SQL
+must read canonical Task fields, not retired provider JSON. To prove pending saves
+across a closed connection, make the peer unavailable during the save; short CLI
+commands attempt delivery even with Desktop closed.
+`task_abandonment` and `local_planning` cover
 portable local decisions and deletion, retry identity and retained execution in
 both connection modes without provider access. No installation or live provider is used.
 
@@ -1081,7 +1143,7 @@ cargo nextest run -p loopflow --test task_github_cache_tests --no-fail-fast
 
 When changing Linear response shapes, run the client tests and PM-operation
 consumers together, including `planning_reconnect_tests` on Linux (a disposable
-container works on macOS). That suite is compiled out on macOS, so a local Rust
+container works on macOS). That suite is explicitly ignored on macOS, so a local Rust
 pass there does not cover its HTTPS fixtures. Keep nullable requested fields,
 including `dueDate`, present in fixture responses. Team migration also reads issue
 comments; its fixtures must include the requested pagination metadata.
@@ -1089,7 +1151,7 @@ Run the same Linux suite when changing Linear mutation inputs or acknowledgement
 the reconnect peer must accept partial Initiative updates and return `success`.
 
 ```bash
-cargo nextest run -p loopflow --lib -E 'test(pm::linear::) | test(ops::pm::) | test(ops::linear_observe::)' --no-fail-fast
+cargo nextest run -p loopflow --lib -E 'test(linear::) | test(ops::linear::) | test(ops::linear_observe::)' --no-fail-fast
 cargo nextest run -p loopflow --test planning_reconnect_tests --no-fail-fast
 ```
 
@@ -1123,6 +1185,11 @@ changes require `DesktopHeadlessTests` alongside `WaveTests` to verify rendered 
 
 Fixture Machines must set `LF_HOME` explicitly, including when overriding `HOME`.
 Open fixture stores at `$LF_HOME/loopflow.db`; no variable selects another file.
+
+Managed-account status fixtures also pin `CLAUDE_CONFIG_DIR` to a disposable
+native home: verification observes the native login before polling managed
+accounts. Put managed homes below the fixture root so their sibling login locks
+cannot collide in the shared temporary directory.
 
 When changing Machine selection, run the affected fixtures with `LF_HOME` unset in
 the test runner; the materialization wrapper's shared test Machine can mask missing
@@ -1220,3 +1287,17 @@ live Session without shell-level scrubbing:
 ```bash
 cargo test -p loopflow --test session_cli_tests session_names_are_shared_and_human_names_win
 ```
+
+Headless provider transport changes also run the research-artifact test
+`two_task_research_runs_leave_distinct_uncommitted_artifacts_for_the_next_prompt`
+and Linux `planning_reconnect_tests`. Their stand-ins must consume and echo the
+stream-input request before reporting success; sleeping and emitting an uncorrelated
+print-mode result can race the seed write and fail with a broken pipe.
+
+Headless shutdown checks run on Linux as well as macOS: fast provider exit must
+settle its owned lifeline watchdog without mistaking it for foreign work. Include
+`launch_nonzero_exit`, bare/default launch, mixed-provider Flow and headless resume;
+Session interactivity must not select an individual launch’s process-group policy.
+Changes to AgentProcess launch-mode recording also run the complete
+`session_record::runtime::tests` module: native refusal and headless cleanup
+fixtures must declare opposite launch modes, independent of Session defaults.

@@ -31,8 +31,7 @@ pub const LF_PROCESS_ID_ENV: &str = "LF_PROCESS_ID";
 /// Every test in the crate that touches these variables must hold this lock.
 #[cfg(test)]
 pub(crate) fn test_env_lock() -> std::sync::MutexGuard<'static, ()> {
-    static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-    LOCK.get_or_init(|| std::sync::Mutex::new(()))
+    loopflow_test_support::env_lock()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }

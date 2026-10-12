@@ -33,6 +33,7 @@ pub struct ClaudeHarness {
     config: Option<AgentConfig>,
     capture: Option<crate::agent::AgentCapture>,
     should_seed_task_prompt: bool,
+    skill_input: Option<String>,
     /// Vendor session id captured from the first turn's `system` event; a
     /// respawn (after interrupt/crash) resumes it via `--resume`.
     agent_session: Arc<Mutex<Option<AgentSessionId>>>,
@@ -78,6 +79,7 @@ impl ClaudeHarness {
             config: None,
             capture: None,
             should_seed_task_prompt: true,
+            skill_input: None,
             agent_session: Arc::new(Mutex::new(None)),
             account_route: None,
             requested_account_id: None,
@@ -124,8 +126,13 @@ impl ClaudeHarness {
             .expect("claude provider session id lock poisoned")
             .clone();
         let context_file = crate::agent::write_system_prompt_file(config, "session")?;
-        let args =
+        let mut args =
             build_claude_stream_session_args(config, resume_id.as_ref(), context_file.as_deref());
+        if let Some(invocation) = &config.skill_invocation {
+            let (flags, input) = invocation.claude_input(config)?;
+            args.extend(flags);
+            self.skill_input = Some(input);
+        }
         let mut cmd = Command::new("claude");
         cmd.args(&args);
         if let Some(context) = &config.conversation_context {
@@ -252,6 +259,12 @@ impl ClaudeHarness {
                 }
                 let result = claude_mapping::process_line(&line, &turn_id(), &events, &mut state);
                 if let Some(session_id) = state.take_agent_session() {
+                    let (store, session, attachment) = &history.owner;
+                    if let Err(error) =
+                        store.record_session_agent_session(session, attachment, &session_id)
+                    {
+                        tracing::warn!(%error, "could not select Claude native conversation");
+                    }
                     *session_slot
                         .lock()
                         .expect("claude provider session id lock poisoned") =
@@ -352,7 +365,7 @@ impl ClaudeHarness {
             }
         };
         let (stdin, result) = tokio::task::spawn_blocking(move || {
-            let result = store.with_session_attachment(&session, &attachment, || {
+            let result = store.with_session_dispatch(&session, &attachment, || {
                 super::dispatch::write_fenced(&mut stdin, line.as_bytes())
             });
             (stdin, result)
@@ -442,6 +455,13 @@ impl Harness for ClaudeHarness {
         }
         let mut turn_guard = TurnInProgressGuard::new(self.turn_in_progress.clone());
 
+        self.interrupt_requested.store(false, Ordering::SeqCst);
+        self.ensure_process().await?;
+        let skill_input = self
+            .should_seed_task_prompt
+            .then(|| self.skill_input.take())
+            .flatten();
+
         // The first message of a run carries the task prompt as a preamble.
         let mut turn_content = content.to_string();
         if self.should_seed_task_prompt {
@@ -457,9 +477,6 @@ impl Harness for ClaudeHarness {
                 turn_content = format!("{task_prompt}\n\n{content}");
             }
         }
-
-        self.interrupt_requested.store(false, Ordering::SeqCst);
-        self.ensure_process().await?;
 
         let origin = self.turn_origin()?;
         let turn_id = uuid::Uuid::new_v4().to_string();
@@ -477,10 +494,23 @@ impl Harness for ClaudeHarness {
             turn_id: turn_id.clone(),
         });
 
-        if let Err(error) = self
-            .send_line(user_message_line(&turn_content, &turn_id))
-            .await
-        {
+        // Send non-query skill context and the correlated query through one
+        // write/error path, so either write failure tears down the process.
+        let mut seed = String::new();
+        if let Some(input) = skill_input {
+            if !turn_content.is_empty() {
+                seed = format!(
+                    "{}\n",
+                    serde_json::json!({
+                        "type": "user", "shouldQuery": false,
+                        "message": {"role": "user", "content": turn_content}
+                    })
+                );
+            }
+            turn_content = input;
+        }
+        seed.push_str(&user_message_line(&turn_content, &turn_id));
+        if let Err(error) = self.send_line(seed).await {
             // The process died between spawn and write; tear it down so the
             // next send_input respawns cleanly.
             drop(turn_guard);
@@ -851,6 +881,7 @@ mod tests {
             conversation_context: None,
             task_prompt: "task".to_string(),
             skill_invocation: None,
+            output_schema: None,
             agent: None,
             cwd: Some(format!("/tmp/loopflow-missing-{}", uuid::Uuid::new_v4()).into()),
             max_turns: None,
@@ -1007,6 +1038,7 @@ done
             conversation_context: None,
             task_prompt: String::new(),
             skill_invocation: None,
+            output_schema: None,
             agent: None,
             cwd: Some(std::env::temp_dir()),
             max_turns: None,

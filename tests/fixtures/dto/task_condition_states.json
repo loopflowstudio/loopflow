@@ -11,8 +11,15 @@
       "state": "unstarted",
       "completed_at": null,
       "due_date": null,
-      "follow_up_sources": [],
-      "sync": null
+      "sync": {
+        "connected": false,
+        "changes": []
+      },
+      "linear_id": null,
+      "acquisition": {
+        "state": "available",
+        "observed_at": null
+      }
     },
     "reference": {
       "issue_url": null,
@@ -54,14 +61,7 @@
     "run_control": {
       "unavailable": null
     },
-    "pr": null,
-    "follow_through": {
-      "intents": [],
-      "links": [],
-      "reason": null,
-      "needs_conversion": false,
-      "scope_notes": []
-    }
+    "pr": null
   },
   "completed": {
     "task": {
@@ -75,8 +75,15 @@
       "state": "completed",
       "completed_at": null,
       "due_date": null,
-      "follow_up_sources": [],
-      "sync": null
+      "sync": {
+        "connected": false,
+        "changes": []
+      },
+      "linear_id": null,
+      "acquisition": {
+        "state": "available",
+        "observed_at": null
+      }
     },
     "reference": {
       "issue_url": null,
@@ -382,14 +389,7 @@
     "run_control": {
       "unavailable": "Task is complete"
     },
-    "pr": null,
-    "follow_through": {
-      "intents": [],
-      "links": [],
-      "reason": null,
-      "needs_conversion": false,
-      "scope_notes": []
-    }
+    "pr": null
   },
   "stale": {
     "task": {
@@ -403,8 +403,15 @@
       "state": "unstarted",
       "completed_at": null,
       "due_date": null,
-      "follow_up_sources": [],
-      "sync": null
+      "sync": {
+        "connected": false,
+        "changes": []
+      },
+      "linear_id": null,
+      "acquisition": {
+        "state": "available",
+        "observed_at": null
+      }
     },
     "reference": {
       "issue_url": null,
@@ -758,14 +765,7 @@
     "run_control": {
       "unavailable": null
     },
-    "pr": null,
-    "follow_through": {
-      "intents": [],
-      "links": [],
-      "reason": null,
-      "needs_conversion": false,
-      "scope_notes": []
-    }
+    "pr": null
   },
   "unavailable": {
     "task": {
@@ -779,8 +779,15 @@
       "state": "unstarted",
       "completed_at": null,
       "due_date": null,
-      "follow_up_sources": [],
-      "sync": null
+      "sync": {
+        "connected": false,
+        "changes": []
+      },
+      "linear_id": null,
+      "acquisition": {
+        "state": "available",
+        "observed_at": null
+      }
     },
     "reference": {
       "issue_url": null,
@@ -837,14 +844,7 @@
     "run_control": {
       "unavailable": null
     },
-    "pr": null,
-    "follow_through": {
-      "intents": [],
-      "links": [],
-      "reason": null,
-      "needs_conversion": false,
-      "scope_notes": []
-    }
+    "pr": null
   },
   "user_wait": {
     "task": {
@@ -858,8 +858,15 @@
       "state": "unstarted",
       "completed_at": null,
       "due_date": null,
-      "follow_up_sources": [],
-      "sync": null
+      "sync": {
+        "connected": false,
+        "changes": []
+      },
+      "linear_id": null,
+      "acquisition": {
+        "state": "available",
+        "observed_at": null
+      }
     },
     "reference": {
       "issue_url": null,
@@ -1214,14 +1221,7 @@
     "run_control": {
       "unavailable": null
     },
-    "pr": null,
-    "follow_through": {
-      "intents": [],
-      "links": [],
-      "reason": null,
-      "needs_conversion": false,
-      "scope_notes": []
-    }
+    "pr": null
   },
   "dirty": {
     "task": {
@@ -1235,8 +1235,15 @@
       "state": "unstarted",
       "completed_at": null,
       "due_date": null,
-      "follow_up_sources": [],
-      "sync": null
+      "sync": {
+        "connected": false,
+        "changes": []
+      },
+      "linear_id": null,
+      "acquisition": {
+        "state": "available",
+        "observed_at": null
+      }
     },
     "reference": {
       "issue_url": null,
@@ -1293,14 +1300,7 @@
     "run_control": {
       "unavailable": null
     },
-    "pr": null,
-    "follow_through": {
-      "intents": [],
-      "links": [],
-      "reason": null,
-      "needs_conversion": false,
-      "scope_notes": []
-    }
+    "pr": null
   },
   "authored_commits": {
     "task": {
@@ -1314,8 +1314,15 @@
       "state": "unstarted",
       "completed_at": null,
       "due_date": null,
-      "follow_up_sources": [],
-      "sync": null
+      "sync": {
+        "connected": false,
+        "changes": []
+      },
+      "linear_id": null,
+      "acquisition": {
+        "state": "available",
+        "observed_at": null
+      }
     },
     "reference": {
       "issue_url": null,
@@ -1695,13 +1702,6 @@
       },
       "merge_commit": null,
       "abandoned_at": null
-    },
-    "follow_through": {
-      "intents": [],
-      "links": [],
-      "reason": null,
-      "needs_conversion": false,
-      "scope_notes": []
     }
   }
 }

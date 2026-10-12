@@ -264,7 +264,7 @@ pub(super) async fn post(
     payload: Value,
 ) -> Result<()> {
     tokio::task::spawn_blocking(move || {
-        store.with_session_attachment(&session, &attachment, || {
+        store.with_session_dispatch(&session, &attachment, || {
             reqwest::blocking::Client::new()
                 .post(url)
                 .timeout(std::time::Duration::from_secs(10))

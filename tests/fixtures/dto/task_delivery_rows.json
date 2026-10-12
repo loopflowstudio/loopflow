@@ -11,8 +11,15 @@
       "state": "unstarted",
       "completed_at": null,
       "due_date": null,
-      "follow_up_sources": [],
-      "sync": null
+      "sync": {
+        "connected": false,
+        "changes": []
+      },
+      "linear_id": null,
+      "acquisition": {
+        "state": "available",
+        "observed_at": null
+      }
     },
     "reference": {
       "issue_url": null,
@@ -36,7 +43,7 @@
     },
     "next_move": {
       "owner": "wave",
-      "reason": "Merged · Follow-through pending"
+      "reason": "Merged; complete the Task"
     },
     "section": "waiting",
     "actions": {
@@ -45,7 +52,7 @@
     },
     "condition": {
       "state": "waiting",
-      "reason": "Merged · Follow-through pending",
+      "reason": "Merged; complete the Task",
       "observed_at": "2026-07-15T00:01:00Z",
       "evidence_age_secs": 7260,
       "local_progress": {
@@ -392,27 +399,6 @@
       },
       "merge_commit": "merged-head",
       "abandoned_at": null
-    },
-    "follow_through": {
-      "intents": [
-        {
-          "key": "installed-check",
-          "issue_id": "follow-up-issue",
-          "relation_id": "3d0bfd25-7e3c-4bd2-845c-bfbd8e4f2a26",
-          "project_id": "project-1",
-          "wave": "product",
-          "title": "Verify the installed command",
-          "notes": "Check the installed release after deployment",
-          "due": "2026-10-08",
-          "existing": false,
-          "team_id": "team-product",
-          "state_id": "state-unstarted"
-        }
-      ],
-      "links": [],
-      "reason": null,
-      "needs_conversion": false,
-      "scope_notes": []
     }
   },
   "done": {
@@ -427,8 +413,15 @@
       "state": "completed",
       "completed_at": "2026-10-07T20:00:00Z",
       "due_date": null,
-      "follow_up_sources": [],
-      "sync": null
+      "sync": {
+        "connected": false,
+        "changes": []
+      },
+      "linear_id": null,
+      "acquisition": {
+        "state": "available",
+        "observed_at": null
+      }
     },
     "reference": {
       "issue_url": null,
@@ -808,35 +801,6 @@
       },
       "merge_commit": "merged-head",
       "abandoned_at": null
-    },
-    "follow_through": {
-      "intents": [
-        {
-          "key": "installed-check",
-          "issue_id": "follow-up-issue",
-          "relation_id": "3d0bfd25-7e3c-4bd2-845c-bfbd8e4f2a26",
-          "project_id": "project-1",
-          "wave": "product",
-          "title": "Verify the installed command",
-          "notes": "Check the installed release after deployment",
-          "due": "2026-10-08",
-          "existing": false,
-          "team_id": "team-product",
-          "state_id": "state-unstarted"
-        }
-      ],
-      "links": [
-        {
-          "key": "installed-check",
-          "issue_id": "follow-up-issue",
-          "identifier": "W2-FOLLOW",
-          "url": "https://linear.app/loopflow/issue/W2-FOLLOW",
-          "due": "2026-10-08"
-        }
-      ],
-      "reason": "Installed-release verification filed.",
-      "needs_conversion": false,
-      "scope_notes": []
     }
   },
   "none": {
@@ -851,8 +815,15 @@
       "state": "completed",
       "completed_at": "2026-10-07T20:00:00Z",
       "due_date": null,
-      "follow_up_sources": [],
-      "sync": null
+      "sync": {
+        "connected": false,
+        "changes": []
+      },
+      "linear_id": null,
+      "acquisition": {
+        "state": "available",
+        "observed_at": null
+      }
     },
     "reference": {
       "issue_url": null,
@@ -1232,13 +1203,6 @@
       },
       "merge_commit": "merged-head",
       "abandoned_at": null
-    },
-    "follow_through": {
-      "intents": [],
-      "links": [],
-      "reason": "No accepted remaining obligations.",
-      "needs_conversion": false,
-      "scope_notes": []
     }
   },
   "due": {
@@ -1253,13 +1217,15 @@
       "state": "unstarted",
       "completed_at": null,
       "due_date": "2026-10-08",
-      "follow_up_sources": [
-        {
-          "issue_id": "source-issue",
-          "identifier": "W2-SOURCE"
-        }
-      ],
-      "sync": null
+      "sync": {
+        "connected": false,
+        "changes": []
+      },
+      "linear_id": null,
+      "acquisition": {
+        "state": "available",
+        "observed_at": null
+      }
     },
     "reference": {
       "issue_url": null,
@@ -1301,14 +1267,7 @@
     "run_control": {
       "unavailable": null
     },
-    "pr": null,
-    "follow_through": {
-      "intents": [],
-      "links": [],
-      "reason": null,
-      "needs_conversion": false,
-      "scope_notes": []
-    }
+    "pr": null
   },
   "unrelated": {
     "task": {
@@ -1322,8 +1281,15 @@
       "state": "unstarted",
       "completed_at": null,
       "due_date": "2026-10-08",
-      "follow_up_sources": [],
-      "sync": null
+      "sync": {
+        "connected": false,
+        "changes": []
+      },
+      "linear_id": null,
+      "acquisition": {
+        "state": "available",
+        "observed_at": null
+      }
     },
     "reference": {
       "issue_url": null,
@@ -1365,14 +1331,7 @@
     "run_control": {
       "unavailable": null
     },
-    "pr": null,
-    "follow_through": {
-      "intents": [],
-      "links": [],
-      "reason": null,
-      "needs_conversion": false,
-      "scope_notes": []
-    }
+    "pr": null
   },
   "conversion": {
     "task": {
@@ -1386,8 +1345,15 @@
       "state": "unstarted",
       "completed_at": null,
       "due_date": null,
-      "follow_up_sources": [],
-      "sync": null
+      "sync": {
+        "connected": false,
+        "changes": []
+      },
+      "linear_id": null,
+      "acquisition": {
+        "state": "available",
+        "observed_at": null
+      }
     },
     "reference": {
       "issue_url": null,
@@ -1411,7 +1377,7 @@
     },
     "next_move": {
       "owner": "wave",
-      "reason": "Merged · Follow-through pending"
+      "reason": "Merged; complete the Task"
     },
     "section": "waiting",
     "actions": {
@@ -1420,7 +1386,7 @@
     },
     "condition": {
       "state": "waiting",
-      "reason": "Merged · Follow-through pending",
+      "reason": "Merged; complete the Task",
       "observed_at": "2026-07-15T00:01:00Z",
       "evidence_age_secs": 7260,
       "local_progress": {
@@ -1767,29 +1733,6 @@
       },
       "merge_commit": "merged-head",
       "abandoned_at": null
-    },
-    "follow_through": {
-      "intents": [
-        {
-          "key": "installed-check",
-          "issue_id": "follow-up-issue",
-          "relation_id": "3d0bfd25-7e3c-4bd2-845c-bfbd8e4f2a26",
-          "project_id": "project-1",
-          "wave": "product",
-          "title": "Verify the installed command",
-          "notes": "Check the installed release after deployment",
-          "due": "2026-10-08",
-          "existing": false,
-          "team_id": "team-product",
-          "state_id": "state-unstarted"
-        }
-      ],
-      "links": [],
-      "reason": null,
-      "needs_conversion": true,
-      "scope_notes": [
-        "Verify the installed release. Evidence: the command succeeds on the released version."
-      ]
     }
   },
   "completed_running": {
@@ -1804,8 +1747,15 @@
       "state": "unstarted",
       "completed_at": null,
       "due_date": null,
-      "follow_up_sources": [],
-      "sync": null
+      "sync": {
+        "connected": false,
+        "changes": []
+      },
+      "linear_id": null,
+      "acquisition": {
+        "state": "available",
+        "observed_at": null
+      }
     },
     "reference": {
       "issue_url": null,
@@ -1829,7 +1779,7 @@
     },
     "next_move": {
       "owner": "wave",
-      "reason": "Merged · Follow-through pending"
+      "reason": "Merged; complete the Task"
     },
     "section": "waiting",
     "actions": {
@@ -1838,7 +1788,7 @@
     },
     "condition": {
       "state": "waiting",
-      "reason": "Merged · Follow-through pending",
+      "reason": "Merged; complete the Task",
       "observed_at": "2026-07-15T00:01:00Z",
       "evidence_age_secs": 7260,
       "local_progress": {
@@ -2185,27 +2135,6 @@
       },
       "merge_commit": "merged-head",
       "abandoned_at": null
-    },
-    "follow_through": {
-      "intents": [
-        {
-          "key": "installed-check",
-          "issue_id": "follow-up-issue",
-          "relation_id": "3d0bfd25-7e3c-4bd2-845c-bfbd8e4f2a26",
-          "project_id": "project-1",
-          "wave": "product",
-          "title": "Verify the installed command",
-          "notes": "Check the installed release after deployment",
-          "due": "2026-10-08",
-          "existing": false,
-          "team_id": "team-product",
-          "state_id": "state-unstarted"
-        }
-      ],
-      "links": [],
-      "reason": null,
-      "needs_conversion": false,
-      "scope_notes": []
     }
   }
 }

@@ -11,7 +11,7 @@ Builds on the merged [Share saved Work across Machines · #1491](https://github.
 
 ## Checks
 
-Rust: 2521 cases passed across the broad run and focused reruns; 18 skipped. Integration sync interrupted tests that rebuild the CLI; all affected cases passed on the stable checkout. Desktop build and all 502 headless Swift tests, formatting and all-target Clippy passed. Architecture coverage, 21 architecture tests, portable HTML and the isolated checkout benchmark also pass. CI owns the release matrix.
+Rust: 2521 cases passed across the broad run and focused reruns; 18 skipped. Integration sync interrupted tests that rebuild the CLI; all affected cases passed on the stable checkout. Desktop build and all 502 headless Swift tests, formatting and all-target Clippy passed. Architecture coverage, 21 architecture tests, portable HTML and the isolated checkout benchmark also pass. CI found Linux rejection-order regressions and a retired Flow spelling; the repair passes local context-preview tests and Clippy, with Linux confirmation remaining in CI. CI owns the release matrix.
 
 Native and configured remote proof remains [LOO-391](https://linear.app/loopflow/issue/LOO-391); this PR makes no new native usability claim.
 

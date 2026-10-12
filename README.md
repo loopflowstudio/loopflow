@@ -135,7 +135,10 @@ lf pr reconcile                                      # check recorded deliveries
 lf ci watch                                          # watch PR checks; start a ci-fix when a landing fails
 ```
 
-Task comments in Linear also reach the Task's running Flow. Steering never starts
+Task comments in Linear also reach the Task's running Flow. Foreground connections
+share comment acquisition for unfinished Tasks every 15 seconds; planning inventory
+uses the one-hour cache. A Linear rate limit pauses requests across repositories in
+the same Home until reset, retaining pending writes. Steering never starts
 an idle Task or broadcasts to independent conversations. A stopped Flow is
 history: `task run` never continues it, so inspect `lf task status` first.
 

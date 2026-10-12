@@ -630,7 +630,7 @@ mod task_comments_tests;
 // ── snapshot freshness policy ────────────────────────────────────────
 
 /// Past this age an Auto read opportunistically refreshes before serving.
-const PM_SOFT_STALE_SECS: i64 = 60 * 60; // 1 hour
+pub(super) const PM_SOFT_STALE_SECS: i64 = 60 * 60; // 1 hour
 /// Past this age a failed refresh is an error, not a silent cache fallback.
 const PM_HARD_STALE_SECS: i64 = 7 * 24 * 60 * 60; // 1 week
 /// Ceiling on an opportunistic refresh; exceeding it counts as a failure.

@@ -79,10 +79,18 @@ pub(super) async fn sync_order(
         {
             return Ok(());
         }
-        client
+        if let Err(error) = client
             .deliver_planning_field(&effect.issue, false, effect.input)
             .await
-            .map_err(message)?;
+        {
+            if matches!(error, crate::pm::PmError::RateLimited { .. }) {
+                store
+                    .sqlite
+                    .reject_project_order(&delivery.id)
+                    .map_err(message)?;
+            }
+            return Err(message(error));
+        }
     }
 }
 

@@ -115,10 +115,15 @@ pub(crate) async fn sync_export(store: &Store, repo: &Path, work: &WorkRef) -> O
         {
             return Ok(());
         }
-        client
-            .deliver_planning_creation(project, input)
-            .await
-            .map_err(message)?;
+        if let Err(error) = client.deliver_planning_creation(project, input).await {
+            if matches!(error, crate::pm::PmError::RateLimited { .. }) {
+                store
+                    .sqlite
+                    .reject_planning_export(owner, false)
+                    .map_err(message)?;
+            }
+            return Err(message(error));
+        }
         if !observe(store, repo, owner, &client, &export, &wave_id).await? {
             return Err(message(
                 "Creation acknowledgement lacks exact readback; receipt retained",
@@ -172,10 +177,18 @@ async fn observe(
                 {
                     return Ok(false);
                 }
-                client
+                if let Err(error) = client
                     .deliver_project_attachment(&export.link_id, &export.id, &export.initiative)
                     .await
-                    .map_err(message)?;
+                {
+                    if matches!(error, crate::pm::PmError::RateLimited { .. }) {
+                        store
+                            .sqlite
+                            .reject_planning_export(owner, true)
+                            .map_err(message)?;
+                    }
+                    return Err(message(error));
+                }
                 project = client
                     .find_project(&export.id)
                     .await

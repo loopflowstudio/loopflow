@@ -38,6 +38,18 @@ impl SqliteStore {
         Ok(deliveries(&conn, project)?.into_iter().next())
     }
 
+    pub(crate) fn reject_project_order(&self, receipt: &str) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "UPDATE project_changes SET attempted=(json_array_length(order_effects_json)>1),
+            order_effects_json=json_remove(order_effects_json,'$[#-1]')
+            WHERE id=?1 AND acknowledged=0 AND conflict_json IS NULL
+            AND json_extract(order_effects_json,'$[#-1].settled')=0",
+            [receipt],
+        )?;
+        Ok(())
+    }
+
     /// Capture exactly one move before issuing it. Local edits and acquisition
     /// use the SQLite transaction, never the provider-effect lock.
     pub(crate) fn attempt_project_order(

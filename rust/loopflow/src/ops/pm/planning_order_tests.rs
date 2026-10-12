@@ -530,3 +530,43 @@ fn planning_order_uncertainty_does_not_stall_project_field_delivery() {
         });
     });
 }
+
+#[test]
+fn linear_rate_limit_retries_rejected_order_move() {
+    with_order(|runtime, fixture, repo, tasks, state| {
+        reorder(&fixture.store, &tasks[3], 0);
+        let work = WorkRef::Project(tasks[0].project_id.clone());
+        runtime.block_on(async {
+            state.lock().await.rate_limit_query = Some("mutation DeliverTaskField");
+            assert!(
+                crate::ops::planning_delivery::sync_fields(&fixture.store, repo, &work)
+                    .await
+                    .is_err()
+            );
+            let receipt = fixture
+                .store
+                .sqlite
+                .project_order_delivery(&tasks[0].project_id)
+                .unwrap()
+                .unwrap();
+            assert!(
+                receipt.effects.is_empty(),
+                "a rejected move has no uncertain effect"
+            );
+            tokio::time::sleep(Duration::from_millis(2100)).await;
+            crate::ops::planning_delivery::sync_fields(&fixture.store, repo, &work)
+                .await
+                .unwrap();
+            assert!(fixture
+                .store
+                .sqlite
+                .project_order_delivery(&tasks[0].project_id)
+                .unwrap()
+                .is_none());
+            assert_eq!(
+                local_order(&fixture.store, &tasks),
+                remote_order(&state).await
+            );
+        });
+    });
+}

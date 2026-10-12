@@ -1,7 +1,6 @@
 pub mod linear;
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -326,6 +325,9 @@ pub struct IssueComment {
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum PmError {
+    /// The request was not sent or Linear explicitly rejected it before execution.
+    #[error("Linear synchronization paused until epoch milliseconds {reset_at_ms}; pending writes retained")]
+    RateLimited { reset_at_ms: i64 },
     #[error("{0}")]
     Message(String),
 }
@@ -504,18 +506,6 @@ fn render_krs(project: &ProjectContent) -> String {
         content.push_str(&format!("\n\n- [{marker}] {}", kr.text.trim()));
     }
     content
-}
-
-pub(crate) const RATE_LIMIT_RETRIES: u8 = 3;
-const RETRY_AFTER_FALLBACK: Duration = Duration::from_secs(60);
-
-pub(crate) fn retry_after_delay(headers: &reqwest::header::HeaderMap) -> Duration {
-    headers
-        .get(reqwest::header::RETRY_AFTER)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.parse::<u64>().ok())
-        .map(Duration::from_secs)
-        .unwrap_or(RETRY_AFTER_FALLBACK)
 }
 
 #[cfg(test)]

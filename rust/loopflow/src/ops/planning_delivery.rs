@@ -158,7 +158,15 @@ async fn sync_deletion(
             "Deletion remains uncertain; no repeated mutation issued",
         ));
     }
-    client.delete_issue(external).await.map_err(message)?;
+    if let Err(error) = client.delete_issue(external).await {
+        if matches!(error, crate::pm::PmError::RateLimited { .. }) {
+            store
+                .sqlite
+                .reject_planning_field(owner, change)
+                .map_err(message)?;
+        }
+        return Err(message(error));
+    }
     store
         .sqlite
         .acknowledge_task_deletion(id, change, None)
@@ -223,14 +231,22 @@ async fn sync_field(
     {
         return Ok(());
     }
-    client
+    if let Err(error) = client
         .deliver_planning_field(
             &external,
             matches!(owner, PlanningChanges::Project(_)),
             input,
         )
         .await
-        .map_err(message)?;
+    {
+        if matches!(error, crate::pm::PmError::RateLimited { .. }) {
+            store
+                .sqlite
+                .reject_planning_field(owner, &current)
+                .map_err(message)?;
+        }
+        return Err(message(error));
+    }
     observe(store, repo, owner, client).await?;
     if pending(store, owner)?.iter().any(|c| c.id == change.id) {
         return Err(message("Field write remains uncertain; receipt retained"));

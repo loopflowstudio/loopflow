@@ -154,7 +154,20 @@ Observed conflicts show both values after adopting Linear. Disconnected reposito
 show no pending Linear delivery; retained losing values remain inspectable.
 A foreground connection synchronizes its repository, independent of Desktop Task
 selection. Inventory, comments and delivery use separate bounded loops; closing
-or clearing the repository connection ends them. Read projections stay read-only.
+or clearing the repository connection ends them. Cross-process acquisition locks
+and attempt timestamps share polling across connections in the same Home. Comments
+poll unfinished linked Tasks at most once per 15 seconds; explicit reads can still
+acquire finished Tasks. Inventory checks the one-hour snapshot policy under the
+Wave lock, including after another connection refreshed it. Read projections stay read-only.
+
+Linear HTTP 400 rate-limit errors, 429 and exhausted request/endpoint/complexity
+headers establish a Home-wide pause across repositories and refreshed logins.
+Reset headers are epoch milliseconds; missing deadlines fall back to one hour.
+In-flight requests may finish, and a successful final response remains usable.
+One warning announces the window; later calls return its deadline without network
+access. After reset, foreground delivery retries the same pending identities.
+Only positive rate-limit rejection clears the newly attempted mutation's flag;
+lost responses retain uncertainty. Independent Homes do not share this pause.
 Ingestion adopts observed Linear conflicts and retains the losing
 local intentions in field, state and comment receipts. Retired intentions never
 reenter delivery after a late acknowledgement or matching observation.

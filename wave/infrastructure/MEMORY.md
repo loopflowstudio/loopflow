@@ -439,40 +439,19 @@ linked receipts. They preserve due ownership, candidate, uncertain publication,
 caller edits and child-held leases; simulated passes establish neither public
 container/macOS acceptance nor configured automatic settlement.
 
-October 6 telemetry's retired metric producer failed; the repaired checkout passed
-35 rows and twelve tests, not automatic settlement. Jack Heart authorized
-publication; the operator owns recovery after LOO-382. Original receipts, repair
-ownership and exact evidence: `85490d96ec:wave/infrastructure/MEMORY.md`, this heading.
-
-Release's September 28 incident proves entry points need operation-level recovery:
-an agent reported failure successfully, producing a misleading green cron receipt.
-Jack's later steer records v0.12.24 publication/install and skill-to-Flow activation
-at unchanged 10:00. That supersedes the child's dated pending-activation evidence,
-without proving this accounting branch is installed or either qualifying outcome.
-Release-specific detail remains in [release memory](release/MEMORY.md).
-October 5 child evidence records repaired installed jobs using the machine gate
-at unchanged 09:00/10:00 schedules. Ownership remains Infrastructure; the child
-is not registered. History exposed three unresolved opportunities with unknown
-timezone provenance, zero executions and no qualifying pair. Schedule repair
-cannot backfill that evidence or count as an unattended settlement.
-
-All 36 telemetry failures, including the original 35, remain dated counterevidence
-from September 24. The missing `agent_turns` diagnosis is historical: integrated
-scorecard source consumes SessionHistory. The isolated doctor/scorecard Flow
-regression proves Recovery cannot replace natural Scheduled evidence. No installed
-pass or accepted Intelligence handoff is established; reproduce current failure
-before commissioning duplicate analytics repair. Required headless Desktop/public proof and
-actual automatic settlement observations remain outstanding. LOO-357 retired
-the UI-host prerequisite; PR #1441 removed its scheduled validator requirement. The working plan
-owns remaining implementation; no production release, install, schedule change,
-Home transfer or review completion is authorized by local reconciliation.
-
-
-On October 4, Jack Heart waived the interactive demo and authorized landing
-PR #1419. This supersedes the earlier review requirement for this delivery;
-installed acceptance and the two automatic settlement observations remain
-unproved. The branch’s prior memory curation remains in Git history at
-`e2eccdd257f0f3e2cf34db7583f7309eb0084394:wave/infrastructure/MEMORY.md`.
+October 6 telemetry repair passed 35 rows and twelve tests, not automatic
+settlement. Jack Heart authorized publication; recovery follows LOO-382.
+All 36 September 24 failures remain counterevidence. Current scorecard consumes
+SessionHistory; reproduce present failure before duplicate analytics work.
+LOO-357/#1441 retired scheduled UI-host validation. Headless Desktop/public proof,
+Intelligence handoff and qualifying automatic settlements remain unproved.
+Jack waived demo and authorized #1419 landing October 4; this grants no production
+install, schedule change or Home transfer. Original receipts, September 28's false
+green incident, October 5's three unresolved opportunities, unchanged schedules
+and exact release references remain at
+`7afd34e7b830d0a82ee3c65bd6a372390ae3ca11:wave/infrastructure/MEMORY.md`,
+“Scheduled release accounting,” and [release memory](release/MEMORY.md).
+Successful reporting, manual publication and schedule repair prove no automatic settlement.
 
 ## Operator acceptance and account direction (2026-10-04)
 

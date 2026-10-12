@@ -7,8 +7,10 @@
 //! store; acquisition supplies observations without proposing a second write.
 
 use std::future::Future;
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::time::Duration;
 
+use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 
 use super::{OpsError, OpsResult};
@@ -156,10 +158,38 @@ impl Drop for PlanningSync {
     }
 }
 
+// Share acquisition attempts, including failures, across foreground connections.
+// Holding this inode through acquisition also prevents overlap on slow reads.
+fn acquire_poll(store: &Store, repo: &str, kind: &str) -> OpsResult<Option<std::fs::File>> {
+    let key = format!("{:x}", Sha256::digest(repo.as_bytes()));
+    let path = store
+        .sqlite
+        .home_dir()
+        .map_err(|error| OpsError::Message(error.to_string()))?
+        .join("locks/planning-acquisition")
+        .join(format!("{key}-{kind}"));
+    let Some(mut file) = super::planning_delivery::lock_delivery(&path)? else {
+        return Ok(None);
+    };
+    let mut saved = String::new();
+    file.read_to_string(&mut saved)?;
+    let now = OffsetDateTime::now_utc().unix_timestamp();
+    if saved.parse::<i64>().is_ok_and(|last| now - last < 15) {
+        return Ok(None);
+    }
+    file.seek(SeekFrom::Start(0))?;
+    file.set_len(0)?;
+    write!(file, "{now}")?;
+    Ok(Some(file))
+}
+
 async fn refresh_repository_comments(store: &SharedStore, repo: &str) -> OpsResult<()> {
     if !connected(repo) {
         return Ok(());
     }
+    let Some(_acquisition) = acquire_poll(store, repo, "comments")? else {
+        return Ok(());
+    };
     let waves = store
         .list_waves(Some(repo))
         .await
@@ -174,6 +204,27 @@ async fn refresh_repository_comments(store: &SharedStore, repo: &str) -> OpsResu
                 .iter()
                 .filter(|task| task.plan.linear_id.is_some())
                 .map(|task| async {
+                    if !store
+                        .task_state(&task.id)
+                        .await
+                        .is_ok_and(|state| !state.is_terminal())
+                    {
+                        return;
+                    }
+                    if store
+                        .task_linear_observation(&task.id)
+                        .await
+                        .ok()
+                        .flatten()
+                        .is_some_and(|observation| {
+                            !observation.last_revision.is_empty()
+                                && (OffsetDateTime::now_utc() - observation.last_success_at)
+                                    .whole_seconds()
+                                    < 15
+                        })
+                    {
+                        return;
+                    }
                     match tokio::time::timeout(
                         Duration::from_secs(5),
                         refresh_task_comments(store, task),
@@ -203,14 +254,30 @@ async fn refresh_repository_planning(store: &Store, repository: &str) -> OpsResu
     if !connected(repository) {
         return Ok(());
     }
+    let Some(_acquisition) = acquire_poll(store, repository, "planning")? else {
+        return Ok(());
+    };
     let owners = store
         .list_waves(Some(repository))
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?;
     let results = futures_util::future::join_all(owners.iter().map(|owner| async {
-        let ctx = super::pm::resolve_context(repo, owner.slug()).await?;
         let guard = super::pm::lock_wave_planning(owner).await?;
-        super::pm::refresh_pm_snapshot_locked(repo, owner, &ctx, store, guard).await
+        if store
+            .pm_snapshot(owner.id())
+            .await
+            .map_err(|error| OpsError::Message(error.to_string()))?
+            .is_some_and(|snapshot| {
+                OffsetDateTime::now_utc().unix_timestamp() - snapshot.synced_at
+                    < super::pm::PM_SOFT_STALE_SECS
+            })
+        {
+            return Ok(None);
+        }
+        let ctx = super::pm::resolve_context(repo, owner.slug()).await?;
+        super::pm::refresh_pm_snapshot_locked(repo, owner, &ctx, store, guard)
+            .await
+            .map(Some)
     }))
     .await;
     for result in results {
@@ -327,10 +394,15 @@ pub(crate) async fn sync_task_state(store: &Store, task: &Task) -> OpsResult<()>
         // Linear has no expected-revision guard here. A reopening between the
         // observation and this mutation can be overwritten; matching readback
         // settles observed state, not the absence of an intervening edit.
-        client
-            .set_item_state(issue.as_str(), &state_id)
-            .await
-            .map_err(|e| message(&e))?;
+        if let Err(error) = client.set_item_state(issue.as_str(), &state_id).await {
+            if matches!(error, crate::pm::PmError::RateLimited { .. }) {
+                store
+                    .sqlite
+                    .reject_task_state(&delivery)
+                    .map_err(|e| message(&e))?;
+            }
+            return Err(message(&error));
+        }
         let (confirmed, _) = client
             .issue_ownership(issue.as_str())
             .await

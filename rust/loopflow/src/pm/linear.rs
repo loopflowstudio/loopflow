@@ -1,13 +1,13 @@
+mod cooldown;
+
 use reqwest::StatusCode;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tokio::time::sleep;
-use tracing::warn;
 
 use crate::pm::{
     parse_project_content, project_slug, IssueComment, IssueObservation, PmError, PmItem,
-    PmProject, PmResult, PmWave, TeamBinding, RATE_LIMIT_RETRIES,
+    PmProject, PmResult, PmWave, TeamBinding,
 };
 
 const LINEAR_BASE_URL: &str = "https://api.linear.app/graphql";
@@ -541,33 +541,24 @@ impl LinearClient {
     {
         let request = GraphqlRequest { query, variables };
 
-        for attempt in 0..=RATE_LIMIT_RETRIES {
-            let response = self
-                .client
-                .post(&self.base_url)
-                .bearer_auth(&self.token)
-                .json(&request)
-                .send()
-                .await
-                .map_err(|err| PmError::Message(format!("linear request failed: {err}")))?;
-
-            if response.status() == StatusCode::TOO_MANY_REQUESTS && attempt < RATE_LIMIT_RETRIES {
-                let delay = super::retry_after_delay(response.headers());
-                warn!(
-                    attempt = attempt + 1,
-                    delay_seconds = delay.as_secs(),
-                    "linear rate limited; retrying"
-                );
-                sleep(delay).await;
-                continue;
-            }
-
-            return parse_graphql_response(response).await;
-        }
-
-        Err(PmError::Message(
-            "linear request failed after retries".to_string(),
-        ))
+        let cooldown = cooldown::Cooldown::for_endpoint(&self.base_url);
+        cooldown.check().await?;
+        let response = self
+            .client
+            .post(&self.base_url)
+            .bearer_auth(&self.token)
+            .json(&request)
+            .send()
+            .await
+            .map_err(|err| PmError::Message(format!("linear request failed: {err}")))?;
+        let status = response.status();
+        let headers = response.headers().clone();
+        let body = response
+            .bytes()
+            .await
+            .map_err(|err| PmError::Message(format!("failed to read Linear response: {err}")))?;
+        cooldown.observe(status, &headers, &body).await?;
+        parse_graphql_response(status, &body)
     }
 
     /// The owning team id of an existing issue. State transitions resolve
@@ -2088,14 +2079,8 @@ struct ProjectsConnection {
     page_info: PageInfo,
 }
 
-async fn parse_graphql_response<T: DeserializeOwned>(response: reqwest::Response) -> PmResult<T> {
-    let status = response.status();
-    let body = response
-        .bytes()
-        .await
-        .map_err(|err| PmError::Message(format!("failed to read Linear response: {err}")))?;
-
-    let parsed = serde_json::from_slice::<GraphqlResponse>(&body)
+fn parse_graphql_response<T: DeserializeOwned>(status: StatusCode, body: &[u8]) -> PmResult<T> {
+    let parsed = serde_json::from_slice::<GraphqlResponse>(body)
         .map_err(|err| PmError::Message(format!("failed to decode Linear response: {err}")))?;
 
     if let Some(error) = parsed.errors.first() {
@@ -2109,7 +2094,7 @@ async fn parse_graphql_response<T: DeserializeOwned>(response: reqwest::Response
     }
 
     if !status.is_success() {
-        let body_text = String::from_utf8_lossy(&body).trim().to_string();
+        let body_text = String::from_utf8_lossy(body).trim().to_string();
         if body_text.is_empty() {
             return Err(PmError::Message(format!(
                 "linear request failed with status {status}"
@@ -2232,6 +2217,58 @@ mod tests {
             convert_legacy_project_content("## Notes\nrecommended: prose").unwrap(),
             "## Notes\nrecommended: prose"
         );
+    }
+
+    #[tokio::test]
+    async fn rate_limit_pauses_independent_clients_and_resumes_after_reset() {
+        let mut limited = json_response(
+            StatusCode::BAD_REQUEST,
+            json!({"errors":[{"message":"Rate limit exceeded", "extensions":{"code":"RATELIMITED"}}]}),
+        );
+        limited.headers.push((
+            "x-ratelimit-requests-reset".into(),
+            ((time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) + 250)
+                .to_string(),
+        ));
+        let (url, requests) = test_server::spawn(vec![limited,
+            json_response(StatusCode::OK, json!({"data":{"initiatives":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}))]).await;
+        let first = LinearClient::with_base_url("first-token".into(), None, url.clone());
+        assert!(matches!(
+            first.list_waves().await,
+            Err(crate::pm::PmError::RateLimited { .. })
+        ));
+        let second = LinearClient::with_base_url("refreshed-token".into(), None, url);
+        assert!(matches!(
+            second.list_waves().await,
+            Err(crate::pm::PmError::RateLimited { .. })
+        ));
+        assert_eq!(requests.lock().await.len(), 1);
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert!(second.list_waves().await.unwrap().is_empty());
+        assert_eq!(requests.lock().await.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn last_allowed_response_is_returned_before_shared_pause() {
+        let mut last = json_response(
+            StatusCode::OK,
+            json!({"data":{"initiatives":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}),
+        );
+        last.headers
+            .push(("x-ratelimit-complexity-remaining".into(), "0".into()));
+        last.headers.push((
+            "x-ratelimit-complexity-reset".into(),
+            ((time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) + 60_000)
+                .to_string(),
+        ));
+        let (url, requests) = test_server::spawn(vec![last]).await;
+        let client = LinearClient::with_base_url("token".into(), None, url);
+        assert!(client.list_waves().await.unwrap().is_empty());
+        assert!(matches!(
+            client.list_waves().await,
+            Err(crate::pm::PmError::RateLimited { .. })
+        ));
+        assert_eq!(requests.lock().await.len(), 1);
     }
 
     #[tokio::test]

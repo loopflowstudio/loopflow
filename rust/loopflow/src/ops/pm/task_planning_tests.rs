@@ -5,6 +5,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use axum::response::IntoResponse;
 use serde_json::json;
 
 use super::test_fixture::{now, Fixture, PlanningEnvironment};
@@ -55,6 +56,8 @@ async fn serve(
 // Stateful provider evidence for planning fields, state, membership, and comments.
 #[derive(Default)]
 struct PlanningState {
+    requests: usize,
+    rate_limit_query: Option<&'static str>,
     wave_summary: String,
     reject_wave_update: bool,
     wave_updates: usize,
@@ -116,6 +119,28 @@ fn planning_project(id: &str, current: &str) -> serde_json::Value {
 }
 
 async fn planning_graphql(
+    axum::extract::State(state): axum::extract::State<Arc<tokio::sync::Mutex<PlanningState>>>,
+    axum::Json(request): axum::Json<serde_json::Value>,
+) -> axum::response::Response {
+    {
+        let mut provider = state.lock().await;
+        provider.requests += 1;
+        if provider
+            .rate_limit_query
+            .is_some_and(|query| request["query"].as_str().unwrap().contains(query))
+        {
+            provider.rate_limit_query = None;
+            return (axum::http::StatusCode::BAD_REQUEST,
+                [("x-ratelimit-requests-reset", ((time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) + 2000).to_string())],
+                axum::Json(json!({"errors":[{"message":"Rate limit exceeded", "extensions":{"code":"RATELIMITED"}}]}))).into_response();
+        }
+    }
+    planning_response(axum::extract::State(state), axum::Json(request))
+        .await
+        .into_response()
+}
+
+async fn planning_response(
     axum::extract::State(state): axum::extract::State<Arc<tokio::sync::Mutex<PlanningState>>>,
     axum::Json(request): axum::Json<serde_json::Value>,
 ) -> axum::Json<serde_json::Value> {
@@ -1590,6 +1615,10 @@ fn task_completion_active_sync_acquires_membership_while_delivery_is_pending() {
             added["state"] = json!({"type":"completed"});
             provider.issues.push(added);
         });
+        rusqlite::Connection::open(&fixture.database)
+            .unwrap()
+            .execute("UPDATE pm_wave_sync SET synced_at=synced_at-3600", [])
+            .unwrap();
         let sync = crate::ops::linear_observe::PlanningSync::start(
             fixture.store.clone(),
             repo.to_string_lossy().into_owned(),
@@ -4380,4 +4409,235 @@ fn wave_summary_sync_reads_committed_default_branch() {
             .contains("Edited directly."));
     });
     server.abort();
+}
+
+#[test]
+fn linear_polling_request_count_is_shared_and_ignores_finished_tasks() {
+    with_planning_task(|runtime, fixture, repo, _task, state| {
+        runtime.block_on(async {
+            let mut provider = state.lock().await;
+            for index in 2..=351 {
+                let mut issue = provider.issues[0].clone();
+                issue["id"] = json!(format!("issue-{index}"));
+                issue["identifier"] = json!(format!("FIX-{index}"));
+                issue["state"]["type"] = json!(if index % 2 == 0 {
+                    "completed"
+                } else {
+                    "canceled"
+                });
+                provider.issues.push(issue);
+            }
+            drop(provider);
+            super::load_show_snapshot(repo, "product", PmRefresh::Force, &NullProgress)
+                .await
+                .unwrap();
+            // Linear cancellation does not itself authorize local abandonment.
+            // Seed that separate decision for the abandoned half of the fixture.
+            rusqlite::Connection::open(&fixture.database)
+                .unwrap()
+                .execute(
+                    "UPDATE tasks SET abandoned_at=?1 WHERE planning_state='canceled'",
+                    [now()],
+                )
+                .unwrap();
+            let tasks = fixture.store.list_tasks(None).await.unwrap();
+            assert_eq!(tasks.len(), 351);
+            assert_eq!(
+                tasks
+                    .iter()
+                    .filter(|task| fixture
+                        .store
+                        .sqlite
+                        .task_state(&task.id)
+                        .unwrap()
+                        .is_terminal())
+                    .count(),
+                350
+            );
+            state.lock().await.requests = 0;
+        });
+        let connections: Vec<_> = (0..4)
+            .map(|_| {
+                crate::ops::linear_observe::PlanningSync::start(
+                    fixture.store.clone(),
+                    repo.to_string_lossy().into_owned(),
+                )
+                .unwrap()
+            })
+            .collect();
+        runtime.block_on(async {
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+        });
+        drop(connections);
+        let requests = runtime.block_on(async { state.lock().await.requests });
+        // Four 15-second intervals; allow the tick exactly on the minute boundary.
+        assert!(
+            (4..=5).contains(&requests),
+            "{requests} requests with 350 finished Tasks and four connections"
+        );
+    });
+}
+
+#[test]
+fn linear_rate_limit_preserves_completion_and_delivers_after_reset() {
+    with_planning_task(|runtime, fixture, repo, task, state| {
+        runtime.block_on(async {
+            state.lock().await.rate_limit_query = Some("mutation SetIssueState");
+        });
+        crate::ops::task::task_complete(repo, task.id.as_str(), Some("Complete after reset"))
+            .unwrap();
+        runtime
+            .block_on(crate::ops::linear_observe::sync_task_state(
+                &fixture.store,
+                task,
+            ))
+            .unwrap();
+        let receipt = fixture
+            .store
+            .sqlite
+            .pending_task_state(&task.id)
+            .unwrap()
+            .unwrap();
+        assert!(
+            !receipt.attempted,
+            "rejection is positive evidence of no effect"
+        );
+        let before = runtime.block_on(async { state.lock().await.requests });
+        let sync = crate::ops::linear_observe::PlanningSync::start(
+            fixture.store.clone(),
+            repo.to_string_lossy().into_owned(),
+        )
+        .unwrap();
+        runtime.block_on(async {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            assert_eq!(
+                state.lock().await.requests,
+                before,
+                "all loops honor the shared pause"
+            );
+            assert_eq!(
+                fixture
+                    .store
+                    .sqlite
+                    .pending_task_state(&task.id)
+                    .unwrap()
+                    .unwrap()
+                    .id,
+                receipt.id
+            );
+            tokio::time::timeout(std::time::Duration::from_secs(8), async {
+                while fixture
+                    .store
+                    .sqlite
+                    .pending_task_state(&task.id)
+                    .unwrap()
+                    .is_some()
+                {
+                    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+                }
+            })
+            .await
+            .unwrap();
+            assert_eq!(state.lock().await.completion_writes, 1);
+            assert_eq!(
+                fixture
+                    .store
+                    .work_status(&crate::durable::WorkRef::Task(task.id.clone()))
+                    .await
+                    .unwrap(),
+                WorkStatus::Done
+            );
+        });
+        drop(sync);
+    });
+}
+
+#[test]
+fn linear_rate_limit_retries_field_without_losing_saved_identity() {
+    with_planning_task(|runtime, fixture, repo, task, state| {
+        fixture
+            .store
+            .sqlite
+            .edit_task(
+                &task.id,
+                task.plan.revision,
+                &crate::pm::PmItemUpdate {
+                    name: Some("After reset".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let receipt = fixture
+            .store
+            .sqlite
+            .pending_task_changes(&task.id)
+            .unwrap()
+            .remove(0);
+        let work = crate::durable::WorkRef::Task(task.id.clone());
+        runtime.block_on(async {
+            state.lock().await.rate_limit_query = Some("mutation DeliverTaskField");
+            crate::ops::planning_delivery::sync_fields(&fixture.store, repo, &work)
+                .await
+                .unwrap();
+            let pending = fixture
+                .store
+                .sqlite
+                .pending_task_changes(&task.id)
+                .unwrap()
+                .remove(0);
+            assert_eq!(pending.id, receipt.id);
+            tokio::time::sleep(std::time::Duration::from_millis(2100)).await;
+            crate::ops::planning_delivery::sync_fields(&fixture.store, repo, &work)
+                .await
+                .unwrap();
+            assert!(fixture
+                .store
+                .sqlite
+                .pending_task_changes(&task.id)
+                .unwrap()
+                .is_empty());
+            assert_eq!(state.lock().await.issues[0]["title"], "After reset");
+            assert_eq!(state.lock().await.field_writes, 1);
+        });
+    });
+}
+
+#[test]
+fn linear_rate_limit_retries_creation_and_attachment_with_saved_ids() {
+    for query in [
+        "mutation DeliverProjectCreation",
+        "mutation DeliverProjectAttachment",
+        "mutation DeliverTaskCreation",
+    ] {
+        with_export_plan(|runtime, fixture, repo, task, state| {
+            runtime.block_on(async {
+                state.lock().await.rate_limit_query = Some(query);
+                crate::ops::planning_export::sync_repository_exports(
+                    &fixture.store,
+                    repo.to_str().unwrap(),
+                )
+                .await
+                .unwrap();
+                assert!(
+                    state.lock().await.rate_limit_query.is_none(),
+                    "fixture must reject {query}"
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(2100)).await;
+                crate::ops::planning_export::sync_repository_exports(
+                    &fixture.store,
+                    repo.to_str().unwrap(),
+                )
+                .await
+                .unwrap();
+                let saved = fixture.store.get_task(&task.id).await.unwrap().unwrap();
+                assert_eq!(saved.id, task.id);
+                assert!(
+                    saved.plan.linear_id.is_some(),
+                    "{query} must leave creation retryable"
+                );
+                assert_eq!(state.lock().await.creation_writes, 2);
+                assert_eq!(state.lock().await.attachment_writes, 1);
+            });
+        });
+    }
 }

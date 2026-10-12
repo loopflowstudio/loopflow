@@ -222,6 +222,7 @@ fn public_context_capability_survives_claim_changes_and_rejects_children_and_rep
 
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
+    let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
     let provider = home.path().join("claude");
     fs::write(&provider, r#"#!/usr/bin/python3
 import json, os, pathlib, shlex, sys, time
@@ -241,7 +242,8 @@ while not (home / 'finish').exists() and time.monotonic() < deadline:
     time.sleep(.01)
 "#).unwrap();
     fs::set_permissions(provider, fs::Permissions::from_mode(0o755)).unwrap();
-    let child = Command::new(env!("CARGO_BIN_EXE_lf"))
+    let startup_log = home.path().join("startup.log");
+    let mut child = Command::new(env!("CARGO_BIN_EXE_lf"))
         .env_clear()
         .env("HOME", home.path())
         .env("LF_HOME", home.path())
@@ -249,15 +251,19 @@ while not (home / 'finish').exists() and time.monotonic() < deadline:
         .env("CLAUDE_CONFIG_DIR", home.path().join(".claude"))
         .env("PATH", format!("{}:/usr/bin:/bin", home.path().display()))
         .current_dir(repo.path())
-        .args(["-b", "-a", "claude", ":", "Hold this conversation"])
+        .args(["-v", "-b", "-a", "claude", ":", "Hold this conversation"])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(fs::File::create(&startup_log).unwrap())
         .spawn()
         .unwrap();
     let deadline = Instant::now() + Duration::from_secs(10);
     while !home.path().join("handoff.json").exists() {
-        assert!(Instant::now() < deadline, "provider did not start");
+        assert!(
+            child.try_wait().unwrap().is_none() && Instant::now() < deadline,
+            "provider did not start: {}",
+            fs::read_to_string(&startup_log).unwrap()
+        );
         std::thread::sleep(Duration::from_millis(10));
     }
     let declaration: serde_json::Value =
@@ -283,7 +289,6 @@ while not (home / 'finish').exists() and time.monotonic() < deadline:
         );
         std::thread::sleep(Duration::from_millis(10));
     }
-    let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
     let first = store.session_attachment(session).unwrap().unwrap();
     let other = LfProcessId::new();
     db.execute(
@@ -453,7 +458,6 @@ assert.equal(child.messages[0].parts.length,0);
     assert!(!stale.status.success());
     assert!(stale.stdout.is_empty());
     fs::write(home.path().join("finish"), "").unwrap();
-    let mut child = child;
     child.wait().unwrap();
 }
 

@@ -313,8 +313,9 @@ serialized mutations and CLI readback through an isolated runtime. The retained-
 case removes nonempty membership without replacing panes or the unsaved document.
 These are automated owner/retention checks, not native path-picker acceptance.
 
-Gate still owns the affected Rust portfolio/CLI, lifecycle/DTO and Desktop suites
-at the integrated revision. `PortfolioServiceTests.desktopWritesReadBackThroughCLI`
+Publication checks now cover the affected Rust portfolio/CLI, lifecycle/DTO and
+Desktop suites at integrated revision `73d2861c1e` (results below).
+`PortfolioServiceTests.desktopWritesReadBackThroughCLI`
 requires `LOOPFLOW_PORTFOLIO_TEST_BIN` pointing to the built branch CLI; otherwise
 it is skipped. Native review must demonstrate both modes entirely from Portfolio,
 CLI readback, menu refresh and retained conversation/draft. The installed release
@@ -376,3 +377,5 @@ Review preserved successful-read gating at startup and authored-Wave refresh on
 activation while removing duplicate membership reads.
 
 Check (October 11 realign): `git diff --check` and `lf context` — pass, both context budgets fit; prose-only reconciliation reuses prior focused evidence, integrated suites belong to gate and native review awaits a compatible installed release.
+
+Check (October 11 publication, `73d2861c1e`): network-isolated `cargo test -p loopflow --test session_lifecycle_tests --test dto_fixtures --test documented_commands --test portfolio_cli_tests` — 65 passed, one Linux-only ignored; `cargo test -p loopflow --lib portfolio::tests` — 3 passed; `LOOPFLOW_PORTFOLIO_TEST_BIN="$PWD/target/debug/lf" scripts/test_desktop.sh --filter 'WorkNavigationTests|WorkNavigationProofTests|WorktreeWorkspaceTests|DTOFixtureTests|PortfolioServiceTests|PortfolioRepoStateTests|WorkDestinationTests|WorkCacheTests|WorkModelTests|SessionControlsTests|SessionChromeProofTests' -Xswiftc -gnone` — successful 193-test run including CLI readback, display diagnostics skipped; `uv run pytest python/tests/test_loopflow_dev.py -q` — 8 passed; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, Ruff and diff whitespace — pass; native review still requires compatible installed identity/portfolio commands.

@@ -154,19 +154,14 @@ fn inspection_is_identical_across_spellings_and_has_no_launch_side_effects() {
 }
 
 #[test]
-fn retired_launch_flags_are_not_forwarded_and_steer_cursor_is_preserved() {
+fn retired_launch_flags_are_rejected() {
     for args in [
         vec!["lf", "--max-turns", "2", "skill", "debug"],
         vec!["lf", "--no-loopflow", "skill", "debug"],
+        vec!["lf", "--steers-after", "42", "flow", "proof"],
     ] {
         assert!(Cli::try_parse_from(args).is_err());
     }
-    let cli = Cli::try_parse_from(["lf", "--steers-after", "42", "flow", "proof"]).unwrap();
-    let child_args = std::iter::once("lf".to_owned())
-        .chain(cli.process_options().step_args())
-        .chain(["skill".to_owned(), "debug".to_owned()]);
-    let child = Cli::try_parse_from(child_args).unwrap();
-    assert_eq!(child.steers_after, Some(42));
 }
 
 #[test]

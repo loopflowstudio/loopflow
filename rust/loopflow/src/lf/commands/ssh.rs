@@ -49,9 +49,6 @@ pub fn run(
             cmd: crate::lf::WaveCommand::Show { .. }
         })
     );
-    if !preview && matches!(cli.command, Some(crate::lf::Commands::Desktop { .. })) {
-        super::desktop::require_supported()?;
-    }
     let runtime = tokio::runtime::Runtime::new()?;
     let source = if preview || resident_operation {
         None

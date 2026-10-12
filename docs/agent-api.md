@@ -115,9 +115,9 @@ the same account. Other integrations should mark progress with
 `<!-- loopflow-progress:<source-id> -->`; historical unmarked comments remain
 eligible because their authorship cannot be inferred safely.
 
-`lf interrupt INF-123` appends a durable interrupt comment;
-the Task's running Flow observes it and ends the current provider turn so the
-next boundary re-reads direction. With no running Flow it remains durable input.
+`lf interrupt INF-123` records a separate control request. An attached Task
+command observes it and interrupts its provider turn; steer delivery retains
+its independent Session history.
 Loopflow never guesses signal authority from a conversation ID, Work ID, PID, or
 tmux name. Project operations are ordinary finite conversations; they have no long-running
 process to interrupt, resume, wait for, or attach to.

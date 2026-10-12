@@ -413,7 +413,7 @@ tokio::task_local! {
 pub(super) mod test_fixture;
 
 #[cfg(test)]
-mod task_planning_tests;
+pub(crate) mod task_planning_tests;
 
 #[cfg(test)]
 mod planning_lookup_tests;

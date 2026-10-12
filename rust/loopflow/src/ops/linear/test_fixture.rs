@@ -10,10 +10,10 @@ use crate::store::{open_ephemeral_store, CredentialType, ProviderToken, StorageC
 use crate::work::wave::Wave;
 
 #[derive(Debug)]
-pub(super) struct Fixture {
-    pub(super) directory: TempDir,
-    pub(super) database: PathBuf,
-    pub(super) store: Arc<Store>,
+pub(crate) struct Fixture {
+    pub(crate) directory: TempDir,
+    pub(crate) database: PathBuf,
+    pub(crate) store: Arc<Store>,
 }
 
 impl Fixture {

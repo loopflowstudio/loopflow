@@ -61,8 +61,8 @@ async fn serve(
 
 // Stateful provider evidence for planning fields, state, membership, and comments.
 #[derive(Default)]
-struct PlanningState {
-    requests: usize,
+pub(crate) struct PlanningState {
+    pub(crate) requests: usize,
     rate_limit_query: Option<&'static str>,
     wave_summary: String,
     reject_wave_update: bool,
@@ -85,7 +85,7 @@ struct PlanningState {
     project_fields: Option<serde_json::Value>,
     field_arrived: Option<Arc<tokio::sync::Notify>>,
     field_release: Option<Arc<tokio::sync::Notify>>,
-    issues: Vec<serde_json::Value>,
+    pub(crate) issues: Vec<serde_json::Value>,
     extra_projects: Vec<serde_json::Value>,
     fail_snapshot: bool,
     // Discovery and confirmation under the Wave lock consume two reads before mutation.
@@ -104,7 +104,7 @@ struct PlanningState {
     move_on_attachment_read: bool,
 }
 
-fn mark_issue_updated(issue: &mut serde_json::Value) {
+pub(crate) fn mark_issue_updated(issue: &mut serde_json::Value) {
     issue["updatedAt"] = json!(time::OffsetDateTime::now_utc()
         .format(&time::format_description::well_known::Rfc3339)
         .unwrap());
@@ -684,7 +684,7 @@ fn seed_provider_task(
     })
 }
 
-fn with_planning_task(
+pub(crate) fn with_planning_task(
     test: impl FnOnce(
         &tokio::runtime::Runtime,
         &Fixture,
@@ -4720,5 +4720,185 @@ fn linear_on_demand_adopts_new_open_issues_without_allocating_execution() {
                 .unwrap()
                 .is_empty());
         });
+    });
+}
+
+// Child entry uses the real CLI parser and callback handler, with only the
+// credential/network boundary replaced by the same stand-in as the parent.
+#[test]
+fn linear_on_demand_hook_child() {
+    use clap::Parser;
+    let Ok(args) = std::env::var("LINEAR_FIXTURE_ARGS") else {
+        return;
+    };
+    let cli = crate::lf::Cli::try_parse_from(serde_json::from_str::<Vec<String>>(&args).unwrap())
+        .unwrap();
+    let Some(crate::lf::Commands::PlanningCheck { delivery }) = cli.command else {
+        panic!("generated turn hook must select the planning callback")
+    };
+    let context: crate::context_block::ContextDelivery =
+        serde_json::from_slice(&std::fs::read(&delivery).unwrap()).unwrap();
+    let path = context.home.join("loopflow.db");
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let store = Arc::new(
+        runtime
+            .block_on(crate::store::open_store(
+                &crate::store::StorageConfig::sqlite(path.clone()),
+            ))
+            .unwrap(),
+    );
+    let context = super::LinearTestContext {
+        path,
+        store,
+        graphql_url: std::env::var("LINEAR_FIXTURE_URL").unwrap(),
+    };
+    let ready = std::env::var("LINEAR_FIXTURE_READY").unwrap();
+    std::fs::write(ready, "ready").unwrap();
+    let start = PathBuf::from(std::env::var("LINEAR_FIXTURE_START").unwrap());
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !start.exists() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "parent did not release hooks"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    LINEAR_TEST_CONTEXT.sync_scope(context, || {
+        crate::lf::commands::context::check_planning(&delivery).unwrap();
+    });
+}
+
+#[test]
+fn linear_on_demand_native_hooks_share_freshness_across_processes() {
+    with_planning_task(|runtime, fixture, repo, task, state| {
+        let _env = crate::test_ambient::EnvGuard::clear(&["LF_BIN"]);
+        let shim = fixture.directory.path().join("lf-hook");
+        // A test-binary adapter replaces main's dispatch only. The generated
+        // shell command, parser, callback, store and acquisition all execute.
+        std::fs::write(&shim, format!(
+            "#!/usr/bin/env python3\nimport json, os, sys\nos.environ['LINEAR_FIXTURE_ARGS'] = json.dumps(['lf'] + sys.argv[1:])\nos.execv({}, [{}, '--exact', 'ops::linear::task_planning_tests::linear_on_demand_hook_child', '--nocapture'])\n",
+            serde_json::to_string(&std::env::current_exe().unwrap()).unwrap(),
+            serde_json::to_string(&std::env::current_exe().unwrap()).unwrap(),
+        )).unwrap();
+        std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::env::set_var("LF_BIN", &shim);
+        let delivery = crate::context_block::ContextDelivery {
+            repo: repo.to_owned(),
+            home: fixture.directory.path().to_owned(),
+            wave: None,
+            skill_file: None,
+            references: Vec::new(),
+        };
+        let claude = crate::harness::context::claude_args(&delivery).unwrap();
+        let settings: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&claude[1]).unwrap()).unwrap();
+        let codex = crate::harness::context::codex_config(Some(&delivery), false).unwrap();
+        let hooks = [
+            &settings["hooks"]["Stop"][0]["hooks"][0]["command"],
+            &codex["hooks"]["Stop"][0]["hooks"][0]["command"],
+        ];
+        runtime.block_on(async {
+            seed_finished_tasks(fixture, repo, &state).await;
+            let mut provider = state.lock().await;
+            provider.requests = 0;
+            provider.issues[0]["title"] = json!("Acquired through native Stop");
+            mark_issue_updated(&mut provider.issues[0]);
+        });
+        let conn = rusqlite::Connection::open(&fixture.database).unwrap();
+        conn.execute("DELETE FROM linear_team_checks", []).unwrap();
+        let start = fixture.directory.path().join("release-hooks");
+        let mut children = Vec::new();
+        for index in 0..4 {
+            let ready = fixture.directory.path().join(format!("ready-{index}"));
+            let mut command = std::process::Command::new("/bin/sh");
+            for (name, _) in
+                std::env::vars_os().filter(|(name, _)| name.to_string_lossy().starts_with("LF_"))
+            {
+                command.env_remove(name);
+            }
+            children.push((
+                ready.clone(),
+                command
+                    .args(["-c", hooks[index % 2].as_str().unwrap()])
+                    .env(
+                        "LINEAR_FIXTURE_URL",
+                        LINEAR_TEST_CONTEXT.with(|ctx| ctx.graphql_url.clone()),
+                    )
+                    .env("LINEAR_FIXTURE_READY", ready)
+                    .env("LINEAR_FIXTURE_START", &start)
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped())
+                    .spawn()
+                    .unwrap(),
+            ));
+        }
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while children.iter().any(|(ready, _)| !ready.exists()) {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "hooks did not reach barrier"
+            );
+            for (_, child) in &mut children {
+                assert!(
+                    child.try_wait().unwrap().is_none(),
+                    "hook exited before barrier"
+                );
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        std::fs::write(start, "go").unwrap();
+        for (_, child) in children {
+            let output = child.wait_with_output().unwrap();
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        // A later process starts after the acquisition lock has been released;
+        // only the persisted stamp can suppress this request.
+        let output = std::process::Command::new("/bin/sh")
+            .args(["-c", hooks[0].as_str().unwrap()])
+            .env(
+                "LINEAR_FIXTURE_URL",
+                LINEAR_TEST_CONTEXT.with(|ctx| ctx.graphql_url.clone()),
+            )
+            .env(
+                "LINEAR_FIXTURE_READY",
+                fixture.directory.path().join("ready-later"),
+            )
+            .env(
+                "LINEAR_FIXTURE_START",
+                fixture.directory.path().join("release-hooks"),
+            )
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        runtime.block_on(async {
+            assert_eq!(state.lock().await.requests, 1);
+            assert_eq!(
+                fixture
+                    .store
+                    .get_task(&task.id)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .title,
+                "Acquired through native Stop"
+            );
+        });
+        let watermark: Option<String> = conn
+            .query_row("SELECT synced_through FROM linear_team_checks", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert!(watermark.is_some());
     });
 }

@@ -276,14 +276,7 @@ impl PlanningWatch {
                 let drive = async {
                     tokio::select! {
                         _ = stopped => {},
-                        _ = async {
-                            let mut delay = 30;
-                            loop {
-                                let changed = sync_repository(&store, &repo).await;
-                                delay = if changed { 30 } else { (delay * 2).min(240) };
-                                tokio::time::sleep(Duration::from_secs(delay)).await;
-                            }
-                        } => {},
+                        _ = watch_repository(&store, &repo) => {},
                     }
                 };
                 #[cfg(test)]
@@ -298,6 +291,16 @@ impl PlanningWatch {
             stop: Some(stop),
             thread: Some(thread),
         })
+    }
+}
+
+async fn watch_repository(store: &Store, repo: &str) {
+    let mut delay = 30;
+    loop {
+        let changed = sync_repository(store, repo).await;
+        delay = if changed { 30 } else { (delay * 2).min(240) };
+        tracing::debug!(target: "loopflow::linear_watch", delay, "Linear watcher waiting");
+        tokio::time::sleep(Duration::from_secs(delay)).await;
     }
 }
 
@@ -536,6 +539,108 @@ pub(crate) fn render_comment(
 #[cfg(test)]
 mod tests {
     use super::{is_direction_comment, render_comment};
+
+    #[test]
+    fn linear_on_demand_watcher_backs_off_and_resets_on_change() {
+        use crate::ops::linear::task_planning_tests::{mark_issue_updated, with_planning_task};
+        use tracing_subscriber::layer::SubscriberExt;
+
+        struct Sleeps(std::sync::mpsc::Sender<u64>);
+        impl tracing::field::Visit for Sleeps {
+            fn record_debug(&mut self, _: &tracing::field::Field, _: &dyn std::fmt::Debug) {}
+            fn record_u64(&mut self, field: &tracing::field::Field, value: u64) {
+                if field.name() == "delay" {
+                    self.0.send(value).unwrap();
+                }
+            }
+        }
+        impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for Sleeps {
+            fn on_event(
+                &self,
+                event: &tracing::Event<'_>,
+                _: tracing_subscriber::layer::Context<'_, S>,
+            ) {
+                if event.metadata().target() == "loopflow::linear_watch" {
+                    event.record(&mut Sleeps(self.0.clone()));
+                }
+            }
+        }
+
+        with_planning_task(|runtime, fixture, repo, task, state| {
+            let clock = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            let conn = rusqlite::Connection::open(&fixture.database).unwrap();
+            conn.execute("DELETE FROM linear_team_checks", []).unwrap();
+            runtime.block_on(async { state.lock().await.requests = 0 });
+            let (sender, sleeps) = std::sync::mpsc::channel();
+            let subscriber = tracing_subscriber::registry().with(Sleeps(sender));
+            let _trace = tracing::subscriber::set_default(subscriber);
+            clock.block_on(async {
+                tokio::time::pause();
+                let mut watch = Box::pin(super::watch_repository(
+                    &fixture.store,
+                    repo.to_str().unwrap(),
+                ));
+                let exercise = async {
+                    let mut previous = 0;
+                    for (index, expected) in [30, 60, 120, 240, 240, 30, 60].into_iter().enumerate()
+                    {
+                        if previous != 0 {
+                            tokio::time::advance(std::time::Duration::from_secs(previous - 1))
+                                .await;
+                            tokio::task::yield_now().await;
+                            assert_eq!(state.lock().await.requests, index);
+                            // SQLite freshness uses wall time; advance its attempt too.
+                            conn.execute("UPDATE linear_team_checks SET attempted_at=0", [])
+                                .unwrap();
+                            if index == 5 {
+                                let mut provider = state.lock().await;
+                                provider.issues[0]["title"] =
+                                    serde_json::json!("Watcher acquired change");
+                                mark_issue_updated(&mut provider.issues[0]);
+                            }
+                            // Tokio rounds sleep deadlines to millisecond ticks.
+                            tokio::time::advance(std::time::Duration::from_millis(1001)).await;
+                        }
+                        let deadline =
+                            std::time::Instant::now() + std::time::Duration::from_secs(5);
+                        let delay = loop {
+                            if let Ok(delay) = sleeps.try_recv() {
+                                break delay;
+                            }
+                            assert!(
+                                std::time::Instant::now() < deadline,
+                                "watcher did not finish check {index}"
+                            );
+                            tokio::task::yield_now().await;
+                        };
+                        assert_eq!(delay, expected);
+                        assert_eq!(state.lock().await.requests, index + 1);
+                        previous = delay;
+                    }
+                    assert_eq!(
+                        fixture
+                            .store
+                            .get_task(&task.id)
+                            .await
+                            .unwrap()
+                            .unwrap()
+                            .title,
+                        "Watcher acquired change"
+                    );
+                };
+                tokio::select! {
+                    _ = &mut watch => panic!("watcher unexpectedly stopped"),
+                    _ = exercise => {},
+                }
+                drop(watch);
+                tokio::time::advance(std::time::Duration::from_secs(600)).await;
+                assert_eq!(state.lock().await.requests, 7);
+            });
+        });
+    }
 
     #[test]
     fn agent_progress_never_reenters_direction_even_with_a_quoted_steer() {

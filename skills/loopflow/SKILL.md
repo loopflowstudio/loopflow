@@ -1,6 +1,6 @@
 ---
 name: loopflow
-description: Use lf to launch agents, run Skills and Flows, manage Sessions, worktrees and PRs; use Task and Wave APIs when requested or already associated.
+description: Launch agents, run Skills and Flows, manage Sessions, worktrees and PRs with Loopflow; use Task and Wave APIs when requested or already associated.
 ---
 
 # Use lf

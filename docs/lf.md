@@ -343,7 +343,8 @@ lf mon active --watch --json        # NDJSON until stdin closes
 lf mon show SESSION --final         # provider conclusion
 lf usage --days 30                  # measured consumption and missing evidence
 lf usage --task LOO-265 --context   # each step's input by source, flagged over budget
-lf mon show SESSION --context       # one step: instructions, memory, scratch, goal, steers, carried, tools
+lf mon show SESSION --context       # input cost by source
+lf mon show SESSION --instructions  # why guidance was included or omitted
 lf session ensure                   # this repository's one ongoing conversation
 lf session ensure -w growth         # a Wave's one ongoing conversation
 lf session ensure --task EXP-12     # a Task's primary conversation

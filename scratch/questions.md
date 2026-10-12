@@ -23,3 +23,9 @@
 - Jack permits writing scratch and wants cleanup optional. Chosen mechanism:
   repo-only `scratch.managed: true`, default false, covering deletion and
   removal from published history. Directory existence never determines ownership.
+
+- Jack requested continuation into instruction explanations and decision
+  evaluations. Existing capture decisions own explanations; no user-level mode
+  or new schema. Nine fixtures and a scorer are provider-neutral. A live model,
+  version and evaluation environment have not been selected; rendered inputs and
+  scorer tests do not constitute model evaluation results.

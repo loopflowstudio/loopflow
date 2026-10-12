@@ -32,7 +32,7 @@ pub struct ProcessPromptInput {
     pub skill_arguments: String,
     pub no_loopflow: bool,
     /// Work was selected or resolved from the current checkout/Session.
-    pub work: bool,
+    pub work: Option<crate::prompt::WorkContext>,
     pub agent: Option<String>,
     pub cwd: Option<PathBuf>,
     pub max_turns: Option<u32>,
@@ -334,7 +334,7 @@ Test skill body.
                 &default_test_config(),
                 ProcessPromptInput {
                     repo_root: repo.path().to_path_buf(),
-                    work,
+                    work: work.then(|| crate::prompt::WorkContext::Task("TASK-1".into())),
                     no_loopflow,
                     skill: skill.map(str::to_owned),
                     ..Default::default()
@@ -359,6 +359,37 @@ Test skill body.
                 &prepared.deduplication_decisions,
                 None,
             );
+            let work_decision = context
+                .decisions
+                .iter()
+                .find(|decision| {
+                    decision.kind == crate::trace::ContextAssetKind::OperatingInstructions
+                        && decision.label == "work"
+                })
+                .unwrap();
+            let (decision, reason) = if no_loopflow {
+                (
+                    crate::trace::ContextDecisionKind::Excluded,
+                    "--no-loopflow disables automatic guidance",
+                )
+            } else if !work {
+                (
+                    crate::trace::ContextDecisionKind::Excluded,
+                    "no Task or Wave association",
+                )
+            } else if skill == Some("work") {
+                (
+                    crate::trace::ContextDecisionKind::Deduplicated,
+                    "the selected work skill supplies this guidance",
+                )
+            } else {
+                (
+                    crate::trace::ContextDecisionKind::Included,
+                    "Task association: TASK-1",
+                )
+            };
+            assert_eq!(work_decision.decision, decision);
+            assert_eq!(work_decision.reason, reason);
             if work && !no_loopflow && skill.is_none() {
                 assert!(context
                     .system

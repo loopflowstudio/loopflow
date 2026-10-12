@@ -9,6 +9,21 @@ Project APIs in an existing conversation. Choose the commands and Skills that
 fit the requested work. Work context does not select a Flow or authorize Wave
 memory maintenance; the selected Loopflow Flow owns that procedure.
 
+## Inspect instruction selection
+
+```bash
+lf mon show SESSION --instructions
+lf mon show SESSION --instructions --json
+```
+
+The retained input records why launcher guidance, Work guidance and selected
+skills were supplied. It also records automatic opt-out, missing Work association,
+and deduplication when `work` was selected as a skill. Use `--input INPUT` to
+inspect an earlier input belonging to that Session. These are recorded decisions,
+not a reconstruction from the repository's current state. Old captures may have
+less detailed reasons; missing captures report unavailable evidence. Native
+provider instructions not attributed in the input remain outside this view.
+
 ## Install the external skill
 
 Give an agent harness the same operating contract when it was not launched by

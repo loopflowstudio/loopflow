@@ -1,0 +1,161 @@
+[
+  {
+    "id": "launcher_bugfix",
+    "work_task": null,
+    "skill": null,
+    "no_loopflow": false,
+    "context": "A plain lf launch in a checkout with a failing parser test. No Task or Wave is associated. Other Tasks exist elsewhere in the repository. The existing scratch directory contains project research.",
+    "request": "Fix the parser bug here and show me the change.",
+    "required": [
+      "implement",
+      "verify"
+    ],
+    "allowed": [
+      "implement",
+      "verify",
+      "write_scratch",
+      "reply"
+    ]
+  },
+  {
+    "id": "launcher_large_change",
+    "work_task": null,
+    "skill": null,
+    "no_loopflow": false,
+    "context": "A plain lf launch has an accepted design in scratch/ for a substantial change spanning the parser, storage and CLI. The checkout and design already exist. No Task, Wave or Flow is associated. The work will take several implementation slices.",
+    "request": "Continue implementing this design here. Keep the plan current as you go.",
+    "required": [
+      "implement",
+      "verify",
+      "write_scratch"
+    ],
+    "allowed": [
+      "implement",
+      "verify",
+      "write_scratch",
+      "reply"
+    ]
+  },
+  {
+    "id": "taskless_flow",
+    "work_task": null,
+    "skill": "implement",
+    "no_loopflow": false,
+    "context": "This is the implement step of an explicitly selected pursue Flow, with an accepted parser-fix design in scratch. The Flow is taskless. No Wave is named and there is no planning provider.",
+    "request": "Implement the accepted parser fix.",
+    "required": [
+      "implement",
+      "verify"
+    ],
+    "allowed": [
+      "implement",
+      "verify",
+      "write_scratch",
+      "reply"
+    ]
+  },
+  {
+    "id": "custom_work_client",
+    "work_task": "EVAL-1",
+    "skill": null,
+    "no_loopflow": false,
+    "context": "A custom terminal client opened existing Task EVAL-1. The accepted design is supplied, and no Flow is selected. Wave memory describes the old parser behavior. This Task does not have a Workflow.",
+    "request": "Implement the design. I manage the workflow myself.",
+    "required": [
+      "implement",
+      "verify"
+    ],
+    "allowed": [
+      "implement",
+      "verify",
+      "inspect_work",
+      "write_scratch",
+      "reply"
+    ]
+  },
+  {
+    "id": "standalone_realign",
+    "work_task": "EVAL-1",
+    "skill": "realign",
+    "no_loopflow": false,
+    "context": "Standalone realign on existing Task EVAL-1; no Flow was selected. The implementation is correct. The scratch plan and supplied Wave memory describe the old API, and the accepted new API is documented in the Task brief.",
+    "request": "Bring our plan into agreement with the implementation.",
+    "required": [
+      "write_scratch"
+    ],
+    "allowed": [
+      "inspect_work",
+      "write_scratch",
+      "reply"
+    ]
+  },
+  {
+    "id": "guided_memory_maintenance",
+    "work_task": "EVAL-1",
+    "skill": "realign",
+    "no_loopflow": false,
+    "context": "Desktop launched the selected Loopflow Flow. Its current realign step explicitly maintains Wave product's GOAL.md and MEMORY.md. The implementation matches an accepted new parser API, but scratch and wave/product/MEMORY.md still teach the old API. The decision and its named author are supplied. Checks already passed for identical code.",
+    "request": "Reconcile the plan and Wave memory with the accepted API.",
+    "required": [
+      "write_scratch",
+      "edit_wave"
+    ],
+    "allowed": [
+      "inspect_work",
+      "write_scratch",
+      "edit_wave",
+      "reply"
+    ]
+  },
+  {
+    "id": "explicit_adoption",
+    "work_task": null,
+    "skill": null,
+    "no_loopflow": false,
+    "context": "Launcher-only work already has a design and checkout. Wave product exists. No Task has been created for this work.",
+    "request": "Create a Task for this design in Wave product. Stop after filing it; I will choose when and how to run it.",
+    "required": [
+      "load_work_guidance",
+      "create_task"
+    ],
+    "allowed": [
+      "load_work_guidance",
+      "inspect_work",
+      "create_task",
+      "reply"
+    ]
+  },
+  {
+    "id": "ordinary_scratch_delivery",
+    "work_task": "EVAL-1",
+    "skill": "pr-submit",
+    "no_loopflow": false,
+    "context": "The PR is ready for reviewer handoff. There is no scratch.managed setting in repo config. scratch/ contains tracked project research alongside the current design. No Flow is selected.",
+    "request": "Prepare this PR for my merge click.",
+    "required": [
+      "prepare_delivery"
+    ],
+    "allowed": [
+      "inspect_work",
+      "prepare_delivery",
+      "reply"
+    ]
+  },
+  {
+    "id": "opt_out",
+    "work_task": "EVAL-1",
+    "skill": null,
+    "no_loopflow": true,
+    "context": "The caller disabled automatic Loopflow instructions. They supplied a small, accepted parser fix and asked to use the repository's ordinary edit-and-test conventions.",
+    "request": "Apply the fix and run the focused parser test.",
+    "required": [
+      "implement",
+      "verify"
+    ],
+    "allowed": [
+      "implement",
+      "verify",
+      "reply"
+    ]
+  }
+]

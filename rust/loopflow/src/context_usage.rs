@@ -263,18 +263,50 @@ struct Measured {
     gaps: Vec<String>,
 }
 
+fn read_context_artifact(dir: &Path) -> std::io::Result<ContextArtifact> {
+    let bytes = std::fs::read(dir.join("context.json"))?;
+    serde_json::from_slice(&bytes)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))
+}
+
+/// Read only recorded instruction decisions; missing captures are unavailable evidence.
+pub fn read_instructions(dir: &Path) -> std::io::Result<Vec<ContextDecision>> {
+    Ok(read_context_artifact(dir)?
+        .context
+        .decisions
+        .into_iter()
+        .filter(|decision| ContextSource::of(decision.kind) == ContextSource::Instructions)
+        .collect())
+}
+
+pub fn render_instructions(decisions: &[ContextDecision]) -> String {
+    if decisions.is_empty() {
+        return "No instruction-selection decisions were recorded for this input.".into();
+    }
+    decisions
+        .iter()
+        .map(|decision| {
+            format!(
+                "{}  {} — {}",
+                decision.decision.as_str(),
+                decision.label,
+                decision.reason
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn read_capture(dir: &Path) -> Measured {
     let mut measured = Measured::default();
-    match std::fs::read(dir.join("context.json")) {
-        Ok(bytes) => match serde_json::from_slice::<ContextArtifact>(&bytes) {
-            Ok(artifact) => measured.read_context(artifact.context),
-            Err(error) => measured
-                .gaps
-                .push(format!("context.json is unreadable: {error}")),
-        },
-        Err(_) => measured
+    match read_context_artifact(dir) {
+        Ok(artifact) => measured.read_context(artifact.context),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => measured
             .gaps
             .push("no context.json: assembled sources were not captured".to_string()),
+        Err(error) => measured
+            .gaps
+            .push(format!("context.json is unreadable: {error}")),
     }
     match std::fs::File::open(dir.join("events.jsonl")) {
         Ok(file) => {

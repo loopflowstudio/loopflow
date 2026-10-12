@@ -132,3 +132,11 @@ Review preserved persistent branch restart independently of scratch ownership,
 and moved the scratch-policy read ahead of Git merge so conflicted config cannot
 interrupt merge recovery. Skill purpose remains the first body line so skill
 discovery continues to describe the operation rather than its write boundary.
+
+Instruction provenance now uses the resolved Task/Wave association directly.
+Opt-out takes precedence over deduplication; selecting a skill still records its
+actual inclusion independently. `--instructions` reads capture decisions rather
+than reinterpreting current checkout state. Historical gaps remain gaps. Review
+also corrected a steer test's assumption that every decision without an asset
+was a steer. Decision fixtures reuse production formatting and keep expected
+actions out of exported model inputs; scoring tests are not model evaluations.

@@ -1297,3 +1297,19 @@ Session interactivity must not select an individual launch’s process-group pol
 Changes to AgentProcess launch-mode recording also run the complete
 `session_record::runtime::tests` module: native refusal and headless cleanup
 fixtures must declare opposite launch modes, independent of Session defaults.
+
+## Instruction decisions
+
+```bash
+cargo test -p loopflow --lib work_guidance_is_additive
+cargo test -p loopflow --test session_cli_tests instruction_inspection
+uv run pytest python/tests/test_instruction_levels.py
+```
+
+The prompt and CLI checks verify recorded inclusion, exclusion and explanation.
+The Python tests verify evaluation scoring, not agent behavior. Render and run
+[the decision cases](scripts/evals/README.md) in a capable provider evaluation
+environment; retain model/version, inputs, replies and failures. These cases cover
+launcher work, taskless Flows, custom Work clients, guided memory maintenance,
+explicit Task adoption, scratch ownership and instruction opt-out. They score
+proposed actions; lifecycle integration tests remain the proof of tool effects.

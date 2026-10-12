@@ -87,6 +87,22 @@ pub struct GatherSpec {
     pub related_repos: Vec<RelatedRepoContext>,
 }
 
+/// The existing Work association that selects its API guidance.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WorkContext {
+    Task(String),
+    Wave(String),
+}
+
+impl WorkContext {
+    pub fn reason(&self) -> String {
+        match self {
+            Self::Task(task) => format!("Task association: {task}"),
+            Self::Wave(wave) => format!("Wave association: {wave}"),
+        }
+    }
+}
+
 /// Options for gathering context.
 #[derive(Debug, Clone, Default)]
 pub struct GatherContextOpts {
@@ -97,7 +113,7 @@ pub struct GatherContextOpts {
     /// Include loopflow operating guidance.
     pub operate: bool,
     /// Include work API guidance for a selected or existing Work association.
-    pub work: bool,
+    pub work: Option<WorkContext>,
     pub surface: Surface,
     /// Explicit docs paths, globs, or directories to include in context.
     pub docs: Vec<String>,
@@ -186,7 +202,7 @@ pub struct PromptComponents {
     /// Include loopflow operating guidance.
     pub operate: bool,
     /// Include work API guidance for a selected or existing Work association.
-    pub work: bool,
+    pub work: Option<WorkContext>,
     /// User message (positional args after skill/flow name)
     pub message: Option<String>,
     /// Semantic attribution for generated intent carried in `message`.
@@ -394,7 +410,10 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
         summaries,
         wave: opts.wave.clone(),
         operate: opts.operate,
-        work: opts.work || opts.wave.is_some(),
+        work: opts
+            .work
+            .clone()
+            .or_else(|| opts.wave.clone().map(WorkContext::Wave)),
         message: opts.message.clone(),
         message_context: None,
         steers: Vec::new(),
@@ -1512,7 +1531,7 @@ pub fn format_system_sections(components: &PromptComponents) -> Vec<String> {
 
     if components.operate {
         parts.push(loopflow_section());
-        if components.work
+        if components.work.is_some()
             && !components
                 .skill
                 .as_ref()

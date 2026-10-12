@@ -61,9 +61,10 @@ the new website assessment uses `website/home.html` and `website/content.yaml`.
 ## Data structures and key functions
 
 The existing `operate`/`--no-loopflow` switch still controls automatic guidance.
-A `work` boolean in `ProcessPromptInput`, `GatherContextOpts` and
-`PromptComponents` selects the additional contract. It is derived from explicit
-Task/Wave scope and existing checkout or resumed Session association. No stored
+An optional `WorkContext` (Task or Wave scope) in `ProcessPromptInput`,
+`GatherContextOpts` and `PromptComponents` selects the additional contract and
+explains the selection. It is derived from explicit Task/Wave scope and existing
+checkout or resumed Session association. No stored
 persona, new database owner or schema migration.
 
 `format_system_sections` emits the base document and, for Work, `work_section()`.
@@ -112,7 +113,7 @@ by prose; hiding command semantics behind a user-level setting.
 
 One coherent local change: two-tier assembly, shared work skill, portable
 onboarding/continuation/delivery instructions, external harness skill and docs.
-No follow-up Tasks or client integrations. Lower-level worktree/PR/Flow commands
+No follow-up Tasks were filed. Lower-level worktree/PR/Flow commands
 retain existing mechanics; no Task creation path was added.
 
 The instruction split and repository ownership refinement are implemented.
@@ -143,4 +144,28 @@ live account, display, or person is required. Run `cargo fmt --check` and
 `cargo clippy --all-targets -- -D warnings` for the Rust cutover.
 
 Base contract: 1,037 → 282 words (73% reduction).
-Checks: `cargo test -p loopflow` with config/builtins filters and golden_prompt, commit_tests, land_tests, sync_tests, task_initialization_tests, task_handoff_tests targets — 97 focused tests passed (cleanup fixture corrected and rerun); `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `lf context` passed; prior two-tier prompt checks remain applicable.
+Checks: focused Rust prompt/provenance, context reader/launch, Session CLI, command-reference and golden tests — 17 passed; `uv run pytest python/tests/test_instruction_levels.py` — 16 passed; nine decision inputs rendered and missing-response scoring failed as expected; Rust formatting/Clippy and Python Ruff passed. Live model evaluations remain for a selected provider environment.
+
+## Instruction explanations and decision evaluations
+
+Implemented, 2026-10-11 — Jack requested continuation after the ownership change.
+The CLI exposes recorded instruction-selection reasons alongside headless decision cases
+for the three usage experiences. No new user mode, store, or schema.
+
+The prompt's optional Task/Wave scope replaces the anonymous Work boolean;
+the same value selects guidance and explains it. Record inclusion, opt-out,
+absence, and explicit-skill deduplication through existing `ContextDecision`s.
+`lf mon show SESSION --instructions [--json]` reads those retained decisions;
+old captures report only what they recorded, never inferred historical authority.
+Keep `--context` token accounting intact. Selected skills, repository guides,
+provider instructions and surface guidance retain separate provenance.
+
+Decision evaluations use production-rendered prompt fixtures and score an
+agent's proposed actions against allowed and required actions. They cover plain
+launcher work, a taskless Flow, custom Work use, guided memory maintenance,
+explicit adoption, opt-out and repository-owned scratch. These are decision
+evaluations, not proof of actual tool effects. Deterministic tests validate
+selection and scoring; live provider runs remain a separate headless check.
+Acceptance: focused prompt/provenance and CLI tests, evaluation runner tests,
+formatting and Clippy. Delete the unexplained Work boolean and opaque automatic
+instruction reasons; reuse existing captured decisions and rendering machinery.

@@ -55,6 +55,25 @@ struct WorkDestinationTests {
         #expect(model.navigation.content == .terminals)
     }
 
+    @Test func failedTaskConversationRetainsItsReasonAfterDismissingTheAlert() async throws {
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(try fixture().utf8))
+        let wave = try #require(snapshot.waves.first)
+        let task = try #require(wave.tasks.items.first)
+        let query = RegistryQuery { _, _ in throw RegistryQueryError("Conversation launcher unavailable") }
+        let model = WorkModel(query: query, repoPath: wave.wave.repo)
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        let registry = SessionsWorkspaceRegistry(localMachineId: "local")
+        model.bindWorkspaces(registry, repository: "repo")
+
+        await model.openTaskConversation(task.id)
+        let entry = try #require(registry.retained(model.workspaceKey(for: .task(id: task.id), repository: "repo")))
+        model.dismissTaskLink()
+        model.select(.wave(id: wave.wave.id))
+        #expect(entry.conversationError == "Conversation launcher unavailable")
+        #expect(!entry.openingConversation)
+        #expect(entry.multiplexer.layout.allPanes.allSatisfy { $0.content == .empty })
+    }
+
     @Test(arguments: [false, true])
     func bareTaskOpeningDoesNotAcquireASession(remote: Bool) async throws {
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(try fixture().utf8))

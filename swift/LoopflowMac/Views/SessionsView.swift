@@ -841,7 +841,7 @@ struct SessionsContentView: View {
                         if let error = workspace.conversationError {
                             HStack {
                                 Text(error).textSelection(.enabled)
-                                Button("Retry") { openRepositoryConversation() }
+                                Button("Retry", action: retryConversation)
                             }.foregroundStyle(Color.statusWarning).padding(8)
                         }
                         ZStack {
@@ -1145,6 +1145,11 @@ struct SessionsContentView: View {
 
     private func openTask(_ work: WorkReference) {
         Task { await model.openTaskConversation(work.id) }
+    }
+
+    private func retryConversation() {
+        if let work = workspace.key.reference, work.kind == .task { openTask(work) }
+        else { openRepositoryConversation() }
     }
 
     private func openRepositoryConversation() {
@@ -1695,21 +1700,31 @@ private struct SessionPaneView: View {
         }
     }
 
+    @ViewBuilder
     private var emptyWorkspace: some View {
-        ContentUnavailableView {
-            Label("No session open", systemImage: "terminal")
-        } description: {
-            Text("Choose a session from the outline or open a shell.")
-        } actions: {
-            Button {
-                do { try workspace.newShell() }
-                catch { shellError = error.localizedDescription }
-            } label: {
-                Label("New shell", systemImage: "terminal")
+        if workspace.key.kind == .task {
+            if !workspace.openingConversation {
+                ContentUnavailableView("No Task conversation open", systemImage: "bubble.left",
+                    description: Text(workspace.conversationError == nil
+                        ? "Open this Task from the sidebar to return to its conversation."
+                        : "The conversation could not open. Retry the opening above."))
             }
-            .buttonStyle(.bordered)
-            .tint(TerminalPalette.accent)
-            .accessibilityIdentifier("sessions-empty-new-shell")
+        } else {
+            ContentUnavailableView {
+                Label("No session open", systemImage: "terminal")
+            } description: {
+                Text("Open a conversation or a shell in this Work.")
+            } actions: {
+                Button {
+                    do { try workspace.newShell() }
+                    catch { shellError = error.localizedDescription }
+                } label: {
+                    Label("New shell", systemImage: "terminal")
+                }
+                .buttonStyle(.bordered)
+                .tint(TerminalPalette.accent)
+                .accessibilityIdentifier("sessions-empty-new-shell")
+            }
         }
     }
 

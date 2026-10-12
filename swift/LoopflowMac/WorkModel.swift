@@ -485,7 +485,14 @@ final class WorkModel {
         openTaskDestination(wave: found.wave, task: found.task)
         navigation.content = .terminals
         if !retainedConversation {
+            let workspace = workspaceRegistry?.retained(key)
+            workspace?.openingConversation = true
+            workspace?.conversationError = nil
+            defer { workspace?.openingConversation = false }
             await openTaskLink(url, expectedTaskID: found.task.id, conversation: true)
+            if taskLinkExpectedID == found.task.id, taskOpening?.status == .failed {
+                workspace?.conversationError = taskOpening?.reason
+            }
         }
     }
 

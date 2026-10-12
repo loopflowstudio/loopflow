@@ -415,9 +415,10 @@ lf wt timing                        # how long real `lf wt list` runs took here
 ```
 
 The repository and each Wave have one ongoing conversation. `session ensure`
-finds it or starts it, a Wave's with its goal and memory, and repeats return the
-same Session. `replace`
-stops that conversation, keeps it as history, and starts a fresh one.
+finds it or prepares it, a Wave's with its goal and memory, and repeats return the
+same Session. `replace` stops that conversation, keeps it as history, and prepares
+a fresh one. Neither launches a provider; `session connect SESSION` opens it in
+the current terminal.
 
 A Task's primary is one of its own conversations: the one named with
 `--choose SESSION`, else its only unfinished interactive conversation, else the
@@ -426,8 +427,12 @@ stay open, and listing Sessions never picks or starts one.
 
 Use `lf resume` in the Task checkout, or `lf session connect SESSION`,
 to reopen the same conversation after a failed terminal launch. Retained native
-history survives retries. For headless Claude and OpenCode, connect stops the run
-and resumes its saved native conversation; it is not live takeover. Codex retains
+history survives retries. A recorded interactive provider observed dead can reopen
+without manual repair; a live or unknown provider cannot be started twice.
+Explicitly connecting to a replaced Session preserves its history and leaves
+the successor as primary, even when the old launch never acquired native history.
+For headless Claude and OpenCode, connect stops the run and resumes its saved
+native conversation; it is not live takeover. Codex retains
 its live connection. Missing process or conversation identity needs recovery before
 a headless run can be stopped and resumed.
 
@@ -924,6 +929,7 @@ the checkout. A stopped Flow is history and blocks nothing.
 ```bash
 lf session ensure                    # persistent repository conversation
 lf session ensure --wave product     # separate persistent Wave conversation
+lf session connect SESSION           # open the prepared conversation
 ```
 
 Inside the conversation's persistent checkout:

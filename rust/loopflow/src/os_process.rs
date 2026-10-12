@@ -770,8 +770,3 @@ mod tests {
         ));
     }
 }
-
-#[cfg(not(test))]
-pub(crate) async fn start_home_session(session: &str, cwd: &Path, argv: &[String]) -> Result<()> {
-    start_lf_session_with_env(session, cwd, argv, &[]).await
-}

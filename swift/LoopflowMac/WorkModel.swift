@@ -244,7 +244,9 @@ final class WorkModel {
         taskLinkReading = .unavailable(lastGood: nil, reason: error.localizedDescription)
         // A sidebar opening already has its retained Task error and retry.
         // Only unresolved external links need the lookup sheet.
-        showsTaskLink = !taskLinkConversation
+        let hasTaskPage = taskLinkConversation
+            && taskLinkExpectedID.map { selection == .task(id: $0) } == true
+        showsTaskLink = !hasTaskPage
     }
 
     /// The one Task a repository-qualified link names in planning this window holds.

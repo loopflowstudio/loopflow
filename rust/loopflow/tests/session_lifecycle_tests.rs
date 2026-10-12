@@ -1126,7 +1126,20 @@ fn a_task_primary_is_one_of_its_own_conversations() {
         .unwrap()
         .stdout;
     std::fs::remove_dir_all(&empty_path).unwrap();
-    let created = primary(&["INF-125"]);
+    // Preparation must also work where no detached terminal host can launch.
+    // The provider's first-use prompts belong in the visible connection next.
+    let tmux = fixture.home.path().join("bin/tmux");
+    let detached_launcher = std::fs::read(&tmux).unwrap();
+    std::fs::write(&tmux, "#!/bin/sh\nexit 88\n").unwrap();
+    let launches_before = fixture.launches().len();
+    let created = primary(&["INF-125", "--prepare"]);
+    assert_eq!(fixture.launches().len(), launches_before);
+    assert!(created["open_argv"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|arg| arg == "connect"));
+    std::fs::write(&tmux, detached_launcher).unwrap();
     assert!(empty_path.join(".git").exists());
     assert_eq!(
         Command::new("git")
@@ -1152,7 +1165,10 @@ fn a_task_primary_is_one_of_its_own_conversations() {
         Path::new(&cwd).canonicalize().unwrap(),
         empty_path.canonicalize().unwrap()
     );
+    // Reopening a retained primary also restores its missing checkout.
+    std::fs::remove_dir_all(&empty_path).unwrap();
     assert_eq!(primary(&["INF-125"])["id"], created["id"]);
+    assert!(empty_path.join(".git").exists());
     assert_eq!(
         members("INF-125"),
         [created["id"].as_str().unwrap().to_string()]

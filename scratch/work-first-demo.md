@@ -106,67 +106,14 @@ handoff remain adversarial cases; native placeholder contrast is repaired below.
 
 ## Correct repository and Started membership — October 12
 
-Jack Heart's latest screenshot shows the isolated one-Task `loopflow-demo`, not
-Loopflow's Task inventory. Raising that window was the wrong demonstration.
-The configured-provider fixture proves input/retention only; the target remains
-the populated Loopflow repo with correct Task-to-conversation opening.
-
-Jack Heart confirmed installed lf 0.13.12; `lf --version` agrees. An upgrade
-is not an established prerequisite. The previous mixed-runtime launch and its
-slow-reader evidence remain at `e276eee8a2:scratch/work-first-demo.md`; the live app failed wire decoding, not repository identity. A source CLI
-with ordinary Home dispatches to installed lf by design. Private copied data
-runs branch code, but its copied execution records grant no live-client authority.
-
-Removed the reachable Session-presence shortcut that admitted unstarted Tasks
-into the sidebar. Recorded Started plus shared unresolved execution now owns
-membership; retained Sessions and Wave plans remain intact. Review confirmed
-this removes a second inference of Started without mutating historical records.
-Check: `scripts/test_desktop.sh --filter WorkNavigationTests -Xswiftc -gnone --no-parallel` — PASS, 37 tests; diff check PASS. Native correction initially still loaded; later copied-data rendering below supersedes it. No live installation authorized.
-
-Release alignment `6f9bd12f85` merged main; conflict resolution preserves collapsed
-Overview and TaskDueDateView. Focused Swift 45/build PASS. Earlier sync attempts:
-`e276eee8a2:scratch/work-first-demo.md`. No push/install.
-
-The synced build still refused the copy's missing `linear_team_checks` draft.
-Applying that exact CREATE TABLE to the disposable copy preserved every existing
-table's row count; branch identity and Work snapshot then succeeded (21.66 s).
-This is fixture schema preparation, not a supported live promotion receipt.
-Evidence: demo directory `compatibility-{check,after-sync,with-draft}.log`,
-`compatibility-fixture-counts.json`, `compatibility-work.json`.
-Snapshot: 11 Tasks, not 12: Growth 312; Infrastructure 367 and lf-9c03797;
-Product 462/427/382/380/378/371/330; Spend 389; Intelligence none. Missing checkout,
-merged-but-uncompleted, retained dirty files and unsettled commits explain those
-inclusions. That explains the rule, not Jack Heart's approval of every remaining
-Task. Native clicks and installation remain unproved; no live schema change.
-Stopped only the owned orphan reader from the closed demo and redundant one-shot;
-the current app reader remains live. Task automation disabled; app CI watcher active.
-
-October 12 copied-data review renders all 11 expected Task rows,
-without Session counts. Clicking LOO-462 selects exact primary Session
-`955ff6f0a65047a18b191505e307fce1`, showing its breadcrumb and Open here action,
-not New shell. The sandbox blocks provider use; placeholder text is nearly
-invisible on the dark pane. No provider continuation is proved.
-The live-data app instead ended its long read with a wire-decoding error and
-retained an older, larger roadmap; it must not be presented as current.
-
-Correction to the runtime diagnosis: Portfolio's root-json error also reproduces
-on the branch, not only the installed CLI. Argument ownership wrongly excluded
-all global flags below root, including globals declared by Portfolio. It now
-excludes inherited IDs only, retaining each nested global at its declaring owner.
-Review: shared Clap metadata remains the sole flag owner, with no command-name
-allowlist. Check: binary reorder_args tests and portfolio_cli_tests PASS;
-`cargo fmt`, `cargo clippy --all-targets -- -D warnings`, diff check PASS.
-Repackaged: native inspection shows the 11-row sidebar with the Portfolio error
-gone; direct packaged `portfolio --json` exits 0. No live install or provider proof.
-
-LOO-312 fails with “no checkout to hold a conversation.” The copied record has no primary or directly bound Sessions;
-this is not a wrong-conversation fallback. Keep it unresolved rather than inventing
-history or hiding the Task. Corrected the participant read to `config user --json`
-The first placeholder dark-appearance change failed native review: text remained
-near-black. Explicit TerminalPalette inks fix it; native relaunch confirms readable text/button.
-Check: RegistryQuery/WorkDestination PASS (68); palette repair WorkDestination PASS (51); configured participant read and diff check PASS.
-Native LOO-462 click selected its exact Session, then sandbox denied launcher
-inspection. Closing that failed terminal exposed the contrast defect. No takeover.
+Copied-data mismatch, failed sandbox launches, release alignment, repaired
+Portfolio flag ownership and placeholder contrast are retained at
+`33e313a56a:scratch/work-first-demo.md`, under this heading. Recorded Started
+plus shared unresolved execution replaced Session-presence sidebar admission;
+37 navigation tests passed. In-memory proof and fixture rendering do not establish
+live-provider continuation. Copied execution grants no takeover. `linear_team_checks`
+was added only to the disposable copy, not the real database; branch draft-schema
+compatibility remains an unresolved live boundary.
 
 ## Live-reader diagnosis — October 12
 
@@ -222,6 +169,43 @@ checkout/Session with abandoned Work. No approval to discard old implementation.
 The captured roster has 12 Tasks; current reads and per-Task evidence are in
 `/tmp/loo462-sidebar-audit/`. No new demo launch until this pass finishes.
 
+### Captured roster and reachable cases
+
+| Task | Evidence requiring an opening path |
+|---|---|
+| LOO-312 | Wanted; checkout and branch absent; no interactive Session |
+| LOO-367 | Canceled but dirty checkout retained; no unfinished interactive Session |
+| lf-12be237 | Dirty CI Task; closed primary and another active elsewhere |
+| lf-9c03797 | Completed but dirty; four unfinished interactive Sessions |
+| LOO-462 | Exact primary; demo Workflow; live/hook-trust boundary |
+| LOO-427 | Failed shipping edge; unfinished conversation with unknown process evidence |
+| LOO-382 | Merged but uncompleted; five unfinished interactive Sessions |
+| LOO-380 | Merged but uncompleted; no unfinished interactive Session |
+| LOO-378 | Explicitly paused; unsettled commits; no unfinished interactive Session |
+| LOO-371 | Merged but uncompleted; no unfinished interactive Session |
+| LOO-330 | Unsettled commits; only completed/headless history |
+| LOO-389 | Dirty; one unfinished old review conversation |
+
+All 12 returned matching Task frames without unavailable readings in the single
+Work stream (`watch-first-results.json`, same audit directory): 35–64 seconds
+per scope, not a missing Workflow reply. This latency is not usable-endpoint proof.
+A redundant second observer was interrupted; it grants no stronger evidence.
+
+`session ensure --prepare` admits and publishes input without a detached provider;
+Desktop then connects through the visible pane. Existing explicit non-prepare CLI
+ensure/replacement semantics remain. Task selection/foreign-choice validation now
+precedes checkout restoration, so a foreign choice cannot restore a folder;
+valid retained conversations still receive missing-checkout recovery. Native first-use trust and existing-client attachment
+still need proof. Review found the prior inline-error change hid recent-Task lookup
+failures before a Task page existed; only a selected matching Task suppresses the
+lookup sheet now. Initial Swift run: 86/88 passed, two assertions exposed that bug.
+
+Git fsck found LOO-312's ten-commit chain from recorded base `102522bc25` to
+`d5c043c13a44dd793ed1efec295f623422f8fa8e`, including installer code and reviewed
+design. Objects exist but branch restoration is not yet performed. Recovery must
+preserve that tip and Task identity, not reset to base. The existing Task checkout
+API restores a retained branch but cannot yet name a recovered commit.
+
 ## CI conversation rate-limit incident — October 12
 
 Jack Heart reported Linear warning flooding made the CI-under-five Task Session
@@ -246,3 +230,6 @@ unverified; do not call another demo ready from this test.
 Review: reuse the existing fallback and shared cooldown; no new retry loop or
 per-Session rate-limit state. This does not prove aggregate live request volume.
 Check: three focused Linear cooldown tests PASS (including five callers/one request); `cargo fmt`, all-target Clippy and diff check PASS. No native relaunch or live provider requests for this check.
+
+Check: Task primary lifecycle plus seven primary-scope tests PASS; 88 Swift WorkDestination/WorkNavigation tests PASS; fmt/all-target Clippy/diff PASS. Earlier launcher-failure fixture exposed a remaining tmux inspection during preparation; preparation now avoids that too. Initial Clippy found 14 test callers needing the new explicit prepare argument; corrected before the final pass. Native launch remains pending.
+Recovery backup: `/tmp/loo462-sidebar-audit/LOO-312-recovered-history.patch`, SHA256 `75dc37dcb326c5760bb6115f585e282d19f4c4d99b101f3cdfb898ce36dde006`; no branch or live Task changed.

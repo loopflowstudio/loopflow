@@ -20,6 +20,7 @@ pub(crate) async fn ensure(
     store: &SharedStore,
     repo: &Path,
     wave: Option<&str>,
+    prepare: bool,
 ) -> Result<SessionRecord> {
     let (scope, mut session) = match wave {
         Some(wave) => {
@@ -39,7 +40,7 @@ pub(crate) async fn ensure(
     let _lock = lock_scope(&scope).await?;
     session.cwd = ensure_scope_worktree(&session.cwd, &scope)?.path;
     let session = store.ensure_primary_session(&scope, None, session).await?;
-    start(store, session).await
+    start(store, session, prepare).await
 }
 
 /// A Task's primary is one of its own conversations: the one already chosen,
@@ -51,10 +52,23 @@ pub(crate) async fn ensure_task(
     repo: &Path,
     task: &str,
     choose: Option<&str>,
+    prepare: bool,
 ) -> Result<SessionRecord> {
     let binding = crate::ops::resolve_work_binding(store, repo, &format!("task:{task}")).await?;
     let crate::durable::WorkRef::Task(id) = &binding.work else {
         unreachable!("a task selector binds a Task");
+    };
+    let scope = PrimaryScope::Task(id.clone());
+    let _lock = lock_scope(&scope).await?;
+    let chosen = match choose {
+        Some(session) => Some(store.choose_task_primary(id, session).await?),
+        None => match store.task_primary(id).await? {
+            Some(primary) => Some(primary),
+            None => match super::most_recent(store, store.task_conversations(id).await?).await? {
+                Some(session) => Some(store.choose_task_primary(id, &session.id).await?),
+                None => None,
+            },
+        },
     };
     if !binding.cwd.try_exists()? {
         // Reuse Task preparation's recorded placement and restoration checks.
@@ -66,21 +80,7 @@ pub(crate) async fn ensure_task(
         })
         .await??;
     }
-    let scope = PrimaryScope::Task(id.clone());
-    let _lock = lock_scope(&scope).await?;
-    let chosen = match choose {
-        Some(session) => Some(session.to_string()),
-        None => {
-            if let Some(primary) = store.task_primary(id).await? {
-                return surface(store, &primary).await;
-            }
-            super::most_recent(store, store.task_conversations(id).await?)
-                .await?
-                .map(|session| session.id)
-        }
-    };
-    if let Some(session) = chosen {
-        let primary = store.choose_task_primary(id, &session).await?;
+    if let Some(primary) = chosen {
         return surface(store, &primary).await;
     }
     anyhow::ensure!(
@@ -90,7 +90,7 @@ pub(crate) async fn ensure_task(
     let session = store
         .ensure_primary_session(&scope, None, task_session(store, &binding, id)?)
         .await?;
-    start(store, session).await
+    start(store, session, prepare).await
 }
 
 /// Give the scope a fresh conversation. The predecessor's provider stops
@@ -130,7 +130,7 @@ pub(crate) async fn replace(store: &SharedStore, id: &str) -> Result<SessionReco
     let session = store
         .ensure_primary_session(&scope, Some(id), successor)
         .await?;
-    start(store, session).await
+    start(store, session, false).await
 }
 
 pub(crate) fn ensure_scope_worktree(
@@ -273,8 +273,10 @@ fn conversation(cwd: &Path, agent: Option<&str>, skill: &str, title: String) -> 
 
 /// Publish the admitted input and launch it unless a launcher already holds
 /// it. A failed start keeps the prepared input for the next caller.
-async fn start(store: &SharedStore, session: LfSession) -> Result<SessionRecord> {
-    let session = if conversation_process_is_running(&session.id).await? {
+async fn start(store: &SharedStore, session: LfSession, prepare: bool) -> Result<SessionRecord> {
+    // A prepared opening acquires no background client. The visible connect
+    // owns workspace admission and provider launch under its Session lock.
+    let session = if prepare || conversation_process_is_running(&session.id).await? {
         session
     } else {
         let id = session.id.clone();
@@ -290,7 +292,8 @@ async fn start(store: &SharedStore, session: LfSession) -> Result<SessionRecord>
             crate::session_record::SessionFlowMembership::Independent,
         )?
     };
-    if capture_is_prepared(&session.artifact_key)?
+    if !prepare
+        && capture_is_prepared(&session.artifact_key)?
         && !conversation_process_is_running(&session.id).await?
     {
         let lf = crate::os_process::resolve_pinned_lf_binary()?;
@@ -362,12 +365,12 @@ mod tests {
             let repo = loopflow_test_support::TestRepo::new();
             let wave = wave(&store, &repo).await;
 
-            let first = ensure(&store, repo.path(), Some("infrastructure"))
+            let first = ensure(&store, repo.path(), Some("infrastructure"), false)
                 .await
                 .unwrap();
             // The simulated launcher refuses a duplicate start, so a second
             // launch attempt would fail this call.
-            let second = ensure(&store, repo.path(), Some("infrastructure"))
+            let second = ensure(&store, repo.path(), Some("infrastructure"), false)
                 .await
                 .unwrap();
 
@@ -395,7 +398,7 @@ mod tests {
 
             // The launcher name derives from an id admitted inside ensure; fail
             // every launcher by admitting first, then failing that name.
-            let admitted = ensure(&store, repo.path(), Some("infrastructure"))
+            let admitted = ensure(&store, repo.path(), Some("infrastructure"), false)
                 .await
                 .unwrap();
             let name = conversation_background_name(&admitted.id);
@@ -404,12 +407,12 @@ mod tests {
                 .lock()
                 .unwrap()
                 .insert(name.clone());
-            assert!(ensure(&store, repo.path(), Some("infrastructure"))
+            assert!(ensure(&store, repo.path(), Some("infrastructure"), false)
                 .await
                 .is_err());
 
             FAILED_CONVERSATION_LAUNCHERS.lock().unwrap().clear();
-            let retried = ensure(&store, repo.path(), Some("infrastructure"))
+            let retried = ensure(&store, repo.path(), Some("infrastructure"), false)
                 .await
                 .unwrap();
             assert_eq!(retried.id, admitted.id);
@@ -425,7 +428,7 @@ mod tests {
             let store = home.store().await;
             let repo = loopflow_test_support::TestRepo::new();
             wave(&store, &repo).await;
-            let first = ensure(&store, repo.path(), Some("infrastructure"))
+            let first = ensure(&store, repo.path(), Some("infrastructure"), false)
                 .await
                 .unwrap();
             let previous = store.session(&first.id).await.unwrap().unwrap();
@@ -446,7 +449,7 @@ mod tests {
             // A repeat after a lost response names the replaced predecessor.
             assert_eq!(replace(&store, &first.id).await.unwrap().id, successor.id);
             assert_eq!(
-                ensure(&store, repo.path(), Some("infrastructure"))
+                ensure(&store, repo.path(), Some("infrastructure"), false)
                     .await
                     .unwrap()
                     .id,
@@ -463,8 +466,15 @@ mod tests {
             let store = home.store().await;
             let repo = loopflow_test_support::TestRepo::new();
 
-            let first = ensure(&store, repo.path(), None).await.unwrap();
-            let second = ensure(&store, repo.path(), None).await.unwrap();
+            let first = ensure(&store, repo.path(), None, true).await.unwrap();
+            let prepared = store.session(&first.id).await.unwrap().unwrap();
+            assert!(prepared.input_published);
+            assert!(super::capture_is_prepared(&prepared.artifact_key).unwrap());
+            assert!(!CONVERSATION_LAUNCHERS
+                .lock()
+                .unwrap()
+                .contains(&conversation_background_name(&first.id)));
+            let second = ensure(&store, repo.path(), None, false).await.unwrap();
 
             assert_eq!(first.id, second.id);
             let session = store.session(&first.id).await.unwrap().unwrap();
@@ -475,13 +485,13 @@ mod tests {
             let ambient_wave = wave(&store, &repo).await;
             std::env::set_var("LF_WAVE_ID", ambient_wave.id().as_str());
             assert_eq!(
-                ensure(&store, repo.path(), None).await.unwrap().id,
+                ensure(&store, repo.path(), None, false).await.unwrap().id,
                 first.id
             );
 
             // Explicit selection also ignores stale ambient Wave context.
             std::env::set_var("LF_WAVE_ID", "unknown-wave");
-            let wave = ensure(&store, repo.path(), Some("infrastructure"))
+            let wave = ensure(&store, repo.path(), Some("infrastructure"), false)
                 .await
                 .unwrap();
             assert_ne!(wave.id, first.id);
@@ -489,7 +499,7 @@ mod tests {
             let successor = replace(&store, &first.id).await.unwrap();
             assert_ne!(successor.id, first.id);
             assert_eq!(
-                ensure(&store, repo.path(), None).await.unwrap().id,
+                ensure(&store, repo.path(), None, false).await.unwrap().id,
                 successor.id
             );
         });
@@ -505,7 +515,7 @@ mod tests {
             wave(&store, &repo).await;
             let mut workspaces = Vec::new();
             for scope in [None, Some("infrastructure")] {
-                let first = ensure(&store, repo.path(), scope).await.unwrap();
+                let first = ensure(&store, repo.path(), scope, false).await.unwrap();
                 let session = store.session(&first.id).await.unwrap().unwrap();
                 assert_ne!(session.cwd, repo.path());
                 std::fs::create_dir_all(session.cwd.join("scratch")).unwrap();
@@ -550,7 +560,7 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            let first = ensure(&store, repo.path(), None).await.unwrap();
+            let first = ensure(&store, repo.path(), None, false).await.unwrap();
             let admitted = store.session(&first.id).await.unwrap().unwrap();
             assert_eq!(admitted.id, previous.id);
             assert_eq!(admitted.title, previous.title);

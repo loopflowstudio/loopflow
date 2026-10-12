@@ -356,6 +356,12 @@ impl Cli {
 }
 
 #[derive(Subcommand, Debug)]
+pub enum ScratchCommand {
+    /// Remove scratch files added in this branch's diff, keeping existing files and edits
+    Clear,
+}
+
+#[derive(Subcommand, Debug)]
 pub enum Commands {
     /// Pull request lifecycle
     Pr {
@@ -369,6 +375,11 @@ pub enum Commands {
     },
     /// Merge upstream into the current branch (default: main or stack parent)
     Sync(SyncArgs),
+    /// Manage working notes
+    Scratch {
+        #[command(subcommand)]
+        cmd: ScratchCommand,
+    },
     /// Commit changes
     Commit {
         #[arg(short = 'm', long = "message")]
@@ -1539,7 +1550,7 @@ pub enum PrCommand {
         #[arg(long = "body")]
         body: Option<String>,
     },
-    /// Prepare a PR to land: sync, apply configured scratch cleanup and mark ready.
+    /// Prepare a PR to land: sync, clear committed scratch additions and mark ready.
     /// Leave it for manual merge without changing reviewers or assignees.
     Submit {
         #[arg(long)]
@@ -2134,7 +2145,7 @@ pub enum WtCommand {
         /// Print the placement plan without creating a worktree
         #[arg(long)]
         plan: bool,
-        /// Keep this workspace after delivery and keep scratch local
+        /// Keep this workspace after delivery
         #[arg(long)]
         persistent: bool,
     },

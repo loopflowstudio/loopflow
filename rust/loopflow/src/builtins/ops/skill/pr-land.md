@@ -6,8 +6,7 @@ Land the current change through Loopflow's delivery operation.
 
 Inspect the intended outcome, diff, proof and repository delivery requirements.
 Fix readiness gaps and preserve useful design conclusions before any configured
-scratch cleanup. Scratch deletion requires `clear_scratch_on_land: true` in
-repository configuration; never enable it merely to make delivery pass.
+scratch cleanup. Cleanup removes committed additions while preserving existing scratch files.
 Keep unrelated active contributions out of this change. Preserve accepted later
 checks and their exact unverified outcomes in durable PR copy before cleanup;
 They must remain readable after merge without scratch.

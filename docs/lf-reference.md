@@ -143,7 +143,7 @@ Push and create or update a draft PR, then open its GitHub page. Existing ready 
 
 ## lf pr submit
 
-Prepare a PR to land: sync, apply configured scratch cleanup and mark ready. Leave it for manual merge without changing reviewers or assignees
+Prepare a PR to land: sync, clear committed scratch additions and mark ready. Leave it for manual merge without changing reviewers or assignees
 
 | Argument | What it does |
 |---|---|
@@ -210,7 +210,7 @@ Create a low-level worktree following the repository's existing layout
 |---|---|
 | `<name>` | Worktree name |
 | `--plan` | Print the placement plan without creating a worktree Default: false. |
-| `--persistent` | Keep this workspace after delivery and keep scratch local Default: false. |
+| `--persistent` | Keep this workspace after delivery Default: false. |
 | `--help / -h` | Print help |
 
 ## lf wt switch
@@ -1942,3 +1942,7 @@ Run a skill explicitly
 | Argument | What it does |
 |---|---|
 | `--help / -h` | Print help |
+
+## lf scratch clear
+
+Remove committed scratch additions relative to the Task or branch base. Existing files, edits and renames remain. Checkpoint intended notes before clearing.

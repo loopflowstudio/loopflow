@@ -1,6 +1,6 @@
 # How lf breaks for friends
 
-Draft implementation for Jack Heart's review — 2026-10-11.
+Delivery authorized by Jack Heart — 2026-10-12.
 
 ## What to build
 
@@ -28,14 +28,15 @@ if your repo has scratch/FOO, pre-existing, no worries.” This supersedes this
 branch's repository-opt-in cleanup proposal as the intended end state; the
 opt-in code below describes the current implementation, not accepted policy.
 
-Follow the companion's implementation before integrating delivery changes here;
-do not build a competing scratch policy. Its working tree already selects
-branch-added paths through `git::scratch::{base, added}` and preserves existing
-files and edits. Branch-added is the observed mechanism, not yet proof of
-Flow authorship. Its design notes still describe an older opt-in policy.
-Reconcile the obsolete `clear_scratch_on_land` setting and CI classification
-with the companion's finished contract before delivery. Keep the pre-existing
-tracked/untracked-file and stacked-work preservation acceptance cases.
+Gate imported the companion's committed scratch implementation from
+`levels-of-lf` at `5c6ceac565`, without editing or launching that checkout.
+`git::scratch::{base, added}` and `ops::scratch::clear` are the single cleanup
+path, exposed through `lf scratch clear` and delivery. Existing files, edits,
+renames and stacked parent files remain ordinary repository content. Only
+committed additions relative to the Task/base are disposable; this is a Git-diff
+proxy for Flow-added notes, not an authorship registry. The fallback base follows
+Git tracking. The obsolete opt-in and global CI job-name exemption are removed.
+This repository's CI owns its stricter scratch-free landing candidate policy.
 
 ## Scope and decisions
 
@@ -68,8 +69,8 @@ was delivered.
    config. Observe the established parent; reuse existing branches in place.
 2. Fail a checkout hook. Observe an error with its output and the retained path.
    Reject a normal push. Observe unchanged remote history and preserved local work.
-3. Preserve existing tracked and untracked scratch by default; opt in to cleanup
-   only in a repository that intentionally treats that directory as disposable.
+3. Clear committed scratch additions during delivery while preserving existing
+   files, edits, renames and uncommitted files during explicit cleanup.
 4. Publish a PR, then explicitly request `alice` and `acme/platform` with
    `lf pr request-review -r alice -r acme/platform`. `lf pr reviews` reads the
    requests, aggregate decision and review commits. `submit` leaves assignments
@@ -88,9 +89,6 @@ No live reviewer requests or merge mutations were performed for this review.
   `inferred_worktree_dir(repo, component)` infers a common parent from at least two
   live branch-bearing non-primary worktrees. Only genuine repository-prefixed
   siblings retain `<repo>.`; other inferred layouts use the flat lf name.
-- `Config.clear_scratch_on_land: bool` defaults false. `clear_scratch` reads only
-  repository config; persistent workspace preservation remains. This repository
-  opts in to its existing scratch-clear convention.
 - `Config.merge_method: Option<MergeMethod>` is a repository-only preference.
   `MergeMethods::select` honors it within GitHub's allowed methods, otherwise
   chooses squash, merge, then rebase. A queue supplies its own strategy.
@@ -127,8 +125,7 @@ semantics; removing fallback does not claim all history rewriting is gone.
 
 No assignment treated as review; no stale review treated as current approval;
 no provider read failure treated as passing; no protection bypass; no successful
-handoff reported as merge. Personal configuration cannot grant scratch deletion
-or override repository merge policy.
+handoff reported as merge. Repository merge policy remains separate from personal configuration.
 
 A separate Git directory has no Git backlink to its original checkout. From that
 checkout lf uses its actual root; from a linked checkout it uses an available
@@ -150,10 +147,6 @@ Later increments, not filed or launched:
 - **Checkout completeness (14/17):** prove sparse patterns, initialized submodules,
   LFS filters and repo setup through a useful build. Hook failure truthfulness
   does not supply dependencies or initialize missing content.
-- **CI preparation policy:** remove the global special treatment of a check named
-  `scratch-clear` in `CiCheck::land_time_precondition`. It still leaks this repo's
-  convention into repair selection. Preserve intentional preparation boundaries
-  through repository-owned policy, without duplicating required-check authority.
 - **Review feedback:** inline unresolved threads and revision-aware remediation.
   This cut reads submissions, not every discussion or a computed “safe to merge.”
 - **Host reach:** select a real second host, then adapt identity/publication/read/
@@ -175,8 +168,8 @@ live review mutation required. CI retains the complete platform/release matrix.
 
 Review finding: keeping review state at the provider avoids a second approval
 model. Removing self-assignment fixes the misleading handoff; leaving queue
-strategy unset preserves host authority. The remaining hardcoded CI check and
-remote-role assumptions are explicit follow-ups rather than compatibility claims.
+strategy unset preserves host authority. The global hardcoded CI check exemption is removed; remote-role assumptions
+remain explicit limits.
 
 Check: canonical Wave migration — isolated Rust Wave/store/context/discovery/sync/DTO suites: 135 passed; Python path consumers: 63 passed; standalone Swift parser fixture passed; fmt, Clippy all-targets and diff checks passed; full Desktop tests deferred to CI (ViewInspector/Ghostty dependencies unavailable).
 
@@ -233,3 +226,18 @@ lookalike directory. Review found and corrected metrics root resolution for
 the deeper path, and retained historical revision paths while updating live links.
 Headless verification: focused Rust Wave/config/context/metrics tests, Desktop
 parser tests where available, Python path-consumer tests, formatting and Clippy.
+
+## Gate review — 2026-10-12
+
+Main integrated through `6935bfbadb` before final checks. Conflict resolution
+retains current CLI/provider APIs and the canonical `.lf/wave` paths. Review
+caught a newly shared Task base resolver: explicit stacked parent branches must
+remain explicit while the default integration base follows Git tracking.
+Scratch cleanup uses the companion implementation; no second ownership system.
+The incoming three-space edit is excluded and preserved in
+`/tmp/lf-how-will-lf-break-pre-ship` alongside all original scratch artifacts.
+
+Review also caught a nested checkout lock on explicit integration sync. The CLI
+now refreshes the default upstream once before entering preservation; explicit
+local targets still avoid unrelated network refresh. Python checkout fixtures
+exercise the unchanged single-snapshot contract.

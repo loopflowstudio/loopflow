@@ -555,15 +555,11 @@ cross-harness exports do not claim to enforce or translate native controls.
 
 ## Scratch cleanup during delivery
 
-```yaml
-# .lf/config.yaml — repository policy, not personal configuration
-clear_scratch_on_land: true
-```
-
-Scratch is preserved by default. Opt in only when this repository treats all
-`scratch/` contents as disposable lf working notes. Delivery then clears that
-directory except `.gitkeep`; persistent workspaces still retain it. A personal
-configuration setting cannot enable deletion in another repository.
+Delivery clears committed scratch additions relative to the Task's base (or the
+branch's integration base). Existing files, edits and renames remain repository
+content. `scratch/.gitkeep` is preserved. Use `lf scratch clear` for the same
+explicit cleanup; checkpoint intended notes first. Uncommitted files are preserved
+by this command. Delivery checkpoints the intended change before cleanup.
 
 ## Merge policy
 

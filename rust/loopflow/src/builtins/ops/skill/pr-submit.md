@@ -9,7 +9,7 @@ Preserve unrelated active contributions. Fix clear readiness gaps and retain
 useful design conclusions and accepted later checks in durable PR copy before
 scratch cleanup.
 
-Run `lf pr submit --create-pr`. It stages the change, syncs, applies repository-configured scratch cleanup,
+Run `lf pr submit --create-pr`. It stages the change, syncs, clears committed scratch additions,
 creates or updates the PR and marks it ready, preserving reviewers and assignees. It consumes
 valid prepared copy or generates it through pr-message. Supply explicit copy
 only for an intentional override, then check the returned scope and proof claims.

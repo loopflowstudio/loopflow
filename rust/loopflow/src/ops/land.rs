@@ -65,7 +65,7 @@ fn prepare_pr(
         ));
     }
     crate::ops::pr::reject_control_plane_pr(&repo_root)?;
-    crate::ops::commit::prepare_persistent_publication(&repo_root)?;
+    crate::ops::commit::restart_landed_persistent(&repo_root)?;
     if !options.local && !crate::ops::pr::gh_available() {
         return Err(OpsError::Message("gh CLI not found".to_string()));
     }
@@ -167,7 +167,7 @@ fn prepare_pr(
         ));
     }
     if matches!(integration, Integration::Required) {
-        clear_scratch(&repo_root, progress)?;
+        crate::ops::scratch::clear(&repo_root)?;
     }
     crate::ops::task::require_task_pr_range_nonempty(&repo_root)?;
     let main_branch = match integration {
@@ -523,72 +523,6 @@ pub(crate) fn resolve_repos(repo: &Path, worktree: Option<&str>) -> OpsResult<(P
     Ok((repo_root, main_repo))
 }
 
-/// Clear `scratch/` down to `.gitkeep` only with explicit repository opt-in.
-///
-/// This step is what greens the `scratch-clear` required check, which is why
-/// that check is a *land-time precondition* and no repair turn can act on it —
-/// see [`crate::work::task::CiCheck::land_time_precondition`], which keeps the landing
-/// supervisor from launching `ci-fix` against work only this function can do.
-fn clear_scratch(repo: &Path, progress: &impl Progress) -> OpsResult<()> {
-    let cleanup = crate::config::load_repo_config(repo)
-        .map_err(|error| OpsError::Message(error.to_string()))?
-        .is_some_and(|config| config.clear_scratch_on_land);
-    if !cleanup || crate::git::worktrees::is_persistent_worktree(repo)? {
-        return Ok(());
-    }
-    let scratch = repo.join("scratch");
-    let gitkeep = scratch.join(".gitkeep");
-
-    // Ensure scratch/ always exists.
-    if !scratch.exists() {
-        std::fs::create_dir_all(&scratch)?;
-    }
-
-    let mut removed = false;
-    for entry in std::fs::read_dir(&scratch)? {
-        let entry = entry?;
-        let path = entry.path();
-        // Preserve .gitkeep so the directory survives git operations.
-        if path == gitkeep {
-            continue;
-        }
-        if path.is_dir() {
-            std::fs::remove_dir_all(&path)?;
-        } else {
-            std::fs::remove_file(&path)?;
-        }
-        removed = true;
-    }
-
-    // Ensure .gitkeep exists so scratch/ is tracked even when empty.
-    if !gitkeep.exists() {
-        std::fs::write(&gitkeep, "")?;
-        removed = true; // needs staging
-    }
-
-    if !removed {
-        return Ok(());
-    }
-
-    progress.status("Clearing scratch/...");
-    crate::git::stage_all(repo, &|_| {})?;
-    if has_staged_changes(repo)? {
-        crate::git::commit(repo, "lf land: clear scratch/", &|_| {})?;
-    }
-
-    Ok(())
-}
-
-fn has_staged_changes(repo: &Path) -> OpsResult<bool> {
-    let status = Command::new("git")
-        .arg("diff")
-        .arg("--cached")
-        .arg("--quiet")
-        .current_dir(repo)
-        .status()?;
-    Ok(!status.success())
-}
-
 fn read_worktree_state(repo: &Path) -> OpsResult<String> {
     let output = Command::new("git")
         .args(["status", "--porcelain=v1"])
@@ -674,33 +608,5 @@ fn current_pr_url(repo: &Path) -> OpsResult<Option<String>> {
         Ok(None)
     } else {
         Ok(Some(url))
-    }
-}
-
-#[cfg(test)]
-mod scratch_tests {
-    use super::clear_scratch;
-    use crate::ops::NullProgress;
-    use loopflow_test_support::TestRepo;
-    use std::fs;
-
-    #[test]
-    fn delivery_preserves_existing_scratch_without_repo_opt_in() {
-        let repo = TestRepo::new();
-        repo.create_file("scratch/research.md", "project data");
-        repo.stage_all();
-        repo.commit("existing research");
-        repo.create_file("scratch/local.md", "uncommitted research");
-        let before = repo.head_sha();
-        clear_scratch(repo.path(), &NullProgress).unwrap();
-        assert_eq!(
-            fs::read_to_string(repo.path().join("scratch/research.md")).unwrap(),
-            "project data"
-        );
-        assert_eq!(
-            fs::read_to_string(repo.path().join("scratch/local.md")).unwrap(),
-            "uncommitted research"
-        );
-        assert_eq!(repo.head_sha(), before);
     }
 }

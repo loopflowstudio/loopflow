@@ -1,5 +1,4 @@
 # Definitions do not activate jobs. Explicit cron sync installs on the placed Machine.
-clear_scratch_on_land: true
 crons:
 - name: telemetry-daily
   command: [--wave, infrastructure, --batch, flow, telemetry-daily]

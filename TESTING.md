@@ -2,7 +2,7 @@
 
 Publish checkpoints with working notes in `scratch/`; hosted CI defers the full
 matrix until scratch is clear. `lf pr submit`, `lf land`, and `lf pr land`
-clear scratch before pushing a landing candidate. Scratch-free PRs, including
+clear committed scratch additions before pushing a landing candidate. Scratch-free PRs, including
 small changes and Dependabot updates, run the full test matrix in parallel.
 Implement/compress only build changed code and run its focused test. Gate owns
 affected suites and automated acceptance once; see the verification cadence in
@@ -15,6 +15,10 @@ and the matrix jobs skip. That is not a passing test result. The required merge
 queue always rejects scratch artifacts and runs full tests before merging.
 Missing scratch, classifier failures, and unexpected skipped candidate jobs
 still fail the aggregate. Restoring scratch on a later PR head defers its tests.
+
+The repository owns the `scratch-clear` classifier; the native CLI does not exempt
+a failing required check by name. Delivery cleanup preserves existing scratch
+content, so repositories retaining it must define their own candidate policy.
 
 A new PR update cancels the previous CI run for that PR. Main and merge-group
 runs remain independent.

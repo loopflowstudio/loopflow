@@ -393,7 +393,7 @@ pub(crate) fn run_sync_in(
     let default = get_default_branch(repo_root)?;
     let upstream = crate::git::integration_base(repo_root)?;
     let on_main = current_branch(repo_root)?.as_deref() == Some(&default);
-    if !plan_only && onto.is_none() {
+    if !plan_only && (onto.is_none() || (on_main && onto == Some(upstream.as_str()))) {
         crate::ops::checkout::refresh_main(repo_root, progress)?;
         if on_main && onto.is_none_or(|target| target == upstream) {
             progress.status("Main is current; unpublished commits and edits remain local.");

@@ -934,14 +934,11 @@ They display a workspace without gaining Task membership. Moved checkouts are
 rediscovered; missing checkouts recover committed branch state. Live conversations
 keep their placement until their attached LfProcess is idle.
 
-Persistent workspaces retain scratch locally through commit, sync, publication and
-landing. A scratch-only selection with no committable changes explains that policy
-and suggests moving durable notes outside `scratch/`. In ordinary Task worktrees,
-selected scratch files are committed. Selected-path commits preserve unrelated
-staged edits. Publication pushes
-the committed range, leaving later local edits alone. Inspect the complete range
-before publishing. PR landing preserves scratch unless the repository opts in
-with `clear_scratch_on_land: true`; persistent workspaces always retain it.
+Scratch files are ordinary repository content during commit, sync and publication.
+Selected-path commits preserve unrelated staged edits. Publication pushes the
+committed range, leaving later local edits alone. Delivery and `lf scratch clear`
+remove committed scratch additions relative to the Task's base, preserving
+existing files, edits and renames. Inspect the complete range before publishing.
 
 If a sync resolver creates a file where an untracked file was stashed, sync restores
 the original and keeps the resolver's file beside it as `<name>.lf-sync-1` (or the

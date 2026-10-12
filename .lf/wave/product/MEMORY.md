@@ -36,7 +36,7 @@ LOO-389 comments failed: unbound Initiative.
   `4cde15a0d3` removes Task inventory hashes/reads, not capture receipts.
   Installed input exceeds budget; rendering proves no adoption.
 
-[LOO-427's comparison](../../docs/reviews/terminal-command-comparison.md) records
+[LOO-427's comparison](../../../docs/reviews/terminal-command-comparison.md) records
 command dispositions. Jack folded LOO-430/431/432 into LOO-427: identity, window
 control and terminal I/O in one diff. October 8: design approved; implementation
 authorized through demo review. Owned cmux probe cleaned up.
@@ -156,7 +156,7 @@ syntax and Desktop result schemas from Clap/Rust DTOs; installed support and cur
 Work eligibility stay separate. Native proof remains. LOO-397 is unstarted.
 Jack authorized Product follow-ups LOO-452 (shortcut customization, beyond LOO-403)
 and LOO-453 (readiness/events); research:
-[the comparison](../../docs/reviews/terminal-command-comparison.md#rex-composition-and-discoverability-2026-10-10).
+[the comparison](../../../docs/reviews/terminal-command-comparison.md#rex-composition-and-discoverability-2026-10-10).
 
 Jack Heart (October 10) accepted Work-named repository/Wave/Task tabs; close hides.
 `39698225f3` keys registry/targets by Work with shared conversation state;
@@ -228,7 +228,7 @@ progress. Release 0.13.9 revision, owners and earlier evidence:
 
 Native resume repeated the **Loopflow operating guide** once; first-content naming
 is only a hypothesis. Preserve native hooks/titles. Remaining trials keep LOO-421
-open; [findings](../../docs/reviews/terminal-host-trial.md) and
+open; [findings](../../../docs/reviews/terminal-host-trial.md) and
 `31ec76b01:wave/product/MEMORY.md`, this heading, retain failed attempts and limits.
 
 ## Live Home reconciliation
@@ -811,7 +811,7 @@ rewrite the chapter's authored KRs or claim native/provider acceptance.
 Keep hierarchy navigation and Task-workspace interaction as separate observations,
 with exact identities, source/build/population, rendered endpoint, retained input
 and failed attempts. The opt-in desktop-performance runner and hash-verified
-[baseline](../../scripts/benchmarks/desktop-performance/20260924-capture-input/README.md)
+[baseline](../../../scripts/benchmarks/desktop-performance/20260924-capture-input/README.md)
 remain useful instruments: synthetic Work, three owned cat PTYs, forced bitmap/text
 capture and PTY replies. They establish neither compositor hitches nor provider
 continuation. Its Monitor scenarios no longer compare because that pane was deleted.

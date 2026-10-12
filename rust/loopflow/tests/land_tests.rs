@@ -439,36 +439,29 @@ fn land_cleans_up_remote_branch() {
 }
 
 #[test]
-fn land_clears_scratch_and_preserves_gitkeep() {
+fn land_cleans_added_scratch_and_retains_existing_edits() {
     let _env = EnvGuard::new(&[]);
     let repo = TestRepo::new();
-    repo.create_file(".lf/config.yaml", "clear_scratch_on_land: true\n");
+    repo.create_file("scratch/research.md", "original research");
+    repo.create_file("scratch/untouched.md", "keep this");
+    repo.create_file("scratch/renamed.md", "renamed research");
+    repo.create_file("scratch/.gitkeep", "");
     repo.stage_all();
-    repo.commit("opt in to scratch cleanup");
+    repo.commit("Existing repository research");
     repo.push();
     repo.create_branch("feature");
     repo.create_file("feature.txt", "feature");
+    repo.create_file("scratch/research.md", "updated research");
+    fs::rename(
+        repo.path().join("scratch/renamed.md"),
+        repo.path().join("scratch/new-name.md"),
+    )
+    .unwrap();
+    repo.create_file("scratch/notes.md", "review notes");
+    repo.create_file("scratch/nested/new [notes].md", "temporary notes");
     repo.stage_all();
-    repo.commit("feature work");
+    repo.commit("Feature and notes");
     push_branch(&repo, "feature");
-
-    let scratch = repo.path().join("scratch");
-    fs::create_dir_all(scratch.join("nested")).expect("create nested scratch dir");
-    fs::write(scratch.join("notes.md"), "review notes").expect("write scratch note");
-    fs::write(scratch.join("nested").join("todo.md"), "todo").expect("write nested scratch note");
-    let status = Command::new("git")
-        .args(["add", "scratch"])
-        .current_dir(repo.path())
-        .status()
-        .expect("git add scratch");
-    assert!(status.success(), "git add scratch should succeed");
-    let status = Command::new("git")
-        .args(["commit", "-m", "add scratch docs"])
-        .current_dir(repo.path())
-        .status()
-        .expect("git commit scratch");
-    assert!(status.success(), "git commit scratch should succeed");
-
     land(
         repo.path(),
         &LandOptions {
@@ -484,19 +477,22 @@ fn land_clears_scratch_and_preserves_gitkeep() {
         },
         &NullProgress,
     )
-    .expect("land should clear scratch");
-
-    let scratch_entries = fs::read_dir(repo.path().join("scratch"))
-        .expect("read scratch after land")
-        .map(|entry| {
-            entry
-                .expect("scratch entry")
-                .file_name()
-                .to_string_lossy()
-                .into_owned()
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(scratch_entries, vec![".gitkeep"]);
+    .unwrap();
+    assert_eq!(
+        fs::read_to_string(repo.path().join("scratch/research.md")).unwrap(),
+        "updated research"
+    );
+    assert_eq!(
+        fs::read_to_string(repo.path().join("scratch/untouched.md")).unwrap(),
+        "keep this"
+    );
+    assert_eq!(
+        fs::read_to_string(repo.path().join("scratch/new-name.md")).unwrap(),
+        "renamed research"
+    );
+    assert!(repo.path().join("scratch/.gitkeep").exists());
+    assert!(!repo.path().join("scratch/notes.md").exists());
+    assert!(!repo.path().join("scratch/nested/new [notes].md").exists());
 }
 
 #[test]
@@ -671,9 +667,6 @@ fi
 #[test]
 fn land_preserves_checkpoint_history_and_pushes_the_final_tree_once() {
     let repo = TestRepo::new();
-    repo.create_file(".lf/config.yaml", "clear_scratch_on_land: true\n");
-    repo.stage_all();
-    repo.commit("opt in to scratch cleanup");
     repo.push();
     repo.create_branch("feature");
     repo.create_file("first.txt", "first");
@@ -772,9 +765,6 @@ fn land_preserves_checkpoint_history_and_pushes_the_final_tree_once() {
 #[test]
 fn land_refuses_when_clearing_scratch_leaves_no_authored_change() {
     let repo = TestRepo::new();
-    repo.create_file(".lf/config.yaml", "clear_scratch_on_land: true\n");
-    repo.stage_all();
-    repo.commit("opt in to scratch cleanup");
     repo.push();
     repo.create_file("scratch/.gitkeep", "");
     repo.stage_all();

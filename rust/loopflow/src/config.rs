@@ -277,10 +277,6 @@ pub struct Config {
     #[serde(default = "default_land")]
     pub land: String,
 
-    /// Repository-only opt-in to discard scratch contents during delivery.
-    #[serde(default)]
-    pub clear_scratch_on_land: bool,
-
     /// Repository-only merge preference; absent chooses an allowed method.
     #[serde(default)]
     pub merge_method: Option<MergeMethod>,
@@ -374,7 +370,6 @@ impl Default for Config {
             chrome: false,
             pr: false,
             land: default_land(),
-            clear_scratch_on_land: false,
             merge_method: None,
             context: Vec::new(),
             exclude: Vec::new(),

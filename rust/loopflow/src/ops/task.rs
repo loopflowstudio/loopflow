@@ -1035,18 +1035,6 @@ async fn finish_task_checkout(store: &SharedStore, task: &Task) -> OpsResult<()>
             TaskEventKind::CheckoutReady { .. } | TaskEventKind::PrStarted { .. }
         )
     }) {
-        // The first child commit owns the deletion. A retry after that commit
-        // but before CheckoutReady must preserve any notes the child has since made.
-        if task.parent_pr_id.is_some() && rev_parse(task.worktree()?, "HEAD")? == task.base_commit {
-            git_output_bytes(
-                task.worktree()?,
-                &["rm", "-r", "-f", "--ignore-unmatch", "--", "scratch"],
-            )?;
-            git_output_bytes(
-                task.worktree()?,
-                &["commit", "--allow-empty", "-m", "Clear inherited scratch"],
-            )?;
-        }
         store
             .append_task_event(
                 &task.id,
@@ -2230,6 +2218,16 @@ fn resolve_upstream_base(repo: &Path, default_branch: &str) -> OpsResult<(String
     let base_commit = rev_parse(repo, &base_ref)
         .map_err(|error| task_error(format!("failed to resolve task base {base_ref}: {error}")))?;
     Ok((base_ref, base_commit))
+}
+
+/// Reuse the Task's recorded diff base, including a stacked parent.
+pub(crate) fn task_diff_base(repo: &Path) -> OpsResult<Option<String>> {
+    block_on_task(async move {
+        match resolve_managed_task(repo).await? {
+            ManagedTask::Managed { task, .. } => Ok(Some(task.base_commit.clone())),
+            ManagedTask::Unmanaged => Ok(None),
+        }
+    })
 }
 
 /// Refresh the Task's comparison base from current Git ancestry before push.

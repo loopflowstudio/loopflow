@@ -388,8 +388,10 @@ Release owns re-entry leases, transfer deadlines and pending-version lessons.
 
 #1459's exact-reflog repair shipped in v0.13.5; history:
 `cad03fe6d:wave/infrastructure/MEMORY.md`. October 11 lf-cb9012a supersedes
-its ancestry veto in source: Jack Heart requested repair through publication,
-without landing. Current Git ancestry owns PR comparison; saved placement cannot
+its ancestry veto in source. Jack Heart subsequently authorized landing #1533
+after resolving main conflicts (`7689d642`); this gate does not establish delivery.
+The [durable review](../../docs/reviews/stale-pr-bases.md) preserves the 5 Whys
+and refusal inventory. Current Git ancestry owns PR comparison; saved placement cannot
 classify commits as foreign. Preserve every commit. Stack forks still own squash-parent sync;
 refreshing them during publication can restore files main deleted. Disposable
 CLI proofs pass; installed Etude and hosted acceptance remain unproved.

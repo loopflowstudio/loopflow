@@ -197,7 +197,7 @@ pub fn main_repo_root(repo: &Path) -> Result<PathBuf, GitError> {
         })
 }
 
-/// The worktree directory for an identity: `<parent>/<repo>.<dir_component>`.
+/// Follow an established worktree layout, defaulting to `<parent>/<repo>.<name>`.
 /// The `/`-scoped branch never reaches disk — only the flat dir component does.
 pub fn worktree_dir(repo: &Path, id: &WorktreeName) -> PathBuf {
     dir_for_component(repo, id.dir_component())
@@ -205,6 +205,9 @@ pub fn worktree_dir(repo: &Path, id: &WorktreeName) -> PathBuf {
 
 fn dir_for_component(repo: &Path, component: &str) -> PathBuf {
     let repo_root = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
+    if let Some(path) = inferred_worktree_dir(&repo_root, component) {
+        return path;
+    }
     let repo_name = repo_root
         .file_name()
         .and_then(|n| n.to_str())
@@ -213,6 +216,30 @@ fn dir_for_component(repo: &Path, component: &str) -> PathBuf {
         .parent()
         .unwrap_or(repo_root.as_path())
         .join(format!("{repo_name}.{component}"))
+}
+
+fn inferred_worktree_dir(repo: &Path, component: &str) -> Option<PathBuf> {
+    let worktrees = list_porcelain(repo).ok()?;
+    let mut layout = None;
+    let mut examples = 0;
+    for (path, branch) in &worktrees {
+        if path == repo || !path.is_dir() {
+            continue;
+        }
+        let Some(branch) = branch else { continue };
+        // A shared parent and a shared prefix before each branch's leaf are
+        // evidence of a layout. Conflicting examples never select a majority.
+        let leaf = branch.rsplit('/').next()?;
+        let prefix = path.file_name()?.to_str()?.strip_suffix(leaf)?;
+        let candidate = (path.parent()?, prefix);
+        if layout.is_some_and(|existing| existing != candidate) {
+            return None;
+        }
+        layout = Some(candidate);
+        examples += 1;
+    }
+    let (directory, prefix) = layout.filter(|_| examples >= 2)?;
+    Some(directory.join(format!("{prefix}{component}")))
 }
 
 /// The worktree directory for a branch or local name. Invalid flat names use a
@@ -1310,7 +1337,7 @@ pub fn prune_worktrees(
     Ok(report)
 }
 
-/// Create a local named sibling worktree; the caller owns publishing its branch.
+/// Create a local named worktree; the caller owns publishing its branch.
 ///
 /// Source selection belongs to the caller. Wave and Project runtimes use the canonical
 /// main checkout; Task placement uses [`plan_placement`].

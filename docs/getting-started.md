@@ -17,7 +17,7 @@ Default install location is `~/.local/bin`. Override with `LF_INSTALL_DIR=/path`
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex), or [OpenCode](https://github.com/anomalyco/opencode), signed in | Every run. Loopflow uses the one you have; these have their own cost |
 | `git`, and a project in a git repository | Every run |
 | [GitHub CLI](https://cli.github.com) (`gh`), signed in | Pull requests |
-| A [Linear](https://linear.app) workspace | Tasks and Waves |
+| A [Linear](https://linear.app) workspace | Optional Linear-backed planning; planning defaults to Git |
 
 A single prompt (`lf debug -c`, `lf : "..."`) needs only the first three.
 
@@ -81,6 +81,24 @@ lf operate                 # review and operate the repository’s open work
 lf : "fix the typo in README"
 lf : "add type hints to utils.py"
 ```
+
+### Worktree placement
+
+```bash
+lf wt create fix-login
+lf wt switch fix-login
+```
+
+If at least two existing, live worktrees share a directory and the same naming
+prefix before their branch's last segment, lf follows that layout. For example,
+`.worktrees/search` and `.worktrees/payments` on branches `feature/search` and
+`feature/payments` place the new checkout at `.worktrees/fix-login`. No lf
+configuration is needed. Branch naming remains `<author>/fix-login`.
+
+With fewer examples or conflicting layouts, lf uses its default sibling path,
+`../<repo>.fix-login`. Detached and missing checkouts do not establish a layout.
+Task placement reuses an existing branch checkout wherever it lives; discovery
+never moves existing worktrees.
 
 ### Context flags
 

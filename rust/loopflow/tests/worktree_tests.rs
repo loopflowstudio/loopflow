@@ -4,11 +4,150 @@ use std::time::{Duration, SystemTime};
 use std::{fs, path::PathBuf};
 
 use loopflow::git::worktrees::{
-    create_named_worktree, list_worktrees, prune_worktrees, push_branch_with_upstream,
-    schedule_upstream_sync, sibling_worktree_name_with_main, WorktreePrunePolicy,
+    create_named_worktree, list_worktrees, plan_placement, prune_worktrees,
+    push_branch_with_upstream, schedule_upstream_sync, sibling_worktree_name_with_main,
+    PlacementStrategy, WorktreePrunePolicy, WorktreeSegment,
 };
 use loopflow::git::{is_clean, origin_branch, worktree_add, worktree_remove, WorktreeBranch};
 use loopflow_test_support::TestRepo;
+
+#[test]
+fn placement_follows_existing_layout_without_configuration() {
+    for (prefix, nested) in [("", true), ("project-", false)] {
+        let repo = TestRepo::new();
+        let directory = tempfile::tempdir().unwrap();
+        let directory = if nested {
+            repo.path().canonicalize().unwrap().join(".worktrees")
+        } else {
+            directory.path().canonicalize().unwrap()
+        };
+        for name in ["first", "second"] {
+            worktree_add(
+                repo.path(),
+                &directory.join(format!("{prefix}{name}")),
+                &format!("teammate/{name}"),
+                WorktreeBranch::New {
+                    start_point: "HEAD",
+                },
+            )
+            .unwrap();
+        }
+
+        // Detached and missing checkouts elsewhere are not layout examples.
+        let other = tempfile::tempdir().unwrap();
+        git_stdout(
+            repo.path(),
+            &[
+                "worktree",
+                "add",
+                "--detach",
+                other.path().join("detached").to_str().unwrap(),
+            ],
+        );
+        let missing = other.path().join("missing");
+        worktree_add(
+            repo.path(),
+            &missing,
+            "missing",
+            WorktreeBranch::New {
+                start_point: "HEAD",
+            },
+        )
+        .unwrap();
+        fs::remove_dir_all(&missing).unwrap();
+
+        let plan = plan_placement(repo.path(), WorktreeSegment::parse("next").unwrap()).unwrap();
+        assert_eq!(plan.worktree_path, directory.join(format!("{prefix}next")));
+        let created = create_named_worktree(repo.path(), "next", None, &|_| {}).unwrap();
+        assert_eq!(created.path, plan.worktree_path);
+        let reused =
+            plan_placement(&created.path, WorktreeSegment::parse("next").unwrap()).unwrap();
+        assert_eq!(reused.strategy, PlacementStrategy::UseExistingWorktree);
+        assert_eq!(reused.worktree_path, created.path);
+
+        let home = tempfile::tempdir().unwrap();
+        let output = lf_command(home.path())
+            .current_dir(repo.path())
+            .args(["wt", "create", "cli-example"])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(directory
+            .join(format!("{prefix}cli-example"))
+            .join(".git")
+            .is_file());
+        let output = lf_command(home.path())
+            .current_dir(repo.path())
+            .args(["wt", "switch", "next"])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(String::from_utf8_lossy(&output.stdout).contains(created.path.to_str().unwrap()));
+        assert!(list_worktrees(repo.path())
+            .unwrap()
+            .iter()
+            .any(|wt| wt.path == created.path));
+    }
+}
+
+#[test]
+fn placement_defaults_for_isolated_or_conflicting_examples_and_reuses_existing_work() {
+    let repo = TestRepo::new();
+    let segment = || WorktreeSegment::parse("next").unwrap();
+    let default = plan_placement(repo.path(), segment())
+        .unwrap()
+        .worktree_path;
+    let first = tempfile::tempdir().unwrap();
+    let second = tempfile::tempdir().unwrap();
+    for (directory, name) in [(first.path(), "one"), (second.path(), "two")] {
+        worktree_add(
+            repo.path(),
+            &directory.join(name),
+            &format!("teammate/{name}"),
+            WorktreeBranch::New {
+                start_point: "HEAD",
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            plan_placement(repo.path(), segment())
+                .unwrap()
+                .worktree_path,
+            default
+        );
+    }
+    let plan = plan_placement(repo.path(), segment()).unwrap();
+    let existing = first
+        .path()
+        .canonicalize()
+        .unwrap()
+        .join("arbitrary-location");
+    worktree_add(
+        repo.path(),
+        &existing,
+        &plan.branch,
+        WorktreeBranch::New {
+            start_point: "HEAD",
+        },
+    )
+    .unwrap();
+    fs::write(existing.join("unfinished.txt"), "keep this work").unwrap();
+    let reused = plan_placement(repo.path(), segment()).unwrap();
+    assert_eq!(reused.strategy, PlacementStrategy::UseExistingWorktree);
+    assert_eq!(reused.worktree_path, existing);
+    assert_eq!(
+        fs::read_to_string(existing.join("unfinished.txt")).unwrap(),
+        "keep this work"
+    );
+}
 
 fn lf_command(home: &std::path::Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));

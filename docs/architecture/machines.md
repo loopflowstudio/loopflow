@@ -19,8 +19,9 @@ lf machine rename mini builder
 lf machine remove builder
 ```
 
-`--machine <label-or-id>` runs the entire command on that machine in its saved
-repository. Task, worktree and Wave selectors resolve there. `--forward-agent` requires `--machine`; the saved repository is set by `machine add`.
+`--machine <label-or-id>` transports the entire command. Unscoped commands use
+its saved repository; Work-addressed commands carry a repository plan ID instead.
+`--forward-agent` requires `--machine`; `machine add` sets the saved default.
 
 Quote a remote `~/` path (`--repo '~/src/project'`) to avoid local shell expansion.
 Without `--repo`, add uses the local checkout's path relative to the local home.
@@ -41,7 +42,12 @@ Connections share a private OpenSSH control socket and expire after 60 idle
 seconds. Personal SSH control sockets are never reused or closed. Explicit
 agent forwarding uses a separate connection. Add and status
 transfer no credentials. SSH requires an added connection and checks its identity
-before dispatch. `lf machine connect mini <provider> [email]` installs a separate
+before dispatch. Every receiving invocation validates identity through read-only
+storage before help, repository lookup or Process admission; no shell-side identity
+probe duplicates that check. Launch retains its sender probe and credential
+preparation. `--context`/`--explain` skip both, and neither side admits a Process.
+Names and paths resolve at the destination. Missing or changed identity fails without
+initialization, repair or local fallback. `lf machine connect mini <provider> [email]` installs a separate
 login through SSH stdin; account-selected launches connect missing logins in the
 foreground. See [subscriptions](../subscriptions.md#use-subscriptions-over-ssh).
 
@@ -52,17 +58,19 @@ need an explicit add before they can receive a login.
 ## Local by default
 
 ```bash
-lf mon list                                # Processes recorded on this Machine
+lf history list                                # Processes recorded on this Machine
 lf ps --json                           # OS-live processes on this Machine
 lf wave status product                 # current plan, Task conditions and Session evidence
 
-lf --machine build-home mon list   # run the same reader on build-home
+lf --machine build-home history list   # run the same reader on build-home
 lf --machine build-home --wave product wave-operate
 ```
 
 `lf --machine` is transport, not a second API. The target runs its own `lf`, verifies
 its Machine identity, resolves its own files and store, and returns the result.
-There is no implicit fan-out and no central execution database.
+There is no central execution database. Shared-Task routing may observe added
+Machines for a retained execution owner, as described below; ordinary inventories
+remain local.
 
 The Machine and placement types live in
 [`durable.rs`](../../rust/loopflow/src/durable.rs). SSH routing is exposed by
@@ -71,10 +79,87 @@ the CLI under [`lf/`](../../rust/loopflow/src/lf/).
 ## Place Work
 
 `Placement` maps one `WorkRef` to one `MachineId`. It records where Work belongs,
-not whether a process exists. `lf wave place` sets the Machine used by Wave schedules
-and inherited once by new Projects; new Tasks inherit their Project's Machine. It
-does not move existing child work or launch a process. `lf wave status` reads
+not whether a process exists. `lf wave place` sets the Machine used by Wave schedules.
+Resolve the nearest assignment through Task, Project and ancestor Waves.
+New children store no assignment copy, so later
+delegation applies to existing
+unassigned children as well as future ones. An explicit narrower assignment wins,
+even when it selected the same Machine as its parent. The read exposes `source`
+and `provenance`; historical rows remain `legacy` because an explicit choice cannot
+be distinguished from a copied value. With no assignment, the root Wave supplies
+a `local_default`. Delegation does not move a checkout or launch a process. `lf wave status` reads
 planning, Task conditions, metrics and Session history; no process needs to be running.
+The current routing prototype uses recorded checkout Machine before delegation
+for known Task launches and checkout preparation. `task run`, `task checkout` and
+global `--task` share that read before Workflow/checkout effects. Allocation checks
+the effective destination again in its transaction; unknown historical checkout
+Machine is unavailable, never a local default.
+
+`RepositoryId` identifies the selected repository plan. `repository_plans` binds
+that ID to the Machine-local repository locator; it contains no copied Work or
+execution. Existing repository paths receive distinct opaque IDs; new Wave writes
+use the same binding, and `lf repo identity` covers repositories without Work.
+`lf repo identity --bind ID` explicitly associates even an established checkout.
+The same table retains prior IDs as local locators and exactly one selected ID
+per path; Work, provider mappings, pending effects and execution are untouched.
+An ID already bound to another local path is not reassigned. Binding selects no
+planning destination and publishes nothing. A shared code remote
+or equal clone name supplies no identity. `--repository ID` resolves at the target
+before Process admission, so SSH need not change the Machine's saved default.
+LOO-412 supplies user/shared destination selection and portable Work exchange.
+The journal carries authored delegation as Machine ID, placement time and
+explicit/legacy provenance, not connections or execution locations. Missing
+assignments retain inheritance. Concurrent losing assignments remain in the journal;
+imports project into the same Placement owner without echoing a local save. An
+unknown Machine remains an assignment reference, never an invented SSH route.
+The journal does not carry RepositoryId: unbound import creates a local repository
+ID. Explicit association converges established roots on a selected ID without
+rewriting Work; Desktop reassociates retained windows on opening/restoration. This associates repository roots, not divergent
+Task/Project IDs for one provider object; provider correspondence and uncertain
+effect ownership remain with the common planning writer.
+
+Read execution separately from planning:
+
+```bash
+lf task location LOO-123 --peers --json
+```
+
+The local read uses one store snapshot. `--peers` addresses added Machines by
+exact repository/Task identity through bounded, noninteractive SSH reads. Each
+reply echoes a fresh request ID and its observing Machine; a cached, mismatched,
+unreachable or unassociated reply is unavailable. A negative reading says only
+that its Machine has no record. No connections, execution records or credentials
+are imported or created by observation.
+
+Routing shared Tasks without local execution now reads these peers before using
+any delegation. One positive owning-Machine record routes retained work there,
+even after delegation changes. Conflicting positive records refuse; no positive
+record retains the first-start refusal. Added peers are not a complete global
+inventory, and an observation reserves nothing. The destination re-resolves Work
+and retains its preparation/admission checks. Local-only work still inherits its
+nearest assignment. No execution-location cache or second placement writer exists.
+
+Task-run, move, checkout and Desktop opening explanations share one location
+projection, including local/peer provenance and unavailable checkout paths for
+retained execution. Desktop opens recorded remote Tasks in the existing local
+repository window through the owner's Session/Files transport. Shells recheck the
+recorded Task/Machine/checkout before launch; file invalidations use the same
+owned-line transport and retain drafts on disconnect. Missing or stale ownership
+prepares nothing and never falls back to local paths. Headless fixtures cover
+these paths; configured SSH and mounted native usability remain unproved.
+
+Exclusive first-start admission is still unavailable. Tasks selected into any Git
+destination without a retained checkout refuse first start, including user refs.
+Saves and acquisition remain usable. Neither a negative peer response nor a local
+SQLite transaction supplies cross-Machine exclusion.
+
+Task checkout location is recorded separately: `tasks.checkout_machine_id` and
+`worktree` identify the Machine and path prepared for execution. New checkouts
+record the preparing Machine. Existing checkouts retain their recorded location
+when Work assignment changes; no process or checkout is moved. Status, file access
+and checkout-based Session/Process membership use that location. Unknown historical
+Machines stay unknown, and file access cannot treat their paths as local. Explicit
+Session bindings retain membership independently of checkout location.
 
 ## Process topology
 
@@ -180,8 +265,9 @@ install command implementation under [`lf/commands/`](../../rust/loopflow/src/lf
 ## Boundary contracts
 
 - Machine identity is stable; network route is replaceable.
-- Commands and read surfaces act locally unless explicitly routed with
-  `lf --machine`.
+- Commands act locally unless routed with `lf --machine` or retained Task
+  execution. Shared-Task location discovery observes added peers without merging
+  their planning or claiming their execution.
 - Placement selects where Work belongs, not whether it is currently running.
 - Detached processes use credentials installed on their Machine.
 - Direct child handles are local capability; inferred process ownership is not.

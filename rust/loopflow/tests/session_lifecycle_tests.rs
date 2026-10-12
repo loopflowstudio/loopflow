@@ -319,55 +319,9 @@ fi
     );
     let status = fixture.json(&["task", "status", task_id, "--json"]);
     let project = status["project"]["id"].as_str().unwrap();
-    let selected = fixture.run(&["project", "workflow", "set", project, "proof"]);
+    let selected = fixture.run(&["wave", "workflow", "set", "--project", project, "proof"]);
     assert!(selected.status.success(), "{selected:?}");
-    // Managed skill execution needs an agent account, independently of planning.
-    let account_home = fixture.home.path().join("fixture-codex");
-    std::fs::create_dir(&account_home).unwrap();
-    let claims =
-        BASE64_URL_SAFE_NO_PAD.encode(r#"{"email":"fixture@example.com","sub":"fixture"}"#);
-    std::fs::write(
-        account_home.join("auth.json"),
-        serde_json::json!({"tokens":{"access_token":"fixture","id_token":format!("h.{claims}.s")}})
-            .to_string(),
-    )
-    .unwrap();
-    let store = loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
-        .unwrap();
-    let account_id = loopflow::store::ProviderAccountId::parse("fixture").unwrap();
-    store
-        .upsert_provider_account(&loopflow::store::ProviderAccount {
-            provider: "codex".into(),
-            account_id: account_id.clone(),
-            home: Some(account_home),
-            login_email: Some(
-                loopflow::profile::EmailAddress::parse("fixture@example.com").unwrap(),
-            ),
-            observed_email: None,
-            observed_subject: None,
-            observed_credential_digest: None,
-            observed_plan: None,
-            credential_state: loopflow::store::CredentialState::Connected,
-            routing_state: loopflow::store::RoutingState::Automatic,
-            plan: None,
-            paid_through: None,
-            utilization_percent: None,
-            cooldown_until: None,
-            cooldown_reason: None,
-            last_selected_at: None,
-            created_at: 1,
-            updated_at: 1,
-        })
-        .unwrap();
-    store
-        .set_provider_route(&loopflow::profile::ProviderRoute {
-            scope: loopflow::profile::RouteScope::Default,
-            provider: loopflow::provider_auth::Provider::Codex,
-            accounts: vec![account_id],
-            created_at: 1,
-            updated_at: 1,
-        })
-        .unwrap();
+    managed_codex_account(&fixture);
     let run = fixture
         .command(&["-b", "--agent", "codex", "task", "run", task_id])
         .env("LF_ACCOUNT_ISOLATION", "isolated")
@@ -773,7 +727,7 @@ fn public_history_discovers_unlinked_native_receipts_without_borrowing_a_later_b
     }
     let captures = fixture.count("agent_sessions");
     {
-        let command = vec!["monitor", "usage", "--days", "0", "--json"];
+        let command = vec!["history", "usage", "--days", "0", "--json"];
         let rows = fixture.json(&command);
         let recovered = rows
             .as_array()
@@ -838,7 +792,7 @@ fn binding_starts_the_task_once_without_reattributing_prior_work() {
     };
     let task_runs = |issue: &str| -> Vec<String> {
         fixture
-            .json(&["monitor", "usage", "--days", "0", "--task", issue, "--json"])
+            .json(&["history", "usage", "--days", "0", "--task", issue, "--json"])
             .as_array()
             .unwrap()
             .iter()
@@ -1440,14 +1394,7 @@ fn unavailable_store_starts_no_provider() {
     for args in [
         LAUNCH.as_slice(),
         &["--batch", "--agent", "opencode", ":", "Tidy the parser"],
-        &[
-            "--agent",
-            "opencode",
-            "flow",
-            "work-then-decide",
-            "--batch",
-            "--no-loopflow",
-        ],
+        &["--agent", "opencode", "flow", "work-then-decide", "--batch"],
     ] {
         let mut launch = fixture.command(args);
         store.select(&mut launch);
@@ -1473,9 +1420,67 @@ fn unavailable_store_starts_no_provider() {
     );
 }
 
+fn managed_codex_account(fixture: &Fixture) {
+    // Managed skill execution needs an agent account, independently of planning.
+    let account_home = fixture.home.path().join("fixture-codex");
+    std::fs::create_dir(&account_home).unwrap();
+    let claims =
+        BASE64_URL_SAFE_NO_PAD.encode(r#"{"email":"fixture@example.com","sub":"fixture"}"#);
+    std::fs::write(
+        account_home.join("auth.json"),
+        serde_json::json!({"tokens":{"access_token":"fixture","id_token":format!("h.{claims}.s")}})
+            .to_string(),
+    )
+    .unwrap();
+    let store = loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
+        .unwrap();
+    let account_id = loopflow::store::ProviderAccountId::parse("fixture").unwrap();
+    store
+        .upsert_provider_account(&loopflow::store::ProviderAccount {
+            provider: "codex".into(),
+            account_id: account_id.clone(),
+            home: Some(account_home),
+            login_email: Some(
+                loopflow::profile::EmailAddress::parse("fixture@example.com").unwrap(),
+            ),
+            observed_email: None,
+            observed_subject: None,
+            observed_credential_digest: None,
+            observed_plan: None,
+            credential_state: loopflow::store::CredentialState::Connected,
+            routing_state: loopflow::store::RoutingState::Automatic,
+            plan: None,
+            paid_through: None,
+            utilization_percent: None,
+            cooldown_until: None,
+            cooldown_reason: None,
+            last_selected_at: None,
+            created_at: 1,
+            updated_at: 1,
+        })
+        .unwrap();
+    store
+        .set_provider_route(&loopflow::profile::ProviderRoute {
+            scope: loopflow::profile::RouteScope::Default,
+            provider: loopflow::provider_auth::Provider::Codex,
+            accounts: vec![account_id],
+            created_at: 1,
+            updated_at: 1,
+        })
+        .unwrap();
+}
+
 #[test]
 fn headless_history_is_discoverable_without_entering_the_interactive_list() {
     let fixture = Fixture::new(false);
+    managed_codex_account(&fixture);
+    let provider = fixture.home.path().join("bin/codex");
+    std::fs::write(
+        &provider,
+        support::codex_app_server_script("Parser tidied.", ""),
+    )
+    .unwrap();
+    std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
     support::register_task_with_pr(
         fixture.home.path(),
         fixture.repo.path(),
@@ -1487,7 +1492,7 @@ fn headless_history_is_discoverable_without_entering_the_interactive_list() {
         "task-pr-tests",
         "--batch",
         "--agent",
-        "opencode",
+        "codex",
         ":",
         "Tidy the parser",
     ]);
@@ -1497,12 +1502,12 @@ fn headless_history_is_discoverable_without_entering_the_interactive_list() {
     assert_eq!(sessions.as_array().unwrap().len(), 1);
     let session = &sessions[0]["id"];
     {
-        let rows = fixture.json(&["monitor", "usage", "--wave", "task-pr-tests", "--json"]);
+        let rows = fixture.json(&["history", "usage", "--wave", "task-pr-tests", "--json"]);
         assert_eq!(rows.as_array().unwrap().len(), 1);
         assert_eq!(&rows[0]["session_id"], session);
         assert_eq!(rows[0]["recorded_outcome"], "completed");
     }
-    let activity = fixture.json(&["monitor", "activity", "--wave", "task-pr-tests", "--json"]);
+    let activity = fixture.json(&["history", "--wave", "task-pr-tests", "--json"]);
     let captures = activity["items"]
         .as_array()
         .unwrap()
@@ -1545,14 +1550,7 @@ fn taskless_structured_output_correction_is_bounded_and_preserves_the_conversati
             "",
         )
         .unwrap();
-        let output = fixture.run(&[
-            "--agent",
-            "opencode",
-            "flow",
-            "work-then-decide",
-            "--batch",
-            "--no-loopflow",
-        ]);
+        let output = fixture.run(&["--agent", "opencode", "flow", "work-then-decide", "--batch"]);
         assert_eq!(
             output.status.success(),
             !exhausted,
@@ -1636,14 +1634,8 @@ fn failed_taskless_decision_stops_and_keeps_its_history() {
     let fixture = Fixture::new(false);
     saved_flow_stand_in(&fixture);
     std::fs::write(fixture.home.path().join("blocked-once"), "").unwrap();
-    let mut command = fixture.command(&[
-        "--agent",
-        "opencode",
-        "flow",
-        "work-then-decide",
-        "--batch",
-        "--no-loopflow",
-    ]);
+    let mut command =
+        fixture.command(&["--agent", "opencode", "flow", "work-then-decide", "--batch"]);
     command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -1704,14 +1696,7 @@ fn custom_router_returns_a_captured_path_without_an_in_turn_command() {
     saved_flow_stand_in(&fixture);
     std::fs::write(fixture.repo.path().join(".lf/flows/choose.yaml"),
         "- xor:\n    router: decide-proof\n    paths:\n      alpha:\n        description: Do the selected work\n        skill: work-proof\n      zeta:\n        description: Leave this path untouched\n        skill: review-proof\n").unwrap();
-    let output = fixture.run(&[
-        "--agent",
-        "opencode",
-        "flow",
-        "choose",
-        "--batch",
-        "--no-loopflow",
-    ]);
+    let output = fixture.run(&["--agent", "opencode", "flow", "choose", "--batch"]);
     assert!(
         output.status.success(),
         "{}",
@@ -1744,14 +1729,7 @@ fn public_taskless_flow_records_distinct_completed_loop_passes() {
     let fixture = Fixture::new(false);
     saved_flow_stand_in(&fixture);
     std::fs::write(fixture.home.path().join("remaining-passes"), "2").unwrap();
-    let output = fixture.run(&[
-        "--agent",
-        "opencode",
-        "flow",
-        "work-then-decide",
-        "--batch",
-        "--no-loopflow",
-    ]);
+    let output = fixture.run(&["--agent", "opencode", "flow", "work-then-decide", "--batch"]);
     assert!(
         output.status.success(),
         "{}",
@@ -1791,14 +1769,7 @@ fn opencode_disconnect_after_tool_preserves_unknown_native_completion() {
     let fixture = Fixture::new(false);
     saved_flow_stand_in(&fixture);
     std::fs::write(fixture.home.path().join("disconnect-after-tool"), "").unwrap();
-    let output = fixture.run(&[
-        "--agent",
-        "opencode",
-        "flow",
-        "work-then-decide",
-        "--batch",
-        "--no-loopflow",
-    ]);
+    let output = fixture.run(&["--agent", "opencode", "flow", "work-then-decide", "--batch"]);
     assert!(!output.status.success(), "{output:?}");
     assert!(fixture.home.path().join("tool-effect").exists());
     let rows: (i64, i64) = fixture
@@ -1828,14 +1799,7 @@ fn opencode_automatic_retry_keeps_conversation_and_rejects_failed_turn_output() 
     let fixture = Fixture::new(false);
     saved_flow_stand_in(&fixture);
     std::fs::write(fixture.home.path().join("transient-once"), "").unwrap();
-    let output = fixture.run(&[
-        "--agent",
-        "opencode",
-        "flow",
-        "work-then-decide",
-        "--batch",
-        "--no-loopflow",
-    ]);
+    let output = fixture.run(&["--agent", "opencode", "flow", "work-then-decide", "--batch"]);
     assert!(
         output.status.success(),
         "{}",
@@ -1857,7 +1821,7 @@ fn opencode_automatic_retry_keeps_conversation_and_rejects_failed_turn_output() 
         )
         .unwrap();
     assert_eq!((threads, starts, done), (2, 3, 3));
-    let usage = fixture.json(&["monitor", "usage", "--json"]);
+    let usage = fixture.json(&["history", "usage", "--json"]);
     assert_eq!(usage.as_array().unwrap().len(), 2);
     let launches = fixture.launches();
     assert_eq!(launches.len(), 3);
@@ -1874,7 +1838,7 @@ fn opencode_automatic_retry_keeps_conversation_and_rejects_failed_turn_output() 
     assert_eq!(retried["usage"]["input_tokens"], 40);
     assert_eq!(retried["usage"]["output_tokens"], 10);
     let answer = fixture.run(&[
-        "monitor",
+        "history",
         "show",
         retried["session_id"].as_str().unwrap(),
         "--input",

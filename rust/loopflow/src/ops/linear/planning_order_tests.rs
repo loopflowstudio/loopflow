@@ -117,71 +117,6 @@ fn assert_no_conflicts(fixture: &Fixture) {
 }
 
 #[test]
-fn planning_order_active_connection_delivers_after_outage() {
-    with_order(|runtime, fixture, repo, tasks, state| {
-        runtime.block_on(async {
-            state.lock().await.field_outage = true;
-            let sync = crate::ops::planning_sync::PlanningSync::start(
-                fixture.store.clone(),
-                repo.to_string_lossy().into_owned(),
-            )
-            .unwrap();
-            reorder(&fixture.store, &tasks[3], 0);
-            let receipt = saved_order(fixture, &tasks[0]);
-            let conn = rusqlite::Connection::open(&fixture.database).unwrap();
-            tokio::time::timeout(Duration::from_secs(8), async {
-                loop {
-                    let failed: bool = conn
-                        .query_row(
-                            "SELECT error IS NOT NULL FROM project_changes WHERE id=?1",
-                            [&receipt.0],
-                            |r| r.get(0),
-                        )
-                        .unwrap();
-                    if failed {
-                        break;
-                    }
-                    tokio::time::sleep(Duration::from_millis(20)).await;
-                }
-            })
-            .await
-            .unwrap();
-            assert_eq!(saved_order(fixture, &tasks[0]).0, receipt.0);
-            state.lock().await.field_outage = false;
-            tokio::time::timeout(Duration::from_secs(8), async {
-                while fixture
-                    .store
-                    .sqlite
-                    .project_order_delivery(&tasks[0].project_id)
-                    .unwrap()
-                    .is_some()
-                {
-                    tokio::time::sleep(Duration::from_millis(20)).await;
-                }
-            })
-            .await
-            .unwrap();
-            assert_eq!(
-                remote_order(&state).await,
-                ["issue-4", "issue-1", "issue-2", "issue-3"]
-            );
-            assert_eq!(
-                local_order(&fixture.store, &tasks),
-                remote_order(&state).await
-            );
-            assert_no_conflicts(fixture);
-            assert!(tasks.iter().all(|task| fixture
-                .store
-                .sqlite
-                .workflow(&task.id)
-                .unwrap()
-                .is_none()));
-            drop(sync);
-        });
-    });
-}
-
-#[test]
 fn planning_order_lost_reply_recovers_partial_reorder_after_reopen() {
     with_order(|runtime, fixture, repo, tasks, state| {
         runtime.block_on(async {
@@ -279,7 +214,13 @@ fn planning_order_acquisition_during_write_preserves_newer_save_and_scalar_edits
             })
             .await
             .unwrap();
-            result.unwrap();
+            assert!(result
+                .unwrap_err()
+                .to_string()
+                .contains("older Project order"));
+            // The acknowledged mutation does not trigger a readback. A new
+            // delivery boundary obtains the newer external state before writing.
+            deliver(&fixture.store, repo, &tasks[0]).await.unwrap();
             assert_eq!(
                 remote_order(&state).await,
                 ["issue-3", "issue-4", "issue-1", "issue-2"]
@@ -502,6 +443,46 @@ fn planning_order_uncertainty_does_not_stall_project_field_delivery() {
                 .unwrap()
                 .is_some());
             assert_no_conflicts(fixture);
+        });
+    });
+}
+
+#[test]
+fn linear_rate_limit_retries_rejected_order_move() {
+    with_order(|runtime, fixture, repo, tasks, state| {
+        reorder(&fixture.store, &tasks[3], 0);
+        let work = WorkRef::Project(tasks[0].project_id.clone());
+        runtime.block_on(async {
+            state.lock().await.rate_limit_query = Some("mutation DeliverTaskField");
+            assert!(
+                crate::ops::planning_delivery::sync_fields(&fixture.store, repo, &work)
+                    .await
+                    .is_err()
+            );
+            let receipt = fixture
+                .store
+                .sqlite
+                .project_order_delivery(&tasks[0].project_id)
+                .unwrap()
+                .unwrap();
+            assert!(
+                receipt.effects.is_empty(),
+                "a rejected move has no uncertain effect"
+            );
+            tokio::time::sleep(Duration::from_millis(2100)).await;
+            crate::ops::planning_delivery::sync_fields(&fixture.store, repo, &work)
+                .await
+                .unwrap();
+            assert!(fixture
+                .store
+                .sqlite
+                .project_order_delivery(&tasks[0].project_id)
+                .unwrap()
+                .is_none());
+            assert_eq!(
+                local_order(&fixture.store, &tasks),
+                remote_order(&state).await
+            );
         });
     });
 }

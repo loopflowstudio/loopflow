@@ -7,11 +7,10 @@ use std::path::Path;
 use rusqlite::{params, OptionalExtension, TransactionBehavior};
 
 use crate::id::WaveId;
-use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
 use crate::work::project::Project;
 
-use super::{durable, planning_write, SqliteStore};
+use super::{planning_write, SqliteStore};
 
 impl SqliteStore {
     /// Provision a Wave hierarchy without a provider, preserving existing authored files.
@@ -59,7 +58,6 @@ impl SqliteStore {
                 }
                 None => {
                     let wave = authored_id.unwrap_or_default();
-                    let now = now_unix();
                     planning_write::create(
                         &tx,
                         &repo,
@@ -71,7 +69,6 @@ impl SqliteStore {
                             ],
                         ),
                     )?;
-                    durable::create_wave_work(&tx, &wave, now)?;
                     wave
                 }
             };

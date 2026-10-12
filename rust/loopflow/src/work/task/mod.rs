@@ -640,7 +640,7 @@ impl Task {
     }
 }
 
-/// Historical keep-open scope, retained for conversion into follow-up Tasks.
+/// Historical keep-open scope, retained for event decoding only.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskFollowUp {
     pub outcome: String,
@@ -651,6 +651,7 @@ pub struct TaskFollowUp {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TaskEventKind {
+    // Historical follow-through events remain readable; no current writers.
     FollowThroughIntent {
         intent: serde_json::Value,
     },
@@ -691,6 +692,7 @@ pub enum TaskEventKind {
     Progress {
         summary: String,
     },
+    // Historical keep-open decision; no current writer.
     FollowUp {
         remaining: Option<TaskFollowUp>,
         reason: String,
@@ -706,12 +708,9 @@ pub enum TaskEventKind {
         flow: String,
         summary: String,
     },
-    /// A durable steer: direction handed to the Task. Folded into the run's
-    /// seed and injected into a live turn; not a report out, so it never
-    /// crosses to the parent Project.
+    /// Historical authored direction; the immutable publication owns its text.
     Steer {
-        author: crate::durable::Author,
-        text: String,
+        steer_id: crate::id::SteerId,
     },
     /// A request to end the Task's current turn so the next one re-reads its
     /// direction immediately. A live run acts on interrupts issued after it

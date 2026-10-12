@@ -3,7 +3,7 @@
 //! Work owns authored Project content and Tasks. Linear refresh accepts provider
 //! facts through the shared writer; ordinary readers consume saved Work.
 
-use super::planning_sync::{lock_wave_planning, planning_store, storage_config_from_env};
+use super::planning_sync::{lock_wave_planning, planning_store};
 use crate::linear::LinearIssue;
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
@@ -213,7 +213,9 @@ fn repository_id(repo: &Path) -> OpsResult<RepoId> {
 async fn resolve_repository_context(repo: &Path) -> OpsResult<LinearRepository> {
     let team_id = repository_team_id(repo)?;
     let repo_id = repository_id(repo)?;
-    let client = build_client(Some(team_id.clone())).await?;
+    let client = build_client(Some(team_id.clone()))
+        .await?
+        .for_repository(repo);
     client
         .validate_team_claim(&team_id, repo_id.as_str())
         .await
@@ -411,7 +413,7 @@ tokio::task_local! {
 pub(super) mod test_fixture;
 
 #[cfg(test)]
-mod task_planning_tests;
+pub(crate) mod task_planning_tests;
 
 #[cfg(test)]
 mod planning_lookup_tests;
@@ -1029,7 +1031,9 @@ async fn resolve_reteam_context(repo: &Path) -> OpsResult<ResolvedReteamContext>
         )
     })?;
     let repo_id = repository_id(repo)?;
-    let client = build_client(Some(team_id.clone())).await?;
+    let client = build_client(Some(team_id.clone()))
+        .await?
+        .for_repository(repo);
     let binding = client
         .validate_team_claim(&team_id, repo_id.as_str())
         .await
@@ -1734,11 +1738,13 @@ pub(crate) async fn rename(
 pub fn list_local_waves(repo: &Path) -> OpsResult<Vec<String>> {
     let canonical = crate::repository::CanonicalRepo::discover(repo)
         .map_err(|error| OpsError::Message(error.to_string()))?;
-    let StorageConfig::Sqlite { path } = storage_config_from_env()?;
-    match std::fs::metadata(&path) {
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(OpsError::Message(error.to_string())),
-        Ok(_) => {}
+    let crate::store::StorageConfig::Sqlite { path } =
+        super::planning_sync::storage_config_from_env()?;
+    if !path
+        .try_exists()
+        .map_err(|error| OpsError::Message(error.to_string()))?
+    {
+        return Ok(Vec::new());
     }
     let store = crate::store::sqlite::SqliteStore::open_read_only(&path)
         .map_err(|error| OpsError::Message(error.to_string()))?;

@@ -122,10 +122,10 @@ struct TaskSessionLaunchProofTests {
         let roadmap = String(decoding: try JSONSerialization.data(withJSONObject: plan), as: UTF8.self)
         let query = RegistryQuery { args, _ in
             switch args.first {
-            case "roadmap": return roadmap
+            case "wave" where args.dropFirst().first == "show": return roadmap
             case "wave" where args.dropFirst().first == "list": return "[]"
             case "session", "flow": return "[]"
-            case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
+            case "history": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             case "pm": return #"{"identifier":"W2-131","comments":[],"pending_sync":[],"conflicts":{},"refresh_error":null}"#
             default: throw RegistryQueryError("Unexpected read in preparation proof")
             }
@@ -135,19 +135,19 @@ struct TaskSessionLaunchProofTests {
         await model.refresh()
         let origin = model.navigation
         let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
-        let workspace = registry.workspace(for: fixtureWorkspace(repo))
-        workspace.multiplexer.newShell()
+        let workspace = fixtureWork(registry, fixtureWorkspace(repo))
+        workspace.multiplexer.newShell(location: workspace.location)
         let pane = workspace.multiplexer.focusedPaneId
-        let terminal = registry.surfaces.view(for: .shell(pane))
+        let terminal = registry.surfaces.view(for: .shell(pane, machineId: fixtureMachineId))
         terminal.frame = CGRect(x: 0, y: 0, width: 600, height: 350)
         terminal.workingDirectory = repo
         terminal.command = buildWorkspaceShellCommand(id: pane, argv: ["/bin/cat"], env: [:])
         terminal.createSurface(manager: GhosttyManager.shared)
         let surface = try #require(terminal.surface)
         defer {
-            for path in registry.paths {
-                for pane in registry.workspace(for: path).multiplexer.layout.allPanes {
-                    registry.surfaces.release(.shell(pane.id))
+            for path in registry.keys {
+                for pane in registry.retained(path)!.multiplexer.layout.allPanes {
+                    registry.surfaces.release(.shell(pane.id, machineId: fixtureMachineId))
                 }
             }
         }
@@ -202,7 +202,6 @@ struct TaskSessionLaunchProofTests {
             }
             #expect(terminal.surface == surface)
         }
-        registry.layout(for: fixtureWorkspace(repo)).select(fixtureWorkspace(repo))
         model.navigation.content = .terminals
         try await settle(window)
         ghostty_surface_text(surface, "\n", 1)

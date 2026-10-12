@@ -35,10 +35,10 @@ lf pr reconcile                      # check delivery once; settle a verified me
 
 Publish makes a PR ready for review; it does not sync. Submit is
 for a reviewer to land; arm/land request auto-merge and return. Later reconciliation
-records verified merges. Complete a Task when its accepted outcome is delivered.
-File independently accepted later work as ordinary Tasks and linking comments.
-`ship` runs gate and waits with `lf land --wait-and-fix`; its caller or Workflow
-arrival owns Task completion. A Task has zero or one PR; additional
+records verified merges. Bare landing leaves the Task open; optional new work uses
+ordinary Task creation before `lf task complete`. No follow-up record is required.
+`ship` runs gate and waited landing; its Workflow endpoint requests completion.
+A Task has zero or one PR; additional
 PRs belong to separate, optionally stacked Tasks. Use the
 selected delivery skill for preparation and recovery. `lf pr open` creates or
 updates a draft and opens its page; use it when the user asks to see the PR.
@@ -90,7 +90,7 @@ Inspect execution and effect history before choosing further work. Historical
 review boundaries grant no authority to close a conversation or launch a Flow.
 
 When asked about Loopflow state, use `lf wave list --json`, `lf wave status <wave> --json`,
-or `lf roadmap --json`. Do not reconstruct shared state from processes or
+or `lf wave show --json`. Do not reconstruct shared state from processes or
 worktrees. Supervision, recovery and placement belong to `repo-operate`,
 `wave-operate` and `task-operate`. The ongoing repository, Wave or Task
 conversation is that scope's operator: it reads failed work's logs and keeps

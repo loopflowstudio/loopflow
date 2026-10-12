@@ -1864,7 +1864,7 @@ fi"#;
         };
         let handed_off = if flow {
             command()
-                .args(["flow", "repair-proof", "--batch", "--no-loopflow"])
+                .args(["flow", "repair-proof", "--batch"])
                 .output()
                 .unwrap()
         } else {
@@ -2499,7 +2499,7 @@ esac
         "--title",
         "Waited landing",
         "--body",
-        "Follow-through must run after merge.",
+        "Completion remains separate from merge.",
     ];
     let stdout = home.path().join("wait.stdout");
     let stderr = home.path().join("wait.stderr");

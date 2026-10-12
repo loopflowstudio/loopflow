@@ -54,7 +54,7 @@ DEV_LOG_DIR = Path.home() / ".lf" / "logs" / "dev"
 LOOPFLOW_STREAM_LOG = DEV_LOG_DIR / f"{REPO_ROOT.name}.loopflow-run-debug.log"
 DEV_CONTROL_CONFIG = "LoopflowDevControl.json"
 GHOSTTY_REVISION = "a60e9e2a57f73e1eef2bd1cf2995a467f69e7fb0"
-GHOSTTY_ARTIFACT = "GhosttyKit-a60e9e2-lf2.xcframework.zip"
+GHOSTTY_ARTIFACT = "GhosttyKit-a60e9e2-lf3.xcframework.zip"
 
 
 def _app_environment(repo: Path) -> dict[str, str]:
@@ -239,6 +239,7 @@ def cmd_ghostty_build() -> int:
             "build",
             "test",
             "-Dtest-filter=command",
+            "-Dtest-filter=bounded text",
             "-Dtest-filter=semantic prompt",
             "-Dtest-filter=execCommand",
             "-Dtest-filter=program status",

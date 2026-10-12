@@ -2934,7 +2934,7 @@
                 "items": [
                   {
                     "actions": {
-                      "reason": "Task FIX-1 cannot complete until its gates close: Merged · Follow-through pending; file follow-ups or record `lf task follow-up <issue> --none REASON`",
+                      "reason": "Merged; ready to complete the Task",
                       "recommended": "no_action"
                     },
                     "condition": {
@@ -3188,7 +3188,7 @@
     },
     "row": {
       "actions": {
-        "reason": "Task FIX-1 cannot complete until its gates close: Merged · Follow-through pending; file follow-ups or record `lf task follow-up <issue> --none REASON`",
+        "reason": "Merged; ready to complete the Task",
         "recommended": "no_action"
       },
       "condition": {
@@ -3378,7 +3378,7 @@
     "status": {
       "execution": {
         "actions": {
-          "reason": "Task FIX-1 cannot complete until its gates close: Merged · Follow-through pending; file follow-ups or record `lf task follow-up <issue> --none REASON`",
+          "reason": "Merged; ready to complete the Task",
           "recommended": "no_action"
         },
         "agent": null,

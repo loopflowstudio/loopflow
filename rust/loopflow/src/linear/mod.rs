@@ -7,18 +7,17 @@ use crate::work::project::{ProjectKR, ProjectStatus};
 use crate::work::wave::metrics::MetricTarget;
 
 use self::project_document::parse_project_document;
+mod cooldown;
+mod team_changes;
+
 use reqwest::StatusCode;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tokio::time::sleep;
-use tracing::warn;
 
 use crate::work::task::comment::{TaskComment, TaskCommentAuthor};
 
 pub(crate) mod project_document;
-
-use std::time::Duration;
 
 use thiserror::Error;
 
@@ -117,6 +116,8 @@ pub(crate) fn validate_project_ownership(
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum LinearError {
+    #[error("Linear rate limit reached; retry after epoch milliseconds {reset_at_ms}")]
+    RateLimited { reset_at_ms: i64 },
     #[error("{0}")]
     Message(String),
 }
@@ -138,18 +139,6 @@ pub fn project_slug(name: &str) -> String {
         }
     }
     slug
-}
-
-pub(crate) const RATE_LIMIT_RETRIES: u8 = 3;
-const RETRY_AFTER_FALLBACK: Duration = Duration::from_secs(60);
-
-pub(crate) fn retry_after_delay(headers: &reqwest::header::HeaderMap) -> Duration {
-    headers
-        .get(reqwest::header::RETRY_AFTER)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.parse::<u64>().ok())
-        .map(Duration::from_secs)
-        .unwrap_or(RETRY_AFTER_FALLBACK)
 }
 
 #[cfg(test)]
@@ -525,9 +514,7 @@ const LIST_ITEMS_QUERY: &str = r#"query ListProjectIssues($projectId: String!, $
   }
 }"#;
 
-const ISSUE_OWNERSHIP_QUERY: &str = r#"query IssueOwnership($id: String!) {
-  issue(id: $id) {
-    id
+const ISSUE_RESPONSE_FIELDS: &str = r#"    id
     identifier
     branchName
     completedAt
@@ -545,18 +532,14 @@ const ISSUE_OWNERSHIP_QUERY: &str = r#"query IssueOwnership($id: String!) {
       id
       name
       updatedAt
+      archivedAt
       description
       content
       status { type }
       initiatives(first: 50) { nodes { id } }
       teams(first: 50) { nodes { id } }
-    }
-  }
-}"#;
-
-const PROJECT_OWNERSHIP_QUERY: &str = r#"query ProjectOwnership($id: String!) {
-  project(id: $id) {
-    id
+    }"#;
+const PROJECT_RESPONSE_FIELDS: &str = r#"    id
     name
     updatedAt
     archivedAt
@@ -564,17 +547,7 @@ const PROJECT_OWNERSHIP_QUERY: &str = r#"query ProjectOwnership($id: String!) {
     content
     status { type }
     initiatives(first: 50) { nodes { id } }
-    teams(first: 50) { nodes { id } }
-  }
-}"#;
-
-const SET_ITEM_STATE_MUTATION: &str = r#"mutation SetIssueState($id: String!, $stateId: String!) {
-  issueUpdate(id: $id, input: { stateId: $stateId }) {
-    issue {
-      id
-    }
-  }
-}"#;
+    teams(first: 50) { nodes { id } }"#;
 
 // Selects `identifier` back because Linear reassigns the issue number on a team
 // move (`W2-155` → `PRD-<next>`); the caller cannot predict the new value.
@@ -712,6 +685,7 @@ pub struct LinearClient {
     token: String,
     team_id: Option<String>,
     base_url: String,
+    repository: Option<std::path::PathBuf>,
 }
 
 impl LinearClient {
@@ -721,6 +695,7 @@ impl LinearClient {
             token,
             team_id,
             base_url: LINEAR_BASE_URL.to_string(),
+            repository: None,
         }
     }
 
@@ -731,7 +706,13 @@ impl LinearClient {
             token,
             team_id,
             base_url,
+            repository: None,
         }
+    }
+
+    pub(crate) fn for_repository(mut self, repo: &std::path::Path) -> Self {
+        self.repository = Some(repo.to_owned());
+        self
     }
 
     /// Adopt or create the team a repository should own, keyed by `key`.
@@ -908,35 +889,35 @@ impl LinearClient {
     where
         T: DeserializeOwned,
     {
+        if query.trim_start().starts_with("mutation") {
+            if let Some(repo) = &self.repository {
+                // The delta reader uses an unbound client and performs no writes.
+                if let Err(error) =
+                    Box::pin(crate::ops::linear_observe::check_before_write(repo)).await
+                {
+                    tracing::debug!(%error, "pre-write Linear check pending");
+                }
+            }
+        }
         let request = GraphqlRequest { query, variables };
 
-        for attempt in 0..=RATE_LIMIT_RETRIES {
-            let response = self
-                .client
-                .post(&self.base_url)
-                .bearer_auth(&self.token)
-                .json(&request)
-                .send()
-                .await
-                .map_err(|err| LinearError::Message(format!("linear request failed: {err}")))?;
-
-            if response.status() == StatusCode::TOO_MANY_REQUESTS && attempt < RATE_LIMIT_RETRIES {
-                let delay = retry_after_delay(response.headers());
-                warn!(
-                    attempt = attempt + 1,
-                    delay_seconds = delay.as_secs(),
-                    "linear rate limited; retrying"
-                );
-                sleep(delay).await;
-                continue;
-            }
-
-            return parse_graphql_response(response).await;
-        }
-
-        Err(LinearError::Message(
-            "linear request failed after retries".to_string(),
-        ))
+        let cooldown = cooldown::Cooldown::for_endpoint(&self.base_url);
+        cooldown.check().await?;
+        let response = self
+            .client
+            .post(&self.base_url)
+            .bearer_auth(&self.token)
+            .json(&request)
+            .send()
+            .await
+            .map_err(|err| LinearError::Message(format!("linear request failed: {err}")))?;
+        let status = response.status();
+        let headers = response.headers().clone();
+        let body = response.bytes().await.map_err(|err| {
+            LinearError::Message(format!("failed to read Linear response: {err}"))
+        })?;
+        cooldown.observe(status, &headers, &body).await?;
+        parse_graphql_response(status, &body)
     }
 
     /// The owning team id of an existing issue. State transitions resolve
@@ -1241,12 +1222,15 @@ impl LinearClient {
             "mutation FollowUpRelation($input: IssueRelationCreateInput!) { issueRelationCreate(input: $input) { success issueRelation { id } } }",
             json!({"input": {"id": id, "issueId": source, "relatedIssueId": target, "type": "related"}}),
         ).await;
-        if self.follow_up_relation_exists(source, target).await? {
+        let response = result?;
+        if response["issueRelationCreate"]["success"] == true
+            && response["issueRelationCreate"]["issueRelation"]["id"] == id
+        {
             return Ok(());
         }
-        Err(result.err().unwrap_or_else(|| {
-            LinearError::Message("Linear did not confirm the follow-up relation".into())
-        }))
+        Err(LinearError::Message(
+            "Linear did not confirm the follow-up relation".into(),
+        ))
     }
 
     async fn follow_up_relation_exists(&self, source: &str, target: &str) -> LinearResult<bool> {
@@ -1327,7 +1311,10 @@ impl LinearClient {
         issue_id: &str,
     ) -> LinearResult<Option<(LinearIssue, Option<LinearProject>)>> {
         let response: IssueOwnershipData = self
-            .graphql(ISSUE_OWNERSHIP_QUERY, json!({ "id": issue_id }))
+            .graphql(
+                &format!("query IssueOwnership($id: String!) {{ issue(id: $id) {{ {ISSUE_RESPONSE_FIELDS} }} }}"),
+                json!({ "id": issue_id }),
+            )
             .await?;
         response.issue.map(IssueNode::into_ownership).transpose()
     }
@@ -1497,30 +1484,33 @@ impl LinearClient {
         &self,
         project: bool,
         input: Value,
-    ) -> LinearResult<()> {
-        let (query, result) = if project {
+    ) -> LinearResult<PlanningResponse> {
+        let (name, operation, input_type, object, fields) = if project {
             (
-                r#"mutation DeliverProjectCreation($input: ProjectCreateInput!) {
-                projectCreate(input: $input) { success project { id } }
-            }"#,
+                "DeliverProjectCreation",
                 "projectCreate",
+                "ProjectCreateInput",
+                "project",
+                PROJECT_RESPONSE_FIELDS,
             )
         } else {
             (
-                r#"mutation DeliverTaskCreation($input: IssueCreateInput!) {
-                issueCreate(input: $input) { success issue { id } }
-            }"#,
+                "DeliverTaskCreation",
                 "issueCreate",
+                "IssueCreateInput",
+                "issue",
+                ISSUE_RESPONSE_FIELDS,
             )
         };
-        let response: Value = self.graphql(query, json!({"input":input})).await?;
-        let object = if project { "project" } else { "issue" };
-        if response[result]["success"] != true || response[result][object]["id"] != input["id"] {
-            return Err(LinearError::Message(
-                "Creation lacks an exact acknowledgement; receipt retained".into(),
-            ));
-        }
-        Ok(())
+        let query = format!("mutation {name}($input: {input_type}!) {{ {operation}(input: $input) {{ success {object} {{ {fields} }} }} }}");
+        let response: Value = self.graphql(&query, json!({"input":input})).await?;
+        planning_response(
+            &response[operation],
+            project,
+            input["id"]
+                .as_str()
+                .ok_or_else(|| LinearError::Message("creation identity is missing".into()))?,
+        )
     }
 
     pub(crate) async fn deliver_project_attachment(
@@ -1528,52 +1518,59 @@ impl LinearClient {
         id: &str,
         project: &str,
         initiative: &str,
-    ) -> LinearResult<()> {
+    ) -> LinearResult<LinearProject> {
+        let query = format!("mutation DeliverProjectAttachment($input: InitiativeToProjectCreateInput!) {{ initiativeToProjectCreate(input: $input) {{ success initiativeToProject {{ project {{ {PROJECT_RESPONSE_FIELDS} }} }} }} }}");
         let response: Value = self
             .graphql(
-                r#"mutation DeliverProjectAttachment($input: InitiativeToProjectCreateInput!) {
-            initiativeToProjectCreate(input: $input) { success }
-        }"#,
+                &query,
                 json!({"input":{"id":id,"projectId":project,"initiativeId":initiative}}),
             )
             .await?;
-        if response["initiativeToProjectCreate"]["success"] != true {
+        let payload = &response["initiativeToProjectCreate"];
+        if payload["success"] != true {
             return Err(LinearError::Message(
                 "Project attachment was not confirmed; receipt retained".into(),
             ));
         }
-        Ok(())
+        let node: ProjectNode = serde_json::from_value(
+            payload["initiativeToProject"]["project"].clone(),
+        )
+        .map_err(|error| LinearError::Message(format!("invalid attached Project: {error}")))?;
+        if node.id != project {
+            return Err(LinearError::Message(
+                "Project attachment returned a different identity".into(),
+            ));
+        }
+        node.into_observation()
     }
 
-    /// The caller persists its receipt before starting this one provider effect.
+    /// The mutation's own response supplies confirmation; no follow-up read.
     pub(crate) async fn deliver_planning_field(
         &self,
         id: &str,
         project: bool,
         input: Value,
-    ) -> LinearResult<()> {
-        let (query, result) = if project {
+    ) -> LinearResult<PlanningResponse> {
+        let (name, operation, input_type, object, fields) = if project {
             (
-                r#"mutation DeliverProjectField($id: String!, $input: ProjectUpdateInput!) {
-                projectUpdate(id: $id, input: $input) { success }
-            }"#,
+                "DeliverProjectField",
                 "projectUpdate",
+                "ProjectUpdateInput",
+                "project",
+                PROJECT_RESPONSE_FIELDS,
             )
         } else {
             (
-                r#"mutation DeliverTaskField($id: String!, $input: IssueUpdateInput!) {
-                issueUpdate(id: $id, input: $input) { success }
-            }"#,
+                "DeliverTaskField",
                 "issueUpdate",
+                "IssueUpdateInput",
+                "issue",
+                ISSUE_RESPONSE_FIELDS,
             )
         };
-        let response: Value = self.graphql(query, json!({"id":id,"input":input})).await?;
-        if response[result]["success"] != true {
-            return Err(LinearError::Message(
-                "Linear did not confirm the field write; receipt retained".into(),
-            ));
-        }
-        Ok(())
+        let query = format!("mutation {name}($id: String!, $input: {input_type}!) {{ {operation}(id: $id,input: $input) {{ success {object} {{ {fields} }} }} }}");
+        let response: Value = self.graphql(&query, json!({"id":id,"input":input})).await?;
+        planning_response(&response[operation], project, id)
     }
 
     // Only migration-marked Projects reach this path. Ordinary parsing reads
@@ -1613,24 +1610,18 @@ impl LinearClient {
             }
             let response: Value = self
                 .graphql(
-                    r#"mutation AdoptProject($id: String!, $input: ProjectUpdateInput!) {
-                    projectUpdate(id: $id, input: $input) { success }
-                }"#,
+                    &format!("mutation AdoptProject($id: String!, $input: ProjectUpdateInput!) {{ projectUpdate(id: $id, input: $input) {{ success project {{ {PROJECT_RESPONSE_FIELDS} }} }} }}"),
                     json!({"id":project_id,"input":input}),
                 )
                 .await?;
-            if response["projectUpdate"]["success"] != true {
-                return Err(LinearError::Message(
-                    "Linear did not confirm Project adoption".into(),
-                ));
-            }
-        }
-        if apply {
-            let confirmed = self.project_ownership(project_id).await?;
-            // The accepted write advances updatedAt; compare authored facts and
-            // retain the provider's confirmed revision for subsequent ingestion.
+            let PlanningResponse::Project {
+                project: confirmed, ..
+            } = planning_response(&response["projectUpdate"], true, project_id)?
+            else {
+                unreachable!("Project adoption returns a Project");
+            };
             project.revision.clone_from(&confirmed.revision);
-            if confirmed != project {
+            if *confirmed != project {
                 return Err(LinearError::Message(format!(
                     "Project {project_id} changed during adoption; refresh and retry"
                 )));
@@ -1641,21 +1632,29 @@ impl LinearClient {
 
     async fn project_node(&self, project_id: &str) -> LinearResult<ProjectNode> {
         let response: ProjectOwnershipData = self
-            .graphql(PROJECT_OWNERSHIP_QUERY, json!({ "id": project_id }))
+            .graphql(
+                &format!("query ProjectOwnership($id: String!) {{ project(id: $id) {{ {PROJECT_RESPONSE_FIELDS} }} }}"),
+                json!({ "id": project_id }),
+            )
             .await?;
         response
             .project
             .ok_or_else(|| LinearError::Message(format!("no Linear Project with id {project_id}")))
     }
 
-    pub(crate) async fn set_item_state(&self, item_id: &str, state_id: &str) -> LinearResult<()> {
-        let _: Value = self
-            .graphql(
-                SET_ITEM_STATE_MUTATION,
-                json!({ "id": item_id, "stateId": state_id }),
-            )
+    pub(crate) async fn set_item_state(
+        &self,
+        item_id: &str,
+        state_id: &str,
+    ) -> LinearResult<LinearIssue> {
+        let query = format!("mutation SetIssueState($id: String!, $stateId: String!) {{ issueUpdate(id: $id,input: {{stateId: $stateId}}) {{ success issue {{ {ISSUE_RESPONSE_FIELDS} }} }} }}");
+        let response: Value = self
+            .graphql(&query, json!({"id":item_id,"stateId":state_id}))
             .await?;
-        Ok(())
+        match planning_response(&response["issueUpdate"], false, item_id)? {
+            PlanningResponse::Task { issue, .. } => Ok(issue.item),
+            PlanningResponse::Project { .. } => unreachable!("issue mutation returns an issue"),
+        }
     }
 
     /// Post a new comment and return its Linear id so callers can update it in
@@ -1842,23 +1841,7 @@ impl LinearClient {
         let mut page = issue.comments;
         let mut comments = Vec::new();
         loop {
-            comments.extend(page.nodes.into_iter().map(|node| LinearComment {
-                id: node.id,
-                created_at: node.created_at,
-                revision: node.updated_at,
-                body: node.body,
-                author_name: node.user.as_ref().and_then(|user| {
-                    user.display_name
-                        .as_deref()
-                        .and_then(crate::config::normalize_user_name)
-                        .or_else(|| {
-                            user.name
-                                .as_deref()
-                                .and_then(crate::config::normalize_user_name)
-                        })
-                }),
-                author_id: node.user.map(|user| user.id),
-            }));
+            comments.extend(page.nodes.into_iter().map(LinearComment::from));
             if !page.page_info.has_next_page {
                 break;
             }
@@ -1889,6 +1872,50 @@ impl LinearClient {
             title: issue.title,
             description: issue.description.unwrap_or_default(),
             comments,
+        })
+    }
+}
+
+#[derive(Debug)]
+pub(crate) enum PlanningResponse {
+    Task {
+        issue: Box<OrderedIssue>,
+        project: Option<Box<LinearProject>>,
+    },
+    Project {
+        project: Box<LinearProject>,
+        content: String,
+    },
+}
+
+fn planning_response(payload: &Value, project: bool, id: &str) -> LinearResult<PlanningResponse> {
+    let object = if project { "project" } else { "issue" };
+    if payload["success"] != true || payload[object]["id"] != id {
+        return Err(LinearError::Message(
+            "Linear mutation lacks an exact acknowledgement; receipt retained".into(),
+        ));
+    }
+    if project {
+        let node: ProjectNode = serde_json::from_value(payload[object].clone())
+            .map_err(|error| LinearError::Message(error.to_string()))?;
+        let content = node.content.clone().unwrap_or_default();
+        Ok(PlanningResponse::Project {
+            project: Box::new(node.into_observation()?),
+            content,
+        })
+    } else {
+        let node: IssueNode<ProjectNode> = serde_json::from_value(payload[object].clone())
+            .map_err(|error| LinearError::Message(error.to_string()))?;
+        let priority_sort_order = node.fields.priority_sort_order;
+        let sort_order = node.fields.sort_order;
+        let (item, project) = node.into_ownership()?;
+        Ok(PlanningResponse::Task {
+            issue: Box::new(OrderedIssue {
+                item,
+                priority_sort_order,
+                sort_order,
+            }),
+            project: project.map(Box::new),
         })
     }
 }
@@ -2013,7 +2040,7 @@ struct IssueObservationNode {
     title: String,
     #[serde(default)]
     description: Option<String>,
-    comments: PagedCommentConnection,
+    comments: Connection<CommentNode>,
 }
 
 #[derive(Deserialize)]
@@ -2023,14 +2050,7 @@ struct IssueCommentsData {
 
 #[derive(Deserialize)]
 struct IssueCommentsNode {
-    comments: PagedCommentConnection,
-}
-
-#[derive(Deserialize)]
-struct PagedCommentConnection {
-    nodes: Vec<CommentNode>,
-    #[serde(rename = "pageInfo")]
-    page_info: PageInfo,
+    comments: Connection<CommentNode>,
 }
 
 #[derive(Deserialize)]
@@ -2044,6 +2064,28 @@ struct CommentNode {
     body: String,
     #[serde(default)]
     user: Option<CommentUser>,
+}
+
+impl From<CommentNode> for LinearComment {
+    fn from(node: CommentNode) -> Self {
+        Self {
+            id: node.id,
+            created_at: node.created_at,
+            revision: node.updated_at,
+            body: node.body,
+            author_name: node.user.as_ref().and_then(|user| {
+                user.display_name
+                    .as_deref()
+                    .and_then(crate::config::normalize_user_name)
+                    .or_else(|| {
+                        user.name
+                            .as_deref()
+                            .and_then(crate::config::normalize_user_name)
+                    })
+            }),
+            author_id: node.user.map(|user| user.id),
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -2063,8 +2105,6 @@ struct IssueNode<P = IdNode> {
     project: Option<P>,
 }
 
-// List and detail observations require the same complete issue fields.
-// Nullable fields must be present; omission is not a value to store.
 #[derive(Debug)]
 pub(crate) struct OrderedIssue {
     pub item: LinearIssue,
@@ -2072,6 +2112,8 @@ pub(crate) struct OrderedIssue {
     pub sort_order: f64,
 }
 
+// List and detail observations require the same complete issue fields.
+// Nullable fields must be present; omission is not a value to store.
 #[derive(Deserialize)]
 struct IssueFields {
     #[serde(rename = "completedAt", deserialize_with = "Option::deserialize")]
@@ -2195,12 +2237,12 @@ struct ProjectIssuesData {
 
 #[derive(Deserialize)]
 struct ProjectWithIssues {
-    issues: IssuesConnection,
+    issues: Connection<IssueNode>,
 }
 
 #[derive(Deserialize)]
-struct IssuesConnection {
-    nodes: Vec<IssueNode>,
+struct Connection<T> {
+    nodes: Vec<T>,
     #[serde(rename = "pageInfo")]
     page_info: PageInfo,
 }
@@ -2411,14 +2453,7 @@ struct IdConnection {
 
 #[derive(Deserialize)]
 struct InitiativesData {
-    initiatives: InitiativesConnection,
-}
-
-#[derive(Deserialize)]
-struct InitiativesConnection {
-    nodes: Vec<InitiativeNode>,
-    #[serde(rename = "pageInfo")]
-    page_info: PageInfo,
+    initiatives: Connection<InitiativeNode>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -2430,7 +2465,7 @@ pub(crate) struct InitiativeNode {
 
 #[derive(Deserialize)]
 struct ProjectsData {
-    projects: ProjectsConnection,
+    projects: Connection<ProjectNode>,
 }
 
 #[derive(Deserialize)]
@@ -2440,26 +2475,11 @@ struct InitiativeProjectsData {
 
 #[derive(Deserialize)]
 struct InitiativeWithProjects {
-    projects: ProjectsConnection,
+    projects: Connection<ProjectNode>,
 }
 
-#[derive(Deserialize)]
-struct ProjectsConnection {
-    nodes: Vec<ProjectNode>,
-    #[serde(rename = "pageInfo")]
-    page_info: PageInfo,
-}
-
-async fn parse_graphql_response<T: DeserializeOwned>(
-    response: reqwest::Response,
-) -> LinearResult<T> {
-    let status = response.status();
-    let body = response
-        .bytes()
-        .await
-        .map_err(|err| LinearError::Message(format!("failed to read Linear response: {err}")))?;
-
-    let parsed = serde_json::from_slice::<GraphqlResponse>(&body)
+fn parse_graphql_response<T: DeserializeOwned>(status: StatusCode, body: &[u8]) -> LinearResult<T> {
+    let parsed = serde_json::from_slice::<GraphqlResponse>(body)
         .map_err(|err| LinearError::Message(format!("failed to decode Linear response: {err}")))?;
 
     if let Some(error) = parsed.errors.first() {
@@ -2473,7 +2493,7 @@ async fn parse_graphql_response<T: DeserializeOwned>(
     }
 
     if !status.is_success() {
-        let body_text = String::from_utf8_lossy(&body).trim().to_string();
+        let body_text = String::from_utf8_lossy(body).trim().to_string();
         if body_text.is_empty() {
             return Err(LinearError::Message(format!(
                 "linear request failed with status {status}"
@@ -2700,6 +2720,58 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn rate_limit_pauses_independent_clients_and_resumes_after_reset() {
+        let mut limited = json_response(
+            StatusCode::BAD_REQUEST,
+            json!({"errors":[{"message":"Rate limit exceeded", "extensions":{"code":"RATELIMITED"}}]}),
+        );
+        limited.headers.push((
+            "x-ratelimit-requests-reset".into(),
+            ((time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) + 250)
+                .to_string(),
+        ));
+        let (url, requests) = test_server::spawn(vec![limited,
+            json_response(StatusCode::OK, json!({"data":{"initiatives":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}))]).await;
+        let first = LinearClient::with_base_url("first-token".into(), None, url.clone());
+        assert!(matches!(
+            first.initiatives().await,
+            Err(crate::linear::LinearError::RateLimited { .. })
+        ));
+        let second = LinearClient::with_base_url("refreshed-token".into(), None, url);
+        assert!(matches!(
+            second.initiatives().await,
+            Err(crate::linear::LinearError::RateLimited { .. })
+        ));
+        assert_eq!(requests.lock().await.len(), 1);
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert!(second.initiatives().await.unwrap().is_empty());
+        assert_eq!(requests.lock().await.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn last_allowed_response_is_returned_before_shared_pause() {
+        let mut last = json_response(
+            StatusCode::OK,
+            json!({"data":{"initiatives":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}),
+        );
+        last.headers
+            .push(("x-ratelimit-complexity-remaining".into(), "0".into()));
+        last.headers.push((
+            "x-ratelimit-complexity-reset".into(),
+            ((time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) + 60_000)
+                .to_string(),
+        ));
+        let (url, requests) = test_server::spawn(vec![last]).await;
+        let client = LinearClient::with_base_url("token".into(), None, url);
+        assert!(client.initiatives().await.unwrap().is_empty());
+        assert!(matches!(
+            client.initiatives().await,
+            Err(crate::linear::LinearError::RateLimited { .. })
+        ));
+        assert_eq!(requests.lock().await.len(), 1);
+    }
+
+    #[tokio::test]
     async fn migration_adoption_accepts_a_started_project_without_flow() {
         let original = "Original prose.\n\n## KRs\n- [ ] Preserve this proof\n";
         let response = json!({"data":{"project": {
@@ -2709,11 +2781,8 @@ mod tests {
             "initiatives":{"nodes":[{"id":"initiative-1"}]},
             "teams":{"nodes":[{"id":"team-1"}]}
         }}});
-        let (base_url, _) = test_server::spawn(vec![
-            json_response(StatusCode::OK, response.clone()),
-            json_response(StatusCode::OK, response),
-        ])
-        .await;
+        let (base_url, requests) =
+            test_server::spawn(vec![json_response(StatusCode::OK, response)]).await;
         let client = LinearClient::with_base_url("fixture".into(), Some("team-1".into()), base_url);
         let adopted = client
             .adopt_project("project-1", "initiative-1", "team-1", false, true)
@@ -2724,15 +2793,34 @@ mod tests {
         assert!(adopted.workflow.is_empty());
         assert_eq!(adopted.krs[0].text, "Preserve this proof");
         assert_eq!(adopted.status, crate::work::project::ProjectStatus::Started);
+        assert_eq!(requests.lock().await.len(), 1);
     }
 
-    #[test]
-    fn issue_mutations_use_linear_string_ids() {
-        for query in [SET_ITEM_STATE_MUTATION, CREATE_COMMENT_MUTATION] {
-            assert!(!query.contains(": ID!"));
-        }
-        assert!(SET_ITEM_STATE_MUTATION.contains("$stateId: String!"));
-        assert!(CREATE_COMMENT_MUTATION.contains("$issueId: String!"));
+    #[tokio::test]
+    async fn project_adoption_uses_the_mutation_acknowledgement() {
+        let mut project = json!({"id":"project-1", "name":"Chapter", "description":"Summary",
+            "content":"## Flows\nrecommended: feature\n", "status":{"type":"started"},
+            "updatedAt":"2026-10-10T12:00:00Z", "archivedAt":null,
+            "initiatives":{"nodes":[{"id":"initiative-1"}]}, "teams":{"nodes":[{"id":"team-1"}]}});
+        let before = json!({"data":{"project":project}});
+        project["content"] = json!("## Flows\nworkflow: feature\n");
+        project["updatedAt"] = json!("2026-10-11T12:00:00Z");
+        let (url, requests) = test_server::spawn(vec![
+            json_response(StatusCode::OK, before),
+            json_response(
+                StatusCode::OK,
+                json!({"data":{"projectUpdate":{"success":true,"project":project}}}),
+            ),
+        ])
+        .await;
+        let client = LinearClient::with_base_url("fixture".into(), Some("team-1".into()), url);
+        let adopted = client
+            .adopt_project("project-1", "initiative-1", "team-1", false, true)
+            .await
+            .unwrap();
+        assert_eq!(adopted.workflow, "feature");
+        assert_eq!(adopted.revision.as_deref(), Some("2026-10-11T12:00:00Z"));
+        assert_eq!(requests.lock().await.len(), 2);
     }
 
     /// A wrong argument on a Linear mutation must fail here, not ship a 400 on
@@ -3478,7 +3566,12 @@ mod tests {
                 ),
                 json_response(
                     StatusCode::OK,
-                    json!({ "data": { "issueUpdate": { "issue": { "id": "ENG-7" } } } }),
+                    json!({ "data": { "issueUpdate": { "success":true,"issue": {
+                        "id":"ENG-7","identifier":"ENG-7","title":"Fixture","description":null,
+                        "branchName":null,"completedAt":null,"dueDate":null,"url":null,
+                        "updatedAt":"2026-10-11T12:00:00Z","prioritySortOrder":0.0,"sortOrder":0.0,
+                        "state":{"type":target},"assignee":null,"team":{"id":"team-eng"},"project":null
+                    } } } }),
                 ),
             ])
             .await;

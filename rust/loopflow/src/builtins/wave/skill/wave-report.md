@@ -185,7 +185,7 @@ Interpret:
 
 ## Task references
 
-When the report names more than one Task, read `lf roadmap --wave <wave>
+When the report names more than one Task, read `lf wave show <wave>
 --json` for plan-wide rows and `lf wave status <wave> --json` for live execution.
 Render operational Task lists with the shared reference:
 

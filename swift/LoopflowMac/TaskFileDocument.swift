@@ -57,7 +57,7 @@ final class TaskFileDocument: NSObject, NSTextViewDelegate, @preconcurrency NSTe
             let merged = TaskTextEdit.merge(base: base, local: local, disk: incoming)
             return (merged, TaskTextEdit.between(local, merged))
         }.value
-        guard generation == incomingGeneration, snapshot?.content == base else { return }
+        guard !Task.isCancelled, generation == incomingGeneration, snapshot?.content == base else { return }
         guard !saving, !editor.hasMarkedText() else {
             deferredSnapshot = next
             return
@@ -280,6 +280,7 @@ final class TaskFilesStore {
     private(set) var changes: TaskChangesSnapshot?
     private(set) var directories: [String: TaskDirectory] = [:]
     private(set) var directoryErrors: [String: String] = [:]
+    private(set) var isRefreshingChanges = false
     private(set) var changesError: String?
     var expandedDirectories: Set<String> = []
     var showIgnored = false
@@ -296,6 +297,8 @@ final class TaskFilesStore {
     private var savedPreference = true
     private var preferenceChanges: AnyCancellable?
     private var observation: TaskFileObservation?
+    @ObservationIgnored private var remoteObservation: Task<Void, Never>?
+
     private var invalidation: Task<Void, Never>?
     private var changedPaths: Set<String> = []
     private var autosaves: [String: Task<Void, Never>] = [:]
@@ -303,13 +306,48 @@ final class TaskFilesStore {
         didSet { for document in documents.values { scheduleSave(document) } }
     }
 
+    deinit { remoteObservation?.cancel() }
+
     func observeFiles() {
+        if let machine = query.remoteMachine {
+            observeRemoteFiles(machine: machine)
+            return
+        }
         guard observation == nil else { return }
         do {
             observation = try TaskFileObservation(path: cwd) { [weak self] paths in
                 self?.invalidate(paths)
             }
         } catch { self.error = "Live file observation unavailable: \(error.localizedDescription)" }
+    }
+
+    private func observeRemoteFiles(machine: String) {
+        guard remoteObservation == nil else { return }
+        let request = UUID().uuidString
+        remoteObservation = Task { [weak self, query, issue, cwd] in
+            var observation: TaskFilesObservation?
+            do {
+                let opened = try await query.watchTaskFiles(issue: issue, checkout: cwd, request: request)
+                observation = opened
+                for try await frame in opened.frames {
+                    try Task.checkCancellation()
+                    guard frame.request == request, frame.taskID == issue,
+                          frame.machineID == machine, frame.checkout == cwd else {
+                        throw RegistryQueryError("Stale or mismatched file observation; drafts retained. Reopen the Task.")
+                    }
+                    guard let self else { break }
+                    if frame.changed { self.error = nil; self.invalidate([""]) }
+                }
+                if !Task.isCancelled { throw RegistryQueryError("Live file observation disconnected; drafts retained. Refresh to reconnect.") }
+            } catch {
+                if let self, !Task.isCancelled {
+                    self.invalidation?.cancel()
+                    self.error = "Live file observation unavailable: \(error.localizedDescription)"
+                }
+            }
+            await observation?.cancel()
+            self?.remoteObservation = nil
+        }
     }
 
     private func invalidate(_ paths: [String]) {
@@ -411,6 +449,7 @@ final class TaskFilesStore {
 
     /// Refresh navigation only; selection and filesystem events own document reads.
     func refresh() async {
+        if query.remoteMachine != nil { observeFiles() }
         await loadDirectory("")
         if needsComparison { await refreshChanges() }
     }
@@ -442,6 +481,8 @@ final class TaskFilesStore {
     func refreshChanges() async {
         refreshGeneration += 1
         let generation = refreshGeneration
+        isRefreshingChanges = true
+        defer { if generation == refreshGeneration { isRefreshingChanges = false } }
         let base = base
         do {
             let changes = try await query.taskChanges(issue: issue, base: base, cwd: cwd)

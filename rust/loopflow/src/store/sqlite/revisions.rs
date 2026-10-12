@@ -65,6 +65,8 @@ mod tests {
         "project_binding_imports",
         "auth_browser_bindings",
         "blob_tokens",
+        // Acquisition attempts and watermarks do not change displayed Work.
+        "linear_team_checks",
         "machines",
         "provider_account_limits",
         "provider_account_switches",
@@ -73,6 +75,11 @@ mod tests {
         "provider_session_accounts",
         "provider_tokens",
         "schema_migrations",
+        // Delivery diagnostics are explicit CLI reads, not workspace projections.
+        "session_steers",
+        "steer_adapters",
+        "steer_batches",
+        "steer_deliveries",
         "store_revisions",
         "task_linear_ingested_comments",
         "tool_responses",
@@ -115,6 +122,10 @@ mod tests {
                 continue;
             }
             for operation in ["insert", "update", "delete"] {
+                // Admission rows reject update/delete; only insertion can commit.
+                if table == "task_admissions" && operation != "insert" {
+                    continue;
+                }
                 let name = format!("store_revision_{table}_{operation}");
                 let exists: bool = conn
                     .query_row(
@@ -135,6 +146,19 @@ mod tests {
         for table in NEVER_DISPLAYED {
             assert!(tables.iter().any(|name| name == table), "{table} is gone");
         }
+    }
+
+    #[test]
+    fn saving_a_steer_invalidates_planning_without_changing_session_state() {
+        let (_dir, store) = store();
+        session(&store, "conversation");
+        let before = store.revisions().unwrap();
+        store
+            .save_session_steer("conversation", "Fixture author", "Keep the public name")
+            .unwrap();
+        let after = store.revisions().unwrap();
+        assert_eq!(after.planning, before.planning + 1);
+        assert_eq!(after.sessions, before.sessions);
     }
 
     /// The tables the Task conversation work adds, each with the one domain

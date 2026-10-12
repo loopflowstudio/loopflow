@@ -114,7 +114,7 @@ pub fn create_or_update_pr(
 
     // Record the ancestry already present in Git before the first remote effect.
     // This recognizes completed merges without integrating or rewriting history.
-    crate::ops::task::verify_task_pr_range(repo)?;
+    crate::ops::task::refresh_task_pr_base(repo)?;
 
     // Gate output is an in-worktree handoff, never published content. Consume
     // valid cached copy before deleting the gate-owned files so the commit and

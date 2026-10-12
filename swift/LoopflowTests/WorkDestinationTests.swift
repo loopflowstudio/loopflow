@@ -8,9 +8,262 @@ import os
 @testable import Loopflow
 @testable import LoopflowMac
 
+private final class RemoteCompanionBundleMarker: NSObject {}
+
 @Suite("Work destinations", .serialized)
 @MainActor
 struct WorkDestinationTests {
+    @Test func taskLinksRetainLiteralTargetsWhenChangingRepositoryLocator() throws {
+        let original = TaskLink(issue: "LOO-427", repo: "/src/a #?&% repo", session: "session+&%", diff: true)
+        let parsed = try TaskLink(url: #require(original.url))
+        #expect(parsed == original)
+        let relocated = TaskLink(issue: parsed.issue, repo: "/peer/other #repo", session: parsed.session, diff: parsed.diff)
+        #expect(try TaskLink(url: #require(relocated.url)) == relocated)
+        #expect(try TaskLink(url: #require(TaskLink(issue: "LOO-427", repo: nil).url))
+            == TaskLink(issue: "LOO-427", repo: nil))
+    }
+
+    @Test(arguments: [false, true])
+    func bareTaskOpeningDoesNotAcquireASession(remote: Bool) async throws {
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(try fixture().utf8))
+        let wave = try #require(snapshot.waves.first)
+        let task = try #require(wave.tasks.items.first)
+        let taskID = task.runtime?.workId ?? task.id
+        let remoteIdentity = WorkspaceIdentity(machineId: "peer", worktree: "/peer/retained-checkout")
+        let query = RegistryQuery { args, _ in
+            if args.starts(with: ["repo", "identity"]) {
+                return #"{"id":"repository","locators":["repository"]}"#
+            }
+            if args.starts(with: ["--machine", "peer", "--repository", "repository", "task", "location"]) {
+                let index = try #require(args.firstIndex(of: "--request"))
+                return String(decoding: try JSONSerialization.data(withJSONObject: [[
+                    "request": args[index + 1], "repository_id": "repository", "task_id": taskID,
+                    "machine_id": "peer", "observed_at": 1,
+                    "location": ["state": "recorded", "task_id": "remote-task", "checkout": remoteIdentity.worktree]
+                ]]), as: UTF8.self)
+            }
+            throw RegistryQueryError("Bare Work opening cannot prepare a checkout or acquire a Session")
+        }
+        let model = WorkModel(query: query, repoPath: wave.wave.repo)
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        let link = TaskLink(issue: taskID, repo: wave.wave.repo, session: nil, diff: false,
+                            machine: remote ? "peer" : nil, repository: remote ? "repository" : nil)
+        await model.openTaskLink(try #require(link.url))
+        #expect(model.selection == .task(id: task.id))
+        #expect(model.roadmap.value == snapshot)
+        #expect(model.linkedSession == nil)
+        #expect(model.navigation.selectedSessionId == nil)
+        #expect(model.taskOpening?.status == .opening)
+        let page = try #require(model.linkedTaskPage)
+        #expect(page.taskID == task.id)
+        if remote {
+            #expect(model.navigation.preparedTaskWorktrees[task.id] == remoteIdentity)
+        } else {
+            #expect(model.navigation.preparedTaskWorktrees.isEmpty)
+        }
+        model.finishTaskPage(page)
+        #expect(model.taskOpening?.status == .usable)
+    }
+
+    @Test(arguments: ["recorded", "stale", "unavailable", "unrecorded", "wrong-checkout"])
+    func remoteOpeningKeepsLocalPlanningAndRetainedDrafts(outcome: String) async throws {
+        if outcome == "recorded", ProcessInfo.processInfo.environment["LOOPFLOW_REMOTE_COMPANION_HOST"] == nil {
+            let host = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            try FileManager.default.createDirectory(at: host, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: host) }
+            let executable = try #require(Bundle.main.executableURL)
+            try #require(executable.lastPathComponent == "swiftpm-testing-helper")
+            let owned = host.appendingPathComponent(executable.lastPathComponent)
+            try FileManager.default.copyItem(at: executable, to: owned)
+            let helper = host.appendingPathComponent("lf")
+            try "#!/bin/sh\nexit 93\n".write(to: helper, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helper.path)
+            try JSONSerialization.data(withJSONObject: ["lf_path": helper.path])
+                .write(to: host.appendingPathComponent("LoopflowDevControl.json"))
+            let process = Process()
+            process.executableURL = owned
+            process.arguments = ["--test-bundle-path", try #require(Bundle(for: RemoteCompanionBundleMarker.self).executablePath),
+                "--testing-library", "swift-testing", "--filter", "WorkDestinationTests/remoteOpeningKeepsLocalPlanningAndRetainedDrafts", "--no-parallel"]
+            process.environment = ProcessInfo.processInfo.environment.merging(
+                ["LOOPFLOW_REMOTE_COMPANION_HOST": host.path], uniquingKeysWith: { _, new in new })
+            let output = Pipe()
+            process.standardOutput = output
+            process.standardError = output
+            try process.run()
+            let log = output.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            print(String(decoding: log, as: UTF8.self))
+            try #require(process.terminationStatus == 0)
+            return
+        }
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(try fixture().utf8))
+        let wave = try #require(snapshot.waves.first)
+        let task = try #require(wave.tasks.items.first)
+        let taskID = try #require(task.runtime?.workId)
+        let localIdentity = try #require(task.reference.workspace?.identity)
+        let remoteID = "task_remote_correspondence"
+        let remoteIdentity = WorkspaceIdentity(machineId: "peer", worktree: "/peer/retained-checkout")
+        var record = try renameFixtureRecord("peer-session", title: "Remote review", work: .task(id: remoteID))
+        record.workspace = try JSONDecoder().decode(SessionWorkspace.self, from: JSONSerialization.data(withJSONObject: [
+            "machine_id": "peer", "worktree": outcome == "wrong-checkout" ? "/changed" : remoteIdentity.worktree,
+            "task_id": remoteID
+        ]))
+        var surface = try JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as! [String: Any]
+        surface["actions"] = sessionActionFixture(state: "closed")
+        surface["open_argv"] = ["ssh", "-tt", "peer", "owned-fixture"]
+        record = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: surface))
+        let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
+        let query = RegistryQuery { args, cwd in
+            if args.starts(with: ["repo", "identity"]) { return #"{"id":"selected-plan","locators":["selected-plan","repository"]}"# }
+            guard args.starts(with: ["--machine", "peer", "--repository", "repository"]), cwd == nil else {
+                throw RegistryQueryError("Remote paths must never become local working directories")
+            }
+            let command = Array(args.dropFirst(4))
+            if command.starts(with: ["task", "location"]) {
+                let requestIndex = try #require(command.firstIndex(of: "--request"))
+                let request = outcome == "stale" ? "previous-request" : command[requestIndex + 1]
+                let location: [String: Any] = outcome == "unavailable" ? ["state": "unavailable", "reason": "Offline"]
+                    : outcome == "unrecorded" ? ["state": "unrecorded"]
+                    : ["state": "recorded", "task_id": remoteID, "checkout": remoteIdentity.worktree]
+                return String(decoding: try JSONSerialization.data(withJSONObject: [[
+                    "request": request, "repository_id": "repository", "task_id": taskID,
+                    "machine_id": "peer", "observed_at": 1, "location": location
+                ]]), as: UTF8.self)
+            }
+            if command.starts(with: ["session", "list"]) { return #"{"entries":[\#(encoded)],"next":null}"# }
+            if command.starts(with: ["session", "connect"]) { return encoded }
+            throw RegistryQueryError("No checkout, provider launch or transfer permitted")
+        }
+        let model = WorkModel(query: query, repoPath: wave.wave.repo)
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        let registry = SessionsWorkspaceRegistry(localMachineId: localIdentity.machineId)
+        let local = fixtureWork(registry, localIdentity)
+        local.multiplexer.newShell(command: ["retained-local-shell"], location: local.location)
+        let layout = local.multiplexer.layout
+        let files = local.files(taskId: task.id, issue: taskID, cwd: localIdentity.worktree, query: query)
+        let document = files.document("draft.txt")
+        document.editor.string = "unfinished local draft"
+        let link = TaskLink(issue: taskID, repo: wave.wave.repo, session: record.id, diff: true,
+                            machine: "peer", repository: "repository")
+        #expect(try TaskLink(url: #require(link.url)) == link)
+        await model.openTaskLink(try #require(link.url))
+        #expect(model.repoPath == wave.wave.repo)
+        #expect(model.roadmap.value == snapshot)
+        #expect(local.multiplexer.layout == layout)
+        #expect(document.editor.string == "unfinished local draft")
+        if outcome == "recorded" {
+            let request = try #require(model.linkedSession)
+            #expect(request.record.id == record.id)
+            #expect(request.location?.machineID == "peer")
+            #expect(model.selection == .task(id: task.id))
+            #expect(model.navigation.preparedTaskWorktrees[task.id] == remoteIdentity)
+            #expect(model.taskOpening?.status == .opening)
+            let remote = registry.workspace(for: WorkWorkspaceKey(repository: "repository", kind: .task, id: task.runtime?.workId ?? task.id), title: task.task.name, location: remoteIdentity)
+            remote.multiplexer.load(sessionId: record.id, location: record.workspace?.identity)
+            let sessionOnly = LinkedSession(generation: request.generation, record: record,
+                task: task, showsChanges: false, location: request.location)
+            #expect(try registry.openLinkedFiles(sessionOnly, in: remote.key, query: query) == nil)
+            let companion = try remote.files(for: .files(taskId: task.id, execution: request.location), task: task, query: query)
+            companion.document("remote-draft.txt").editor.string = "retained peer draft"
+            #expect(remote.multiplexer.layout.allPanes.count == 1)
+            #expect(try registry.openLinkedFiles(request, in: remote.key, query: query) === companion)
+            #expect(companion.document("remote-draft.txt").editor.string == "retained peer draft")
+            let sessions = local.sessionStore(repoPath: wave.wave.repo, query: query)
+            sessions.retainLocation(try #require(request.location), for: record)
+            sessions.reconcile([record])
+            await sessions.select(record.id)
+            #expect(sessions.sessions.first?.state == .prepared)
+            #expect(sessions.sessions.first?.record.openArgv.first == "ssh")
+            #expect(sessions.presentationDirectory(for: record, checkout: remoteIdentity.worktree) == wave.wave.repo)
+            #expect(sessions.taskSubject(for: record) == .task(id: taskID))
+            #expect(companion.issue == remoteID)
+            #expect(companion.query.remoteMachine == "peer")
+            #expect(remote.multiplexer.layout.allPanes.count == 2)
+            let targetPane = remote.multiplexer.focusedPane
+            let focus = remote.multiplexer.focusedPaneId
+            remote.multiplexer.setZoom(targetPane.id, enabled: true)
+            let target = DesktopPaneTarget(repository: "repository", window: UUID().uuidString,
+                work: remote.key, pane: targetPane.id, incarnation: targetPane.incarnation)
+            try registry.controlPane(.init(target: target, action: .shell), model: model)
+            let shell = try #require(remote.multiplexer.layout.allPanes.first { $0.content == .shell(location: remoteIdentity, execution: request.location) })
+            let command = try #require(remote.multiplexer.shellCommands[shell.id])
+            #expect(Array(command.dropFirst()) == ["--machine", "peer", "--repository", "repository",
+                "task", "shell", remoteID, "--checkout", remoteIdentity.worktree])
+            let splitID = try registry.controlPane(.init(target: target, action: .split(axis: .horizontal)), model: model)
+            #expect(remote.multiplexer.layout.pane(for: splitID)?.content == .shell(location: remoteIdentity, execution: request.location))
+            #expect(remote.multiplexer.shellCommands[splitID] == command)
+            #expect(remote.multiplexer.layout.pane(for: targetPane.id) == targetPane)
+            #expect(remote.multiplexer.focusedPaneId == focus)
+            #expect(remote.multiplexer.zoomedPaneId == targetPane.id)
+            #expect(companion.document("remote-draft.txt").editor.string == "retained peer draft")
+            // A second same-path owner must not redirect the first pane's shell.
+            // This process owns its lf fixture; constructing argv launches nothing.
+            do {
+                let workspace = fixtureWork(localIdentity)
+                let peer = WorkspaceIdentity(machineId: "peer", worktree: "/remote/task")
+                let first = TaskLocationObservation(request: "first", repositoryID: "repo-a", taskID: "plan-a",
+                    machineID: "peer", observedAt: 1, location: .recorded(taskID: "owner-a", checkout: peer.worktree))
+                let second = TaskLocationObservation(request: "second", repositoryID: "repo-b", taskID: "plan-b",
+                    machineID: "peer", observedAt: 2, location: .recorded(taskID: "owner-b", checkout: peer.worktree))
+                let store = workspace.multiplexer
+                store.load(sessionId: "first", location: peer)
+                store.updateSessionLocation("first", location: peer, execution: first)
+                let original = store.focusedPane
+                let shell = try #require(try workspace.split(original.id, axis: .vertical))
+                store.load(sessionId: "second", location: peer)
+                store.updateSessionLocation("second", location: peer, execution: second)
+                store.updateSessionLocation("first", location: peer) // An ordinary reading keeps the pinned owner.
+                #expect(store.layout.pane(for: original.id) == original)
+                let again = try #require(try workspace.split(shell.id, axis: .horizontal))
+                let command = try #require(store.shellCommands[again.id])
+                #expect(Array(command.dropFirst()) == ["--machine", "peer", "--repository", "repo-a",
+                    "task", "shell", "owner-a", "--checkout", peer.worktree])
+                #expect(again.executionLocation == first)
+                store.close(again.id)
+                store.undoClose()
+                #expect(store.layout.pane(for: again.id)?.executionLocation == first)
+                #expect(store.shellCommands[again.id] == nil) // Undo cannot replay a launch.
+                let afterUndo = try #require(try workspace.split(again.id, axis: .vertical))
+                #expect(store.shellCommands[afterUndo.id] == command)
+
+                let files = try #require(store.show(.files(taskId: "plan-a", execution: first)))
+                let filesSplit = try #require(try workspace.split(files.id, axis: .vertical))
+                #expect(store.shellCommands[filesSplit.id] == command)
+                #expect(store.show(.files(taskId: "plan-a")) == files)
+                #expect(store.layout.allPanes.filter { if case .files = $0.content { true } else { false } }.count == 1)
+
+                store.updateSessionLocation("first", location: WorkspaceIdentity(machineId: "peer", worktree: "/moved"))
+                let changed = try #require(store.pane(forSessionId: "first"))
+                #expect(changed.incarnation != original.incarnation)
+                #expect(changed.executionLocation == nil)
+                let before = store.layout
+                #expect(throws: RegistryQueryError.self) { try workspace.split(changed.id, axis: .vertical) }
+                #expect(store.layout == before)
+                let unavailable = TaskLocationObservation(request: "offline", repositoryID: "repo-a", taskID: "plan-a",
+                    machineID: "peer", observedAt: 3, location: .unavailable(reason: "Offline"))
+                let unavailableFiles = try #require(store.show(.files(taskId: "plan-a", execution: unavailable)))
+                #expect(unavailableFiles.id == files.id)
+                #expect(unavailableFiles.incarnation != files.incarnation)
+                let unavailableLayout = store.layout
+                #expect(throws: RegistryQueryError.self) { try workspace.split(unavailableFiles.id, axis: .vertical) }
+                #expect(store.layout == unavailableLayout)
+            }
+            remote.multiplexer.load(sessionId: "replacement")
+            let unchanged = remote.multiplexer.layout
+            #expect(throws: RegistryQueryError.self) {
+                try registry.controlPane(.init(target: target, action: .shell), model: model)
+            }
+            #expect(remote.multiplexer.layout == unchanged)
+
+            #expect(local.multiplexer.layout == layout)
+        } else {
+            #expect(model.linkedSession == nil)
+            #expect(model.taskOpening?.status == .failed)
+            #expect(model.navigation.preparedTaskWorktrees[task.id] == nil)
+            #expect(registry.keys == [fixtureWorkKey(localIdentity)])
+        }
+    }
+
     @Test func resolvingTaskKeepsTheWorkspaceVisible() async throws {
         let data = try fixture()
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
@@ -57,7 +310,6 @@ struct WorkDestinationTests {
         #expect(model.navigation.content == .terminals)
         #expect(model.taskLinkReading.errorMessage == nil)
         #expect(!model.showsTaskLink)
-        #expect(model.containsTaskDestination(try #require(url.url)))
 
         // Reopening what is already open changes nothing, so nothing redraws.
         let invalidations = OSAllocatedUnfairLock(initialState: 0)
@@ -115,13 +367,248 @@ struct WorkDestinationTests {
         var url = try #require(URLComponents(string: "loopflow://task/\(task.task.identifier)"))
         url.queryItems = [URLQueryItem(name: "repo", value: wave.wave.repo), URLQueryItem(name: "session", value: record.id)]
         await model.openTaskLink(try #require(url.url))
-        #expect(model.linkedSession?.id == record.id)
+        #expect(model.linkedSession?.record.id == record.id)
         #expect(model.navigation.selectedSessionId == record.id)
         #expect(model.taskLinkReading.errorMessage == nil)
         // Reopening from retained evidence must preserve the conversation too.
         await model.openTaskLink(try #require(url.url))
         #expect(model.navigation.selectedSessionId == record.id)
         #expect(model.sessions.value?.map(\.id) == [record.id, other.id])
+    }
+
+    @Test func composedOpeningRetainsTheExactSessionAndChangesPane() async throws {
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(try fixture().utf8))
+        let wave = try #require(snapshot.waves.first)
+        let task = try #require(wave.tasks.items.first)
+        var record = try renameFixtureRecord("composed-session", title: "Review", work: .task(id: #require(task.runtime?.workId)))
+        let identity = try #require(task.reference.workspace?.identity)
+        record.workspace = try JSONDecoder().decode(SessionWorkspace.self, from: JSONSerialization.data(withJSONObject: [
+            "machine_id": identity.machineId, "worktree": identity.worktree,
+            "task_id": try #require(task.runtime?.workId)
+        ]))
+        let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
+        let query = RegistryQuery { args, _ in
+            guard args.starts(with: ["session", "list"]) else { throw RegistryQueryError("No launch or planning mutation permitted") }
+            return #"{"entries":[\#(encoded)],"next":null}"#
+        }
+        let model = WorkModel(query: query, repoPath: wave.wave.repo)
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        let sessionOnly = TaskLink(issue: task.task.identifier, repo: wave.wave.repo, session: record.id)
+        await model.openTaskLink(try #require(sessionOnly.url))
+        #expect(model.linkedSession?.record.id == record.id)
+        #expect(model.linkedSession?.showsChanges == false)
+        // The same Session with a companion is a different pending destination,
+        // even if SwiftUI has not consumed the first request yet.
+        let link = TaskLink(issue: try #require(task.runtime?.workId), repo: wave.wave.repo, session: record.id, diff: true)
+        await model.openTaskLink(try #require(link.url))
+        #expect(model.linkedSession?.record.id == record.id)
+        #expect(model.linkedSession?.showsChanges == true)
+        #expect(model.taskOpening?.status == .opening) // selection is not native readiness
+        let registry = SessionsWorkspaceRegistry(localMachineId: identity.machineId)
+        let workspace = fixtureWork(registry, identity)
+        workspace.multiplexer.load(sessionId: record.id, location: record.workspace?.identity)
+        let terminal = try #require(workspace.multiplexer.layout.allPanes.first)
+        try registry.openLinkedFiles(try #require(model.linkedSession), in: workspace.key, query: query)
+        let files = workspace.files(taskId: task.id, issue: task.task.identifier, cwd: identity.worktree, query: query)
+        files.selection = "retained-draft.rs"
+        try registry.openLinkedFiles(try #require(model.linkedSession), in: workspace.key, query: query)
+        #expect(workspace.multiplexer.layout.allPanes.count == 2)
+        #expect(workspace.multiplexer.layout.pane(for: terminal.id) == terminal)
+        #expect(workspace.multiplexer.focusedPaneId == terminal.id)
+        #expect(files.selection == "retained-draft.rs")
+        #expect(files.showsChanges)
+        let failure = TaskLink(issue: task.task.identifier, repo: wave.wave.repo, session: "missing", diff: true)
+        await model.openTaskLink(try #require(failure.url))
+        #expect(model.taskOpening?.status == .failed)
+        #expect(model.taskOpening?.url == failure.url?.absoluteString)
+        #expect(model.navigation.selectedSessionId == record.id)
+        #expect(model.linkedSession == nil)
+        // Retrying through the chooser uses the same failure receipt as a direct link.
+        await model.chooseLinkedTask(wave: wave, task: task)
+        #expect(model.taskOpening?.status == .failed)
+        #expect(model.taskOpening?.reason == model.taskLinkReading.errorMessage)
+        #expect(model.linkedSession == nil)
+    }
+
+    @Test(arguments: ["usable", "connection", "surface", "comparison", "closed", "hidden", "zoomed", "replaced"])
+    func composedOpeningWaitsForNativeSessionAndComparison(outcome: String) async throws {
+        let (model, record, url, query) = try openingFixture(outcome: outcome)
+        await model.openTaskLink(url)
+        let request = try #require(model.linkedSession)
+        let workspace = fixtureWork(try #require(record.workspace?.identity))
+        workspace.multiplexer.load(sessionId: record.id, location: record.workspace?.identity)
+        workspace.multiplexer.show(.files(taskId: request.task.id), focus: false)
+        let store = SessionsStore(repoPath: try #require(model.repoPath), query: query)
+        store.reconcile([record])
+        let files = TaskFilesStore(issue: "LOO-427", cwd: "/fixture", query: query)
+        files.selection = "retained-draft.rs"
+        await model.connectLinkedOpening(request, store: store, workspace: workspace, files: files)
+        if outcome != "connection", outcome != "comparison" {
+            #expect(store.sessions.first?.state == .prepared)
+            #expect(model.taskOpening?.status == .opening)
+            let pane = workspace.multiplexer.focusedPane
+            switch outcome {
+            case "closed": workspace.multiplexer.close(pane.id)
+            case "hidden": workspace.multiplexer.setCollapsed(paneId: pane.id, collapsed: true)
+            case "zoomed": workspace.multiplexer.setZoom(pane.id, enabled: true)
+            case "replaced": workspace.multiplexer.load(sessionId: "replacement")
+            case "surface": store.recordPaneFailure(record.id, reason: "Native surface unavailable")
+            default:
+                // Exercise the native owner's callback, not a fabricated prepared=usable rule.
+                store.recordPaneLive(record.id)
+            }
+        }
+        try await waitForOpening(model)
+        let reasons = ["connection": "Connection unavailable", "surface": "Native surface unavailable",
+                       "comparison": "Comparison unavailable"]
+        #expect(model.taskOpening?.status == (outcome == "usable" ? .usable : .failed))
+        if outcome != "usable" {
+            #expect(model.taskOpening?.reason == (reasons[outcome] ?? "Opening panes were hidden, closed or replaced."))
+        }
+        #expect(model.taskOpening?.url == url.absoluteString)
+        #expect(files.selection == "retained-draft.rs")
+    }
+
+    @Test func missingSessionReadingDoesNotHidePaneClosure() async throws {
+        let (model, record, url, query) = try openingFixture(outcome: "usable")
+        await model.openTaskLink(url)
+        let request = try #require(model.linkedSession)
+        let workspace = fixtureWork(try #require(record.workspace?.identity))
+        workspace.multiplexer.load(sessionId: record.id, location: record.workspace?.identity)
+        workspace.multiplexer.show(.files(taskId: request.task.id), focus: false)
+        let store = SessionsStore(repoPath: try #require(model.repoPath), query: query)
+        // An incomplete Session reading is not failure, but cannot hide a
+        // definitive layout change while the request waits for that reading.
+        await model.connectLinkedOpening(request, store: store, workspace: workspace, files: nil)
+        #expect(model.taskOpening?.status == .opening)
+        workspace.multiplexer.close(workspace.multiplexer.focusedPaneId)
+        try await waitForOpening(model)
+        #expect(model.taskOpening?.status == .failed)
+        #expect(model.taskOpening?.reason == "Opening panes were hidden, closed or replaced.")
+    }
+
+    @Test(arguments: [false, true])
+    func supersededOpeningCannotSettleRepeatedURL(cancel: Bool) async throws {
+        let (model, record, url, query) = try openingFixture(outcome: "usable")
+        await model.openTaskLink(url)
+        let oldRequest = try #require(model.linkedSession)
+        let workspace = fixtureWork(try #require(record.workspace?.identity))
+        workspace.multiplexer.load(sessionId: record.id, location: record.workspace?.identity)
+        workspace.multiplexer.show(.files(taskId: oldRequest.task.id), focus: false)
+        let oldStore = SessionsStore(repoPath: try #require(model.repoPath), query: query)
+        oldStore.reconcile([record])
+        await oldStore.select(record.id)
+        await model.connectLinkedOpening(oldRequest, store: oldStore, workspace: workspace, files: nil)
+        await model.openTaskLink(url)
+        let newRequest = try #require(model.linkedSession)
+        #expect(oldRequest.generation != newRequest.generation)
+        let newStore = SessionsStore(repoPath: try #require(model.repoPath), query: query)
+        newStore.reconcile([record])
+        await newStore.select(record.id)
+        let files = TaskFilesStore(issue: "LOO-427", cwd: "/fixture", query: query)
+        await model.connectLinkedOpening(newRequest, store: newStore, workspace: workspace, files: files)
+        if cancel { model.dismissTaskLink() }
+        let before = model.taskOpening
+        oldStore.recordPaneFailure(record.id, reason: "Late old failure")
+        await model.connectLinkedOpening(oldRequest, store: oldStore, workspace: workspace, files: nil)
+        #expect(model.taskOpening == before)
+        newStore.recordPaneLive(record.id)
+        try await waitForOpening(model)
+        #expect(model.taskOpening?.status == (cancel ? .failed : .usable))
+        #expect(model.taskOpening?.reason != "Late old failure")
+    }
+
+    @Test func canceledComparisonCannotSettleNewOpening() async throws {
+        let barrier = LinkedDestinationBarrier()
+        let (model, record, url, query) = try openingFixture(outcome: "usable", comparisonBarrier: barrier)
+        await model.openTaskLink(url)
+        let request = try #require(model.linkedSession)
+        let workspace = fixtureWork(try #require(record.workspace?.identity))
+        workspace.multiplexer.load(sessionId: record.id, location: record.workspace?.identity)
+        workspace.multiplexer.show(.files(taskId: request.task.id), focus: false)
+        let store = SessionsStore(repoPath: try #require(model.repoPath), query: query)
+        store.reconcile([record])
+        await store.select(record.id)
+        store.recordPaneLive(record.id)
+        let files = TaskFilesStore(issue: "LOO-427", cwd: "/fixture", query: query)
+        let reading = Task { await model.connectLinkedOpening(request, store: store, workspace: workspace, files: files) }
+        while !(await barrier.contains("comparison")) { await Task.yield() }
+        #expect(model.taskOpening?.status == .opening)
+        await model.openTaskLink(url)
+        let next = try #require(model.linkedSession)
+        await barrier.release("comparison")
+        await reading.value
+        #expect(model.taskOpening?.status == .opening)
+        #expect(model.linkedSession == next)
+        model.dismissTaskLink()
+        #expect(model.taskOpening?.status == .failed)
+    }
+
+    private func waitForOpening(_ model: WorkModel) async throws {
+        let deadline = ContinuousClock.now + .seconds(3)
+        while model.taskOpening?.status == .opening {
+            guard ContinuousClock.now < deadline else { throw RegistryQueryError("Opening never settled") }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+    }
+
+    private func openingFixture(outcome: String, comparisonBarrier: LinkedDestinationBarrier? = nil) throws -> (WorkModel, SessionRecord, URL, RegistryQuery) {
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(try fixture().utf8))
+        let wave = try #require(snapshot.waves.first)
+        let task = try #require(wave.tasks.items.first)
+        var record = try renameFixtureRecord("ready-session", title: "Review", work: .task(id: #require(task.runtime?.workId)))
+        let identity = try #require(task.reference.workspace?.identity)
+        record.workspace = try JSONDecoder().decode(SessionWorkspace.self, from: JSONSerialization.data(withJSONObject: [
+            "machine_id": identity.machineId, "worktree": identity.worktree, "task_id": try #require(task.runtime?.workId)
+        ]))
+        var sessionJSON = try JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as! [String: Any]
+        sessionJSON["actions"] = sessionActionFixture(state: "closed")
+        record = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: sessionJSON))
+        let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
+        let fixtureURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("tests/fixtures/dto/task_files.json")
+        let root = try JSONSerialization.jsonObject(with: Data(contentsOf: fixtureURL)) as! [String: Any]
+        let changes = String(decoding: try JSONSerialization.data(withJSONObject: #require(root["changes"])), as: UTF8.self)
+        let query = RegistryQuery { args, _ in
+            if args.starts(with: ["session", "list"]) { return #"{"entries":[\#(encoded)],"next":null}"# }
+            if args.starts(with: ["session", "connect"]) {
+                if outcome == "connection" { throw RegistryQueryError("Connection unavailable") }
+                return encoded
+            }
+            if args.starts(with: ["task", "diff"]) {
+                if let comparisonBarrier { await comparisonBarrier.wait("comparison") }
+                if outcome == "comparison" { throw RegistryQueryError("Comparison unavailable") }
+                return changes
+            }
+            throw RegistryQueryError("Unexpected fixture operation")
+        }
+        let model = WorkModel(query: query, repoPath: wave.wave.repo)
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        return (model, record, try #require(TaskLink(issue: task.task.identifier, repo: wave.wave.repo, session: record.id, diff: true).url), query)
+    }
+
+    @Test func delayedPrimarySessionPreparationDoesNotOpenChangesInAnotherTask() async throws {
+        let data = try fixture()
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
+        let wave = try #require(snapshot.waves.first)
+        let task = try #require(wave.tasks.items.first)
+        let record = try renameFixtureRecord("prepared-session", title: "Review", work: .task(id: #require(task.runtime?.workId)))
+        let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
+        let barrier = LinkedDestinationBarrier()
+        let model = WorkModel(query: RegistryQuery { args, _ in
+            guard args.starts(with: ["session", "ensure"]) else { throw RegistryQueryError("Canceled preparation must not read or open another Task") }
+            await barrier.wait("ensure")
+            return encoded
+        }, repoPath: wave.wave.repo)
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        let url = try #require(TaskLink(issue: task.task.identifier, repo: wave.wave.repo, diff: true).url)
+        let opening = Task { await model.openTaskLink(url) }
+        while !(await barrier.contains("ensure")) { await Task.yield() }
+        model.select(.wave(id: wave.wave.id))
+        await barrier.release("ensure")
+        await opening.value
+        #expect(model.selection == .wave(id: wave.wave.id))
+        #expect(model.linkedSession == nil)
     }
 
     @Test func paletteBindingTargetsOnlyTheSelectedUnassignedSession() async throws {
@@ -181,7 +668,7 @@ struct WorkDestinationTests {
         await model.openTaskLink(try #require(url.url))
         #expect(model.navigation.selectedSessionId == record.id)
         #expect(model.navigation.content == .terminals)
-        #expect(model.linkedSession?.id == record.id)
+        #expect(model.linkedSession?.record.id == record.id)
         #expect(!model.showsTaskLink)
 
         for session in ["missing", unrelated.id] {
@@ -202,7 +689,7 @@ struct WorkDestinationTests {
         let exact = try oneTask(data, taskId: task.id)
         let exactQuery = RegistryQuery { args, _ in
             if args.contains("--task") { return exact }
-            if args.first == "roadmap" { return #"{"generated_at":"2026-09-26T00:00:00Z","waves":[]}"# }
+            if args.prefix(2) == ["wave", "show"] { return #"{"generated_at":"2026-09-26T00:00:00Z","waves":[]}"# }
             if args.first == "session" { return #"{"entries":[],"next":null}"# }
             if args.first == "wave" { return "[]" }
             throw RegistryQueryError("No mutation permitted")
@@ -218,15 +705,15 @@ struct WorkDestinationTests {
         #expect(destination.visibleRoadmaps.isEmpty)
         #expect(destination.breadcrumb?.task?.task.id == task.id)
         let registry = SessionsWorkspaceRegistry()
-        let workspace = registry.workspace(for: try #require(task.reference.workspace?.identity))
-        workspace.multiplexer.newShell(command: ["local-server"])
+        let workspace = fixtureWork(registry, try #require(task.reference.workspace?.identity))
+        workspace.multiplexer.newShell(command: ["local-server"], location: workspace.location)
         let layout = workspace.multiplexer.layout
         let document = workspace.files(taskId: task.id, issue: task.task.identifier, cwd: wave.wave.repo,
                                        query: exactQuery).document("note.txt")
         document.editor.string = "unsaved draft"
         let retained = SessionsContentView(
             model: destination, repoPath: wave.wave.repo,
-            workspaces: registry, machineId: "local", query: exactQuery
+            workspaces: registry, machineId: "local", repository: "fixture-repository", query: exactQuery
         )
         #expect(throws: Never.self) {
             try retained.inspect().find(viewWithAccessibilityIdentifier: "task-worktree-location")
@@ -248,7 +735,7 @@ struct WorkDestinationTests {
         let current = try oneTask(data, taskId: "absent")
         let model = WorkModel(query: RegistryQuery { args, _ in
             if args.contains("--task") { return exact }
-            if args.first == "roadmap" { return current }
+            if args.prefix(2) == ["wave", "show"] { return current }
             if args.first == "session" { return #"{"entries":[],"next":null}"# }
             if args.first == "wave" { return "[]" }
             throw RegistryQueryError("No mutation permitted")
@@ -282,7 +769,7 @@ struct WorkDestinationTests {
                     if response == "failure" { throw RegistryQueryError("Machine unavailable") }
                     return response
                 }
-                if args.first == "roadmap" { return current }
+                if args.prefix(2) == ["wave", "show"] { return current }
                 if args.first == "session" { return #"{"entries":[],"next":null}"# }
                 if args.first == "wave" { return "[]" }
                 throw RegistryQueryError("No mutation permitted")
@@ -312,7 +799,7 @@ struct WorkDestinationTests {
         let records = try (0..<30).map { try renameFixtureRecord("\($0)", title: "Session \($0)") }
         let sessions = String(decoding: try JSONEncoder().encode(records), as: UTF8.self)
         let model = WorkModel(query: RegistryQuery { args, _ in
-            if args.first == "roadmap" { return data }
+            if args.prefix(2) == ["wave", "show"] { return data }
             if args.first == "session" { return #"{"entries":\#(sessions),"next":null}"# }
             if args.first == "wave" { return "[]" }
             throw RegistryQueryError("Unavailable")
@@ -354,7 +841,7 @@ struct WorkDestinationTests {
                     if response == "transport-error" { throw RegistryQueryError("Machine unavailable") }
                     return response
                 }
-                if args.first == "roadmap" { return data }
+                if args.prefix(2) == ["wave", "show"] { return data }
                 if args.first == "session" { return #"{"entries":[],"next":null}"# }
                 if args.first == "wave" { return "[]" }
                 throw RegistryQueryError("No mutation permitted")
@@ -397,40 +884,712 @@ struct WorkDestinationTests {
         #expect(model.showsTaskLink == !scoped)
     }
 
-    @Test func coldAndWarmLinksReachOnlyOneWorkspace() throws {
-        _ = NSApplication.shared
-        let router = WorkLinkRouter()
-        let url = try #require(URL(string: "loopflow://task/LOO-303"))
-        #expect(!router.deliver(url))
-        #expect(router.deliver(url)) // the requested window has not mounted yet
-        let window = NSWindow(contentRect: .init(x: 0, y: 0, width: 600, height: 400), styleMask: [.titled], backing: .buffered, defer: false)
-        let other = NSWindow(contentRect: .init(x: 0, y: 0, width: 600, height: 400), styleMask: [.titled], backing: .buffered, defer: false)
-        defer { window.orderOut(nil); other.orderOut(nil) }
-        var received: [URL] = []
-        var otherReceived: [URL] = []
-        router.register(UUID(), window: window) { received.append($0) }
-        router.register(UUID(), window: other) { otherReceived.append($0) }
-        #expect(received == [url])
-        #expect(otherReceived.isEmpty)
-        window.makeKeyAndOrderFront(nil)
-        #expect(router.deliver(url))
-        #expect(received == [url, url])
-        #expect(otherReceived.isEmpty)
+    @Test func inspectionForwardsTaskControlIndependentlyOfSessionFailure() throws {
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(fixture().utf8))
+        let wave = try #require(snapshot.waves.first)
+        let task = try #require(wave.tasks.items.first)
+        let model = WorkModel(query: RegistryQuery { _, _ in
+            throw RegistryQueryError("Inspection must not read or mutate Work")
+        }, repoPath: wave.wave.repo)
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        model.openTaskDestination(wave: wave, task: task)
+        model.navigation.selectedSessionId = "not-read-yet"
+        let workspaces = SessionsWorkspaceRegistry()
+        let report = model.inspectDesktop(repository: "plan", window: UUID(), workspaces: workspaces)
+        #expect(report.reading == "loading")
+        #expect(report.supportedOperations.contains("list"))
+        #expect(report.supportedOperations.contains("read"))
+        #expect(!report.supportedOperations.contains("inspect"))
+        #expect(report.task?.reading == "current")
+        #expect(report.task?.actions == task.actions)
+        #expect(report.task?.runControl == task.runControl)
+        #expect(report.task?.roadmapGeneratedAt == snapshot.generatedAt)
+        #expect(report.task?.conditionObservedAt == task.condition.observedAt)
+        #expect(report.session?.reading == "loading")
+        #expect(report.session?.actions == nil)
+        #expect(report.session?.observedAt == nil)
+        #expect(workspaces.inspect().isEmpty)
     }
 
-    @Test func linkPrefersTheWindowAlreadyHoldingItsDestination() throws {
-        _ = NSApplication.shared
+    @Test func inspectionUsesTheRepositoryInventoryForBothTaskIdentities() throws {
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(fixture().utf8))
+        let wave = try #require(snapshot.waves.first)
+        let task = try #require(wave.tasks.items.first)
+        let runtimeID = try #require(task.runtime?.workId)
+        let model = WorkModel(query: RegistryQuery { _, _ in
+            throw RegistryQueryError("Inspection must not read Work")
+        }, repoPath: wave.wave.repo)
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        let registry = SessionsWorkspaceRegistry()
+        for id in [task.id, runtimeID] {
+            model.select(.task(id: id))
+            #expect(model.task(id: id)?.task.id == task.id)
+            let reading = model.inspectDesktop(repository: "plan", window: UUID(), workspaces: registry)
+            #expect(reading.task?.reading == "current")
+            #expect(reading.task?.actions == task.actions)
+        }
+        // A repository window cannot offer actions from another repo's inventory.
+        model.setRepoPath("/another-repository")
+        model.navigation.selection = .task(id: task.id)
+        let outside = model.inspectDesktop(repository: "other-plan", window: UUID(), workspaces: registry)
+        #expect(outside.task?.reading == "unavailable")
+        #expect(outside.task?.actions == nil)
+        #expect(outside.task?.conditionObservedAt == nil)
+    }
+
+    @Test func inspectionKeepsStaleDatesButNeverHistoricalActions() throws {
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(fixture().utf8))
+        let wave = try #require(snapshot.waves.first)
+        let task = try #require(wave.tasks.items.first)
+        let model = WorkModel(query: RegistryQuery { _, _ in
+            throw RegistryQueryError("Inspection must not read or mutate Work")
+        }, repoPath: wave.wave.repo)
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        model.openTaskDestination(wave: wave, task: task)
+        model.applyFixture(roadmap: .unavailable(lastGood: snapshot, reason: "Disconnected"),
+                           waves: .available([]), workActivity: .loading, repos: [])
+        let stale = model.inspectDesktop(repository: "plan", window: UUID(), workspaces: SessionsWorkspaceRegistry())
+        #expect(stale.task?.reading == "unavailable")
+        #expect(stale.task?.reason == "Disconnected")
+        #expect(stale.task?.roadmapGeneratedAt == snapshot.generatedAt)
+        #expect(stale.task?.actions == nil)
+        #expect(stale.task?.runControl == nil)
+
+        let empty = RoadmapSnapshot(generatedAt: "2026-10-08T21:00:00Z", waves: [])
+        model.applyFixture(roadmap: .available(empty), waves: .available([]), workActivity: .loading, repos: [])
+        model.select(.task(id: task.id))
+        let removed = model.inspectDesktop(repository: "plan", window: UUID(), workspaces: SessionsWorkspaceRegistry())
+        #expect(removed.task?.reading == "unavailable")
+        #expect(removed.task?.actions == nil)
+        #expect(removed.task?.conditionObservedAt == nil)
+        #expect(removed.task?.roadmapGeneratedAt == empty.generatedAt)
+    }
+
+    @Test func inspectionForwardsSessionActionsThenWithdrawsThemOnReadFailure() async throws {
+        let record = try renameFixtureRecord("selected-session", title: "Review", work: nil)
+        let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
+        let reads = DestinationReadCounter()
+        let model = WorkModel(query: RegistryQuery { args, _ in
+            guard args.first == "session" else { throw RegistryQueryError("No other reads permitted") }
+            if await reads.next() > 1 { throw RegistryQueryError("Session source disconnected") }
+            return #"{"entries":[\#(encoded)],"next":null}"#
+        }, repoPath: "/src/loopflow")
+        await model.refreshSessions()
+        model.navigation.selectedSessionId = record.id
+        let registry = SessionsWorkspaceRegistry()
+        let first = model.inspectDesktop(repository: "plan", window: UUID(), workspaces: registry)
+        #expect(first.session?.reading == "current")
+        #expect(first.session?.actions == record.actions)
+        #expect(first.session?.machineId == record.workspace?.machineId)
+        #expect(first.task == nil)
+        await model.refreshSessions()
+        let failed = model.inspectDesktop(repository: "plan", window: UUID(), workspaces: registry)
+        #expect(failed.session?.id == record.id)
+        #expect(failed.session?.reading == "unavailable")
+        #expect(failed.session?.reason == "Session source disconnected")
+        #expect(failed.session?.actions == nil)
+        #expect(model.navigation.selectedSessionId == record.id)
+        #expect(registry.inspect().isEmpty)
+    }
+
+    @Test func inspectionDoesNotOfferActionsFromAnIncompleteSessionEnumeration() async throws {
+        let record = try renameFixtureRecord("retained-session", title: "Draft", work: nil)
+        let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
+        let reads = DestinationReadCounter()
+        let barrier = LinkedDestinationBarrier()
+        let model = WorkModel(query: RegistryQuery { args, _ in
+            guard args.first == "session" else { throw RegistryQueryError("No other reads permitted") }
+            if args.contains("--after") {
+                await barrier.wait("last-page")
+                return #"{"entries":[],"next":null}"#
+            }
+            if await reads.next() == 1 { return #"{"entries":[\#(encoded)],"next":null}"# }
+            return #"{"entries":[],"next":"last-page"}"#
+        }, repoPath: "/src/loopflow")
+        await model.refreshSessions()
+        model.navigation.selectedSessionId = record.id
+        let refreshing = Task { await model.refreshSessions() }
+        while !(await barrier.contains("last-page")) { await Task.yield() }
+        let partial = model.inspectDesktop(repository: "plan", window: UUID(), workspaces: SessionsWorkspaceRegistry())
+        #expect(partial.session?.reading == "updating")
+        #expect(partial.session?.actions == nil)
+        #expect(model.sessions.value?.contains { $0.id == record.id } == true)
+        await barrier.release("last-page")
+        await refreshing.value
+        let removed = model.inspectDesktop(repository: "plan", window: UUID(), workspaces: SessionsWorkspaceRegistry())
+        #expect(removed.session?.reading == "unavailable")
+        #expect(removed.session?.actions == nil)
+        #expect(model.navigation.selectedSessionId == record.id)
+    }
+
+    @Test(arguments: ["usable", "failed", "canceled"])
+    func plainTaskPageWaitsForItsOwnContent(outcome: String) async throws {
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(try fixture().utf8))
+        let wave = try #require(snapshot.waves.first)
+        let task = try #require(wave.tasks.items.first)
+        let model = WorkModel(query: RegistryQuery { _, _ in
+            throw RegistryQueryError("No Session preparation is required to show a Task page")
+        }, repoPath: wave.wave.repo)
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        let url = try #require(TaskLink(issue: task.task.identifier, repo: wave.wave.repo).url)
+        await model.openTaskLink(url)
+        let old = try #require(model.linkedTaskPage)
+        #expect(model.taskOpening?.status == .opening)
+        #expect(model.linkedSession == nil)
+        await model.openTaskLink(url)
+        let current = try #require(model.linkedTaskPage)
+        #expect(old != current)
+        model.finishTaskPage(old)
+        model.finishTaskPage(old, error: "Old failure")
+        #expect(model.taskOpening?.status == .opening)
+        if outcome == "canceled" { model.select(.wave(id: wave.wave.id)) }
+        model.finishTaskPage(current, error: outcome == "failed" ? "Machine unavailable" : nil)
+        #expect(model.taskOpening?.status == (outcome == "usable" ? .usable : .failed))
+        if outcome == "failed" { #expect(model.taskOpening?.reason == "Machine unavailable") }
+        #expect(model.linkedTaskPage == nil)
+    }
+
+    @Test func repositoryLookupFailureIsInspectableWithoutAWindow() async throws {
         let router = WorkLinkRouter()
-        let url = try #require(URL(string: "loopflow://task/LOO-368?repo=%2Fsrc%2Floopflow"))
-        let retained = NSWindow(contentRect: .init(x: 0, y: 0, width: 600, height: 400), styleMask: [.titled], backing: .buffered, defer: false)
-        let unrelated = NSWindow(contentRect: .init(x: 0, y: 0, width: 600, height: 400), styleMask: [.titled], backing: .buffered, defer: false)
-        defer { retained.orderOut(nil); unrelated.orderOut(nil) }
-        var opened = ""
-        router.register(UUID(), window: retained, contains: { $0 == url }) { _ in opened = "retained" }
-        router.register(UUID(), window: unrelated) { _ in opened = "unrelated" }
-        unrelated.makeKeyAndOrderFront(nil)
-        #expect(router.deliver(url))
-        #expect(opened == "retained")
+        let missing = "/nonexistent-loopflow-fixture-\(UUID().uuidString)"
+        do {
+            _ = try await router.openRepository(path: missing, link: nil, query: RegistryQuery { _, _ in
+                throw RegistryQueryError("No registry read for an absent Git directory")
+            }) { _ in Issue.record("A failed lookup cannot open a window") }
+            Issue.record("Missing repository unexpectedly opened")
+        } catch {}
+        let report = router.inspect()
+        #expect(report.windows.isEmpty)
+        #expect(report.openings.count == 1)
+        #expect(report.openings[0].status == .failed)
+        #expect(report.openings[0].reason?.contains("not an available local Git repository") == true)
+    }
+
+    @Test func remoteTaskLinksReuseTheLocalRepositoryWindow() async throws {
+        let router = WorkLinkRouter()
+        let query = RegistryQuery { _, _ in #"{"id":"plan","locators":["plan"]}"# }
+        let path = repositoryFixturePath()
+        let workspace = try await router.openRepository(path: path, link: nil, query: query) { _ in }
+        let window = UUID()
+        var received: [TaskLink] = []
+        router.register(window, repository: workspace.id, focus: {}, inspect: windowInspection,
+            controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { url in
+            do { received.append(try TaskLink(url: url)) } catch { Issue.record(error) }
+        }
+        for machine in ["local-owner", "peer-owner"] {
+            let link = TaskLink(issue: "task-\(machine)", repo: path, session: "session-\(machine)", diff: true,
+                                machine: machine, repository: "plan")
+            let url = try #require(link.url)
+            _ = try await router.openRepository(path: path, link: url, query: query) { _ in
+                Issue.record("Execution Machine must not create another repository window")
+            }
+        }
+        while received.count < 2 { await Task.yield() }
+        #expect(received.map(\.machine) == ["local-owner", "peer-owner"])
+        #expect(received.allSatisfy { $0.repository == "plan" && $0.diff })
+        #expect(router.inspect().windows.map(\.window) == [window.uuidString])
+    }
+
+    @Test func plainRepositoryWaitsForRegistrationAndReusesTheWindow() async throws {
+        let router = WorkLinkRouter()
+        let query = RegistryQuery { _, _ in #"{"id":"plan","locators":["plan"]}"# }
+        let workspace = try await router.openRepository(path: repositoryFixturePath(), link: nil, query: query) { _ in }
+        #expect(router.inspect().windows.isEmpty)
+        #expect(router.inspect().openings.first?.status == .opening)
+        let id = UUID()
+        router.register(id, repository: workspace.id, openingRequests: router.workspaceRequests(workspace.id), focus: {}, inspect: windowInspection,
+                        controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+        #expect(router.inspect().openings.first?.status == .usable)
+        _ = try await router.openRepository(path: repositoryFixturePath(), link: nil, query: query) { _ in
+            Issue.record("An open repository must reuse its window")
+        }
+        #expect(router.inspect().windows.map(\.window) == [id.uuidString])
+        #expect(router.inspect().openings.first?.status == .usable)
+    }
+
+    @Test(arguments: ["success", "failure", "cancellation"])
+    func obsoleteRepositoryLookupCannotOpenOrSettleANewerRequest(outcome: String) async throws {
+        let router = WorkLinkRouter(), barrier = LinkedDestinationBarrier()
+        let path = repositoryFixturePath()
+        let old = Task {
+            try await router.openRepository(path: path, link: nil, query: RegistryQuery { _, _ in
+                await barrier.wait("lookup")
+                if outcome == "failure" { throw RegistryQueryError("Old lookup failure") }
+                return #"{"id":"old-plan","locators":["old-plan"]}"#
+            }) { _ in Issue.record("An obsolete lookup must not open its window") }
+        }
+        while !(await barrier.contains("lookup")) { await Task.yield() }
+        if outcome == "cancellation" { old.cancel() }
+        let current = try await router.openRepository(path: path, link: nil, query: RegistryQuery { _, _ in #"{"id":"plan","locators":["plan"]}"# }) { _ in }
+        await barrier.release("lookup")
+        switch await old.result {
+        case .success: Issue.record("Obsolete lookup unexpectedly succeeded")
+        case .failure(let error): #expect(error is CancellationError)
+        }
+        #expect(router.inspect().openings.first?.status == .opening)
+        router.register(UUID(), repository: "old-plan", focus: {}, inspect: windowInspection,
+                        controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+        #expect(router.inspect().openings.first?.status == .opening)
+        router.register(UUID(), repository: current.id, openingRequests: router.workspaceRequests(current.id), focus: {}, inspect: windowInspection,
+                        controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+        #expect(router.inspect().openings.first?.status == .usable)
+    }
+
+    @Test(arguments: ["success", "failure", "cancellation"])
+    func obsoleteSceneValidationCannotSettleNewRepositoryRequest(outcome: String) async throws {
+        let router = WorkLinkRouter(), barrier = LinkedDestinationBarrier()
+        let path = repositoryFixturePath()
+        let query = RegistryQuery { _, _ in #"{"id":"plan","locators":["plan"]}"# }
+        let workspace = try await router.openRepository(path: path, link: nil, query: query) { _ in }
+        let oldRequests = router.workspaceRequests(workspace.id)
+        let validation = Task {
+            try await router.resolveWorkspace(workspace, query: RegistryQuery { _, _ in
+                await barrier.wait("validate")
+                if outcome == "failure" { throw RegistryQueryError("Old validation failure") }
+                return #"{"id":"plan","locators":["plan"]}"#
+            })
+        }
+        while !(await barrier.contains("validate")) { await Task.yield() }
+        _ = try await router.openRepository(path: path, link: nil, query: query) { _ in }
+        #expect(router.workspaceRequests(workspace.id) != oldRequests)
+        if outcome == "cancellation" { validation.cancel() }
+        await barrier.release("validate")
+        switch await validation.result {
+        case .success: Issue.record("Obsolete validation unexpectedly succeeded")
+        case .failure(let error): #expect(error is CancellationError)
+        }
+        #expect(router.inspect().openings.first?.status == .opening)
+        let stale = UUID()
+        router.register(stale, repository: workspace.id, openingRequests: oldRequests, focus: {}, inspect: windowInspection,
+                        controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+        #expect(router.inspect().openings.first?.status == .opening)
+        router.remove(stale, repository: workspace.id)
+        _ = try await router.resolveWorkspace(workspace, query: query)
+        router.register(UUID(), repository: workspace.id, openingRequests: router.workspaceRequests(workspace.id), focus: {}, inspect: windowInspection,
+                        controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+        #expect(router.inspect().openings.first?.status == .usable)
+    }
+
+    @Test func requestArrivingBetweenValidationAndRegistrationUsesTheRetainedShell() async throws {
+        let router = WorkLinkRouter()
+        let path = repositoryFixturePath()
+        let query = RegistryQuery { _, _ in #"{"id":"plan","locators":["plan"]}"# }
+        let workspace = try await router.openRepository(path: path, link: nil, query: query) { _ in }
+        let validated = router.workspaceRequests(workspace.id)
+        _ = try await router.resolveWorkspace(workspace, query: query)
+        _ = try await router.openRepository(path: path, link: nil, query: query) { _ in }
+        let current = router.workspaceRequests(workspace.id)
+        let id = UUID()
+        router.register(id, repository: workspace.id, openingRequests: validated, focus: {}, inspect: windowInspection,
+                        controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+        #expect(router.inspect().openings.first?.status == .opening)
+        router.confirmRegisteredWorkspace(workspace.id, requests: validated)
+        #expect(router.inspect().openings.first?.status == .opening)
+        router.confirmRegisteredWorkspace(workspace.id, requests: current)
+        #expect(router.inspect().openings.first?.status == .usable)
+        #expect(router.inspect().windows.map(\.window) == [id.uuidString])
+    }
+
+    @Test func sceneValidationFailureRemainsFailedAfterDelayedRegistration() async throws {
+        let router = WorkLinkRouter()
+        let workspace = try await router.openRepository(path: repositoryFixturePath(), link: nil,
+            query: RegistryQuery { _, _ in #"{"id":"plan","locators":["plan"]}"# }) { _ in }
+        do {
+            _ = try await router.resolveWorkspace(workspace, query: RegistryQuery { _, _ in #"{"id":"different-plan","locators":["different-plan"]}"# })
+            Issue.record("A changed plan must not restore this workspace")
+        } catch {}
+        #expect(router.inspect().windows.isEmpty)
+        #expect(router.inspect().openings.first?.status == .failed)
+        let receipt = router.inspect().openings
+        router.register(UUID(), repository: workspace.id, openingRequests: router.workspaceRequests(workspace.id), focus: {}, inspect: windowInspection,
+                        controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+        #expect(router.inspect().openings == receipt)
+    }
+
+    @Test func repositoryAssociationRetainsDraftsPanesAndInFlightDelivery() async throws {
+        let router = WorkLinkRouter(), barrier = LinkedDestinationBarrier()
+        let path = repositoryFixturePath()
+        let before = RegistryQuery { _, _ in #"{"id":"old-plan","locators":["old-plan"]}"# }
+        let after = RegistryQuery { _, _ in #"{"id":"plan","locators":["old-plan","plan"]}"# }
+        let first = try #require(TaskLink(issue: "FIRST", repo: path).url)
+        let second = try #require(TaskLink(issue: "SECOND", repo: path).url)
+        let scene = try await router.openRepository(path: path, link: first, query: before) { _ in }
+        let deliveredFirst = try #require(TaskLink(issue: "FIRST", repo: scene.path).url)
+        let deliveredSecond = try #require(TaskLink(issue: "SECOND", repo: scene.path).url)
+        let registry = SessionsWorkspaceRegistry(localMachineId: "fixture-machine")
+        let identity = WorkspaceIdentity(machineId: "fixture-machine", worktree: path)
+        let oldKey = WorkWorkspaceKey(repository: "old-plan", kind: .repository, id: "old-plan")
+        let retained = registry.open(oldKey, title: "Repository", location: identity), store = retained.multiplexer
+        store.newShell(command: ["retained-command"], location: identity)
+        let pane = store.focusedPane
+        let document = retained.files(taskId: "task", issue: "TASK", cwd: path).document("note.txt")
+        document.editor.string = "unfinished draft"
+        document.editor.setSelectedRange(NSRange(location: 2, length: 4))
+        let layout = store.layout, focus = store.focusedPaneId
+        #if canImport(GhosttyKit)
+        let terminal = TerminalIdentity.shell(pane.id, machineId: identity.machineId)
+        let view = registry.surfaces.view(for: terminal)
+        defer { registry.surfaces.release(terminal) }
+        #endif
+        let window = UUID()
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("No Work reads") })
+        model.bindWorkspaces(registry, repository: "old-plan")
+        var received: [URL] = []
+        router.register(window, repository: scene.id, openingRequests: router.workspaceRequests(scene.id), focus: {},
+            inspect: { repository, incarnation in
+                model.inspectDesktop(repository: repository, window: incarnation, workspaces: registry)
+            }, controlPane: { try registry.controlPane($0, model: model) },
+            readText: { try registry.readText($0) }) { url in
+                received.append(url)
+                if url == deliveredFirst { await barrier.wait("delivery") }
+            }
+        while !(await barrier.contains("delivery")) { await Task.yield() }
+        let rebound = try await router.openRepository(path: path, link: second, query: after) { _ in
+            Issue.record("Association must reuse the retained window")
+        }
+        #expect(rebound == scene)
+        for _ in 0..<2 {
+            _ = try await router.openRepository(path: path, link: nil, query: after) { _ in
+                Issue.record("Repeated opens must reuse the retained window")
+            }
+        }
+        let report = router.inspect()
+        #expect(report.windows.count == 1)
+        #expect(report.windows[0].repository == "plan")
+        #expect(report.windows[0].window != window.uuidString)
+        #expect(received == [deliveredFirst])
+        #expect(registry.retained(WorkWorkspaceKey(repository: "plan", kind: .repository, id: "plan")) === retained)
+        #if canImport(GhosttyKit)
+        #expect(registry.surfaces.view(for: terminal) === view)
+        #expect(registry.surfaces.programStatus(for: terminal) === view.programStatus)
+        #endif
+        #expect(store.layout == layout)
+        #expect(store.focusedPaneId == focus)
+        #expect(document.editor.string == "unfinished draft")
+        #expect(document.editor.selectedRange() == NSRange(location: 2, length: 4))
+        let stale = DesktopPaneTarget(repository: "old-plan", window: window.uuidString,
+            work: oldKey, pane: pane.id, incarnation: pane.incarnation)
+        #expect(throws: RegistryQueryError.self) {
+            try router.controlPane(.init(target: stale, action: .hide))
+        }
+        let current = DesktopPaneTarget(repository: "plan", window: report.windows[0].window,
+            work: retained.key, pane: pane.id, incarnation: pane.incarnation)
+        _ = try router.controlPane(.init(target: current, action: .hide))
+        _ = try router.controlPane(.init(target: current, action: .restore))
+        #expect(store.layout == layout)
+        await barrier.release("delivery")
+        while received.count < 2 { await Task.yield() }
+        #expect(received == [deliveredFirst, deliveredSecond])
+        #expect(document.editor.string == "unfinished draft")
+        _ = try await router.openRepository(path: path, link: nil, query: RegistryQuery { _, _ in
+            #"{"id":"old-plan","locators":["old-plan","plan"]}"#
+        }) { _ in Issue.record("Binding back must also reuse the window") }
+        #expect(router.inspect().windows.first?.repository == "old-plan")
+        #expect(throws: RegistryQueryError.self) {
+            try router.controlPane(.init(target: stale, action: .hide))
+        }
+        #expect(throws: RegistryQueryError.self) {
+            try router.controlPane(.init(target: current, action: .hide))
+        }
+        router.remove(window, repository: scene.id)
+        #expect(router.inspect().windows.isEmpty)
+    }
+
+    @Test func associationBeforeRegistrationKeepsOneSceneAndRejectsLateLookup() async throws {
+        let router = WorkLinkRouter(), barrier = LinkedDestinationBarrier()
+        let path = repositoryFixturePath()
+        var opened: [RepositoryWorkspace] = []
+        let scene = try await router.openRepository(path: path, link: nil,
+            query: RegistryQuery { _, _ in #"{"id":"old-plan","locators":["old-plan"]}"# }) { opened.append($0) }
+        let stale = Task {
+            try await router.openRepository(path: path, link: nil, query: RegistryQuery { _, _ in
+                await barrier.wait("lookup")
+                return #"{"id":"old-plan","locators":["old-plan"]}"#
+            }) { opened.append($0) }
+        }
+        while !(await barrier.contains("lookup")) { await Task.yield() }
+        let after = RegistryQuery { _, _ in #"{"id":"plan","locators":["old-plan","plan"]}"# }
+        _ = try await router.openRepository(path: path, link: nil, query: after) { opened.append($0) }
+        await barrier.release("lookup")
+        switch await stale.result {
+        case .success: Issue.record("A stale lookup cannot change repository association")
+        case .failure(let error): #expect(error is CancellationError)
+        }
+        #expect(Set(opened).count == 1)
+        #expect(opened.first == scene)
+        // Scene restoration accepts retained identity without unmounting/rekeying it.
+        #expect(try await router.resolveWorkspace(scene, query: after) == scene)
+        let restoredAlias = RepositoryWorkspace(id: "plan", path: path)
+        #expect(try await router.resolveWorkspace(restoredAlias, query: after) == scene)
+        let window = UUID()
+        router.register(window, repository: scene.id, openingRequests: router.workspaceRequests(scene.id), focus: {},
+            inspect: windowInspection, controlPane: { $0.target.pane },
+            readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+        #expect(router.inspect().windows.map(\.repository) == ["plan"])
+        #expect(router.inspect().openings.first?.status == .usable)
+        _ = try await router.openRepository(path: path, link: nil, query: after) { _ in
+            Issue.record("Concurrent opens must converge before and after registration")
+        }
+        #expect(router.inspect().windows.map(\.window) == [window.uuidString])
+    }
+
+    @Test(arguments: [false, true])
+    func restoredAliasCannotUndoBindingBackToTheSamePlan(registered: Bool) async throws {
+        let router = WorkLinkRouter(), barrier = LinkedDestinationBarrier()
+        let path = repositoryFixturePath()
+        let before = RegistryQuery { _, _ in #"{"id":"old-plan","locators":["old-plan","plan"]}"# }
+        let after = RegistryQuery { _, _ in #"{"id":"plan","locators":["old-plan","plan"]}"# }
+        let scene = try await router.openRepository(path: path, link: nil, query: before) { _ in }
+        let window = UUID()
+        if registered {
+            router.register(window, repository: scene.id, focus: {}, inspect: windowInspection,
+                controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+        }
+        let validation = Task {
+            try await router.resolveWorkspace(RepositoryWorkspace(id: "plan", path: path), query: RegistryQuery { _, _ in
+                await barrier.wait("restore")
+                return #"{"id":"plan","locators":["old-plan","plan"]}"#
+            })
+        }
+        while !(await barrier.contains("restore")) { await Task.yield() }
+        _ = try await router.openRepository(path: path, link: nil, query: after) { _ in }
+        _ = try await router.openRepository(path: path, link: nil, query: before) { _ in }
+        let reboundWindow = router.inspect().windows.first?.window
+        await barrier.release("restore")
+        #expect(try await validation.value == scene)
+        if !registered {
+            router.register(window, repository: scene.id, focus: {}, inspect: windowInspection,
+                controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+        }
+        #expect(router.inspect().windows.map(\.repository) == ["old-plan"])
+        #expect(router.inspect().windows.first?.window == (reboundWindow ?? window.uuidString))
+    }
+
+    @Test(arguments: [false, true])
+    func delayedLocatorOpenCannotUndoRepositoryAssociation(alreadyOpen: Bool) async throws {
+        let router = WorkLinkRouter(), barrier = LinkedDestinationBarrier()
+        let path = repositoryFixturePath()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let parent = directory.appendingPathComponent("parent")
+        let repository = URL(fileURLWithPath: path)
+        try FileManager.default.createSymbolicLink(at: parent, withDestinationURL: repository.deletingLastPathComponent())
+        let alias = parent.appendingPathComponent(repository.lastPathComponent)
+        try #require(RepoScanner().mainRepository(alias) != nil)
+        let window = UUID()
+        var received: [URL] = []
+        let register: (RepositoryWorkspace) -> Void = { scene in
+            router.register(window, repository: scene.id, openingRequests: router.workspaceRequests(scene.id),
+                focus: {}, inspect: windowInspection,
+                controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { received.append($0) }
+        }
+        if alreadyOpen {
+            _ = try await router.openRepository(path: path, link: nil,
+                query: RegistryQuery { _, _ in #"{"id":"old-plan","locators":["old-plan"]}"# }, openWindow: register)
+        }
+        let link = try #require(TaskLink(issue: "PENDING", repo: alias.path).url)
+        let delayed = Task {
+            try await router.openRepository(path: alias.path, link: link, query: RegistryQuery { _, _ in
+                await barrier.wait("alias")
+                return #"{"id":"old-plan","locators":["old-plan"]}"#
+            }) { _ in Issue.record("A locator must reuse its repository window") }
+        }
+        while !(await barrier.contains("alias")) { await Task.yield() }
+        let scene = try await router.openRepository(path: path, link: nil,
+            query: RegistryQuery { _, _ in #"{"id":"plan","locators":["old-plan","plan"]}"# }) { workspace in
+                if alreadyOpen { Issue.record("Association must reuse the existing window") }
+                register(workspace)
+            }
+        let rebound = router.inspect().windows
+        await barrier.release("alias")
+        try #require(try await delayed.value == scene)
+        #expect(router.inspect().windows == rebound)
+        try #require(router.inspect().windows.count == 1)
+        while received.isEmpty { await Task.yield() }
+        #expect(received == [TaskLink(issue: "PENDING", repo: scene.path).url])
+        #expect(router.inspect().openings.allSatisfy { $0.status == .usable })
+    }
+
+    private func repositoryFixturePath() -> String {
+        URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().path
+    }
+
+    private func windowInspection(_ repository: String, _ id: UUID) -> DesktopWindowInspection {
+        DesktopWindowInspection(repository: repository, window: id.uuidString, path: nil,
+            selectionKind: nil, selectionId: nil, reading: "loading", reason: nil,
+            task: nil, session: nil, supportedOperations: ["list"], workspaces: [], opening: nil)
+    }
+
+    @Test func inspectionIncludesOnlyRegisteredWindowIncarnationsWithoutFocusing() {
+        let router = WorkLinkRouter()
+        let first = UUID(), replacement = UUID()
+        var focused = false
+        router.register(first, repository: "plan", focus: { focused = true }, inspect: windowInspection, controlPane: { _ in throw RegistryQueryError("No panes in this fixture") }, readText: { _ in throw RegistryQueryError("No panes in this fixture") }) { _ in }
+        #expect(router.inspect().windows.map(\.window) == [first.uuidString])
+        router.register(replacement, repository: "plan", focus: { focused = true }, inspect: windowInspection, controlPane: { _ in throw RegistryQueryError("No panes in this fixture") }, readText: { _ in throw RegistryQueryError("No panes in this fixture") }) { _ in }
+        router.remove(first, repository: "plan")
+        #expect(router.inspect().windows.map(\.window) == [replacement.uuidString])
+        router.remove(replacement, repository: "plan")
+        #expect(router.inspect().windows.isEmpty)
+        #expect(!focused)
+    }
+
+    @Test func coldRepositoriesRegisterInReverseOrderWithoutLosingDestinations() async throws {
+        let router = WorkLinkRouter()
+        let a = try #require(URL(string: "loopflow://task/A"))
+        let a2 = try #require(URL(string: "loopflow://task/A2"))
+        let b = try #require(URL(string: "loopflow://task/B"))
+        #expect(!router.deliver(a, repository: "plan-a"))
+        #expect(!router.deliver(b, repository: "plan-b"))
+        #expect(!router.deliver(a2, repository: "plan-a"))
+        var first: [URL] = []
+        var second: [URL] = []
+        router.register(UUID(), repository: "plan-b", focus: {}, inspect: windowInspection, controlPane: { _ in throw RegistryQueryError("No panes in this fixture") }, readText: { _ in throw RegistryQueryError("No panes in this fixture") }) { second.append($0) }
+        while second.isEmpty { await Task.yield() }
+        #expect(second == [b])
+        #expect(first.isEmpty)
+        router.register(UUID(), repository: "plan-a", focus: {}, inspect: windowInspection, controlPane: { _ in throw RegistryQueryError("No panes in this fixture") }, readText: { _ in throw RegistryQueryError("No panes in this fixture") }) { first.append($0) }
+        while first.count < 2 { await Task.yield() }
+        #expect(first == [a, a2])
+        #expect(second == [b])
+    }
+
+    @Test func samePlanReusesItsRetainedWorkspaceRegardlessOfFocusOrLocator() async throws {
+        let a = RepositoryWorkspace(id: "plan", path: "/machine-a/repo")
+        let b = RepositoryWorkspace(id: "plan", path: "/machine-b/repo")
+        #expect(Set([a, b]).count == 1)
+        #expect(a != RepositoryWorkspace(id: "another-plan", path: a.path))
+        let router = WorkLinkRouter()
+        var focused: [String] = []
+        var received: [URL] = []
+        let url = try #require(URL(string: "loopflow://task/A"))
+        router.register(UUID(), repository: a.id, focus: { focused.append("retained") }, inspect: windowInspection, controlPane: { _ in throw RegistryQueryError("No panes in this fixture") }, readText: { _ in throw RegistryQueryError("No panes in this fixture") }) { received.append($0) }
+        router.register(UUID(), repository: "other", focus: { focused.append("other") }, inspect: windowInspection, controlPane: { _ in throw RegistryQueryError("No panes in this fixture") }, readText: { _ in throw RegistryQueryError("No panes in this fixture") }) { _ in
+            Issue.record("A repository must never receive another repository's link")
+        }
+        #expect(router.deliver(url, repository: b.id))
+        #expect(router.deliver(nil, repository: a.id))
+        #expect(focused == ["retained", "retained"])
+        while received.isEmpty { await Task.yield() }
+        #expect(received == [url])
+    }
+
+    @Test func lateWindowRemovalDoesNotRemoveItsReplacement() async throws {
+        let router = WorkLinkRouter()
+        let old = UUID(), replacement = UUID()
+        router.register(old, repository: "plan", focus: {}, inspect: windowInspection, controlPane: { _ in throw RegistryQueryError("No panes in this fixture") }, readText: { _ in throw RegistryQueryError("No panes in this fixture") }) { _ in }
+        var received: [URL] = []
+        router.register(replacement, repository: "plan", focus: {}, inspect: windowInspection, controlPane: { _ in throw RegistryQueryError("No panes in this fixture") }, readText: { _ in throw RegistryQueryError("No panes in this fixture") }) { received.append($0) }
+        router.remove(old, repository: "plan")
+        let url = try #require(URL(string: "loopflow://task/A"))
+        #expect(router.deliver(url, repository: "plan"))
+        while received.isEmpty { await Task.yield() }
+        #expect(received == [url])
+        router.remove(replacement, repository: "plan")
+        #expect(!router.deliver(url, repository: "plan"))
+    }
+
+    @Test func delayedDeliveryKeepsOneQueueAcrossReceiverReplacement() async throws {
+        let router = WorkLinkRouter()
+        let first = try #require(URL(string: "loopflow://task/first"))
+        let second = try #require(URL(string: "loopflow://task/second"))
+        let third = try #require(URL(string: "loopflow://task/third"))
+        let other = try #require(URL(string: "loopflow://task/other"))
+        let old = UUID(), replacement = UUID()
+        let barrier = LinkedDestinationBarrier()
+        var delivered: [URL] = []
+        router.register(old, repository: "plan", focus: {}, inspect: windowInspection, controlPane: { _ in throw RegistryQueryError("No panes in this fixture") }, readText: { _ in throw RegistryQueryError("No panes in this fixture") }) { link in
+            await barrier.wait("first")
+            guard !Task.isCancelled else { return }
+            delivered.append(link)
+        }
+        router.deliver(first, repository: "plan")
+        router.deliver(second, repository: "plan")
+        while !(await barrier.contains("first")) { await Task.yield() }
+        #expect(delivered.isEmpty)
+        router.remove(old, repository: "plan")
+        #expect(!router.deliver(third, repository: "plan"))
+        router.register(replacement, repository: "plan", focus: {}, inspect: windowInspection, controlPane: { _ in throw RegistryQueryError("No panes in this fixture") }, readText: { _ in throw RegistryQueryError("No panes in this fixture") }) { delivered.append($0) }
+        router.remove(old, repository: "plan")
+
+        // A slow repository never blocks another repository's opening.
+        router.register(UUID(), repository: "other", focus: {}, inspect: windowInspection, controlPane: { _ in throw RegistryQueryError("No panes in this fixture") }, readText: { _ in throw RegistryQueryError("No panes in this fixture") }) { delivered.append($0) }
+        router.deliver(other, repository: "other")
+        while delivered.count < 4 { await Task.yield() }
+        #expect(delivered.filter { $0 != other } == [first, second, third])
+        #expect(delivered.contains(other))
+        // The replacement finishes even while the obsolete read is suspended.
+        await barrier.release("first")
+        for _ in 0..<10 { await Task.yield() }
+        #expect(delivered.count == 4)
+    }
+
+    @Test func reattachingTheSameReceiverDoesNotLetItsCanceledReadClearTheNewQueue() async throws {
+        let router = WorkLinkRouter(), id = UUID()
+        let first = try #require(URL(string: "loopflow://task/first"))
+        let second = try #require(URL(string: "loopflow://task/second"))
+        let barrier = LinkedDestinationBarrier()
+        var delivered: [URL] = []
+        router.register(id, repository: "plan", focus: {}, inspect: windowInspection, controlPane: { _ in throw RegistryQueryError("No panes in this fixture") }, readText: { _ in throw RegistryQueryError("No panes in this fixture") }) { _ in await barrier.wait("old") }
+        router.deliver(first, repository: "plan")
+        while !(await barrier.contains("old")) { await Task.yield() }
+        router.remove(id, repository: "plan")
+        router.register(id, repository: "plan", focus: {}, inspect: windowInspection, controlPane: { _ in throw RegistryQueryError("No panes in this fixture") }, readText: { _ in throw RegistryQueryError("No panes in this fixture") }) { link in
+            if link == first { await barrier.wait("new") }
+            delivered.append(link)
+        }
+        while !(await barrier.contains("new")) { await Task.yield() }
+        await barrier.release("old")
+        for _ in 0..<10 { await Task.yield() }
+        router.deliver(second, repository: "plan")
+        for _ in 0..<10 { await Task.yield() }
+        #expect(delivered.isEmpty)
+        await barrier.release("new")
+        while delivered.count < 2 { await Task.yield() }
+        #expect(delivered == [first, second])
+    }
+
+    @Test(arguments: [false, true])
+    func closedWindowDoesNotPublishDelayedOpening(fails: Bool) async throws {
+        let data = try fixture()
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
+        let task = try #require(snapshot.waves.first?.tasks.items.first)
+        let exact = try oneTask(data, taskId: task.id)
+        let barrier = LinkedDestinationBarrier()
+        let model = WorkModel(query: RegistryQuery { _, _ in
+            await barrier.wait("read")
+            if fails { throw RegistryQueryError("Delayed failure") }
+            return exact
+        }, repoPath: "/origin")
+        model.navigation.selectedSessionId = "retained-session"
+        let link = try #require(URL(string: "loopflow://task/\(task.task.identifier)"))
+        let opening = Task { await model.openTaskLink(link) }
+        while !(await barrier.contains("read")) { await Task.yield() }
+        opening.cancel()
+        await barrier.release("read")
+        await opening.value
+        #expect(model.repoPath == "/origin")
+        #expect(model.selection == nil)
+        #expect(model.navigation.selectedSessionId == "retained-session")
+        #expect(model.linkedSession == nil)
+        #expect(!model.showsTaskLink)
+    }
+
+    @Test func repositoryNavigationLeavesTheOriginSelectionAndDraftWorkspaceAlone() async throws {
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(try fixture().utf8))
+        let wave = try #require(snapshot.waves.first)
+        let task = try #require(wave.tasks.items.first)
+        let model = WorkModel(query: RegistryQuery { _, _ in "" }, repoPath: "/origin")
+        model.navigation.selectedSessionId = "retained-session"
+        var requests: [(String, URL?)] = []
+        model.openRepository = { requests.append(($0, $1)) }
+        model.setRepoPath("/other")
+        model.openTaskDestination(wave: wave, task: task)
+        #expect(model.repoPath == "/origin")
+        #expect(model.navigation.selectedSessionId == "retained-session")
+        #expect(requests.map { $0.0 } == ["/other", wave.wave.repo])
+        #expect(try TaskLink(url: #require(requests.last?.1)).issue == task.task.identifier)
     }
 
     @Test(arguments: [false, true])
@@ -450,7 +1609,7 @@ struct WorkDestinationTests {
                 await barrier.wait(issue)
                 return responses[issue]!
             }
-            if args.first == "roadmap" { return data }
+            if args.prefix(2) == ["wave", "show"] { return data }
             if args.first == "session" { return #"{"entries":[],"next":null}"# }
             if args.first == "wave" { return "[]" }
             throw RegistryQueryError("No mutation permitted")
@@ -504,9 +1663,8 @@ private actor LinkedDestinationBarrier {
     func release(_ key: String) { pending.removeValue(forKey: key)?.resume() }
 }
 
-#endif
-
 private actor DestinationReadCounter {
     private var count = 0
     func next() -> Int { count += 1; return count }
 }
+#endif

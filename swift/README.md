@@ -82,6 +82,13 @@ Closing the pane keeps its drafts in this window.
 **File** retains editable UTF-8 drafts and selection in this window; **Diff**
 shows the draft comparison read-only. Task headers show the recorded checkout;
 terminal and files follow that Task without a separate worktree selector.
+Changing Work assignment leaves the recorded checkout Machine and path intact.
+Files panes retain their opening location through Close/Undo, including a first open
+without a Session link. A shell split beside Files uses that same location.
+Unknown or changed owners stay unavailable without redirecting retained drafts.
+Remote paths are never opened or watched on the presentation Mac. Filesystem events
+on the execution Machine refresh retained documents, including hidden drafts. Disconnects
+retain drafts and show an error; Refresh reconnects. Stale owner readings are discarded.
 Switching files, hiding Files and returning to the Task keeps the draft.
 Files reached through symlinks remain readable within the checkout and show a
 read-only explanation. If a regular file becomes a symlink, its retained draft
@@ -133,20 +140,22 @@ Task rows and their counts show unfinished interactive Sessions in the Task chec
 including independent conversations and authored Flow reviews. **Show headless Sessions**
 includes background conversations; `lf session list --interactive all --history`
 inspects the full history. Filtering preserves retained terminals and drafts.
-Repo and Wave Sessions retain their own scopes. Collapsed Wave rows roll up Task
+Repo and Wave Sessions retain their own scopes. Wave rows include their conversations and roll up Task
 Sessions; choose a name to open it directly.
 **Available** means the conversation can be joined. Historical feedback remains
 readable without granting completion authority. Failed provider starts offer recovery.
 
-Use the outline menu for **Compact**, **Full hierarchy**, or **Sessions**.
-Repository conversations and Sessions with unavailable ancestry stay reachable
-below the outline. Sessions without a Task association are also available under
+Use the outline menu for **Compact** or **Full hierarchy**. Open a Task conversation
+from its Session-count menu; Task rows always open Work.
+Repository conversations and Sessions with unavailable planning stay reachable
+under **Debug → Sessions**, without inventing sidebar ancestry. Sessions without a Task association are also available under
 **Debug → Sessions → Orphan Sessions** in the repository menu, or `lf session list --orphan`.
 There is no creation opt-out from checkout association. **Task details** opens the description, comments and Run history.
 
 A Task's workspace is its Workflow in the header and a multiplexer below.
-Opening a Task opens its one Session (`lf session ensure --task`); there is no
-Sessions list. The header draws the Workflow as a graph scaled to the window:
+Opening a Task shows its retained panes without creating or connecting a Session.
+Use **New conversation** or an explicit Session link to connect; an unplaced Task
+keeps its explicit **Prepare workspace** action. The header draws the Workflow as a graph scaled to the window:
 `start` and `end` as circles, each node a box saying what you do there, one
 labelled arrow per edge, a loop back as an arc over its node. The current node
 or running edge is marked. The labels of the edges leaving the current node
@@ -168,8 +177,9 @@ how long it ran. A row opens to its id, graph and steps (the shape of
 as running. **Task details → Debug** lists the Task's raw Sessions and Processes.
 Sessions list **Waiting** first and working ones in a compact group.
 The Wave page's **Workflow** sets the Project's workflow from the catalogue
-(`lf project workflow list`); **Customize** or **Edit** opens its source in
-your editor, writing a builtin to `.lf/` first.
+(`lf wave workflow list`); **Customize** or **Edit** opens its source in a
+sheet. Save stores the definition in the Wave and selects it for the current
+chapter; captured Task Workflows stay unchanged.
 **Session history** under the Flow reads nothing until expanded; it then lists that
 Task's complete recorded input history (`lf usage --days 0 --task ID --json`) with each recorded
 outcome. Session rows show the provider recorded on their Run and a ready summary
@@ -225,8 +235,12 @@ Task links and palette Task entries open retained workspaces, including Tasks
 outside the current chapter, without starting a Task Flow. A repository-qualified
 link opens its exact match even when another Wave's planning is unavailable.
 Ambiguous links offer repository-qualified choices; failed reads keep the current
-workspace and offer Retry. Only one workspace window receives a link.
-Links prefer a window already selecting the destination. Reopening its Task keeps
+workspace visible. Only its repository window receives a link.
+Open Repo, Task links and the repository menu reuse one window per plan identity,
+including while it opens. Different repositories keep separate queued destinations;
+closing one needs no replacement window. A restored location that now selects another
+plan reports an error rather than restoring its panes into that plan.
+Reopening a Task keeps
 the selected conversation and pane layout. Loaded repository-qualified links reuse
 observed planning; successful opens do not present a Task-finding sheet.
 Add `session` to open an existing Task conversation in its terminal pane. A
@@ -310,7 +324,8 @@ Manually launched agents in these shells register against their actual terminal.
 Selecting their Session focuses the existing shell; selection leaves both the
 conversation and shell running.
 External clients require explicit **Move here**. Terminals and their command titles survive Work list and detail
-navigation and repository switches within a window. Native surfaces belong to
+navigation. Switching repositories focuses that repository’s window without replacing
+the origin’s panes or drafts. Native surfaces belong to
 that window and are never mounted twice.
 Session reads and preparation run in the opened repository rather than a
 machine-wide aggregate.
@@ -337,8 +352,8 @@ agent readings fail independently. A failed refresh keeps the last useful
 evidence visible with its failure reason rather than painting a healthy empty
 state.
 
-The previous Wave workspace remains available in repository and Portfolio
-windows while its proven inspectors and Chat surface move into the new root.
+Portfolio retains the Wave inspectors. Opening a Task there routes to its
+repository window rather than creating another Task workspace in a sheet.
 Wave Chat loads the active backing's bounded history before SSE, keeps it visible
 through reconnects, and rolls equivalent operational failures into one
 disclosed notice. Cold launch does not start a chat transcript read.
@@ -354,7 +369,7 @@ from `lf wave status <wave> --json`.
 Start, attach, or interrupt a Task from the roadmap. Open its worktree
 in Warp, or attach to the running Task agent in the workspace sheet beside its
 changed files, per-file patches, current contents, and embedded shells.
-The condition chip and spoken row use the same `lf roadmap` reason: green is a
+The condition chip and spoken row use the same `lf wave show` reason: green is a
 live advancing body, blue is waiting, red is blocked, black is settled or
 unstarted, and unknown means the required evidence could not be read.
 
@@ -374,7 +389,7 @@ codebase tree, and registry health.
   Lifecycle mutations remain `lf task run` and `lf interrupt`; review nodes use
   the Task's persisted flow position and provider Run identity.
 - **Registry queries** own durable reads. `RegistryQuery` runs
-  `lf wave list/status/roadmap/ps/activity/usage/doctor/tokens --json`; the app does not
+  `lf wave list/show/status`, `lf monitor`, and `lf history` JSON commands; the app does not
   maintain a second roadmap or lifecycle database. Unavailable per-Wave evidence
   renders its reason, and refresh failures leave the last successful roadmap or
   Activity history visible.
@@ -382,7 +397,7 @@ codebase tree, and registry health.
 
 ## Code map
 
-- `LoopflowMac/Views/RepoView.swift` — one repository/Wave/Task/Session outline and retained workspace
+- `LoopflowMac/Views/RepoView.swift` — one repository/Wave/Task outline and retained workspace
 - `LoopflowMac/Views/SessionsView.swift` — every Session in a native split multiplexer
 - `Loopflow/Models/MultiplexerLayout.swift` — immutable pane split tree
 - `Loopflow/Models/MultiplexerStore.swift` — reference-owned layout, focus, zoom, and undo
@@ -535,3 +550,102 @@ same name. Project selectors list only Workflows. Task reads expose
 `workflow_name`, `latest_flow_process`, `execution`, and `run_control` separately;
 completed Flow processes retain their graph and identity. The Task watch part
 supplies `flow_processes`, using the same execution details as CLI inspection.
+
+### Inspect retained workspaces
+
+```sh
+lf --task LOO-427 desktop open --diff --json
+lf desktop list --json
+lf task run LOO-427 --explain --json
+```
+
+Inspection reads the open repository windows through macOS automation without
+launching the app, changing focus or acquiring a Session. Window incarnations,
+Work tabs, pane layouts and hidden panes come from the retained workspace owners.
+Repository, Wave and Task tabs remain distinct even at the same checkout. Closing a
+tab hides its workspace without releasing terminals or file drafts; reopening
+restores focus and zoom. Bare Work navigation starts no Session or checkout.
+The last tab can close without starting a repository conversation. Window close
+and app quit still end embedded clients; this is not draft recovery after quit.
+
+Inspection reports each workspace's `work`, title, open state and selection.
+Execution locations live on contents, not workspace keys or pane receipts.
+There is no outer checkout-slot layout or checkout-split menu. Flow logs use their
+content location: the matching local Work stream, or an owner-pinned read with
+explicit Refresh for other retained locations. They never read a peer path locally.
+Task recommendations/run legality and Session actions retain their separate
+source availability. Saved or failed readings supply no actions. Inspection
+preserves Task source dates; Session observation time remains unavailable rather
+than borrowing the UI snapshot time. This reports model state, not rendered
+usability or provider readiness. Terminal panes include a `surface`
+incarnation only when a native surface exists. It is separate from the pane's
+content incarnation; inspection never creates a surface or cleans up an exited
+child. Neither token authorizes terminal input.
+
+`desktop open` delivers the resolved Task/Session link to this same repository
+window. After explicit `repo identity --bind`, the next open reuses the existing
+scene, including one still registering. Retained local IDs come from `lf`, not
+path matching. Drafts, native views and pending links stay in place; old pane
+targets become stale, so inspect again before control. Restoration accepts a
+retained ID but refuses a location that no longer owns it. `--diff` reveals the existing Changes browser beside the conversation,
+retaining file selection and drafts. Launch acceptance returns `opening`; it does
+not prove a usable native endpoint. Inspection retains the latest request's outcome:
+`usable` for a Session request requires the Session's native-surface callback and a loaded Changes reading
+when requested, with both original panes still visible. Closing, hiding, replacing or
+zooming away a requested pane fails the pending request, as do connection, surface and
+comparison errors. Navigation cancels an unfinished opening; late results cannot settle a newer
+request, even for the same URL. This is endpoint readiness, not provider-turn completion
+or proof of compositor rendering. A plain Task link waits for its Task page to mount;
+it does not require a Session or checkout. An unavailable workspace reports failure.
+
+Top-level `openings` records the latest repository-opening request per local locator,
+including lookup/validation failures before any window registers. A plain repository
+becomes usable when its validated workspace receiver registers, even while planning
+loads. Registered Task links report their page/Session outcome on the window instead.
+These are transient receipts, not opening history or Work identity. Remote Task links
+retain the local repository window and re-observe the named execution Machine before
+opening its Session and optional Changes pane. A remote link without `--session`
+shows the Task without creating or connecting a Session. An explicit Changes
+request without a Session still uses that Task's primary Session. Missing, changed or unavailable recorded locations
+never prepare another checkout. The CLI transports native Session argv over SSH,
+keeping the owner's data directory and explicit takeover behavior. Local panes and
+drafts remain retained; no remote planning tree or execution record is imported.
+
+`lf --task LOO-427 desktop hide --pane "$pane"` and `lf --task LOO-427 desktop restore --pane "$pane"`
+change retained pane visibility. Focus, split, move, resize and zoom use that same
+exact-target path through the registry and multiplexer; see the
+[CLI examples](../docs/lf.md#desktop-navigation). `--repo`/`--task` select Work;
+`--pane` selects a pane ID from inspection or a creation receipt. Without it,
+the verified caller terminal wins within selected Work, otherwise one eligible
+pane is required; ambiguity lists choices and does nothing. Surface/window/content tokens are internal.
+Move retains the pane itself,
+including its content occurrence and surface key; it never closes/reopens a client.
+Split adds a shell on the addressed pane’s execution Machine and checkout. Shell panes retain their creation location through arrangement and Close/Undo. Session panes capture their recorded location; changed readings invalidate old pane targets without changing focus. Unknown locations never open a local replacement. Arrangement preserves selection except explicit focus;
+zoom does not redirect input to an unselected pane. Window/content replacement
+rejects stale targets, including the second target of a move or resize. Mutation replies
+identify the affected pane directly; they are not native-rendering proof. Shell, Files and Flow-log add
+companions beside the exact target without changing focus or zoom. Files and
+Flow-log reuse existing panes for the named Task; its recorded checkout must
+match. Remote shells run on the recorded execution Machine; changed or missing checkouts
+refuse launch without opening a local shell. Disconnects never replay shell commands.
+
+`lf --task LOO-427 desktop read --pane "$pane" --region selection --json`
+validates the retained pane and native surface without following focus or retiring
+an exited surface. Missing surfaces and nonterminal panes are explicit unavailable
+results, not empty text. The verified lf3 reader writes directly into the requested
+byte bound; Swift copies only that UTF-8 prefix. `screen` reads the viewport,
+`scrollback` the retained screen history, and `selection` the current text or
+command block (empty when nothing is selected). No unbounded extraction is used.
+Mounted extraction/draft acceptance and cross-machine composition remain unproved.
+
+```sh
+lf --task LOO-427 desktop text --pane "$pane" -- 'add to the draft'
+lf --task LOO-427 desktop key --pane "$pane" enter
+```
+
+Text preserves the draft and inserts at its cursor; Enter is separate. Control
+characters in text are rejected rather than turned into keys. Both operations
+require the exact existing live surface and leave focus unchanged. An active IME
+composition must finish first. Missing/exited/replaced surfaces never reopen or
+redirect input. A lost reply is uncertain: do not automatically resend. The native
+fixture covers cursor insertion and submission but has not run here.

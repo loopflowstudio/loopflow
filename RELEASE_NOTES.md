@@ -1,46 +1,43 @@
-# v0.13.12
+# v0.13.13
 
 <!-- loopflow:release-notes=narrative;gate=safe -->
 
-v0.13.12 makes unattended work easier to follow and resume: Flows can read Claude’s completed answers, dead agents stop appearing available, and headless Claude and OpenCode conversations gain a supported stop-and-resume path. The release connects conversation history to process status without treating an interrupted turn as successful work. It also fixes selected scratch commits and makes installation checks more resilient to registry throttling.
+v0.13.13 reduces interruptions when several pieces of work run at once. Linear checks are shared across work boundaries, optional Session naming gives way when the store is busy, and PR publication uses current Git ancestry when a saved Task base is stale. The through-line is keeping prompts and delivery moving while preserving pending writes and branch history.
 
-## Let Claude answers move a Flow forward
+## Check Linear when work needs it
 
-Headless Claude now records answers through the shared harness, making them available to the Flow runner. Deciding steps can advance from a valid answer or request a correction in the same conversation while preserving skill input, context and native resume identity.
+Agents no longer poll Linear independently while idle. Changes are acquired before Flow steps, after agent turns, when showing planning and before Linear writes, reducing duplicate requests as concurrent work grows.
 
-- Flow decisions and final answers come from correlated, successfully completed native turns. Retained transcript prose remains readable but cannot substitute for a final answer.
-- Native JSON schemas carry through launch, correction turns and replay. Claude failure messages remain available for retry classification.
-- Claude, Codex and OpenCode use their harnesses; unknown providers return an error. Obsolete batch launch and answer-recovery paths are removed.
-- Headless output prints assistant text without the former tool summaries or cost/time footer. Historical captures remain intact.
+- Team checks share ten-second freshness across processes and repositories. Paginated acquisition advances its watermark only after successful ingestion.
+- Desktop and `--watch` retain checks with a 30–240-second backoff. Teams without live Tasks make no acquisition requests; locally finished or abandoned Tasks are excluded.
+- Rate-limit responses and exhausted quota headers establish one cooldown across a Home. After reset, the next supported boundary retries pending delivery; lost responses retain uncertainty.
+- Successful mutation responses settle writes without follow-up reads. Foreground Git exchange remains in place.
+- Comments on an idle Task become available at the next supported boundary without waking its Session.
 
-## See whether an agent is still available
+## Keep optional naming out of the prompt's way
 
-CLI and Desktop Session status now follows the recorded agent process and its exact operating-system identity. Stale client files, attachment events and saved sockets can no longer keep a dead agent looking active or Waiting.
+Native title callbacks now bound their store work so contention does not make optional naming wait through the hook's five-second timeout. When ownership cannot be established promptly, the title stays unchanged.
 
-- Waiting requires a live agent, checked before pagination. Work-watch refreshes on process changes and a two-second operating-system check, so agent death can appear without a database write.
-- Saved connections are offered only for live agents. A failed connection does not authorize launching a replacement.
-- Older Sessions without recorded process identity remain Unknown. Uncertain evidence never ages into permission to replace an agent or clean up its checkout.
-- Terminal placement belongs to the attached Loopflow process; terminal updates and Move reject stale attachments. Captured-input completion follows the latest turn’s process while retaining provider outcomes separately from process death.
+- Title callbacks run before ordinary command admission, with a 100 ms Process-recording wait and separate 100 ms bounds for ownership lock waits and history scans.
+- Process history remains best-effort, without creating or migrating a store. Failed observation is no longer retried at exit.
 
-## Continue background conversations interactively
+## Publish from the branch's current history
 
-Run `lf session connect SESSION` to stop a headless Claude or OpenCode process group and open the same saved native conversation. Session identity and history survive the transition.
+`lf pr open` and `lf pr publish` resolve their comparison from current Git ancestry, so a stale saved base after a rebase or rewritten main no longer blocks valid branch work. Publication preserves existing commits, including inherited dependencies absent from upstream.
 
-- Missing native conversation identity refuses the connection before stopping useful work.
-- Shutdown requires the current attachment, excludes foreground providers and waits for surviving helpers before settling the process group.
-- Interrupted turns remain unfinished. This is stop-and-resume; Codex retains its live connection behavior and protections for servers hosting unrelated conversations.
-- OpenCode receives permission rules when a new session is created, and uncertain writes are no longer automatically retried.
+- Compare HEAD with the selected upstream's current merge-base and refresh root Tasks' saved bases without relying on reflogs.
+- Stacked Tasks retain their integration forks until explicit sync. Sync after a parent squash preserves child edits without restoring files deleted on main.
+- Ownership checks remain, as do refusals for empty ranges and unrelated histories. Ancestry errors are shorter and leave the branch intact.
 
 ## Operational notes
 
-Installation verification now separates image-download failures from the checks themselves, making transient registry throttling recoverable and exhausted acquisition visible as an infrastructure failure.
+Linear cooldowns are shared within one Home; separate Homes remain independent. Linear writes still use unconditional updates, so an unseen concurrent edit can be overwritten between observation and mutation.
 
-- The harness reuses cached images, including explicit `--image` selections. Refresh mutable tags with an explicit `docker pull`.
-- Recognized throttling retries after 15, 30 and 60 seconds within one five-minute download budget, separate from container startup. Other pull errors fail immediately; installation checks themselves are not retried.
-
-Recorded checks cover Flow decisions and corrections, process-death updates, stop-before-resume and unfinished history using provider stand-ins. Configured-provider and installed acceptance remain unverified, including a real Task reaching publication through Claude’s decision. Cached-image installation paths passed locally; recovery from actual throttling on a cold hosted runner remains unverified. The included evidence does not establish a passing full release matrix.
+- For rollout measurements in loopflow, etude, kata and fantasia, restore `linear.team` with `planning.provider: linear` before collecting live request and quota evidence.
+- Live Linear request counts, rejected-request quota accounting and installed pending-write recovery remain unverified. Confirm retained writes settle at a supported boundary after reset.
+- Title-hook contention probes and disposable PR scenarios passed, but installed acceptance in Kata and Etude remains outstanding. The reported Kata timeout has no confirmed lock trace; broader slow-status and records-read reports remain unresolved.
+- Recorded checks include focused network-isolated tests, formatting, Clippy and architecture checks. The supplied evidence does not establish a passing full hosted matrix for the combined release; repaired Linux PR coverage also remains CI-owned.
 
 ## Small changes
 
-- `lf commit` can commit selected `scratch/` files in ordinary Task worktrees while preserving unrelated staged content and working edits. Persistent workspaces continue to exclude scratch and explain how to save durable notes elsewhere.
-- Empty commit selections explain what needs to change. Failed Git commands retain stderr and stdout, or report the exit status when neither contains diagnostics.
+- Task-preservation coverage removes a clock-boundary assumption while retaining checks that planning edits preserve execution state.

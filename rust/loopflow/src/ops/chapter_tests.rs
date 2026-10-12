@@ -146,7 +146,7 @@ async fn graphql(
         issue["branchName"] = Value::Null;
     }
     let prior_projects = provider.projects.clone();
-    let data = if query.contains("query ListTeams") {
+    let mut data = if query.contains("query ListTeams") {
         json!({"teams":page(vec![json!({"id":"team-1", "name":"Fixture", "key":"FIX", "description":"<!-- loopflow-repository: loopflowstudio/fixture -->"})])})
     } else if query.contains("query ProjectInitiative") {
         json!({"initiative":{"id":id}})
@@ -190,6 +190,9 @@ async fn graphql(
             if prior_projects.get(id) != Some(project) {
                 project["updatedAt"] = revision.clone();
             }
+        }
+        if query.contains("mutation AdoptProject") {
+            data["projectUpdate"]["project"] = provider.projects[id].clone();
         }
         if provider.interrupt_after == Some(provider.mutations) {
             provider.unavailable = true;

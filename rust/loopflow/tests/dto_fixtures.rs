@@ -672,6 +672,209 @@ fn planning_sync_preserves_delivery_and_losing_values() {
 }
 
 #[test]
+fn desktop_pane_command_requires_an_exact_content_occurrence() {
+    use loopflow::lf::commands::desktop::DesktopPaneCommand;
+    let json = include_str!("../../../tests/fixtures/dto/desktop_pane_commands.json");
+    let requests: Vec<DesktopPaneCommand> = serde_json::from_str(json).unwrap();
+    assert_eq!(
+        serde_json::to_value(&requests).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+    for request in &requests {
+        let wire = serde_json::to_value(request).unwrap();
+        for field in wire["action"].as_object().unwrap().keys() {
+            let mut missing = wire.clone();
+            missing["action"].as_object_mut().unwrap().remove(field);
+            assert!(serde_json::from_value::<DesktopPaneCommand>(missing).is_err());
+        }
+    }
+    let request = &requests[0];
+    assert_eq!(
+        request.action,
+        loopflow::lf::commands::desktop::DesktopPaneAction::Hide
+    );
+    assert_eq!(request.target.incarnation, "occurrence-session-pane");
+    let wire = serde_json::to_value(request).unwrap();
+    assert_eq!(
+        wire,
+        serde_json::from_str::<serde_json::Value>(json).unwrap()[0]
+    );
+    for field in ["repository", "window", "work", "pane", "incarnation"] {
+        let mut missing = wire.clone();
+        missing["target"].as_object_mut().unwrap().remove(field);
+        assert!(serde_json::from_value::<DesktopPaneCommand>(missing).is_err());
+    }
+    let mut missing = wire;
+    missing.as_object_mut().unwrap().remove("action");
+    assert!(serde_json::from_value::<DesktopPaneCommand>(missing).is_err());
+}
+
+#[test]
+fn desktop_text_distinguishes_empty_and_unavailable() {
+    use loopflow::lf::commands::desktop::{
+        DesktopTextReading, DesktopTextResult, DesktopTextUnavailable,
+    };
+    let json = include_str!("../../../tests/fixtures/dto/desktop_text_readings.json");
+    let readings: Vec<DesktopTextReading> = serde_json::from_str(json).unwrap();
+    assert_eq!(
+        serde_json::to_value(&readings).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+    assert_eq!(
+        readings[0].result,
+        DesktopTextResult::Available {
+            text: String::new(),
+            truncated: false
+        }
+    );
+    assert_eq!(
+        readings[2].result,
+        DesktopTextResult::Unavailable {
+            reason: DesktopTextUnavailable::MissingSurface
+        }
+    );
+    for reading in &readings {
+        let wire = serde_json::to_value(reading).unwrap();
+        for owner in ["request", "result"] {
+            for field in wire[owner].as_object().unwrap().keys() {
+                let mut missing = wire.clone();
+                missing[owner].as_object_mut().unwrap().remove(field);
+                assert!(serde_json::from_value::<DesktopTextReading>(missing).is_err());
+            }
+        }
+    }
+}
+
+#[test]
+fn desktop_opening_distinguishes_launch_acceptance_from_usable_and_failed() {
+    use loopflow::lf::commands::desktop::{DesktopOpening, DesktopOpeningStatus};
+    let json = include_str!("../../../tests/fixtures/dto/desktop_openings.json");
+    let readings: Vec<DesktopOpening> = serde_json::from_str(json).unwrap();
+    assert_eq!(
+        readings.iter().map(|r| r.status).collect::<Vec<_>>(),
+        vec![
+            DesktopOpeningStatus::Opening,
+            DesktopOpeningStatus::Usable,
+            DesktopOpeningStatus::Failed
+        ]
+    );
+    assert!(readings[0].reason.is_none());
+    assert!(readings[2].reason.is_some());
+    assert_eq!(
+        serde_json::to_value(readings).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+}
+
+#[test]
+fn task_run_explanations_preserve_actions_and_missing_evidence() {
+    use loopflow::ops::task::{TaskRunAction, TaskRunExplanation};
+    let json = include_str!("../../../tests/fixtures/dto/task_run_explanations.json");
+    let reports: Vec<TaskRunExplanation> = serde_json::from_str(json).unwrap();
+    assert!(matches!(
+        &reports[0].action,
+        Some(TaskRunAction::Edge { take_up: true, .. })
+    ));
+    assert!(matches!(
+        &reports[1].action,
+        Some(TaskRunAction::Edge { flow: None, .. })
+    ));
+    assert!(matches!(
+        &reports[2].action,
+        Some(TaskRunAction::Flow { .. })
+    ));
+    assert!(reports[3].action.is_none());
+    assert_eq!(
+        serde_json::to_value(reports).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+    let mut missing: serde_json::Value = serde_json::from_str(json).unwrap();
+    missing[0].as_object_mut().unwrap().remove("unavailable");
+    assert!(serde_json::from_value::<Vec<TaskRunExplanation>>(missing).is_err());
+}
+
+#[test]
+fn desktop_open_explanations_preserve_proposals_and_impediments() {
+    use loopflow::lf::commands::desktop::DesktopOpenExplanation;
+    let json = include_str!("../../../tests/fixtures/dto/desktop_open_explanations.json");
+    let reports: Vec<DesktopOpenExplanation> = serde_json::from_str(json).unwrap();
+    assert!(reports[0].url.as_ref().unwrap().contains("diff=true"));
+    assert!(reports[1].url.is_none());
+    assert!(!reports[1].impediments.is_empty());
+    assert_eq!(
+        serde_json::to_value(reports).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+    let mut missing: serde_json::Value = serde_json::from_str(json).unwrap();
+    missing[0].as_object_mut().unwrap().remove("impediments");
+    assert!(serde_json::from_value::<Vec<DesktopOpenExplanation>>(missing).is_err());
+}
+
+#[test]
+fn session_connect_explanations_preserve_intent_and_unavailable_evidence() {
+    use loopflow::lf::commands::context::{
+        OpenMode, SessionConnectExplanation, SessionConnectIntent,
+    };
+    let wire: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/session_connect_explanations.json"
+    ))
+    .unwrap();
+    let reports: Vec<SessionConnectExplanation> = serde_json::from_value(wire.clone()).unwrap();
+    assert_eq!(
+        reports[0].action.as_ref().unwrap().intent,
+        SessionConnectIntent::Start
+    );
+    assert_eq!(reports[0].action.as_ref().unwrap().mode, OpenMode::Refuse);
+    assert_eq!(
+        reports[1].action.as_ref().unwrap().intent,
+        SessionConnectIntent::Resume
+    );
+    assert_eq!(reports[1].action.as_ref().unwrap().mode, OpenMode::Replace);
+    assert!(reports[1].action.as_ref().unwrap().prepare_only);
+    assert_eq!(
+        reports[2].action.as_ref().unwrap().intent,
+        SessionConnectIntent::ConnectOrResume
+    );
+    assert_eq!(reports[2].action.as_ref().unwrap().mode, OpenMode::Try);
+    assert!(!reports[2].unavailable.is_empty());
+    assert!(reports[3].action.is_none());
+    assert!(reports[3].state.is_none());
+    assert!(reports[3].actions.is_empty());
+    assert_eq!(serde_json::to_value(&reports).unwrap(), wire);
+    for field in ["resolution", "actions", "impediments", "unavailable"] {
+        let mut missing = wire[0].clone();
+        missing.as_object_mut().unwrap().remove(field);
+        assert!(serde_json::from_value::<SessionConnectExplanation>(missing).is_err());
+    }
+}
+
+#[test]
+fn work_authors_preserve_names_and_historical_attribution() {
+    let fixture = include_str!("../../../tests/fixtures/dto/work_authors.json");
+    let authors: Vec<loopflow::durable::Author> = serde_json::from_str(fixture).unwrap();
+    assert_eq!(
+        authors[1],
+        loopflow::durable::Author::Named("Fixture author".into())
+    );
+    assert_eq!(
+        serde_json::to_value(authors).unwrap(),
+        serde_json::from_str::<serde_json::Value>(fixture).unwrap()
+    );
+}
+
+#[test]
+fn session_steer_status_preserves_excerpt_evidence() {
+    let fixture = include_str!("../../../tests/fixtures/dto/session_steers.json");
+    let page: loopflow::steer::SessionSteerPage = serde_json::from_str(fixture).unwrap();
+    assert_eq!(page.items[0].excerpted, Some(true));
+    assert_eq!(page.items[0].evidence, "emitted");
+    assert_eq!(
+        serde_json::to_value(page).unwrap(),
+        serde_json::from_str::<serde_json::Value>(fixture).unwrap()
+    );
+}
+
+#[test]
 fn peer_planning_status_keeps_journal_and_independent_receipts() {
     let value: serde_json::Value = serde_json::from_str(include_str!(
         "../../../tests/fixtures/dto/peer_planning_status.json"
@@ -735,4 +938,177 @@ fn unplaced_wave_preserves_nullable_machine() {
     assert!(wave.machine.is_none());
     assert_eq!(wave.active_tasks, 1);
     assert_eq!(serde_json::to_value(wave).unwrap(), fixture);
+}
+
+#[test]
+fn repository_identity_preserves_explicit_local_locators() {
+    use loopflow::durable::RepositoryIdentity;
+    let json = include_str!("../../../tests/fixtures/dto/repository_identity.json");
+    let identity: RepositoryIdentity = serde_json::from_str(json).unwrap();
+    assert_eq!(identity.locators.len(), 2);
+    assert_eq!(identity.id, identity.locators[1]);
+    assert_eq!(
+        serde_json::to_value(&identity).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+    let mut missing = serde_json::to_value(&identity).unwrap();
+    missing.as_object_mut().unwrap().remove("locators");
+    assert!(serde_json::from_value::<RepositoryIdentity>(missing).is_err());
+}
+
+#[test]
+fn task_move_explanations_preserve_positions_and_completion_uncertainty() {
+    use loopflow::ops::task::TaskMoveExplanation;
+    use loopflow::ops::workflow::WorkflowPosition;
+    let json = include_str!("../../../tests/fixtures/dto/task_move_explanations.json");
+    let reports: Vec<TaskMoveExplanation> = serde_json::from_str(json).unwrap();
+    let restart = reports[0].action.as_ref().unwrap();
+    assert!(matches!(
+        restart.from,
+        Some(WorkflowPosition::Edge { running: true, .. })
+    ));
+    assert_eq!(restart.to, "start");
+    assert_eq!(restart.reason.as_deref(), Some("Restart Workflow"));
+    let completion = reports[1].action.as_ref().unwrap();
+    assert!(completion.workflow.is_none());
+    assert!(completion.from.is_none());
+    assert_eq!(completion.to, "end");
+    assert!(!reports[1].unavailable.is_empty());
+    assert!(reports[2].action.is_none());
+    assert_eq!(
+        serde_json::to_value(reports).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+    let mut missing: serde_json::Value = serde_json::from_str(json).unwrap();
+    missing[0]["action"].as_object_mut().unwrap().remove("to");
+    assert!(serde_json::from_value::<Vec<TaskMoveExplanation>>(missing).is_err());
+}
+
+#[test]
+fn task_planning_explanations_preserve_intent_and_effects() {
+    use loopflow::ops::task::{TaskPlanningAction, TaskPlanningExplanation};
+    let json = include_str!("../../../tests/fixtures/dto/task_planning_explanations.json");
+    let reports: Vec<TaskPlanningExplanation> = serde_json::from_str(json).unwrap();
+    assert!(matches!(
+        &reports[0].action,
+        Some(TaskPlanningAction::Create {
+            project: Some(_),
+            ..
+        })
+    ));
+    assert!(
+        matches!(&reports[1].action, Some(TaskPlanningAction::Edit { revision: 3, fields }) if fields == &["title", "assignee"])
+    );
+    assert!(matches!(
+        &reports[2].action,
+        Some(TaskPlanningAction::Comment {
+            message: Some(_),
+            steer: true,
+            refresh: false
+        })
+    ));
+    assert!(matches!(
+        &reports[3].action,
+        Some(TaskPlanningAction::Comment {
+            message: None,
+            refresh: true,
+            ..
+        })
+    ));
+    assert!(
+        matches!(&reports[5].action, Some(TaskPlanningAction::Refile { wave, project, previous_project })
+        if wave == "destination-wave" && project == "destination-project" && previous_project == "source-project")
+    );
+    assert!(
+        matches!(&reports[6].action, Some(TaskPlanningAction::Save { path, revision, draft_bytes: 42 })
+        if path == "scratch/note.md" && revision == "observed-file-revision")
+    );
+    assert!(reports[4].action.is_none());
+    assert!(!reports[4].impediments.is_empty());
+    assert_eq!(
+        serde_json::to_value(reports).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+    let mut missing: serde_json::Value = serde_json::from_str(json).unwrap();
+    missing[0].as_object_mut().unwrap().remove("effects");
+    assert!(serde_json::from_value::<Vec<TaskPlanningExplanation>>(missing).is_err());
+}
+
+#[test]
+fn task_checkout_explanations_keep_proposals_separate_from_admission() {
+    use loopflow::ops::task::{TaskCheckoutBehavior, TaskCheckoutExplanation};
+    let json = include_str!("../../../tests/fixtures/dto/task_checkout_explanations.json");
+    let reports: Vec<TaskCheckoutExplanation> = serde_json::from_str(json).unwrap();
+    for (report, behavior) in reports.iter().zip([
+        TaskCheckoutBehavior::Prepare,
+        TaskCheckoutBehavior::Reuse,
+        TaskCheckoutBehavior::Restore,
+    ]) {
+        assert_eq!(report.action.as_ref().unwrap().behavior, behavior);
+        assert!(!report.unavailable.is_empty());
+    }
+    assert!(reports[3].action.is_none());
+    assert_eq!(
+        serde_json::to_value(reports).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+}
+
+#[test]
+fn task_locations_preserve_owner_freshness_and_unavailable_evidence() {
+    use loopflow::durable::{TaskLocation, TaskLocationObservation};
+    let wire: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/task_locations.json"
+    ))
+    .unwrap();
+    let readings: Vec<TaskLocationObservation> = serde_json::from_value(wire.clone()).unwrap();
+    assert!(matches!(
+        readings[0].location,
+        TaskLocation::Recorded {
+            checkout: Some(_),
+            ..
+        }
+    ));
+    assert!(matches!(
+        readings[1].location,
+        TaskLocation::Recorded { checkout: None, .. }
+    ));
+    assert!(matches!(readings[2].location, TaskLocation::Unrecorded));
+    assert!(matches!(
+        readings[3].location,
+        TaskLocation::Unavailable { .. }
+    ));
+    assert_eq!(serde_json::to_value(readings).unwrap(), wire);
+}
+
+#[test]
+fn task_files_frames_preserve_checkout_identity_and_heartbeat() {
+    use loopflow::ops::task::TaskFilesFrame;
+    let wire: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/task_files_frames.json"
+    ))
+    .unwrap();
+    let frames: Vec<TaskFilesFrame> = serde_json::from_value(wire.clone()).unwrap();
+    assert!(frames[0].changed);
+    assert!(!frames[1].changed);
+    assert_eq!(frames[0].request, frames[1].request);
+    assert_eq!(serde_json::to_value(frames).unwrap(), wire);
+    for field in ["request", "task_id", "machine_id", "checkout", "changed"] {
+        let mut missing = wire[0].clone();
+        missing.as_object_mut().unwrap().remove(field);
+        assert!(serde_json::from_value::<TaskFilesFrame>(missing).is_err());
+    }
+}
+
+#[test]
+fn desktop_pane_receipt_returns_the_affected_identity() {
+    use loopflow::lf::commands::desktop::DesktopPaneReceipt;
+    let json = include_str!("../../../tests/fixtures/dto/desktop_pane_receipt.json");
+    let receipt: DesktopPaneReceipt = serde_json::from_str(json).unwrap();
+    assert_eq!(receipt.pane, "created-pane");
+    assert_eq!(receipt.work.repository, receipt.repository);
+    assert_eq!(
+        serde_json::to_value(&receipt).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
 }

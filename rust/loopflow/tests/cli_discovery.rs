@@ -81,7 +81,7 @@ fn inspection_is_identical_across_spellings_and_has_no_launch_side_effects() {
         vec![
             vec!["help", "debug"],
             vec!["debug", "--help"],
-            vec!["run", "debug", "--help"],
+            vec!["skill", "debug", "--help"],
         ],
         vec![vec!["help", "flow", "list"], vec!["flow", "list", "--help"]],
         vec![vec!["help", "wt", "create"], vec!["wt", "create", "--help"]],
@@ -111,7 +111,7 @@ fn inspection_is_identical_across_spellings_and_has_no_launch_side_effects() {
         vec![
             vec!["help", "paired"],
             vec!["paired", "--help"],
-            vec!["run", "paired", "-a", "unused", "--help"],
+            vec!["flow", "paired", "-a", "unused", "--help"],
         ],
     ] {
         let expected = success(run(repo.path(), home.path(), &forms[0]));
@@ -146,11 +146,40 @@ fn inspection_is_identical_across_spellings_and_has_no_launch_side_effects() {
     let overview = success(run(repo.path(), home.path(), &["--help"]));
     let overview = String::from_utf8(overview).unwrap();
     assert!(overview.starts_with("Usage: lf "));
-    assert!(overview.lines().count() <= 25, "{overview}");
+    assert!(overview.contains("--repo") && overview.contains("--machine"));
     assert!(
         !home.path().join(".lf").exists(),
         "inspection wrote runtime state"
     );
+}
+
+#[test]
+fn retired_launch_flags_are_rejected() {
+    for args in [
+        vec!["lf", "--max-turns", "2", "skill", "debug"],
+        vec!["lf", "--no-loopflow", "skill", "debug"],
+        vec!["lf", "--steers-after", "42", "flow", "proof"],
+    ] {
+        assert!(Cli::try_parse_from(args).is_err());
+    }
+}
+
+#[test]
+fn removed_run_dispatch_reports_owners_without_launching() {
+    let repo = fixture();
+    let home = tempfile::tempdir().unwrap();
+    for args in [["run", "paired"], ["run", "--help"], ["help", "run"]] {
+        let result = run(repo.path(), home.path(), &args);
+        assert_eq!(result.status.code(), Some(2));
+        let error = String::from_utf8_lossy(&result.stderr);
+        assert!(error.contains("ambiguous command 'run'"), "{error}");
+        assert!(error.contains("lf task run"), "{error}");
+        assert!(result.stdout.is_empty());
+    }
+    let overview = String::from_utf8(success(run(repo.path(), home.path(), &["help"]))).unwrap();
+    assert!(overview.contains("lf flow <name>"), "{overview}");
+    assert!(!overview.contains("lf run "), "{overview}");
+    assert!(!home.path().join(".lf").exists());
 }
 
 #[test]
@@ -168,7 +197,7 @@ fn skill_help_does_not_offer_untyped_execution_when_the_flow_is_invalid() {
     );
     assert!(!help.contains("lf run paired"), "{help}");
     assert!(!help.contains("lf paired [message]"), "{help}");
-    let untyped = run(repo.path(), home.path(), &["run", "paired", "--help"]);
+    let untyped = run(repo.path(), home.path(), &["paired", "--help"]);
     assert_eq!(untyped.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&untyped.stderr).contains("invalid flow"));
 }
@@ -213,15 +242,13 @@ fn typed_help_inspects_reserved_definitions_without_launching() {
     let skill = String::from_utf8(skill).unwrap();
     assert!(skill.contains("Reserved skill body."), "{skill}");
     assert!(skill.contains("lf skill list"), "{skill}");
-    for owner in ["flow", "run"] {
-        let flow = success(run(
-            repo.path(),
-            home.path(),
-            &["help", owner, "--", "list"],
-        ));
-        let flow = String::from_utf8(flow).unwrap();
-        assert!(flow.contains("flow (.lf/flows/list.yaml)"), "{flow}");
-    }
+    let flow = success(run(
+        repo.path(),
+        home.path(),
+        &["help", "flow", "--", "list"],
+    ));
+    let flow = String::from_utf8(flow).unwrap();
+    assert!(flow.contains("flow (.lf/flows/list.yaml)"), "{flow}");
     for args in [["help", "skill", "list"], ["skill", "list", "--help"]] {
         assert_eq!(
             success(run(repo.path(), home.path(), &args)),
@@ -284,8 +311,8 @@ fn removed_options_and_aliases_report_usage_errors_without_effects() {
         ],
         &["account", "route", "--json", "set", "codex", "work@"],
         &["wt", "rm", "unused"],
-        &["-M", "unused", "run", "solo"],
-        &["-C", "run", "solo"],
+        &["-M", "unused", "skill", "solo"],
+        &["-C", "skill", "solo"],
     ] {
         let result = run(repo.path(), home.path(), args);
         assert_eq!(result.status.code(), Some(2), "{args:?}");
@@ -373,7 +400,11 @@ fn ambiguous_commands_never_fall_back_to_installed_definitions() {
         assert!(message.contains("lf session rename"), "{message}");
         assert!(message.contains("lf wave rename"), "{message}");
     }
-    let selected = success(run(repo.path(), home.path(), &["run", "rename", "--help"]));
+    let selected = success(run(
+        repo.path(),
+        home.path(),
+        &["skill", "rename", "--help"],
+    ));
     assert!(String::from_utf8_lossy(&selected).contains("Skill rename body."));
     assert!(!home.path().join(".lf").exists());
 }
@@ -486,8 +517,8 @@ fn shorthand_stops_at_leaf_and_passthrough_boundaries() {
         ["lf", "task", "comment", "status"]
     );
     assert_eq!(
-        normalized(&["lf", "run", "land", "--", "--help"]),
-        ["lf", "run", "land", "--", "--help"]
+        normalized(&["lf", "flow", "land", "--", "--help"]),
+        ["lf", "flow", "land", "--", "--help"]
     );
     let parsed = Cli::try_parse_from(normalized(&["lf", "flow", "--", "list"])).unwrap();
     assert!(
@@ -503,7 +534,7 @@ fn help_preserves_location_without_promoting_query_filters() {
             Some("LOO-123"),
         ),
         (
-            vec!["lf", "monitor", "list", "--task", "LOO-123", "--help"],
+            vec!["lf", "history", "list", "--task", "LOO-123", "--help"],
             None,
         ),
     ] {
@@ -513,6 +544,181 @@ fn help_preserves_location_without_promoting_query_filters() {
         .unwrap();
         assert_eq!(cli.task.as_deref(), task);
         assert!(matches!(cli.command, Some(Commands::Help { .. })));
+    }
+}
+
+#[test]
+fn desktop_open_has_one_owner_and_ambiguous_shorthand_has_no_effects() {
+    use loopflow::lf::DesktopCommand;
+
+    let cli = Cli::try_parse_from(["lf", "desktop", "open"]).unwrap();
+    assert!(matches!(
+        cli.command,
+        Some(Commands::Desktop {
+            cmd: DesktopCommand::Open {
+                session: None,
+                diff: false,
+                json: false
+            }
+        })
+    ));
+    let composed = Cli::try_parse_from([
+        "lf",
+        "--task",
+        "LOO-427",
+        "desktop",
+        "open",
+        "--session",
+        "session-exact",
+        "--diff",
+        "--json",
+    ])
+    .unwrap();
+    assert!(
+        matches!(composed.command, Some(Commands::Desktop { cmd: DesktopCommand::Open { session: Some(ref id), diff: true, json: true } }) if id == "session-exact")
+    );
+    assert!(Cli::command().find_subcommand("open").is_none());
+    let saved: loopflow::flow::Command =
+        serde_json::from_value(serde_json::json!({"command": "open", "args": []})).unwrap();
+    assert_eq!(saved.argv(), ["lf", "desktop", "open"]);
+    assert_eq!(saved.clone().current(), saved);
+
+    let repo = fixture();
+    let home = tempfile::tempdir().unwrap();
+    let output = run(repo.path(), home.path(), &["open"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    let error = String::from_utf8(output.stderr).unwrap();
+    for owner in ["desktop", "pr"] {
+        assert!(error.contains(&format!("lf {owner} open")), "{error}");
+    }
+    assert!(!error.contains("lf session open"));
+    assert!(!home.path().join(".lf").exists());
+}
+
+#[test]
+fn desktop_list_uses_the_retained_reader_without_an_inspect_alias() {
+    use loopflow::lf::DesktopCommand;
+
+    for args in [
+        vec!["lf", "desktop", "list", "--json"],
+        vec!["lf", "desktop", "li", "--json"],
+    ] {
+        let args = normalize_args(args.into_iter().map(str::to_owned).collect()).unwrap();
+        let cli = Cli::try_parse_from(args).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Desktop {
+                cmd: DesktopCommand::List { json: true }
+            })
+        ));
+    }
+    let repo = fixture();
+    let home = tempfile::tempdir().unwrap();
+    let help = success(run(
+        repo.path(),
+        home.path(),
+        &["desktop", "list", "--help"],
+    ));
+    assert_eq!(
+        help,
+        success(run(repo.path(), home.path(), &["help", "desktop", "list"]))
+    );
+    let retired = run(repo.path(), home.path(), &["desktop", "inspect", "--json"]);
+    assert_eq!(retired.status.code(), Some(2));
+    assert!(retired.stdout.is_empty());
+    assert!(!home.path().join(".lf").exists());
+}
+
+#[test]
+fn history_owns_recorded_reads_and_replay_without_changing_live_monitoring() {
+    let parse = |args: &[&str]| {
+        Cli::try_parse_from(normalize_args(args.iter().map(|s| s.to_string()).collect()).unwrap())
+            .unwrap()
+    };
+    let cli = parse(&[
+        "lf", "history", "--task", "LOO-123", "--since", "24h", "--json",
+    ]);
+    assert!(
+        cli.task.is_none(),
+        "history filters must not launch Task work"
+    );
+    let Some(Commands::History { feed, cmd: None }) = cli.command else {
+        panic!("expected the default history feed");
+    };
+    assert_eq!(feed.task.as_deref(), Some("LOO-123"));
+    assert_eq!(feed.since, "24h");
+    assert!(feed.json);
+
+    for verb in ["list", "show", "usage", "replay"] {
+        let mut args = vec!["lf", "history", verb];
+        if matches!(verb, "show" | "replay") {
+            args.push("exact-capture");
+        }
+        assert!(matches!(
+            parse(&args).command,
+            Some(Commands::History { cmd: Some(_), .. })
+        ));
+        assert!(Cli::try_parse_from(["lf", "monitor", verb]).is_err());
+    }
+    for verb in ["usage", "replay"] {
+        let mut args = vec!["lf", verb];
+        if verb == "replay" {
+            args.push("exact-capture");
+        }
+        assert!(matches!(
+            parse(&args).command,
+            Some(Commands::History { cmd: Some(_), .. })
+        ));
+    }
+    for verb in ["ps", "top", "active"] {
+        assert!(matches!(
+            parse(&["lf", verb]).command,
+            Some(Commands::Monitor { .. })
+        ));
+    }
+    assert!(Cli::try_parse_from(["lf", "monitor", "activity"]).is_err());
+    assert!(Cli::command().find_subcommand("replay").is_none());
+}
+
+#[test]
+fn history_help_is_passive_and_saved_commands_keep_their_evidence_selectors() {
+    let repo = fixture();
+    let home = tempfile::tempdir().unwrap();
+    for verb in ["list", "show", "usage", "replay"] {
+        let help = success(run(repo.path(), home.path(), &["history", verb, "--help"]));
+        assert_eq!(
+            help,
+            success(run(repo.path(), home.path(), &["help", "history", verb]))
+        );
+    }
+    let retired = run(repo.path(), home.path(), &["help", "activity"]);
+    assert_eq!(retired.status.code(), Some(2));
+    assert!(!home.path().join(".lf").exists());
+
+    for (command, args, expected) in [
+        (
+            "monitor",
+            vec!["show", "session-id", "--input", "capture-id"],
+            vec!["show", "session-id", "--input", "capture-id"],
+        ),
+        (
+            "monitor",
+            vec!["activity", "--since", "24h"],
+            vec!["--since", "24h"],
+        ),
+        (
+            "activity",
+            vec!["--task", "LOO-123"],
+            vec!["--task", "LOO-123"],
+        ),
+        ("replay", vec!["capture-id"], vec!["replay", "capture-id"]),
+        ("usage", vec!["--days", "0"], vec!["usage", "--days", "0"]),
+    ] {
+        let saved = serde_json::json!({"command": command, "args": args});
+        let restored: loopflow::flow::Command = serde_json::from_value(saved).unwrap();
+        assert_eq!(restored.command, "history");
+        assert_eq!(restored.args, expected);
     }
 }
 
@@ -640,13 +846,17 @@ fn installation_configuration_and_app_commands_have_distinct_owners() {
     );
     let help =
         String::from_utf8(success(run(repo.path(), home.path(), &["help", "--all"]))).unwrap();
-    for path in ["self install", "self doctor", "config user", "open"] {
+    for path in ["self install", "self doctor", "config user", "desktop open"] {
         assert!(help.contains(path), "{help}");
     }
     assert!(!help.contains("screenshot"));
     assert!(!help.contains("machine desktop"));
-    success(run(repo.path(), home.path(), &["open", "--help"]));
-    // Root open must not change the explicit PR operation.
+    success(run(
+        repo.path(),
+        home.path(),
+        &["desktop", "open", "--help"],
+    ));
+    // Desktop opening must not change the explicit PR operation.
     success(run(repo.path(), home.path(), &["pr", "open", "--help"]));
     assert!(!home.path().join(".lf").exists());
 }
@@ -663,7 +873,6 @@ fn retired_installation_and_capture_paths_do_not_resolve() {
         vec!["machine", "desktop"],
         vec!["machine", "screenshot"],
         vec!["self", "screenshot"],
-        vec!["desktop"],
         vec!["screenshot"],
         vec!["__screenshot-supervisor"],
     ] {
@@ -886,6 +1095,41 @@ fn native_skill_help_and_flow_capture_keep_the_selected_source_and_declarations(
 }
 
 #[test]
+fn desktop_input_uses_work_and_pane_selectors_without_public_lifetime_tokens() {
+    use loopflow::lf::commands::desktop::DesktopKey;
+    use loopflow::lf::DesktopCommand;
+    let literal = "héλ🙂 \\n \"$(literal)\"";
+    let cli = Cli::try_parse_from([
+        "lf", "--repo", "project", "--task", "LOO-427", "desktop", "text", "--pane", "pane-one",
+        "--", literal,
+    ])
+    .unwrap();
+    assert_eq!(cli.task.as_deref(), Some("LOO-427"));
+    assert!(matches!(cli.command, Some(Commands::Desktop {
+        cmd: DesktopCommand::Text { text, pane: Some(pane), .. }
+    }) if text == literal && pane == "pane-one"));
+    let cli = Cli::try_parse_from(["lf", "--task", "LOO-427", "desktop", "key", "enter"]).unwrap();
+    assert!(matches!(
+        cli.command,
+        Some(Commands::Desktop {
+            cmd: DesktopCommand::Key {
+                key: DesktopKey::Enter,
+                pane: None,
+                ..
+            }
+        })
+    ));
+    for flag in ["--target", "--surface", "--window", "--incarnation"] {
+        assert!(Cli::try_parse_from(["lf", "desktop", "text", flag, "removed", "text"]).is_err());
+    }
+    assert!(Cli::try_parse_from(["lf", "desktop", "key", "arbitrary-bytes"]).is_err());
+    assert!(
+        matches!(Cli::try_parse_from(["lf", "desktop", "move", "--pane", "one", "--destination", "two", "--axis", "vertical"]).unwrap().command,
+        Some(Commands::Desktop { cmd: DesktopCommand::Move { destination, .. } }) if destination == "two")
+    );
+}
+
+#[test]
 fn portable_help_describes_exact_kind_selection() {
     let repo = fixture();
     let home = tempfile::tempdir().unwrap();
@@ -909,4 +1153,61 @@ fn portable_help_describes_exact_kind_selection() {
     assert!(help(&["help", "team-check"]).contains("team-check — flow"));
     assert!(help(&["help", "skill", "team-check"])
         .contains("Untyped lookup selects the same-named flow"));
+}
+
+#[test]
+fn structured_help_describes_pane_creation_and_read_results_without_desktop() {
+    use loopflow::lf::navigation::describe_command;
+    let repo = fixture();
+    let home = tempfile::tempdir().unwrap();
+    let output = success(run(
+        repo.path(),
+        home.path(),
+        &["help", "desktop", "split", "--json"],
+    ));
+    let split: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(
+        split,
+        describe_command(&["desktop".into(), "split".into()], false).unwrap()
+    );
+    assert!(!home.path().join(".lf").exists());
+    let definition = &split["definition"];
+    let args = definition["arguments"].as_array().unwrap();
+    let axis = args.iter().find(|arg| arg["name"] == "axis").unwrap();
+    assert_eq!(axis["required"], true);
+    assert_eq!(
+        axis["values"],
+        serde_json::json!(["horizontal", "vertical"])
+    );
+    assert!(args
+        .iter()
+        .any(|arg| arg["name"] == "pane" && arg["required"] == false));
+    assert!(!args.iter().any(|arg| arg["name"] == "target"));
+    assert_eq!(
+        definition["result_schema"]["properties"]["pane"]["type"],
+        "string"
+    );
+    assert_eq!(
+        definition["result_schema"]["properties"]["work"]["$ref"],
+        "#/$defs/WorkWorkspaceKey"
+    );
+    let read = describe_command(&["desktop".into(), "read".into()], false).unwrap();
+    let region = read["definition"]["arguments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|arg| arg["name"] == "region")
+        .unwrap();
+    assert_eq!(
+        region["values"],
+        serde_json::json!(["screen", "scrollback", "selection"])
+    );
+    assert!(read["definition"]["result_schema"]["$defs"]["DesktopTextResult"].is_object());
+    assert!(describe_command(&["desktop".into(), "splut".into()], false).is_err());
+    let all = describe_command(&["desktop".into()], true).unwrap();
+    assert!(all["definition"]["commands"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|command| command["result_schema"].is_object()));
 }

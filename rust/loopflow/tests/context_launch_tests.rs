@@ -120,13 +120,17 @@ exit 23
                 .map(|capture| serde_json::from_str(&capture[1]).unwrap())
                 .collect()
         };
-        let invoke = |index: usize| {
+        let invoke = |moment: &str| {
+            let callback = callbacks
+                .iter()
+                .find(|callback| callback.ends_with(&format!(" {moment}")))
+                .unwrap();
             let output = Command::new("/bin/sh")
                 .env_clear()
                 .env("PATH", "/usr/bin:/bin")
                 .env("HOME", home.path())
                 .current_dir(repo.path())
-                .args(["-c", &callbacks[index]])
+                .args(["-c", callback])
                 .output()
                 .unwrap();
             assert!(
@@ -140,7 +144,7 @@ exit 23
                 .unwrap()
                 .to_string()
         };
-        let first = invoke(0);
+        let first = invoke("start");
         assert!(first.contains("CURRENT_SCRATCH"));
         assert!(first.contains("CURRENT_WAVE_MEMORY"));
         assert!(!first.contains("Saved active skill.\n"));
@@ -149,7 +153,7 @@ exit 23
         assert!(!first.contains(&large));
         repo.create_file("scratch/small.md", "FRESH_SCRATCH");
         repo.create_file(".lf/wave/fixture/MEMORY.md", "FRESH_WAVE_MEMORY");
-        let compact = invoke(1);
+        let compact = invoke("compact");
         assert!(compact.contains("FRESH_WAVE_MEMORY"));
         assert!(!compact.contains("CURRENT_WAVE_MEMORY"));
         assert!(compact.contains("FRESH_SCRATCH"));
@@ -289,4 +293,223 @@ fn terminal_rejects_only_the_oversized_first_turn_before_provider_spawn() {
         "{stderr}"
     );
     assert!(!home.path().join("provider-started").exists());
+}
+
+#[test]
+fn context_preview_matches_launched_input_without_writing_or_running_provider() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    repo.create_file(".lf/skills/probe.md", "Read this exact preview marker.");
+    repo.create_file(
+        ".lf/config.yaml",
+        "diff: false\ndiff_files: false\npaste: false\ncontext_budgets:\n  memory_tokens: 300\n",
+    );
+    let bin = home.path().join("bin");
+    fs::create_dir(&bin).unwrap();
+    let provider = bin.join("claude");
+    fs::write(
+        &provider,
+        r#"#!/bin/sh
+printf 'called\n' >> "$HOME/provider-calls"
+if [ "$1" = --version ]; then echo fixture; exit 0; fi
+if [ "$1" = --dangerously-bypass-hook-trust ] && [ "$2" = --model ]; then
+    echo "error: a value is required for '--model <MODEL>' but none was supplied" >&2
+    exit 2
+fi
+for arg in "$@"; do
+    if [ "$next" = yes ]; then cp "$arg" "$HOME/received-context"; next=no; fi
+    [ "$arg" = --append-system-prompt-file ] && next=yes
+done
+printf 'fixture finished\n' >&2
+exit 23
+"#,
+    )
+    .unwrap();
+    fs::set_permissions(&provider, fs::Permissions::from_mode(0o755)).unwrap();
+    let message = "Exact supplied direction. ".repeat(500);
+    let invoke = |preview: bool| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+        command
+            .env_clear()
+            .env("HOME", home.path())
+            .env("LF_HOME", home.path().join("machine"))
+            .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+            .env("CLAUDE_CONFIG_DIR", home.path().join(".claude"))
+            .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+            .env("NO_COLOR", "1")
+            .current_dir(repo.path())
+            .args(["-i", "-a", "claude", "skill", "probe", &message]);
+        if preview {
+            command.args(["--context", "--json"]);
+        }
+        command.output().unwrap()
+    };
+    let preview = invoke(true);
+    assert!(
+        preview.status.success(),
+        "{}",
+        String::from_utf8_lossy(&preview.stderr)
+    );
+    let input: serde_json::Value = serde_json::from_slice(&preview.stdout).unwrap();
+    assert!(input["task_prompt"].as_str().unwrap().contains(&message));
+    assert!(!repo.path().join(".lf/prompts").exists());
+    assert!(!home.path().join("provider-calls").exists());
+    assert!(!home.path().join("machine").exists());
+    assert!(!repo.path().join(".lf/tmp").exists());
+
+    let launch = invoke(false);
+    assert!(!launch.status.success());
+    assert!(String::from_utf8_lossy(&launch.stderr).contains("fixture finished"));
+    assert_eq!(
+        fs::read_to_string(home.path().join("received-context")).unwrap(),
+        input["system_prompt"].as_str().unwrap()
+    );
+}
+
+#[test]
+fn flow_context_preview_preserves_absent_store_and_captured_first_skill() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    repo.create_file(
+        ".lf/config.yaml",
+        "diff: false\ndiff_files: false\npaste: false\n",
+    );
+    repo.create_file(".lf/skills/probe.md", "First input marker.");
+    repo.create_file(".lf/skills/decide.md", "Do not assemble future input.");
+    repo.create_file(
+        ".lf/flows/inspect.yaml",
+        "- probe\n- loop: probe\n  step: decide\n",
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .env_clear()
+        .env("HOME", home.path())
+        .env("LF_HOME", home.path().join("machine"))
+        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+        .env("PATH", "/usr/bin:/bin")
+        .current_dir(repo.path())
+        .args(["flow", "inspect", "literal input", "--context", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["graph"]["steps"][1]["returns_to"], 0);
+    assert_eq!(report["inputs"][0]["node"], 0);
+    let prompt = report["inputs"][0]["input"]["task_prompt"]
+        .as_str()
+        .unwrap();
+    assert!(prompt.contains("First input marker."));
+    assert!(prompt.contains("literal input"));
+    assert!(!prompt.contains("Do not assemble future input."));
+    assert_eq!(report["inputs"][1]["state"], "unavailable");
+    assert!(!home.path().join("machine").exists());
+    assert!(!repo.path().join(".lf/tmp").exists());
+}
+
+#[test]
+fn flow_context_preview_retains_native_arguments_and_operating_guidance() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    repo.create_file(
+        ".lf/config.yaml",
+        "diff: false\ndiff_files: false\npaste: false\n",
+    );
+    repo.create_file(
+        ".claude/skills/audit/SKILL.md",
+        "---\nname: audit\ndescription: Native audit\n---\nAudit these exact arguments.",
+    );
+    repo.create_file(".lf/flows/inspect.yaml", "- audit\n");
+    let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .env_clear()
+        .env("HOME", home.path())
+        .env("LF_HOME", home.path().join("machine"))
+        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+        .env("PATH", "/usr/bin:/bin")
+        .current_dir(repo.path())
+        .args([
+            "-a",
+            "claude",
+            "flow",
+            "inspect",
+            "  literal input  ",
+            "--context",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let input = &report["inputs"][0]["input"];
+    assert_eq!(input["skill_invocation"]["skill"]["name"], "audit");
+    assert_eq!(input["skill_invocation"]["arguments"], "  literal input  ");
+    assert!(input["system_prompt"]
+        .as_str()
+        .unwrap()
+        .contains("Operating Through Loopflow"));
+    assert!(!home.path().join("machine").exists());
+    assert!(!repo.path().join(".lf/tmp").exists());
+}
+
+#[test]
+fn operator_context_preview_uses_resolved_skills_without_preparing_checkouts() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    repo.create_file(
+        ".lf/config.yaml",
+        "diff: false\ndiff_files: false\npaste: false\n",
+    );
+    repo.create_file(".lf/flows/inspect.yaml", "- repo/operate\n");
+    let preview = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_lf"))
+            .env_clear()
+            .env("HOME", home.path())
+            .env("LF_HOME", home.path().join("machine"))
+            .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+            .env("PATH", "/usr/bin:/bin")
+            .current_dir(repo.path())
+            .args(args)
+            .args(["--context", "--json"])
+            .output()
+            .unwrap()
+    };
+    for args in [
+        vec!["operate"],
+        vec!["repo/operate"],
+        vec!["skill", "repo-operate"],
+        vec!["flow", "inspect"],
+    ] {
+        let output = preview(&args);
+        assert!(!output.status.success(), "{args:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr)
+                .contains("context unavailable before the operator's scope checkout is prepared"),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    // A literal hierarchical override is not the builtin operator. Preview must
+    // follow the resolved skill, rather than imposing policy on its spelling.
+    repo.create_file(
+        ".lf/skills/repo/operate.md",
+        "Local skill, current checkout.",
+    );
+    for args in [vec!["repo/operate"], vec!["flow", "inspect"]] {
+        let output = preview(&args);
+        assert!(
+            output.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(String::from_utf8_lossy(&output.stdout).contains("Local skill, current checkout."));
+    }
+    assert!(!home.path().join("machine").exists());
+    assert!(!repo.path().join(".lf/tmp").exists());
+    assert!(!repo.path().join(".git/worktrees").exists());
 }

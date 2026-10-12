@@ -10,7 +10,7 @@ scratch cleanup. Scratch deletion requires `clear_scratch_on_land: true` in
 repository configuration; never enable it merely to make delivery pass.
 Keep unrelated active contributions out of this change. Preserve accepted later
 checks and their exact unverified outcomes in durable PR copy before cleanup;
-the Task conversation must be able to read them after merge without scratch.
+They must remain readable after merge without scratch.
 
 ```bash
 lf land                 # prepare, request exact-head auto-merge, return
@@ -32,12 +32,11 @@ releases the landing lock. Timeout leaves intent intact and returns held;
 interruption returns stopped. Neither reports merge.
 A successful handoff proves neither merge nor Task completion.
 
-After verified merge, complete the Task when its accepted outcome is delivered.
-File independently accepted later work as ordinary Tasks and link them with
-`lf task comment`; a saved Task survives a failed linking comment, so retry only
-that comment. No empty disposition or separate finishing Flow is required.
-A Task has zero or one PR; further implementation belongs to another Task,
-stacked on this one when dependent. Taskless delivery needs no synthetic Task.
+Verified merge leaves an open Task available for optional follow-up work. Register
+new work through ordinary Task creation when useful, then `lf task complete` when
+the outcome is satisfied. No follow-up disposition is required. `ship` runs gate
+and waited landing; the Workflow's end requests completion. Additional PR work
+needs another Task, stacked when dependent; a Task never rotates to a second PR.
 
 If sync or CI fails, use the named recovery path in this checkout and retry.
 Rerunning land retries a retained blocker without inventing an empty commit.

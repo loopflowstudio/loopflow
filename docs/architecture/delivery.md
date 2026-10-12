@@ -28,7 +28,7 @@ Task Work ----> managed worktree ----> commits
                                           |
                                  checks / repair / merge
                                           |
-                             file follow-ups or record none
+                             optional ordinary Task creation
                                           |
                                     complete Task
 ```
@@ -96,6 +96,15 @@ lf ci watch                            # repair failed landings while it runs
 `publish` creates or refreshes the Task's sole optional PR without integration.
 The publishing intent is durable before the remote call, so retries resolve the
 same PR. Reopening a Task or closed PR never grants a second PR slot.
+
+`open` and `publish` resolve the comparison base from HEAD's current
+merge-base with the selected upstream. A reset, rebase or rewritten main cannot
+make an old base veto publication. All branch commits remain intact, including
+inherited dependencies; the PR shows GitHub's actual range. Publication does not
+trim commits based on a saved Task boundary. Unrelated histories and empty ranges
+still cannot form a PR. Root Tasks save the resolved base; stacked Tasks retain
+their integration fork until explicit sync so squash-parent comparison preserves
+child edits.
 
 `arm` and `land` merge current main, clear merge-time scratch state, verify once,
 and push the exact head. Branch commits and merge resolutions retain their identities.
@@ -286,7 +295,7 @@ and event, while legacy status contexts keep their own identities.
 A blocked landing stays observable: later checks still settle its merge, and
 checks that stop failing clear the block. Rerun `lf arm` or `lf land`
 after resolving a blocker to resume under a fresh generation, including when
-the SHA has not changed. Use `lf mon show SESSION --final` to inspect a repair's
+the SHA has not changed. Use `lf history show SESSION --final` to inspect a repair's
 conclusion.
 
 Repairs return `published` or `blocked` with a summary in their final answer.

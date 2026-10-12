@@ -32,8 +32,8 @@ fn command(repo: &Path, home: &Path, args: &[&str]) -> Command {
 /// worktree. All block in the foreground and reach the same checks.
 const LAUNCHES: [&[&str]; 3] = [
     &["-b", "task", "run", "INF-123", "proof"],
-    &["-b", "--task", "INF-123", "run", "proof"],
-    &["-b", "run", "proof"],
+    &["-b", "--task", "INF-123", "flow", "proof"],
+    &["-b", "flow", "proof"],
 ];
 
 #[test]
@@ -251,7 +251,7 @@ for line in sys.stdin:
     }
     unbound.stage_all();
     unbound.commit("Define default agent fixtures");
-    for owner in ["skill", "run"] {
+    for owner in ["skill", "flow"] {
         let output = command(
             unbound.path(),
             home.path(),
@@ -419,7 +419,7 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
         let error = String::from_utf8_lossy(&output.stderr);
         assert!(error.contains("which is not a workflow"), "{error}");
         assert!(
-            error.contains("lf project workflow set <project>"),
+            error.contains("lf wave workflow set <name> <wave>"),
             "{error}"
         );
         assert_eq!(support::recorded_flows(home.path()).len(), 3);
@@ -480,7 +480,7 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
 #[test]
 fn failed_placement_is_observed_without_starting_a_task() {
     let task = WorkflowTask::new();
-    let output = task.run(&["--task", "missing-task", "run", "proof"]);
+    let output = task.run(&["--task", "missing-task", "flow", "proof"]);
     assert!(!output.status.success());
     let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
     let (cwd, outcome): (String, String) = db
@@ -594,10 +594,10 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
         .unwrap();
         let (cwd, args): (&Path, &[&str]) = match launch {
             "task" => (&caller, &["-b", "task", "run", "INF-123", "proof"]),
-            "direct" => (&caller, &["-b", "--task", "INF-123", "run", "proof"]),
-            "wt" => (&caller, &["-b", "--wt", "launch-proof", "run", "proof"]),
-            "alias" => (&alias, &["-b", "run", "proof"]),
-            _ => (task.repo.path(), &["-b", "run", "proof"]),
+            "direct" => (&caller, &["-b", "--task", "INF-123", "flow", "proof"]),
+            "wt" => (&caller, &["-b", "--wt", "launch-proof", "flow", "proof"]),
+            "alias" => (&alias, &["-b", "flow", "proof"]),
+            _ => (task.repo.path(), &["-b", "flow", "proof"]),
         };
         let log_path = task.home.path().join("launch.log");
         let log = fs::File::create(&log_path).unwrap();
@@ -959,7 +959,15 @@ fn checkout_leaves_workflow_selection_to_the_first_run() {
 fn a_task_takes_up_its_projects_workflow_and_keeps_one_it_named() {
     // Nothing named, no Workflow yet: the Project's.
     let task = WorkflowTask::new();
-    task.ok(&["-b", "task", "run", "INF-123"]);
+    let preview = task.run(&["task", "run", "--explain", "--json"]);
+    assert!(
+        preview.status.success(),
+        "{}",
+        String::from_utf8_lossy(&preview.stderr)
+    );
+    let preview: serde_json::Value = serde_json::from_slice(&preview.stdout).unwrap();
+    assert_eq!(preview["action"]["to"], "review");
+    task.ok(&["-b", "task", "run"]);
     let workflow = task.workflow();
     assert_eq!(workflow["name"], "feature");
     assert_eq!(workflow["position"], at("review"));
@@ -1149,16 +1157,38 @@ fn a_stopped_edge_is_chosen_again_and_the_task_can_go_back() {
 }
 
 #[test]
+fn task_edges_launch_flows_named_after_collection_commands() {
+    let task = WorkflowTask::new();
+    fs::write(
+        task.repo.path().join(".lf/flows/list.yaml"),
+        "- cmd: task sync --plan\n",
+    )
+    .unwrap();
+    fs::write(
+        task.repo.path().join(".lf/workflows/reserved.yaml"),
+        "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, flow: list}\n",
+    )
+    .unwrap();
+    task.select_workflow("reserved");
+    task.ok(&["-b", "task", "run", "INF-123", "reserved"]);
+    assert_eq!(
+        task.workflow()["position"],
+        serde_json::json!({"kind":"node","node":"review"})
+    );
+    assert_eq!(support::recorded_flows(task.home.path()).len(), 1);
+}
+
+#[test]
 fn a_plain_flow_process_in_the_worktree_does_not_move_the_task() {
     let task = WorkflowTask::new();
     task.ok(&["-b", "task", "run", "INF-123", "rounds"]);
     let before = task.workflow();
-    task.ok(&["-b", "run", "land-proof"]);
-    task.ok(&["-b", "--task", "INF-123", "run", "land-proof"]);
+    task.ok(&["-b", "flow", "land-proof"]);
+    task.ok(&["-b", "--task", "INF-123", "flow", "land-proof"]);
     assert_eq!(support::recorded_flows(task.home.path()).len(), 3);
     assert_eq!(task.workflow(), before);
     // A workflow is traversed, never run as a Flow.
-    let refused = task.run(&["-b", "run", "rounds"]);
+    let refused = task.run(&["-b", "flow", "rounds"]);
     assert!(!refused.status.success());
     let error = String::from_utf8_lossy(&refused.stderr).to_string();
     assert!(error.contains("lf task run <issue> rounds"), "{error}");
@@ -1179,7 +1209,7 @@ fn a_task_takes_up_the_workflow_when_an_autonomous_flow_has_the_same_name() {
         captured["position"],
         serde_json::json!({"kind":"node","node":"review"})
     );
-    task.ok(&["-b", "run", "feature"]);
+    task.ok(&["-b", "flow", "feature"]);
     assert_eq!(task.workflow(), captured);
     assert_eq!(support::recorded_flows(task.home.path()).len(), 2);
 }
@@ -1558,22 +1588,24 @@ fn completion_preserves_retained_session_input_and_unknown_process_history() {
 }
 
 #[test]
-fn merged_delivery_completes_without_a_filing_disposition() {
+fn merged_delivery_completes_without_disposition_and_is_idempotent() {
     let task = WorkflowTask::new();
     task.publish(true);
     task.ok(&["-b", "task", "run", "INF-123", "findings"]);
+    assert_ne!(task.state(), "done");
+    assert!(task.repo.path().exists());
     task.finish_after_provider_observation(&["task", "complete", "INF-123"]);
     let workflow = task.workflow();
-    for _ in 0..2 {
-        task.ok(&["task", "complete", "INF-123"]);
-    }
+    task.ok(&["task", "complete", "INF-123"]);
     assert_eq!(task.workflow(), workflow);
-    assert_eq!(task.state(), "done");
-    let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
-    let dispositions: i64 = db.query_row(
-        "SELECT count(*) FROM task_events WHERE json_extract(kind_json,'$.kind')='follow_through_disposition'",
-        [], |row| row.get(0)).unwrap();
-    assert_eq!(dispositions, 0);
+    let status = task.status();
+    assert_eq!(status["status"], "done");
+    assert_eq!(status["pr"]["publication"]["github"]["number"], 42);
+    assert!(status.get("follow_through").is_none());
+    assert!(!task
+        .run(&["task", "follow-up", "INF-123", "--none", "obsolete"])
+        .status
+        .success());
 }
 
 #[test]
@@ -1651,9 +1683,10 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
 "#,
     );
     task.ok(&[
-        "project",
+        "wave",
         "workflow",
         "set",
+        "--project",
         task.registered.task.project_id.as_str(),
         "live-workflow",
         "--file",

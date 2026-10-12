@@ -7,6 +7,261 @@ import Testing
 /// the Mac app.
 @Suite("DTO Fixtures")
 struct DTOFixtureTests {
+    @Test func taskFilesFramesKeepInvalidationSeparateFromHeartbeat() throws {
+        let data = try loadFixtureData("task_files_frames.json")
+        let frames = try JSONDecoder().decode([TaskFilesFrame].self, from: data)
+        #expect(frames.map(\.changed) == [true, false])
+        #expect(frames[0].request == frames[1].request)
+        #expect(frames[0].checkout == "/repo/task")
+        #expect(try JSONDecoder().decode([TaskFilesFrame].self, from: JSONEncoder().encode(frames)) == frames)
+    }
+
+    @Test func taskLocationsRetainFreshnessAndUnavailableEvidence() throws {
+        let data = try loadFixtureData("task_locations.json")
+        let readings = try JSONDecoder().decode([TaskLocationObservation].self, from: data)
+        #expect(readings[0].location == .recorded(taskID: readings[0].taskID, checkout: "/repo/task"))
+        #expect(readings[1].location == .recorded(taskID: readings[1].taskID, checkout: nil))
+        #expect(readings[2].location == .unrecorded)
+        #expect(readings[3].location == .unavailable(reason: "peer unreachable"))
+        #expect(try JSONDecoder().decode([TaskLocationObservation].self, from: JSONEncoder().encode(readings)) == readings)
+    }
+
+    @Test func repositoryIdentityPreservesExplicitLocalLocators() throws {
+        let data = try loadFixtureData("repository_identity.json")
+        let identity = try JSONDecoder().decode(RepositoryIdentity.self, from: data)
+        #expect(identity.locators.count == 2)
+        #expect(identity.id == identity.locators[1])
+        #expect(try JSONDecoder().decode(RepositoryIdentity.self, from: JSONEncoder().encode(identity)) == identity)
+        var wire = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        wire.removeValue(forKey: "locators")
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(RepositoryIdentity.self, from: JSONSerialization.data(withJSONObject: wire))
+        }
+    }
+
+    @Test func sessionConnectExplanationsPreserveIntentAndUnavailableEvidence() throws {
+        let data = try loadFixtureData("session_connect_explanations.json")
+        let reports = try JSONDecoder().decode([SessionConnectExplanation].self, from: data)
+        #expect(reports[0].action?.intent == .start)
+        #expect(reports[0].action?.mode == .refuse)
+        #expect(reports[1].action?.mode == .replace)
+        #expect(reports[1].action?.prepareOnly == true)
+        #expect(reports[2].action?.intent == .connectOrResume)
+        #expect(reports[2].action?.mode == .try)
+        #expect(!reports[2].unavailable.isEmpty)
+        #expect(reports[3].state == nil)
+        #expect(reports[3].action == nil)
+        #expect(reports[3].actions.isEmpty)
+        #expect(try JSONDecoder().decode([SessionConnectExplanation].self, from: JSONEncoder().encode(reports)) == reports)
+        var wire = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
+        wire[0].removeValue(forKey: "actions")
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode([SessionConnectExplanation].self, from: JSONSerialization.data(withJSONObject: wire))
+        }
+    }
+
+    @Test func desktopOpenExplanationsPreserveProposalsAndImpediments() throws {
+        let data = try loadFixtureData("desktop_open_explanations.json")
+        let reports = try JSONDecoder().decode([DesktopOpenExplanation].self, from: data)
+        #expect(reports[0].url?.contains("diff=true") == true)
+        #expect(reports[1].url == nil)
+        #expect(!reports[1].impediments.isEmpty)
+        #expect(try JSONDecoder().decode([DesktopOpenExplanation].self, from: JSONEncoder().encode(reports)) == reports)
+    }
+
+    @Test func taskPlanningExplanationsPreserveIntentAndEffects() throws {
+        let data = try loadFixtureData("task_planning_explanations.json")
+        let reports = try JSONDecoder().decode([TaskPlanningExplanation].self, from: data)
+        #expect(reports[0].action == .create(title: "Keep drafts", description: "Retain input", project: "project-fixture"))
+        #expect(reports[1].action == .edit(revision: 3, fields: ["title", "assignee"]))
+        #expect(reports[2].action == .comment(message: "Keep the draft", steer: true, refresh: false))
+        #expect(reports[3].action == .comment(message: nil, steer: false, refresh: true))
+        #expect(reports[4].action == nil)
+        #expect(!reports[4].impediments.isEmpty)
+        #expect(reports[5].action == .refile(wave: "destination-wave", project: "destination-project", previousProject: "source-project"))
+        #expect(reports[6].action == .save(path: "scratch/note.md", revision: "observed-file-revision", draftBytes: 42))
+        #expect(try JSONDecoder().decode([TaskPlanningExplanation].self, from: JSONEncoder().encode(reports)) == reports)
+        var wire = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
+        wire[0].removeValue(forKey: "effects")
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode([TaskPlanningExplanation].self, from: JSONSerialization.data(withJSONObject: wire))
+        }
+    }
+
+    @Test func taskCheckoutExplanationsKeepProposalsSeparateFromAdmission() throws {
+        let data = try loadFixtureData("task_checkout_explanations.json")
+        let reports = try JSONDecoder().decode([TaskCheckoutExplanation].self, from: data)
+        #expect(reports[0].action?.behavior == .prepare)
+        #expect(reports[1].action?.behavior == .reuse)
+        #expect(reports[2].action?.behavior == .restore)
+        #expect(reports[3].action == nil)
+        #expect(!reports[0].unavailable.isEmpty)
+        #expect(try JSONDecoder().decode([TaskCheckoutExplanation].self, from: JSONEncoder().encode(reports)) == reports)
+    }
+
+    @Test func taskMoveExplanationsPreservePositionsAndCompletionUncertainty() throws {
+        let data = try loadFixtureData("task_move_explanations.json")
+        let reports = try JSONDecoder().decode([TaskMoveExplanation].self, from: data)
+        #expect(reports[0].action?.from == .edge(index: 1, lfProcessId: "process-retained", running: true))
+        #expect(reports[0].action?.to == "start")
+        #expect(reports[0].action?.reason == "Restart Workflow")
+        #expect(reports[1].action?.workflow == nil)
+        #expect(reports[1].action?.from == nil)
+        #expect(reports[1].action?.to == "end")
+        #expect(!reports[1].unavailable.isEmpty)
+        #expect(reports[2].action == nil)
+        #expect(try JSONDecoder().decode([TaskMoveExplanation].self, from: JSONEncoder().encode(reports)) == reports)
+        var wire = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
+        var action = try #require(wire[0]["action"] as? [String: Any])
+        action.removeValue(forKey: "to")
+        wire[0]["action"] = action
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode([TaskMoveExplanation].self, from: JSONSerialization.data(withJSONObject: wire))
+        }
+    }
+
+    @Test func taskRunExplanationsPreserveActionsAndMissingEvidence() throws {
+        let data = try loadFixtureData("task_run_explanations.json")
+        let reports = try JSONDecoder().decode([TaskRunExplanation].self, from: data)
+        #expect(reports[0].action == .edge(workflow: "feature", takeUp: true, from: "start", to: "design", flow: "task-design"))
+        #expect(reports[1].action == .edge(workflow: "feature", takeUp: false, from: "design", to: "end", flow: nil))
+        #expect(reports[2].action == .flow("proof"))
+        #expect(reports[3].action == nil)
+        #expect(try JSONDecoder().decode([TaskRunExplanation].self, from: JSONEncoder().encode(reports)) == reports)
+    }
+
+    @Test func contextExplanationPreservesAvailabilityAndProvenance() throws {
+        let data = try loadFixtureData("context_explanation.json")
+        let report = try JSONDecoder().decode(ContextExplanation.self, from: data)
+        #expect(report.checkout == .unbound)
+        #expect(report.executionMachine == .unavailable(reason: "No local execution location; peer execution has not been observed"))
+        #expect(report.planningObservedAt == nil)
+        #expect(try JSONDecoder().decode(ContextExplanation.self, from: JSONEncoder().encode(report)) == report)
+        var wire = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        wire.removeValue(forKey: "task")
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(ContextExplanation.self, from: JSONSerialization.data(withJSONObject: wire))
+        }
+    }
+
+    @Test func desktopOpeningDoesNotConfuseLaunchWithUsability() throws {
+        let data = try loadFixtureData("desktop_openings.json")
+        let readings = try JSONDecoder().decode([DesktopOpening].self, from: data)
+        #expect(readings.map(\.status) == [.opening, .usable, .failed])
+        #expect(readings[0].reason == nil)
+        #expect(readings[2].reason != nil)
+        #expect(try JSONDecoder().decode([DesktopOpening].self, from: JSONEncoder().encode(readings)) == readings)
+    }
+
+    @Test func desktopTextDistinguishesEmptyAndUnavailable() throws {
+        let data = try loadFixtureData("desktop_text_readings.json")
+        let readings = try JSONDecoder().decode([DesktopTextReading].self, from: data)
+        #expect(readings[0].result == .available(text: "", truncated: false))
+        #expect(readings[1].result == .available(text: "héλ🙂", truncated: true))
+        #expect(readings[2].result == .unavailable(reason: .missingSurface))
+        let original = try #require(JSONSerialization.jsonObject(with: data) as? NSArray)
+        let encoded = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(readings)) as? NSArray)
+        #expect(original == encoded)
+        for reading in readings {
+            let wire = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(reading)) as? [String: Any])
+            for owner in ["request", "result"] {
+                let payload = try #require(wire[owner] as? [String: Any])
+                for field in payload.keys {
+                    var missing = wire, value = payload
+                    value.removeValue(forKey: field)
+                    missing[owner] = value
+                    #expect(throws: DecodingError.self) {
+                        try JSONDecoder().decode(DesktopTextReading.self, from: JSONSerialization.data(withJSONObject: missing))
+                    }
+                }
+            }
+        }
+    }
+
+    @Test func paneCommandRequiresEveryTargetComponent() throws {
+        let data = try loadFixtureData("desktop_pane_commands.json")
+        let requests = try JSONDecoder().decode([DesktopPaneCommand].self, from: data)
+        let original = try #require(JSONSerialization.jsonObject(with: data) as? NSArray)
+        let encoded = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(requests)) as? NSArray)
+        #expect(original == encoded)
+        for request in requests {
+            let wire = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any])
+            let action = try #require(wire["action"] as? [String: Any])
+            for field in action.keys {
+                var missing = wire, payload = action
+                payload.removeValue(forKey: field)
+                missing["action"] = payload
+                #expect(throws: DecodingError.self) {
+                    try JSONDecoder().decode(DesktopPaneCommand.self, from: JSONSerialization.data(withJSONObject: missing))
+                }
+            }
+        }
+        let request = try #require(requests.first)
+        #expect(request.action == .hide)
+        #expect(request.target.incarnation == "occurrence-session-pane")
+        #expect(try JSONDecoder().decode(DesktopPaneCommand.self, from: JSONEncoder().encode(request)) == request)
+        let wire = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any])
+        for field in ["repository", "window", "work", "pane", "incarnation"] {
+            var missing = wire
+            var target = try #require(missing["target"] as? [String: Any])
+            target.removeValue(forKey: field)
+            missing["target"] = target
+            #expect(throws: DecodingError.self) {
+                try JSONDecoder().decode(DesktopPaneCommand.self, from: JSONSerialization.data(withJSONObject: missing))
+            }
+        }
+    }
+
+    @Test func desktopPaneReceiptIdentifiesTheAffectedPane() throws {
+        let data = try loadFixtureData("desktop_pane_receipt.json")
+        let receipt = try JSONDecoder().decode(DesktopPaneReceipt.self, from: data)
+        #expect(receipt.pane == "created-pane")
+        #expect(receipt.work.kind == .task)
+        #expect(try JSONDecoder().decode(DesktopPaneReceipt.self, from: JSONEncoder().encode(receipt)) == receipt)
+    }
+
+    @Test func desktopInspectionRetainsUnavailableWorkAndExactPanes() throws {
+        let data = try loadFixtureData("desktop_inspection.json")
+        let report = try JSONDecoder().decode(DesktopInspection.self, from: data)
+        #expect(report.openings.first?.status == .failed)
+        #expect(report.openings.first?.reason == "Repository path is unavailable")
+        var missingOpenings = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        missingOpenings.removeValue(forKey: "openings")
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(DesktopInspection.self, from: JSONSerialization.data(withJSONObject: missingOpenings))
+        }
+        let window = try #require(report.windows.first)
+        #expect(window.reading == "unavailable")
+        #expect(window.task?.actions == nil)
+        #expect(window.task?.roadmapGeneratedAt == "2026-10-08T19:00:00Z")
+        #expect(window.task?.conditionObservedAt == "2026-10-08T18:59:58Z")
+        #expect(window.session?.id == "session-one")
+        #expect(window.session?.actions?.map(\.kind) == [.open, .moveHere])
+        #expect(window.session?.actions?.first?.unavailableReason != nil)
+        #expect(window.session?.observedAt == nil)
+        #expect(report.windows[1].task?.actions?.recommended == .resume)
+        #expect(report.windows[1].task?.runControl?.unavailable == "Task checkout is on another Machine")
+        #expect(window.workspaces.first?.hiddenPanes == ["files-pane"])
+        #expect(window.workspaces.first?.layout.children.first?.subject == "session-one")
+        #expect(window.workspaces.first?.layout.children.first?.surface == "native-surface-incarnation")
+        #expect(window.workspaces.first?.layout.children.last?.surface == nil)
+        #expect(try JSONDecoder().decode(DesktopInspection.self, from: JSONEncoder().encode(report)) == report)
+        var wire = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var windows = try #require(wire["windows"] as? [[String: Any]])
+        windows[0].removeValue(forKey: "reading")
+        wire["windows"] = windows
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(DesktopInspection.self, from: JSONSerialization.data(withJSONObject: wire))
+        }
+    }
+
+    @Test("Direction preserves named and historical authors")
+    func workAuthors() throws {
+        let authors = try JSONDecoder().decode([WorkAuthor].self, from: loadFixtureData("work_authors.json"))
+        #expect(authors == [.user, .named(id: "Fixture author"), .captured(id: 3), .imported(id: "historical")])
+        #expect(try JSONDecoder().decode([WorkAuthor].self, from: JSONEncoder().encode(authors)) == authors)
+    }
+
     @Test("Activity retains unknown record identity without a PID")
     func activityFixture() throws {
         let snapshot = try JSONDecoder().decode(ActivitySnapshot.self, from: loadFixtureData("activity_snapshot.json"))

@@ -18,7 +18,7 @@ Wave. Read its objective and memory, current Project's plan, Task outcomes and
 unresolved concerns. The Project is part of the Wave, not another operator.
 
 Start with `lf wave status <exact-wave> --json` and
-`lf roadmap --wave <exact-wave> --json`. Read relevant Task detail with
+`lf wave show <exact-wave> --json`. Read relevant Task detail with
 `lf task status <issue> --json`. Follow summaries to the source only where a
 claim, conflict or missing fact matters; do not ingest every transcript.
 
@@ -73,12 +73,11 @@ and due follow-ups have been checked for selection or authorized execution.
   `lf task complete <issue>`, never `task run` or gate. Completion, Workflow
   position and Process liveness are independent. A newer reopening supersedes
   old intent; end alone cannot re-complete it.
-- **Finish merged delivery.** Inspect associated Flows and unfinished Processes;
-  leave authorized live work to finish. Preserve independently accepted later work
-  as ordinary Tasks and linking comments. Complete the source when its outcome is
-  delivered, then reread status. A failed linking comment retries only the comment.
-  Do not replay gate, re-arm a merged PR or resume a stopped Flow to finish it.
-  Missing scope judgment and uncertain provider writes remain visible.
+- **Finish merged delivery.** Merge alone does not complete a Task. Inspect
+  associated Flows and unfinished Processes; leave a live ship Flow to finish.
+  Otherwise, when the accepted outcome is satisfied, run `lf task complete <issue>`
+  and reread status. Optional new work uses ordinary Task creation; no filing or
+  disposition is required. Do not replay gate or re-arm a merged PR.
 - **Reviews stay in the Task conversation.** Surface the Session from
   `lf session list --waiting --json`. Discuss feedback and preserve agreed
   direction there; closing a Session supplies no navigation authority.
@@ -89,7 +88,7 @@ arm a merge, cancel or abandon Tasks, or change direction.
 
 ## Return to due follow-ups
 
-Read follow-up links and due dates in the shared plan, including unstarted Tasks.
+Read due dates and briefs in the shared plan, including unstarted Tasks.
 List due or overdue follow-ups separately from unrelated backlog. Use the date
 and any timezone, release or environment prerequisite in the brief; a due date
 is a day, not an exact-time alarm. Missing date or provider evidence stays unknown.

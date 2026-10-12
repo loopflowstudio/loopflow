@@ -5,7 +5,7 @@
 //
 // Reads run `lf` subprocesses and decode shared wire types into app models.
 // The injected runner on macOS launches the `lf` shipped inside the app. There is no
-// HTTP fallback for reads; remote reads need to become proxied `lf` queries.
+// HTTP fallback; remote reads use the same CLI with explicit Machine selectors.
 
 import Foundation
 
@@ -38,15 +38,18 @@ public struct DiscoveryEntry: Codable, Equatable, Sendable, Identifiable {
 }
 
 public struct RegistryQuery: Sendable {
-    private let run: RegistryRunner
-    private let runWithInput: @Sendable ([String], String?, String) async throws -> String
+    public private(set) var remoteMachine: String?
+    private var run: RegistryRunner
+    private var runWithInput: @Sendable ([String], String?, String) async throws -> String
     private let start: RegistryStarter?
+    private let observeFiles: (@Sendable ([String], String?) async throws -> TaskFilesObservation)?
     private let observeWork: (@Sendable () async throws -> WorkObservation)?
 
     public init(
         runWithInput: @escaping @Sendable ([String], String?, String) async throws -> String = { _, _, _ in
             throw RegistryQueryError("Draft comparison is unavailable on this transport")
         },
+        watchFiles: (@Sendable ([String], String?) async throws -> TaskFilesObservation)? = nil,
         watchWork: (@Sendable () async throws -> WorkObservation)? = nil,
         start: RegistryStarter? = nil,
         run: @escaping RegistryRunner
@@ -54,17 +57,89 @@ public struct RegistryQuery: Sendable {
         self.runWithInput = runWithInput
         self.run = run
         self.start = start
+        self.observeFiles = watchFiles
         self.observeWork = watchWork
+    }
+
+    /// Keep execution selectors off local filesystem paths. The existing CLI owns
+    /// connection identity, repository lookup and every operation on that Machine.
+    public func onMachine(_ machine: String, repository: String) -> RegistryQuery {
+        let prefix = ["--machine", machine, "--repository", repository]
+        var query = RegistryQuery(runWithInput: { [runWithInput] args, _, input in
+            try await runWithInput(prefix + args, nil, input)
+        }, watchFiles: { [observeFiles] args, _ in
+            guard let observeFiles else { throw RegistryQueryError("Live file observation is unavailable on this transport") }
+            return try await observeFiles(prefix + args, nil)
+        }, start: { [run, start] args, _ in
+            if let start { try await start(prefix + args, nil) }
+            else { _ = try await run(prefix + args, nil) }
+        }) { [run] args, _ in
+            try await run(prefix + args, nil)
+        }
+        query.remoteMachine = machine
+        return query
+    }
+
+    public func watchTaskFiles(issue: String, checkout: String, request: String) async throws -> TaskFilesObservation {
+        guard let observeFiles else { throw RegistryQueryError("Live file observation is unavailable on this transport") }
+        return try await observeFiles(["task", "watch-files", issue, "--checkout", checkout, "--request", request], nil)
+    }
+
+    /// Reject delayed reads after a recorded owner changes. Neither observation
+    /// prepares a checkout or falls back to a path on the displaying Machine.
+    public func pinTaskLocation(to location: TaskLocationObservation) -> RegistryQuery {
+        let original = self
+        let validate: @Sendable () async throws -> Void = {
+            let current = try await original.taskLocation(task: location.taskID,
+                repository: location.repositoryID, machine: location.machineID)
+            guard current.location == location.location else {
+                throw RegistryQueryError("The Task checkout changed; reopen the Task. Drafts were retained.")
+            }
+        }
+        var query = self
+        query.run = { [run] args, cwd in
+            try await validate()
+            let output = try await run(args, cwd)
+            try await validate()
+            return output
+        }
+        query.runWithInput = { [runWithInput] args, cwd, input in
+            try await validate()
+            let output = try await runWithInput(args, cwd, input)
+            try await validate()
+            return output
+        }
+        return query
+    }
+
+    /// A request-bound observation, not admission or checkout preparation.
+    public func taskLocation(task: String, repository: String, machine: String) async throws -> TaskLocationObservation {
+        let request = UUID().uuidString
+        let readings = try Self.decode([TaskLocationObservation].self, from: await run(
+            ["task", "location", task, "--request", request, "--json"], nil))
+        guard readings.count == 1, let reading = readings.first,
+              reading.request == request, reading.repositoryID == repository,
+              reading.taskID == task, reading.machineID == machine else {
+            throw RegistryQueryError("Stale or mismatched execution-location observation; nothing was opened.")
+        }
+        return reading
     }
 
     /// A copy that also reports each successful read's wire text, so a caller
     /// can retain exactly what it decoded.
     public func recording(_ record: @escaping @Sendable (_ stdout: String) -> Void) -> RegistryQuery {
-        RegistryQuery(runWithInput: runWithInput, watchWork: observeWork, start: start) { [run] args, cwd in
+        var query = self
+        query.run = { [run] args, cwd in
             let stdout = try await run(args, cwd)
             record(stdout)
             return stdout
         }
+        return query
+    }
+
+    /// Explicit workspace opening binds a plain repository to its local plan.
+    public func repositoryIdentity(cwd: String) async throws -> RepositoryIdentity {
+        try Self.decode(RepositoryIdentity.self, from: await run(["repo", "identity", "--json"], cwd))
     }
 
     /// Current Waves across the machine. The shared
@@ -104,9 +179,9 @@ public struct RegistryQuery: Sendable {
     }
 
     public func roadmap(wave: String? = nil) async throws -> RoadmapSnapshot {
-        var args = ["roadmap"]
+        var args = ["wave", "show"]
         if let wave {
-            args.append(contentsOf: ["--wave", wave])
+            args.append(wave)
         } else {
             args.append("--all")
         }
@@ -116,7 +191,7 @@ public struct RegistryQuery: Sendable {
     }
 
     public func taskDestination(issue: String, repo: String?) async throws -> RoadmapSnapshot {
-        var args = ["roadmap", "--task", issue, "--json"]
+        var args = ["wave", "show", "--task", issue, "--json"]
         if repo == nil { args.append("--all") }
         return try Self.decode(RoadmapSnapshot.self, from: await run(args, repo))
     }
@@ -156,7 +231,7 @@ public struct RegistryQuery: Sendable {
         project: String? = nil,
         task: String? = nil
     ) async throws -> WorkActivitySnapshot {
-        var args = ["activity", "--since", since, "--limit", String(limit)]
+        var args = ["history", "--since", since, "--limit", String(limit)]
         if let wave { args.append(contentsOf: ["--wave", wave]) }
         if let project { args.append(contentsOf: ["--project", project]) }
         if let task { args.append(contentsOf: ["--task", task]) }
@@ -186,6 +261,25 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(TaskChangesSnapshot.self, from: stdout)
     }
 
+    /// Read a Task's captured Flows through its content-owned transport.
+    public func taskFlowProcesses(task: String, cwd: String?) async throws -> [FlowProcessDetail] {
+        struct Page: Decodable { let entries: [FlowProcessInventoryEntry]; let next: String? }
+        var after: String?
+        var result: [FlowProcessDetail] = []
+        repeat {
+            var args = ["flow", "list", "--processes", "--for-task", task, "--json"]
+            if let after { args += ["--after", after] }
+            let page = try Self.decode(Page.self, from: await run(args, cwd))
+            for entry in page.entries {
+                let detail = try Self.decode(FlowProcessDetail.self,
+                    from: await run(["flow", "show", entry.id, "--processes", "--json"], cwd))
+                result.append(detail)
+            }
+            after = page.next
+        } while after != nil
+        return result
+    }
+
     public func sessionSkills(cwd: String) async throws -> [DiscoveryEntry] {
         let stdout = try await run(["list", "--json"], cwd)
         return try Self.decode([DiscoveryEntry].self, from: stdout)
@@ -199,25 +293,25 @@ public struct RegistryQuery: Sendable {
         return try Self.decode([FlowCatalogEntry].self, from: stdout)
     }
 
-    public func workflowCatalog(cwd: String?, project: String? = nil) async throws -> [WorkflowCatalogEntry] {
-        let stdout = try await run(["project", "workflow", "list", "--json"] + (project.map { ["--project", $0] } ?? []), cwd)
+    public func workflowCatalog(cwd: String?, wave: String? = nil) async throws -> [WorkflowCatalogEntry] {
+        let stdout = try await run(["wave", "workflow", "list", "--json"] + (wave.map { ["--wave", $0] } ?? []), cwd)
         return try Self.decode([WorkflowCatalogEntry].self, from: stdout)
     }
 
-    public func workflowSource(_ name: String, project: String, cwd: String?) async throws -> String {
-        try await run(["project", "workflow", "source", project, name], cwd)
+    public func workflowSource(_ name: String, wave: String, cwd: String?) async throws -> String {
+        try await run(["wave", "workflow", "source", name, wave], cwd)
     }
 
-    public func saveWorkflow(_ name: String, content: String, project: String, cwd: String?) async throws {
-        _ = try await runWithInput(["project", "workflow", "set", project, name, "--file", "/dev/stdin"], cwd, content)
+    public func saveWorkflow(_ name: String, content: String, wave: String, cwd: String?) async throws {
+        _ = try await runWithInput(["wave", "workflow", "set", name, wave, "--file", "/dev/stdin"], cwd, content)
     }
 
     public func customizeFlow(_ name: String, cwd: String?) async throws -> String {
         try await run(["flow", "customize", name], cwd).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    public func setWorkflow(_ name: String, project: String, cwd: String?) async throws {
-        _ = try await run(["project", "workflow", "set", project, name], cwd)
+    public func setWorkflow(_ name: String, wave: String, cwd: String?) async throws {
+        _ = try await run(["wave", "workflow", "set", name, wave], cwd)
     }
 
     /// Run a fresh Flow for the Task headless, placing it when needed. Without

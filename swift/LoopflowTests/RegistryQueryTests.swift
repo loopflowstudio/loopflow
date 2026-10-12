@@ -7,6 +7,46 @@ import Testing
 
 @Suite("RegistryQuery")
 struct RegistryQueryTests {
+    @Test("Flow logs read captured execution from the content Machine, never a peer path locally")
+    func contentRoutedFlowLog() async throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let detail = try String(contentsOf: root.appendingPathComponent("tests/fixtures/dto/flow_detail.json"), encoding: .utf8)
+        let expected = try JSONDecoder().decode(FlowProcessDetail.self, from: Data(detail.utf8))
+        let entry = String(decoding: try JSONEncoder().encode(expected.entry), as: UTF8.self)
+        let query = RegistryQuery { args, cwd in
+            guard args.starts(with: ["--machine", "peer", "--repository", "plan"]), cwd == nil else {
+                throw RegistryQueryError("A peer Flow log must never use local execution")
+            }
+            let command = Array(args.dropFirst(4))
+            if command.starts(with: ["flow", "list"]) {
+                return "{\"entries\":[\(entry)],\"next\":null}"
+            }
+            if command == ["flow", "show", expected.entry.id, "--processes", "--json"] { return detail }
+            throw RegistryQueryError("Unexpected execution")
+        }
+        let flows = try await query.onMachine("peer", repository: "plan").taskFlowProcesses(task: "task", cwd: "/peer/checkout")
+        #expect(flows == [expected])
+    }
+
+    @Test("Recording a remote reading preserves its Machine and transport", arguments: [false, true])
+    func recordingRemoteQuery(recordFirst: Bool) async throws {
+        let json = #"{"id":"peer"}"#
+        let local = RegistryQuery { args, cwd in
+            guard args.starts(with: ["--machine", "peer", "--repository", "plan"]), cwd == nil else {
+                throw RegistryQueryError("The reading lost its remote selectors")
+            }
+            return json
+        }
+        let record: @Sendable (String) -> Void = { #expect($0 == json) }
+        let query = recordFirst
+            ? local.recording(record).onMachine("peer", repository: "plan")
+            : local.onMachine("peer", repository: "plan").recording(record)
+        #expect(query.remoteMachine == "peer")
+        #expect(try await query.localMachineId() == "peer")
+        #expect(!query.streamsWork)
+        #expect(local.remoteMachine == nil)
+    }
+
     @Test("Session pages return a stable continuation and preserve renamed records")
     func sessionsReadPages() async throws {
         let row = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: sessionFixtureURL())) as? [String: Any])
@@ -303,10 +343,10 @@ struct RegistryQueryTests {
         #expect(result.workMap.tasks.items[0].actions.recommended == .resume)
     }
 
-    @Test("lf roadmap is one optionally scoped machine query")
+    @Test("lf wave show is one optionally scoped machine query")
     func roadmapUsesOneMachineQuery() async throws {
         let query = RegistryQuery { args, cwd in
-            #expect(args == ["roadmap", "--wave", "product", "--json"])
+            #expect(args == ["wave", "show", "product", "--json"])
             #expect(cwd == nil)
             return #"{"generated_at":"2026-07-15T00:00:00Z","waves":[]}"#
         }
@@ -316,10 +356,10 @@ struct RegistryQueryTests {
         #expect(result.waves.isEmpty)
     }
 
-    @Test("lf roadmap requests every repository when no Wave narrows it")
+    @Test("lf wave show requests every repository when no Wave narrows it")
     func roadmapRequestsAllRepositories() async throws {
         let query = RegistryQuery { args, cwd in
-            #expect(args == ["roadmap", "--all", "--json"])
+            #expect(args == ["wave", "show", "--all", "--json"])
             #expect(cwd == nil)
             return #"{"generated_at":"2026-07-15T00:00:00Z","waves":[]}"#
         }
@@ -328,12 +368,12 @@ struct RegistryQueryTests {
         #expect(result.waves.isEmpty)
     }
 
-    @Test("lf activity composes Work filters before the bounded result")
+    @Test("lf history composes Work filters before the bounded result")
     func workActivityUsesOneFilteredQuery() async throws {
         let json = try String(contentsOf: workActivityFixtureURL(), encoding: .utf8)
         let query = RegistryQuery { args, cwd in
             #expect(args == [
-                "activity", "--since", "7d", "--limit", "50",
+                "history", "--since", "7d", "--limit", "50",
                 "--wave", "product", "--project", "mac-surface-ux",
                 "--task", "W2-144", "--json",
             ])

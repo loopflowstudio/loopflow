@@ -108,7 +108,7 @@ track remaining implementation and acceptance.
 ## The planning model
 
 ```bash
-lf roadmap --json
+lf wave show --json
 lf repo new-chapter 2026-10 --plan scratch/chapter.json --dry-run
 lf repo new-chapter 2026-10 --plan scratch/chapter.json
 ```
@@ -158,7 +158,7 @@ workflow: feature
 
 A Task with no workflow takes that one up on its first `lf task run <task>`;
 naming another takes that up instead, and the Task keeps it.
-`lf project workflow set PROJECT NAME` validates the Workflow and rewrites only
+`lf wave workflow set NAME WAVE` validates the Workflow and rewrites only
 that selection, preserving KRs and metric targets. `lf task run` refuses a name
 that is not a workflow until a Flow or workflow is named. A Project written with the earlier
 `flow:` line reads the same and is rewritten by the next plan update. Existing
@@ -252,7 +252,7 @@ The Wave objective stays in `GOAL.md`; Project plans have no second objective.
 ```bash
 lf wave status <wave>                  # owner, value, target, window, freshness, reason
 lf wave status <wave> --json           # the shared metric_portfolio DTO
-lf roadmap --json                      # the same DTO on every Wave row
+lf wave show --json                      # the same DTO on every Wave row
 ```
 
 `installed` metrics appear under Instrumenting. Promote a contract to
@@ -287,7 +287,7 @@ The cursor exists only in memory. Every start skips existing channel history;
 restarting after a failure does not replay missed messages. The bridge uses the
 channel binding; `guild_id` is configuration metadata, not a process owner. Run a single bridge per channel to avoid duplicate replies.
 There is no local Wave transcript, inbox, listener or automatic service startup.
-Use Sessions for native conversations and `lf mon show --wave product` for historical launch inspection.
+Use Sessions for native conversations and `lf history list --wave product` for historical launch inspection.
 
 ### Memory
 
@@ -347,9 +347,9 @@ See [Machines and processes](architecture/machines.md) and
 ```bash
 lf wave status infra --json
 lf update-plan --wave infra --plan plan.json
-lf project workflow set PROJECT research    # only the workflow
-lf project workflow source PROJECT research > /tmp/research.yaml
-lf project workflow set PROJECT research --file /tmp/research.yaml
+lf wave workflow set research WAVE    # only the workflow
+lf wave workflow source research WAVE > /tmp/research.yaml
+lf wave workflow set research WAVE --file /tmp/research.yaml
 ```
 
 `plan.json` contains the complete current plan:
@@ -442,16 +442,14 @@ Task completion is independent of Workflow position. `task complete` changes
 status; `task move end` records the move and requests completion. If completion
 fails, retry it alone without replaying the Flow. Linear completion and reopening
 leave execution intact; reopening supersedes old requests. A Task with a PR needs
-authoritative merge. Record independently accepted later work as ordinary Tasks
-and linking comments. A PR-less Task may finish with research files and commits;
+authoritative merge. A PR-less Task may finish with research files and commits;
 unsafe or occupied checkouts are retained. Completion does not settle Session
 turns or process exits. Repeat completion to retry pending planning writeback.
 
-`ship` runs gate and waits for merge. Its caller or Workflow arrival owns Task
-completion. After a stopped Flow or manual merge, inspect live processes and
-retry only unfinished operations. Complete the delivered source outcome without
-waiting for independent later Tasks. A failed linking comment retries only that
-comment; the saved Task remains.
+`ship` runs gate and waits for merge; its Workflow endpoint requests completion.
+Bare landing or a manual merge leaves the Task open. Optional new work uses ordinary
+Task creation before completion, with no required filing or disposition. Inspect
+live Flow processes before retrying completion; no fresh gate or landing is needed.
 
 A due follow-up returns on its owning Wave's next operation, even if unstarted.
 Surface it for selection unless its brief already authorizes a concrete unattended

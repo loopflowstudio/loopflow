@@ -91,7 +91,7 @@ Mechanical git/PR operations ride along as `cmd:` steps:
 ```
 
 `cmd:` invokes a builtin command with its arguments. Named skills and flows
-remain separate targets; `lf run NAME` selects only those definitions. Use
+remain separate targets; `lf skill NAME` and `lf flow NAME` select their kind. Use
 `cmd:` in authored YAML; the former `op:` spelling is no longer accepted.
 
 ### Flows in chat
@@ -273,8 +273,8 @@ lf task move DES-123 design    # go back without running anything
 
 `start` and `end` are implicit. A node may say what you do there:
 `design: { skill: review-design, description: you review the plan }`;
-without one, the skill's first line stands in. An edge runs anything `lf run` accepts, a
-skill included. Only an edge into `end` may omit `flow:`; take it with
+without one, the skill's first line stands in. An edge names a Flow or skill; Task launch resolves it and uses the explicit
+`flow` or `skill` invocation. Only an edge into `end` may omit `flow:`; take it with
 `lf task run ISSUE end`. A Task with no PR is a workflow with no landing edge,
 like builtin `research`. An edge is named by what it runs, so two edges
 leaving one node run different things.
@@ -291,17 +291,17 @@ settled after its Flow stopped. An edge cannot be chosen while another is
 running. `lf task status ISSUE --json` carries the position, the edges that
 can be chosen now and every move with who made it and its `--reason`. There
 is no approve or complete command. Give feedback in the Task conversation,
-which is told its node's skill and the command for each edge leaving it. `lf --task ISSUE run FLOW` runs a Flow without moving the Task.
+which is told its node's skill and the command for each edge leaving it. `lf --task ISSUE flow FLOW` runs a Flow without moving the Task.
 
 Builtins are `feature` (design, demo, land), `code` (demo, land) and
-`research` (findings, no PR). `lf project workflow list` lists Workflows;
+`research` (findings, no PR). `lf wave workflow list` lists Workflows;
 `lf flow list` lists autonomous Flows. To edit a Workflow, read its source,
 edit the file, then save it to the Wave:
 
 ```bash
-lf project workflow source PROJECT feature > /tmp/feature.yaml
+lf wave workflow source feature WAVE > /tmp/feature.yaml
 # Edit /tmp/feature.yaml.
-lf project workflow set PROJECT feature --file /tmp/feature.yaml
+lf wave workflow set feature WAVE --file /tmp/feature.yaml
 ```
 
 `lf flow customize NAME` copies a builtin into `.lf/flows/`, reusing an
@@ -309,14 +309,14 @@ existing local file and printing its path.
 Overrides stay within their kind: a Flow and a Workflow can share a name.
 An invalid local source stays unavailable and never exposes a hidden builtin.
 
-`lf project workflow set PROJECT NAME` changes what future Tasks take up.
+`lf wave workflow set NAME WAVE` changes what future Tasks take up.
 Existing Tasks retain their captured graph. `lf task workflow restart ISSUE`
 moves that graph to `start`, retaining its move and execution history; it
 neither reloads the definition nor executes work.
 
-A Flow that repeats a step passes it `--steers-after STEER`, so the step
-receives only Task direction newer than its last run. The option works on any
-`lf` run.
+Each Session receives applicable steers independently, in bounded batches.
+Repeating a Flow step creates another Session; continuing or compacting the same
+Session preserves its delivery history.
 
 ## Goals
 

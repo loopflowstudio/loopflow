@@ -225,7 +225,7 @@ is equally its work; a stopped Flow is history its caller inspects, never a
 position to resume. A Task with no Workflow takes up its Project's `workflow:`
 on its first `lf task run`; one that named its own keeps it.
 WorkflowDefinition and FlowDefinition occupy separate `.lf/workflows/` and
-`.lf/flows/` namespaces. `lf project workflow` owns definition discovery,
+`.lf/flows/` namespaces. `lf wave workflow` owns definition discovery,
 customization and Project selection. `lf task workflow show` reads the captured
 instance; `restart` moves it to `start` without reloading or executing anything.
 `lf flow` handles autonomous definitions and `--processes` inspects execution.
@@ -235,7 +235,7 @@ A Workflow is the Task's outer shape: the workflow definition it took up,
 whose nodes are where a person takes part in the Task conversation and whose
 edges each run one Flow, plus the Task's stored position on it. The graph is
 fixed when taken up. `lf task run` chooses an edge, starts its Flow as a child
-`lf run`, again when a Flow process fails, and writes the arrival when one
+`lf flow`, again when a Flow process fails, and writes the arrival when one
 succeeds; a stopped Flow leaves the Task on its edge;
 `lf task move` sets a node. Each move is appended to the Task's history. It
 executes nothing, and no command approves or completes a node.

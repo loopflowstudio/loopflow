@@ -123,7 +123,7 @@ PYTHON
         let output = lf_command(
             repo.path(),
             home.path(),
-            &["flow", "path-proof", "--batch", "--no-loopflow"],
+            &["flow", "path-proof", "--batch"],
             None,
         )
         .env("LF_BIN", bin.join("lf"))
@@ -205,7 +205,7 @@ fn mechanical_failure_retains_earlier_step_success() {
     let output = run_lf(
         repo.path(),
         home.path(),
-        &["flow", "mechanical-failure", "--batch", "--no-loopflow"],
+        &["flow", "mechanical-failure", "--batch"],
         None,
     );
     assert!(!output.status.success());
@@ -711,7 +711,7 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
         let launch = run_lf(
             repo.path(),
             home.path(),
-            &["-i", "skill", "identity-proof", "--no-loopflow"],
+            &["-i", "skill", "identity-proof"],
             Some(&path),
         );
         assert!(
@@ -797,10 +797,10 @@ fn interactive_flow_keeps_input_and_advances_only_after_each_provider_exits() {
     use std::process::Stdio;
 
     for (flags, stop) in [
-        (vec!["-i", "run", "conversation"], false),
-        (vec!["run", "conversation", "-i"], false),
-        (vec!["run", "conversation"], false),
-        (vec!["-i", "run", "conversation"], true),
+        (vec!["-i", "flow", "conversation"], false),
+        (vec!["flow", "conversation", "-i"], false),
+        (vec!["flow", "conversation"], false),
+        (vec!["-i", "flow", "conversation"], true),
     ] {
         let repo = loopflow_test_support::TestRepo::new();
         let home = TempDir::new().unwrap();
@@ -859,7 +859,7 @@ printf '%s' "$answer" > "$LF_HOME/$step.answer"
         let log = fs::File::create(&log_path).unwrap();
         let path = format!("{}:/usr/bin:/bin", bin.display());
         let mut child = lf_command(repo.path(), home.path(), &flags, Some(&path))
-            .args(["-a", "claude", "--no-loopflow"])
+            .args(["-a", "claude"])
             .env_remove("CLAUDE_CONFIG_DIR")
             .env_remove("ANTHROPIC_API_KEY")
             .stdin(Stdio::from(slave))
@@ -953,7 +953,7 @@ fn authored_flow_records_each_skill_as_one_session() {
     let output = run_lf(
         repo.path(),
         home.path(),
-        &["two-skills", "--batch", "--no-loopflow"],
+        &["two-skills", "--batch"],
         Some(&path),
     );
     assert!(
@@ -966,7 +966,7 @@ fn authored_flow_records_each_skill_as_one_session() {
     let output = run_lf(
         repo.path(),
         home.path(),
-        &["monitor", "usage", "--days", "7", "--json"],
+        &["history", "usage", "--days", "7", "--json"],
         None,
     );
     assert!(
@@ -1037,10 +1037,9 @@ fn flow_output_shows_steps_and_agent_messages_with_opt_in_diagnostics() {
         let home = TempDir::new().unwrap();
         let mut args = vec![
             "--batch",
-            "--no-loopflow",
             "-a",
             "codex",
-            "run",
+            "flow",
             "readable",
             "private-message-marker",
         ];
@@ -1138,7 +1137,7 @@ fn killed_flow_process_leaves_its_agent_step_as_history_without_another_turn() {
     let mut flow_process = lf_command(
         repo.path(),
         home.path(),
-        &["--batch", "--no-loopflow", "flow", "survive-agent"],
+        &["--batch", "flow", "survive-agent"],
         Some(&path),
     )
     .stdout(std::process::Stdio::null())
@@ -1221,7 +1220,7 @@ fn observing_and_preparing_a_task_are_not_execution() {
     for args in [
         vec!["monitor", "active", "--task", "INF-123", "--json"],
         vec!["session", "list", "--task", "INF-123", "--json"],
-        vec!["monitor", "usage", "--task", "INF-123", "--json"],
+        vec!["history", "usage", "--task", "INF-123", "--json"],
     ] {
         let read = run_lf(repo.path(), home.path(), &args, None);
         assert!(read.status.success(), "{read:?}");
@@ -1237,14 +1236,7 @@ fn observing_and_preparing_a_task_are_not_execution() {
     let prepared = run_lf(
         repo.path(),
         home.path(),
-        &[
-            "--task",
-            "INF-123",
-            "flow",
-            "review-first",
-            "--batch",
-            "--no-loopflow",
-        ],
+        &["--task", "INF-123", "flow", "review-first", "--batch"],
         None,
     );
     assert!(!prepared.status.success());
@@ -1289,7 +1281,7 @@ fn task_run_history_reads_only_that_tasks_runs_without_starting_it() {
             repo.path(),
             home.path(),
             &[
-                "monitor", "usage", "--days", "0", "--task", selector, "--json",
+                "history", "usage", "--days", "0", "--task", selector, "--json",
             ],
             None,
         );
@@ -1329,14 +1321,8 @@ fn task_run_history_reads_only_that_tasks_runs_without_starting_it() {
         "Do unrelated proof-owned work.",
     );
     for args in [
-        &[
-            "--task",
-            "INF-123",
-            "history-work",
-            "--batch",
-            "--no-loopflow",
-        ][..],
-        &["history-work", "--batch", "--no-loopflow"][..],
+        &["--task", "INF-123", "history-work", "--batch"][..],
+        &["history-work", "--batch"][..],
     ] {
         let launched = run_lf(repo.path(), home.path(), args, Some(&path));
         assert!(
@@ -1349,7 +1335,7 @@ fn task_run_history_reads_only_that_tasks_runs_without_starting_it() {
     let unrelated = run_lf(
         outside.path(),
         home.path(),
-        &["history-work", "--batch", "--no-loopflow"],
+        &["history-work", "--batch"],
         Some(&path),
     );
     assert!(
@@ -1425,7 +1411,7 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
     };
     let task_runs = |identifier: &str| -> Vec<String> {
         json(&[
-            "monitor", "usage", "--days", "0", "--task", identifier, "--json",
+            "history", "usage", "--days", "0", "--task", identifier, "--json",
         ])
         .as_array()
         .unwrap()
@@ -1475,7 +1461,7 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
 
     // In the Task's checkout, a plain launch binds to that Task.
     repo.create_branch("task-binding");
-    let bound = launch(repo.path(), &["-i", "binding-work", "--no-loopflow"]);
+    let bound = launch(repo.path(), &["-i", "binding-work"]);
     let listed = session(&bound);
     assert_eq!(
         listed["work"],
@@ -1495,7 +1481,7 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
 
     // A checkout no Task owns stays unbound and retires on exit.
     let unrelated = repo.create_named_worktree("unregistered");
-    let unbound = launch(&unrelated, &["-i", "binding-work", "--no-loopflow"]);
+    let unbound = launch(&unrelated, &["-i", "binding-work"]);
     let history = json(&["session", "list", "--all", "--history", "--json"]);
     let retired = history
         .as_array()
@@ -1509,10 +1495,7 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
 
     // Explicit selection wins over the checkout.
     repo.checkout("task-binding");
-    let explicit = launch(
-        repo.path(),
-        &["--task", "INF-124", "-i", "binding-work", "--no-loopflow"],
-    );
+    let explicit = launch(repo.path(), &["--task", "INF-124", "-i", "binding-work"]);
     assert_eq!(
         session(&explicit)["work"],
         serde_json::json!({"kind": "task", "id": sibling.id})
@@ -1526,7 +1509,7 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
     let settled = events();
     let _ = json(&["session", "list", "--all", "--json"]);
     let _ = json(&[
-        "monitor", "usage", "--days", "0", "--task", "INF-123", "--json",
+        "history", "usage", "--days", "0", "--task", "INF-123", "--json",
     ]);
     let _ = json(&["monitor", "active", "--task", "INF-123", "--json"]);
     assert_eq!(events(), settled, "reads write no Task event");
@@ -1547,7 +1530,7 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
     runtime
         .block_on(task.store.update_task_pr(&landed))
         .unwrap();
-    let after_landing = launch(repo.path(), &["-i", "binding-work", "--no-loopflow"]);
+    let after_landing = launch(repo.path(), &["-i", "binding-work"]);
     assert_eq!(
         session(&after_landing)["work"],
         serde_json::json!({"kind": "task", "id": task.task.id})
@@ -1619,7 +1602,7 @@ fn bound_flows_keep_task_context_and_leave_other_flows_and_shared_edits_alone() 
     for args in [
         vec!["--task", "INF-123", "two-steps"],
         vec!["--task", "INF-123", "contribution"],
-        vec!["--task", "INF-123", "run", "contribution"],
+        vec!["--task", "INF-123", "flow", "contribution"],
         vec!["--task", "INF-123", "flow", "contribution"],
         vec!["--task", "INF-123", "flow", "contribution"],
     ] {
@@ -1627,7 +1610,7 @@ fn bound_flows_keep_task_context_and_leave_other_flows_and_shared_edits_alone() 
         let _ = fs::remove_file(home.path().join("cwds"));
         let _ = fs::remove_file(repo.path().join("scratch/step.md"));
         let mut args = args;
-        args.extend(["--batch", "--no-loopflow", "Keep the Task context."]);
+        args.extend(["--batch", "Keep the Task context."]);
         let output = run_lf(caller.path(), home.path(), &args, Some(&path));
         assert!(
             output.status.success(),
@@ -1676,7 +1659,7 @@ fn bound_flows_keep_task_context_and_leave_other_flows_and_shared_edits_alone() 
     let output = run_lf(
         repo.path(),
         home.path(),
-        &["monitor", "usage", "--days", "7", "--json"],
+        &["history", "usage", "--days", "7", "--json"],
         None,
     );
     assert!(output.status.success());
@@ -1690,7 +1673,7 @@ fn bound_flows_keep_task_context_and_leave_other_flows_and_shared_edits_alone() 
         let _ = fs::remove_file(home.path().join("prompts"));
         let mut args = vec!["--task", "INF-123"];
         args.extend(invocation);
-        args.extend(["--batch", "--no-loopflow"]);
+        args.extend(["--batch"]);
         let output = run_lf(caller.path(), home.path(), &args, Some(&path));
         assert!(
             output.status.success(),
@@ -1939,7 +1922,7 @@ fn builtin_deploy_uses_ops_land_item() {
 }
 
 fn roadmap_task(repo: &Path, home: &Path) -> serde_json::Value {
-    lf_json(repo, home, &["roadmap", "--json"])["waves"][0]["tasks"]["items"][0].clone()
+    lf_json(repo, home, &["wave", "show", "--json"])["waves"][0]["tasks"]["items"][0].clone()
 }
 
 fn labels(graph: &serde_json::Value) -> Vec<&str> {
@@ -1958,7 +1941,8 @@ fn record_context_script() -> &'static str {
 import json, pathlib, shlex, subprocess, sys
 requests = json.load(sys.stdin)
 hook = requests[0]["params"]["config"]["hooks"]["SessionStart"][0]["hooks"][0]["command"]
-block = json.loads(subprocess.check_output(hook, shell=True))["hookSpecificOutput"]["additionalContext"]
+event = {"session_id": requests[1]["params"]["threadId"], "hook_event_name": "SessionStart", "source": "startup"}
+block = json.loads(subprocess.check_output(hook, shell=True, input=json.dumps(event).encode()))["hookSpecificOutput"]["additionalContext"]
 args = shlex.split(hook)
 delivery = json.loads(pathlib.Path(args[args.index("--delivery") + 1]).read_text())
 references = "\n".join(pathlib.Path(path).read_text() for path in delivery["references"])
@@ -2089,14 +2073,7 @@ fn task_flow_read_keeps_captured_topology_and_counts_both_returns() {
     let ran = run_lf(
         repo.path(),
         home.path(),
-        &[
-            "--task",
-            "INF-123",
-            "flow",
-            "two-loops",
-            "--batch",
-            "--no-loopflow",
-        ],
+        &["--task", "INF-123", "flow", "two-loops", "--batch"],
         Some(&path),
     );
     assert!(!ran.status.success(), "the last operation fails");
@@ -2270,14 +2247,7 @@ fn three_nested_loops_return_to_named_occurrences_of_one_skill() {
     let ran = run_lf(
         repo.path(),
         home.path(),
-        &[
-            "--task",
-            "INF-123",
-            "flow",
-            "nested",
-            "--batch",
-            "--no-loopflow",
-        ],
+        &["--task", "INF-123", "flow", "nested", "--batch"],
         Some(&path),
     );
     assert!(
@@ -2322,70 +2292,6 @@ fn three_nested_loops_return_to_named_occurrences_of_one_skill() {
 }
 
 #[test]
-fn a_repeated_node_receives_only_task_direction_newer_than_its_last_run() {
-    let repo = loopflow_test_support::TestRepo::new();
-    support::bind_task_planning(&repo);
-    let home = TempDir::new().unwrap();
-    let checkout = repo.path().canonicalize().unwrap();
-    let task =
-        support::register_task_with_pr(home.path(), &checkout, "repeat-steers", &repo.head_sha());
-    observe_planning(&task, &checkout);
-    repo.create_branch("repeat-steers");
-    write_skill(repo.path(), "work-proof", "Fixture step.");
-    write_flow(repo.path(), "twice", "- work-proof\n- loop: work-proof\n");
-    let steer = |text: &str| -> i64 {
-        let kind = serde_json::json!({"kind": "steer", "author": {"kind": "user"}, "text": text});
-        rusqlite::Connection::open(home.path().join("loopflow.db"))
-            .unwrap()
-            .query_row(
-                "INSERT INTO task_events(task_id,kind_json,created_at) VALUES(?1,?2,unixepoch()) RETURNING id",
-                [task.task.id.as_str(), &kind.to_string()],
-                |row| row.get(0),
-            )
-            .unwrap()
-    };
-    let earlier = steer("Keep the parser strict.");
-    let (_bin, path) = scripted_provider(home.path(), &[WORK, ITERATE, WORK, ADVANCE, WORK]);
-    let run = |args: &[&str]| {
-        let mut args = args.to_vec();
-        args.extend(["--batch", "--no-loopflow"]);
-        let ran = run_lf(repo.path(), home.path(), &args, Some(&path));
-        assert!(
-            ran.status.success(),
-            "{args:?}: {}",
-            String::from_utf8_lossy(&ran.stderr)
-        );
-        received_contexts(home.path())
-            .iter()
-            .map(|prompt| prompt.contains("Keep the parser strict."))
-            .collect::<Vec<_>>()
-    };
-    // work, decide, work, decide: each node's first run is given the steer,
-    // its second is spared it.
-    assert_eq!(
-        run(&["--task", "INF-123", "flow", "twice"]),
-        [true, true, false, false]
-    );
-    // The Flow process asked for that with an option any run takes.
-    steer("Report the first error only.");
-    let after = earlier.to_string();
-    let given = run(&[
-        "--task",
-        "INF-123",
-        "--steers-after",
-        &after,
-        "skill",
-        "work-proof",
-    ]);
-    assert_eq!(given.last(), Some(&false));
-    let prompts = received_contexts(home.path());
-    assert!(prompts
-        .last()
-        .unwrap()
-        .contains("Report the first error only."));
-}
-
-#[test]
 fn the_research_workflow_ends_on_its_edge_that_runs_nothing() {
     let repo = loopflow_test_support::TestRepo::new();
     support::bind_task_planning(&repo);
@@ -2405,7 +2311,7 @@ fn the_research_workflow_ends_on_its_edge_that_runs_nothing() {
         )["execution"]["work"]["workflow"]["position"]["node"]
             .clone()
     };
-    let ran = run(&["-b", "--no-loopflow", "task", "run", "INF-123", "research"]);
+    let ran = run(&["-b", "task", "run", "INF-123", "research"]);
     assert!(
         ran.status.success(),
         "{}",
@@ -2711,14 +2617,7 @@ for line in sys.stdin:
         let output = lf_command(
             repo.path(),
             home.path(),
-            &[
-                "-a",
-                "claude",
-                "-b",
-                "run",
-                "claude-decision",
-                "--no-loopflow",
-            ],
+            &["-a", "claude", "-b", "flow", "claude-decision"],
             Some(&format!("{}:/usr/bin:/bin", bin.display())),
         )
         .env("CORRECT_FIRST", correct_first.to_string())

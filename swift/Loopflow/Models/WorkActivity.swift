@@ -1,6 +1,6 @@
 import Foundation
 
-/// One bounded, ordered window from `lf activity`.
+/// One bounded, ordered window from `lf history`.
 public struct WorkActivitySnapshot: Decodable, Sendable, Hashable {
     public let generatedAt: Int64
     public let since: Int64

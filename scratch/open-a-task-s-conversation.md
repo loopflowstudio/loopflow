@@ -58,8 +58,7 @@ of 0.13.13 does not establish recovery by this branch's later repair.
 
 ## Remaining
 
-- Gate: affected Session/connection/store suites and automated acceptance;
-  installed recovery of the two reported Sessions and real Codex terminal
+- Installed recovery of the two reported Sessions and real Codex terminal
   interaction remain unproved. Stand-in CLI tests establish source behavior.
 - Installed acceptance retains both reported IDs: `e9fc442cdda14454aa65f5d16d98bd7f`
   and `2030b31b03704d0191762b53b32f22fe`. Retrying the retired first Session must
@@ -67,4 +66,6 @@ of 0.13.13 does not establish recovery by this branch's later repair.
   must remain singular; missing identity remains unresolved, not dead.
 - Publication and landing remain with the supplied Flow's later steps.
 
-Checks: prior focused Cargo tests (9 passed), native-resume proof, fmt and Clippy reused for unchanged Rust; `git diff --check` and `lf context` pass after reconciliation; broader suites remain with gate/CI and installed terminal acceptance with demo/review.
+Publication review corrected the prior foreground-close test: live providers remain untouched; exact observed death is now accepted without mutating process or attachment records.
+
+Checks: `cargo test -p loopflow` with integration targets `session_lifecycle_tests`, `session_cli_tests`, `agent_startup_tests` and library filters `session_record::runtime::tests`, `ops::human_session::`, `store::sqlite::sessions::` passed 90 tests; one disposable-Linux-account test deferred to CI; `cargo fmt` and `cargo clippy --all-targets -- -D warnings` passed; installed terminal acceptance remains with demo/review.

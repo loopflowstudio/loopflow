@@ -481,7 +481,7 @@ mod tests {
     }
 
     #[test]
-    fn foreground_agent_is_not_subject_to_headless_close_before_or_after_exit() {
+    fn foreground_agent_is_observed_dead_without_headless_group_control() {
         let _ambient = crate::test_ambient::EnvGuard::new();
         for provider in ["claude", "opencode", "codex"] {
             let (home, store, detached) = resume_fixture();
@@ -522,7 +522,7 @@ mod tests {
             child.0.kill().unwrap();
             child.0.wait().unwrap();
             let before = store.process(&attachment.agent_process_id).unwrap();
-            assert!(!store
+            assert!(store
                 .with_session_attachment("resume", &attachment, || {
                     super::close_session_agent_process(&store, "resume")
                 })

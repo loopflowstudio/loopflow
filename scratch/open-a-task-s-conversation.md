@@ -25,8 +25,8 @@ process-group death rules remain unchanged. Death does not invent success.
 ## Implemented
 
 Commits `d3a00bf0ca` and `fac6e65141` implement preparation and recovery.
-The checkout is clean at `9ccaac2e48`; the earlier uncommitted-work description
-has been superseded by these checkpoints. All targets below are removed.
+The implementation is checkpointed through `10dce0b1cd`; the earlier uncommitted-work
+description has been superseded by these checkpoints. All targets below are removed.
 
 - Primary `start` background launch: replace with input preparation.
 - `serve-conversation` hidden command and its sole serving function; the unused
@@ -68,4 +68,6 @@ of 0.13.13 does not establish recovery by this branch's later repair.
 
 Publication review corrected the prior foreground-close test: live providers remain untouched; exact observed death is now accepted without mutating process or attachment records.
 
-Checks: `cargo test -p loopflow` with integration targets `session_lifecycle_tests`, `session_cli_tests`, `agent_startup_tests` and library filters `session_record::runtime::tests`, `ops::human_session::`, `store::sqlite::sessions::` passed 90 tests; one disposable-Linux-account test deferred to CI; `cargo fmt` and `cargo clippy --all-targets -- -D warnings` passed; installed terminal acceptance remains with demo/review.
+Gate review found no further production-code mismatch. The first broad run retained ambient account selection; its account failures passed with inherited `LF_*` cleared. A Machine version mismatch also passed on the clean rebuild. The release-repair rerun exposed a cached fixture helper referencing the removed materialized checkout; rebuilding that helper restored the test. TESTING.md records this recovery. The full Rust run exhausted its 1,200-second phase budget after 2,500 of 2,555 tests completed; its remaining coverage belongs to CI, not a claimed local pass.
+
+Checks: `uv run python scripts/test.py --reuse-passing` passed architecture, rustfmt, all-target Clippy and 75 website tests, but Rust timed out; network-isolated `cargo nextest run -p loopflow` filtered to `provider_account::`, `add_alias_rename_connect_and_remove_preserve_identity`, `release_run_repairs_failed_checks_before_tagging`, `session_lifecycle_tests`, `session_record::runtime::tests`, `ops::human_session::`, and `store::sqlite::sessions::` with inherited `LF_*` cleared and `TMPDIR=/private/tmp` passed 110/111, with the remaining release test passing via `cargo test -p loopflow --test release_tests release_run_repairs_failed_checks_before_tagging -- --exact` after `cargo clean -p loopflow-test-support`; full Rust completion and the disposable-Linux-account test remain CI-owned, installed terminal acceptance remains with demo/review.

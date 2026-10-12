@@ -19,13 +19,8 @@ new buttons or chrome have been added. Portfolio remains wanted but needs furthe
 revision; review it second, after the main views feel right. This is not native
 acceptance of either surface.
 
-The earlier redraw freeze, main-thread sample, failed screenshot attempts and
-44 passing location/navigation tests remain at
-`2a56c9937d:scratch/work-first-demo.md`, **Review priority**. The repaired launch
-alone did not establish rendered usability or normal Quit.
-
-Next demo must compare populated Loopflow navigation with shared planning;
-client takeover remains explicit.
+Earlier redraw freeze and 44-test repair: `2a56c9937d:scratch/work-first-demo.md`,
+**Review priority**. Launch alone proved neither usability nor normal Quit.
 
 October 11 preparation, validation failures and denied Git execution remain at
 `9a23582588:scratch/work-first-demo.md`, **Review priority**. Copies preserved exact
@@ -286,6 +281,5 @@ models (Portfolio is new). A generic decode failure therefore does not establish
 version incompatibility. LocalLineObservation now retains the decoder's field/path
 error instead of Foundation's opaque localized message; its wrong-type regression
 identifies `sequence`. Check: WorkObservationTransportTests PASS (8); diff check PASS.
-One installed, repository-scoped read is captured privately under
-`/tmp/loo462-live-wire/`; the linked production Swift decoder accepts the branch's
-copied-data frames. Await the live read before deciding the runtime requirement.
+Installed read: `/tmp/loo462-live-wire/`. Production Swift decodes the branch snapshot;
+live output remains pending.

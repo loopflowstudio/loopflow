@@ -266,18 +266,17 @@ inspection. Closing that failed terminal exposed the contrast defect. No takeove
 
 ## Live-reader diagnosis — October 12
 
-v0.13.12 and this branch share WorkFrame and wire models; Portfolio is new. LocalLineObservation now retains the decoder's field/path
-error instead of Foundation's opaque localized message; its wrong-type regression
-identifies `sequence`. Check: WorkObservationTransportTests PASS (8); diff check PASS.
+v0.13.12 shares WorkFrame/wire models; Portfolio is new. LocalLineObservation
+now reports decoding paths; the wrong-type regression identifies `sequence`. Check: WorkObservationTransportTests PASS (8); diff check PASS.
 Installed read `/tmp/loo462-live-wire/` finished in 690 s: both live frames decode
-with current Swift, as do 100 Session records. The earlier live app predates main
-sync; current wire compatibility is proved, usable loading/opening is not.
-Screen locked: native review unavailable.
-Current app staged at `loo462-native.FgtDmE/staged/Loopflow Work Demo.app` under
-/private/tmp; Old app unchanged; no install/takeover.
+with current Swift, as do 100 Session records. Earlier live app predates main sync; compatibility is not usable opening.
+Jack Heart requested this app on the real database. After unlock, launched
+`/private/tmp/loo462-native.FgtDmE/staged/Loopflow Work Demo.app` (PID 26326),
+ordinary Home/installed dispatch, actual Loopflow repo. Native view is loading;
+Portfolio reports root-json failure. Reader 26587 is live. No migration/takeover.
 
 Live output selects 17 Loopflow Tasks under the current Swift predicate; the branch
 snapshot selects 11. Six extra completed Tasks have only old blocked Flow evidence:
 LOO-440/412, lf-b978097/df7e403/cb9012a/6f396c0. `c229a29648` fixes that shared
 Rust projection; Desktop decoding compatibility does not deliver this unreleased
-behavior. Do not delete failed history or duplicate the fix in Swift. Screen still locked; clients unchanged.
+behavior. Do not delete failed history or duplicate the fix in Swift.

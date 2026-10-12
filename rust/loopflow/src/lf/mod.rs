@@ -1093,6 +1093,10 @@ pub struct SyncArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum TaskCommand {
+    /// Pause future Task execution without stopping live processes
+    Pause { issue: String },
+    /// Clear a Task pause without starting execution
+    Resume { issue: String },
     /// Synchronize a Task; observed planning conflicts adopt Linear
     Sync { issue: String },
     /// Inspect or reset this Task's captured Workflow
@@ -1378,6 +1382,8 @@ impl TaskCommand {
             | Self::Sync { issue, .. }
             | Self::Move { issue, .. }
             | Self::Complete { issue, .. }
+            | Self::Pause { issue }
+            | Self::Resume { issue }
             | Self::Reopen { issue, .. }
             | Self::Diff { issue, .. }
             | Self::Files { issue, .. }
@@ -1415,6 +1421,8 @@ impl TaskCommand {
             | Self::Sync { issue, .. }
             | Self::Move { issue, .. }
             | Self::Complete { issue, .. }
+            | Self::Pause { issue }
+            | Self::Resume { issue }
             | Self::Reopen { issue, .. }
             | Self::Diff { issue, .. }
             | Self::Files { issue, .. }

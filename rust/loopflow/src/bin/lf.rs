@@ -1005,6 +1005,15 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             );
             Ok(())
         }
+        TaskCommand::Pause { issue } | TaskCommand::Resume { issue } => {
+            let paused = matches!(command, TaskCommand::Pause { .. });
+            loopflow::ops::task::task_pause(issue, paused)?;
+            println!(
+                "{issue}: {}; execution unchanged",
+                if paused { "paused" } else { "resumed" }
+            );
+            Ok(())
+        }
         TaskCommand::Reopen { issue, reason } => {
             loopflow::ops::task::task_reopen(issue, reason.as_deref())?;
             println!("{issue}: reopened; Workflow unchanged");

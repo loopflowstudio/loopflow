@@ -318,6 +318,10 @@ public struct RegistryQuery: Sendable {
         _ = try await run(["task", "move", issue, node], cwd)
     }
 
+    public func pauseTask(issue: String, paused: Bool, cwd: String?) async throws {
+        _ = try await run(["task", paused ? "pause" : "resume", issue], cwd)
+    }
+
     public func completeTask(issue: String, cwd: String?) async throws {
         _ = try await run(["task", "complete", issue], cwd)
     }

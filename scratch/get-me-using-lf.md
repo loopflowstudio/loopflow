@@ -461,38 +461,34 @@ unclassified bucket stays explicit; it is not an excuse to mark every old Task d
 
 Check: `cargo test -p loopflow --lib a_finished_task_stays_current_only_while_execution_is_unresolved`, `cargo clippy --all-targets -- -D warnings`, `cargo fmt` — pass; native refresh of the stopped-failure correction remains.
 
-October 11 follow-up: live/copy comparison identified 126 Loopflow Tasks with an
-existing abandonment timestamp but no planning disposition. LOO-149 is one rendered
-example. Today's abandonment transaction queues `canceled` through the common
-planning writer before commit; an explicit regression now checks both abandoned
-execution and canceled planning after repeat abandonment. This supports treating
-the missing-disposition cohort as legacy reconciliation, not adding a permanent
-sidebar exception. It does not by itself authorize all 126 repairs: retain newer
-provider intent, unsettled work and per-record provenance when selecting candidates.
+Earlier LOO-376 completion and 126-row legacy reconciliation, including exact
+selection, rehearsal and rollback limits: `d65dff0cbb:scratch/get-me-using-lf.md`,
+**Applied legacy reconciliation** and preceding paragraphs. Applied changes remain;
+this grants no broader cleanup authority. Current receipts: work-first-demo.md.
 
-LOO-376 is a different case: its brief explicitly records Jack Heart's closure
-request and retired performance scope. The branch-copy rehearsal completed, but
-the installed CLI additionally required disposition of an old serial-PR continuation.
-A fresh copy of the live schema with the installed CLI passed `follow-up --none`
-then `task complete`, retaining checkout/history. The same supported operations
-have now committed live completion (fresh SQLite reading: completed, no pending
-request/error). The installed command returned exit 0 and retained the checkout for two unresolved
-Processes. Backup and failures remain in `work-first-demo.md`.
+## Paused — accepted October 12
 
-Check: `cargo test -p loopflow --test local_planning public_local_planning_survives_restart_with_generated_identity`, `cargo fmt`, `cargo clippy --all-targets -- -D warnings` — pass, including repeated abandonment preserving canceled planning.
+Jack Heart selected explicit Paused in this diff and authorized pausing LOO-389.
+Preserve Task identity, history, checkout and Workflow. Default active navigation
+omits paused Tasks; the Wave plan keeps them reachable. Resume clears the hold,
+never launches execution. Pause does not kill an already-running process.
 
-### Applied legacy reconciliation
+Use the common Work writer for a portable Task pause flag, separate from Linear's
+provider disposition. Derive shared TaskState::Paused; CLI pause/resume and Desktop
+consume that owner. Block subsequent Task Flow/automatic repair launches while
+paused. Keep historical completion and abandonment independently readable.
+Delete the need for an undocumented sidebar-only parked flag or automatic restart
+on resume. Test persistence, repeat writes, retained Workflow/execution, sidebar
+filtering and API controls before applying LOO-389 to the real store.
+Jack Heart reports LOO-427 landed: verify delivery before repairing its remaining
+Task disposition. The misleading CI conversation title still needs attribution
+and navigation inspection, not an assumed Session reassignment.
 
-Jack Heart authorized live cleanup after rehearsal. The 126 absent-disposition
-rows were already abandoned, had no newer Task edit/comment, no provider revision,
-no pending completion, and no state-delivery or planning-edit records. Rehearsed
-field repair and conditional rollback on the installed-schema copy, then applied
-the exact manifest transactionally to live data after another SQLite backup. Only
-missing planning state becomes canceled and planning revision advances; original
-abandonment, content, placement, PRs, Sessions and execution history remain. This
-is a one-time old-schema repair, not a migration or new cancellation request.
-The newer demo copy uses its common planning writer to retain its journal contract;
-the temporary invocation was removed from source afterward. Native Product Task
-list dropped from 65 to 24 without deleting records or hiding all past Projects.
-Remaining titled-superseded and merged-but-uncompleted rows still need individual
-disposition. No provider continuation or full demo acceptance is claimed.
+Local pause implementation is not deployed: a development helper cannot advance
+main's schema. Preserve active native clients; use the supported installation
+boundary rather than bypassing migration authority. LOO-427's fresh status retains
+merge `9211b47c47bf986348af00b5a546c7cce2048c8c` but Task remains active.
+Review fixed historical journal seeding before the pause column exists. Early
+pause tests exposed incomplete raw Task fixtures; use normal creation with the
+Wave's selected Project. Logs: `/tmp/loo462-paused-{test*,final,checks,verified*}.log`.
+Check: pause persistence/migration/exchange and Rust/Swift DTO tests pass; 17 focused Swift tests pass; fmt, all-target Clippy and diff-check pass. Native pause controls and live migration remain unproved.

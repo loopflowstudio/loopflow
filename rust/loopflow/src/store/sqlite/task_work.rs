@@ -230,6 +230,11 @@ fn choose_edge_in(
     by: Option<&LfProcessId>,
     note: Option<&str>,
 ) -> StoreResult<bool> {
+    if super::durable::task_state_in(tx, task)? == crate::durable::TaskState::Paused {
+        return Err(crate::store::StoreError::InvalidAuthority(
+            "Task is paused; resume it before running a Flow".into(),
+        ));
+    }
     let chosen = &workflow.definition.edges[edge as usize];
     let stopped = match &workflow.position {
         WorkflowPosition::Node { .. } => None,
@@ -686,6 +691,106 @@ mod tests {
     use crate::session::SessionFilter;
     use crate::store::sqlite::SqliteStore;
     use crate::task_work::TaskWork;
+
+    #[test]
+    fn paused_task_retains_workflow_and_resumes_without_execution() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("db");
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let task = TaskId::new();
+        let wave = WaveId::new();
+        let project = ProjectId::new();
+        let by = LfProcessId::new();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?2,'/repo/task',1)",
+                params![by, crate::id::TraceId::new()],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'proof','/repo',1)",
+                [&wave],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO projects(id,wave_id,created_at) VALUES(?1,?2,1)",
+                params![project.as_str(), wave],
+            )
+            .unwrap();
+        }
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE waves SET current_project_id=?1 WHERE id=?2",
+                params![project.as_str(), wave],
+            )
+            .unwrap();
+        store
+            .create_task(&crate::work::task::NewTask {
+                id: task.clone(),
+                project_id: project,
+                title: "Retained Task".into(),
+                description: "Brief".into(),
+                due_date: None,
+            })
+            .unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET worktree='/repo/task' WHERE id=?1",
+                [task.as_str()],
+            )
+            .unwrap();
+        let definition = crate::workflow::WorkflowDefinition {
+            name: "proof".into(),
+            nodes: vec![],
+            edges: vec![crate::workflow::WorkflowEdge {
+                from: "start".into(),
+                to: "end".into(),
+                flow: Some("pursue".into()),
+            }],
+        };
+        store
+            .take_up_workflow(&task, &definition, &by, None)
+            .unwrap();
+        let before = store.workflow(&task).unwrap().unwrap();
+        store.set_task_paused(&task, true).unwrap();
+        store.set_task_paused(&task, true).unwrap();
+        assert_eq!(
+            store.task_state(&task).unwrap(),
+            crate::durable::TaskState::Paused
+        );
+        assert!(!store
+            .task_automation(&task)
+            .unwrap()
+            .enabled
+            .unwrap_or(true));
+        assert!(store
+            .choose_workflow_edge(&task, &before, 0, &LfProcessId::new(), None)
+            .is_err());
+        assert_eq!(store.workflow(&task).unwrap().unwrap(), before);
+        drop(store);
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        assert_eq!(
+            store.task_state(&task).unwrap(),
+            crate::durable::TaskState::Paused
+        );
+        store.set_task_paused(&task, false).unwrap();
+        assert_eq!(
+            store.task_state(&task).unwrap(),
+            crate::durable::TaskState::Ready
+        );
+        assert_eq!(store.workflow(&task).unwrap().unwrap(), before);
+        assert_eq!(
+            store.task(&task).unwrap().unwrap().worktree,
+            Some(std::path::PathBuf::from("/repo/task"))
+        );
+    }
 
     #[test]
     fn end_request_is_atomic_and_survives_reopening_the_store() {

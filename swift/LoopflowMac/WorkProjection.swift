@@ -20,7 +20,7 @@ struct TaskProjection: Identifiable {
     /// Sessions remain available inside Work, but their presence cannot establish
     /// that a Task started. Shared execution evidence keeps unsettled work visible.
     var inWorkingSet: Bool {
-        return started && task.condition.unresolvedExecution
+        return task.runtime?.status != .paused && started && task.condition.unresolvedExecution
     }
 }
 

@@ -21,6 +21,7 @@ struct TaskWorkflowHeader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .center, spacing: Spacing.md) {
+                if task.runtime?.status == .paused { Text("Paused").foregroundStyle(palette.textSecondary) }
                 if let workflow = work.value?.workflow {
                     WorkflowGraph(
                         nodes: workflow.nodes, edges: workflow.edges, position: workflow.position,
@@ -98,6 +99,13 @@ struct TaskWorkflowHeader: View {
                     .lineLimit(3)
                     .textSelection(.enabled)
                     .accessibilityIdentifier("task-workflow-error")
+            }
+        }
+        .contextMenu {
+            if task.runtime?.status.isTerminal != true {
+                Button(task.runtime?.status == .paused ? "Resume Task" : "Pause Task") {
+                    Task { await model.pauseTask(task, wave: wave, paused: task.runtime?.status != .paused) }
+                }.disabled(acting)
             }
         }
         .font(Typography.body(12))

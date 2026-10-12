@@ -527,6 +527,12 @@ pub(crate) fn select_task_run(
     checkout: &Path,
     requested: Option<&str>,
 ) -> OpsResult<TaskRunSelection> {
+    if store.sqlite.task_state(&task.id).map_err(task_error)? == crate::durable::TaskState::Paused {
+        return Err(task_error(format!(
+            "Task is paused; use `lf task resume {}` before running a Flow",
+            task.identifier
+        )));
+    }
     let current = store.sqlite.workflow(&task.id).map_err(task_error)?;
     // A name that leaves the current node is that edge, whatever else
     // shares its name.
@@ -3069,6 +3075,24 @@ pub fn task_complete(repo: &Path, issue: &str, note: Option<&str>) -> OpsResult<
     })
 }
 
+pub fn task_pause(issue: &str, paused: bool) -> OpsResult<()> {
+    block_on_task(async {
+        let store = task_store().await?;
+        let task = store
+            .get_task_by_issue(issue)
+            .await
+            .map_err(task_error)?
+            .ok_or_else(|| task_error(format!("Task {issue} is unavailable")))?;
+        store
+            .sqlite
+            .set_task_paused(&task.id, paused)
+            .map_err(task_error)?;
+        let wave = owning_wave(&store, &task).await?;
+        super::planning_sync::sync_after_save(&store, wave.repo()).await;
+        Ok(())
+    })
+}
+
 pub fn task_reopen(issue: &str, note: Option<&str>) -> OpsResult<Task> {
     block_on_task(async {
         let store = task_store().await?;
@@ -3325,6 +3349,9 @@ pub(crate) async fn reconcile_task_completion(
     store: &SharedStore,
     task: &mut Task,
 ) -> OpsResult<()> {
+    if store.sqlite.task_state(&task.id).map_err(task_error)? == crate::durable::TaskState::Paused {
+        return Ok(());
+    }
     match task_work_status(store, task).await? {
         WorkStatus::Done => {
             return Ok(());

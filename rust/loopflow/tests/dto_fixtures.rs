@@ -1112,3 +1112,12 @@ fn desktop_pane_receipt_returns_the_affected_identity() {
         serde_json::from_str::<serde_json::Value>(json).unwrap()
     );
 }
+
+#[test]
+fn paused_task_state_is_unfinished() {
+    let state: TaskState =
+        serde_json::from_str(include_str!("../../../tests/fixtures/dto/task_paused.json")).unwrap();
+    assert_eq!(state, TaskState::Paused);
+    assert!(!state.is_terminal());
+    assert_eq!(serde_json::to_string(&state).unwrap(), "\"paused\"");
+}

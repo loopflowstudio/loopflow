@@ -1,69 +1,43 @@
-# v0.13.12
+# v0.13.13
 
 <!-- loopflow:release-notes=narrative;gate=safe -->
 
-v0.13.12 makes saved work easier to carry between Machines and unattended work easier to direct, follow and resume. Planning can travel through Git or Linear, Desktop can be arranged from `lf`, and each Session keeps its own record of delivered direction. Claude answers can move Flows forward, while process status and stop-and-resume support make background conversations easier to recover.
+v0.13.13 reduces interruptions when several pieces of work run at once. Linear checks are shared across work boundaries, optional Session naming gives way when the store is busy, and PR publication uses current Git ancestry when a saved Task base is stale. The through-line is keeping prompts and delivery moving while preserving pending writes and branch history.
 
-## Carry work between Machines and keep its place
+## Check Linear when work needs it
 
-Waves, Projects, Tasks and comments share one local model with repository-selected personal Git, shared Git or Linear synchronization. Offline edits remain local until reconnection; foreground CLI, Session and Desktop connections synchronize without replaying agent turns or Flows.
+Agents no longer poll Linear independently while idle. Changes are acquired before Flow steps, after agent turns, when showing planning and before Linear writes, reducing duplicate requests as concurrent work grows.
 
-- CLI and Desktop expose Git acquisition, publication, conflicts and retained alternatives. Rejected changes remain available without blocking unrelated records.
-- Remote Task commands resolve through the target's configured planning and separately validate pushed code. Repeated dispatch reuses Task identity and preserves existing checkout contents.
-- New Tasks reserve one permanent execution Machine before checkout. Concurrent starts and lost replies retain that owner; started Tasks stay put. Historical shared Tasks without a coordinator still require recovery.
-- Shared planning travels; checkouts, captured Workflow positions, Sessions, Processes, controls and delivery attempts remain local.
-- Required post-merge follow-up is removed. Bare landing leaves the Task open; optional follow-up work uses ordinary Task creation before completion. Private recovery retains historical reserved filings and uncertain exports.
+- Team checks share ten-second freshness across processes and repositories. Paginated acquisition advances its watermark only after successful ingestion.
+- Desktop and `--watch` retain checks with a 30–240-second backoff. Teams without live Tasks make no acquisition requests; locally finished or abandoned Tasks are excluded.
+- Rate-limit responses and exhausted quota headers establish one cooldown across a Home. After reset, the next supported boundary retries pending delivery; lost responses retain uncertainty.
+- Successful mutation responses settle writes without follow-up reads. Foreground Git exchange remains in place.
+- Comments on an idle Task become available at the next supported boundary without waking its Session.
 
-## Arrange Desktop around the work
+## Keep optional naming out of the prompt's way
 
-Agents can open and arrange Desktop by repository, Wave or Task identity. Each Work retains its tab and panes in one repository window across Machines, with Sessions separate from their views and pane execution locations preserved.
+Native title callbacks now bound their store work so contention does not make optional naming wait through the hook's five-second timeout. When ownership cannot be established promptly, the title stays unchanged.
 
-- Open a Task with `lf --task TASK desktop open` and inspect arrangements with `lf desktop list --json`.
-- Desktop commands support shell splits, bounded terminal reads and targeted input.
-- Linux reports unsupported Desktop operations. Native usability and configured remote behavior still need acceptance verification.
+- Title callbacks run before ordinary command admission, with a 100 ms Process-recording wait and separate 100 ms bounds for ownership lock waits and history scans.
+- Process history remains best-effort, without creating or migrating a store. Failed observation is no longer retried at exit.
 
-## Keep direction with every conversation
+## Publish from the branch's current history
 
-Task direction can reach every associated Session, including conversations outside a running Flow. Each Session retains its own delivery history, so idle conversations receive pending direction when they ordinarily continue without being started just to deliver a steer.
+`lf pr open` and `lf pr publish` resolve their comparison from current Git ancestry, so a stale saved base after a rebase or rewritten main no longer blocks valid branch work. Publication preserves existing commits, including inherited dependencies absent from upstream.
 
-- Task comments and definition revisions produce immutable steers. Repository, Wave and direct Session commands also supply direction; repository and Wave scope follows existing work associations.
-- Supported provider boundaries deliver at most eight steers within 10,000 bytes of combined context, with complete sources available for excerpts. Resume and compaction preserve delivery history.
-- `lf session steers` inspects delivery, reads sources and explicitly retries uncertain attempts without starting a turn.
-- Session receipts replace Flow injection and per-step cursors. Recorded emission does not prove provider acceptance or that the model followed the direction; no current adapter confirms acceptance.
-
-## Choose an agent and let its answers advance the Flow
-
-A global `-a` / `--agent` carries one explicit provider and optional model through Tasks, nested Flows and child commands. Headless Claude records completed answers through the shared harness, allowing deciding steps to advance or request a correction in the same conversation.
-
-- Use `lf -a claude:opus debug` or `lf debug -a claude:opus`. The inherited choice wins over saved defaults and conflicting child selections, and forwards through remote commands. Independent Session shells clear it; arguments after `--` remain literal.
-- Replay can select an agent without changing its source capture. Native resume permits model changes within the saved provider; switching providers requires a new Session.
-- Flow decisions and final answers require correlated, successfully completed native turns. Native JSON schemas carry through launch, correction and replay; retained transcript prose cannot substitute for a final answer.
-- Headless output prints assistant text without the former tool summaries or cost/time footer. Historical captures remain intact.
-
-## See what is running and continue it interactively
-
-CLI and Desktop status follows the recorded agent process and its exact operating-system identity. Stale client files, attachment events and sockets no longer keep a dead agent looking active or Waiting.
-
-- Waiting requires a live agent. Work-watch checks operating-system state every two seconds as well as refreshing on process changes, so death can appear without a database write.
-- Older Sessions without recorded process identity remain Unknown. Failed connections and uncertain status do not authorize a replacement agent or checkout cleanup.
-- `lf session connect SESSION` stops a headless Claude or OpenCode process group and opens the same saved native conversation. Missing native identity refuses before stopping useful work.
-- Interrupted turns remain unfinished. Shutdown requires the current attachment and accounts for surviving helpers. Codex retains its live connection behavior and protections for unrelated conversations.
+- Compare HEAD with the selected upstream's current merge-base and refresh root Tasks' saved bases without relying on reflogs.
+- Stacked Tasks retain their integration forks until explicit sync. Sync after a parent squash preserves child edits without restoring files deleted on main.
+- Ownership checks remain, as do refusals for empty ranges and unrelated histories. Ancestry errors are shorter and leave the branch intact.
 
 ## Operational notes
 
-Storage conversion preserves Work identities, authored content, provider mappings, pending receipts and local execution history. Historical steer events migrate into Session delivery history while Linear comment receipts remain separate.
+Linear cooldowns are shared within one Home; separate Homes remain independent. Linear writes still use unconditional updates, so an unseen concurrent edit can be overwritten between observation and mutation.
 
-- Personal Git keys require explicit recovery on another Machine. Switching transports retains history but does not automatically migrate unmapped Git-imported Work into Linear. Linear's unconditional-update race remains; exactly-once delivery is not claimed.
-- Git publication can remain pending or unconfirmed without warning a short-command caller, although delivery evidence is retained.
-- Repository and Wave steers remain Machine-local. Already-open providers without hook declarations require a provider start.
-- Scheduled commands move to one repository cron list. Conversion preserves installed job identities, history and execution locks; installation remains explicit.
-- Installation checks reuse cached images, including explicit `--image` selections. Refresh mutable tags with `docker pull`. Recognized registry throttling retries after 15, 30 and 60 seconds within one five-minute download budget; other pull errors fail immediately. The checks themselves are not retried.
-
-Recorded verification includes provider stand-ins, migration and delivery fixtures, focused CLI checks and headless Swift tests. Configured-provider acceptance, native Desktop and two-Machine SSH behavior, live Linear, installed scheduling and real cold-runner throttling recovery remain unverified. The supplied evidence does not establish a passing full matrix for the combined release.
+- For rollout measurements in loopflow, etude, kata and fantasia, restore `linear.team` with `planning.provider: linear` before collecting live request and quota evidence.
+- Live Linear request counts, rejected-request quota accounting and installed pending-write recovery remain unverified. Confirm retained writes settle at a supported boundary after reset.
+- Title-hook contention probes and disposable PR scenarios passed, but installed acceptance in Kata and Etude remains outstanding. The reported Kata timeout has no confirmed lock trace; broader slow-status and records-read reports remain unresolved.
+- Recorded checks include focused network-isolated tests, formatting, Clippy and architecture checks. The supplied evidence does not establish a passing full hosted matrix for the combined release; repaired Linux PR coverage also remains CI-owned.
 
 ## Small changes
 
-- `lf commit` saves selected `scratch/` files in ordinary Task worktrees while preserving unrelated staged content and working edits. Persistent workspaces continue to exclude scratch and explain where to save durable notes.
-- Empty commit selections explain what needs to change. Git failures retain stderr and stdout, or report the exit status when neither contains diagnostics.
-- OpenCode receives permission rules when a new session is created; uncertain writes are no longer automatically retried.
-- Planning-only Tasks without worktrees no longer break checkout pruning.
+- Task-preservation coverage removes a clock-boundary assumption while retaining checks that planning edits preserve execution state.

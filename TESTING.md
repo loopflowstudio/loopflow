@@ -1326,3 +1326,19 @@ LOOPFLOW_PORTFOLIO_TEST_BIN="$PWD/target/debug/lf" scripts/test_desktop.sh --fil
 
 Without the explicit binary, the CLI round-trip case is skipped; service and DTO
 cases still run. Rust's `portfolio_cli_tests` covers standalone command dispatch.
+
+## Instruction decisions
+
+```bash
+cargo test -p loopflow --lib work_guidance_is_additive
+cargo test -p loopflow --test session_cli_tests instruction_inspection
+uv run pytest python/tests/test_instruction_levels.py
+```
+
+The prompt and CLI checks verify recorded inclusion, exclusion and explanation.
+The Python tests verify evaluation scoring, not agent behavior. Render and run
+[the decision cases](scripts/evals/README.md) in a capable provider evaluation
+environment; retain model/version, inputs, replies and failures. These cases cover
+launcher work, taskless Flows, custom Work clients, guided memory maintenance,
+explicit Task adoption, scratch ownership and instruction opt-out. They score
+proposed actions; lifecycle integration tests remain the proof of tool effects.

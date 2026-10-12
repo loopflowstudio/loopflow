@@ -1,3 +1,4 @@
+pub(crate) mod scratch;
 pub mod worktree_name;
 pub mod worktrees;
 
@@ -1049,15 +1050,7 @@ pub fn merge(
         // Git has populated the index/worktree with its normal three-way merge.
         // Record the real target before either committing or handing off recovery.
         write_merge_target(worktree, target)?;
-        let preserve_scratch =
-            fork_base.is_some() || crate::git::worktrees::is_persistent_worktree(worktree)?;
-        if preserve_scratch {
-            // Scratch belongs to the child, including deletions and cleanly
-            // merged parent additions. Restoring changed scratch paths also resolves
-            // modify/delete conflicts which a text merge cannot handle.
-            restore_scratch_from_head(worktree)?;
-        }
-        if output.status.success() || (preserve_scratch && list_conflicts(worktree)?.is_empty()) {
+        if output.status.success() {
             return continue_merge(worktree, None);
         }
     } else if !output.status.success() {
@@ -1076,64 +1069,6 @@ pub fn merge(
             .then(|| rev_parse(worktree, "HEAD"))
             .transpose()?,
     })
-}
-
-fn restore_scratch_from_head(worktree: &Path) -> Result<(), GitError> {
-    // Restore only paths changed in the merge index. Unrelated working edits
-    // and untracked child notes never enter this path list.
-    let paths = git_stdout(
-        worktree,
-        &[
-            "diff",
-            "--cached",
-            "--name-only",
-            "--no-renames",
-            "-z",
-            "HEAD",
-            "--",
-            "scratch",
-        ],
-    )?;
-    if paths.is_empty() {
-        return Ok(());
-    }
-    let child_paths = git_stdout(
-        worktree,
-        &[
-            "ls-tree",
-            "-r",
-            "--name-only",
-            "-z",
-            "HEAD",
-            "--",
-            "scratch",
-        ],
-    )?;
-    let (restore, remove): (Vec<_>, Vec<_>) = paths
-        .split('\0')
-        .filter(|path| !path.is_empty())
-        .partition(|path| child_paths.split('\0').any(|child| child == *path));
-    // restore cannot resolve an unmerged path absent from the source tree.
-    for (mut args, paths) in [
-        (vec!["--literal-pathspecs", "rm", "-f", "--"], remove),
-        (
-            vec![
-                "--literal-pathspecs",
-                "restore",
-                "--source=HEAD",
-                "--staged",
-                "--worktree",
-                "--",
-            ],
-            restore,
-        ),
-    ] {
-        if !paths.is_empty() {
-            args.extend(paths);
-            git_stdout(worktree, &args)?;
-        }
-    }
-    Ok(())
 }
 
 fn write_merge_target(worktree: &Path, target: &str) -> Result<(), GitError> {

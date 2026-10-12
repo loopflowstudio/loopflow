@@ -1,12 +1,9 @@
 ---
 produces: connected Loopflow path and an evidence-backed next command
 ---
-Connect this repository to Loopflow's distributed control system.
-
-Loopflow is not primarily a prompt launcher. It is the shared control surface
-for durable Waves, chapter plans and Linear-backed Tasks, GitHub delivery, stable
-execution Machines, and the agents that do the work. Establish that system first.
-Skills, flows, models, and launch preferences are secondary configuration.
+Set up the part of Loopflow the user wants to use. The launcher, Skills, Flows,
+worktrees and PR tools need no Task, Wave or Linear setup. Desktop offers a guided
+work experience; other clients can use the same work APIs with their own workflow.
 
 ## Reviewer mode
 
@@ -24,7 +21,25 @@ The launch prompt identifies the reviewer.
 Never expose credential values. Use Loopflow's account commands; do not read
 tokens from dotfiles or environment variables.
 
-## 1. Discover the existing system
+## Start from the request
+
+Use the request, installed tools and existing Work association to infer what
+needs setup. With no further direction, make a plain agent launch work. Ask only
+when a concrete setup choice cannot be inferred; do not ask the user to select
+a usage level. Continue existing Work without requiring another opt-in.
+
+For launcher, Skill, Flow, worktree or PR use, check `lf --version`, installed
+agent availability, and only the accounts needed for the requested operation.
+Preserve existing configuration; defaults need no `.lf/config.yaml`. Prove the
+selected capability with its read-only help/status and offer one next command,
+such as `lf : "fix the failing test"` or `lf flow pursue`. Do not launch a coding
+job as a setup probe. Stop here: no Task creation, Linear connection or Wave lookup.
+
+For existing or explicitly requested managed work, read `lf help skill work` and
+continue below. A terminal client needs no Desktop installation and keeps its
+own workflow. Only inspect or connect the parts the request needs.
+
+## 1. Discover the selected work system
 
 Run read-only checks first. Missing optional commands are observations, not
 failures.
@@ -120,7 +135,7 @@ works; never modify them for a parent reviewer.
 
 ## 3. Connect shared truth for the intended path
 
-Ask the user what they want to make operational now:
+Use the work path already selected; ask only for missing scope:
 
 1. an existing Wave,
 2. a new durable Wave,
@@ -228,7 +243,7 @@ Do not create an ad-hoc worktree or convert the Task into a local prompt.
 
 ### Direct skills and flows
 
-Offer the lightweight path without pretending it is the whole product:
+This path needs no managed setup. Offer a next command:
 
 ```bash
 lf debug -c
@@ -315,6 +330,6 @@ selected path is proved. Do not launch it automatically.
 
 - Lead with the observed topology, not configuration trivia.
 - Ask one consequential question at a time.
-- Prefer a working durable path over exhaustive optional setup.
+- Prove the chosen capability without enrolling the user in other features.
 - Expose Wave and Task; keep the chapter Project internal. Keep Machine, account, and skill distinct.
 - Stop when the chosen path is proved and the next command is obvious.

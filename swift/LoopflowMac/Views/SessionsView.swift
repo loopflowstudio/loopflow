@@ -1738,20 +1738,25 @@ private struct SessionPaneView: View {
             _elsewherePlaceholder(item)
         case .opening, .prepared:
             ProgressView("Opening session…")
+                .foregroundStyle(TerminalPalette.foreground)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .failed(let message):
             ContentUnavailableView {
                 Label("Session failed to open", systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(TerminalPalette.foreground)
             } description: {
                 Text(message)
+                    .foregroundStyle(TerminalPalette.dim)
             } actions: {
                 openButton(item, retrying: true)
             }
         case .pending, .live:
             ContentUnavailableView {
                 Label("Not running here", systemImage: "terminal")
+                    .foregroundStyle(TerminalPalette.foreground)
             } description: {
                 Text("This Session has no live terminal in this pane yet.")
+                    .foregroundStyle(TerminalPalette.dim)
             } actions: {
                 openButton(item, retrying: false)
             }
@@ -1770,6 +1775,7 @@ private struct SessionPaneView: View {
             }
             .buttonStyle(.bordered)
             .tint(TerminalPalette.accent)
+            .foregroundStyle(TerminalPalette.foreground)
             .disabled(action.unavailableReason != nil)
             .help(action.unavailableReason ?? action.help)
             .accessibilityIdentifier(retrying ? "session-retry-\(item.id)" : "session-open-here-\(item.id)")
@@ -1782,6 +1788,7 @@ private struct SessionPaneView: View {
     private func _elsewherePlaceholder(_ item: SessionItem) -> some View {
         ContentUnavailableView {
             Label("Active in another terminal", systemImage: "rectangle.on.rectangle")
+                .foregroundStyle(TerminalPalette.foreground)
         } description: {
             Text(
                 """
@@ -1790,6 +1797,7 @@ private struct SessionPaneView: View {
                 It keeps running there until you move it.
                 """
             )
+            .foregroundStyle(TerminalPalette.dim)
         } actions: {
             if let action = item.record.action(.moveHere) {
                 VStack(spacing: Spacing.sm) {

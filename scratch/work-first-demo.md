@@ -242,12 +242,9 @@ membership; retained Sessions and Wave plans remain intact. Review confirmed
 this removes a second inference of Started without mutating historical records.
 Check: `scripts/test_desktop.sh --filter WorkNavigationTests -Xswiftc -gnone --no-parallel` — PASS, 37 tests; diff check PASS. Native correction initially still loaded; later copied-data rendering below supersedes it. No live installation authorized.
 
-Release alignment: a fresh SQLite backup in `compatibility-home` first refused
-unknown 0.13.12 migrations. `lf sync --manual` then merged current main locally
-(`6f9bd12f85`); the sole conflict preserves collapsed Overview and main's
-TaskDueDateView replacement. Explicit-target sync first refused the stacked Task;
-the supported automatic-parent sync succeeded. Check: TaskFlow/WorkNavigation
-focused suites PASS (45); validation-only Rust build PASS. No push/install.
+Release alignment `6f9bd12f85` merged main; conflict resolution preserves collapsed
+Overview and TaskDueDateView. Focused Swift 45/build PASS. Earlier sync attempts:
+`e276eee8a2:scratch/work-first-demo.md`. No push/install.
 
 The synced build still refused the copy's missing `linear_team_checks` draft.
 Applying that exact CREATE TABLE to the disposable copy preserved every existing
@@ -284,5 +281,8 @@ gone; direct packaged `portfolio --json` exits 0. No live install or provider pr
 LOO-312 fails with “no checkout to hold a conversation.” The copied record has no primary or directly bound Sessions;
 this is not a wrong-conversation fallback. Keep it unresolved rather than inventing
 history or hiding the Task. Corrected the participant read to `config user --json`
-and confined dark appearance to the Session placeholder on its dark terminal panel.
-Check: RegistryQuery/WorkDestination suites PASS (68); configured participant read and diff check PASS. Native contrast unverified.
+The first placeholder dark-appearance change failed native review: text remained
+near-black. Explicit TerminalPalette foregrounds now replace inferred system inks.
+Check: RegistryQuery/WorkDestination PASS (68); palette repair WorkDestination PASS (51); configured participant read and diff check PASS.
+Native LOO-462 click selected its exact Session, then sandbox denied launcher
+inspection. Closing that failed terminal exposed the contrast defect. No takeover.

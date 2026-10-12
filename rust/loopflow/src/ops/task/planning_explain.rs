@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::ops::context::{ContextExplanation, ContextFact};
 use crate::ops::run::WorkSelection;
-use crate::pm::PmItemUpdate;
 use crate::store::SharedStore;
+use crate::work::task::TaskUpdate;
 
 #[derive(Debug)]
 pub enum TaskPlanningRequest<'a> {
@@ -14,7 +14,7 @@ pub enum TaskPlanningRequest<'a> {
         title: Option<&'a str>,
         notes: Option<&'a str>,
     },
-    Edit(PmItemUpdate),
+    Edit(TaskUpdate),
     Refile {
         wave: &'a str,
     },
@@ -167,7 +167,7 @@ async fn read_planning(
                 return Ok(());
             }
             let fields = [
-                ("title", update.name.is_some()),
+                ("title", update.title.is_some()),
                 ("description", update.description.is_some()),
                 ("rank", update.rank.is_some()),
                 ("assignee", update.assignee.is_some()),
@@ -299,7 +299,7 @@ async fn read_saved_task(
         .get_task(&id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("Task {id} is missing"))?;
-    crate::ops::pm::validate_saved_task_scope(store, cwd, wave, &task).await?;
+    crate::ops::task::validate_saved_task_scope(store, cwd, wave, &task).await?;
     Ok(task)
 }
 

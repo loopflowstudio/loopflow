@@ -44,7 +44,7 @@ struct DesktopHeadlessTests {
         let statuses = try JSONDecoder().decode([PeerPlanningStatus].self, from: data)
         let view = PeerPlanningView(reading: .unavailable(lastGood: statuses, reason: "reader exited"))
         for text in ["Showing the last sync status", "Local changes pending",
-                     "Configured for this repository", "Held task retained-task: retained projection conflict",
+                     "Configured for this repository", "Held retained-task: retained projection conflict",
                      "Publication: unconfirmed (attempted-publication)", "Fetched: newer-fetch",
                      "Retained import: retained-import", "Sync status unavailable: reader exited",
                      "Retained alternative", "\"Retained title\"",

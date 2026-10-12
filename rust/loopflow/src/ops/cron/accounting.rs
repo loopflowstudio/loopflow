@@ -1424,9 +1424,7 @@ mod tests {
         ScheduledReleaseOutcome,
     };
     use crate::durable::{CronReceiptId, MachineId};
-    use crate::ops::{
-        parse_schedule, CronHost, CronOutcome, CronReceipt, CronSource, CronSpec, CronTargetKind,
-    };
+    use crate::ops::{parse_schedule, CronHost, CronOutcome, CronReceipt, CronSource, CronSpec};
     use std::path::Path;
 
     #[test]
@@ -1455,7 +1453,13 @@ mod tests {
         CronSpec {
             wave: "infrastructure".into(),
             flow: "release-run".into(),
-            target_kind: CronTargetKind::Flow,
+            command: vec![
+                "--wave".into(),
+                "infrastructure".into(),
+                "--batch".into(),
+                "flow".into(),
+                "release-run".into(),
+            ],
             schedule: parse_schedule("0 0 10 * * *").unwrap(),
             working_directory: root.to_path_buf(),
             lf_path: root.join("lf"),
@@ -1476,7 +1480,7 @@ mod tests {
             machine_id: spec.host.machine_id.clone(),
             wave: spec.wave.clone(),
             flow: spec.flow.clone(),
-            target_kind: spec.target_kind,
+            target_kind: spec.target_kind().unwrap(),
             source: CronSource::Scheduled,
             schedule: spec.schedule.expression().into(),
             repo: spec.working_directory.clone(),

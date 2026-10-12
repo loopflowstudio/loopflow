@@ -1156,7 +1156,7 @@ impl CodexHarness {
                 let message = Message::Text(payload.to_string().into());
                 let (store, session, expected) = authority.clone();
                 let dispatched = tokio::task::spawn_blocking(move || {
-                    let outcome = store.with_session_attachment(&session, &expected, || {
+                    let outcome = store.with_session_dispatch(&session, &expected, || {
                         super::dispatch::send_fenced(&mut writer, message)
                     });
                     (writer, outcome)

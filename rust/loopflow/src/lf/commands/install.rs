@@ -1525,6 +1525,7 @@ fn running_app_processes(paths: &[PathBuf]) -> Result<Vec<(libc::pid_t, PathBuf)
 mod app_process_tests {
     use super::running_app_processes;
     use std::fs;
+    use std::io::{BufRead, BufReader};
     use std::process::{Child, Command, Stdio};
     use std::time::Duration;
 
@@ -1540,6 +1541,7 @@ mod app_process_tests {
     #[test]
     #[ignore = "entry point for the process-discovery fixture"]
     fn app_process_fixture() {
+        println!("ready");
         std::thread::sleep(Duration::from_secs(60));
     }
 
@@ -1555,13 +1557,28 @@ mod app_process_tests {
             Command::new(&cli)
                 .args([
                     "--ignored",
+                    "--nocapture",
                     "--exact",
                     "lf::commands::install::app_process_tests::app_process_fixture",
                 ])
-                .stdout(Stdio::null())
+                .stdout(Stdio::piped())
                 .spawn()
                 .unwrap(),
         );
+        // Wait until the copied executable has entered the fixture before
+        // unlinking it; spawn alone does not establish completed startup.
+        let mut output = BufReader::new(child.0.stdout.take().unwrap());
+        loop {
+            let mut line = String::new();
+            assert_ne!(
+                output.read_line(&mut line).unwrap(),
+                0,
+                "fixture exited before startup"
+            );
+            if line.trim_end().ends_with("ready") {
+                break;
+            }
+        }
         let pid = child.0.id() as libc::pid_t;
         let app_helper = root.join("Loopflow.app/Contents/MacOS/lf");
 

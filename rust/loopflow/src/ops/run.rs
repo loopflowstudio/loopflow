@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use crate::durable::{render_steers, Steer, WorkRef};
+use crate::durable::WorkRef;
 use crate::id::WaveId;
 use crate::store::SharedStore;
 use crate::work::project::Project;
@@ -27,7 +27,6 @@ pub(crate) fn render_task_context(
     project: &Project,
     pr: Option<&TaskPr>,
     wave_name: &str,
-    steers: &[Steer],
 ) -> String {
     let placement = task
         .parent_pr_id
@@ -39,14 +38,13 @@ pub(crate) fn render_task_context(
         .map(|pr| format!("\nPull request: {}", pr.url))
         .unwrap_or_default();
     format!(
-        "Task {identifier}: {title}\n\n{description}\n\nChapter plan: {project} (source {project_id})\n{project_context}\n\n{direction}\n\nTask directive snapshot synced at: {task_snapshot_synced_at}\nChapter plan snapshot synced at: {project_snapshot_synced_at}\nWave: {wave}\nTask Work: {task_id}\nWorktree: {worktree}\nBranch: {branch}{pull_request}\nBase commit: {base_commit}\n{placement}",
+        "Task {identifier}: {title}\n\n{description}\n\nChapter plan: {project} (source {project_id})\n{project_context}\n\nTask directive snapshot synced at: {task_snapshot_synced_at}\nChapter plan snapshot synced at: {project_snapshot_synced_at}\nWave: {wave}\nTask Work: {task_id}\nWorktree: {worktree}\nBranch: {branch}{pull_request}\nBase commit: {base_commit}\n{placement}",
         identifier = task.identifier,
         title = task.title,
         description = task.description,
         project = project.name,
         project_id = project.linear_id.as_ref().map(|id| id.as_str()).unwrap_or("local"),
         project_context = render_project_context(project),
-        direction = render_steers(steers),
         task_snapshot_synced_at = task.pm_snapshot_synced_at.map(|at| at.to_string()).unwrap_or_else(|| "not observed".into()),
         project_snapshot_synced_at = project.pm_snapshot_synced_at.map(|at| at.to_string()).unwrap_or_else(|| "not observed".into()),
         wave = wave_name,
@@ -215,9 +213,8 @@ async fn bind_selected_work(
             .map_err(run_error)?
             .ok_or_else(|| run_error(format!("Task {} has no owning Project", task.id)))?;
         let work = WorkRef::Task(task.id.clone());
-        let steers = Vec::new();
         let pr = store.active_task_pr(&task.id).await.map_err(run_error)?;
-        let mut context = render_task_context(&task, &project, pr.as_ref(), wave.slug(), &steers);
+        let mut context = render_task_context(&task, &project, pr.as_ref(), wave.slug());
         if let Ok(Some(workflow)) = store.sqlite.workflow(&task.id) {
             context.push_str(&format!("\n\n{}", workflow.guidance(&task.identifier)));
         }
@@ -332,6 +329,7 @@ fn run_error(error: impl std::fmt::Display) -> OpsError {
 
 #[cfg(test)]
 mod tests {
+    use crate::test_linear_input::{InventoryFixture, SeedLinear};
     use std::sync::Arc;
 
     use time::OffsetDateTime;
@@ -339,11 +337,11 @@ mod tests {
     use super::{resolve_work_binding, resolve_work_selection, WorkSelection};
     use crate::durable::{ProjectId, TaskId, WorkRef};
     use crate::id::WaveId;
-    use crate::pm::linear::LinearProject;
-    use crate::pm::PmSnapshot;
-    use crate::pm::{LinearIssueId, LinearProjectId};
+    use crate::linear::LinearProject;
+    use crate::linear::{LinearIssueId, LinearProjectId};
     use crate::store::SharedStore;
-    use crate::store::{PmSnapshotRow, StorageConfig};
+    use crate::store::StorageConfig;
+    use crate::test_linear_input::Inventory;
     use crate::work::project::Project;
     use crate::work::project::ProjectKR;
     use crate::work::task::{LinearWritebackState, Observation, Task, TaskPr, TaskPrId};
@@ -910,6 +908,7 @@ mod tests {
     async fn controller_free_task_supports_multiple_independent_bindings() {
         let (directory, store) = test_store().await;
         let repo = directory.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
         let worktree = directory.path().join("repo.runtime-research");
         std::fs::create_dir_all(&worktree).unwrap();
         let wave = Wave::new(
@@ -923,7 +922,7 @@ mod tests {
         let task = task(&store, &wave, &project, worktree.clone()).await;
 
         store
-            .append_steer(
+            .save_steer(
                 &WorkRef::Task(task.id.clone()),
                 crate::durable::Author::User,
                 "ADVANCER ONLY",
@@ -1227,6 +1226,7 @@ mod tests {
     async fn hierarchical_work_selectors_must_match() {
         let (directory, store) = test_store().await;
         let repo = directory.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
         let worktree = directory.path().join("repo.runtime-research");
         std::fs::create_dir_all(&worktree).unwrap();
         let wave = Wave::new(
@@ -1289,7 +1289,7 @@ mod tests {
             .create_project(&project(&wave, "loopflow-api", "project-api"))
             .await
             .unwrap();
-        let snapshot = PmSnapshot {
+        let snapshot = Inventory {
             projects: vec![LinearProject {
                 description: None,
                 revision: None,
@@ -1311,8 +1311,8 @@ mod tests {
             items: Vec::new(),
         };
         store
-            .put_pm_snapshot(
-                PmSnapshotRow {
+            .seed_inventory(
+                InventoryFixture {
                     wave_id: wave.id().clone(),
                     provider: "linear".to_string(),
                     initiative: "initiative-1".to_string(),

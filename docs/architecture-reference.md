@@ -193,7 +193,7 @@ Flow LfProcess --< step LfProcess   FlowProcess graph; result is the step's exit
 | AgentSession | Provider-owned conversation, identified by opaque AgentSessionId for resume, turn matching and account attribution; no separate table |
 | Machine | Store, payloads, credentials and exact local process authority |
 | Placement | Where Work executes; no authority over merely observed processes |
-| Steer | Ordered authored correction to Work |
+| Steer publication | Immutable authored direction with independent Session delivery |
 
 The LOO-441 names are integrated. The common `LfProcess` wire projection
 still carries both lf and agent rows during the AgentProcess cutover.
@@ -560,9 +560,9 @@ effects. The unconditional-update race remains a protocol limit.
 | **Live metric** — one reviewed measurement contract owned by exactly one Wave, plus revision-bound current evidence | `wave/<name>/metrics/*.md` owns meaning and Wave ownership; an accepted instrument observation owns its source-time fact; [`MetricPortfolioDto`](../rust/loopflow/src/work/wave/metrics.rs) is the sole derived reading shared across surfaces. Metrics inform KRs but never complete them. | [`MetricContract`](../rust/loopflow/src/work/wave/metrics.rs), [`MetricObservation`](../rust/loopflow/src/work/wave/metrics.rs), [`MetricPortfolioDto`](../rust/loopflow/src/work/wave/metrics.rs) | `wave/<name>/metrics/`, `metric_instruments`, `metric_observations` | Metric instruments write observations; foreground Rust readers derive bounded portfolios. | Status/roadmap JSON, Wave and Task prompts, the shared Swift DTO, and Mac Wave detail expose the same `metric_portfolio`. | — |
 | **Task** — concrete work inside exactly one Project | Local Task planning owns directive/status with optional Linear synchronization. The checked-out branch identifies the Task through its checkout placement; the stored worktree path is placement. Git upstream tracking does not select Task identity. Every Flow process for the Task is equally its work; helpers and delivery commands may mutate the worktree without driving a Flow. Git owns commits/branch state; GitHub owns PR/check/merge truth. | [`Task`](../rust/loopflow/src/work/task/mod.rs), [`TaskPr`](../rust/loopflow/src/work/task/mod.rs) | `tasks`, `task_creation_intents`, `task_changes`, `task_state_deliveries`, `task_issue_identities`, `task_deletions`, `task_events`, `task_prs`, `task_pr_repair_incidents`, `task_linear_observations`, `task_linear_ingested_comments`; Linear Issue; Git worktree | `lf task run` places the worktree, then drives a fresh Flow in the foreground; foreground operations record delivery evidence | `lf task`, `lf pr`, `lf wt`, `lf sync`, `lf commit` | Linear |
 | **PR landing** — one recorded intent to merge an exact PR head | GitHub is authoritative for the PR head, required checks, and merge. One landing generation admits one check at a time; an incident without a recorded response admits one repair. | [`PrLanding`](../rust/loopflow/src/pr_landing.rs), [`CiIncident`](../rust/loopflow/src/work/task/mod.rs) | `pr_landings`, `ci_incidents` | The process holding the claim: `lf pr reconcile` to observe and settle, `lf ci watch` to repair | `lf arm`, `lf land`, `lf pr reconcile`, `lf ci watch`, `lf pr checks` | `provider:github`, model provider for `ci-fix`, `process:git`, `process:gh` |
-| **Linear observations** — acquisition and ownership evidence | Repository/provider-scoped Project and issue observations retain provider evidence. Task and Wave readers use saved planning; ingestion preserves pending saves against unchanged baselines and adopts observed Linear conflicts, retaining losing intentions. Wave membership and sync observations reference those shared facts; change receipts invalidate admission without rewriting execution history. | [`PmSnapshotRow`](../rust/loopflow/src/store/mod.rs), [`PmTaskRecord`](../rust/loopflow/src/store/mod.rs), [`PmWave`](../rust/loopflow/src/pm/mod.rs) | `pm_projects`, `pm_items`, `pm_wave_projects`, `pm_wave_sync`, `pm_issue_changes`, `pm_project_name_cutover`, `project_binding_imports`, `project_transitions`, `project_transition_items` | Foreground PM sync and Task lookup | `lf repo`, `lf refresh`, `lf task status` | `provider:linear` |
-| **Planning exchange** — shared Work changes across Machines | Canonical Work owns planning; repository configuration selects Git or Linear. Peer changes retain causal history and conflicts without importing execution or delivery authority. | [`PlanningSnapshot`](../rust/loopflow/src/planning_exchange.rs), [`PlanningGit`](../rust/loopflow/src/planning_git.rs), [`PlanningConfig`](../rust/loopflow/src/config.rs) | `planning_active`, `planning_destinations`, `planning_members`, `planning_peer_changes`, `planning_peer_conflicts`, `planning_peer_imports`, `planning_peer_observed`, `planning_user` | The shared planning writer saves/imports; foreground exchange observes and publishes configured refs. | `lf planning`, ordinary Work reads and saves | Git refs |
-| **Steer** — correction to Task advancement | Saved comment UUID or incoming Linear id/revision; Task identity selects its Runs | [`Steer`](../rust/loopflow/src/durable.rs), [`TaskEventKind`](../rust/loopflow/src/work/task/mod.rs) | `task_comments`, `task_comment_deliveries`; Task events retain direction | Foreground Task connections acquire comments independently of pending writes | `lf comment`, Linear issue comments | SQLite |
+| **Linear observations** — acquisition and ownership evidence | Repository/provider-scoped Project and issue observations retain provider evidence. Task and Wave readers use saved planning; ingestion preserves pending saves against unchanged baselines and adopts observed Linear conflicts, retaining losing intentions. Wave membership and sync observations reference those shared facts; change receipts invalidate admission without rewriting execution history. | [Linear acquisition](../rust/loopflow/src/linear/acceptance.rs) | `pm_projects`, `pm_items`, `pm_wave_projects`, `pm_wave_sync`, `pm_issue_changes`, `pm_project_name_cutover`, `project_binding_imports`, `project_transitions`, `project_transition_items`, `linear_team_checks` | On-demand team acquisition at planning/Flow/write boundaries and native turn hooks (`lf __planning-check`); watchers alone retain a slow clock. SQLite shares attempt freshness and the successful watermark; a Home-wide cooldown retains the reset deadline | `lf repo`, `lf refresh`, `lf task status` | `provider:linear` |
+| **Planning exchange** — shared Work changes across Machines | Canonical Work owns planning; repository configuration selects Git or Linear. Peer changes retain causal history and conflicts without importing execution or delivery authority. | [`PlanningSnapshot`](../rust/loopflow/src/planning_exchange.rs), [`PlanningGit`](../rust/loopflow/src/planning_git.rs), [`PlanningConfig`](../rust/loopflow/src/config.rs) | `repository_plans`, `planning_destinations`, `planning_peer_routes`, `planning_peer_changes`, `planning_peer_conflicts`, `planning_peer_imports`, `planning_peer_observed`, `planning_user` | The shared planning writer saves/imports; foreground exchange observes and publishes configured refs. | `lf planning`, ordinary Work reads and saves | Git refs |
+| **Steer** — message guiding work | Immutable source/revision UUID; existing associations select Sessions | [`Steer`](../rust/loopflow/src/steer.rs), [`SessionSteerStatus`](../rust/loopflow/src/steer.rs) | `steers`, `session_steers`, `steer_batches`, `steer_deliveries`; `steer_adapters` binds provider callbacks. `task_comments` and `task_comment_deliveries` retain the separate planning thread and Linear sync | Foreground Task connections acquire comments independently of pending writes | `lf comment`, Linear issue comments | SQLite |
 | **Tool response** — one idempotent response to a Work-scoped tool request | Stable Work identity plus request id names the response slot; a second, different answer is rejected. | [`ToolResponseWrite`](../rust/loopflow/src/durable.rs), [`ToolResponseReceipt`](../rust/loopflow/src/durable.rs) | `tool_responses` | Store transaction | Internal Work store API | — |
 | **LfSession** — one conversation | Session row owns name, ancestry, readiness, completion and publication. Its current capture references an immutable history event written at reservation. Earlier events retain caller and Work attribution. Complete returns saved feedback; the following typed decision chooses navigation. | `SessionRecord`, `SessionId` | `agent_sessions`, `session_events`; `session_activity` holds attachment stream readings and terminal-reported status | Native turn observation retains start/usage/completion; `lf __provider-session` records native identity; `lf __session-title` supplies new plain-native names; Session operations own state | `lf session`, interactive `lf` | `process:cmux` projects the attached Session name without owning it |
 | **Machine / Placement / Promotion** — stable machine identity, Work placement, and artifact selection | `MachineId` is identity; SSH route is mutable. Placement is planning state and never process ownership. Promotion owns immutable artifact selection, isolated schema proof, app replacement, and rollback only. Install selects the latest published release independently of caller Git state; the laptop schedule invokes that same command. Checkout updates belong to sync. | [`Machine`](../rust/loopflow/src/durable.rs), [`Placement`](../rust/loopflow/src/durable.rs), [`SwitchReceipt`](../rust/loopflow/src/installation.rs), [`published installation`](../rust/loopflow/src/lf/commands/install/published.rs) | `machines`, `work_placements`; Machine-local SQLite; installation selection and switch receipts; laptop refresh LaunchAgent | The promotion command owns its OS-locked switch transaction | `lf machine`, `lf self`, `lf --machine`, `lf install`, `lf schedule` | `process:ssh`, `process:launchctl`, `process:systemctl`, `process:/usr/bin/open`, `process:/usr/bin/osascript`, `process:brew`, `process:/bin/sh`, `process:tmux` |
@@ -575,7 +575,7 @@ effects. The unconditional-update race remains a protocol limit.
 | **Code-size measurement** — repository blobs measured in model tokens | Git blob identity owns content; token counts are deterministic memoized measurements, not Run usage. | [`CodeNode`](../rust/loopflow/src/lf/commands/tokens.rs), [`CodeSnapshot`](../rust/loopflow/src/lf/commands/tokens.rs) | `blob_tokens` | Foreground command only | `lf tokens` | — |
 | **Store change revision** — which displayed domain a commit changed | Derived inside the writer's transaction by schema triggers, never authored and never bumped at a call site. Transcript lines move nothing; usage moves only its own revision, which Wave detail follows at most every 10 s. A reader compares revisions to decide what to read again; events only say when to look. | [`StoreRevisions`](../rust/loopflow/src/store/sqlite/revisions.rs), [`WorkFrame`](../rust/loopflow/src/lf/commands/work_watch.rs) | `store_revisions` | Store transaction | `lf monitor work` | — |
 | **Schema frontier** — ordered definition of durable control storage | Released migration bytes are immutable authority; drafts join only through deterministic release materialization. | [`Migration`](../rust/loopflow/src/store/migration_catalog.rs), [`MigrationId`](../rust/loopflow/src/store/migration_catalog.rs) | `schema_migrations`; canonical and draft migration files | Store open validates/applies; release cut publishes | `lf release` | `process:sh` (release hooks) |
-| **Portable planning exchange** — shared Work without shared execution | Common planning writes retain causal journals, accepted frontiers, provider receipts and explicit correspondence. Repository association preserves local locators and execution; confirmation never reserves first start. | `RepositoryId`, `PlanningMutation`, `PeerPlanningStatus` | `repository_plans`, `planning_user`, `planning_destinations`, `planning_active`, `planning_members`, `planning_peer_changes`, `planning_peer_heads`, `planning_peer_observed`, `planning_peer_context`, `planning_peer_imports`, `planning_peer_conflicts`, `planning_associations`, `planning_creations` | Foreground planning exchange through the existing store writer | `lf planning`, `lf repo identity` | Git planning refs, separate from code remotes |
+| **Task first-start admission** — one permanent execution Machine | The creating Machine grants an immutable execution owner transactionally before checkout. Shared planning carries its coordinator; local receipts preserve retries after lost replies. Started Tasks retain their recorded Machine. | `TaskAdmission`, `TaskAdmissionAuthority` | `task_admissions` | Coordinator admission transaction | Task execution preparation | SSH |
 | **Desktop workspace** — retained presentation of repository, Wave or Task | Work identity selects one repository window and retained Work tabs. Pane contents own Machine locations; exact window/content/surface lifetimes fence mutations. Reads acquire no client and receipts promise no readiness. | `WorkWorkspaceKey`, `DesktopInspection`, `DesktopPaneTarget`, `DesktopPaneReceipt` | Window-owned registry, multiplexer and native surfaces; no second Work database | Loopflow.app on macOS | `lf desktop` | Apple events |
 <!-- architecture-map:end -->
 
@@ -610,7 +610,7 @@ kernel locks                 live local exclusion authority
 | Task delivery | `task_prs`, `task_pr_repair_incidents`, `task_linear_observations`, `task_linear_ingested_comments` | Optional PR, retained historical PRs and provider observations |
 | Work adjuncts | `tool_responses`, `work_placements` | Tool answers and Machine placement |
 | Historical Ask | `ask_exchanges`, `ask_linear_comment_outbox` | Retained exchange/publication facts; former Ask rows are ordinary conversations in `agent_sessions` |
-| PM projection | `pm_projects`, `pm_items`, `pm_wave_projects`, `pm_wave_sync`, `pm_issue_changes` | Bounded Linear reads |
+| Linear acquisition | `pm_projects`, `pm_items`, `pm_wave_projects`, `pm_wave_sync`, `pm_issue_changes`, `linear_team_checks` | Provider observations, shared attempt freshness and successful team watermark |
 | Metrics | `metric_instruments`, `metric_observations` | Registered producers and accepted measurements |
 | PR landing | `pr_landings`, `ci_incidents` | Exact PR-head delivery intent, claims, and repair admission |
 | Machine and provider authority | `machines`, `access_profiles`, `auth_browser_bindings`, `provider_accounts`, `provider_account_limits`, `provider_account_switches`, `provider_routes`, `provider_session_accounts`, `provider_tokens` | Machine routes, credentials, selection, limits, shared-home account switches, delivery receipts |
@@ -783,17 +783,47 @@ converges independently; there is no cross-system atomic switch.
 
 ## Durable communication
 
-Task steering saves a comment and its stable delivery UUID atomically in SQLite.
-Foreground Task Sessions and Desktop repository connections independently acquire
-comments and deliver pending Linear writes. The saved thread enters Desktop's
-Task stream; provider echoes do not repeat local direction. Provider acknowledgement,
-seed inclusion and model acceptance remain distinct evidence.
-Steering an idle Task starts nothing. Wave guidance travels as extra
-instructions to `wave-operate`.
-
 ```bash
-lf comment INF-123 "keep the public name"
+lf comment INF-123 "keep the public name" --steer
+lf wave comment infrastructure "preserve native history" --steer
+lf repo comment "retain source attribution" --steer
+lf session steer SESSION "inspect the last failure"
+lf session steers SESSION --json --limit 32
+lf session steers SESSION --after 42 --json
+lf session steers SESSION --source STEER_ID
+lf session steers SESSION --retry STEER_ID
 ```
+
+Steers retain immutable source revisions and authorship. Task comments and
+definition acquisition save steers in their existing planning transaction; their
+Linear delivery receipts remain separate. Repository and Wave steers are
+Machine-local and report unavailable shared planning exchange for those scopes.
+
+Each Session selects its steers from its repository, Task association and
+Wave ancestors. Peers receive independent receipts. Saving a steer starts no turn;
+an idle Session receives pending steers on its next supported provider boundary.
+Startup, user continuation, tools and compaction share the receipt path. Task
+brief references contain no consumed steers.
+
+The provider capability belongs to the selected AgentProcess and native
+conversation, survives client attachment handoff and fails after replacement.
+Child callbacks cannot consume parent steers. Shared Session dispatch exclusion
+lets startup hooks finish while native stdin is blocked; takeover remains exclusive.
+
+A boundary reserves at most eight steers and renders at most 10,000 bytes
+including reference context. Oversized text has a marked UTF-8 excerpt and a
+complete immutable source. Only the selected page is materialized.
+Receipts distinguish pending, prepared, uncertain and emitted/unconfirmed.
+Successful stdout proves local emission only. No current adapter manufactures
+confirmed acceptance. Explicit retry creates another attempt without waking work.
+An exclusive, nonblocking Session fence proves a prepared emitter has exited
+before its reservation is cancelled; elapsed time grants no retry authority.
+
+OpenCode gives each transform an adapter invocation UUID. Internal stream retries
+reuse that transformed copy; later transforms replace the ephemeral context part
+and do not reselect emitted steers. Providers without an observed authenticated
+callback report that limitation; already-open providers without declarations need
+a provider start.
 
 ### Questions and sessions
 
@@ -1079,8 +1109,8 @@ Intentional copies stay read projections:
 <!-- architecture-projections:start -->
 | Projection | Authority copied | Freshness and consumer |
 | --- | --- | --- |
-| [`PmSnapshotRow`](../rust/loopflow/src/store/mod.rs) / `pm_projects`, `pm_items`, `pm_wave_projects`, `pm_wave_sync`, `pm_issue_changes` | Linear planning | Shared entity ingestion orders provider revisions and retains last-good facts when refresh fails. Canonical Task and Wave views read saved Work with separate acquisition evidence; ownership checks read retained claims directly. `PmSnapshotRow` is ingestion input only. Observation age and invalidation remain explicit. |
-| [`TaskLinearObservation`](../rust/loopflow/src/work/task/mod.rs) / `task_linear_observations` | Linear Issue title, description and comment revisions | Reconciliation saves comments and appends deduplicated direction. This acquisition path reads neither state nor Project membership and grants no Workflow or Process authority. |
+| [Linear acquisition](../rust/loopflow/src/linear/acceptance.rs) / `pm_projects`, `pm_items`, `pm_wave_projects`, `pm_wave_sync`, `pm_issue_changes` | Linear planning | Shared entity ingestion orders provider revisions and retains last-good facts when refresh fails. Canonical Task and Wave views read saved Work with separate acquisition evidence; ownership checks read retained claims directly. Inventory and detail acceptance consume concrete Linear fields in one transaction; there is no public snapshot envelope. Observation age and invalidation remain explicit. |
+| [`TaskLinearObservation`](../rust/loopflow/src/work/task/mod.rs) / `task_linear_observations` | Linear Issue title, description and comment revisions | Reconciliation saves comments and appends deduplicated direction. Team acquisition also accepts issue state and Project membership through the typed Linear owner; the saved comment projection grants no Workflow or Process authority. |
 | [`GithubObservation`](../rust/loopflow/src/work/task/mod.rs) / `task_prs`, `ci_incidents` | GitHub PR/check state | Webhook or foreground reads update Task delivery evidence; GitHub remains merge truth. |
 | `tests/fixtures/dto/` | Rust `lf --json` DTOs | Rust and Swift fixture tests reject required-field or enum drift. |
 | `tests/fixtures/migrations/` | Ordinal-free migration drafts and the Python canonicalizer | Rust build/runtime and Python release tests reject ordering, body-byte, checksum, and graph-error drift. |
@@ -1132,7 +1162,7 @@ model.
 | `Project Session`, `project_sessions`, `task_sessions` | `rust/loopflow/src/store/migrations/`, `rust/loopflow/src/store/migrations.rs`, `rust/loopflow/src/store/tests/fixtures/`, `release/` | Stable Project/Task **Work**; LfSession owns the conversation and native history; a Flow is a Flow process and its step processes. |
 | `session context`, `LF_SESSION` | — | Typed Work ancestry and Process/LfSession provenance; transitional launch environment names are listed in cutover status. |
 | `lf radio`, `agent bus` | `release/` | Typed Work observations, Steer, synchronous questions, and review FlowSteps. |
-| `pm.linear_project`, `projects/<slug>.md` | `release/`, `rust/loopflow/src/ops/project.rs` | `pm.linear_initiative`; Linear Initiative → Project → Issue. The Project operation reads the historical YAML field once into SQLite and retains original bytes; later file edits are inert. |
+| `pm.linear_project`, `projects/<slug>.md` | `release/`, `rust/loopflow/src/ops/project.rs` | `linear.initiative`; Linear Initiative → Project → Issue. The Project operation reads the historical YAML field once into SQLite and retains original bytes; later file edits are inert. |
 | `machine-local host`, `machine-global command`, `machine-global mutation`, `machine-global reservation` | — | Machine-local keeper, command, mutation, or reservation. |
 <!-- architecture-vocabulary:end -->
 

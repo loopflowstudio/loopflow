@@ -31,24 +31,6 @@ mod token_crypto;
 
 pub use planning_peers::{PeerPlanningStatus, PeerProjectionConflict};
 
-/// One acquired Linear inventory. Input to ingestion, never a local Work reading.
-#[derive(Debug, Clone, PartialEq)]
-pub struct PmSnapshotRow {
-    pub wave_id: WaveId,
-    pub provider: String,
-    pub initiative: String,
-    pub synced_at: i64,
-    pub snapshot: crate::pm::PmSnapshot,
-}
-
-/// A planning observation; neither Project ownership nor execution is required.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct PmTaskRecord {
-    pub item: crate::pm::PmItem,
-    pub project: Option<crate::pm::linear::LinearProject>,
-    pub observed_at: i64,
-}
-
 /// Availability of retained planning facts, independent of execution permission.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -68,9 +50,16 @@ pub struct TaskAcquisition {
     pub observed_at: Option<i64>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct PmTaskObservation {
-    pub record: Option<PmTaskRecord>,
+/// Retained Linear acquisition facts, including observations without owned Work.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinearIssueEvidence {
+    pub issue_id: Option<String>,
+    pub revision: Option<String>,
+    pub observed_at: Option<i64>,
+    pub project_id: Option<String>,
+    pub initiative_ids: Vec<String>,
+    pub project_team_ids: Vec<String>,
+    pub team_id: Option<String>,
     pub state: PlanningState,
 }
 
@@ -86,7 +75,7 @@ pub(crate) struct WaveLocatorUpdate {
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
     #[error(transparent)]
-    Planning(#[from] crate::pm::LinearBindingError),
+    Planning(#[from] crate::linear::LinearBindingError),
     #[error(transparent)]
     TaskData(#[from] crate::work::task::TaskDataError),
     #[error("sqlite error: {0}")]
@@ -330,7 +319,7 @@ tokio::task_local! {
 }
 
 // The blocking worker owns acquisition through commit, even if its async caller is canceled.
-async fn run_planning_write<T: Send + 'static>(
+pub(crate) async fn run_planning_write<T: Send + 'static>(
     store: &sqlite::SqliteStore,
     acquisition: Option<Arc<PlanningLocks>>,
     write: impl FnOnce(sqlite::SqliteStore) -> StoreResult<T> + Send + 'static,
@@ -360,84 +349,15 @@ impl Store {
         self.sqlite.apply_migration_for_test(name)
     }
 
-    pub async fn put_pm_snapshot(
-        &self,
-        snapshot: PmSnapshotRow,
-        acquisition: Option<Arc<PlanningLocks>>,
-    ) -> StoreResult<()> {
-        run_planning_write(&self.sqlite, acquisition, move |store| {
-            store.put_pm_snapshot(&snapshot)
-        })
-        .await
-    }
-
-    pub(crate) async fn reconcile_pm_project_teams(
-        &self,
-        wave: &WaveId,
-        provider: &str,
-        initiative: &str,
-        project: crate::pm::linear::LinearProject,
-        observed_at: i64,
-        acquisition: Arc<PlanningLocks>,
-    ) -> StoreResult<()> {
-        let wave = wave.clone();
-        let provider = provider.to_string();
-        let initiative = initiative.to_string();
-        run_planning_write(&self.sqlite, Some(acquisition), move |store| {
-            store.reconcile_pm_project_teams(&wave, &provider, &initiative, &project, observed_at)
-        })
-        .await
-    }
-
-    pub async fn put_pm_task(
+    pub async fn linear_issue_evidence(
         &self,
         repo: &str,
-        provider: &str,
-        record: PmTaskRecord,
-        confirmed_wave: Option<(WaveId, String)>,
-        acquisition: Option<Arc<PlanningLocks>>,
-    ) -> StoreResult<()> {
-        let repo = repo.to_string();
-        let provider = provider.to_string();
-        run_planning_write(&self.sqlite, acquisition, move |store| {
-            store.put_pm_task(
-                &repo,
-                &provider,
-                &record,
-                confirmed_wave
-                    .as_ref()
-                    .map(|(wave, initiative)| (wave, initiative.as_str())),
-            )
-        })
-        .await
-    }
-
-    pub async fn pm_task_observation(
-        &self,
-        repo: &str,
-        provider: &str,
         selector: &str,
-    ) -> StoreResult<PmTaskObservation> {
+    ) -> StoreResult<LinearIssueEvidence> {
         let repo = repo.to_string();
-        let provider = provider.to_string();
         let selector = selector.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.pm_task_observation(&repo, &provider, &selector)
-        })
-        .await
-    }
-
-    pub async fn confirm_pm_project_archival(
-        &self,
-        repo: &str,
-        provider: &str,
-        project: crate::pm::linear::LinearProject,
-        observed_at: i64,
-    ) -> StoreResult<()> {
-        let repo = repo.to_string();
-        let provider = provider.to_string();
-        run_sqlite(&self.sqlite, move |store| {
-            store.confirm_pm_project_archival(&repo, &provider, &project, observed_at)
+            store.linear_issue_evidence(&repo, &selector)
         })
         .await
     }
@@ -456,17 +376,15 @@ impl Store {
         .await
     }
 
-    pub async fn invalidate_pm_task(
+    pub async fn invalidate_linear_issue(
         &self,
         repo: &str,
-        provider: &str,
-        expected: PmTaskRecord,
+        expected: LinearIssueEvidence,
         acquisition: Option<Arc<PlanningLocks>>,
     ) -> StoreResult<()> {
         let repo = repo.to_string();
-        let provider = provider.to_string();
         run_planning_write(&self.sqlite, acquisition, move |store| {
-            store.invalidate_pm_task(&repo, &provider, &expected)
+            store.invalidate_linear_issue(&repo, &expected)
         })
         .await
     }
@@ -1284,15 +1202,15 @@ pub type SharedStore = Arc<Store>;
 mod tests {
     use super::{
         guard_development_database, may_apply_migrations, read_nonterminal_task_worktrees,
-        CredentialState, PmSnapshotRow, ProviderAccount, ProviderAccountId, RoutingState,
-        StorageConfig,
+        CredentialState, ProviderAccount, ProviderAccountId, RoutingState, StorageConfig,
     };
     use crate::build_info::{BuildProvenance, MigrationAuthority};
     use crate::child::ChildRef;
     use crate::durable::{Author, WorkRef};
     use crate::id::WaveId;
-    use crate::pm::{LinearIssueId, LinearProjectId};
+    use crate::linear::{LinearIssueId, LinearProjectId};
     use crate::profile::EmailAddress;
+    use crate::test_linear_input::{InventoryFixture, SeedLinear};
     use crate::work::project::{Project, ProjectId};
     use crate::work::task::{
         CiIncident, GithubPr, LinearWritebackState, PrPhase, PrPresentation, PrPublication, Task,
@@ -1319,8 +1237,10 @@ mod tests {
                  );
                  CREATE TABLE task_workflows (task_id TEXT PRIMARY KEY, node TEXT NOT NULL, edge INTEGER);
                  INSERT INTO tasks VALUES ('unplaced', NULL, NULL, NULL);
+                 INSERT INTO tasks VALUES ('legacy-unplaced', '', NULL, NULL);
                  INSERT INTO tasks VALUES ('running', '/repo.running', NULL, NULL);
                  INSERT INTO tasks VALUES ('waiting', '/repo.waiting', NULL, NULL);
+                 INSERT INTO tasks VALUES ('planned', NULL, NULL, NULL);
                  INSERT INTO tasks VALUES ('completed', '/repo.completed', NULL, 1);
                  INSERT INTO tasks VALUES ('abandoned', '/repo.abandoned', 1, NULL);
                  INSERT INTO task_workflows VALUES ('running', 'review', 2);
@@ -1552,8 +1472,8 @@ mod tests {
         }
     }
 
-    fn task_planning_snapshot(wave: &Wave, project: &Project, task: &Task) -> PmSnapshotRow {
-        let mut snapshot: crate::pm::PmSnapshot = serde_json::from_str(include_str!(
+    fn task_planning_snapshot(wave: &Wave, project: &Project, task: &Task) -> InventoryFixture {
+        let mut snapshot: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
             "../../../../tests/fixtures/dto/task_history_planning.json"
         ))
         .unwrap();
@@ -1564,9 +1484,8 @@ mod tests {
         snapshot.items[0].id = task.linear_id.as_ref().unwrap().as_str().to_string();
         snapshot.items[0].identifier = task.identifier.clone();
         snapshot.items[0].project_id = Some(snapshot.projects[0].id.clone());
-        snapshot.items[0].project = Some(snapshot.projects[0].slug.clone());
         snapshot.items[0].revision = Some("2026-10-05T12:00:00Z".into());
-        PmSnapshotRow {
+        InventoryFixture {
             wave_id: wave.id().clone(),
             provider: "linear".into(),
             initiative: snapshot.projects[0].initiative_ids[0].clone(),
@@ -1617,7 +1536,7 @@ mod tests {
             snapshot.snapshot.items[0].identifier = "NEXT-9".into();
             snapshot.snapshot.items[0].name = "Accepted title".into();
             snapshot.snapshot.items[0].description = "Accepted direction".into();
-            store.put_pm_snapshot(snapshot, None).await.unwrap();
+            store.seed_inventory(snapshot, None).await.unwrap();
             let imported = store.get_task_by_issue("NEXT-9").await.unwrap().unwrap();
             task.id = imported.id;
             task.revision = imported.revision;
@@ -1691,7 +1610,7 @@ mod tests {
             first_project.id = "00000000-0000-4000-8000-000000000002".into();
             first_project.slug = "ordered-first".into();
             snapshot.snapshot.projects.insert(0, first_project);
-            store.put_pm_snapshot(snapshot.clone(), None).await.unwrap();
+            store.seed_inventory(snapshot.clone(), None).await.unwrap();
             let task = store
                 .get_task_by_issue(&task.identifier)
                 .await
@@ -1739,7 +1658,7 @@ mod tests {
             snapshot.snapshot.items[0].state = None;
             snapshot.snapshot.items[0].completed = true;
             snapshot.snapshot.items[0].completed_at = Some("2026-10-05T12:00:30Z".into());
-            store.put_pm_snapshot(snapshot.clone(), None).await.unwrap();
+            store.seed_inventory(snapshot.clone(), None).await.unwrap();
             assert_eq!(
                 store.sqlite.task(&task.id).unwrap().unwrap().completed_at,
                 snapshot.snapshot.items[0].completed_at
@@ -1771,7 +1690,7 @@ mod tests {
             snapshot.snapshot.items[0].completed_at = None;
             snapshot.snapshot.items[0].revision = Some("2026-10-05T12:02:00Z".into());
             snapshot.snapshot.items[0].assignee = None;
-            store.put_pm_snapshot(snapshot.clone(), None).await.unwrap();
+            store.seed_inventory(snapshot.clone(), None).await.unwrap();
             if !mapped {
                 rusqlite::Connection::open(directory.path().join("registry.db"))
                     .unwrap()
@@ -1802,7 +1721,7 @@ mod tests {
             let task = make_task(&wave, &project);
             let mut snapshot = task_planning_snapshot(&wave, &project, &task);
             snapshot.synced_at = 17;
-            store.put_pm_snapshot(snapshot.clone(), None).await.unwrap();
+            store.seed_inventory(snapshot.clone(), None).await.unwrap();
             let krs = vec![crate::work::project::ProjectKR {
                 text: "Saved plan survives an outage".into(),
                 holds: false,
@@ -1871,7 +1790,7 @@ mod tests {
         for change in [
             "UPDATE pm_projects SET archived=1",
             "UPDATE pm_projects SET membership_unresolved=1",
-            "UPDATE pm_projects SET body='malformed'",
+            "UPDATE pm_projects SET initiative_ids='malformed'",
             "UPDATE pm_projects SET observed_at=18",
             "UPDATE pm_wave_sync SET initiative='different-initiative'",
         ] {
@@ -1881,7 +1800,7 @@ mod tests {
             select_project(&store, &project);
             let task = make_task(&wave, &project);
             let snapshot = task_planning_snapshot(&wave, &project, &task);
-            store.put_pm_snapshot(snapshot.clone(), None).await.unwrap();
+            store.seed_inventory(snapshot.clone(), None).await.unwrap();
             let saved = store.get_project(&project.id).await.unwrap().unwrap();
             rusqlite::Connection::open(directory.path().join("registry.db"))
                 .unwrap()
@@ -1908,7 +1827,7 @@ mod tests {
         select_project(&store, &project);
         let task = make_task(&wave, &project);
         store
-            .put_pm_snapshot(task_planning_snapshot(&wave, &project, &task), None)
+            .seed_inventory(task_planning_snapshot(&wave, &project, &task), None)
             .await
             .unwrap();
         let before = crate::ops::project::current_project(&store, &wave).unwrap();
@@ -1939,7 +1858,7 @@ mod tests {
             let mut snapshot = task_planning_snapshot(&wave, &project, &task);
             snapshot.snapshot.items[0].state = Some("unstarted".into());
             snapshot.snapshot.items[0].completed = false;
-            store.put_pm_snapshot(snapshot.clone(), None).await.unwrap();
+            store.seed_inventory(snapshot.clone(), None).await.unwrap();
             let imported = store
                 .get_task_by_issue(&task.identifier)
                 .await
@@ -1950,7 +1869,7 @@ mod tests {
             snapshot.snapshot.items[0].revision = Some("2026-10-05T12:01:00Z".into());
             snapshot.snapshot.items[0].state = state.map(str::to_string);
             snapshot.snapshot.items[0].completed = completed;
-            store.put_pm_snapshot(snapshot.clone(), None).await.unwrap();
+            store.seed_inventory(snapshot.clone(), None).await.unwrap();
             let events = store.task_events_after(&task.id, 0).await.unwrap();
             let pr = make_task_pr(&task);
             let place = || {
@@ -1977,7 +1896,7 @@ mod tests {
             snapshot.snapshot.items[0].revision = Some("2026-10-05T12:02:00Z".into());
             snapshot.snapshot.items[0].state = Some("unstarted".into());
             snapshot.snapshot.items[0].completed = false;
-            store.put_pm_snapshot(snapshot, None).await.unwrap();
+            store.seed_inventory(snapshot, None).await.unwrap();
             place().await.unwrap();
             assert!(store.task_prs(&task.id).await.unwrap().is_empty());
             assert!(!store.task_started(&task.id).await.unwrap());
@@ -2033,7 +1952,7 @@ mod tests {
                 snapshot.snapshot.items[0].completed = false;
                 snapshot.snapshot.items[0].completed_at = None;
                 snapshot.snapshot.items[0].state = Some("unstarted".into());
-                store.put_pm_snapshot(snapshot, None).await.unwrap();
+                store.seed_inventory(snapshot, None).await.unwrap();
                 store
                     .get_task_by_issue(&task.identifier)
                     .await
@@ -2125,7 +2044,7 @@ mod tests {
         let writer_store = super::Store::from_sqlite_for_test(store.sqlite.clone());
         let writer = tokio::spawn(super::PLANNING_ACCEPTANCE_GATE.scope(gate, async move {
             writer_store
-                .put_pm_snapshot(snapshot, Some(acquisition))
+                .seed_inventory(snapshot, Some(acquisition))
                 .await
         }));
         tokio::time::timeout(std::time::Duration::from_secs(5), entered.notified())
@@ -2172,7 +2091,7 @@ mod tests {
                 snapshot.snapshot.items[0].completed = false;
                 snapshot.snapshot.items[0].completed_at = None;
                 snapshot.snapshot.items[0].state = Some("unstarted".into());
-                store.put_pm_snapshot(snapshot, None).await.unwrap();
+                store.seed_inventory(snapshot, None).await.unwrap();
                 let imported = store
                     .get_task_by_issue(&task.identifier)
                     .await
@@ -2257,16 +2176,16 @@ mod tests {
         let mut snapshot = task_planning_snapshot(&wave, &project, &task);
         snapshot.snapshot.items[0].name = task.title.clone();
         snapshot.snapshot.items[0].description = task.description.clone();
-        store.put_pm_snapshot(snapshot.clone(), None).await.unwrap();
+        store.seed_inventory(snapshot.clone(), None).await.unwrap();
 
         let mut confirmed = snapshot.snapshot.items[0].clone();
         confirmed.identifier = "NEXT-8".into();
         confirmed.revision = Some("2026-10-05T13:00:00Z".into());
         store
-            .put_pm_task(
+            .seed_issue(
                 "/repo",
                 "linear",
-                crate::store::PmTaskRecord {
+                crate::test_linear_input::IssueFixture {
                     item: confirmed,
                     project: Some(snapshot.snapshot.projects[0].clone()),
                     observed_at: 2,
@@ -2281,10 +2200,10 @@ mod tests {
 
         // An earlier detail response arrives after the interrupted operation.
         store
-            .put_pm_task(
+            .seed_issue(
                 "/repo",
                 "linear",
-                crate::store::PmTaskRecord {
+                crate::test_linear_input::IssueFixture {
                     item: snapshot.snapshot.items[0].clone(),
                     project: Some(snapshot.snapshot.projects[0].clone()),
                     observed_at: snapshot.synced_at,
@@ -2321,7 +2240,7 @@ mod tests {
                 .items
                 .remove(0),
         );
-        store.put_pm_snapshot(snapshot.clone(), None).await.unwrap();
+        store.seed_inventory(snapshot.clone(), None).await.unwrap();
         let unobserved = store.get_task(&other.id).await.unwrap().unwrap();
         let mut item = snapshot.snapshot.items[0].clone();
         item.name = "New issue title".into();
@@ -2330,10 +2249,10 @@ mod tests {
         older_project.name = "Old Project title".into();
         older_project.revision = Some("2026-10-05T11:59:59Z".into());
         store
-            .put_pm_task(
+            .seed_issue(
                 "/repo",
                 "linear",
-                crate::store::PmTaskRecord {
+                crate::test_linear_input::IssueFixture {
                     item,
                     project: Some(older_project),
                     observed_at: 20,
@@ -2368,31 +2287,51 @@ mod tests {
         let pr = make_task_pr(&task);
         store.seed_task(&task, &pr).await.unwrap();
         let snapshot = task_planning_snapshot(&wave, &project, &task);
-        store.put_pm_snapshot(snapshot.clone(), None).await.unwrap();
+        store.seed_inventory(snapshot.clone(), None).await.unwrap();
         let retained = store.get_task(&task.id).await.unwrap().unwrap();
+        let retained_project = store.get_project(&project.id).await.unwrap();
+        let retained_age = wave_refresh_at(_directory.path(), &wave);
+        let database = _directory.path().join("registry.db");
+        let before: crate::test_linear_input::IssueFixture =
+            loopflow_test_support::retained_task_input(&database, wave.repo(), &task.identifier);
         let other = Wave::new(crate::id::WaveId::new(), "other".into(), "/repo".into());
         store.create_wave(&other).await.unwrap();
         let mut foreign = make_project(&other);
-        foreign.linear_id = Some(crate::pm::LinearProjectId::new("foreign-project").unwrap());
+        foreign.linear_id = Some(crate::linear::LinearProjectId::new("foreign-project").unwrap());
         store.create_project(&foreign).await.unwrap();
         let mut response = snapshot.clone();
         response.synced_at = 2;
+        response.snapshot.projects[0].name = "Rejected Project name".into();
+        response.snapshot.projects[0].revision = Some("2026-10-05T12:00:01Z".into());
         response.snapshot.items[0].name = "Rejected issue title".into();
         response.snapshot.items[0].revision = Some("2026-10-05T12:00:01Z".into());
         let mut conflict = response.snapshot.projects[0].clone();
         conflict.id = foreign.linear_id.as_ref().unwrap().as_str().to_string();
         response.snapshot.projects.push(conflict);
-        assert!(store.put_pm_snapshot(response, None).await.is_err());
+        assert!(store.seed_inventory(response, None).await.is_err());
         let retained_observation = store
-            .pm_task_observation(wave.repo(), "linear", &task.identifier)
+            .linear_issue_evidence(wave.repo(), &task.identifier)
             .await
             .unwrap();
         assert_eq!(
-            retained_observation.record.unwrap().item,
-            snapshot.snapshot.items[0]
+            retained_observation.revision,
+            snapshot.snapshot.items[0].revision
         );
         assert_eq!(store.get_task(&task.id).await.unwrap().unwrap(), retained);
         assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
+        assert_eq!(
+            store.get_project(&project.id).await.unwrap(),
+            retained_project
+        );
+        assert_eq!(wave_refresh_at(_directory.path(), &wave), retained_age);
+        assert_eq!(
+            loopflow_test_support::retained_task_input::<crate::test_linear_input::IssueFixture>(
+                &database,
+                wave.repo(),
+                &task.identifier
+            ),
+            before
+        );
     }
 
     #[tokio::test]
@@ -2404,12 +2343,12 @@ mod tests {
         let task = make_task(&wave, &project);
         let mut snapshot = task_planning_snapshot(&wave, &project, &task);
         snapshot.synced_at = 10;
-        store.put_pm_snapshot(snapshot.clone(), None).await.unwrap();
+        store.seed_inventory(snapshot.clone(), None).await.unwrap();
         let original = snapshot.snapshot.projects[0].clone();
         snapshot.synced_at = 20;
         snapshot.snapshot.projects[0].revision = Some("2026-10-05T11:59:59Z".into());
         snapshot.snapshot.projects[0].name = "Older provider title".into();
-        store.put_pm_snapshot(snapshot, None).await.unwrap();
+        store.seed_inventory(snapshot, None).await.unwrap();
         let projected = store.get_project(&project.id).await.unwrap().unwrap();
         assert_eq!(projected.name, original.name);
         assert_eq!(projected.pm_snapshot_synced_at, Some(10));
@@ -2425,7 +2364,7 @@ mod tests {
         let pr = make_task_pr(&task);
         store.seed_task(&task, &pr).await.unwrap();
         let old = task_planning_snapshot(&wave, &predecessor, &task);
-        store.put_pm_snapshot(old.clone(), None).await.unwrap();
+        store.seed_inventory(old.clone(), None).await.unwrap();
         // The first refresh has fetched its response, then pauses.
         let delayed = old;
         let predecessor_work = WorkRef::Project(predecessor.id.clone());
@@ -2445,12 +2384,11 @@ mod tests {
         successor.slug = "successor".into();
         successor.name = "Successor".into();
         newer.snapshot.items[0].project_id = Some(successor.id.clone());
-        newer.snapshot.items[0].project = Some(successor.slug.clone());
         newer.snapshot.items[0].revision = Some("2026-10-05T12:00:01Z".into());
         newer.snapshot.projects.push(successor);
-        store.put_pm_snapshot(newer, None).await.unwrap();
+        store.seed_inventory(newer, None).await.unwrap();
         let accepted = store
-            .pm_task_observation(wave.repo(), "linear", &task.identifier)
+            .linear_issue_evidence(wave.repo(), &task.identifier)
             .await
             .unwrap();
         let transferred = store.get_task(&task.id).await.unwrap().unwrap();
@@ -2468,10 +2406,10 @@ mod tests {
         assert_eq!(inherited.source, WorkRef::Wave(wave.id().clone()));
         // A delayed response omits the now-known successor. Rejection must
         // preserve both normalized facts and the durable Task transfer.
-        assert!(store.put_pm_snapshot(delayed, None).await.is_err());
+        assert!(store.seed_inventory(delayed, None).await.is_err());
         assert_eq!(
             store
-                .pm_task_observation(wave.repo(), "linear", &task.identifier)
+                .linear_issue_evidence(wave.repo(), &task.identifier)
                 .await
                 .unwrap(),
             accepted
@@ -2503,10 +2441,10 @@ mod tests {
         // Durable identity survives a cold planning cache. It does not prove
         // that this freshly observed Initiative still belongs to that Wave.
         store
-            .put_pm_task(
+            .seed_issue(
                 wave.repo(),
                 "linear",
-                crate::store::PmTaskRecord {
+                crate::test_linear_input::IssueFixture {
                     item,
                     project: Some(observed_project),
                     observed_at: 10,
@@ -2537,10 +2475,10 @@ mod tests {
         let mut item = snapshot.snapshot.items.remove(0);
         item.name = "Refreshed work".into();
         store
-            .put_pm_task(
+            .seed_issue(
                 wave.repo(),
                 "linear",
-                crate::store::PmTaskRecord {
+                crate::test_linear_input::IssueFixture {
                     item,
                     project: Some(observed),
                     observed_at: 10,
@@ -2580,10 +2518,10 @@ mod tests {
         current.initiative_ids = vec!["elsewhere".into()];
         current.revision = Some("2026-10-05T12:00:01Z".into());
         store
-            .put_pm_task(
+            .seed_issue(
                 wave.repo(),
                 "linear",
-                crate::store::PmTaskRecord {
+                crate::test_linear_input::IssueFixture {
                     item: snapshot.snapshot.items[0].clone(),
                     project: Some(current.clone()),
                     observed_at: 10,
@@ -2593,11 +2531,15 @@ mod tests {
             )
             .await
             .unwrap();
-        assert!(store
-            .sqlite
-            .put_pm_project(wave.id(), "linear", &snapshot.initiative, &old, 20)
-            .is_err());
-        assert!(store.put_pm_snapshot(snapshot, None).await.is_err());
+        assert!(crate::linear::acceptance::accept_linear_project_in(
+            &store.sqlite,
+            wave.id(),
+            &snapshot.initiative,
+            &old,
+            20
+        )
+        .is_err());
+        assert!(store.seed_inventory(snapshot, None).await.is_err());
         assert_eq!(wave_refresh_at(_directory.path(), &wave), None);
         assert!(store
             .list_projects(Some(wave.id()))
@@ -2605,14 +2547,17 @@ mod tests {
             .unwrap()
             .is_empty());
         let retained = store
-            .pm_task_observation(
-                wave.repo(),
-                "linear",
-                task.linear_id.as_ref().unwrap().as_str(),
-            )
+            .linear_issue_evidence(wave.repo(), task.linear_id.as_ref().unwrap().as_str())
             .await
             .unwrap();
-        assert_eq!(retained.record.unwrap().project, Some(current));
+        assert_eq!(retained.project_team_ids, current.team_ids);
+        let retained_input: crate::test_linear_input::IssueFixture =
+            loopflow_test_support::retained_task_input(
+                &_directory.path().join("registry.db"),
+                wave.repo(),
+                &task.identifier,
+            );
+        assert_eq!(retained_input.project, Some(current));
     }
 
     #[tokio::test]
@@ -2623,7 +2568,7 @@ mod tests {
         select_project(&store, &project);
         let task = make_task(&wave, &project);
         let snapshot = task_planning_snapshot(&wave, &project, &task);
-        store.put_pm_snapshot(snapshot.clone(), None).await.unwrap();
+        store.seed_inventory(snapshot.clone(), None).await.unwrap();
         let mut confirmed = snapshot.snapshot.projects[0].clone();
         confirmed.name = "Ordinary work".into();
         confirmed.slug = "ordinary-work".into();
@@ -2633,16 +2578,25 @@ mod tests {
             holds: false,
         });
         confirmed.revision = Some("2026-10-05T12:00:01Z".into());
-        store
-            .sqlite
-            .put_pm_project(wave.id(), "linear", &snapshot.initiative, &confirmed, 10)
-            .unwrap();
+        crate::linear::acceptance::accept_linear_project_in(
+            &store.sqlite,
+            wave.id(),
+            &snapshot.initiative,
+            &confirmed,
+            10,
+        )
+        .unwrap();
         let accepted = store
-            .pm_task_observation(wave.repo(), "linear", &task.identifier)
+            .linear_issue_evidence(wave.repo(), &task.identifier)
             .await
             .unwrap();
         assert_eq!(
-            accepted.record.as_ref().unwrap().project,
+            loopflow_test_support::retained_task_input::<crate::test_linear_input::IssueFixture>(
+                &_directory.path().join("registry.db"),
+                wave.repo(),
+                &task.identifier
+            )
+            .project,
             Some(confirmed.clone())
         );
         assert_eq!(
@@ -2655,10 +2609,14 @@ mod tests {
         assert_eq!(durable.krs, confirmed.krs);
         let other = Wave::new(WaveId::new(), "other".into(), wave.repo().into());
         store.create_wave(&other).await.unwrap();
-        assert!(store
-            .sqlite
-            .put_pm_project(other.id(), "linear", &snapshot.initiative, &confirmed, 20)
-            .is_err());
+        assert!(crate::linear::acceptance::accept_linear_project_in(
+            &store.sqlite,
+            other.id(),
+            &snapshot.initiative,
+            &confirmed,
+            20
+        )
+        .is_err());
         assert_eq!(
             store.get_project(&project.id).await.unwrap().unwrap(),
             durable
@@ -2668,10 +2626,10 @@ mod tests {
             .await
             .unwrap()
             .is_empty());
-        store.put_pm_snapshot(snapshot, None).await.unwrap();
+        store.seed_inventory(snapshot, None).await.unwrap();
         assert_eq!(
             store
-                .pm_task_observation(wave.repo(), "linear", &task.identifier)
+                .linear_issue_evidence(wave.repo(), &task.identifier)
                 .await
                 .unwrap(),
             accepted
@@ -2689,7 +2647,8 @@ mod tests {
         store.create_project(&predecessor).await.unwrap();
         select_project(&store, &predecessor);
         let mut successor = make_project(&wave);
-        successor.linear_id = Some(crate::pm::LinearProjectId::new("successor-project").unwrap());
+        successor.linear_id =
+            Some(crate::linear::LinearProjectId::new("successor-project").unwrap());
         let task = make_task(&wave, &predecessor);
         let pr = make_task_pr(&task);
         store.seed_task(&task, &pr).await.unwrap();
@@ -2698,16 +2657,16 @@ mod tests {
         let mut next = response.snapshot.projects[0].clone();
         next.id = successor.linear_id.as_ref().unwrap().as_str().to_string();
         response.snapshot.projects.push(next);
-        store.put_pm_snapshot(response.clone(), None).await.unwrap();
+        store.seed_inventory(response.clone(), None).await.unwrap();
         // Confirmed transfer is accepted before rotation's final full refresh.
         let mut confirmed = response.snapshot.items[0].clone();
         confirmed.project_id = Some(successor.linear_id.as_ref().unwrap().as_str().into());
         confirmed.revision = Some("2026-10-05T12:00:01Z".into());
         store
-            .put_pm_task(
+            .seed_issue(
                 wave.repo(),
                 "linear",
-                crate::store::PmTaskRecord {
+                crate::test_linear_input::IssueFixture {
                     item: confirmed,
                     project: Some(response.snapshot.projects[1].clone()),
                     observed_at: 2,
@@ -2720,7 +2679,7 @@ mod tests {
         let transferred = store.get_task(&task.id).await.unwrap().unwrap();
         assert_eq!(transferred.project_id, successor.id);
         // A delayed response cannot reverse the confirmed revision.
-        store.put_pm_snapshot(response, None).await.unwrap();
+        store.seed_inventory(response, None).await.unwrap();
         assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
         assert_eq!(
             store.get_task(&task.id).await.unwrap().unwrap(),
@@ -2759,7 +2718,7 @@ mod tests {
         successor.linear_id = Some(LinearProjectId::new("next-chapter").unwrap());
         store.create_project(&successor).await.unwrap();
         let response = task_planning_snapshot(&wave, &successor, &task);
-        store.put_pm_snapshot(response, None).await.unwrap();
+        store.seed_inventory(response, None).await.unwrap();
         let moved = store.get_task(&task.id).await.unwrap().unwrap();
         assert_eq!(moved.project_id, successor.id);
         assert_eq!(moved.worktree, task.worktree);
@@ -2800,18 +2759,21 @@ mod tests {
         let target = ChildRef::Task(task.id.clone());
         let work = store.work_for_child(&target).await.unwrap();
         let first = store
-            .append_steer(&work, Author::User, "inspect the failing test")
+            .save_steer(&work, Author::User, "inspect the failing test")
             .await
             .unwrap();
         let second = store
-            .append_steer(&work, Author::User, "preserve the public behavior")
+            .save_steer(&work, Author::User, "preserve the public behavior")
             .await
             .unwrap();
 
         let steers = store.task_steers(&task.id).await.unwrap();
         assert_eq!(
-            steers.iter().map(|steer| steer.id).collect::<Vec<_>>(),
-            [first.id, second.id]
+            steers
+                .iter()
+                .map(|steer| steer.id.clone())
+                .collect::<Vec<_>>(),
+            [first.id.clone(), second.id.clone()]
         );
         assert_eq!(
             steers
@@ -2826,13 +2788,13 @@ mod tests {
         // two events so the `since` filter has something to bite on.
         let conn = rusqlite::Connection::open(&database_path).unwrap();
         conn.execute(
-            "UPDATE task_events SET created_at=1700000001 WHERE id=?1",
+            "UPDATE steers SET created_at=1700000001 WHERE id=?1",
             [first.id],
         )
         .unwrap();
         conn.execute(
-            "UPDATE task_events SET created_at=1700000021 WHERE id=?1",
-            [second.id],
+            "UPDATE steers SET created_at=1700000021 WHERE id=?1",
+            [second.id.clone()],
         )
         .unwrap();
         let timeline = store.steers_since(0).await.unwrap();
@@ -2899,7 +2861,7 @@ mod tests {
             .await
             .unwrap();
         store
-            .append_steer(
+            .save_steer(
                 &WorkRef::Task(task.id.clone()),
                 Author::User,
                 "try the flaky test again",
@@ -2955,89 +2917,6 @@ mod tests {
         fn agent_session(&self) -> Option<crate::id::AgentSessionId> {
             None
         }
-    }
-
-    #[test]
-    fn live_steers_inject_new_comments_and_defer_when_not_steerable() {
-        let _lock = crate::journal::test_env_lock();
-        let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
-        tokio::runtime::Runtime::new().unwrap().block_on(async {
-            let directory = tempfile::tempdir().unwrap();
-            std::env::set_var("LF_HOME", directory.path());
-            let store = std::sync::Arc::new(
-                crate::store::open_ephemeral_store(&StorageConfig::sqlite(
-                    directory.path().join("loopflow.db"),
-                ))
-                .await
-                .unwrap(),
-            );
-            let wave = make_wave(directory.path().to_str().unwrap());
-            store.create_wave(&wave).await.unwrap();
-            let project = make_project(&wave);
-            store.create_project(&project).await.unwrap();
-            select_project(&store, &project);
-            let mut task = make_task(&wave, &project);
-            let checkout = directory.path().join("checkout");
-            std::fs::create_dir(&checkout).unwrap();
-            task.worktree = Some(checkout);
-            store.seed_task(&task, &make_task_pr(&task)).await.unwrap();
-            let work = WorkRef::Task(task.id.clone());
-
-            let sent = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-            let mut harness = RecordingHarness {
-                sent: sent.clone(),
-                steerable: true,
-                ..Default::default()
-            };
-
-            let first = store
-                .append_steer(&work, Author::User, "focus on the parser")
-                .await
-                .unwrap();
-            let second = store
-                .append_steer(&work, Author::User, "keep the API stable")
-                .await
-                .unwrap();
-            let mut cursor = 0;
-            crate::ops::child::inject_live_steers(&store, &task.id, &mut harness, &mut cursor)
-                .await;
-            assert_eq!(
-                *sent.lock().unwrap(),
-                ["focus on the parser", "keep the API stable"]
-            );
-            assert_eq!(
-                cursor, second.id,
-                "the cursor advances past what was injected"
-            );
-            assert!(first.id < second.id);
-
-            // A comment that arrives later injects only itself — the cursor gates it.
-            let third = store
-                .append_steer(&work, Author::User, "add a regression test")
-                .await
-                .unwrap();
-            crate::ops::child::inject_live_steers(&store, &task.id, &mut harness, &mut cursor)
-                .await;
-            assert_eq!(sent.lock().unwrap().len(), 3);
-            assert_eq!(cursor, third.id);
-
-            // A provider that can't take live input leaves the cursor where it is, so
-            // the comment rides the next skill boundary's seed instead.
-            store
-                .append_steer(&work, Author::User, "later direction")
-                .await
-                .unwrap();
-            let mut deaf = RecordingHarness {
-                steerable: false,
-                ..Default::default()
-            };
-            let before = cursor;
-            crate::ops::child::inject_live_steers(&store, &task.id, &mut deaf, &mut cursor).await;
-            assert_eq!(
-                cursor, before,
-                "NotSteerable defers the comment to the next boundary seed"
-            );
-        });
     }
 
     #[tokio::test]
@@ -3132,7 +3011,7 @@ mod tests {
         snapshot.snapshot.items[0].completed = false;
         snapshot.snapshot.items[0].completed_at = None;
         snapshot.snapshot.items[0].state = Some("unstarted".into());
-        store.put_pm_snapshot(snapshot, None).await.unwrap();
+        store.seed_inventory(snapshot, None).await.unwrap();
         let imported = store
             .get_task_by_issue(&task.identifier)
             .await
@@ -3273,6 +3152,14 @@ mod tests {
         select_project(&store, &project);
         let task = make_task(&wave, &project);
         store.seed_task(&task, &make_task_pr(&task)).await.unwrap();
+        // Separate creation from the edit without depending on a wall-clock tick.
+        rusqlite::Connection::open(&database)
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET updated_at=1 WHERE id=?1",
+                [task.id.as_str()],
+            )
+            .unwrap();
         let persisted = store.get_task(&task.id).await.unwrap().unwrap();
         let before_pr = store.active_task_pr(&task.id).await.unwrap();
         let mut expected = persisted.clone();
@@ -3285,13 +3172,20 @@ mod tests {
         snapshot.snapshot.items[0].name = expected.title.clone();
         snapshot.snapshot.items[0].description = expected.description.clone();
         expected.state = snapshot.snapshot.items[0].state.clone();
-        store.put_pm_snapshot(snapshot, None).await.unwrap();
+        let edit_started_at = OffsetDateTime::now_utc().unix_timestamp();
+        store.seed_inventory(snapshot, None).await.unwrap();
         let by_stable_id = store
             .get_task_by_issue(task.id.as_str())
             .await
             .unwrap()
             .unwrap();
 
+        assert!(
+            (edit_started_at..=OffsetDateTime::now_utc().unix_timestamp())
+                .contains(&by_stable_id.updated_at.unix_timestamp()),
+            "planning edits must advance the update timestamp"
+        );
+        expected.updated_at = by_stable_id.updated_at;
         assert_eq!(
             by_stable_id, expected,
             "editing planning facts must preserve execution facts"
@@ -3333,10 +3227,14 @@ mod tests {
         let mut observed = snapshot.snapshot.projects.remove(0);
         observed.workflow = "incident".into();
         observed.status = crate::work::project::ProjectStatus::Completed;
-        store
-            .sqlite
-            .put_pm_project(wave.id(), "linear", &snapshot.initiative, &observed, 10)
-            .unwrap();
+        crate::linear::acceptance::accept_linear_project_in(
+            &store.sqlite,
+            wave.id(),
+            &snapshot.initiative,
+            &observed,
+            10,
+        )
+        .unwrap();
 
         let stored_project = store.get_project(&project.id).await.unwrap().unwrap();
         let stored_task = store.get_task(&task.id).await.unwrap().unwrap();
@@ -3649,7 +3547,7 @@ mod tests {
         initial.snapshot.items[0].completed = false;
         initial.snapshot.items[0].completed_at = None;
         initial.snapshot.items[0].state = Some("unstarted".into());
-        store.put_pm_snapshot(initial, None).await.unwrap();
+        store.seed_inventory(initial, None).await.unwrap();
         task.id = store
             .get_task_by_issue(&task.identifier)
             .await
@@ -3678,7 +3576,7 @@ mod tests {
         snapshot.snapshot.items[0].completed_at = None;
         snapshot.snapshot.items[0].state = Some("unstarted".into());
         snapshot.snapshot.items[0].description = refreshed_plan.description.clone();
-        store.put_pm_snapshot(snapshot, None).await.unwrap();
+        store.seed_inventory(snapshot, None).await.unwrap();
         let before_completion = store.get_task(&task.id).await.unwrap().unwrap();
         assert_eq!(before_completion.title, refreshed_plan.title);
         refreshed_plan.revision = before_completion.revision + 1;

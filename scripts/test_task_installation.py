@@ -17,6 +17,9 @@ PROOFS = {
 }
 
 
+LIB_PROOFS = {"task_adoption_tests", "flow_tests"}
+
+
 def _prepare_image(image: str) -> None:
     failure = (
         f"Infrastructure failure acquiring proof image {image}; installation tests did not run."
@@ -116,9 +119,18 @@ def main() -> None:
             if copy.wait() != 0:
                 raise RuntimeError("copy disposable source snapshot")
         selected = {name: PROOFS[name] for name in args.test} if args.test else PROOFS
-        targets = " ".join(f"--test {target}" for target in sorted(set(selected.values())))
+        targets = " ".join(
+            sorted(
+                {
+                    "--lib" if target in LIB_PROOFS else f"--test {target}"
+                    for target in selected.values()
+                }
+            )
+        )
         checks = "\n".join(
-            f"timeout 180 cargo test -p loopflow --test {target} {name} "
+            f"timeout 180 cargo test -p loopflow "
+            f"{'--lib' if target in LIB_PROOFS else f'--test {target}'} "
+            f"{f'{target}::' if target in LIB_PROOFS else ''}{name} "
             "-- --exact --include-ignored --nocapture"
             for name, target in selected.items()
         )

@@ -49,8 +49,15 @@ pub fn resolve_child(
         return Ok(Some(vec![child.get_name().to_string()]));
     }
     let mut matches = Vec::new();
-    if prefix.is_empty() && name == "resume" && command.find_subcommand("session").is_some() {
-        return Ok(Some(vec!["session".into(), "resume".into()]));
+    if prefix.is_empty() {
+        let owner = match name {
+            "resume" => Some("session"),
+            "comment" => Some("task"),
+            _ => None,
+        };
+        if let Some(owner) = owner.filter(|owner| command.find_subcommand(owner).is_some()) {
+            return Ok(Some(vec![owner.into(), name.into()]));
+        }
     }
     descendants(command, name, &[], &mut matches, false);
     // Exact descendant names win over abbreviations, just as exact owners do.
@@ -414,7 +421,7 @@ pub fn render_help(path: &[String], repo: &Path, all: bool) -> Result<String> {
                     .trim_end()
             ));
         }
-        output.push_str("\nSelect: --repo <name-or-path>, --machine <label-or-id>, --task <task>, --wt <name>, --wave <wave>\n--repo resolves names under repo_root (default ~/src) on the selected Machine.\n--machine otherwise uses its saved remote repository.\nWith --machine: --forward-agent\n");
+        output.push_str("\nSelect: --repo <name-or-path>, --machine <label-or-id>, --task <task>, --wt <name>, --wave <wave>\n--repo resolves names under repo_root (default ~/src) on the selected Machine.\n--machine otherwise uses its saved remote repository.\nWith --machine: --forward-agent\nAgent selection: -a, --agent <harness[:model]> overrides agents in Tasks, Flows, skills and child commands\n");
         output.push_str("\nOmit owners when a command is unique: lf land → lf pr land.\nCommands take precedence; lf skill NAME and lf flow NAME select definitions.\n");
         return Ok(output);
     }

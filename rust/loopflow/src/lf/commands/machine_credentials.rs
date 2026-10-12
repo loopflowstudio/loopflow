@@ -542,14 +542,14 @@ async fn github_login(token: &str) -> Result<String> {
 
 async fn linear_login(token: &str) -> Result<String> {
     #[cfg(test)]
-    let client = crate::pm::linear::LinearClient::with_base_url(
+    let client = crate::linear::LinearClient::with_base_url(
         token.to_string(),
         None,
         std::env::var("LF_TEST_MACHINE_LINEAR_URL")
             .unwrap_or_else(|_| "http://127.0.0.1:1/graphql".into()),
     );
     #[cfg(not(test))]
-    let client = crate::pm::linear::LinearClient::new(token.to_string(), None);
+    let client = crate::linear::LinearClient::new(token.to_string(), None);
     client
         .viewer_id()
         .await

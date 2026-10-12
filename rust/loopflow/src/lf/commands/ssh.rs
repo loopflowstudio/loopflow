@@ -49,9 +49,6 @@ pub fn run(
             cmd: crate::lf::WaveCommand::Show { .. }
         })
     );
-    if !preview && matches!(cli.command, Some(crate::lf::Commands::Desktop { .. })) {
-        super::desktop::require_supported()?;
-    }
     let runtime = tokio::runtime::Runtime::new()?;
     let source = if preview || resident_operation {
         None
@@ -114,6 +111,10 @@ pub fn run(
             selection,
         ));
         extra_env.push(crate::provider_account::activation::isolation_env(true));
+    }
+    let agent = crate::config::agent_override();
+    if let Some(agent) = agent.as_deref() {
+        extra_env.push((crate::config::AGENT_OVERRIDE_ENV, agent));
     }
     if let Some(source) = source_json.as_deref() {
         extra_env.push((crate::lf::TASK_SOURCE_ENV, source));

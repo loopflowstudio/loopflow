@@ -314,9 +314,9 @@ Existing Tasks retain their captured graph. `lf task workflow restart ISSUE`
 moves that graph to `start`, retaining its move and execution history; it
 neither reloads the definition nor executes work.
 
-A Flow that repeats a step passes it `--steers-after STEER`, so the step
-receives only Task direction newer than its last run. The option works on any
-`lf` run.
+Each Session receives applicable steers independently, in bounded batches.
+Repeating a Flow step creates another Session; continuing or compacting the same
+Session preserves its delivery history.
 
 ## Goals
 
@@ -325,11 +325,6 @@ body is the prompt the wave runs each wake.
 
 ```markdown
 <!-- wave/infra/GOAL.md -->
----
-crons:
-  - flow: sync
-    schedule: "0 0 0 1 * * *"
----
 
 ## Objective
 
@@ -355,19 +350,21 @@ measurement lives in reviewed `wave/<wave>/metrics/*.md` contracts, not a
 | Field | What it does |
 |-------|-------------|
 | `agent` | Preferred agent harness/model |
-| `crons` | Flow schedules installed through `lf cron sync` |
-| `pm.linear_initiative` | Linear Initiative id backing the wave (written by `lf repo connect`) |
+| `linear.initiative` | Linear Initiative id backing the wave (written by `lf repo connect`) |
 
-The repository owns PM provider and Team authority in `.lf/config.yaml`:
+Schedules live in the repository configuration as ordinary command arguments;
+see [Schedule ordinary commands](lf.md#schedule-ordinary-commands).
+
+Bind the repository to a Linear Team in `.lf/config.yaml`:
 
 ```yaml
-pm:
-  provider: linear
-  linear_team: "stable-team-uuid"
+linear:
+  team: "stable-team-uuid"
 ```
 
-Do not copy provider or Team bindings into Wave frontmatter. Every Wave reuses
-the repository Team and owns only its Initiative.
+Every Wave uses the repository Team and binds only its Initiative. Select the
+synchronization transport with `planning.provider`; a Team binding selects Linear
+when that choice is omitted.
 
 Execution placement is durable state: use `lf wave place <wave-id> <machine-id>`.
 Placement does not edit the goal, launch work or stop existing conversations.

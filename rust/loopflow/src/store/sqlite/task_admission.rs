@@ -175,8 +175,8 @@ mod tests {
 
     use super::SqliteStore;
     use crate::durable::{MachineId, TaskId, WorkRef};
-    use crate::planning_exchange::PlanningKind;
-    use crate::store::sqlite::planning_write::{self, PlanningEdit};
+    use crate::store::sqlite::planning_write;
+    use crate::work::edit::{WorkEdit, WorkValue};
     use crate::work::task::NewTask;
 
     fn new_task(store: &SqliteStore, repo: &str) -> TaskId {
@@ -260,26 +260,28 @@ mod tests {
     async fn exchange_preserves_authority_but_never_imports_admission() {
         let a = tempfile::tempdir().unwrap();
         let b = tempfile::tempdir().unwrap();
-        let source = SqliteStore::open_ephemeral(&a.path().join("db")).unwrap();
-        let target = SqliteStore::open_ephemeral(&b.path().join("db")).unwrap();
-        let task = new_task(&source, a.path().to_str().unwrap());
+        let source_repo = a.path().canonicalize().unwrap();
+        let target_repo = b.path().canonicalize().unwrap();
+        let source = SqliteStore::open_ephemeral(&source_repo.as_path().join("db")).unwrap();
+        let target = SqliteStore::open_ephemeral(&target_repo.as_path().join("db")).unwrap();
+        let task = new_task(&source, source_repo.as_path().to_str().unwrap());
         let destination = crate::planning_git::PlanningDestination::new(
             "/fixture/planning.git",
             "refs/loopflow/planning/shared/admission",
         )
         .unwrap();
         let source_dest = source
-            .bind_peer_planning(a.path().to_str().unwrap(), &destination)
+            .bind_peer_planning(source_repo.as_path().to_str().unwrap(), &destination)
             .unwrap();
         let target_dest = target
-            .bind_peer_planning(b.path().to_str().unwrap(), &destination)
+            .bind_peer_planning(target_repo.as_path().to_str().unwrap(), &destination)
             .unwrap();
         let snapshot = source
-            .export_peer_planning(a.path().to_str().unwrap(), &source_dest)
+            .export_peer_planning(source_repo.as_path().to_str().unwrap(), &source_dest)
             .unwrap();
         target
             .import_peer_planning(
-                b.path().to_str().unwrap(),
+                target_repo.as_path().to_str().unwrap(),
                 &target_dest,
                 "initial",
                 &snapshot,
@@ -316,11 +318,11 @@ mod tests {
             .claim_task_admission(&task, &local, "accepted")
             .unwrap();
         let snapshot = source
-            .export_peer_planning(a.path().to_str().unwrap(), &source_dest)
+            .export_peer_planning(source_repo.as_path().to_str().unwrap(), &source_dest)
             .unwrap();
         target
             .import_peer_planning(
-                b.path().to_str().unwrap(),
+                target_repo.as_path().to_str().unwrap(),
                 &target_dest,
                 "claimed",
                 &snapshot,
@@ -346,9 +348,10 @@ mod tests {
         };
         assert!(planning_write::local(
             &target.conn.lock().unwrap(),
-            PlanningKind::Task,
-            task.as_str(),
-            &[PlanningEdit::TaskAdmissionAuthority(Some(changed))]
+            &WorkEdit::for_target(
+                task.as_str(),
+                &[WorkValue::TaskAdmissionAuthority(Some(changed))]
+            )
         )
         .unwrap_err()
         .to_string()

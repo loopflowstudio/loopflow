@@ -24,7 +24,7 @@ pub(crate) async fn cleanup_completed_task(store: &SharedStore, task: &Task) -> 
         );
         return Ok(());
     };
-    if !super::CompletionGate::from_delivery(Some(&pr)).satisfied() {
+    if super::completion_refusal(Some(&pr), &task.identifier).is_some() {
         eprintln!(
             "Task {} is complete; retained checkout for unresolved delivery.",
             task.identifier
@@ -195,7 +195,7 @@ async fn abandon(repo: &Path, selector: &str, force: bool) -> OpsResult<String> 
     let task = match resolve_task(&store, Some(&repo.to_string_lossy()), selector).await? {
         Some(task) => task,
         None => {
-            crate::ops::pm::resolve_saved_task(repo, None, selector)
+            crate::ops::task::resolve_saved_task(repo, None, selector)
                 .await?
                 .1
         }
@@ -238,7 +238,7 @@ pub fn task_delete(repo: &Path, issue: &str) -> OpsResult<String> {
         let task = match resolve_task(&store, Some(&repo.to_string_lossy()), issue).await? {
             Some(task) => task,
             None => {
-                crate::ops::pm::resolve_saved_task(&repo, None, issue)
+                crate::ops::task::resolve_saved_task(&repo, None, issue)
                     .await?
                     .1
             }
@@ -307,7 +307,7 @@ async fn prepare_abandon(
 }
 
 async fn require_known_prs(repo: &Path, pr: Option<&TaskPr>, issue: &str) -> OpsResult<()> {
-    for url in crate::ops::pm::issue_client(repo)
+    for url in crate::ops::linear::issue_client()
         .await?
         .item_attachment_urls(issue)
         .await
@@ -374,7 +374,7 @@ pub struct SweepEntry {
 pub fn task_sweep(repo: &Path, apply: bool) -> OpsResult<Vec<SweepEntry>> {
     block_on_task(async {
         let store = task_store().await?;
-        let sweep = crate::ops::pm::chapter_sweep_candidates(repo).await?;
+        let sweep = crate::ops::linear::chapter_sweep_candidates(repo).await?;
         let mut entries: Vec<_> = sweep
             .skipped_projects
             .into_iter()
@@ -403,7 +403,8 @@ pub fn task_sweep(repo: &Path, apply: bool) -> OpsResult<Vec<SweepEntry>> {
                 Ok(_) if !apply => "would cancel Task and remove any retained branches".into(),
                 Ok(deletion) => {
                     // Read membership after preparation, immediately before effects.
-                    match crate::ops::pm::require_outside_current_chapter(repo, &item.id).await {
+                    match crate::ops::linear::require_outside_current_chapter(repo, &item.id).await
+                    {
                         Err(error) => format!("skipped: {error}"),
                         Ok(task) => match save_abandon(&store, &task).await {
                             Err(error) => format!(

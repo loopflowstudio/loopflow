@@ -75,7 +75,7 @@ struct TaskWorkflowHeader: View {
                     .padding(.vertical, 6)
             }
             .accessibilityIdentifier("task-overview")
-            TaskDeliveryView(task: task)
+            TaskDueDateView(task: task)
             // Completion may fail after the Workflow has already arrived.
             if let conflict = task.runtime?.completionPending {
                 HStack(spacing: Spacing.sm) {
@@ -117,7 +117,7 @@ struct TaskWorkflowHeader: View {
 }
 
 /// The Task due date stays beside the conversation and in Task details.
-struct TaskDeliveryView: View {
+struct TaskDueDateView: View {
     let task: RoadmapTask
     @Environment(\.palette) private var palette
 

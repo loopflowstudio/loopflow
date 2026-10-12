@@ -58,8 +58,8 @@ fn active_sessions_preserve_identity_waiting_clients_and_incomplete_evidence() {
 
 #[test]
 fn task_comments_keep_authorship_and_require_every_field() {
-    use loopflow::ops::pm::TaskComments;
     use loopflow::work::task::comment::TaskCommentAuthor;
+    use loopflow::work::task::comment::TaskComments;
     let json = include_str!("../../../tests/fixtures/dto/task_comments.json");
     let thread: TaskComments = serde_json::from_str(json).unwrap();
     assert_eq!(thread.comments[0].author, TaskCommentAuthor::Integration);
@@ -562,106 +562,35 @@ fn separate_workflow_catalog_preserves_invalid_sources() {
 }
 
 #[test]
-fn placement_retains_assignment_source_and_unknown_history() {
-    use loopflow::durable::{Placement, PlacementProvenance};
-    let wire: serde_json::Value =
-        serde_json::from_str(include_str!("../../../tests/fixtures/dto/placements.json")).unwrap();
-    let placements: Vec<Placement> = serde_json::from_value(wire.clone()).unwrap();
-    assert_ne!(placements[0].work, placements[0].source);
-    assert_eq!(placements[0].provenance, PlacementProvenance::Explicit);
-    assert_eq!(placements[1].provenance, PlacementProvenance::Legacy);
-    assert_eq!(placements[2].provenance, PlacementProvenance::LocalDefault);
-    assert_eq!(serde_json::to_value(placements).unwrap(), wire);
-}
-
-#[test]
-fn context_explanation_preserves_unbound_unavailable_and_provenance() {
-    use loopflow::ops::context::{ContextExplanation, ContextFact};
-    let json = include_str!("../../../tests/fixtures/dto/context_explanation.json");
-    let report: ContextExplanation = serde_json::from_str(json).unwrap();
-    assert_eq!(report.checkout, ContextFact::Unbound);
-    assert!(matches!(
-        report.execution_machine,
-        ContextFact::Unavailable { .. }
-    ));
-    assert_eq!(
-        serde_json::to_value(&report).unwrap(),
-        serde_json::from_str::<serde_json::Value>(json).unwrap()
-    );
-    let mut missing: serde_json::Value = serde_json::from_str(json).unwrap();
-    missing.as_object_mut().unwrap().remove("task");
-    assert!(serde_json::from_value::<ContextExplanation>(missing).is_err());
-}
-
-#[test]
-fn desktop_inspection_preserves_exact_windows_hidden_panes_and_stale_reading() {
-    use loopflow::lf::commands::desktop::DesktopInspection;
-    let json = include_str!("../../../tests/fixtures/dto/desktop_inspection.json");
-    let report: DesktopInspection = serde_json::from_str(json).unwrap();
-    assert_eq!(
-        report.openings[0].reason.as_deref(),
-        Some("Repository path is unavailable")
-    );
-    assert!(report.render().contains("Repository path is unavailable"));
-    let mut missing_openings: serde_json::Value = serde_json::from_str(json).unwrap();
-    missing_openings.as_object_mut().unwrap().remove("openings");
-    assert!(serde_json::from_value::<DesktopInspection>(missing_openings).is_err());
-    let window = &report.windows[0];
-    assert_eq!(
-        window.workspaces[0].layout.children[0].surface.as_deref(),
-        Some("native-surface-incarnation")
-    );
-    assert!(window.workspaces[0].layout.children[1].surface.is_none());
-    assert_eq!(window.reading, "unavailable");
-    let task = window.task.as_ref().unwrap();
-    assert!(task.actions.is_none());
-    assert_eq!(
-        task.roadmap_generated_at.as_deref(),
-        Some("2026-10-08T19:00:00Z")
-    );
-    assert_eq!(
-        task.condition_observed_at.as_deref(),
-        Some("2026-10-08T18:59:58Z")
-    );
-    let session = window.session.as_ref().unwrap();
-    assert_eq!(session.id, "session-one");
-    assert!(report.render().contains("Session: session-one"));
-    assert!(session.observed_at.is_none());
-    let actions = session.actions.as_ref().unwrap();
-    assert_eq!(actions.len(), 2);
-    assert!(actions[0].unavailable_reason.is_some());
-    assert!(actions[1].unavailable_reason.is_none());
-    let current = report.windows[1].task.as_ref().unwrap();
-    assert_eq!(
-        current.actions.as_ref().unwrap().recommended,
-        Some(loopflow::ops::task_actions::TaskAction::Resume)
-    );
-    assert_eq!(
-        current.run_control.as_ref().unwrap().unavailable.as_deref(),
-        Some("Task checkout is on another Machine")
-    );
-    assert!(report.render().contains("Observed: unavailable"));
-    assert!(report
-        .render()
-        .contains("Run: Task checkout is on another Machine"));
-    assert_eq!(window.workspaces[0].hidden_panes, ["files-pane"]);
-    assert_eq!(
-        window.workspaces[0].layout.children[0].subject.as_deref(),
-        Some("session-one")
-    );
-    assert_eq!(
-        serde_json::to_value(&report).unwrap(),
-        serde_json::from_str::<serde_json::Value>(json).unwrap()
-    );
-    assert!(report
-        .render()
-        .contains("session-pane: session session-one"));
-    let mut missing: serde_json::Value = serde_json::from_str(json).unwrap();
-    missing["windows"][0]
-        .as_object_mut()
+fn task_delivery_preserves_execution_and_due_unstarted_tasks() {
+    use loopflow::lf::commands::waves::RoadmapTask;
+    let json = include_str!("../../../tests/fixtures/dto/task_delivery_rows.json");
+    let rows: std::collections::BTreeMap<String, RoadmapTask> = serde_json::from_str(json).unwrap();
+    assert!(rows["pending"]
+        .runtime
+        .as_ref()
         .unwrap()
-        .remove("reading");
-    assert!(serde_json::from_value::<DesktopInspection>(missing).is_err());
+        .completion_pending
+        .as_ref()
+        .unwrap()
+        .contains("lf task complete"));
+    assert_eq!(
+        rows["completed_running"].runtime.as_ref().unwrap().status,
+        loopflow::durable::TaskState::Done
+    );
+    assert_eq!(
+        rows["completed_running"].execution,
+        rows["pending"].execution
+    );
+    assert!(rows["due"].runtime.is_none());
+    assert_eq!(rows["due"].task.due_date.as_deref(), Some("2026-10-08"));
+    assert_eq!(
+        serde_json::to_value(&rows).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+    let mut missing = serde_json::to_value(&rows["pending"]).unwrap();
+    missing.as_object_mut().unwrap().remove("run_control");
+    assert!(serde_json::from_value::<RoadmapTask>(missing).is_err());
 }
 
 #[test]
@@ -731,6 +660,8 @@ fn planning_sync_preserves_delivery_and_losing_values() {
         sync.changes[1].state,
         loopflow::store::planning_sync::PlanningSyncState::Uncertain
     );
+    assert_eq!(sync.changes[2].field, "task_title");
+    assert_eq!(sync.changes[3].field, "task_assignee");
     assert_eq!(sync.changes[2].local_value, "Local title");
     assert_eq!(
         sync.changes[2].linear_value,
@@ -918,6 +849,32 @@ fn session_connect_explanations_preserve_intent_and_unavailable_evidence() {
 }
 
 #[test]
+fn work_authors_preserve_names_and_historical_attribution() {
+    let fixture = include_str!("../../../tests/fixtures/dto/work_authors.json");
+    let authors: Vec<loopflow::durable::Author> = serde_json::from_str(fixture).unwrap();
+    assert_eq!(
+        authors[1],
+        loopflow::durable::Author::Named("Fixture author".into())
+    );
+    assert_eq!(
+        serde_json::to_value(authors).unwrap(),
+        serde_json::from_str::<serde_json::Value>(fixture).unwrap()
+    );
+}
+
+#[test]
+fn session_steer_status_preserves_excerpt_evidence() {
+    let fixture = include_str!("../../../tests/fixtures/dto/session_steers.json");
+    let page: loopflow::steer::SessionSteerPage = serde_json::from_str(fixture).unwrap();
+    assert_eq!(page.items[0].excerpted, Some(true));
+    assert_eq!(page.items[0].evidence, "emitted");
+    assert_eq!(
+        serde_json::to_value(page).unwrap(),
+        serde_json::from_str::<serde_json::Value>(fixture).unwrap()
+    );
+}
+
+#[test]
 fn peer_planning_status_keeps_journal_and_independent_receipts() {
     let value: serde_json::Value = serde_json::from_str(include_str!(
         "../../../tests/fixtures/dto/peer_planning_status.json"
@@ -933,10 +890,21 @@ fn peer_planning_status_keeps_journal_and_independent_receipts() {
     assert_eq!(statuses[0].conflicts.len(), 1);
     assert!(statuses[1].pending_local);
     assert_eq!(
-        statuses[1].changes["comment-head"].value["author"],
+        statuses[1].changes["comment-head"]
+            .edit
+            .change
+            .value()
+            .unwrap()["author"],
         serde_json::json!({"kind": "person", "name": "Maya"})
     );
-    assert_eq!(statuses[1].changes["title-loser"].value, "Retained title");
+    assert_eq!(
+        statuses[1].changes["title-loser"]
+            .edit
+            .change
+            .value()
+            .unwrap(),
+        "Retained title"
+    );
     assert!(!statuses[1].candidates.contains("title-loser"));
     assert!(statuses[1].changes["title-head"]
         .parents

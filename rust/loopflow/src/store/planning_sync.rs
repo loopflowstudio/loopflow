@@ -6,9 +6,21 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PlanningChange {
     pub id: String,
-    pub field: String,
-    pub value: serde_json::Value,
-    pub base: Option<serde_json::Value>,
+    pub value: crate::work::edit::WorkValue,
+    pub base: Option<PlanningBaseline>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlanningBaseline {
+    pub revision: Option<String>,
+    /// None retains an explicitly null membership claim; no baseline means omission.
+    pub value: Option<crate::work::edit::WorkValue>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TaskDeletion {
+    pub id: String,
+    pub base_revision: Option<String>,
 }
 
 /// Read-only delivery evidence. These rows never confer execution authority.

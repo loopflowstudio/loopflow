@@ -201,7 +201,6 @@ fn execute(
                 WorkRef::Task(id) => Some(id.clone()),
                 _ => None,
             }),
-            steers: Mutex::default(),
         };
         // A chapter rotation moving this checkout's Task excludes new work in it.
         let admission = running
@@ -417,8 +416,6 @@ struct RunningFlow<'a> {
     /// Where the runner stands, as of its last checkpoint.
     position: Mutex<ExecutionCursor>,
     task: Option<crate::durable::TaskId>,
-    /// The Task's newest steer when each node last started, by node key.
-    steers: Mutex<std::collections::HashMap<u32, i64>>,
 }
 
 /// How a step's process ended, before any answer is read.
@@ -597,6 +594,7 @@ impl SkillExecutor for &RunningFlow<'_> {
         skill: &ConcreteSkill,
         ctx: ExecutionContext,
     ) -> Result<SkillOutcome> {
+        crate::ops::linear_observe::sync_repository(&self.store, &self.cwd.to_string_lossy()).await;
         let name = &skill.skill.name;
         print_step_progress(ctx.progress, name);
         let current = self.current();
@@ -628,23 +626,6 @@ impl SkillExecutor for &RunningFlow<'_> {
         step_cli.only_account.clear();
         step_cli.isolate = false;
         step_cli.shared = false;
-        // A node that runs again is spared the Task direction its earlier run
-        // was already given.
-        if let Some(task) = &self.task {
-            let newest = self
-                .store
-                .task_steers(task)
-                .await?
-                .last()
-                .map_or(0, |steer| steer.id);
-            let (node, _) = self.location();
-            let seen = self
-                .steers
-                .lock()
-                .expect("Flow steers mutex poisoned")
-                .insert(node, newest);
-            step_cli.steers_after = seen.max(step_cli.steers_after);
-        }
         // The child receives this occurrence's captured source, not a later
         // catalog selection. Keep the file alive through every child/readback.
         let mut input = tempfile::NamedTempFile::new()?;
@@ -702,6 +683,7 @@ impl SkillExecutor for &RunningFlow<'_> {
         ops: &crate::flow::ConcreteCommand,
         _ctx: ExecutionContext,
     ) -> Result<SkillOutcome> {
+        crate::ops::linear_observe::sync_repository(&self.store, &self.cwd.to_string_lossy()).await;
         let label = ops.item.display_name();
         eprintln!("op: {label}");
         // Authored spellings outlive the CLI's; the step runs today's.
@@ -757,6 +739,89 @@ mod tests {
     use crate::flow::ConcreteStep;
     use std::fs;
     use tempfile::tempdir;
+
+    #[test]
+    fn linear_on_demand_flow_steps_acquire_before_spawning() {
+        use crate::flow::runner::{ExecutionContext, ExecutionCursor, SkillExecutor, SkillOutcome};
+        use crate::flow::{Command, ConcreteCommand, ConcreteSkill, Skill};
+        use crate::lf::Cli;
+        use crate::ops::linear::task_planning_tests::{mark_issue_updated, with_planning_task};
+        use clap::Parser;
+        use std::os::unix::fs::PermissionsExt;
+        use std::sync::Mutex;
+
+        with_planning_task(|runtime, fixture, repo, task, state| {
+            let _env = crate::test_ambient::EnvGuard::clear(&["LF_BIN"]);
+            let child = fixture.directory.path().join("lf-step");
+            fs::write(&child, format!(
+                "#!/usr/bin/env python3\nimport sqlite3\nwith sqlite3.connect({}) as db:\n    title, = db.execute('SELECT issue_title FROM tasks WHERE id=?', ({},)).fetchone()\nassert title == 'Acquired before step', title\n",
+                serde_json::to_string(&fixture.database).unwrap(),
+                serde_json::to_string(task.id.as_str()).unwrap(),
+            )).unwrap();
+            fs::set_permissions(&child, fs::Permissions::from_mode(0o755)).unwrap();
+            std::env::set_var("LF_BIN", &child);
+            let cli = Cli::try_parse_from(["lf", "--batch"]).unwrap();
+            let skill = ConcreteSkill {
+                skill: Skill::named("probe"),
+                id: None,
+                human: false,
+                returns: None,
+                sources: Vec::new(),
+            };
+            let command = ConcreteCommand {
+                item: Command {
+                    command: "context".into(),
+                    args: Vec::new(),
+                },
+                sources: Vec::new(),
+            };
+            let steps = [
+                ConcreteStep::Skill(skill.clone()),
+                ConcreteStep::Command(command.clone()),
+            ];
+            let running = super::RunningFlow {
+                store: fixture.store.clone(),
+                process: crate::id::LfProcessId::new(),
+                flow: "probe",
+                steps: &steps,
+                message: None,
+                cwd: repo,
+                launcher: &cli,
+                position: Mutex::new(ExecutionCursor::default()),
+                task: None,
+            };
+            runtime.block_on(async {
+                let conn = rusqlite::Connection::open(&fixture.database).unwrap();
+                for index in 0..2 {
+                    conn.execute("DELETE FROM linear_team_checks", []).unwrap();
+                    conn.execute(
+                        "UPDATE tasks SET issue_title='Old title' WHERE id=?1",
+                        [task.id.as_str()],
+                    )
+                    .unwrap();
+                    {
+                        let mut provider = state.lock().await;
+                        provider.requests = 0;
+                        provider.issues[0]["title"] = serde_json::json!("Acquired before step");
+                        mark_issue_updated(&mut provider.issues[0]);
+                    }
+                    let ctx = ExecutionContext {
+                        progress: None,
+                        direction: None,
+                    };
+                    let outcome = if index == 0 {
+                        (&running).run_skill(&skill, ctx).await
+                    } else {
+                        running.position.lock().unwrap().index = 1;
+                        (&running).run_command(&command, ctx).await
+                    }
+                    .unwrap();
+                    assert_eq!(outcome, SkillOutcome::Completed);
+                    assert_eq!(state.lock().await.requests, 1);
+                }
+            });
+        });
+    }
 
     #[test]
     fn render_pipeline_lines_expands_xor_paths_on_separate_lines() {

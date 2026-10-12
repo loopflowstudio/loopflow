@@ -68,7 +68,7 @@ async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
         return Ok(());
     }
     crate::ops::planning_sync::configured_destination(store, repo).await?;
-    let destinations = store.peer_planning_status(repo).await?;
+    let destinations = crate::ops::planning_sync::peer_status(store, repo).await?;
     if json {
         println!(
             "{}",
@@ -125,26 +125,20 @@ async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
             println!("  {error}");
         }
         for conflict in destination.conflicts {
-            println!(
-                "  Held {} {}: {}",
-                conflict.object.kind.as_str(),
-                conflict.object.id,
-                conflict.reason
-            );
+            println!("  Held {}: {}", conflict.target, conflict.reason);
         }
         for (id, change) in destination.changes {
             println!(
-                "  {} {} {} [{}; {}]: {}",
-                change.object.kind.as_str(),
-                change.object.id,
-                change.field,
+                "  {} {} [{}; {}]: {}",
+                change.edit.target,
+                change.edit.change.field(),
                 id,
                 if destination.candidates.contains(&id) {
                     "candidate, not confirmed"
                 } else {
                     "retained alternative"
                 },
-                change.value
+                change.edit.change.value()?
             );
         }
     }

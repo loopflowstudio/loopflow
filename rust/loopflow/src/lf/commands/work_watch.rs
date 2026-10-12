@@ -110,7 +110,7 @@ pub struct TaskPart {
     pub task: String,
     pub work: TaskWork,
     pub flow_processes: Vec<FlowProcessDetail>,
-    pub comments: crate::ops::pm::TaskComments,
+    pub comments: crate::work::task::comment::TaskComments,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -235,7 +235,9 @@ impl Part {
 
     fn clock(self) -> Duration {
         match self {
-            Part::Planning | Part::PeerPlanning | Part::Wave => PLANNING_CLOCK,
+            Part::Planning | Part::Wave => PLANNING_CLOCK,
+            // Transport selection lives in config, so it can change without a store write.
+            Part::PeerPlanning => Duration::from_secs(5),
             Part::Activity | Part::Sessions | Part::Task | Part::WorkActivity => ACTIVITY_CLOCK,
         }
     }
@@ -384,7 +386,7 @@ struct Reader {
     /// The sessions revision a quiet deadline was read at, and that deadline.
     quiet: Option<(i64, Option<i64>)>,
     runtime: tokio::runtime::Runtime,
-    planning_sync: Option<(String, crate::ops::linear_observe::PlanningSync)>,
+    planning_sync: Option<(String, crate::ops::planning_sync::PlanningSync)>,
 }
 
 impl Reader {
@@ -427,7 +429,7 @@ impl Reader {
             let store = Arc::new(
                 crate::store::open_store(&StorageConfig::sqlite(self.database.clone())).await?,
             );
-            crate::ops::linear_observe::PlanningSync::start(store, repo.clone())
+            crate::ops::planning_sync::PlanningSync::start_watch(store, repo.clone())
                 .map_err(anyhow::Error::from)
         });
         match result {
@@ -591,16 +593,8 @@ impl Reader {
                 Part::PeerPlanning => {
                     let repo = self.scope.repo.clone().context("no repository in scope")?;
                     let root = CanonicalRepo::discover(Path::new(&repo))?;
-                    let config =
-                        crate::config::load_config(Some(root.as_path()))?.unwrap_or_default();
-                    let destinations = if matches!(
-                        config.planning_transport(),
-                        crate::config::PlanningConfig::Linear {}
-                    ) {
-                        Vec::new()
-                    } else {
-                        store.peer_planning_status(&root.to_string()).await?
-                    };
+                    let destinations =
+                        crate::ops::planning_sync::peer_status(store, &root.to_string()).await?;
                     WorkContent::PeerPlanning(Some(PeerPlanningPart { repo, destinations }))
                 }
                 Part::Sessions => {

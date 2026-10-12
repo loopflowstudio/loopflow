@@ -1795,7 +1795,7 @@ fn repository_identity_binding_is_explicit_and_does_not_select_planning() {
         .unwrap()
         .to_string_lossy()
         .into_owned();
-    assert!(store.peer_planning_status(&repo).unwrap().is_empty());
+    assert!(store.peer_planning_status(&repo, None).unwrap().is_empty());
     assert!(store.list_waves(None).unwrap().is_empty());
     let task: serde_json::Value = serde_json::from_str(&success(
         command(
@@ -1813,7 +1813,8 @@ fn repository_identity_binding_is_explicit_and_does_not_select_planning() {
         .unwrap(),
     ))
     .unwrap();
-    let planning_before = serde_json::to_value(store.peer_planning_status(&repo).unwrap()).unwrap();
+    let planning_before =
+        serde_json::to_value(store.peer_planning_status(&repo, None).unwrap()).unwrap();
     let other = loopflow::durable::RepositoryId::new();
     let rebound = command(
         target_home.path(),
@@ -1863,7 +1864,7 @@ fn repository_identity_binding_is_explicit_and_does_not_select_planning() {
     assert!(explained.contains(task["id"].as_str().unwrap()));
     assert!(explained.contains(through_prior.id.as_str()));
     assert_eq!(
-        serde_json::to_value(store.peer_planning_status(&repo).unwrap()).unwrap(),
+        serde_json::to_value(store.peer_planning_status(&repo, None).unwrap()).unwrap(),
         planning_before
     );
 }

@@ -125,17 +125,18 @@ Reading is half; the system stays steerable while it runs.
 lf --wave <wave> wave-operate "ship the parser fix first"
 lf session ensure -w <wave>                # the Wave's ongoing conversation and operator
 lf --wave <wave> : "Review this plan"          # start a conversation
-lf comment INF-123 "smaller PR"            # post a Linear comment; deliver to its running Flow
-lf interrupt INF-123                     # end this turn and re-read direction
+lf comment INF-123 "smaller PR"            # save a steer for the Task's Sessions
+lf interrupt INF-123                     # end the active turn
 lf session list --waiting --json              # conversations waiting on you
 lf session connect <session-id> --json           # recover one exact conversation
 ```
 
-Task steering posts a Linear Task comment; commenting in Linear also steers the
-Task's running Flow. Independent conversations receive no live injection. Idle Tasks retain
-comments without starting execution. Task interrupt ends the active turn so
-the next step re-reads direction. Publication and transport acceptance do not
-prove that the agent applied the correction. See [The Agent API](agent-api.md#steer).
+Task comments save steers locally and sync when Linear is configured. Acquired
+Linear comments also become steers. Each associated Session receives them
+independently at its next supported provider boundary. Idle Sessions stay idle.
+Inspect delivery with `lf session steers SESSION`; retry an uncertain delivery
+with `lf session steers SESSION --retry STEER_ID`. Delivery evidence does not
+prove the agent followed the steer. See [The Agent API](agent-api.md#steer).
 
 Headless work that lacks required input explains its failure and stops. Read
 its existing status and logs; discuss unresolved judgment in the ongoing Wave
@@ -158,7 +159,7 @@ Task workspace shells run directly in the app's terminal.
 
 See the [Sessions lifecycle](../README.md#sessions) for opening and replacing
 conversations.
-Use `lf comment` for durable Task direction,
+Use `lf comment` to save a Task steer,
 and `lf --task` for another agent perspective.
 
 ## Next

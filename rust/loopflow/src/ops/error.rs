@@ -7,7 +7,7 @@ pub type OpsResult<T> = Result<T, OpsError>;
 #[derive(Debug, Error)]
 pub enum OpsError {
     #[error(transparent)]
-    Planning(#[from] crate::pm::LinearBindingError),
+    Planning(#[from] crate::linear::LinearBindingError),
     #[error(transparent)]
     TaskData(#[from] crate::work::task::TaskDataError),
     #[error("git error: {0}")]
@@ -41,8 +41,8 @@ pub enum OpsError {
     },
     #[error(
         "refusing to sync: recorded base {base} is not an ancestor of HEAD, so \
-         its history diverged. Reconcile by hand; the commits since the common \
-         ancestor are:\n{commits}"
+         the saved comparison cannot identify the child edits. Keep this branch; \
+         review its history before changing the stack comparison base"
     )]
-    UnsafeSyncBase { base: String, commits: String },
+    UnsafeSyncBase { base: String },
 }

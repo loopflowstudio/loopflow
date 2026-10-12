@@ -1,8 +1,9 @@
 use crate::child::ChildRef;
 use crate::durable::{
-    AbandonReceipt, Machine, MachineId, Placement, Steer, SteerComment, TaskId,
-    ToolResponseReceipt, ToolResponseWrite, WorkRef, WorkStatus,
+    AbandonReceipt, Machine, MachineId, Placement, SteerComment, TaskId, ToolResponseReceipt,
+    ToolResponseWrite, WorkRef, WorkStatus,
 };
+use crate::steer::Steer;
 
 use super::{run_sqlite, Store, StoreResult};
 
@@ -123,7 +124,7 @@ impl Store {
     }
 
     #[cfg(test)]
-    pub(crate) async fn append_steer(
+    pub(crate) async fn save_steer(
         &self,
         work: &WorkRef,
         author: crate::durable::Author,
@@ -132,7 +133,7 @@ impl Store {
         let work = work.clone();
         let text = text.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.append_steer(&work, &author, &text)
+            store.save_steer(&work, &author, &text)
         })
         .await
     }

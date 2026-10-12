@@ -114,7 +114,7 @@ pub fn create_or_update_pr(
 
     // Record the ancestry already present in Git before the first remote effect.
     // This recognizes completed merges without integrating or rewriting history.
-    crate::ops::task::verify_task_pr_range(repo)?;
+    crate::ops::task::refresh_task_pr_base(repo)?;
 
     // Gate output is an in-worktree handoff, never published content. Consume
     // valid cached copy before deleting the gate-owned files so the commit and
@@ -261,15 +261,9 @@ pub(crate) fn normalize_task_pr_copy(
 
     let task_link = context.task_link();
     let pr_lifecycle: String = match lifecycle {
-        TaskPrCopyLifecycle::Draft => {
-            "The pull request is a draft; no Task settlement is requested.".into()
-        }
-        TaskPrCopyLifecycle::Published => {
-            "The pull request is published for review; no Task settlement is requested.".into()
-        }
-        TaskPrCopyLifecycle::Completes => {
-            "Merge delivers the code. Complete the Task when its outcome is satisfied.".into()
-        }
+        TaskPrCopyLifecycle::Draft => "The pull request is a draft; no Task settlement is requested.".into(),
+        TaskPrCopyLifecycle::Published => "The pull request is published for review; no Task settlement is requested.".into(),
+        TaskPrCopyLifecycle::Completes => "Merge delivers the code. Record independent later work as Tasks and comments; complete the delivered outcome.".into(),
     };
     let managed = format!(
         "{TASK_PR_CONTEXT_START}\n> [!NOTE]\n> **Task:** {task_link}\n> **PR lifecycle:** {pr_lifecycle}\n{TASK_PR_CONTEXT_END}"
@@ -2523,7 +2517,7 @@ esac
 <!-- loopflow:task-pr-context:start -->\n\
 > [!NOTE]\n\
 > **Task:** [Make Task PR copy explain intent and lifecycle · LOO-249](https://linear.app/loopflow/issue/LOO-249/task-pr-copy)\n\
-> **PR lifecycle:** Merge delivers the code. Complete the Task when its outcome is satisfied.\n\
+> **PR lifecycle:** Merge delivers the code. Record independent later work as Tasks and comments; complete the delivered outcome.\n\
 <!-- loopflow:task-pr-context:end -->\n\n\
 ## Evaluate\n\nRecorded proof."
         );
@@ -2576,7 +2570,10 @@ esac
                 TaskPrCopyLifecycle::Published,
                 "no Task settlement is requested.",
             ),
-            (TaskPrCopyLifecycle::Completes, "then complete the Task."),
+            (
+                TaskPrCopyLifecycle::Completes,
+                "complete the delivered outcome.",
+            ),
         ] {
             copy = normalize_task_pr_copy(copy, Some(&context), &lifecycle).unwrap();
             assert!(copy

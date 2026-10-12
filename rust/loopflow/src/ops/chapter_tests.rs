@@ -6,11 +6,13 @@ use serde_json::{json, Value};
 use tokio::sync::Mutex;
 
 use super::{classify_task, TaskDisposition, TaskStartEvidence};
-use crate::ops::pm::test_fixture::PlanningEnvironment;
-use crate::ops::pm::{pm_sync, resolve_context, PmSyncOptions, PmTestContext, PM_TEST_CONTEXT};
+use crate::linear::LinearIssueId;
+use crate::linear::LinearProject;
+use crate::ops::linear::test_fixture::PlanningEnvironment;
+use crate::ops::linear::{
+    refresh, resolve_context, LinearSyncOptions, LinearTestContext, LINEAR_TEST_CONTEXT,
+};
 use crate::ops::NullProgress;
-use crate::pm::linear::LinearProject;
-use crate::pm::LinearIssueId;
 use crate::store::{open_ephemeral_store, CredentialType, ProviderToken, StorageConfig};
 use crate::work::project::ProjectStatus;
 use crate::work::task::{LinearWritebackState, Observation, Task, TaskId, TaskPr, TaskPrId};
@@ -144,7 +146,7 @@ async fn graphql(
         issue["branchName"] = Value::Null;
     }
     let prior_projects = provider.projects.clone();
-    let data = if query.contains("query ListTeams") {
+    let mut data = if query.contains("query ListTeams") {
         json!({"teams":page(vec![json!({"id":"team-1", "name":"Fixture", "key":"FIX", "description":"<!-- loopflow-repository: loopflowstudio/fixture -->"})])})
     } else if query.contains("query ProjectInitiative") {
         json!({"initiative":{"id":id}})
@@ -189,6 +191,9 @@ async fn graphql(
                 project["updatedAt"] = revision.clone();
             }
         }
+        if query.contains("mutation AdoptProject") {
+            data["projectUpdate"]["project"] = provider.projects[id].clone();
+        }
         if provider.interrupt_after == Some(provider.mutations) {
             provider.unavailable = true;
             return Json(json!({"errors":[{"message":"fixture lost mutation response"}]}));
@@ -227,7 +232,7 @@ fn provider_fixture() -> Provider {
     provider
 }
 
-async fn context(home: &std::path::Path, repo: &std::path::Path, url: &str) -> PmTestContext {
+async fn context(home: &std::path::Path, repo: &std::path::Path, url: &str) -> LinearTestContext {
     std::fs::create_dir_all(home).unwrap();
     std::env::set_var("LF_HOME", home);
     let path = home.join("loopflow.db");
@@ -252,7 +257,7 @@ async fn context(home: &std::path::Path, repo: &std::path::Path, url: &str) -> P
         })
         .await
         .unwrap();
-    PmTestContext {
+    LinearTestContext {
         path,
         store,
         graphql_url: url.into(),
@@ -273,7 +278,7 @@ async fn seed_project(
         wave_id: wave.id().clone(),
 
         summary: String::new(),
-        linear_id: Some(crate::pm::LinearProjectId::new(plan.id.clone()).unwrap()),
+        linear_id: Some(crate::linear::LinearProjectId::new(plan.id.clone()).unwrap()),
         slug: plan.slug.clone(),
         name: plan.name.clone(),
         description: String::new(),
@@ -291,7 +296,7 @@ async fn seed_project(
 }
 
 async fn local_task(
-    context: &PmTestContext,
+    context: &LinearTestContext,
     repo: &std::path::Path,
     wave_name: &str,
     issue: &str,
@@ -378,7 +383,7 @@ async fn local_task(
 }
 
 async fn local_started_task(
-    context: &PmTestContext,
+    context: &LinearTestContext,
     repo: &std::path::Path,
 ) -> (Task, TaskPr, Vec<crate::ops::flow_process::FlowProcess>) {
     let (task, _) = local_task(
@@ -435,7 +440,7 @@ fn clean_checkout(checkout: &std::path::Path) -> String {
     crate::git::rev_parse(checkout, "HEAD").unwrap()
 }
 
-async fn local_backlog_tasks(context: &PmTestContext, repo: &std::path::Path) {
+async fn local_backlog_tasks(context: &LinearTestContext, repo: &std::path::Path) {
     for wave in ["a", "b"] {
         let checkout = context.path.with_extension(format!("{wave}-checkout"));
         let base = clean_checkout(&checkout);
@@ -470,16 +475,12 @@ fn fixture_repo(root: &std::path::Path) -> std::path::PathBuf {
             .unwrap()
             .success());
     }
-    std::fs::write(
-        repo.join(".lf/config.yaml"),
-        "pm:\n  provider: linear\n  linear_team: team-1\n",
-    )
-    .unwrap();
+    std::fs::write(repo.join(".lf/config.yaml"), "linear:\n  team: team-1\n").unwrap();
     for wave in ["a", "b"] {
         std::fs::create_dir_all(repo.join(format!("wave/{wave}"))).unwrap();
         std::fs::write(
             repo.join(format!("wave/{wave}/GOAL.md")),
-            format!("---\npm:\n  linear_initiative: initiative-{wave}\n---\nDurable mandate.\n"),
+            format!("---\nlinear:\n  initiative: initiative-{wave}\n---\nDurable mandate.\n"),
         )
         .unwrap();
     }
@@ -549,11 +550,11 @@ async fn explicit_sync_converts_legacy_flow_without_renaming_or_losing_content()
     let store = home.store.clone();
     // The public sync entry point owns a runtime; keep the fixture server running separately.
     tokio::task::spawn_blocking(move || {
-        PM_TEST_CONTEXT.sync_scope(home, || {
+        LINEAR_TEST_CONTEXT.sync_scope(home, || {
             for _ in 0..2 {
-                pm_sync(
+                refresh(
                     &repo,
-                    &PmSyncOptions {
+                    &LinearSyncOptions {
                         wave: Some("a".into()),
                         plan: false,
                     },
@@ -603,13 +604,13 @@ async fn archived_predecessor_is_history_even_when_linear_still_says_started() {
     let (url, server) = serve_fixture(provider.clone()).await;
     let home = context(&directory.path().join("archive"), &repo, &url).await;
     let (task, pr, flow) = local_started_task(&home, &repo).await;
-    PM_TEST_CONTEXT
+    LINEAR_TEST_CONTEXT
         .scope(home, async {
-            let ctx = resolve_context(&repo, "a").await.unwrap();
-            crate::ops::pm::refresh_pm_snapshot(&repo, "a", &ctx)
+            let (ctx, initiative) = resolve_context(&repo, "a").await.unwrap();
+            crate::ops::linear::refresh_inventory(&repo, "a", &ctx, &initiative)
                 .await
                 .unwrap();
-            let store = super::pm_store().await.unwrap();
+            let store = super::planning_store().await.unwrap();
             let projects = store.list_projects(None).await.unwrap();
             assert!(projects.iter().any(|project| project
                 .linear_id
@@ -640,7 +641,11 @@ async fn archived_predecessor_is_history_even_when_linear_still_says_started() {
     server.abort();
 }
 
-async fn legacy_home(path: &std::path::Path, repo: &std::path::Path, url: &str) -> PmTestContext {
+async fn legacy_home(
+    path: &std::path::Path,
+    repo: &std::path::Path,
+    url: &str,
+) -> LinearTestContext {
     let home = context(path, repo, url).await;
     local_started_task(&home, repo).await;
     local_backlog_tasks(&home, repo).await;
@@ -725,18 +730,19 @@ async fn legacy_project_adoption_preserves_plans_across_lost_responses() {
                     &url,
                 )
                 .await;
-                PM_TEST_CONTEXT
+                LINEAR_TEST_CONTEXT
                     .scope(
-                        PmTestContext {
+                        LinearTestContext {
                             path: first.path.clone(),
                             store: first.store.clone(),
                             graphql_url: first.graphql_url.clone(),
                         },
                         async {
-                            let ctx = resolve_context(&repo, "a").await.unwrap();
-                            let plans = crate::ops::pm::checked_projects(&repo, &ctx, "a")
-                                .await
-                                .unwrap();
+                            let (ctx, initiative) = resolve_context(&repo, "a").await.unwrap();
+                            let plans =
+                                crate::ops::linear::checked_projects(&repo, &ctx, &initiative, "a")
+                                    .await
+                                    .unwrap();
                             let current = plans
                                 .iter()
                                 .find(|p| p.id == "00000000-0000-4000-8000-000000000001")
@@ -759,6 +765,7 @@ async fn legacy_project_adoption_preserves_plans_across_lost_responses() {
                                 &first.store,
                                 "a",
                                 &ctx,
+                                &initiative,
                                 true
                             )
                             .await
@@ -781,14 +788,14 @@ async fn legacy_project_adoption_preserves_plans_across_lost_responses() {
                 } else {
                     first
                 };
-                PM_TEST_CONTEXT
+                LINEAR_TEST_CONTEXT
                     .scope(resumed, async {
-                        let store = super::pm_store().await.unwrap();
+                        let store = super::planning_store().await.unwrap();
                         let task = store.get_task_by_issue("a-started").await.unwrap().unwrap();
                         let prs = store.task_prs(&task.id).await.unwrap();
                         let flow = store.sqlite.task_flows(&task.id).unwrap();
-                        let ctx = resolve_context(&repo, "a").await.unwrap();
-                        super::adopt_legacy_projects(&repo, &store, "a", &ctx, true)
+                        let (ctx, initiative) = resolve_context(&repo, "a").await.unwrap();
+                        super::adopt_legacy_projects(&repo, &store, "a", &ctx, &initiative, true)
                             .await
                             .unwrap();
                         assert!(store
@@ -797,7 +804,7 @@ async fn legacy_project_adoption_preserves_plans_across_lost_responses() {
                             .unwrap()
                             .is_empty());
                         let mutations = provider.lock().await.mutations;
-                        super::adopt_legacy_projects(&repo, &store, "a", &ctx, true)
+                        super::adopt_legacy_projects(&repo, &store, "a", &ctx, &initiative, true)
                             .await
                             .unwrap();
                         assert_eq!(provider.lock().await.mutations, mutations);
@@ -865,11 +872,11 @@ async fn legacy_adoption_leaves_foreign_team_projects_and_receipts_untouched() {
     }
     let (url, server) = serve_fixture(provider.clone()).await;
     let home = legacy_home(&directory.path().join("foreign"), &repo, &url).await;
-    PM_TEST_CONTEXT
+    LINEAR_TEST_CONTEXT
         .scope(home, async {
-            let store = super::pm_store().await.unwrap();
-            let ctx = resolve_context(&repo, "a").await.unwrap();
-            let plans = crate::ops::pm::checked_projects(&repo, &ctx, "a")
+            let store = super::planning_store().await.unwrap();
+            let (ctx, initiative) = resolve_context(&repo, "a").await.unwrap();
+            let plans = crate::ops::linear::checked_projects(&repo, &ctx, &initiative, "a")
                 .await
                 .unwrap();
             assert_eq!(plans.len(), 1);
@@ -882,9 +889,10 @@ async fn legacy_adoption_leaves_foreign_team_projects_and_receipts_untouched() {
                 "00000000-0000-4000-8000-000000000001"
             );
             let before = provider.lock().await.projects.clone();
-            let converted = super::adopt_legacy_projects(&repo, &store, "a", &ctx, true)
-                .await
-                .unwrap();
+            let converted =
+                super::adopt_legacy_projects(&repo, &store, "a", &ctx, &initiative, true)
+                    .await
+                    .unwrap();
             assert_eq!(converted.len(), 1);
             assert_eq!(converted[0].status, ProjectStatus::Started);
             let wave = store
@@ -940,13 +948,14 @@ async fn legacy_adoption_without_a_receipt_never_guesses_between_plans() {
             [],
         )
         .unwrap();
-    PM_TEST_CONTEXT
+    LINEAR_TEST_CONTEXT
         .scope(home, async {
-            let store = super::pm_store().await.unwrap();
-            let ctx = resolve_context(&repo, "a").await.unwrap();
-            let projects = super::adopt_legacy_projects(&repo, &store, "a", &ctx, false)
-                .await
-                .unwrap();
+            let store = super::planning_store().await.unwrap();
+            let (ctx, initiative) = resolve_context(&repo, "a").await.unwrap();
+            let projects =
+                super::adopt_legacy_projects(&repo, &store, "a", &ctx, &initiative, false)
+                    .await
+                    .unwrap();
             assert_eq!(projects[0].status, ProjectStatus::Started);
             assert_eq!(projects[0].workflow, "custom");
             {
@@ -958,15 +967,17 @@ async fn legacy_adoption_without_a_receipt_never_guesses_between_plans() {
                 future["content"] = json!("flow: future-custom");
                 state.projects.insert("a-future".into(), future);
             }
-            assert!(super::adopt_legacy_projects(&repo, &store, "a", &ctx, true)
-                .await
-                .unwrap_err()
-                .to_string()
-                .contains("ambiguous"));
+            assert!(
+                super::adopt_legacy_projects(&repo, &store, "a", &ctx, &initiative, true)
+                    .await
+                    .unwrap_err()
+                    .to_string()
+                    .contains("ambiguous")
+            );
             assert_eq!(provider.lock().await.mutations, 0);
             provider.lock().await.projects.get_mut("a-future").unwrap()["status"]["type"] =
                 json!("started");
-            super::adopt_legacy_projects(&repo, &store, "a", &ctx, true)
+            super::adopt_legacy_projects(&repo, &store, "a", &ctx, &initiative, true)
                 .await
                 .unwrap();
             assert_eq!(

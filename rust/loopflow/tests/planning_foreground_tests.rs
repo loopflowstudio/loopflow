@@ -108,9 +108,31 @@ fn wait_for(mut condition: impl FnMut() -> bool) {
     }
 }
 
-fn status(runtime: &tokio::runtime::Runtime, store: &Store, repo: &str) -> PeerPlanningStatus {
+// Execution fixtures seed SQL directly. Save through the ordinary writer before
+// exercising Git exchange, which publishes only the journal of accepted edits.
+fn save_fixture_task(home: &Path, task: &loopflow::work::task::Task) {
+    let store = loopflow::store::sqlite::SqliteStore::new(&home.join("loopflow.db")).unwrap();
+    let current = store.task(&task.id).unwrap().unwrap();
+    store
+        .edit_task(
+            &current.id,
+            current.revision,
+            &loopflow::work::task::TaskUpdate {
+                title: Some(current.title.clone()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+}
+
+fn status(
+    runtime: &tokio::runtime::Runtime,
+    store: &Store,
+    repo: &str,
+    binding: &PlanningDestination,
+) -> PeerPlanningStatus {
     runtime
-        .block_on(store.peer_planning_status(repo))
+        .block_on(store.peer_planning_status(repo, Some(&binding.id())))
         .unwrap()
         .remove(0)
 }
@@ -168,6 +190,7 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
     fs::write(left.path().join("config.yaml"), "user:\n  name: Maya\n").unwrap();
     fs::write(right.path().join("config.yaml"), "user:\n  name: Lee\n").unwrap();
     let fixture = support::register_task_with_pr(left.path(), &source, "main", &repo.head_sha());
+    save_fixture_task(left.path(), &fixture.task);
     loopflow::store::sqlite::SqliteStore::new(&left.path().join("loopflow.db"))
         .unwrap()
         .ensure_wave_project(source.to_str().unwrap(), "task-pr-tests")
@@ -189,11 +212,6 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
             .bind_peer_planning(source_key, &binding)
             .await
             .unwrap();
-        fixture
-            .store
-            .use_peer_planning(source_key, Some(&binding.id()))
-            .await
-            .unwrap();
         worker
             .bind_peer_planning(target_key, &binding)
             .await
@@ -213,7 +231,7 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
     .unwrap();
     let before = execution(&conn, fixture.task.id.as_str());
     let placement = fixture.task.worktree.clone();
-    assert!(status(&runtime, &fixture.store, source_key).pending_local);
+    assert!(status(&runtime, &fixture.store, source_key, &binding).pending_local);
     // Short commands exchange without a watcher, and identical create requests
     // remain different intentions, unlike repeated delivery of the same journal.
     let first = create(&source, left.path(), "task-pr-tests");
@@ -260,12 +278,12 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
         .unwrap()
         .is_empty());
     wait_for(|| {
-        status(&runtime, &fixture.store, source_key)
+        status(&runtime, &fixture.store, source_key, &binding)
             .publication_state
             .as_deref()
             == Some("confirmed")
     });
-    let received_status = status(&runtime, &worker, target_key);
+    let received_status = status(&runtime, &worker, target_key, &binding);
     assert!(received_status.fetched_revision.is_some());
     assert!(received_status.imported_revision.is_some());
 
@@ -325,12 +343,12 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
         &["task", "move", fixture.task.id.as_str(), "end"],
     );
     wait_for(|| {
-        status(&runtime, &worker, target_key)
+        status(&runtime, &worker, target_key, &binding)
             .acquisition_error
             .is_some()
     });
-    assert!(status(&runtime, &worker, target_key).pending_local);
-    assert!(status(&runtime, &fixture.store, source_key).pending_local);
+    assert!(status(&runtime, &worker, target_key, &binding).pending_local);
+    assert!(status(&runtime, &fixture.store, source_key, &binding).pending_local);
     let lock_path = left
         .path()
         .join("locks/planning-peers")
@@ -383,8 +401,8 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
         )
         .unwrap());
     wait_for(|| {
-        let a = status(&runtime, &fixture.store, source_key);
-        let b = status(&runtime, &worker, target_key);
+        let a = status(&runtime, &fixture.store, source_key, &binding);
+        let b = status(&runtime, &worker, target_key, &binding);
         !a.pending_local
             && !b.pending_local
             && a.publication_state.as_deref() == Some("confirmed")
@@ -497,11 +515,11 @@ fn fetched_invalid_document_does_not_claim_import_or_publication() {
     );
     let watch = Watch::start(&repo_path, home.path());
     wait_for(|| {
-        status(&runtime, &store, repo_key)
+        status(&runtime, &store, repo_key, &binding)
             .acquisition_error
             .is_some()
     });
-    let status = status(&runtime, &store, repo_key);
+    let status = status(&runtime, &store, repo_key, &binding);
     assert_eq!(
         status.fetched_revision.as_deref(),
         Some(invalid.revision.as_str())
@@ -523,24 +541,14 @@ impl Agent {
         let bin = home.join("bin");
         fs::create_dir(&bin).unwrap();
         let provider = bin.join("claude");
-        fs::write(
-            &provider,
-            r#"#!/bin/sh
-printf 'launch\n' >> "$HOME/launches"
-for argument in "$@"; do
-  if [ "$argument" = --print ]; then cat > /dev/null; fi
-done
-printf 'ready\n' > "$HOME/ready.tmp"
-mv "$HOME/ready.tmp" "$HOME/ready"
-while [ ! -f "$HOME/stop" ]; do sleep 0.1; done
-printf '%s\n' '{"type":"result","subtype":"success","result":"done"}'
-"#,
-        )
-        .unwrap();
+        fs::write(&provider, include_str!("support/holding_provider.py")).unwrap();
         fs::set_permissions(&provider, fs::Permissions::from_mode(0o755)).unwrap();
         let child = command(repo, home)
             .process_group(0)
             .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+            .env("FIXTURE_STARTED", home.join("ready"))
+            .env("FIXTURE_STOP", home.join("stop"))
+            .env("FIXTURE_LAUNCHES", home.join("launches"))
             .args([if interactive { "-i" } else { "-b" }, "-a", "claude:sonnet"])
             .stdin(Stdio::null())
             .stdout(File::create(home.join("agent.stdout")).unwrap())
@@ -630,9 +638,6 @@ fn taskless_terminal_and_headless_sessions_keep_planning_live() {
     let mut target_agent = Agent::start(&target_path, right.path(), false);
     runtime.block_on(async {
         a.bind_peer_planning(source_key, &binding).await.unwrap();
-        a.use_peer_planning(source_key, Some(&binding.id()))
-            .await
-            .unwrap();
         b.bind_peer_planning(target_key, &binding).await.unwrap();
     });
     let id = create(&source_path, left.path(), "");
@@ -652,16 +657,16 @@ fn taskless_terminal_and_headless_sessions_keep_planning_live() {
         right.path(),
         &["task", "edit", &id, "--notes", "Target offline"],
     );
-    assert!(status(&runtime, &a, source_key).pending_local);
-    assert!(status(&runtime, &b, target_key).pending_local);
+    assert!(status(&runtime, &a, source_key, &binding).pending_local);
+    assert!(status(&runtime, &b, target_key, &binding).pending_local);
     fs::rename(&disconnected, remote).unwrap();
     wait_for(|| {
         let source = runtime.block_on(a.get_task(&task_id)).unwrap().unwrap();
         let target = runtime.block_on(b.get_task(&task_id)).unwrap().unwrap();
         source.description == "Target offline"
             && target.title == "Source offline"
-            && !status(&runtime, &a, source_key).pending_local
-            && !status(&runtime, &b, target_key).pending_local
+            && !status(&runtime, &a, source_key, &binding).pending_local
+            && !status(&runtime, &b, target_key, &binding).pending_local
     });
     source_agent.finish();
     target_agent.finish();
@@ -693,6 +698,7 @@ fn public_wave_reads_imported_planning_without_placing_or_changing_execution() {
     let source = repo.path().canonicalize().unwrap();
     let target = other.path().canonicalize().unwrap();
     let fixture = support::register_task_with_pr(left.path(), &source, "main", &repo.head_sha());
+    save_fixture_task(left.path(), &fixture.task);
     loopflow::store::sqlite::SqliteStore::new(&left.path().join("loopflow.db"))
         .unwrap()
         .ensure_wave_project(source.to_str().unwrap(), "task-pr-tests")
@@ -712,9 +718,6 @@ fn public_wave_reads_imported_planning_without_placing_or_changing_execution() {
     source_store
         .bind_peer_planning(source_key, &binding)
         .unwrap();
-    source_store
-        .use_peer_planning(source_key, Some(&binding.id()))
-        .unwrap();
     worker.bind_peer_planning(target_key, &binding).unwrap();
     let snapshot = source_store
         .export_peer_planning(source_key, &binding.id())
@@ -722,7 +725,7 @@ fn public_wave_reads_imported_planning_without_placing_or_changing_execution() {
     worker
         .import_peer_planning(target_key, &binding.id(), "fixture", &snapshot)
         .unwrap();
-    assert!(worker.peer_planning_status(target_key).unwrap()[0]
+    assert!(worker.peer_planning_status(target_key, None).unwrap()[0]
         .conflicts
         .is_empty());
     let wave_id = fixture.task.wave_id.as_str();
@@ -840,20 +843,20 @@ fn planning_status_reads_retained_journal_without_inventing_recovery_records() {
         .changes
         .iter()
         .find(|(_, change)| {
-            change.object.id == task
-                && change.field == "issue_title"
-                && change.value == "Same title"
+            change.edit.target == task
+                && change.edit.change.field() == "task_title"
+                && change.edit.change.value().unwrap() == "Same title"
         })
         .unwrap();
     assert!(!active.candidates.contains(old_id));
-    assert_eq!(old.value, "Same title");
+    assert_eq!(old.edit.change.value().unwrap(), "Same title");
     let (current_id, current) = active
         .changes
         .iter()
         .find(|(_, change)| {
-            change.object.id == task
-                && change.field == "issue_title"
-                && change.value == "Later title"
+            change.edit.target == task
+                && change.edit.change.field() == "task_title"
+                && change.edit.change.value().unwrap() == "Later title"
         })
         .unwrap();
     assert!(active.candidates.contains(current_id));
@@ -868,11 +871,38 @@ fn planning_status_reads_retained_journal_without_inventing_recovery_records() {
         journal
     );
 
+    // Switching config selects a different ref without replacing the old route.
+    let config_path = source.join(".lf/config.yaml");
+    let config = config_path
+        .exists()
+        .then(|| fs::read(&config_path).unwrap());
+    let other =
+        PlanningDestination::resolve(&source, "origin", "refs/loopflow/planning/shared/other")
+            .unwrap();
+    configure(&source, &other);
+    let switched: serde_json::Value = serde_json::from_str(&run(
+        &source,
+        home.path(),
+        &["planning", "status", "--json"],
+    ))
+    .unwrap();
+    let switched: Vec<PeerPlanningStatus> =
+        serde_json::from_value(switched["destinations"].clone()).unwrap();
+    assert_eq!(switched.iter().find(|d| d.active).unwrap().id, other.id());
+    let retained = switched.iter().find(|d| d.id == active.id).unwrap();
+    assert!(!retained.active);
+    assert_eq!(retained.changes, active.changes);
+    assert_eq!(retained.publication_revision, active.publication_revision);
+    match config {
+        Some(bytes) => fs::write(&config_path, bytes).unwrap(),
+        None => fs::remove_file(&config_path).unwrap(),
+    }
+
     // An unreadable journal fails the read; it must not fabricate an empty plan
     // or overwrite the bytes needed for repair. Work frames carry that read error.
     let conn = Connection::open(home.path().join("loopflow.db")).unwrap();
     conn.execute(
-        "UPDATE planning_peer_changes SET parents='[\"missing\"]' WHERE id=?1",
+        "UPDATE planning_peer_changes SET mutation=json_set(mutation,'$.parents',json('[\"missing\"]')) WHERE id=?1",
         [current_id],
     )
     .unwrap();
@@ -885,7 +915,7 @@ fn planning_status_reads_retained_journal_without_inventing_recovery_records() {
     assert!(String::from_utf8_lossy(&failed.stderr).contains("missing planning predecessor"));
     let retained: String = conn
         .query_row(
-            "SELECT parents FROM planning_peer_changes WHERE id=?1",
+            "SELECT mutation -> '$.parents' FROM planning_peer_changes WHERE id=?1",
             [current_id],
             |row| row.get(0),
         )

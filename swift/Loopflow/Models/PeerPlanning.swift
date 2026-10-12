@@ -31,27 +31,29 @@ public struct PeerPlanningStatus: Decodable, Sendable, Equatable, Identifiable {
 }
 
 public struct PeerProjectionConflict: Decodable, Sendable, Equatable {
-    public struct Object: Decodable, Sendable, Equatable {
-        public let kind: String
-        public let id: String
-    }
-
-    public let object: Object
+    public let target: String
     public let reason: String
 }
 
 /// The retained mutation itself, not a reconstructed Work record.
 public struct PlanningMutation: Decodable, Sendable, Equatable {
-    public let object: PeerProjectionConflict.Object
-    public let field: String
-    public let value: JSONValue
+    public struct Edit: Decodable, Sendable, Equatable {
+        public struct Change: Decodable, Sendable, Equatable {
+            public let field: String
+            public let value: JSONValue
+        }
+        public let target: String
+        public let change: Change
+    }
+
+    public let edit: Edit
     public let clock: Int64
     public let parents: Set<String>
 
     public var valueText: String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
-        guard let data = try? encoder.encode(value) else { return "Value unavailable" }
+        guard let data = try? encoder.encode(edit.change.value) else { return "Value unavailable" }
         return String(decoding: data, as: UTF8.self)
     }
 }

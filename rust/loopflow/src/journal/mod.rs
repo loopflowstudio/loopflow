@@ -31,8 +31,7 @@ pub const LF_PROCESS_ID_ENV: &str = "LF_PROCESS_ID";
 /// Every test in the crate that touches these variables must hold this lock.
 #[cfg(test)]
 pub(crate) fn test_env_lock() -> std::sync::MutexGuard<'static, ()> {
-    static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-    LOCK.get_or_init(|| std::sync::Mutex::new(()))
+    loopflow_test_support::env_lock()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
@@ -135,6 +134,7 @@ struct ProcessContext {
     ledger_path: PathBuf,
     /// Early observation retains a noninitializing connection through completion.
     ledger: Option<SqliteStore>,
+    receipt_wait: Duration,
     /// Serialized argv captured at Process start so terminal rows name their work.
     command: Option<String>,
     /// Optional repository trace journal. Early process observation uses only
@@ -305,19 +305,26 @@ pub fn with_process(run: impl FnOnce() -> anyhow::Result<()>) -> anyhow::Result<
 /// Observe an early command without creating a Machine, migrating, or requiring Git.
 /// Failure to observe never prevents help or installation recovery.
 pub fn observe_process(command: &[String]) {
-    if current_context().is_some() {
+    observe_process_within(command, receipt_wait());
+}
+
+/// Observe a latency-sensitive callback without ordinary admission's write wait.
+pub fn observe_process_within(command: &[String], wait: Duration) {
+    // Failed early observation must not be retried at exit with a longer wait.
+    static ATTEMPTED: AtomicBool = AtomicBool::new(false);
+    if current_context().is_some() || ATTEMPTED.swap(true, Ordering::Relaxed) {
         return;
     }
     let observe = || -> anyhow::Result<()> {
         let path = crate::store::database_path_from_env()?;
-        let ledger = SqliteStore::open_existing_processes(&path)?;
+        let ledger = SqliteStore::open_existing_processes(&path, wait)?;
         let directory = std::env::current_dir()?;
         let fields = LfEventFields {
             command: Some(command.to_vec()),
             worktree: Some(directory.display().to_string()),
             ..LfEventFields::default()
         };
-        create_process_context(&directory, &fields, path, Some(ledger))?;
+        create_process_context(&directory, &fields, path, Some(ledger), wait)?;
         try_emit(&directory, LfNode::Process, LfEventType::Started, fields)?;
         Ok(())
     };
@@ -589,7 +596,9 @@ fn ledger_insert(
         .map_or_else(|| SqliteStore::new(&context.ledger_path), Ok)
     {
         Ok(store) => {
-            let wait = receipt_wait().saturating_sub(already_waited + started.elapsed());
+            let wait = context
+                .receipt_wait
+                .saturating_sub(already_waited + started.elapsed());
             match store.record_process_within(&record, wait) {
                 Ok(()) => true,
                 Err(err) => {
@@ -676,6 +685,7 @@ fn ensure_process_context(
         fields,
         ledger_db_path().map_err(std::io::Error::other)?,
         None,
+        receipt_wait(),
     )
 }
 
@@ -684,6 +694,7 @@ fn create_process_context(
     fields: &LfEventFields,
     ledger_path: PathBuf,
     ledger: Option<SqliteStore>,
+    receipt_wait: Duration,
 ) -> Result<Option<ProcessContext>, std::io::Error> {
     let early = ledger.is_some();
     let same_store = ledger_db_path()
@@ -764,7 +775,7 @@ fn create_process_context(
                     .and_then(|value| LfProcessId::parse(&value).ok())
             })
             .flatten()
-            .filter(parent_is_recorded)
+            .filter(|parent| parent_is_recorded(parent, ledger.as_ref()))
     };
     std::env::set_var(LF_TRACE_ID_ENV, trace_id.as_str());
     let lf_process_id = LfProcessId::default();
@@ -822,6 +833,7 @@ fn create_process_context(
         cwd: repo_root.to_path_buf(),
         ledger_path,
         ledger,
+        receipt_wait,
         command: fields
             .command
             .as_ref()
@@ -867,7 +879,7 @@ fn create_process_context(
 /// `false`. Any other read failure answers `true` — never disown a real parent
 /// over a locked store; this process's own row is about to fail the same way,
 /// so there is no ghost to prevent.
-fn parent_is_recorded(parent: &LfProcessId) -> bool {
+fn parent_is_recorded(parent: &LfProcessId, ledger: Option<&SqliteStore>) -> bool {
     let path = match ledger_db_path() {
         Ok(path) if path.exists() => path,
         Ok(_) => return false,
@@ -876,7 +888,9 @@ fn parent_is_recorded(parent: &LfProcessId) -> bool {
             return true;
         }
     };
-    match SqliteStore::open_processes_read_only(&path)
+    match ledger
+        .cloned()
+        .map_or_else(|| SqliteStore::open_processes_read_only(&path), Ok)
         .and_then(|store| store.process_is_recorded(parent.as_str()))
     {
         Ok(recorded) => recorded,
@@ -1571,7 +1585,7 @@ mod tests {
             .expect("context");
 
         assert!(
-            super::parent_is_recorded(&recorded.lf_process_id),
+            super::parent_is_recorded(&recorded.lf_process_id, None),
             "the ledger must really hold a parent, or the assertion below \
              passes for the wrong reason"
         );

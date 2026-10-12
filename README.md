@@ -127,10 +127,10 @@ Delegate durable work — the same verbs whether the caller is you or the wave:
 lf checkout INF-123                               # durable Task Work + worktree, no controller
 lf -b task run INF-123                            # place the Task, then run its Flow here until it ends
 lf task run INF-123 pursue                        # on a workflow: take the edge that runs pursue
-lf comment INF-123 "take the smaller approach"   # post a Linear comment for the Task's running Flow
-lf interrupt INF-123                             # end this turn so fresh direction is read now
+lf comment INF-123 "take the smaller approach"   # save a steer for the Task's Sessions
+lf interrupt INF-123                             # end the active turn
 lf --task INF-123 research "write scratch/runtime.md"    # one independent Task conversation
-lf task run INF-123 --reason "reconcile all scratch first" # publish direction, then run fresh work
+lf task run INF-123 --reason "reconcile all scratch first" # save a steer, then run fresh work
 lf task status INF-123 --json                         # inspect planning, even when sync is unavailable
 lf task complete INF-123                             # complete without moving the Workflow
 lf task reopen INF-123                               # reopen planning; keep the Workflow and PR
@@ -142,14 +142,19 @@ lf pr reconcile                                      # check recorded deliveries
 lf ci watch                                          # watch PR checks; start a ci-fix when a landing fails
 ```
 
-Wave and narrower assignments travel through selected Git planning destinations,
-including offline edits. Existing Tasks keep their recorded checkout Machine;
-shared first starts remain unavailable until exclusive admission is implemented.
-Connection settings and execution records never travel with planning.
+Subtree delegation travels with shared planning. Started Tasks retain their recorded
+Machine; new Tasks reserve an exclusive execution owner before checkout.
+Connection settings and execution records remain Machine-local.
 
-Task comments in Linear also reach the Task's running Flow. Steering never starts
-an idle Task or broadcasts to independent conversations. A stopped Flow is
-history: `task run` never continues it, so inspect `lf task status` first.
+Task comments in Linear reach the Task's next useful boundary: before a Flow step,
+after an agent turn, when showing planning, and before a Linear write. Team checks
+share ten-second freshness. Only Desktop and `--watch` keep a slow clock, backing
+off while nothing changes; idle agents do not poll. Teams without live Tasks make
+no acquisition requests. A rate limit pauses requests across repositories in the
+same Home until reset, retaining pending writes. Acquired Task comments become steers for each associated
+Session, with independent delivery at its next supported provider boundary.
+Steering leaves idle Sessions idle. A stopped Flow is history: `task run` never
+continues it, so inspect `lf task status` first.
 
 Turn a reviewed design into work without another planning subsystem:
 
@@ -208,7 +213,8 @@ Published installs also add native naming hooks, preserving existing hooks. In
 repositories with `.lf`, plain Claude and Codex use the first request as a short
 name when unnamed. Existing names stay, including instruction-derived titles;
 preservation during concurrent renames remains unproved. Review the installed
-hooks with Codex's `/hooks`.
+hooks with Codex's `/hooks`. Naming uses bounded store reads and process recording;
+if ownership cannot be read promptly, the hook leaves the name unchanged.
 Claude naming also works with `claude -p`. Codex naming requires its shared
 app-server; embedded launches and `codex exec` lack that naming endpoint.
 No resume hooks repair old conversations. Native providers own their terminal output.

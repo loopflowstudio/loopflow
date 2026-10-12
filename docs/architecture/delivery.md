@@ -97,6 +97,15 @@ lf ci watch                            # repair failed landings while it runs
 The publishing intent is durable before the remote call, so retries resolve the
 same PR. Reopening a Task or closed PR never grants a second PR slot.
 
+`open` and `publish` resolve the comparison base from HEAD's current
+merge-base with the selected upstream. A reset, rebase or rewritten main cannot
+make an old base veto publication. All branch commits remain intact, including
+inherited dependencies; the PR shows GitHub's actual range. Publication does not
+trim commits based on a saved Task boundary. Unrelated histories and empty ranges
+still cannot form a PR. Root Tasks save the resolved base; stacked Tasks retain
+their integration fork until explicit sync so squash-parent comparison preserves
+child edits.
+
 `arm` and `land` merge current main, clear merge-time scratch state, verify once,
 and push the exact head. Branch commits and merge resolutions retain their identities.
 GitHub squash-merges the final PR tree into one commit on main. `arm` and `land` request
@@ -122,7 +131,7 @@ existing request, including standalone PRs. It preserves the commit, merge
 queue position, and CI. Explicit standalone title/body edits update only those
 fields; omitted copy is preserved. Dirty source or a new local commit still
 prepares and publishes a replacement head. Task completion remains separate:
-a verified merge is required when the Task has a PR.
+verified merge is required.
 
 `lf pr open` is the presenting verb; it opens the review surface after
 publishing. Headless Task flows use publish or land.
@@ -297,37 +306,40 @@ A PR closed without merging ends its landing unsettled. Merge evidence is
 recorded before Task settlement; a failed local or Linear settlement keeps the
 landing pending and the next check retries it.
 
-After verified merge the open Task can be completed.
-`ship` runs gate and `land --wait-and-fix`. Waited landing uses the
-existing observation and CI repair path every 15 seconds for at most 30 minutes,
-releasing its lock between reads. Repair admission exempts the calling command
-and its recorded ancestors, which wait for it; unrelated live or unresolved
-Processes still prevent editing. Unanswered turns alone are history, not execution.
-The same incident reservation deduplicates a concurrent watcher. Timeout
-retains intent and returns held (exit 3), propagated through the Flow without
-automatic retry;
-interruption retains intent and returns stopped (exit 130).
-Neither ordinary reconciliation nor a manual GitHub merge manufactures a verdict.
-Keep the checkout available for the finishing step.
+`ship` runs gate and `land --wait-and-fix`. Waited landing uses the existing
+observation and CI repair path every 15 seconds for at most 30 minutes, releasing
+its lock between reads. Repair admission exempts the calling command and recorded
+ancestors waiting for it; unrelated live or unresolved Processes still prevent
+editing. Unanswered turns alone are history, not execution. The same incident
+reservation deduplicates a concurrent watcher. Timeout retains intent and returns
+held (exit 3); interruption retains intent and returns stopped (exit 130).
+Neither ordinary reconciliation nor a manual GitHub merge invents a verdict.
 
-After merge, optional follow-up work uses ordinary Task creation. No dedicated
-API, relation exporter, disposition or completion gate is needed. Historical event
-payloads remain readable without authorizing writes or preventing completion.
-Already-saved ordinary creation/export receipts retain their normal recovery.
+Independently accepted later work is an ordinary Task plus a linking comment.
+Keep a saved Task when its comment fails; retry only the comment. Synchronization
+uses the same Task and comment writers as other Work. Historical filing events
+stay intact: private recovery converts reserved children and notes, retaining
+unknown provider creations and relations with their original IDs and inputs.
+These receipts carry no completion or process authority.
 
 `lf task complete` settles status without moving the Workflow. Movement to
 `end` persists a completion request in the same transaction as arrival, then
 tries completion. Failure retains both arrival and the reason; operators retry
 completion alone. Accepted provider status changes clear superseded requests
-without touching Workflow or Process history. Reads never execute the trigger. A Task with a PR needs a verified merge.
+without touching Workflow or Process history. Reads never execute the trigger. A Task with a PR needs merge
+evidence; its follow-up Tasks need not be complete.
 A PR-less Task may finish with retained files and commits, without a landing
 ceremony. Completion is idempotent, including when the enclosing Flow later
 arrives at end; planning writeback remains retryable.
 
-After a stopped Flow, inspect associated live work and the requested outcome,
-then retry completion alone when appropriate. Do not replay gate or re-arm a
-merged PR. Completed Tasks have no special Flow-launch exception for filing.
-New work can be created independently without reopening its source Task.
+After a stopped Flow, inspect associated live work and retry only the unfinished
+operation. A completed Task can receive comments without reopening execution.
+There is no special finishing Flow or new-work exception for completed Tasks.
+Do not replay gate or re-arm a merged PR to finish a comment or completion request.
+Dated follow-ups return on the owning Wave's next pass, including unstarted ones;
+unattended execution needs a concrete check already authorized in the brief.
+Filing installs no schedule. Without an installed Wave schedule there is no
+automatic wake, and time passing proves no accepted outcome.
 
 Task decisions never settle Session turns or process exits. Checkout cleanup and
 process control keep their own evidence and authority. Historical uncertainty

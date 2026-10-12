@@ -105,6 +105,9 @@ pub fn resume(id: &str, message: &str, cli: &Cli) -> Result<()> {
     let session = store
         .session(id)?
         .ok_or_else(|| anyhow!("session {id:?} was not found"))?;
+    if let Some(provider) = session.provider.as_deref() {
+        crate::config::resume_model(provider, session.model.as_deref())?;
+    }
     let mut turn = cli.process_options();
     if turn.agent.is_none() {
         turn.agent = match (&session.provider, &session.model) {
@@ -396,17 +399,13 @@ fn prepare_task_input(
             .await?
             .ok_or_else(|| anyhow!("Task Wave is missing"))?;
         if !cli.context {
-            if let Err(error) = crate::ops::linear_observe::refresh_task_comments(&store, &task).await {
-                tracing::warn!(%error, "Linear comment refresh failed; retaining confirmed Task direction");
-            }
+            crate::ops::linear_observe::sync_repository(&store, wave.repo()).await;
         }
-        let seed = crate::ops::task_input::read_seed(
-            &store,
-            &task,
-            wave.slug(),
-            cli.steers_after.unwrap_or(0),
-        )
-        .await?;
+        let task = store
+            .get_task(&task.id)
+            .await?
+            .ok_or_else(|| anyhow!("Task is missing"))?;
+        let seed = crate::ops::task_input::read_seed(&store, &task, wave.slug()).await?;
         Ok(Some((store, seed)))
     })
 }
@@ -430,10 +429,6 @@ fn build_prompt_at(
     };
     let confine = confine_checkout_agent(task_checkout, is_interactive);
     let task_message = task_input.as_ref().map(|(_, seed)| seed.message.clone());
-    let steers = task_input
-        .as_ref()
-        .map(|(_, seed)| seed.steers.clone())
-        .unwrap_or_default();
     let config_start = Instant::now();
     let config = crate::config::load_config(Some(&repo_root))?.unwrap_or_default();
     debug!(
@@ -510,7 +505,7 @@ fn build_prompt_at(
             summary: None,
             references: task_message
                 .as_ref()
-                .map(|text| vec![("Task brief and steers".into(), text.clone())])
+                .map(|text| vec![("Task brief".into(), text.clone())])
                 .unwrap_or_default(),
             client_context: Default::default(),
             related_repos: Vec::new(),
@@ -566,7 +561,6 @@ fn build_prompt_at(
             )
         })
     });
-    components.steers = steers;
     let deduplication_decisions = prepared.deduplication_decisions;
     let effective_system = crate::agent::system_prompt_with_structured_replies(&agent_config);
     let context = attributed_context(
@@ -1058,17 +1052,6 @@ pub(crate) fn attributed_context(
         );
     }
     if let Some(message) = &components.message {
-        // Steers ride inside the launch message; claim them before it does.
-        if let Some(steers) = tagged_block(message, "<lf:steers>", "</lf:steers>") {
-            push(
-                steers,
-                Kind::Steer,
-                Scope::Task,
-                "steers".to_string(),
-                None,
-                "steers",
-            );
-        }
         let (kind, scope) = components
             .message_context
             .unwrap_or((Kind::UserMessage, Scope::User));
@@ -1087,20 +1070,6 @@ pub(crate) fn attributed_context(
     }
 
     let mut decisions = deduplication_decisions.to_vec();
-    for steer in &components.steers {
-        decisions.push(ContextDecision {
-            position: decisions.len() as u32,
-            kind: Kind::Steer,
-            scope: Scope::Task,
-            label: steer.author.to_string(),
-            source_path: Some(format!("steer:{}", steer.id)),
-            decision: ContextDecisionKind::Included,
-            reason: "rendered in the launch goal".to_string(),
-            original_bytes: Some(steer.text.len() as u64),
-            original_tokens: Some(crate::prompt::count_tokens(&steer.text) as u64),
-            asset_position: None,
-        });
-    }
     if components.diff_tier == DiffTier::StatOnly {
         decisions.push(ContextDecision {
             position: decisions.len() as u32,
@@ -1958,68 +1927,6 @@ for line in sys.stdin:
             asset.kind == ContextAssetKind::UserMessage
                 && turn[asset.byte_start as usize..asset.byte_end as usize].contains("Build it.")
         }));
-    }
-
-    #[test]
-    fn attributed_context_records_each_steer_and_its_author() {
-        let steers = vec![
-            crate::durable::Steer {
-                id: 7,
-                author: crate::durable::Author::User,
-                text: "keep the API stable".into(),
-            },
-            crate::durable::Steer {
-                id: 9,
-                author: crate::durable::Author::Captured(3),
-                text: "price it in $ first".into(),
-            },
-        ];
-        let components = PromptComponents {
-            message: Some(format!(
-                "Linear Task LOO-1: goal\n\n{}\n\nWave: demo",
-                crate::durable::render_steers(&steers)
-            )),
-            message_context: Some((ContextAssetKind::Goal, ContextScope::Task)),
-            steers,
-            ..Default::default()
-        };
-        let system = crate::prompt::format_prompt(&components);
-        let prepared = attributed_context(&components, &system, "", &[], None);
-
-        let block = prepared
-            .system
-            .as_ref()
-            .unwrap()
-            .assets
-            .iter()
-            .find(|asset| asset.kind == ContextAssetKind::Steer)
-            .expect("steers are their own asset");
-        let text = &system[block.byte_start as usize..block.byte_end as usize];
-        assert!(text.contains("keep the API stable") && text.ends_with("</lf:steers>"));
-        assert!(prepared
-            .system
-            .as_ref()
-            .unwrap()
-            .assets
-            .iter()
-            .filter(|asset| asset.kind == ContextAssetKind::Goal)
-            .all(
-                |asset| !system[asset.byte_start as usize..asset.byte_end as usize]
-                    .contains("keep the API stable")
-            ));
-        let recorded = prepared
-            .decisions
-            .iter()
-            .filter(|decision| decision.asset_position.is_none())
-            .map(|decision| (decision.source_path.as_deref(), decision.label.as_str()))
-            .collect::<Vec<_>>();
-        assert_eq!(
-            recorded,
-            [
-                (Some("steer:7"), "user"),
-                (Some("steer:9"), "session input 3")
-            ]
-        );
     }
 
     #[test]

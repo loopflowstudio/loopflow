@@ -20,27 +20,10 @@ pub(crate) enum WaveConfigError {
     },
 }
 
-/// One cron line from GOAL.md frontmatter: `crons: [{flow, schedule}]`.
-/// `lf wave cron sync` installs these schedules on the placed Machine.
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
-pub struct WaveCronDef {
-    pub flow: String,
-    pub schedule: String,
-}
-
-/// The Linear Initiative representing a wave, from `pm.*` in GOAL.md.
-///
-/// `provider` and `linear_team` remain decodable only as repository-Team
-/// migration sentinels. Normal PM authority reads provider and Team from the
-/// repository's `.lf/config.yaml`.
+/// The Linear Initiative linked to this Wave.
 #[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq, Eq)]
-pub struct WavePmConfig {
-    #[serde(default)]
-    pub provider: Option<String>,
-    #[serde(default)]
-    pub linear_initiative: Option<String>,
-    #[serde(default)]
-    pub linear_team: Option<String>,
+pub struct WaveLinearConfig {
+    pub initiative: Option<String>,
 }
 
 /// One existing Discord guild text channel bound to this Wave's chat.
@@ -61,10 +44,9 @@ pub struct WaveConfig {
     pub id: Option<crate::id::WaveId>,
     #[serde(default)]
     pub context_budgets: BTreeMap<BudgetKey, usize>,
-    pub crons: Option<Vec<WaveCronDef>>,
     pub agent: Option<String>,
     pub skill_agents: Option<HashMap<String, String>>,
-    pub pm: Option<WavePmConfig>,
+    pub linear: Option<WaveLinearConfig>,
     /// One external presentation binding. Discord is the only supported
     /// provider and remains a concrete variant rather than a registry.
     pub chat: Option<WaveChatConfig>,
@@ -308,18 +290,14 @@ mod tests {
     }
 
     #[test]
-    fn read_wave_config_parses_linear_pm_block() {
+    fn read_wave_config_parses_linear_binding() {
         let temp = ConfigRepo::new();
-        temp.write(
-            "---\npm:\n  provider: linear\n  linear_initiative: \"lin-123\"\n  linear_team: \"team-prd\"\n---\nDrive the work.\n",
-        )
-        .expect("write");
+        temp.write("---\nlinear:\n  initiative: \"lin-123\"\n---\nDrive the work.\n")
+            .expect("write");
 
         let config = read_wave_config(temp.path(), "scan").expect("config should parse");
-        let pm = config.pm.expect("pm config should exist");
-        assert_eq!(pm.provider.as_deref(), Some("linear"));
-        assert_eq!(pm.linear_initiative.as_deref(), Some("lin-123"));
-        assert_eq!(pm.linear_team.as_deref(), Some("team-prd"));
+        let linear = config.linear.expect("Linear binding should exist");
+        assert_eq!(linear.initiative.as_deref(), Some("lin-123"));
     }
 
     #[test]
@@ -377,22 +355,6 @@ mod tests {
         ));
     }
 
-    /// Crons live in GOAL.md frontmatter, the schedule source. Legacy `triggers:` keys are simply unknown fields now.
-    #[test]
-    fn read_wave_config_parses_crons_and_ignores_legacy_triggers() {
-        let temp = ConfigRepo::new();
-        temp.write(
-            "---\ncrons:\n  - flow: wave-polish\n    schedule: '0 0 0 * * Mon *'\ntriggers:\n  signal: wave\n  source: infra\n  source_repo: /tmp/source\n---\nDrive the work.\n",
-        )
-        .expect("write");
-
-        let config = read_wave_config(temp.path(), "scan").expect("config should parse");
-        let crons = config.crons.expect("crons parse from frontmatter");
-        assert_eq!(crons.len(), 1);
-        assert_eq!(crons[0].flow, "wave-polish");
-        assert_eq!(crons[0].schedule, "0 0 0 * * Mon *");
-    }
-
     #[test]
     fn read_wave_config_returns_none_for_missing() {
         let temp = ConfigRepo::new();
@@ -407,8 +369,8 @@ mod tests {
             .unwrap();
         update_wave_goal_config(repo.path(), "scan", |map| {
             map.insert(
-                "pm".into(),
-                serde_yaml_ng::from_str("linear_initiative: lin-123").unwrap(),
+                "linear".into(),
+                serde_yaml_ng::from_str("initiative: lin-123").unwrap(),
             );
             Ok(())
         })
@@ -418,7 +380,7 @@ mod tests {
         let config = read_wave_config(repo.path(), "scan").unwrap();
         assert_eq!(config.agent.as_deref(), Some("codex"));
         assert_eq!(
-            config.pm.unwrap().linear_initiative.as_deref(),
+            config.linear.unwrap().initiative.as_deref(),
             Some("lin-123")
         );
     }

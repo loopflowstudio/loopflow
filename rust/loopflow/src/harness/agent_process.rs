@@ -48,12 +48,17 @@ fn record_identity(
 /// through pre-exec recording, and retain failed attempts without inventing an
 /// observed exit. Synchronous admission cannot detach a launch on async cancellation.
 pub(crate) fn spawn(
-    command: tokio::process::Command,
+    mut command: tokio::process::Command,
     lifeline: Option<&std::path::Path>,
     owner: &AttachmentOwner,
 ) -> Result<tokio::process::Child> {
     let (store, session, attachment) = owner;
     super::dispatch::off_reactor(|| {
+        let capability = store.reserve_steer_adapter(session, attachment)?;
+        command.env(
+            crate::steer::PROVIDER_CONTEXT_ENV,
+            serde_json::to_string(&capability)?,
+        );
         let program = command
             .as_std()
             .get_program()
@@ -78,10 +83,15 @@ pub(crate) fn spawn(
 /// own the provider; owned native launches use the same admission fence and
 /// pre-exec recording as headless launches.
 pub(crate) fn spawn_native(
-    command: std::process::Command,
+    mut command: std::process::Command,
     owner: &AttachmentOwner,
 ) -> Result<std::process::Child> {
     let (store, session, attachment) = owner;
+    let capability = store.reserve_steer_adapter(session, attachment)?;
+    command.env(
+        crate::steer::PROVIDER_CONTEXT_ENV,
+        serde_json::to_string(&capability)?,
+    );
     store
         .with_session_attachment(session, attachment, || {
             store.record_agent_process_launch(session, attachment, &command, true)?;

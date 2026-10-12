@@ -180,7 +180,7 @@ fn prepare_prompt(
         .skill
         .as_ref()
         .and_then(|skill| skill.action_style.as_deref());
-    let launch = AgentConfig {
+    let mut launch = AgentConfig {
         chrome: false,
         session_attachment: None,
         system_prompt,
@@ -205,6 +205,7 @@ fn prepare_prompt(
         )]
         .into(),
     };
+    launch.apply_agent_override();
     Ok(PreparedProcessPrompt {
         config: launch,
         components,
@@ -259,8 +260,8 @@ pub(crate) fn resolve_agent(
     skill: Option<&Skill>,
     config: &Config,
 ) -> String {
-    override_agent
-        .map(str::to_owned)
+    crate::config::agent_override()
+        .or_else(|| override_agent.map(str::to_owned))
         .or_else(|| skill.and_then(|skill| skill.agent.clone()))
         .or_else(|| config.agent.clone())
         .or_else(|| skill.and_then(|skill| skill.default_agent.clone()))

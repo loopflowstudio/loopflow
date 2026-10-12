@@ -20,7 +20,7 @@ Flow execution; each Machine retains command and conversation history.
 
 | Path | Holds |
 |------|-------|
-| `wave/<name>/GOAL.md` | Objective, operating guidance and schedules |
+| `wave/<name>/GOAL.md` | Objective and operating guidance |
 | `wave/<name>/MEMORY.md` | Curated decisions and lessons |
 | `wave/<name>/metrics/*.md` | Metric meaning, window and freshness |
 
@@ -39,7 +39,8 @@ wave/infrastructure/release/MEMORY.md
 ```
 
 Address Release as `infrastructure/release`. It has its own objective, plan,
-Tasks and schedules. Its prompt reads Infrastructure's top-level Markdown,
+Tasks. Scheduled commands select their Work with `--wave` or `--task` in the
+repository configuration. Its prompt reads Infrastructure's top-level Markdown,
 then Release's, from the executing checkout; sibling Waves stay out.
 
 Repository-root `MEMORY.md`, when present, comes before Wave files and is also
@@ -58,10 +59,9 @@ changes Release's address without changing its ID, Project or Task links.
 A fresh Machine uses the same authored IDs. Copying an ID into two Wave directories
 is a conflict, not a second Wave.
 
-The release prototype declares its schedule in
-`wave/infrastructure/release/GOAL.md`. Connecting its Linear Initiative, moving
-release plans and Tasks, and syncing the installed schedule are separate
-post-landing operations.
+Release declares its schedule in `.lf/config.yaml`, retaining Infrastructure as
+the installed job owner. Connecting its Linear Initiative, moving release plans
+and Tasks, and syncing the installed schedule are separate operations.
 
 ## Operate manually
 

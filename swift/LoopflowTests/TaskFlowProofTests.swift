@@ -46,6 +46,14 @@ private func captureIfRequested(_ window: NSWindow, name: String) throws {
 @Suite("Task Flow")
 struct TaskFlowTests {
 
+    @Test("Task due date appears beside the conversation")
+    @MainActor
+    func dueDate() throws {
+        let rows = try JSONDecoder().decode([String: RoadmapTask].self, from: fixture("task_delivery_rows.json"))
+        let view = TaskDueDateView(task: try #require(rows["due"]))
+        #expect(try view.inspect().find(text: "Due 2026-10-08").string() == "Due 2026-10-08")
+    }
+
     @Test("Separate catalogs retain invalid entries and graph composition")
     func flowFixtures() throws {
         let catalog = try JSONDecoder().decode([FlowCatalogEntry].self, from: fixture("flow_catalog.json"))

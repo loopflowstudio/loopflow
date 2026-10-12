@@ -1,12 +1,12 @@
 //! One saved Task thread and its delivery evidence, with or without Linear.
 
-use super::planning_write::{self, PlanningEdit as Edit};
-use crate::planning_exchange::PlanningKind;
+use super::planning_write;
+use crate::work::edit::WorkValue as Edit;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
 use crate::durable::TaskId;
-use crate::ops::pm::TaskComments;
 use crate::store::{StoreError, StoreResult};
+use crate::work::task::comment::TaskComments;
 use crate::work::task::comment::{TaskComment, TaskCommentAuthor};
 
 use super::SqliteStore;
@@ -14,7 +14,7 @@ use super::SqliteStore;
 pub(super) fn ingest_task_comment(
     conn: &Connection,
     task: &TaskId,
-    comment: &crate::pm::linear::LinearComment,
+    comment: &crate::linear::LinearComment,
 ) -> StoreResult<bool> {
     let existing: Option<(String, Option<String>)> = conn
         .query_row(
@@ -88,16 +88,17 @@ fn write_comment(conn: &Connection, task: &TaskId, comment: &TaskComment) -> Sto
     planning_write::create(
         conn,
         "",
-        PlanningKind::Comment,
-        &comment.id,
-        &[
-            Edit::CommentTask(task.to_string()),
-            Edit::CommentContent(super::planning_write::CommentContent {
-                body: comment.body.clone(),
-                author: comment.author.clone(),
-                created_at: comment.created_at.clone(),
-            }),
-        ],
+        &crate::work::edit::WorkEdit::for_target(
+            &comment.id,
+            &[
+                Edit::CommentTask(task.to_string()),
+                Edit::CommentContent(crate::work::edit::CommentContent {
+                    body: comment.body.clone(),
+                    author: comment.author.clone(),
+                    created_at: comment.created_at.clone(),
+                }),
+            ],
+        ),
     )
 }
 
@@ -206,7 +207,17 @@ impl SqliteStore {
                         comment.id, comment.body
                     ),
                 };
-                Self::append_task_steer_in(&tx, &task.id, &crate::durable::Author::User, &text)?;
+                Self::save_task_steer_in(
+                    &tx,
+                    &task.id,
+                    &name
+                        .as_ref()
+                        .map(|name| crate::durable::Author::Named(name.clone()))
+                        .unwrap_or(crate::durable::Author::User),
+                    &text,
+                    &format!("comment:{}", comment.id),
+                    "local",
+                )?;
             }
         }
         tx.commit()?;
@@ -273,7 +284,7 @@ mod tests {
         let initial_state = store.task_state(&task).unwrap();
         store.append_task_comment(&task, &original).unwrap();
         let steers = store.task_steers(&task).unwrap();
-        let observed = crate::pm::linear::LinearComment {
+        let observed = crate::linear::LinearComment {
             id: original.id.clone(),
             body: "Provider body".into(),
             author_id: Some("person-2".into()),
@@ -323,11 +334,11 @@ mod tests {
             original
         );
         assert_eq!(
-            serde_json::from_str::<crate::pm::linear::LinearComment>(&receipt.1).unwrap(),
+            serde_json::from_str::<crate::linear::LinearComment>(&receipt.1).unwrap(),
             observed
         );
         assert!(!receipt.2);
-        let stale = crate::pm::linear::LinearComment {
+        let stale = crate::linear::LinearComment {
             body: original.body.clone(),
             revision: Some("2026-10-08T01:00:00Z".into()),
             ..observed.clone()
@@ -337,7 +348,7 @@ mod tests {
             store.task_comments(&task).unwrap().comments,
             thread.comments
         );
-        let amended = crate::pm::linear::LinearComment {
+        let amended = crate::linear::LinearComment {
             body: "Later provider correction".into(),
             revision: Some("2026-10-08T01:04:00Z".into()),
             ..observed

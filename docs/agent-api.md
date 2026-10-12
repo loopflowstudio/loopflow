@@ -84,41 +84,40 @@ Child edits survive the parent's squash landing without replay.
 ## Steer
 
 ```bash
-lf comment INF-123 "keep the public API"          # post a Linear Task comment
-lf comment INF-123 --steer "keep the public API"  # explicit direction from an agent
+lf comment INF-123 "keep the public API"          # save a Task steer
+lf comment INF-123 --steer "keep the public API"  # save a steer from an agent Session
+lf session steers SESSION --json                 # inspect delivery
+lf session steers SESSION --retry STEER_ID        # retry one delivery
 lf --wave <wave> wave-operate "prioritize the parser"
 lf --wave <wave> wave-operate "reassess Project priorities"
 ```
 
-Comment on the Linear Task directly, or use `task comment`. Both reach only the
-Task's running Flow. Independent conversations sharing its worktree or using
-`--task` do not subscribe to steering. With no running Flow, comments
-wait for the next launch; steering never starts execution.
+Save a Task comment locally, or comment in Linear when sync is configured.
+Each associated Session receives acquired steers independently, including
+conversations associated through the checkout or `--task`. Repository and Wave
+steers apply downward through the Work tree; direct Session steers apply only
+to that Session. Repository and Wave steers currently remain Machine-local.
 
-Linear comments are the authored record. Task Flows refresh comments while running
-and before starting a Skill; local events cache their delivery. The command
-receipt confirms publication to Linear. Conversation history distinguishes input included
-in the starting prompt from input accepted by the live provider transport;
-neither proves the model followed it. Provider scheduling determines when a
-live correction is consumed.
+Delivery occurs at the next supported provider boundary. Idle Sessions stay idle.
+Each new Session receives applicable steers at launch; continuing or compacting
+the same Session preserves its delivery history. The context stays bounded, with
+complete sources available for excerpts.
 
-On a repeated Flow step, Task Flows seed only steer IDs newer than those an
-earlier successful run of that step, under the same Flow process, already received. Failed or interrupted attempts acknowledge
-nothing. Each structural step and each new Flow has its own history;
-unreceived late comments remain eligible. This records delivery, not proof that
-the model followed the instruction.
+A saved steer is not proof of delivery. A completed provider write is not proof
+the model received or followed it. Uncertain writes remain visible and require
+explicit retry; retry saves another attempt without starting a turn.
 
 Keep routine agent progress in working notes and the Session response. `task comment`
-from an agent Session marks its publication as progress, excluded from steers. Use
-`--steer` only to deliver deliberate new direction. Direct
-participant comments and explicit `--steer` remain direction, even through
+from an agent Session marks its comment as progress, excluded from steers. Use
+`--steer` only to save a deliberate steer. Direct
+participant comments and explicit `--steer` remain steers, even through
 the same account. Other integrations should mark progress with
 `<!-- loopflow-progress:<source-id> -->`; historical unmarked comments remain
 eligible because their authorship cannot be inferred safely.
 
-`lf interrupt INF-123` appends a durable interrupt comment;
-the Task's running Flow observes it and ends the current provider turn so the
-next boundary re-reads direction. With no running Flow it remains durable input.
+`lf interrupt INF-123` records a separate control request. An attached Task
+command observes it and interrupts its provider turn; steer delivery retains
+its independent Session history.
 Loopflow never guesses signal authority from a conversation ID, Work ID, PID, or
 tmux name. Project operations are ordinary finite conversations; they have no long-running
 process to interrupt, resume, wait for, or attach to.

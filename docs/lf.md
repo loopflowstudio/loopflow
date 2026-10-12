@@ -57,10 +57,14 @@ repair or preserve them. Use a fresh directory when its schema changes.
 
 ```bash
 lf -a codex debug
-lf --agent claude:opus debug
+lf task run LOO-438 pursue -a claude:opus
 ```
 
-`--agent` / `-a` selects the harness and optional model as `harness[:model]`.
+`--agent` / `-a` is global: place it before or after any command. It selects
+`harness[:model]` for the entire invocation, overriding agents named in Tasks,
+Flows and skills, including nested Flows and child `lf` commands. Without it,
+definitions and defaults apply. Put literal skill arguments after `--`.
+Resuming native history keeps its provider; changing providers requires a new Session.
 
 ## Run a Flow interactively
 
@@ -292,15 +296,17 @@ planning:
 ```yaml
 planning:
   provider: linear
-pm:
-  linear_team: <team-id>
+linear:
+  team: <team-id>
 ```
 
 Repository `planning` replaces the personal selection as a whole. Omit `shared`
 for `refs/loopflow/planning/users/<user-key>`; shared names use
-`refs/loopflow/planning/shared/<name>`. Existing `pm.linear_team` selects Linear
+`refs/loopflow/planning/shared/<name>`. Existing `linear.team` selects Linear
 when `planning` is omitted. Every machine uses the selected transport independently.
 Linear unavailability leaves saves buffered locally; it never switches to Git.
+`lf repo connect <wave>` saves the repository Team and selects Linear, overriding
+a personal Git preference.
 
 This build implements the enrollment baseline below. LOO-412 replaces it with one
 configured transport per repository; that unmerged configuration path is not
@@ -503,6 +509,30 @@ A published parent PR, including a draft, is enough to start and publish the
 child. Prepare a child-specific design; checkout transfers it without overwriting
 newer child work. `lf sync` follows parent updates and its squash merge while
 preserving the child's identity, PR, Session and design.
+
+## Schedule ordinary commands
+
+```yaml
+# .lf/config.yaml
+crons:
+  - name: daily-review
+    command: [--wave, product, --batch, skill, wave/operate]
+    schedule: 0 0 9 * * *
+```
+
+```bash
+lf cron preflight                  # validate configuration and Machine placement
+lf cron sync                       # explicitly install the configured list
+lf cron list --wave product         # filter by the command's Work selector
+lf cron list --task EXP-12
+lf cron add daily-review --schedule daily -- --wave product --batch skill wave/operate
+```
+
+Commands use ordinary `lf` arguments, including `--wave` and `--task`.
+Reading or cloning the repository installs nothing. An explicit `crons: []`
+removes the repository's jobs when synced; an absent list leaves them alone.
+Scope-filtered sync only changes matching jobs. Existing job names and Wave
+selectors retain installed identities and receipt history.
 
 ## Check authorized deliveries in the background
 
@@ -898,7 +928,10 @@ rediscovered; missing checkouts recover committed branch state. Live conversatio
 keep their placement until their attached LfProcess is idle.
 
 Persistent workspaces retain scratch locally through commit, sync, publication and
-landing. Selected-path commits preserve unrelated staged edits. Publication pushes
+landing. A scratch-only selection with no committable changes explains that policy
+and suggests moving durable notes outside `scratch/`. In ordinary Task worktrees,
+selected scratch files are committed. Selected-path commits preserve unrelated
+staged edits. Publication pushes
 the committed range, leaving later local edits alone. Inspect the complete range
 before publishing. PR landing clears scratch in non-persistent workspaces, whether
 or not the work belongs to a Task.

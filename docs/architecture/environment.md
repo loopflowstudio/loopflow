@@ -51,6 +51,7 @@ never in environment variables. Detached Session shells scrub transient credenti
 
 | Variable | Policy |
 |---|---|
+| `LF_AGENT_OVERRIDE` | Explicit `-a` selection for this invocation and all children, ahead of Task/Flow/skill defaults. Forwarded to remote commands; cleared for independent Session shells. Contains no credential. |
 | `LF_ACCOUNT_SELECTION` | Account preference/restriction for this invocation and its children; contains no credential. |
 | `LF_TASK_SOURCE` | One SSH invocation's saved Task ID, identifier, optional provider issue ID, branch and required commit. Contains no planning payload, local paths or execution authority. |
 | `LF_DISCORD_TOKEN` | Chat bridge token; removed before any provider child. |

@@ -272,7 +272,7 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
             )
             flow_log = (root / "flow.log").open("w+")
             flow = subprocess.Popen(
-                [fixture["lf"], "-b", "--task", "INF-123", "run", "reconnect"],
+                [fixture["lf"], "-b", "--task", "INF-123", "flow", "reconnect"],
                 cwd=repo,
                 env=env,
                 stdout=flow_log,

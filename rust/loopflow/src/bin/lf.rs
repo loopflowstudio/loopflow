@@ -1496,8 +1496,10 @@ fn run() -> anyhow::Result<()> {
                 cmd: loopflow::lf::DesktopCommand::Open { .. }
             })
         );
-    if matches!(cli.command, Some(Commands::Desktop { .. })) && !opening_preview {
-        loopflow::lf::commands::desktop::require_supported()?;
+    if matches!(cli.command, Some(Commands::Desktop { .. })) && !opening_preview && !cli.context {
+        loopflow::lf::commands::desktop::require_supported().inspect_err(|_| {
+            journal::mark_effect_free_read();
+        })?;
     }
     let _selected_repo_cwd = cli
         .repo

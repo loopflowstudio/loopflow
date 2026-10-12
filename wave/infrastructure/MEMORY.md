@@ -117,6 +117,14 @@ Release's operation-entry lesson applies: generated Stop-hook child processes,
 Flow launches, watcher backoff/shutdown and populated migration fixtures prove their
 boundaries, not installed behavior. Idle providers issue no timed Linear requests.
 
+Gate repaired architecture-map coverage, non-displayed freshness-table classification,
+and the planning-status fixture's stale error expectation. macOS peer-admission
+coverage needed canonical paths to export the registered Task. Materialized Rust
+ran 2,543 tests; all 21 initial failures have passing focused checks after repairs
+and clearing inherited account selection. Website's 75 tests, formatting and Clippy
+pass. One scheduled-release child signal did not recur; its cause remains unknown.
+CI still owns the full candidate matrix.
+
 Jack authorized landing after checks. His `6d169dc1` permits publication before live
 measurement while Linear is paused. Live request counts, rejected-request quota
 accounting and installed pending-write recovery remain unproved. After installing,

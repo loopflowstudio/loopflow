@@ -3252,9 +3252,13 @@ fn planning_sync_tracks_creation_errors_uncertainty_conflicts_and_settlement() {
         .unwrap()
         .iter()
         .all(|c| (c["state"] == "uncertain" || c["field"] == "comment") && c["error"].is_string()));
+    // Planning reads retry delivery and report the current missing mapping,
+    // while retaining the uncertain creation and attachment attempts.
+    let project_sync = read_project();
+    assert_eq!(project_sync["changes"][0]["state"], "uncertain");
     assert_eq!(
-        read_project()["changes"][0]["error"],
-        "Lost attachment reply"
+        project_sync["changes"][0]["error"],
+        "Wave has no Linear Initiative; export remains pending"
     );
     // Model provider confirmation and an observed losing field receipt; projection is read-only.
     conn.execute(

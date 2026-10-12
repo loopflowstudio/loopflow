@@ -538,7 +538,7 @@ or terminating Processes. Reopening supersedes old requests. Ordinary reads do
 not execute completion. Unfinished readiness remains not ready with no Workflow,
 ready at start, and active otherwise; abandonment is its own mark.
 
-Foreground Task connections acquire repository membership/state independently of
+On-demand team checks acquire issue membership/state independently of
 comment and state delivery. Delivery receipts retain their original provider revision,
 attempt evidence and conflicting value. The latest receipt determines the displayed
 writeback state; Tasks store no separate copy. A response records only its captured
@@ -546,7 +546,7 @@ effect, so it cannot settle a newer decision. State acquisition and delivery sha
 one transactional reconciliation rule: observed conflicts adopt Linear and settle
 the losing receipt without changing the Workflow. No local/provider clock comparison orders edits.
 The provider read and mutation remain separate requests; they do not prevent a
-concurrent Linear edit between them. Matching readback settles the observed target;
+concurrent Linear edit between them. A matching mutation response settles the observed target;
 it does not prove that no intermediate edit was overwritten. An unseen complete/reopen
 cycle can disappear under the unconditional write, leaving no observed conflict
 to retain. Another read cannot close that race.
@@ -554,7 +554,7 @@ to retain. Another read cannot close that race.
 Jack Heart's October 8 conflict decision and subsequent regression-repair request
 replace the former test's absolute unseen-reopening protection and pending-loser
 expectations. Enabled operation tests now distinguish reopening observed before
-delivery or in readback (Linear wins, both values retained, loser retired, no
+delivery or in the mutation response (Linear wins, both values retained, loser retired, no
 execution changes) from the original unseen interleaving (overwrite remains
 possible). Lost replies retain attempt identity and reconcile without replay.
 This is an explicit concurrency limit, not a provider atomicity guarantee.
@@ -565,7 +565,7 @@ unknown or live execution prevents cleanup before provider inspection. Cancellat
 uses the same state delivery path as completion and reopening. Resolve the issue
 team and target state before marking a receipt attempted, so failed reads remain
 retryable. A lost mutation reply retains uncertainty until provider observation.
-An independent foreground export loop selects unmapped local Projects and Tasks,
+Delivery at save, check and watcher boundaries selects unmapped local Projects and Tasks,
 using their saved UUIDs. Project transitions and Task creation receipts retain the
 captured payload, attempted effects and errors; no second creation owner exists.
 Exact observations attach mappings in the common ingestion transaction before
@@ -669,9 +669,9 @@ UUID in one transaction, before contacting Linear. CLI and Desktop read the thre
 pending IDs and losing local bodies from one SQLite snapshot. An observed comment
 conflict adopts Linear’s body, author and time while the receipt retains both
 complete comments; no replacement comment is created. Connected repositories show
-pending sync, including comments on unmapped Tasks;
-a foreground Task Session or Desktop repository connection delivers saved comments and
-acquires incoming comments independently. Lost replies are resolved by exact UUID,
+pending sync, including comments on unmapped Tasks. Saves and on-demand boundaries
+attempt delivery; team checks acquire incoming comments independently. Desktop and
+`--watch` continue checks while open. Lost replies are resolved by exact UUID,
 issue and body. Incoming comments enter the same thread without echoing locally
 saved steers. Comments and adopted definition revisions save immutable
 steers. Each Session selects steers from checkout/explicit Task associations, Wave

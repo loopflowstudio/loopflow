@@ -44,6 +44,7 @@ mod project_transitions;
 mod revisions;
 mod session_events;
 pub(crate) mod sessions;
+mod steers;
 mod task_comments;
 mod task_content;
 pub(crate) mod task_history;

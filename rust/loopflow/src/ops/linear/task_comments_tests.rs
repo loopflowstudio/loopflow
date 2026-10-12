@@ -347,8 +347,8 @@ async fn task_comments_read_and_publish_without_starting_work() {
                 let started = home.join(format!("{marker}.started"));
                 let stop = home.join(format!("{marker}.stop"));
                 let seed = crate::ops::task_input::TaskSeed {
-                    task: task.clone(), message: String::new(), steers: Vec::new(),
-                    steer: 0, interrupt: 0,
+                    task: task.clone(), message: String::new(),
+                    interrupt: 0,
                 };
                 let process = crate::agent::ProcessConfig {
                     auto,

@@ -1861,8 +1861,6 @@ fn native_runner_reconnects_planning_without_another_turn() {
                     crate::ops::task_input::TaskSeed {
                         task: task.clone(),
                         message: String::new(),
-                        steers: Vec::new(),
-                        steer: 0,
                         interrupt: 0,
                     },
                 )),

@@ -83,12 +83,9 @@ pub enum ProjectEventKind {
         iteration: u32,
         summary: String,
     },
-    /// A durable steer: direction handed to the Project. Folded into the run's
-    /// seed and injected into a live turn; not a report out, so it never
-    /// crosses to the parent Wave.
+    /// Historical authored direction; the immutable publication owns its text.
     Steer {
-        author: crate::durable::Author,
-        text: String,
+        steer_id: crate::id::SteerId,
     },
     /// A request to end the Project's current turn so the next re-reads its
     /// direction immediately. Acted on only by a live run, and not a report out.

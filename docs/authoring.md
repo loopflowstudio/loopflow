@@ -314,9 +314,9 @@ Existing Tasks retain their captured graph. `lf task workflow restart ISSUE`
 moves that graph to `start`, retaining its move and execution history; it
 neither reloads the definition nor executes work.
 
-A Flow that repeats a step passes it `--steers-after STEER`, so the step
-receives only Task direction newer than its last run. The option works on any
-`lf` run.
+Each Session receives applicable steers independently, in bounded batches.
+Repeating a Flow step creates another Session; continuing or compacting the same
+Session preserves its delivery history.
 
 ## Goals
 

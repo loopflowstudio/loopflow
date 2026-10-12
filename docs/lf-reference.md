@@ -71,7 +71,6 @@ Open Loopflow or run its CLI
 | `--forward-agent` | Forward the SSH agent to the selected machine Default: false. |
 | `--wave` | Add Wave context and identity without changing the working directory |
 | `--task` | Execute in this Task's checkout |
-| `--steers-after` | Give the agent only Task direction newer than this steer |
 | `--wt` | Execute in an existing worktree by name or branch |
 | `--__cwd` | Keep a Work-bound internal launch in this exact checkout Internal. |
 | `--no-loopflow` | Exclude loopflow operating guidance Default: false. |
@@ -474,6 +473,32 @@ Inspect and continue Sessions
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
+## lf session steer
+
+Save a steer for this Session without starting a turn
+
+| Argument | What it does |
+|---|---|
+| `<id>` | id |
+| `<message>` | message |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf session steers
+
+Inspect steer delivery or retry delivery
+
+| Argument | What it does |
+|---|---|
+| `<id>` | id |
+| `--json` | json Default: false. |
+| `--retry` | retry |
+| `--after` | after Default: 0. |
+| `--limit` | limit Default: 32. |
+| `--source` | Read the complete steer |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
 ## lf session observe-status
 
 Observe validated Program Status snapshots from an active local terminal
@@ -719,6 +744,17 @@ Repository releases, source measurement, CI evidence, and provider administratio
 
 | Argument | What it does |
 |---|---|
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf repo comment
+
+Save a steer for associated Sessions without starting a turn
+
+| Argument | What it does |
+|---|---|
+| `<message>` | message |
+| `--steer` | steer Default: false. |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
@@ -1227,6 +1263,18 @@ Manage Wave identity, placement and planning
 
 | Argument | What it does |
 |---|---|
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf wave comment
+
+Save a steer for associated Sessions without starting a turn
+
+| Argument | What it does |
+|---|---|
+| `<wave>` | wave |
+| `<message>` | message |
+| `--steer` | steer Default: false. |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
@@ -1829,7 +1877,7 @@ Read the thread or publish a comment; agent comments default to progress
 |---|---|
 | `<issue>` | issue |
 | `<message>` | message |
-| `--steer` | Deliver new direction even when publishing from an agent Session Default: false. |
+| `--steer` | Save a steer even when commenting from an agent Session Default: false. |
 | `--wave / -w` | wave |
 | `--json` | json Default: false. |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |

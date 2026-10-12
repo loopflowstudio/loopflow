@@ -275,6 +275,43 @@ approving landing with quieter output. Fenced native answers, replay/schema and
 fake-Flow proofs pass, not configured Task-to-publication or installation.
 Harness errors retain failed-result text for retries. CI owns the full matrix.
 
+## Session steers (lf-9c03797, 2026-10-11)
+
+Jack Heart accepted Session-only delivery, repository/Work wrappers, downward
+propagation, independent receipts, bounded launch seeding and idle staying idle;
+he renewed pursuit after the provider gaps. Replace old paths together in one PR.
+Jack Heart then selected the vocabulary “steer” and “delivery” and authorized
+the naming update followed by landing PR #1535. `Steer`/`SteerId` replace the
+duplicate message projections; JSON uses `steer`, and the single draft stores
+`steers` with `steer_id` references. Released migration history remains unchanged.
+Source-level delivery inspection and agent acknowledgement were review proposals,
+not selected work. Keep explicit retry and honest unconfirmed delivery; no new
+acknowledgement lifecycle or follow-up Task is implied by vocabulary reduction.
+Provider-bound capability survives Codex handoff; OpenCode uses local invocation
+IDs, never fabricated provider request IDs. Child callbacks and replaced providers
+retain no authority; emission is not confirmation.
+
+Claude 2.1.296's exclusive startup-hook/input cycle wrote only 512 of 131,133
+bytes in two seconds. Shared dispatch plus exclusive takeover resolves it.
+`0d04805ab3` preserves oversized launch/resume, handoff, replacement/child rejection
+and OpenCode retry protocol proofs, not configured model acceptance. Old injection
+paths are deleted; the withdrawn-cut feedback no longer describes current source.
+`27ce387bdc` removes unread subscription state. `cd2c38184f` reconciles membership
+on Session reads/callbacks, removing publication-time scans; cancelled mixed batches
+retain unaffected pending direction. `f96a7d2378` labels capabilities reserved,
+not installed. Release's operation-entry lesson applies: store proofs cannot
+replace public launch proofs; protocol stand-ins cannot prove model acceptance.
+The shared-dispatch counterexample and protocol limits remain in
+`0d04805ab35f2ba0ee4d72dec3cc9caa1d1aa051:scratch/session-steer-subscriptions.md`.
+Configured-provider acceptance remains unproved; current semantics and limitations
+live in `docs/architecture-reference.md` under Durable communication.
+Gate found missing planning revision triggers for saved steers; the same draft now
+adds them. Explicit delivery diagnostics do not drive workspace refreshes.
+The launch fixtures select hooks by moment and supply the native Session identity;
+the account fixture isolates native Claude state. Focused repairs, receipt/migration
+proofs, CLI/integration checks and 28 headless Swift DTO tests pass. The broader
+library run had 1,718 passes and 9 ignores; both failures passed focused repairs.
+
 ## Process-owned liveness (LOO-451, 2026-10-10)
 
 Jack Heart removed client-file compatibility (`5228ab69`); launches record an
@@ -438,12 +475,10 @@ container/macOS acceptance nor configured automatic settlement.
 Telemetry repair/publication authorization: `85490d96ec:wave/infrastructure/MEMORY.md`.
 Isolated passes prove no automatic settlement; receipts retain repair ownership.
 
-Release's September 28 incident proves entry points need operation-level recovery:
-an agent reported failure successfully, producing a misleading green cron receipt.
-Jack's later steer records v0.12.24 publication/install and skill-to-Flow activation
-at unchanged 10:00. That supersedes the child's dated pending-activation evidence,
-without proving this accounting branch is installed or either qualifying outcome.
-Release-specific detail remains in [release memory](release/MEMORY.md).
+Release's operation-entry lesson and v0.12.24 activation history remain at
+`ff1dc403c4:wave/infrastructure/MEMORY.md`, this heading, and in
+[release memory](release/MEMORY.md). Successful reporting proves no operation
+success; activation proves neither accounting installation nor qualifying settlement.
 October 5 child evidence records repaired installed jobs using the machine gate
 at unchanged 09:00/10:00 schedules. Ownership remains Infrastructure; the child
 is not registered. History exposed three unresolved opportunities with unknown

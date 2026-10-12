@@ -4807,32 +4807,34 @@ fn linear_on_demand_native_hooks_share_freshness_across_processes() {
         let conn = rusqlite::Connection::open(&fixture.database).unwrap();
         conn.execute("DELETE FROM linear_team_checks", []).unwrap();
         let start = fixture.directory.path().join("release-hooks");
-        let mut children = Vec::new();
-        for index in 0..4 {
-            let ready = fixture.directory.path().join(format!("ready-{index}"));
+        let spawn_hook = |hook: &serde_json::Value, ready: &Path| {
             let mut command = std::process::Command::new("/bin/sh");
             for (name, _) in
                 std::env::vars_os().filter(|(name, _)| name.to_string_lossy().starts_with("LF_"))
             {
                 command.env_remove(name);
             }
-            children.push((
-                ready.clone(),
-                command
-                    .args(["-c", hooks[index % 2].as_str().unwrap()])
-                    .env(
-                        "LINEAR_FIXTURE_URL",
-                        LINEAR_TEST_CONTEXT.with(|ctx| ctx.graphql_url.clone()),
-                    )
-                    .env("LINEAR_FIXTURE_READY", ready)
-                    .env("LINEAR_FIXTURE_START", &start)
-                    .stdin(std::process::Stdio::null())
-                    .stdout(std::process::Stdio::piped())
-                    .stderr(std::process::Stdio::piped())
-                    .spawn()
-                    .unwrap(),
-            ));
-        }
+            command
+                .args(["-c", hook.as_str().unwrap()])
+                .env(
+                    "LINEAR_FIXTURE_URL",
+                    LINEAR_TEST_CONTEXT.with(|ctx| ctx.graphql_url.clone()),
+                )
+                .env("LINEAR_FIXTURE_READY", ready)
+                .env("LINEAR_FIXTURE_START", &start)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .unwrap()
+        };
+        let mut children: Vec<_> = (0..4)
+            .map(|index| {
+                let ready = fixture.directory.path().join(format!("ready-{index}"));
+                let child = spawn_hook(hooks[index % 2], &ready);
+                (ready, child)
+            })
+            .collect();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         while children.iter().any(|(ready, _)| !ready.exists()) {
             assert!(
@@ -4847,7 +4849,7 @@ fn linear_on_demand_native_hooks_share_freshness_across_processes() {
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
-        std::fs::write(start, "go").unwrap();
+        std::fs::write(&start, "go").unwrap();
         for (_, child) in children {
             let output = child.wait_with_output().unwrap();
             assert!(
@@ -4859,22 +4861,8 @@ fn linear_on_demand_native_hooks_share_freshness_across_processes() {
         }
         // A later process starts after the acquisition lock has been released;
         // only the persisted stamp can suppress this request.
-        let output = std::process::Command::new("/bin/sh")
-            .args(["-c", hooks[0].as_str().unwrap()])
-            .env(
-                "LINEAR_FIXTURE_URL",
-                LINEAR_TEST_CONTEXT.with(|ctx| ctx.graphql_url.clone()),
-            )
-            .env(
-                "LINEAR_FIXTURE_READY",
-                fixture.directory.path().join("ready-later"),
-            )
-            .env(
-                "LINEAR_FIXTURE_START",
-                fixture.directory.path().join("release-hooks"),
-            )
-            .stdin(std::process::Stdio::null())
-            .output()
+        let output = spawn_hook(hooks[0], &fixture.directory.path().join("ready-later"))
+            .wait_with_output()
             .unwrap();
         assert!(
             output.status.success(),

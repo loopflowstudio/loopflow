@@ -2040,7 +2040,7 @@ struct IssueObservationNode {
     title: String,
     #[serde(default)]
     description: Option<String>,
-    comments: PagedCommentConnection,
+    comments: Connection<CommentNode>,
 }
 
 #[derive(Deserialize)]
@@ -2050,14 +2050,7 @@ struct IssueCommentsData {
 
 #[derive(Deserialize)]
 struct IssueCommentsNode {
-    comments: PagedCommentConnection,
-}
-
-#[derive(Deserialize)]
-struct PagedCommentConnection {
-    nodes: Vec<CommentNode>,
-    #[serde(rename = "pageInfo")]
-    page_info: PageInfo,
+    comments: Connection<CommentNode>,
 }
 
 #[derive(Deserialize)]
@@ -2244,12 +2237,12 @@ struct ProjectIssuesData {
 
 #[derive(Deserialize)]
 struct ProjectWithIssues {
-    issues: IssuesConnection,
+    issues: Connection<IssueNode>,
 }
 
 #[derive(Deserialize)]
-struct IssuesConnection {
-    nodes: Vec<IssueNode>,
+struct Connection<T> {
+    nodes: Vec<T>,
     #[serde(rename = "pageInfo")]
     page_info: PageInfo,
 }
@@ -2460,14 +2453,7 @@ struct IdConnection {
 
 #[derive(Deserialize)]
 struct InitiativesData {
-    initiatives: InitiativesConnection,
-}
-
-#[derive(Deserialize)]
-struct InitiativesConnection {
-    nodes: Vec<InitiativeNode>,
-    #[serde(rename = "pageInfo")]
-    page_info: PageInfo,
+    initiatives: Connection<InitiativeNode>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -2479,7 +2465,7 @@ pub(crate) struct InitiativeNode {
 
 #[derive(Deserialize)]
 struct ProjectsData {
-    projects: ProjectsConnection,
+    projects: Connection<ProjectNode>,
 }
 
 #[derive(Deserialize)]
@@ -2489,14 +2475,7 @@ struct InitiativeProjectsData {
 
 #[derive(Deserialize)]
 struct InitiativeWithProjects {
-    projects: ProjectsConnection,
-}
-
-#[derive(Deserialize)]
-struct ProjectsConnection {
-    nodes: Vec<ProjectNode>,
-    #[serde(rename = "pageInfo")]
-    page_info: PageInfo,
+    projects: Connection<ProjectNode>,
 }
 
 fn parse_graphql_response<T: DeserializeOwned>(status: StatusCode, body: &[u8]) -> LinearResult<T> {

@@ -4,7 +4,9 @@ use std::collections::{btree_map::Entry, BTreeMap};
 use serde::Deserialize;
 use serde_json::json;
 
-use super::{CommentNode, IssueNode, LinearClient, PageInfo, ProjectNode, ISSUE_RESPONSE_FIELDS};
+use super::{
+    CommentNode, Connection, IssueNode, LinearClient, PageInfo, ProjectNode, ISSUE_RESPONSE_FIELDS,
+};
 use super::{LinearIssue, LinearProject};
 use crate::linear::{LinearComment, LinearError, LinearIssueObservation, LinearResult};
 
@@ -21,22 +23,8 @@ const QUERY: &str = r#"query TeamChanges($issues: IssueFilter!, $comments: Comme
 
 #[derive(Deserialize)]
 struct Changes {
-    issues: Option<Issues>,
-    comments: Option<Comments>,
-}
-
-#[derive(Deserialize)]
-struct Issues {
-    nodes: Vec<IssueNode<ProjectNode>>,
-    #[serde(rename = "pageInfo")]
-    page_info: PageInfo,
-}
-
-#[derive(Deserialize)]
-struct Comments {
-    nodes: Vec<ChangedComment>,
-    #[serde(rename = "pageInfo")]
-    page_info: PageInfo,
+    issues: Option<Connection<IssueNode<ProjectNode>>>,
+    comments: Option<Connection<ChangedComment>>,
 }
 
 #[derive(Deserialize)]

@@ -443,6 +443,7 @@ struct SessionItem: Identifiable, Equatable {
         case prepared
         case live
         case failed(String)
+        case ended(String)
     }
 
     var record: SessionRecord
@@ -453,7 +454,7 @@ struct SessionItem: Identifiable, Equatable {
     var surface: SessionRecord? {
         switch state {
         case .prepared, .live: record
-        case .pending, .elsewhere, .opening, .failed: nil
+        case .pending, .elsewhere, .opening, .failed, .ended: nil
         }
     }
 
@@ -524,7 +525,12 @@ final class SessionsStore {
                 }
                 sessions[index].record = record
                 if case .opening = sessions[index].state { continue }
-                if case .failed = sessions[index].state, observedState == .pending { continue }
+                if observedState == .pending {
+                    switch sessions[index].state {
+                    case .failed, .ended: continue
+                    default: break
+                    }
+                }
                 sessions[index].state = observedState
             } else {
                 sessions.append(SessionItem(record: record, state: observedState))
@@ -540,7 +546,7 @@ final class SessionsStore {
         // An explicit open revalidates through connect; it never replaces a client.
         if replacing, action.unavailableReason != nil { return }
         switch sessions[index].state {
-        case .pending, .failed:
+        case .pending, .failed, .ended:
             sessions[index].state = .opening
         case .elsewhere where replacing:
             sessions[index].state = .opening
@@ -622,7 +628,7 @@ final class SessionsStore {
     /// instead of presenting a dead terminal until the next poll. A window
     /// whose own pool still holds a live surface for this Session (it just
     /// took the client over) is unaffected.
-    func noteSurfaceClosed(_ terminal: TerminalIdentity) {
+    func noteSurfaceClosed(_ terminal: TerminalIdentity, output: String? = nil) {
         guard case .session(let id, let machineId) = terminal,
               !surfaces.hasSurface(terminal),
               let index = _index(id), sessions[index].record.workspace?.machineId == machineId
@@ -630,8 +636,8 @@ final class SessionsStore {
         switch sessions[index].state {
         case .prepared, .live:
             sessions[index].state = sessions[index].record.action(.moveHere) != nil
-                ? .elsewhere : .pending
-        case .pending, .elsewhere, .opening, .failed:
+                ? .elsewhere : .ended(output ?? "Terminal output is unavailable.")
+        case .pending, .elsewhere, .opening, .failed, .ended:
             break
         }
     }
@@ -945,7 +951,7 @@ struct SessionsContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .ghosttySurfaceClosed)) { notification in
             guard let terminal = notification.object as? TerminalIdentity else { return }
-            store.noteSurfaceClosed(terminal)
+            store.noteSurfaceClosed(terminal, output: notification.userInfo?["output"] as? String)
         }
         .onReceive(NotificationCenter.default.publisher(for: .openSessions)) { _ in
             navigation.content = .terminals
@@ -1740,6 +1746,16 @@ private struct SessionPaneView: View {
             ProgressView("Opening session…")
                 .foregroundStyle(TerminalPalette.foreground)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .ended(let output):
+            VStack(alignment: .leading, spacing: Spacing.md) {
+                Text("Session terminal ended").foregroundStyle(TerminalPalette.foreground)
+                ScrollView {
+                    Text(output).font(.system(.body, design: .monospaced))
+                        .foregroundStyle(TerminalPalette.foreground).textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                openButton(item, retrying: true)
+            }.padding()
         case .failed(let message):
             ContentUnavailableView {
                 Label("Session failed to open", systemImage: "exclamationmark.triangle")

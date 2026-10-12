@@ -435,7 +435,7 @@ final class WorkModel {
             reason = "The Session checkout changed while opening; retry its current location."
         } else {
             switch item.state {
-            case .failed(let message): reason = message
+            case .failed(let message), .ended(let message): reason = message
             case .elsewhere: reason = "Session is open elsewhere; use Move here explicitly."
             case .pending where item.record.action(.open) == nil:
                 reason = "Session has no available opening action."

@@ -120,11 +120,11 @@ without changing its destination.
 Binary, missing, unsupported and over-1-MB files have explicit states. Extremely
 long lines retain the native editor's known responsiveness limitation.
 
-Select a repository, then a Task. Its workspace retains conversations, shells,
-file drafts and layout across visits. Use **+** in the toolbar for a conversation
-or shell, and the document icon for Files. The sidebar icon hides or restores the
-Sessions pane without changing its terminals or drafts. Click the Task title for
-details and the full Flow; the toolbar's current stage opens its available review.
+Select a repository, then a Task to open its conversation. Its workspace retains
+conversations, shells, file drafts and layout across visits. Use **+** for supporting
+panes; expand **Overview** for Task details. Active clients elsewhere require
+explicit **Move here**. An ended Session shows a bounded excerpt of its final
+terminal screen; reopening is explicit and preserves the conversation's history.
 
 Exiting a disposable CLI conversation retires it from navigation while keeping
 its provider history. Ctrl-C interruption is recorded; interrupted Flow reviews,
@@ -136,12 +136,9 @@ continues; **Expand** returns to it. **Focus** gives one conversation the conten
 area; **Restore** brings back the panes and files. **Terminate** ends a shell.
 New conversations arrive in the list without taking focus.
 
-Task rows and their counts show unfinished interactive Sessions in the Task checkout,
-including independent conversations and authored Flow reviews.
-`lf session list --interactive all --history` inspects the full history.
-Filtering preserves retained terminals and drafts.
-Repo and Wave Sessions retain their own scopes. Wave rows include their conversations and roll up Task
-Sessions; choose a name to open it directly.
+The sidebar lists Work, not an unscoped Session inventory or conversation counts.
+Repository and Wave conversations retain their own scopes. Shell-launched unscoped
+conversations stay out of the sidebar without deleting their history.
 **Available** means the conversation can be joined. Historical feedback remains
 readable without granting completion authority. Failed provider starts offer recovery.
 

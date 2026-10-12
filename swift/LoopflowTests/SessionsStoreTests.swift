@@ -161,6 +161,22 @@ struct SessionsStoreTests {
         #expect(item(store, "native")?.surface == nil)
     }
 
+    @Test("Ended Session output survives a fresh inventory without relaunch")
+    func endedOutputSurvivesPolling() async throws {
+        let record = session(id: "native", state: "closed")
+        let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { _, _ in record })
+        store.reconcile(try records([record]))
+        await store.select("native")
+        store.recordPaneLive("native")
+        store.noteSurfaceClosed(.session("native", machineId: fixtureMachineId),
+            output: "Error: Previous AgentProcess has no observed exit")
+        store.reconcile(try records([record]))
+        #expect(item(store, "native")?.state == .ended("Error: Previous AgentProcess has no observed exit"))
+        #expect(item(store, "native")?.surface == nil)
+        await store.select("native")
+        #expect(item(store, "native")?.state == .prepared)
+    }
+
     @Test("A failed open stays visible across polling until superseded")
     func failedOpenSurvivesPolling() async throws {
         let store = SessionsStore(

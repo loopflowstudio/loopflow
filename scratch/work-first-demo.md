@@ -52,42 +52,17 @@ unchanged. No new provider requests were created. Backup `live-before-abandoned-
 preimages `abandoned-live-before.json`; rollback refuses any subsequently edited row.
 Do not restore a whole snapshot over concurrent live activity.
 
-The newer private demo copy used the existing common planning writer for these
-same IDs, not direct journal edits. Temporary helper source remains only in the
-demo directory (`clone_abandonment_repair.rs`), removed from production source
-after its successful invocation (`/tmp/loo462-clone-abandonment-repair.log`).
-Native Product Task inventory now reads 24 rather than 65; old LOO-149 etc. are
-absent, Workflow renders, and other open Work tabs survive. Provider opening remains
-intentionally sandbox-blocked; an Open Task error was canceled without retrying
-against a real provider. Remaining plan rows include LOO-299's superseded title,
-which is not by itself authority for another cancellation.
+Private-copy writer rehearsal and native 24-versus-65 Product rows:
+`f0d993e2c9:scratch/work-first-demo.md`, **Verified live result and legacy cleanup**.
+Provider opening there was sandbox-blocked; no further cancellation authority.
 
-## Task click fallback — October 12
+## Earlier Task opening — October 12
 
-Jack Heart expects sidebar Task clicks to open their conversation directly, not
-show New shell. Native inspection found an Open Task failure for LOO-299: no
-checkout. Its private-copy row is unstarted with no primary Session; the sidebar
-also admits nonterminal Tasks with associated Sessions, so visibility alone does
-not prove Started. This reachable working-set rule still needs reconciliation;
-no additional Task disposition was inferred or changed.
-
-Before mounting a Session, failure left the empty pane offering New shell after
-alert dismissal. Task workspaces now retain the error/progress; Retry targets
-the Task. Empty Task panes no longer offer shells. Layouts/clients are unchanged.
-This repairs presentation, not missing checkouts or sandbox-blocked providers.
-The running demo has not been replaced; native continuation remains unproved.
-
-Check: `scripts/test_desktop.sh --filter WorkDestinationTests -Xswiftc -gnone --no-parallel` — PASS, 51 tests; regression retains failure after navigation/dismissal. Earlier builds failed on an optional WorkReference in the inline Retry action; extraction and optional binding fixed it. `git diff --check` — PASS. Native demo remains separate.
-
-
-## Provider-backed conversation — October 12
-
-Disposable configured-provider proof, exact Session IDs, failed hidden trust prompt,
-replacement and native input/reply remain at `2016119a88:scratch/work-first-demo.md`,
-**Provider-backed conversation**. This proves neither populated real-Task first
-opening nor takeover of copied execution. The no-remotes/default-branch repair
-passed focused Rust checks. Hidden first-use prompts, timeout recovery and client
-handoff remain adversarial cases; native placeholder contrast is repaired below.
+Task-click fallback and disposable provider proof, including failed optional
+WorkReference builds and hidden trust prompts: `f0d993e2c9:scratch/work-first-demo.md`,
+**Task click fallback** and **Provider-backed conversation**. Inline opening/error
+retention replaced New shell; later Started membership supersedes Session-presence
+admission. No copied-execution takeover or populated-provider acceptance followed.
 
 ## Correct repository and Started membership — October 12
 
@@ -261,4 +236,28 @@ partial indexes own those lookups. Add the missing agent-kind predicate, includi
 reverse membership. Regression adds 2,000 unrelated commands and checks unchanged
 candidate membership with bounded VM work. No schema or live data change.
 
-Check: five Rust Task-membership tests and 17 Swift Session/stream tests PASS; real attachment lookup 114.6 ms scan → 0.08 ms indexed, same row. All-target Clippy/fmt/diff PASS. Candidate PID 44545 now renders LOO-462’s demo Workflow and readable Move here; no broader performance claim.
+Check: five Rust Task-membership tests and 17 Swift Session/stream tests PASS; real attachment lookup 114.6 ms scan → 0.08 ms indexed, same row. All-target Clippy/fmt/diff PASS. Native PID 44545 renders LOO-462’s demo Workflow and readable Move here.
+
+## Full sidebar opening pass — October 12
+
+All 13 listed Tasks were clicked across the bundled native candidates, not just
+prepared in JSON. Codex hook review appeared for LOO-312/367/371/378/382/330,
+lf-12be237, lf-9c03797 and lf-8fed729. No trust choice or Task Flow action was
+submitted. LOO-380 opened Claude and began its configured Task conversation;
+preserve that active surface, not another app restart. LOO-462 correctly refuses
+implicit takeover. LOO-378 remains paused; opening its conversation does not
+resume implementation. Inventory and prepare IDs remain in the audit directory.
+
+LOO-427 and LOO-389 lose their terminal failure behind Not running here. The former
+has an October 8 spawn_requested AgentProcess without PID/birth/exit evidence;
+the latter has an October 6 legacy null spawn_state and no PID. The null Boolean
+SQL expression crashes decoding. Treat null as not-reserved, not an observed exit.
+Neither record can yet authorize ordinary replacement. Command receipts:
+`427-native-commands.json`, `389-native-commands.json` in the audit directory.
+
+Retain a bounded final-screen excerpt before releasing an ended Session surface,
+using the existing lf3 reader; show terminal-ended output through refresh until
+explicit reopen or fresh live ownership. Do not infer failure from prose or exit
+alone. No new transcript store or retained dead PTY. Review caught truncation and
+empty-output handling; label truncation and unavailable output explicitly.
+Check: final 18 Swift Session/stream tests and legacy-null Rust regression PASS; fmt/all-target Clippy/diff PASS. Native excerpt remains unproved; the app stays running to preserve Claude. No unknown-process retirement or demo acceptance.

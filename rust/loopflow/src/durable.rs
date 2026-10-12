@@ -59,6 +59,16 @@ pub enum DurableDataError {
     InvalidId(String),
 }
 
+// Identity of one selected repository plan, never derived from a code remote.
+durable_id!(RepositoryId, "repo_");
+
+/// One selected plan and its retained Machine-local locators, read together.
+/// Locators prove explicit association, not portable Work or execution authority.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RepositoryIdentity {
+    pub id: RepositoryId,
+    pub locators: Vec<RepositoryId>,
+}
 durable_id!(ProjectId, "proj_");
 durable_id!(TaskId, "task_");
 // Opaque IDs retain their released spelling, including references in scheduled jobs.
@@ -114,6 +124,65 @@ impl WorkRef {
     }
 }
 
+/// A fresh, Machine-local observation, never replicated as planning or a start claim.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskLocationObservation {
+    pub request: String,
+    pub repository_id: RepositoryId,
+    pub task_id: TaskId,
+    pub machine_id: MachineId,
+    pub observed_at: i64,
+    pub location: TaskLocation,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum TaskLocation {
+    Recorded {
+        task_id: TaskId,
+        checkout: Option<String>,
+    },
+    /// Only this Machine has no retained execution; this is not global absence.
+    Unrecorded,
+    Unavailable {
+        reason: String,
+    },
+}
+
+/// A launch destination read from planning and recorded execution, not a claim.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskExecutionRoute {
+    pub task_id: TaskId,
+    pub checkout: Option<String>,
+    pub repository_id: RepositoryId,
+    pub machine_id: MachineId,
+    pub source: TaskExecutionSource,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskExecutionSource {
+    RecordedCheckout,
+    Admission,
+    EffectiveDelegation,
+}
+
+/// Immutable first-start coordinator, carried with the Task's planning identity.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskAdmissionAuthority {
+    pub machine_id: MachineId,
+    pub repository_id: RepositoryId,
+}
+
+/// A request-bound reading from the coordinator. A positive owner never expires.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskAdmission {
+    pub request: String,
+    pub task_id: TaskId,
+    pub authority: TaskAdmissionAuthority,
+    pub owner: Option<MachineId>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Machine {
     pub label: Option<String>,
@@ -129,9 +198,23 @@ pub struct Machine {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Placement {
     pub work: WorkRef,
+    /// The ancestor (or Work itself) supplying this assignment.
+    pub source: WorkRef,
+    pub provenance: PlacementProvenance,
     pub machine_id: MachineId,
     #[serde(with = "time::serde::rfc3339")]
     pub placed_at: OffsetDateTime,
+}
+
+/// How the source assignment was established; inheritance is `source != work`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlacementProvenance {
+    Explicit,
+    /// Released rows cannot distinguish an explicit choice from a copied parent.
+    Legacy,
+    /// No authored assignment exists in the ancestry.
+    LocalDefault,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -156,7 +239,7 @@ impl std::fmt::Display for Author {
     }
 }
 
-/// A steer comment surfaced for the cross-Work `lf activity` timeline: the read
+/// A steer comment surfaced for the cross-Work `lf history` timeline: the read
 /// model plus the Work it targets and when it was issued.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SteerComment {

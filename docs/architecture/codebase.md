@@ -75,7 +75,7 @@ Flows may invoke the named internal operations that own their exact boundary.
 | `lf wave`, `repo`, `task` | planning and Work coordination |
 | `lf session` | durable Sessions and resolution |
 | `lf wt`, `commit`, `sync`, `pr`, `ci` | worktree and delivery operations |
-| `lf mon show`, `usage`, `activity` | durable execution/history projections |
+| `lf history`, `history show`, `usage` | durable execution/history projections |
 | `lf ps`, `top`, `prune`, `doctor` | local OS and command-journal observation |
 | `lf machine`, `lf --machine` | Machine identity, placement, command routing |
 | `lf account` | provider credential and account authority |
@@ -87,7 +87,7 @@ round-trip the same fixtures under `tests/fixtures/dto/`.
 
 `lf checkout` belongs to tracked Work and delivery: it starts no execution.
 `lf task run ISSUE` places the Task and fills its defaults, then is
-`lf --task ISSUE run FLOW` in that checkout. `lf --task ... <skill>` goes directly through execution with
+`lf --task ISSUE flow FLOW` in that checkout. `lf --task ... <skill>` goes directly through execution with
 Task attribution and never moves a Flow's position.
 
 ## Dependency direction

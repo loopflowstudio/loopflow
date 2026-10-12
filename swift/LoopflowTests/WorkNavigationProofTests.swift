@@ -43,10 +43,10 @@ struct WorkNavigationProofTests {
         let roadmap = String(decoding: try JSONSerialization.data(withJSONObject: snapshot), as: UTF8.self)
         let query = RegistryQuery { args, _ in
             switch args.first {
-            case "roadmap": return roadmap
+            case "wave" where args.dropFirst().first == "show": return roadmap
             case "wave" where args.dropFirst().first == "list": return "[]"
             case "session": return #"{"entries":[],"next":null}"#
-            case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
+            case "history": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             default: throw RegistryQueryError("Unexpected operation in navigator proof")
             }
         }
@@ -161,10 +161,10 @@ struct WorkNavigationProofTests {
         let source = SidebarSessionSource(list: try encode(attached + orphans))
         let query = RegistryQuery { args, _ in
             switch args.first {
-            case "roadmap": return roadmap
+            case "wave" where args.dropFirst().first == "show": return roadmap
             case "wave" where args.dropFirst().first == "list": return "[]"
             case "session": return #"{"entries":\#(await source.list()),"next":null}"#
-            case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
+            case "history": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             default: throw RegistryQueryError("Unexpected operation in sidebar density proof")
             }
         }
@@ -241,12 +241,12 @@ struct WorkNavigationProofTests {
         GhosttyManager.shared.initialize()
         let repo = "/src/loopflow"
         let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
-        let workspace = registry.workspace(for: fixtureWorkspace(repo))
+        let workspace = fixtureWork(registry, fixtureWorkspace(repo))
         var terminals: [GhosttyMetalView] = []
         for _ in 0..<3 {
-            workspace.multiplexer.newShell()
+            workspace.multiplexer.newShell(location: workspace.location)
             let pane = workspace.multiplexer.focusedPaneId
-            let terminal = registry.surfaces.view(for: .shell(pane))
+            let terminal = registry.surfaces.view(for: .shell(pane, machineId: fixtureMachineId))
             terminal.frame = CGRect(x: 0, y: 0, width: 400, height: 350)
             terminal.workingDirectory = NSTemporaryDirectory()
             terminal.command = buildWorkspaceShellCommand(id: pane, argv: ["/bin/cat"], env: [:])
@@ -290,9 +290,9 @@ struct WorkNavigationProofTests {
         let planning = SidebarSessionSource(list: roadmap)
         let query = RegistryQuery { args, _ in
             switch (args.first, args.dropFirst().first) {
-            case ("roadmap", _): return await planning.list()
+            case ("wave", "show"): return await planning.list()
             case ("wave", "list"): return "[]"
-            case ("activity", _): return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
+            case ("history", _): return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             case ("session", "list"): return try await named.page(args)
             case ("session", "rename"): return try await named.rename(args)
             case ("session", "bind"): return try await named.bind(args, task: task)
@@ -551,22 +551,21 @@ struct WorkNavigationProofTests {
         #expect(terminals[0].surface == surfaces[0])
     }
 
-    @Test("Session rows restore their shell and companion layout across worktree slots")
+    @Test("Session rows restore their shell and companion layout across navigation")
     func sessionRowRestoresWorktree() async throws {
         _ = NSApplication.shared
         GhosttyManager.shared.initialize()
         let repo = "/src/loopflow"
         let paths = [repo, "/src/loopflow.task"]
         let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
-        let outer = registry.layout(for: fixtureWorkspace(repo))
         var terminals: [GhosttyMetalView] = []
         var records: [[String: Any]] = []
         for (index, path) in paths.enumerated() {
-            let workspace = registry.workspace(for: fixtureWorkspace(path))
+            let workspace = fixtureWork(registry, fixtureWorkspace(path))
             for _ in 0..<2 {
-                workspace.multiplexer.newShell()
+                workspace.multiplexer.newShell(location: workspace.location)
                 let pane = workspace.multiplexer.focusedPaneId
-                let terminal = registry.surfaces.view(for: .shell(pane))
+                let terminal = registry.surfaces.view(for: .shell(pane, machineId: fixtureMachineId))
                 terminal.frame = CGRect(x: 0, y: 0, width: 500, height: 350)
                 terminal.workingDirectory = NSTemporaryDirectory()
                 terminal.command = buildWorkspaceShellCommand(id: pane, argv: ["/bin/cat"], env: [:])
@@ -584,11 +583,11 @@ struct WorkNavigationProofTests {
         }
         defer { for terminal in terminals { registry.surfaces.release(terminal.terminal) } }
         let surfaces = try terminals.map { try #require($0.surface) }
-        let layouts = paths.map { registry.workspace(for: fixtureWorkspace($0)).multiplexer.layout }
+        let layouts = paths.map { fixtureWork(registry, fixtureWorkspace($0)).multiplexer.layout }
         let sessionJSON = String(decoding: try JSONSerialization.data(withJSONObject: records), as: UTF8.self)
         let query = RegistryQuery { args, _ in
             switch args.first {
-            case "roadmap": return #"{"generated_at":1,"waves":[]}"#
+            case "wave" where args.dropFirst().first == "show": return #"{"generated_at":1,"waves":[]}"#
             case "wave" where args.dropFirst().first == "list": return "[]"
             case "session" where args.dropFirst().first == "list": return #"{"entries":\#(sessionJSON),"next":null}"#
             default: throw RegistryQueryError("Local row must focus its existing shell")
@@ -607,34 +606,15 @@ struct WorkNavigationProofTests {
         draft.withCString { ghostty_surface_text(surfaces[0], $0, UInt(draft.utf8.count)) }
 
         for index in [1, 0] {
-            try view.inspect().find(viewWithAccessibilityIdentifier: "session-row-row-\(index)").button().tap()
+            try view.inspect().find(viewWithAccessibilityIdentifier: "debug-session-row-\(index)").button().tap()
             try await settle(window)
-            #expect(outer.focusedPath == fixtureWorkspace(paths[index]))
             #expect(window.firstResponder === terminals[index * 2])
             #expect(terminals[index * 2].window === window)
             #expect(terminals[(1 - index) * 2].window == nil)
-            #expect(paths.map { registry.workspace(for: fixtureWorkspace($0)).multiplexer.layout } == layouts)
+            #expect(paths.map { fixtureWork(registry, fixtureWorkspace($0)).multiplexer.layout } == layouts)
         }
 
-        let firstSlot = outer.focusedSlotId
-        try view.inspect().find(viewWithAccessibilityLabel: "Split worktrees right").button().tap()
-        outer.select(fixtureWorkspace(paths[1]))
-        try await settle(window)
-        #expect(terminals.allSatisfy { $0.window === window })
-        #expect(paths.map { registry.workspace(for: fixtureWorkspace($0)).multiplexer.layout } == layouts)
-        try view.inspect().find(viewWithAccessibilityIdentifier: "session-row-row-0").button().tap()
-        try await settle(window)
-        #expect(outer.layout.slots.count == 2)
-        #expect(outer.focusedSlotId == firstSlot)
-        #expect(window.firstResponder === terminals[0])
-        outer.close(firstSlot)
-        try await settle(window)
-        try view.inspect().find(viewWithAccessibilityIdentifier: "session-row-row-0").button().tap()
-        try await settle(window)
-        #expect(window.firstResponder === terminals[0])
-        #expect(paths.map { registry.workspace(for: fixtureWorkspace($0)).multiplexer.layout } == layouts)
-
-        let store = registry.workspace(for: fixtureWorkspace(repo)).sessionStore(repoPath: repo, query: query)
+        let store = fixtureWork(registry, fixtureWorkspace(repo)).sessionStore(repoPath: repo, query: query)
         #expect(store.sessions.allSatisfy { $0.state == .live })
         for (index, surface) in surfaces.enumerated() {
             #expect(terminals[index].surface == surface)
@@ -658,7 +638,7 @@ struct WorkNavigationProofTests {
         manager.initialize()
         try #require(manager.state == .ready)
         let pool = GhosttySurfacePool()
-        let identity = TerminalIdentity.session("navigation-draft-proof")
+        let identity = TerminalIdentity.session("navigation-draft-proof", machineId: fixtureMachineId)
         let terminal = pool.view(for: identity)
         let window = NSWindow(
             contentRect: CGRect(x: 0, y: 0, width: 500, height: 300),
@@ -756,26 +736,26 @@ struct WorkNavigationProofTests {
         """
         let query = RegistryQuery { args, cwd in
             switch args.first {
-            case "roadmap": return roadmap
+            case "wave" where args.dropFirst().first == "show": return roadmap
             case "wave" where args.dropFirst().first == "list": return "[]"
             case "session" where args.dropFirst().first == "list":
                 return #"{"entries":\#(cwd == "/src/context" ? otherRecords : records),"next":null}"#
-            case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
+            case "history": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             default: throw RegistryQueryError("Unexpected operation in navigation proof")
             }
         }
         let model = WorkModel(query: query, repoPath: "/src/loopflow")
         await model.refresh()
         let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
-        let workspace = registry.workspace(for: fixtureWorkspace("/src/loopflow"))
-        workspace.multiplexer.load(sessionId: "navigation-split")
+        let workspace = fixtureWork(registry, fixtureWorkspace("/src/loopflow"))
+        workspace.multiplexer.load(sessionId: "navigation-split", location: model.sessions.value?.first { $0.id == "navigation-split" }?.workspace?.identity)
         let sessionPane = workspace.multiplexer.focusedPaneId
         _ = workspace.multiplexer.split(sessionPane, axis: .vertical)
-        workspace.multiplexer.newShell()
+        workspace.multiplexer.newShell(location: workspace.location)
         let shellPane = workspace.multiplexer.focusedPaneId
-        workspace.multiplexer.load(sessionId: "navigation-split")
+        workspace.multiplexer.load(sessionId: "navigation-split", location: model.sessions.value?.first { $0.id == "navigation-split" }?.workspace?.identity)
         let layout = workspace.multiplexer.layout
-        let identities: [TerminalIdentity] = [.session("navigation-split"), .shell(shellPane)]
+        let identities: [TerminalIdentity] = [.session("navigation-split", machineId: fixtureMachineId), .shell(shellPane, machineId: fixtureMachineId)]
         let terminals = identities.map { workspace.surfaces.view(for: $0) }
         defer { for identity in identities { workspace.surfaces.release(identity) } }
         let history = (0..<120).map { "history-\($0)" }.joined(separator: " ")

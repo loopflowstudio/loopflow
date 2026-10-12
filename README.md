@@ -37,7 +37,7 @@ cargo install --git https://github.com/loopflowstudio/loopflow --bin lf
 
 The Mac app — Sessions, the roadmap, every Task's worktree — is
 [`Loopflow-latest.dmg`](https://downloads.loopflow.studio/Loopflow-latest.dmg).
-It bundles `lf`; open it explicitly with `lf open`. Bare `lf` starts the
+It bundles `lf`; open it explicitly with `lf desktop open`. Bare `lf` starts the
 general-purpose terminal conversation. On canonical main, it first carries local
 commits and uncommitted files into an author-scoped sibling worktree so the
 conversation cannot dirty main.
@@ -61,9 +61,16 @@ The harness acts as a User over the same `lf` API. See
 ## Find a command or workflow
 
 ```bash
+lf --repo loopflow list    # use ~/src/loopflow without changing directories
+```
+
+Set `repo_root: ~/projects` in `~/.lf/config.yaml` to change the search root.
+Use `--repo ./path` for an explicit checkout; with `--machine`, lookup happens there.
+
+```bash
 lf list                    # commands, skills, and flows
 lf help debug              # inspect a definition without launching it
-lf run feature             # select a flow, otherwise a skill
+lf flow pursue             # select a flow explicitly
 lf skill release-run       # explicitly select the skill
 lf land --help           # inspect the landing command
 lf pr-review               # build an HTML walkthrough of the important code in this PR
@@ -127,13 +134,17 @@ lf task run INF-123 --reason "reconcile all scratch first" # save a steer, then 
 lf task status INF-123 --json                         # inspect planning, even when sync is unavailable
 lf task complete INF-123                             # complete without moving the Workflow
 lf task reopen INF-123                               # reopen planning; keep the Workflow and PR
-lf task-operate "INF-123"                           # advance through follow-through to completion, or a blocker
+lf task-operate "INF-123"                           # advance to completion, or a blocker
 lf --task INF-123 skill task-session               # ongoing conversation that keeps applying task-operate
 lf arm                                             # request exact-head auto-merge and return
-lf land                                            # request merge; follow-through completes the Task
+lf land                                            # request merge; Task completion stays separate
 lf pr reconcile                                      # check recorded deliveries once and settle merges
 lf ci watch                                          # watch PR checks; start a ci-fix when a landing fails
 ```
+
+Subtree delegation travels with shared planning. Started Tasks retain their recorded
+Machine; new Tasks reserve an exclusive execution owner before checkout.
+Connection settings and execution records remain Machine-local.
 
 Acquired Task comments from Linear also become steers for each associated
 Session, with independent delivery at its next supported provider boundary.
@@ -152,12 +163,16 @@ Watch this repository and the current Machine:
 ```bash
 lf wave list                  # every durable Wave and its Machine/runtime evidence
 lf user           # read config: display name from Git or a personal override
-lf roadmap             # every open Task across this repository's Waves
-lf roadmap --all       # every repository on this machine
+lf wave show             # every open Task across this repository's Waves
+lf wave show --all       # every repository on this machine
 lf wave status designer     # one Wave's current chapter and Tasks
-lf activity            # durable work, delivery and steering history
+lf history             # durable work, delivery and steering history
 lf session list --json # conversations on this Machine
 lf context             # context budgets, configuration sources and current usage
+lf task run LOO-427 --explain --json # intended action and impediments; no launch
+lf task edit LOO-427 --title "Retain drafts" --explain # validate without saving
+lf --machine mini --repo project debug --context # read remote input without launching
+lf flow pursue --context # graph and initial input; future inputs stay unavailable
 lf usage --days 30      # recorded provider usage
 lf usage --task LOO-265 # usage attributed to one Task
 lf usage --task LOO-265 --context # each step's input by source, flagged over budget

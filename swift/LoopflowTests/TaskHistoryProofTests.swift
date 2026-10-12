@@ -25,12 +25,12 @@ struct TaskHistoryProofTests {
         GhosttyManager.shared.initialize()
         let repo = "/src/loopflow"
         let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
-        let workspace = registry.workspace(for: fixtureWorkspace(repo))
+        let workspace = fixtureWork(registry, fixtureWorkspace(repo))
         var terminals: [GhosttyMetalView] = []
         for _ in 0..<2 {
-            workspace.multiplexer.newShell()
+            workspace.multiplexer.newShell(location: workspace.location)
             let pane = workspace.multiplexer.focusedPaneId
-            let terminal = registry.surfaces.view(for: .shell(pane))
+            let terminal = registry.surfaces.view(for: .shell(pane, machineId: fixtureMachineId))
             terminal.frame = CGRect(x: 0, y: 0, width: 400, height: 350)
             terminal.workingDirectory = NSTemporaryDirectory()
             terminal.command = buildWorkspaceShellCommand(id: pane, argv: ["/bin/cat"], env: [:])
@@ -213,9 +213,9 @@ private actor HistorySource {
 
     func respond(_ args: [String]) async throws -> String {
         switch (args.first, args.dropFirst().first) {
-        case ("roadmap", _): return roadmap
+        case ("wave", "show"): return roadmap
         case ("wave", "list"): return "[]"
-        case ("activity", _): return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
+        case ("history", _): return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
         case ("session", "list"): return #"{"entries":\#(session),"next":null}"#
         case ("flow", "list"): return "[]"
         case ("task", "comment"):

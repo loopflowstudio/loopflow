@@ -115,9 +115,9 @@ the same account. Other integrations should mark progress with
 `<!-- loopflow-progress:<source-id> -->`; historical unmarked comments remain
 eligible because their authorship cannot be inferred safely.
 
-`lf interrupt INF-123` appends a durable interrupt comment;
-the Task's running Flow observes it and ends the current provider turn so the
-next boundary re-reads direction. With no running Flow it remains durable input.
+`lf interrupt INF-123` records a separate control request. An attached Task
+command observes it and interrupts its provider turn; steer delivery retains
+its independent Session history.
 Loopflow never guesses signal authority from a conversation ID, Work ID, PID, or
 tmux name. Project operations are ordinary finite conversations; they have no long-running
 process to interrupt, resume, wait for, or attach to.
@@ -173,10 +173,10 @@ Every read the conducting surfaces offer is `--json`:
 ```bash
 lf wave list --json                    # every durable Wave and its Machine/runtime evidence
 lf wave status <wave> --json           # hierarchy plus one Rust-derived metric_portfolio
-lf roadmap --json                      # every Wave repeats that required portfolio envelope
-lf activity --task INF-123 --json
-lf mon show --project parser --json
-lf mon show --task INF-123 --json
+lf wave show --json                      # every Wave repeats that required portfolio envelope
+lf history --task INF-123 --json
+lf usage --project parser --json
+lf history list --task INF-123 --json
 lf usage --days 30 --json   # recorded provider usage, newest first
 lf usage --task INF-123 --json # the same evidence drilled to one Task
 lf usage --weekly --json   # context cost and turn time by week since 2026-09-30
@@ -185,13 +185,13 @@ lf ps --json                # one OS-live process frame
 ```
 
 `lf wave list` is the registry plane, `lf wave status` is the focused operational view,
-and `lf roadmap` joins the current Linear plan to that runtime truth.
-`lf activity` is the ordered durable history; each item reuses `WorkRef` and
+and `lf wave show` joins the current Linear plan to that runtime truth.
+`lf history` is the ordered durable history; each item reuses `WorkRef` and
 carries one typed fact with its execution, Task PR, or Steer evidence. Agents consume
 those projections; they do not rebuild the joins.
 
 All of these reads are local to the executing Machine. Use `lf --machine <machine-id> ...`
-to execute the same read remotely. The historical `lf mon show` interface and `lf usage` read that Machine's evidence;
+to execute the same read remotely. The historical `lf history show` interface and `lf usage` read that Machine's evidence;
 their transitional wire shape is recorded in the cutover status. They do not
 query a central execution service.
 

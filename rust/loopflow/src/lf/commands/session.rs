@@ -98,20 +98,14 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
                 message.is_none(),
                 "a resume message is a headless turn: lf -b session resume ID MESSAGE"
             );
-            let id = match id {
-                Some(id) => id.clone(),
-                None => {
-                    let store = open_shared_store().await?;
-                    crate::ops::human_session::latest_interactive_session(
-                        &store,
-                        &std::env::current_dir()?,
-                    )
-                    .await?
-                    .context("No interactive session found in this worktree")?
-                    .id
-                }
-            };
-            open(&id, false, OpenMode::Refuse).await
+            let store = open_shared_store().await?;
+            let id = crate::ops::human_session::select_connection(
+                &store,
+                &std::env::current_dir()?,
+                id.as_deref(),
+            )
+            .await?;
+            open(&store, &id, false, OpenMode::Refuse).await
         }
         SessionCommand::History {
             id,
@@ -182,14 +176,8 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
             replace,
             try_open,
         } => {
-            let mode = if *replace {
-                OpenMode::Replace
-            } else if *try_open {
-                OpenMode::Try
-            } else {
-                OpenMode::Refuse
-            };
-            open(id, *json, mode).await
+            let store = open_shared_store().await?;
+            open(&store, id, *json, OpenMode::from_flags(*replace, *try_open)).await
         }
         SessionCommand::Ensure {
             wave,
@@ -317,9 +305,13 @@ async fn list(
     Ok(())
 }
 
-async fn open(id: &str, json: bool, mode: OpenMode) -> anyhow::Result<()> {
-    let store = open_shared_store().await?;
-    let session = crate::ops::human_session::open(&store, id, mode, !json).await?;
+async fn open(
+    store: &crate::store::SharedStore,
+    id: &str,
+    json: bool,
+    mode: OpenMode,
+) -> anyhow::Result<()> {
+    let session = crate::ops::human_session::open(store, id, mode, !json).await?;
     if json {
         println!("{}", serde_json::to_string_pretty(&session)?);
     }

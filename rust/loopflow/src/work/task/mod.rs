@@ -640,7 +640,7 @@ impl Task {
     }
 }
 
-/// Historical keep-open scope, retained for conversion into follow-up Tasks.
+/// Historical keep-open scope, retained for event decoding only.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskFollowUp {
     pub outcome: String,
@@ -651,6 +651,7 @@ pub struct TaskFollowUp {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TaskEventKind {
+    // Historical follow-through events remain readable; no current writers.
     FollowThroughIntent {
         intent: serde_json::Value,
     },
@@ -691,6 +692,7 @@ pub enum TaskEventKind {
     Progress {
         summary: String,
     },
+    // Historical keep-open decision; no current writer.
     FollowUp {
         remaining: Option<TaskFollowUp>,
         reason: String,

@@ -19,6 +19,7 @@ struct GhosttyTerminalView: View {
     let surfacePool: GhosttySurfacePool?
     let isFocused: Bool
     let onSurfaceCreated: () -> Void
+    let onSurfaceFailed: (String) -> Void
     let onFocus: () -> Void
     @ObservedObject var manager: GhosttyManager
 
@@ -30,6 +31,7 @@ struct GhosttyTerminalView: View {
         surfacePool: GhosttySurfacePool? = nil,
         isFocused: Bool = false,
         onSurfaceCreated: @escaping () -> Void = {},
+        onSurfaceFailed: @escaping (String) -> Void = { _ in },
         onFocus: @escaping () -> Void = {},
         manager: GhosttyManager = .shared
     ) {
@@ -40,6 +42,7 @@ struct GhosttyTerminalView: View {
         self.surfacePool = surfacePool
         self.isFocused = isFocused
         self.onSurfaceCreated = onSurfaceCreated
+        self.onSurfaceFailed = onSurfaceFailed
         self.onFocus = onFocus
         self.manager = manager
     }
@@ -53,6 +56,7 @@ struct GhosttyTerminalView: View {
                 surfacePool: surfacePool,
                 isFocused: isFocused,
                 onSurfaceCreated: onSurfaceCreated,
+                onSurfaceFailed: onSurfaceFailed,
                 onFocus: onFocus,
                 size: geo.size,
                 manager: manager
@@ -61,7 +65,7 @@ struct GhosttyTerminalView: View {
     }
 
     private var shellCommand: String? {
-        if case .shell(let id) = terminal {
+        if case .shell(let id, _) = terminal {
             return buildWorkspaceShellCommand(id: id, argv: argv, env: env)
         }
         return buildGhosttyShellCommand(argv: argv, env: env)
@@ -76,6 +80,7 @@ struct GhosttyTerminalRepresentable: NSViewRepresentable {
     let surfacePool: GhosttySurfacePool?
     let isFocused: Bool
     let onSurfaceCreated: () -> Void
+    let onSurfaceFailed: (String) -> Void
     let onFocus: () -> Void
     let size: CGSize
     @ObservedObject var manager: GhosttyManager
@@ -103,6 +108,7 @@ struct GhosttyTerminalRepresentable: NSViewRepresentable {
             nsView.workingDirectory = workingDirectory
             nsView.command = command
             nsView.onSurfaceCreated = onSurfaceCreated
+            nsView.onSurfaceFailed = onSurfaceFailed
             nsView.onFocus = onFocus
             nsView.sizeDidChange(size)
 
@@ -110,6 +116,7 @@ struct GhosttyTerminalRepresentable: NSViewRepresentable {
                size.width > 0, size.height > 0 {
                 nsView.createSurface(manager: manager)
             }
+            if case .failed(let reason) = manager.state { onSurfaceFailed(reason) }
             nsView.updateFocus(isFocused: isFocused, isEnabled: enabled)
         }
         guard nsView.superview === mount else { return }
@@ -165,6 +172,74 @@ final class GhosttySurfacePool {
         return view
     }
 
+    /// Inspection never allocates a view or retires an exited child. The
+    /// surface owner supplies its lifetime, independently of pane occurrences.
+    func surfaceIncarnation(for id: TerminalIdentity) -> String? {
+        guard let view = views[id], view.surface != nil else { return nil }
+        return view.programStatus.incarnation.uuidString.lowercased()
+    }
+
+    func readText(_ request: DesktopTextRequest, terminal: TerminalIdentity) throws -> DesktopTextResult {
+        // Do not use view(for:) or hasSurface: those allocate or schedule cleanup.
+        guard let view = views[terminal], let surface = view.surface else {
+            return .unavailable(reason: .missingSurface)
+        }
+        guard view.programStatus.incarnation.uuidString.lowercased() == request.surface else {
+            throw RegistryQueryError("The terminal surface was replaced. Inspect Desktop again; no text was read.")
+        }
+        // The native reader formats directly into this fixed buffer under the
+        // renderer lock. Never read a whole terminal and truncate it in Swift.
+        var bytes = [CChar](repeating: 0, count: request.maxBytes)
+        var written = 0
+        var truncated = false
+        let succeeded = bytes.withUnsafeMutableBufferPointer { buffer in
+            if request.region == .selection {
+                return ghostty_surface_read_text_bounded(
+                    surface, nil, buffer.baseAddress, buffer.count, &written, &truncated)
+            }
+            let tag = request.region == .screen ? GHOSTTY_POINT_VIEWPORT : GHOSTTY_POINT_SCREEN
+            var selection = ghostty_selection_s(
+                top_left: ghostty_point_s(tag: tag, coord: GHOSTTY_POINT_COORD_TOP_LEFT, x: 0, y: 0),
+                bottom_right: ghostty_point_s(tag: tag, coord: GHOSTTY_POINT_COORD_BOTTOM_RIGHT, x: 0, y: 0),
+                rectangle: false)
+            return ghostty_surface_read_text_bounded(
+                surface, &selection, buffer.baseAddress, buffer.count, &written, &truncated)
+        }
+        guard succeeded else {
+            throw RegistryQueryError("The terminal region could not be read; no unbounded fallback was used.")
+        }
+        let text = bytes.withUnsafeBytes { String(decoding: $0.prefix(written), as: UTF8.self) }
+        return .available(text: text, truncated: truncated)
+    }
+
+    func insertText(_ text: String, terminal: TerminalIdentity, surface: String) throws {
+        try validateDesktopLiteralText(text)
+        let view = try inputView(terminal: terminal, surface: surface)
+        _ = view.insertTerminalText(text)
+    }
+
+    func sendKey(_ key: DesktopKey, terminal: TerminalIdentity, surface: String) throws {
+        let view = try inputView(terminal: terminal, surface: surface)
+        view.sendTerminalKey(key)
+    }
+
+    private func inputView(terminal: TerminalIdentity, surface incarnation: String) throws -> GhosttyMetalView {
+        // Never allocate, clean up, acquire a client, or fall back to focus.
+        guard let view = views[terminal], let surface = view.surface else {
+            throw RegistryQueryError("The retained pane has no native surface; no input was sent.")
+        }
+        guard view.programStatus.incarnation.uuidString.lowercased() == incarnation else {
+            throw RegistryQueryError("The terminal surface was replaced. Inspect Desktop again; no input was sent.")
+        }
+        guard !view.childExited, !ghostty_surface_process_exited(surface) else {
+            throw RegistryQueryError("The terminal child exited; no input was sent or client reopened.")
+        }
+        guard !view.hasMarkedText() else {
+            throw RegistryQueryError("The terminal has an active input-method composition; finish it before sending input.")
+        }
+        return view
+    }
+
     func programStatus(for id: TerminalIdentity) -> ProgramStatusSurface? {
         views[id]?.programStatus
     }
@@ -172,13 +247,18 @@ final class GhosttySurfacePool {
     func associateProgramStatus(_ records: [SessionRecord]) {
         for view in views.values {
             let marker = view.terminalMarker
-            if case .session(let id) = view.terminal {
-                if let record = records.first(where: { $0.id == id }) {
+            if case .session(let id, _) = view.terminal {
+                if let record = records.first(where: {
+                    $0.id == id && $0.workspace?.machineId == view.terminal.machineId
+                }) {
                     view.programStatus.associate(sessionId: id, terminalId: marker, provider: SessionProviderReading(agentProcessId: record.agentProcessId))
                 }
                 continue
             }
-            let matches = records.filter { $0.state == .active && $0.terminalIds.contains(marker) }
+            let matches = records.filter {
+                $0.workspace?.machineId == view.terminal.machineId
+                    && $0.state == .active && $0.terminalIds.contains(marker)
+            }
             view.programStatus.associate(
                 sessionId: matches.count == 1 ? matches[0].id : nil,
                 terminalId: matches.count == 1 ? marker : nil,
@@ -213,6 +293,10 @@ final class GhosttySurfacePool {
 
     func release(_ id: TerminalIdentity) {
         views.removeValue(forKey: id)?.destroySurface()
+    }
+
+    func clearFocus() {
+        for view in views.values { view.updateFocus(isFocused: false, isEnabled: false) }
     }
 
     func focus(_ id: TerminalIdentity) {
@@ -342,6 +426,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     var command: String?
     let terminal: TerminalIdentity
     var onSurfaceCreated: () -> Void = {}
+    var onSurfaceFailed: (String) -> Void = { _ in }
     var onFocus: () -> Void = {}
     weak var pool: GhosttySurfacePool?
     /// Set when the surface's child ended; blocks implicit relaunch — reopening
@@ -350,7 +435,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     let programStatus = ProgramStatusSurface()
     var terminalMarker: String {
         switch terminal {
-        case .shell(let id): id
+        case .shell(let id, _): id
         case .session: programStatus.incarnation.uuidString.lowercased()
         }
     }
@@ -384,7 +469,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     init(terminal: TerminalIdentity, frame frameRect: NSRect = .zero) {
         self.terminal = terminal
         super.init(frame: frameRect)
-        if case .session(let id) = terminal {
+        if case .session(let id, _) = terminal {
             programStatus.associate(sessionId: id, terminalId: terminalMarker, provider: nil)
         }
         setupView()
@@ -404,7 +489,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     }
 
     func createSurface(manager: GhosttyManager) {
-        guard surface == nil else { return }
+        guard surface == nil, !childExited else { return }
 
         let surfaceCommand: String?
         if case .session = terminal, let command {
@@ -426,6 +511,8 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
             if window != nil { setupDisplayLink() }
             setupTrackingArea()
             onSurfaceCreated()
+        } else {
+            onSurfaceFailed("Could not create the native terminal surface.")
         }
     }
 
@@ -715,7 +802,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         if accepted, let surface {
             ghostty_surface_set_focus(surface, true)
             // The Session pane is visible and accepting input.
-            if case .session(let id) = terminal { Perf.endAfterCommit(Perf.taskWorkspaceReady, id: id) }
+            if case .session(let id, _) = terminal { Perf.endAfterCommit(Perf.taskWorkspaceReady, id: id) }
         }
         return accepted
     }
@@ -1198,7 +1285,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         dropHighlight?.isHidden = true
     }
 
-    private func insertTerminalText(_ text: String) -> Bool {
+    fileprivate func insertTerminalText(_ text: String) -> Bool {
         guard let surface else { return false }
         programStatus.receive(.interaction, incarnation: programStatus.incarnation)
         clearBlockSelection()
@@ -1206,6 +1293,20 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
             ghostty_surface_text(surface, ptr, UInt(text.utf8.count))
         }
         return true
+    }
+
+    fileprivate func sendTerminalKey(_ input: DesktopKey) {
+        guard let surface else { return }
+        programStatus.receive(.interaction, incarnation: programStatus.incarnation)
+        clearBlockSelection()
+        var key = ghostty_input_key_s()
+        key.action = GHOSTTY_ACTION_PRESS
+        key.mods = GHOSTTY_MODS_NONE
+        key.consumed_mods = GHOSTTY_MODS_NONE
+        key.keycode = input.macKeyCode
+        _ = ghostty_surface_key(surface, key)
+        key.action = GHOSTTY_ACTION_RELEASE
+        _ = ghostty_surface_key(surface, key)
     }
 
     // MARK: - Key Translation
@@ -1305,11 +1406,23 @@ func terminalPasteText(from pasteboard: NSPasteboard) -> String? {
 // Stub view when GhosttyKit is not available
 @MainActor @Observable
 final class GhosttySurfacePool {
+    func surfaceIncarnation(for id: TerminalIdentity) -> String? { nil }
+    func readText(_ request: DesktopTextRequest, terminal: TerminalIdentity) throws -> DesktopTextResult {
+        .unavailable(reason: .missingSurface)
+    }
+    func insertText(_ text: String, terminal: TerminalIdentity, surface: String) throws {
+        try validateDesktopLiteralText(text)
+        throw RegistryQueryError("This Desktop build has no native terminal; no input was sent.")
+    }
+    func sendKey(_ key: DesktopKey, terminal: TerminalIdentity, surface: String) throws {
+        throw RegistryQueryError("This Desktop build has no native terminal; no input was sent.")
+    }
     func hasSurface(_ id: TerminalIdentity) -> Bool { false }
     func programStatus(for id: TerminalIdentity) -> ProgramStatusSurface? { nil }
     func associateProgramStatus(_ records: [SessionRecord]) {}
     func title(for id: TerminalIdentity) -> String? { nil }
     func release(_ id: TerminalIdentity) {}
+    func clearFocus() {}
     func focus(_ id: TerminalIdentity) {}
 }
 
@@ -1321,6 +1434,7 @@ struct GhosttyTerminalView: View {
     let surfacePool: GhosttySurfacePool?
     let isFocused: Bool
     let onSurfaceCreated: () -> Void
+    let onSurfaceFailed: (String) -> Void
     let onFocus: () -> Void
     @ObservedObject var manager: GhosttyManager
 
@@ -1332,6 +1446,7 @@ struct GhosttyTerminalView: View {
         surfacePool: GhosttySurfacePool? = nil,
         isFocused: Bool = false,
         onSurfaceCreated: @escaping () -> Void = {},
+        onSurfaceFailed: @escaping (String) -> Void = { _ in },
         onFocus: @escaping () -> Void = {},
         manager: GhosttyManager = .shared
     ) {
@@ -1342,6 +1457,7 @@ struct GhosttyTerminalView: View {
         self.surfacePool = surfacePool
         self.isFocused = isFocused
         self.onSurfaceCreated = onSurfaceCreated
+        self.onSurfaceFailed = onSurfaceFailed
         self.onFocus = onFocus
         self.manager = manager
     }
@@ -1359,6 +1475,7 @@ struct GhosttyTerminalView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(TerminalPalette.background)
+        .onAppear { onSurfaceFailed("Embedded terminal not available in this build.") }
     }
 }
 
@@ -1577,4 +1694,30 @@ private func ghosttyIsPrintableKeyText(_ text: String) -> Bool {
 private func shellEscape(_ value: String) -> String {
     let escaped = value.replacingOccurrences(of: "'", with: "'\\''")
     return "'\(escaped)'"
+}
+
+// Control bytes in a paste can submit or edit a shell when bracketed paste is
+// disabled. Keep the text/key boundary independent of the child program's mode.
+func validateDesktopLiteralText(_ text: String) throws {
+    guard !text.unicodeScalars.contains(where: { $0.value < 0x20 || (0x7f...0x9f).contains($0.value) }) else {
+        throw RegistryQueryError("Literal text cannot contain control characters; use an explicit key action. No input was sent.")
+    }
+}
+
+private extension DesktopKey {
+    var macKeyCode: UInt32 {
+        switch self {
+        case .enter: 0x24
+        case .tab: 0x30
+        case .escape: 0x35
+        case .backspace: 0x33
+        case .delete: 0x75
+        case .left: 0x7b
+        case .right: 0x7c
+        case .up: 0x7e
+        case .down: 0x7d
+        case .home: 0x73
+        case .end: 0x77
+        }
+    }
 }

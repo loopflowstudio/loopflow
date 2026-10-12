@@ -127,23 +127,35 @@ struct TaskDueDateView: View {
 struct FlowProcessLog: View {
     let model: WorkModel
     let taskId: String
+    let location: WorkspaceIdentity?
+    var execution: TaskLocationObservation? = nil
+    var query: RegistryQuery = RegistryQueryLocal.shared
+    @State private var captured: [FlowProcessDetail]?
+    @State private var error: String?
+    @State private var refresh = 0
     @Environment(\.palette) private var palette
 
     var body: some View {
         let task = model.task(id: taskId)?.task
         let reading = task.map { model.taskWork[$0.id] }
+        let readsWindow = execution == nil && query.remoteMachine == nil && location != nil
+            && location?.machineId == model.observingMachineId && location == task?.reference.workspace?.identity
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                if let flows = reading?.value?.flowProcesses {
+                if !readsWindow {
+                    Button("Refresh") { refresh += 1 }
+                    if let error { Text("Flow processes could not be read: \(error)").padding(.vertical, 6) }
+                }
+                if let flows = captured?.map(\.entry) ?? (readsWindow ? reading?.value?.flowProcesses : nil) {
                     ForEach(Array(flows.reversed().enumerated()), id: \.element.id) { index, flow in
                         if index > 0 { Divider().overlay(palette.border.opacity(0.6)) }
-                        FlowProcessView(model: model, flow: flow)
+                        FlowProcessView(model: model, flow: flow, run: captured?.first { $0.entry.id == flow.id } ?? (readsWindow ? model.flowProcesses[flow.id] : nil))
                     }
                     if flows.isEmpty {
                         Text("No Flow has run.").padding(.vertical, 6)
                             .accessibilityIdentifier("task-flow-processes-empty")
                     }
-                } else if let error = reading?.errorMessage {
+                } else if let error = error ?? reading?.errorMessage {
                     Text("Flow processes could not be read: \(error)").padding(.vertical, 6)
                 } else {
                     Text(task == nil ? "Task unavailable" : "Reading Flow processes…").padding(.vertical, 6)
@@ -159,6 +171,34 @@ struct FlowProcessLog: View {
         .background(palette.background)
         .environment(\.colorScheme, .light)
         .accessibilityIdentifier("task-flow-processes")
+        .task(id: refresh) {
+            guard !readsWindow else { return }
+            do {
+                let ownerQuery: RegistryQuery
+                let subject: String
+                let cwd: String?
+                if let execution {
+                    guard case .recorded(let ownerTask, _) = execution.location else {
+                        throw RegistryQueryError("Task log location is unavailable.")
+                    }
+                    ownerQuery = query.onMachine(execution.machineID, repository: execution.repositoryID).pinTaskLocation(to: execution)
+                    subject = ownerTask
+                    cwd = nil
+                } else {
+                    guard let location, location.machineId == model.savedMachineId,
+                          query.remoteMachine == nil else {
+                        throw RegistryQueryError("Task log location is unavailable; no local fallback was used.")
+                    }
+                    ownerQuery = query
+                    subject = task?.runtime?.workId ?? taskId
+                    cwd = location.worktree
+                }
+                let flows = try await ownerQuery.taskFlowProcesses(task: subject, cwd: cwd)
+                try Task.checkCancellation()
+                captured = flows
+                error = nil
+            } catch { self.error = error.localizedDescription }
+        }
     }
 }
 
@@ -217,11 +257,11 @@ struct TaskWorkView: View {
 struct FlowProcessView: View {
     let model: WorkModel
     let flow: FlowProcessInventoryEntry
+    let run: FlowProcessDetail?
+    private var expanded: Bool { model.navigation.expandedFlowProcesses.contains(flow.id) }
     @State private var inspected: UInt32?
     @Environment(\.palette) private var palette
 
-    private var expanded: Bool { model.navigation.expandedFlowProcesses.contains(flow.id) }
-    private var run: FlowProcessDetail? { model.flowProcesses[flow.id] }
     private var started: Int64 { run?.steps.first?.startedAt ?? flow.updatedAt }
 
     /// How long the process ran; a running one has no length yet.
@@ -235,11 +275,8 @@ struct FlowProcessView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             Button {
-                if expanded {
-                    model.navigation.expandedFlowProcesses.remove(flow.id)
-                } else {
-                    model.navigation.expandedFlowProcesses.insert(flow.id)
-                }
+                if expanded { model.navigation.expandedFlowProcesses.remove(flow.id) }
+                else { model.navigation.expandedFlowProcesses.insert(flow.id) }
             } label: {
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
                     Image(systemName: expanded ? "chevron.down" : "chevron.right")

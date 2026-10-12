@@ -189,7 +189,6 @@ impl SqliteStore {
                         ],
                     ),
                 )?;
-                super::durable::inherit_project_placement(&tx, &id)?;
                 if pending.is_none() {
                     tx.execute("INSERT INTO project_transitions(wave_id,successor_id,created_at,local_plan_json)
                         VALUES(?1,?2,?3,?4)",params![wave,id.as_str(),now,serde_json::json!({"name":name}).to_string()])?;

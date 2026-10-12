@@ -1,9 +1,6 @@
 import CoreGraphics
 import Foundation
-
-public extension Notification.Name {
-    static let multiplexerStoreDidChange = Notification.Name("loopflow.multiplexerStoreDidChange")
-}
+import Observation
 
 public enum SpatialDirection: Equatable, Sendable {
     case left
@@ -12,9 +9,10 @@ public enum SpatialDirection: Equatable, Sendable {
     case down
 }
 
-/// Owns the immutable layout tree outside SwiftUI. Views receive snapshots via
-/// a notification and send every mutation back through this reference layer.
+/// Owns the retained layout. Views and opening receipts observe this same store;
+/// mutations finish on MainActor before either consumer reads the new state.
 @MainActor
+@Observable
 public final class MultiplexerStore {
     public private(set) var layout: LayoutNode
     public private(set) var focusedPaneId: String
@@ -23,6 +21,13 @@ public final class MultiplexerStore {
 
     public private(set) var collapsedPaneIds: Set<String> = []
     public var visibleLayout: LayoutNode? { layout.visible(excluding: collapsedPaneIds) }
+
+    /// Visibility of this exact retained occurrence within its workspace,
+    /// independent of window focus or compositor visibility.
+    public func isVisible(_ pane: PaneState) -> Bool {
+        layout.pane(for: pane.id) == pane && !collapsedPaneIds.contains(pane.id)
+            && (zoomedPaneId == nil || zoomedPaneId == pane.id)
+    }
 
     private var closedState: ClosedState?
     private var focusBeforeZoom: String?
@@ -48,7 +53,25 @@ public final class MultiplexerStore {
 
     public func pane(forSessionId sessionId: String) -> PaneState? {
         layout.allPanes.first { pane in
-            pane.content == .session(id: sessionId)
+            pane.sessionId == sessionId
+        }
+    }
+
+    /// A fresh record changes the captured location without selecting a pane.
+    /// Renew the occurrence so targets captured before a move cannot send input.
+    public func updateSessionLocation(_ sessionId: String, location: WorkspaceIdentity?, execution: TaskLocationObservation? = nil) {
+        func update(_ node: LayoutNode) -> LayoutNode {
+            guard let pane = node.allPanes.first(where: { $0.sessionId == sessionId }) else { return node }
+            let retained = pane.content.location == location ? pane.executionLocation : nil
+            let content = PaneContent.session(id: sessionId, location: location, execution: execution ?? retained)
+            guard pane.content != content else { return node }
+            return node.replacingContent(of: pane.id, with: content)
+        }
+        let updated = update(layout)
+        if updated != layout { layout = updated }
+        if var closed = closedState {
+            closed.layout = update(closed.layout)
+            closedState = closed
         }
     }
 
@@ -60,52 +83,52 @@ public final class MultiplexerStore {
         if collapsed && focusedPaneId == paneId, let first = visibleLayout?.firstPane {
             focusedPaneId = first.id
         }
-        _notify()
     }
 
-    public func reveal(sessionId: String) {
+    public func reveal(sessionId: String, location: WorkspaceIdentity? = nil) {
+        updateSessionLocation(sessionId, location: location)
         if let pane = pane(forSessionId: sessionId) {
-            setCollapsed(paneId: pane.id, collapsed: false)
             setFocusedPane(pane.id)
         } else if focusedPane.content == .empty {
-            load(sessionId: sessionId)
-            setCollapsed(paneId: focusedPaneId, collapsed: false)
+            load(sessionId: sessionId, location: location)
         } else {
-            _ = _split(focusedPaneId, axis: .vertical, content: .session(id: sessionId))
+            _insert(.session(id: sessionId, location: location), beside: focusedPaneId)
         }
     }
 
     public func setFocusedPane(_ paneId: String) {
-        guard layout.pane(for: paneId) != nil, focusedPaneId != paneId else { return }
+        guard layout.pane(for: paneId) != nil else { return }
+        guard focusedPaneId != paneId || collapsedPaneIds.contains(paneId)
+            || (zoomedPaneId != nil && zoomedPaneId != paneId) else { return }
         collapsedPaneIds.remove(paneId)
         focusedPaneId = paneId
         if zoomedPaneId != nil { zoomedPaneId = paneId }
-        _notify()
     }
 
     @discardableResult
-    public func split(_ paneId: String, axis: SplitAxis) -> PaneState? {
-        _split(paneId, axis: axis, content: .empty)
+    public func split(_ paneId: String, axis: SplitAxis, command: [String] = [], location: WorkspaceIdentity? = nil, execution: TaskLocationObservation? = nil, focusNewPane: Bool = true) -> PaneState? {
+        _insert(.shell(location: location, execution: execution), beside: paneId, focus: focusNewPane, splitAxis: axis, shellCommand: command)
     }
 
-    private func _split(_ paneId: String, axis: SplitAxis, content: PaneContent) -> PaneState? {
-        guard layout.pane(for: paneId) != nil else { return nil }
-        let pane = PaneState(content: content)
-        layout = layout.splitting(paneId, axis: axis, newPane: pane)
-        focusedPaneId = pane.id
-        zoomedPaneId = nil
+    /// Relocate the leaf itself, retaining content occurrence and surface keys.
+    /// Never use close/load: those invalidate targets and may retire a shell.
+    public func move(_ paneId: String, beside destination: String, axis: SplitAxis) {
+        guard paneId != destination,
+              let pane = layout.pane(for: paneId), layout.pane(for: destination) != nil,
+              let remaining = layout.removing([paneId]) else { return }
+        layout = remaining.splitting(destination, axis: axis, newPane: pane)
         closedState = nil
-        _notify()
-        return pane
     }
 
     public func close(_ paneId: String) {
-        guard let pane = layout.pane(for: paneId),
-              layout.allPanes.count > 1 || pane.content != .empty
-        else { return }
+        guard let pane = layout.pane(for: paneId) else { return }
+        let remaining = layout.removing([paneId])
+        guard remaining != nil || pane.content != .empty else { return }
 
+        // Undo restores this pane as a new occurrence, never reviving a stale
+        // control target. Other panes retain their existing occurrences.
         closedState = ClosedState(
-            layout: layout,
+            layout: layout.replacingContent(of: paneId, with: pane.content),
             focusedPaneId: focusedPaneId,
             zoomedPaneId: zoomedPaneId,
             collapsedPaneIds: collapsedPaneIds
@@ -114,20 +137,12 @@ public final class MultiplexerStore {
         // interrupted conversation's initial launch command.
         collapsedPaneIds.remove(paneId)
         shellCommands.removeValue(forKey: paneId)
-        if layout.allPanes.count == 1 {
-            layout = layout.replacingContent(of: paneId, with: .empty)
-            zoomedPaneId = nil
-            _notify()
-            return
-        }
-        guard let updated = layout.removing(paneId) else { return }
-        layout = updated
+        layout = remaining ?? .leaf(PaneState(id: paneId, content: .empty))
         if zoomedPaneId == paneId { zoomedPaneId = nil }
-        if focusedPaneId == paneId {
+        if focusedPaneId == paneId, remaining != nil {
             focusedPaneId = _nearestPane(to: paneId, in: closedState?.layout)
-                ?? updated.firstPane.id
+                ?? layout.firstPane.id
         }
-        _notify()
     }
 
     public func undoClose() {
@@ -137,10 +152,10 @@ public final class MultiplexerStore {
         zoomedPaneId = closedState.zoomedPaneId
         collapsedPaneIds = closedState.collapsedPaneIds
         self.closedState = nil
-        _notify()
     }
 
-    public func load(sessionId: String) {
+    public func load(sessionId: String, location: WorkspaceIdentity? = nil) {
+        updateSessionLocation(sessionId, location: location)
         if let openPane = pane(forSessionId: sessionId) {
             if collapsedPaneIds.contains(openPane.id), openPane.id != focusedPaneId,
                case .session = focusedPane.content {
@@ -151,17 +166,15 @@ public final class MultiplexerStore {
                     .replacingContent(of: openPane.id, with: previous)
                 collapsedPaneIds.remove(focusedPaneId)
                 closedState = nil
-                _notify()
                 return
             }
-            setCollapsed(paneId: openPane.id, collapsed: false)
             setFocusedPane(openPane.id)
             return
         }
 
         switch focusedPane.content {
         case .shell, .flowLog, .files:
-            _ = _split(focusedPaneId, axis: .vertical, content: .session(id: sessionId))
+            _insert(.session(id: sessionId, location: location), beside: focusedPaneId)
             return
         case .empty, .session:
             break
@@ -169,41 +182,85 @@ public final class MultiplexerStore {
 
         layout = layout.replacingContent(
             of: focusedPaneId,
-            with: .session(id: sessionId)
+            with: .session(id: sessionId, location: location)
         )
         collapsedPaneIds.remove(focusedPaneId)
         closedState = nil
-        _notify()
     }
 
-    public func newShell(command: [String] = []) {
-        if focusedPane.content == .empty {
-            shellCommands[focusedPaneId] = command
-            layout = layout.replacingContent(of: focusedPaneId, with: .shell)
-        } else {
-            if let pane = _split(focusedPaneId, axis: .vertical, content: .shell) {
-                shellCommands[pane.id] = command
-                _notify()
-            }
-            return
-        }
-        closedState = nil
-        _notify()
+    @discardableResult
+    public func newShell(command: [String] = [], location: WorkspaceIdentity? = nil, execution: TaskLocationObservation? = nil, beside paneId: String? = nil, focus: Bool = true) -> PaneState? {
+        _insert(.shell(location: location, execution: execution), beside: paneId ?? focusedPaneId, focus: focus, shellCommand: command)
     }
 
     /// Reveal a Task's Flow process log or files beside existing terminals,
-    /// never replacing them.
-    public func show(_ content: PaneContent) {
-        if let pane = layout.allPanes.first(where: { $0.content == content }) {
-            setCollapsed(paneId: pane.id, collapsed: false)
-            setFocusedPane(pane.id)
-        } else if focusedPane.content == .empty {
-            layout = layout.replacingContent(of: focusedPaneId, with: content)
-            closedState = nil
-            _notify()
-        } else {
-            _ = _split(focusedPaneId, axis: .vertical, content: content)
+    /// never replacing them. Explicit targets do not follow later focus.
+    @discardableResult
+    public func show(_ content: PaneContent, beside paneId: String? = nil, focus: Bool = true) -> PaneState? {
+        let existing = layout.allPanes.first { pane in
+            switch (pane.content, content) {
+            case (.files(let current, _, _), .files(let requested, _, _)),
+                 (.flowLog(let current, _, _), .flowLog(let requested, _, _)):
+                return current == requested
+            default: return pane.content == content
+            }
         }
+        if let pane = existing {
+            // A fresh observation can replace the captured owner, but missing
+            // evidence cannot discard the retained remote location or draft.
+            if content.executionLocation != nil || content.location != nil, pane.content != content {
+                layout = layout.replacingContent(of: pane.id, with: content)
+                closedState = nil
+            }
+            if focus { setFocusedPane(pane.id) }
+            else { setCollapsed(paneId: pane.id, collapsed: false) }
+            return layout.pane(for: pane.id)
+        } else {
+            return _insert(content, beside: paneId ?? focusedPaneId, focus: focus)
+        }
+    }
+
+    /// Fill empty targets unless an explicit split was requested. Update the
+    /// occurrence, launch command, focus and Undo together on MainActor.
+    @discardableResult
+    private func _insert(
+        _ content: PaneContent,
+        beside paneId: String,
+        focus: Bool = true,
+        splitAxis: SplitAxis? = nil,
+        shellCommand: [String]? = nil
+    ) -> PaneState? {
+        guard let target = layout.pane(for: paneId) else { return nil }
+        let axis = splitAxis ?? (target.content == .empty ? nil : .vertical)
+        let insertedId: String
+        if let axis {
+            let pane = PaneState(content: content)
+            insertedId = pane.id
+            layout = layout.splitting(paneId, axis: axis, newPane: pane)
+        } else {
+            insertedId = paneId
+            layout = layout.replacingContent(of: paneId, with: content)
+            collapsedPaneIds.remove(paneId)
+        }
+        if let shellCommand { shellCommands[insertedId] = shellCommand }
+        if focus {
+            focusedPaneId = insertedId
+            zoomedPaneId = axis == nil && zoomedPaneId != nil ? insertedId : nil
+        }
+        closedState = nil
+        return layout.pane(for: insertedId)
+    }
+
+    /// Explicit arrangement changes visibility without selecting another Session.
+    public func setZoom(_ paneId: String, enabled: Bool) {
+        guard layout.pane(for: paneId) != nil else { return }
+        if enabled {
+            collapsedPaneIds.remove(paneId)
+            zoomedPaneId = paneId
+        } else if zoomedPaneId == paneId {
+            zoomedPaneId = nil
+        } else { return }
+        focusBeforeZoom = nil
     }
 
     public func toggleZoom(_ paneId: String) {
@@ -219,7 +276,6 @@ public final class MultiplexerStore {
             zoomedPaneId = paneId
             focusedPaneId = paneId
         }
-        _notify()
     }
 
     public func updateRatio(
@@ -234,7 +290,6 @@ public final class MultiplexerStore {
         )
         guard updated != layout else { return }
         layout = updated
-        _notify()
     }
 
     public func focus(_ direction: SpatialDirection) {
@@ -259,40 +314,30 @@ public final class MultiplexerStore {
         if let candidate {
             focusedPaneId = candidate.key
             zoomedPaneId = nil
-            _notify()
         }
     }
 
     /// Removes confirmed resolved or moved Sessions without creating an undo entry.
     public func removeSessions(_ sessionIds: Set<String>) {
-        let stale = layout.allPanes.filter { pane in
-            guard case .session(let id) = pane.content else { return false }
+        let removes: (PaneState) -> Bool = { pane in
+            guard case .session(let id, _, _) = pane.content else { return false }
             return sessionIds.contains(id)
         }
-        let undoIsStale = closedState?.layout.allPanes.contains { pane in
-            guard case .session(let id) = pane.content else { return false }
-            return sessionIds.contains(id)
-        } == true
+        let stale = layout.allPanes.filter(removes)
+        let undoIsStale = closedState?.layout.allPanes.contains(where: removes) == true
         guard !stale.isEmpty || undoIsStale else { return }
 
-        for pane in stale {
-            collapsedPaneIds.remove(pane.id)
-            if zoomedPaneId == pane.id { zoomedPaneId = nil }
-            if layout.allPanes.count == 1 {
-                layout = .leaf(PaneState(id: pane.id, content: .empty))
-            } else if let updated = layout.removing(pane.id) {
-                layout = updated
-            }
+        if let last = stale.last {
+            let removed = Set(stale.map(\.id))
+            // Keep the final slot when all Sessions leave, as single removals do.
+            layout = layout.removing(removed) ?? .leaf(PaneState(id: last.id, content: .empty))
+            collapsedPaneIds.subtract(removed)
+            if let zoomedPaneId, removed.contains(zoomedPaneId) { self.zoomedPaneId = nil }
         }
         if layout.pane(for: focusedPaneId) == nil {
             focusedPaneId = layout.firstPane.id
         }
         closedState = nil
-        _notify()
-    }
-
-    private func _notify() {
-        NotificationCenter.default.post(name: .multiplexerStoreDidChange, object: self)
     }
 
     private func _nearestPane(to paneId: String, in previousLayout: LayoutNode?) -> String? {
@@ -329,52 +374,13 @@ public final class MultiplexerStore {
         case .leaf(let pane):
             frames[pane.id] = rect
         case .split(let axis, let first, let second, let ratio):
-            switch axis {
-            case .vertical:
-                let firstWidth = rect.width * ratio
-                _collectFrames(
-                    first,
-                    rect: CGRect(
-                        x: rect.minX,
-                        y: rect.minY,
-                        width: firstWidth,
-                        height: rect.height
-                    ),
-                    into: &frames
-                )
-                _collectFrames(
-                    second,
-                    rect: CGRect(
-                        x: rect.minX + firstWidth,
-                        y: rect.minY,
-                        width: rect.width - firstWidth,
-                        height: rect.height
-                    ),
-                    into: &frames
-                )
-            case .horizontal:
-                let firstHeight = rect.height * ratio
-                _collectFrames(
-                    first,
-                    rect: CGRect(
-                        x: rect.minX,
-                        y: rect.minY,
-                        width: rect.width,
-                        height: firstHeight
-                    ),
-                    into: &frames
-                )
-                _collectFrames(
-                    second,
-                    rect: CGRect(
-                        x: rect.minX,
-                        y: rect.minY + firstHeight,
-                        width: rect.width,
-                        height: rect.height - firstHeight
-                    ),
-                    into: &frames
-                )
-            }
+            let vertical = axis == .vertical
+            let (firstRect, secondRect) = rect.divided(
+                atDistance: (vertical ? rect.width : rect.height) * ratio,
+                from: vertical ? .minXEdge : .minYEdge
+            )
+            _collectFrames(first, rect: firstRect, into: &frames)
+            _collectFrames(second, rect: secondRect, into: &frames)
         }
     }
 
@@ -397,7 +403,7 @@ public final class MultiplexerStore {
     }
 
     private struct ClosedState {
-        let layout: LayoutNode
+        var layout: LayoutNode
         let focusedPaneId: String
         let zoomedPaneId: String?
         let collapsedPaneIds: Set<String>

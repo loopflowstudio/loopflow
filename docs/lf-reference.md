@@ -7,17 +7,16 @@ lf monitor --json
 ```
 
 Generated from the compiled Clap tree. Canonical command paths are shown; unique shortcuts also resolve. See
-[the workflow guide](lf.md) for examples. Hidden commands
-are internal process boundaries and are marked below.
+[the workflow guide](lf.md) for examples. This reference lists public commands.
 
 ## Selection and output
 
-`--machine <label-or-id>` runs the command in the saved remote repository.
+`--machine <label-or-id>` runs the command remotely; `--repo NAME_OR_PATH` overrides its saved repository.
 `--forward-agent` requires `--machine`.
 `--task` selects a Task checkout; `--wt` selects an existing worktree.
 `--wave` adds context without moving directories and must match a Task's
 owning Wave. `task run` places a Task's worktree and then runs like
-`lf --task ISSUE run FLOW`; every Flow naming a Task is equally its work.
+`lf --task ISSUE flow FLOW`; every Flow naming a Task is equally its work.
 
 A preference (`--account`) permits fallback. A restriction (`--only-account`)
 limits this launch and its children. A Flow retains its provider selections;
@@ -49,11 +48,12 @@ Open Loopflow or run its CLI
 
 | Argument | What it does |
 |---|---|
+| `--context` | Preview assembled agent input without launching or changing Work Default: false. |
+| `--explain` | Explain this invocation's Work selection without executing it Default: false. |
+| `--json` | Emit invocation previews as JSON Default: false. |
 | `--docs` | Docs paths, globs, or directories to include in context |
 | `--clipboard / -c` | Include clipboard content in prompt Default: false. |
 | `--agent / -a` | Override agents named in Tasks, Flows and skills, including child commands (harness[:model]) Applies everywhere. |
-| `--skill-input` | Captured skill and arguments supplied by the invoking Flow process Internal. |
-| `--output-schema` | Native final-answer schema supplied by a deciding step Internal. |
 | `--account` | Prefer this managed provider login before the normal route. Repeat to select provider-qualified preferences such as `claude=jack@`. Logins spend; a profile is only the Chrome venue accounts log in through, so it is never a run-time selector |
 | `--only-account` | Restrict this invocation and its children to exactly these managed provider logins. Providers without a selection are unavailable |
 | `--isolate` | Run in the selected account's own provider home, unmoved by account switches. Applies to this invocation and its children Default: false. |
@@ -61,19 +61,16 @@ Open Loopflow or run its CLI
 | `--yolo` | Skip permission prompts Default: false. |
 | `--interactive / -i` | Run interactively Default: false. |
 | `--batch / -b` | Run headless: print the output and return when the work ends Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--verbose / -v` | Show context accounting and diagnostic logs Applies everywhere. Default: false. |
 | `--chrome` | Override Chrome integration; omission inherits configuration |
-| `--__cron-receipt` | Exact cron receipt attribution for mechanical release execution Internal. |
-| `--__cron-lock-fd` | cron lock fd Internal. |
 | `--diff` | Select changed-code context; omission inherits configuration |
-| `--max-turns` | Maximum agent turns for this invocation |
 | `--machine` | Run the command on this saved machine in its repository |
+| `--repo` | Select a repository by name under repo_root (default ~/src), or by explicit path |
+| `--repository` | Select a registered repository plan on this Machine, not a clone name |
 | `--forward-agent` | Forward the SSH agent to the selected machine Default: false. |
 | `--wave` | Add Wave context and identity without changing the working directory |
 | `--task` | Execute in this Task's checkout |
 | `--wt` | Execute in an existing worktree by name or branch |
-| `--__cwd` | Keep a Work-bound internal launch in this exact checkout Internal. |
-| `--no-loopflow` | Exclude loopflow operating guidance Default: false. |
 | `--help / -h` | Print help |
 | `--version / -V` | Print version |
 
@@ -83,7 +80,6 @@ Pull request lifecycle
 
 | Argument | What it does |
 |---|---|
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf pr reconcile
@@ -92,7 +88,6 @@ Check recorded repository landings once, record CI failures, and settle verified
 
 | Argument | What it does |
 |---|---|
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf pr checks
@@ -103,7 +98,6 @@ Show CI status for current branch
 |---|---|
 | `--watch / -w` | watch Default: false. |
 | `--logs / -l` | logs Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf pr publish
@@ -114,7 +108,6 @@ Publish a ready PR headlessly: push, create or refresh, print state + URL. Opens
 |---|---|
 | `--title` | title |
 | `--body` | body |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf pr open
@@ -125,7 +118,6 @@ Push and create or update a draft PR, then open its GitHub page. Existing ready 
 |---|---|
 | `--title` | title |
 | `--body` | body |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf pr submit
@@ -140,7 +132,6 @@ Prepare a PR to land: sync, clear scratch, mark ready, and assign it to you. Not
 | `--message / -m` | message |
 | `--title` | title |
 | `--body` | body |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf pr arm
@@ -155,7 +146,6 @@ Prepare a PR, request exact-head auto-merge, and return without watching
 | `--message / -m` | message |
 | `--title` | title |
 | `--body` | body |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf pr land
@@ -171,7 +161,6 @@ Request auto-merge, retain settlement intent, and return
 | `--message / -m` | message |
 | `--title` | title |
 | `--body` | body |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf pr abandon
@@ -182,7 +171,6 @@ Abandon branch: close PR, remove worktree, delete branch
 |---|---|
 | `<branch>` | Branch to abandon (default: current) |
 | `--force / -f` | force Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf wt
@@ -191,7 +179,6 @@ Worktree operations
 
 | Argument | What it does |
 |---|---|
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf wt create
@@ -203,7 +190,6 @@ Create a low-level sibling worktree
 | `<name>` | Worktree name |
 | `--plan` | Print the placement plan without creating a worktree Default: false. |
 | `--persistent` | Keep this workspace after delivery and keep scratch local Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf wt switch
@@ -213,7 +199,6 @@ Switch to a worktree by name, identity leaf, or full branch
 | Argument | What it does |
 |---|---|
 | `<name>` | Worktree name or full branch name to switch to |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf wt list
@@ -224,7 +209,6 @@ List worktrees (read-only; reflects the last-synced main)
 |---|---|
 | `--json` | json Default: false. |
 | `--sync` | Fetch origin and fast-forward main before listing (mutates the canonical checkout). Off by default so a list never touches it Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf wt timing
@@ -234,7 +218,6 @@ Report how long `lf wt list` has taken on this machine
 | Argument | What it does |
 |---|---|
 | `--json` | json Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf wt prune
@@ -244,7 +227,6 @@ Remove clean terminal or inactive worktrees
 | Argument | What it does |
 |---|---|
 | `--dry-run` | Show what would be pruned without removing anything Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf wt delete
@@ -255,7 +237,6 @@ Delete a worktree and its local and remote branch; retain PR and Task outcomes
 |---|---|
 | `<name>` | Worktree name to remove |
 | `--force / -f` | force Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf sync
@@ -270,7 +251,6 @@ Merge upstream into the current branch (default: main or stack parent)
 | `--abort` | Abort the local sync in progress Default: false. |
 | `--adopt` | Explicitly claim a raw sync that has no Loopflow owner Default: false. |
 | `<onto>` | Branch to sync onto |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf commit
@@ -283,7 +263,6 @@ Commit changes
 | `--push / -p` | Push the branch after committing Default: false. |
 | `--no-add` | no add Default: false. |
 | `<paths>` | Commit only these paths, preserving other staged and unstaged edits |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf monitor
@@ -294,41 +273,6 @@ Show waiting, blocked, active, and finished work with next actions
 |---|---|
 | `--json` | json Default: false. |
 | `--all` | all Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
-| `--help / -h` | Print help |
-
-## lf monitor list
-
-List a bounded page of recorded commands, newest first
-
-| Argument | What it does |
-|---|---|
-| `--json` | json Default: false. |
-| `--all` | Include all repositories Default: false. |
-| `--limit` | limit Default: 100. |
-| `--after` | Continue with the previous page's next object, encoded as JSON |
-| `--parent` | Direct children of an exact or unambiguous parent Process |
-| `--caller` | Commands issued by this Session |
-| `--search` | Literal command text, ignoring ASCII case |
-| `--outcome` | outcome |
-| `--task` | Recorded work for a Task, including completed Tasks |
-| `--wave` | Recorded work for a Wave |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
-| `--help / -h` | Print help |
-
-## lf monitor show
-
-Inspect a process or Session by identity
-
-| Argument | What it does |
-|---|---|
-| `<id>` | id |
-| `--json` | json Default: false. |
-| `--events` | Print a Session's retained raw input events Default: false. |
-| `--final` | Print a Session's last recorded provider conclusion Default: false. |
-| `--input` | Inspect an exact retained input belonging to this Session |
-| `--context` | Print only what the step's submitted input was made of, by source Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf monitor active
@@ -340,7 +284,6 @@ Observe active conversations and missing process evidence
 | `--json` | json Default: false. |
 | `--watch` | Stream NDJSON until stdin closes Default: false. |
 | `--task` | task |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf monitor work
@@ -351,25 +294,6 @@ Stream planning and activity for the selected Work, each part again only when it
 |---|---|
 | `--json` | json Default: false. |
 | `--watch` | Stream NDJSON until stdin closes Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
-| `--help / -h` | Print help |
-
-## lf monitor usage
-
-Show direct provider-authored usage from recorded Session inputs
-
-| Argument | What it does |
-|---|---|
-| `--json` | Emit Session usage evidence as JSON Default: false. |
-| `--days` | Observation window, in days (zero means all time) Default: 30. |
-| `--weekly` | Report context cost and turn time by week since 2026-09-30 Default: false. |
-| `--binds` | Compare Task and Wave usage under prospective and post-hoc bind attribution Default: false. |
-| `--parent` | Inputs issued by this Session or retained capture |
-| `--wave` | Limit to Session inputs attributed to one Wave |
-| `--project` | Limit to Session inputs attributed to one Project |
-| `--task` | Limit to Session inputs attributed to one Task |
-| `--context` | Break each step's submitted input down by source, flagged against budgets Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf monitor ps
@@ -379,7 +303,6 @@ Print one parseable snapshot of live Loopflow call trees
 | Argument | What it does |
 |---|---|
 | `--json` | Emit the versioned activity snapshot as JSON Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf monitor top
@@ -389,7 +312,6 @@ Refresh live Loopflow call trees on a terminal; print once when redirected
 | Argument | What it does |
 |---|---|
 | `--json` | Emit one versioned activity snapshot as JSON Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf monitor prune
@@ -400,22 +322,6 @@ Reap registered orphan providers and remove dead process receipts
 |---|---|
 | `--dry-run` | Show exact targets without changing process or receipt state Default: false. |
 | `--json` | Emit the versioned prune report as JSON Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
-| `--help / -h` | Print help |
-
-## lf monitor activity
-
-Show one ordered record of durable Work, Session, PR, and Steer facts
-
-| Argument | What it does |
-|---|---|
-| `--since` | Relative window (7d, 24h, 30m) or RFC3339 start Default: 7d. |
-| `--limit` | Maximum rows after Work filters (1-200) Default: 50. |
-| `--wave` | Scope to one Wave by name |
-| `--project` | Scope to one Project by slug |
-| `--task` | Scope to one Task by Linear identifier |
-| `--json` | Emit the typed activity snapshot as JSON Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf :
@@ -425,43 +331,6 @@ Run an inline prompt
 | Argument | What it does |
 |---|---|
 | `<prompt>` | prompt |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
-| `--help / -h` | Print help |
-
-## lf __provider-session
-
-Internal provider callback that records one native interactive session
-
-Internal command; invoked by the owning operation.
-
-| Argument | What it does |
-|---|---|
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
-| `--help / -h` | Print help |
-
-## lf __context-block
-
-Internal conversation context for native startup/compaction hooks
-
-Internal command; invoked by the owning operation.
-
-| Argument | What it does |
-|---|---|
-| `--delivery` | delivery |
-| `--moment` | moment |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
-| `--help / -h` | Print help |
-
-## lf __session-title
-
-Native provider naming callback
-
-Internal command; invoked by the owning operation.
-
-| Argument | What it does |
-|---|---|
-| `<provider>` | provider |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf session
@@ -470,7 +339,6 @@ Inspect and continue Sessions
 
 | Argument | What it does |
 |---|---|
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf session steer
@@ -481,7 +349,6 @@ Save a steer for this Session without starting a turn
 |---|---|
 | `<id>` | id |
 | `<message>` | message |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf session steers
@@ -496,7 +363,6 @@ Inspect steer delivery or retry delivery
 | `--after` | after Default: 0. |
 | `--limit` | limit Default: 32. |
 | `--source` | Read the complete steer |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf session observe-status
@@ -508,7 +374,6 @@ Observe validated Program Status snapshots from an active local terminal
 | `<id>` | id |
 | `--terminal` | The terminal marker in the current provider client receipt |
 | `--agent-process` | AgentProcess from the Session reading; omit when it reported none |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf session resume
@@ -519,7 +384,6 @@ Resume a conversation by ID, or the last interactive Session in this worktree
 |---|---|
 | `<id>` | Loopflow Session ID or Claude/Codex conversation ID |
 | `<message>` | With `-b`: send this as the conversation's next headless turn |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf session history
@@ -532,7 +396,6 @@ Read this conversation's native start, usage and completion receipts
 | `--json` | json Default: false. |
 | `--after` | Continue after an observed event sequence Default: 0. |
 | `--limit` | limit Default: 100. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf session list
@@ -553,7 +416,6 @@ List Sessions
 | `--task` | task |
 | `--orphan` | Only Sessions without a Task association Default: false. |
 | `--search` | search |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf session connect
@@ -566,7 +428,6 @@ Stop headless Claude/OpenCode and resume history; connect to Codex live
 | `--json` | json Default: false. |
 | `--replace` | Stop Loopflow-owned clients before resuming here Default: false. |
 | `--try` | Ask the provider to resume even when another client is active Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf session ensure
@@ -579,7 +440,6 @@ Find or start the one ongoing conversation of this repository, a Wave or a Task
 | `--task` | The Task's: the one chosen, else its only or most recently used conversation |
 | `--choose` | Make this conversation of the Task its primary |
 | `--json` | json Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf session replace
@@ -590,7 +450,6 @@ Give a primary Session's scope a fresh conversation
 |---|---|
 | `<id>` | id |
 | `--json` | json Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf session rename
@@ -603,7 +462,6 @@ Rename a Session; a human name is never replaced by a suggestion
 | `<name>` | name |
 | `--suggest` | Propose an agent-generated name; keeps a human-assigned name Default: false. |
 | `--json` | json Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf session bind
@@ -616,19 +474,6 @@ Assign a Task to a Session that has none; the Task never changes after
 | `--task` | The Task, by its issue identifier (e.g. INF-123) or stable Task ID |
 | `--dry-run` | Resolve the exact target without assigning the Session Default: false. |
 | `--json` | json Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
-| `--help / -h` | Print help |
-
-## lf session serve-conversation
-
-Run one prepared conversation in its durable terminal
-
-Internal command; invoked by the owning operation.
-
-| Argument | What it does |
-|---|---|
-| `<input>` | input |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf account
@@ -641,7 +486,6 @@ Refresh account access and capacity, or manage logins and routing
 | `--cached` | Inspect cached evidence without contacting providers Default: false. |
 | `--details` | Include credential sources, browser choices, and timestamps Default: false. |
 | `--json` | Emit the account overview as one JSON document Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf account disconnect
@@ -652,7 +496,6 @@ Disconnect local credentials or one managed login
 |---|---|
 | `<provider>` | provider |
 | `<email>` | email |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf account connect
@@ -666,7 +509,6 @@ Connect local credentials or a managed login using a remembered browser
 | `--chrome-profile` | chrome profile |
 | `--import` | Adopt an existing Claude login Default: false. |
 | `--api-key` | Read the provider's API key environment variable Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf account set
@@ -686,7 +528,6 @@ Edit account configuration or remembered browser choices
 | `--clear-cooldown` | clear cooldown Default: false. |
 | `--chrome-profile` | Replace the ordered browser choices (repeat for fallback profiles) |
 | `--clear-chrome-profiles` | clear chrome profiles Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf account redeem-reset
@@ -700,7 +541,6 @@ Spend one banked Codex reset for this named login
 | `--idempotency-key` | Reuse this key when retrying the same redemption |
 | `--credit-id` | Opaque credit ID returned by live status (otherwise the service chooses) |
 | `--json` | json Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf account use
@@ -710,7 +550,6 @@ Sign the provider's ordinary home in as a stored login: `lf account <provider> u
 | Argument | What it does |
 |---|---|
 | `<email>` | email |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf account route
@@ -722,7 +561,6 @@ Explain configured and automatic account selection, or replace a route
 | `--repo` | repo |
 | `--default` | default Default: false. |
 | `--json` | json Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf account route set
@@ -735,7 +573,6 @@ Replace a provider's ordered route
 | `<accounts>` | accounts |
 | `--repo` | repo |
 | `--default` | default Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf repo
@@ -744,7 +581,16 @@ Repository releases, source measurement, CI evidence, and provider administratio
 
 | Argument | What it does |
 |---|---|
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf repo identity
+
+Establish or print this repository's selected planning identity
+
+| Argument | What it does |
+|---|---|
+| `--bind` | Associate this checkout with a repository identity, retaining prior IDs |
+| `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
 ## lf repo comment
@@ -755,7 +601,6 @@ Save a steer for associated Sessions without starting a turn
 |---|---|
 | `<message>` | message |
 | `--steer` | steer Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf repo planning
@@ -764,7 +609,6 @@ Inspect planning synchronization and personal identity
 
 | Argument | What it does |
 |---|---|
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf repo planning key
@@ -775,7 +619,6 @@ Show, explicitly create, or recover the same planning user key on another machin
 |---|---|
 | `--new` | new Default: false. |
 | `--recover` | recover |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf repo planning status
@@ -785,7 +628,6 @@ Show selection, retained imports and held records without contacting Git
 | Argument | What it does |
 |---|---|
 | `--json` | json Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf repo connect
@@ -798,7 +640,6 @@ Connect a Wave to its Initiative and the repository's Team (Task prefix)
 | `--all` | Recursively initialize every Wave under wave/ Default: false. |
 | `--team-key` | Repository Team key = Task prefix (e.g. LOO). Defaults from the repository name |
 | `--team-name` | Repository Team display name. Defaults to the repository name |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf repo refresh
@@ -809,7 +650,6 @@ Refresh shared planning from Linear
 |---|---|
 | `<wave>` | wave |
 | `--all` | all Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf repo new-chapter
@@ -822,7 +662,6 @@ Advance every Wave to the named Project plan
 | `--plan` | plan |
 | `--dry-run` | dry run Default: false. |
 | `--json` | json Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf repo release
@@ -831,7 +670,6 @@ Release operations (run, check, notes, bump, tag, status)
 
 | Argument | What it does |
 |---|---|
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf repo release history
@@ -843,7 +681,6 @@ Show original due opportunities and their release evidence
 | `--wave / -w` | wave |
 | `--days` | days Default: 35. |
 | `--json` | json Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf repo release run
@@ -854,7 +691,6 @@ Run the full release workflow end-to-end
 |---|---|
 | `<version>` | Version to release: patch\|minor\|major\|X.Y.Z (default: patch) |
 | `--target / -t` | target |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf repo release check
@@ -864,7 +700,6 @@ Check if PRs have merged since the last tag
 | Argument | What it does |
 |---|---|
 | `--target / -t` | target |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf repo release notes
@@ -877,7 +712,6 @@ Generate release notes for a version
 | `--prev-tag` | prev tag |
 | `--preview` | Print notes without updating manifests or release archives Default: false. |
 | `--target / -t` | target |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf repo release bump
@@ -888,7 +722,6 @@ Bump version in manifest files
 |---|---|
 | `<version>` | Version to bump to (e.g. 0.9.6) |
 | `--target / -t` | target |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf repo release tag
@@ -899,7 +732,6 @@ Create a git tag and push it
 |---|---|
 | `<version>` | Version to tag (e.g. 0.9.6) |
 | `--target / -t` | target |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf repo release publish
@@ -912,7 +744,6 @@ Stage or publish a GitHub Release
 | `--notes` | Release notes used while creating or updating the draft |
 | `--asset` | Asset to upload; repeat for multiple files |
 | `--finalize` | Publish the existing draft and mark it latest Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf repo release status
@@ -922,7 +753,6 @@ Check release workflow status
 | Argument | What it does |
 |---|---|
 | `--target / -t` | target |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf repo tokens
@@ -933,7 +763,6 @@ Measure this codebase: lines and tokens per directory (tracked files only)
 |---|---|
 | `--json` | Emit as JSON Default: false. |
 | `--days` | Walk git history instead: the codebase's size on each day it changed |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf repo ci
@@ -946,7 +775,6 @@ Show how failed CI is detected, repaired, and landed across this Machine
 | `--wave` | Scope to one Wave |
 | `--repo` | Scope to one GitHub owner/repo |
 | `--json` | Emit the complete incident report as JSON Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf repo ci watch
@@ -960,8 +788,6 @@ Watch this repository's PR checks and start a ci-fix when a recorded landing fai
 | `--uninstall` | Remove the background service Default: false. |
 | `--status` | Show whether a watcher is live, its last poll, and what it started Default: false. |
 | `--json` | Emit the status as JSON Default: false. |
-| `--parent-pid` | Stop when this process exits Internal. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf repo reteam
@@ -971,7 +797,6 @@ Reconcile linked Waves to the repository's Linear Team
 | Argument | What it does |
 |---|---|
 | `--apply` | apply Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf self
@@ -980,7 +805,6 @@ Manage the installed Loopflow release and exported skills
 
 | Argument | What it does |
 |---|---|
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf self doctor
@@ -991,7 +815,6 @@ Diagnose installation, storage, Process integrity and scheduled receipts
 |---|---|
 | `--planning` | Diagnose repository planning without changing it Default: false. |
 | `--json` | Emit the audit as JSON Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf self install
@@ -1000,7 +823,6 @@ Install the latest published Loopflow release from any directory
 
 | Argument | What it does |
 |---|---|
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf self install schedule
@@ -1010,87 +832,6 @@ Install the latest Loopflow at login and weekly by default (macOS launchd)
 | Argument | What it does |
 |---|---|
 | `<frequency>` | Weekly: Monday 09:00; daily: 09:00; otherwise on clock boundaries (local time) Default: weekly. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
-| `--help / -h` | Print help |
-
-## lf self install recover-switch
-
-Continue one interrupted installation switch from its pinned candidate
-
-Internal command; invoked by the owning operation.
-
-| Argument | What it does |
-|---|---|
-| `--switch` | The fixed installation switch receipt to continue |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
-| `--help / -h` | Print help |
-
-## lf self install preflight
-
-Preview whether this build may replace the global lf (read-only). Reads the shared store's migration frontier and validates executable planning references against this binary without changing that frontier. Exits non-zero on refusal so a caller can gate on it
-
-Internal command; invoked by the owning operation.
-
-| Argument | What it does |
-|---|---|
-| `--json` | Emit the structured PromotionPreview as JSON Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
-| `--help / -h` | Print help |
-
-## lf self install advance-switch
-
-Advance the receipt-selected store with this exact candidate's registry
-
-Internal command; invoked by the owning operation.
-
-| Argument | What it does |
-|---|---|
-| `--switch` | switch |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
-| `--help / -h` | Print help |
-
-## lf self install promote
-
-Promote this build to the global CLI: content-address it into ~/.lf/bin and atomically repoint the target symlink, under the exclusive promotion lock. Refuses — leaving every target unchanged — on incompatible schema or persisted executable evidence
-
-Internal command; invoked by the owning operation.
-
-| Argument | What it does |
-|---|---|
-| `--cli-target` | The global CLI symlink to replace (e.g. ~/.local/bin/lf) |
-| `--app-source` | A staged Loopflow.app bundle to install alongside the CLI |
-| `--app-target` | The global Loopflow.app path to replace atomically |
-| `--legacy-app-target` | A retired app bundle to remove after the new app commits |
-| `--sync-skills` | Regenerate global skills after the promotion commits Default: false. |
-| `--preview` | Validate and print the preview but change nothing Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
-| `--help / -h` | Print help |
-
-## lf self install rollback
-
-Repoint the global CLI at retained prior bytes only after that binary's own preflight proves it recognizes the current store frontier
-
-Internal command; invoked by the owning operation.
-
-| Argument | What it does |
-|---|---|
-| `--cli-target` | The global CLI symlink to replace (e.g. ~/.local/bin/lf) |
-| `--candidate` | The immutable content-addressed prior executable to activate |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
-| `--help / -h` | Print help |
-
-## lf self sync-skills
-
-Export skills and Flows into native vendor Skills directories
-
-Internal command; invoked by the owning operation.
-
-| Argument | What it does |
-|---|---|
-| `--yes / -y` | Confirm writes under ~/ without prompting Default: false. |
-| `--no-prune` | Keep stale loopflow-generated skills Default: false. |
-| `--repo` | Export repository definitions into this checkout instead of home Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf config
@@ -1099,7 +840,6 @@ Read Loopflow configuration
 
 | Argument | What it does |
 |---|---|
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf config user
@@ -1109,16 +849,174 @@ Print the configured participant display name
 | Argument | What it does |
 |---|---|
 | `--json` | json Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
-## lf open
+## lf desktop
 
-Open or focus Loopflow.app
+Open, inspect and control Loopflow Desktop (macOS only)
 
 | Argument | What it does |
 |---|---|
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop open
+
+Open resolved Work in its retained repository window
+
+| Argument | What it does |
+|---|---|
+| `--session` | Open this Task-associated Session without taking over another client |
+| `--diff` | Show the Task's Changes browser beside its conversation Default: false. |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop text
+
+Insert literal text at an exact surface's cursor; never submits or clears a draft
+
+| Argument | What it does |
+|---|---|
+| `--pane` | pane |
+| `<text>` | Unicode text without control characters (use key for Enter/Tab) |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop key
+
+Send one explicit key to an exact retained surface, without following focus
+
+| Argument | What it does |
+|---|---|
+| `--pane` | pane |
+| `<key>` | key |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop read
+
+Read bounded text from an exact retained surface, without following focus
+
+| Argument | What it does |
+|---|---|
+| `--pane` | pane |
+| `--region` | region |
+| `--max-bytes` | max bytes Default: 65536. |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop hide
+
+Hide an exact retained pane without closing its Session or process
+
+| Argument | What it does |
+|---|---|
+| `--pane` | Pane ID; defaults to this terminal when verified, otherwise one eligible pane |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop restore
+
+Restore an exact hidden pane without selecting Work or acquiring a client
+
+| Argument | What it does |
+|---|---|
+| `--pane` | pane |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop focus
+
+Focus an exact pane in its retained workspace (does not select Work)
+
+| Argument | What it does |
+|---|---|
+| `--pane` | pane |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop shell
+
+Add a shell on the recorded Machine beside a pane without changing selection
+
+| Argument | What it does |
+|---|---|
+| `--pane` | pane |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop files
+
+Show the recorded Task's files beside an exact pane, retaining drafts
+
+| Argument | What it does |
+|---|---|
+| `--pane` | pane |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop flow-log
+
+Show the recorded Task's Flow processes beside an exact pane
+
+| Argument | What it does |
+|---|---|
+| `--pane` | pane |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop split
+
+Add a shell split beside an exact pane, retaining selection and clients
+
+| Argument | What it does |
+|---|---|
+| `--pane` | pane |
+| `--axis` | axis |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop move
+
+Move a retained pane after another pane in the same workspace
+
+| Argument | What it does |
+|---|---|
+| `--pane` | pane |
+| `--destination` | destination |
+| `--axis` | axis |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop resize
+
+Resize the divider between two exact panes; ratio is the target side's share
+
+| Argument | What it does |
+|---|---|
+| `--pane` | pane |
+| `--toward` | toward |
+| `--ratio` | ratio |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop zoom
+
+Zoom an exact retained pane without changing selection; --off unzooms it
+
+| Argument | What it does |
+|---|---|
+| `--pane` | pane |
+| `--off` | off Default: false. |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop list
+
+Read actual windows and panes without launching, focusing, or acquiring clients
+
+| Argument | What it does |
+|---|---|
+| `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
 ## lf machine
@@ -1127,7 +1025,6 @@ Name and connect to machines
 
 | Argument | What it does |
 |---|---|
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf machine connect
@@ -1140,7 +1037,6 @@ Install a separate login on an added machine using this laptop's browser
 | `<provider>` | provider |
 | `<email>` | email |
 | `--chrome-profile` | chrome profile |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf machine credentials
@@ -1149,7 +1045,6 @@ Inspect or receive a machine credential (credential bytes use stdin only)
 
 | Argument | What it does |
 |---|---|
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf machine credentials inspect
@@ -1160,7 +1055,6 @@ Report whether this account is installed, without logging in
 |---|---|
 | `<provider>` | provider |
 | `<login>` | login |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf machine credentials receive
@@ -1169,7 +1063,6 @@ Receive a fresh login as JSON on stdin; preserve existing accounts
 
 | Argument | What it does |
 |---|---|
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf machine id
@@ -1179,7 +1072,6 @@ Print this machine's stable local Machine identity
 | Argument | What it does |
 |---|---|
 | `--json` | json Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf machine add
@@ -1192,7 +1084,6 @@ Discover a remote machine and save its SSH destination
 | `--label` | label |
 | `--repo` | Remote repository path; defaults to this checkout's home-relative path |
 | `--json` | json Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf machine list
@@ -1203,7 +1094,6 @@ List saved machines without connecting
 |---|---|
 | `<label>` | label |
 | `--json` | json Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf machine status
@@ -1214,7 +1104,6 @@ Check reachability and version without prompting
 |---|---|
 | `<label>` | label |
 | `--json` | json Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf machine rename
@@ -1225,7 +1114,6 @@ Change a saved machine's label
 |---|---|
 | `<label>` | label |
 | `<name>` | name |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf machine remove
@@ -1235,7 +1123,6 @@ Forget a connection without touching remote work
 | Argument | What it does |
 |---|---|
 | `<label>` | label |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf discord
@@ -1244,7 +1131,6 @@ Bridge new Discord messages to finite Wave Sessions
 
 | Argument | What it does |
 |---|---|
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf discord serve
@@ -1254,7 +1140,6 @@ Poll a configured channel and post each Session's final answer
 | Argument | What it does |
 |---|---|
 | `<wave>` | wave |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf wave
@@ -1263,7 +1148,83 @@ Manage Wave identity, placement and planning
 
 | Argument | What it does |
 |---|---|
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf wave show
+
+Read chapter plans and Tasks without starting work; an explicit Wave includes history
+
+| Argument | What it does |
+|---|---|
+| `<wave>` | wave |
+| `--task` | Find an exact Task, including historical planning |
+| `--json` | json Default: false. |
+| `--all` | Read every repository on this Machine Default: false. |
+| `--help / -h` | Print help |
+
+## lf wave workflow
+
+Select and inspect the chapter Workflow
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
+## lf wave workflow source
+
+Read the authored definition without creating a repository file
+
+| Argument | What it does |
+|---|---|
+| `<name>` | name |
+| `<wave>` | Wave name or ID (default: the ambient Wave) |
+| `--project` | Exact retained Project ID, provider ID or unique name instead of current selection |
+| `--help / -h` | Print help |
+
+## lf wave workflow list
+
+List Workflow definitions, including unavailable local files
+
+| Argument | What it does |
+|---|---|
+| `--wave` | Include this Project's stored Wave Workflow definitions |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf wave workflow show
+
+Show the selected chapter's Workflow
+
+| Argument | What it does |
+|---|---|
+| `<wave>` | Wave name or ID (default: the ambient Wave) |
+| `--project` | Exact retained Project ID, provider ID or unique name instead of current selection |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf wave workflow set
+
+Select the Workflow future Tasks take up; captured Tasks stay unchanged
+
+| Argument | What it does |
+|---|---|
+| `<name>` | name |
+| `<wave>` | Wave name or ID (default: the ambient Wave) |
+| `--project` | Exact retained Project ID, provider ID or unique name instead of current selection |
+| `--file` | Store this definition in the Wave |
+| `--help / -h` | Print help |
+
+## lf wave edit-plan
+
+Edit the selected chapter's name or summary
+
+| Argument | What it does |
+|---|---|
+| `<wave>` | Wave name or ID (default: the ambient Wave) |
+| `--project` | Exact retained Project ID, provider ID or unique name instead of current selection |
+| `--name` | name |
+| `--summary` | summary |
+| `--description` | Authored chapter prose |
 | `--help / -h` | Print help |
 
 ## lf wave comment
@@ -1275,7 +1236,6 @@ Save a steer for associated Sessions without starting a turn
 | `<wave>` | wave |
 | `<message>` | message |
 | `--steer` | steer Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf wave new-chapter
@@ -1289,7 +1249,6 @@ Rotate this Wave using its exact destination in a retained chapter plan
 | `--plan` | plan |
 | `--dry-run` | dry run Default: false. |
 | `--json` | json Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf wave ensure
@@ -1300,7 +1259,6 @@ Ensure the configured Project is active, or create one with a durable identity
 |---|---|
 | `<wave>` | wave |
 | `--json` | json Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf wave bind-project
@@ -1312,7 +1270,6 @@ Bind an existing Project UUID as this Wave's shared current selection
 | `<wave>` | wave |
 | `<project>` | project |
 | `--json` | json Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf wave cron
@@ -1321,7 +1278,6 @@ Local launchd jobs that run lf commands on a schedule
 
 | Argument | What it does |
 |---|---|
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf wave cron disposition
@@ -1334,7 +1290,6 @@ Record repair ownership without changing the failed evidence
 | `--wave` | wave |
 | `--owner` | owner |
 | `--reason` | reason |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf wave cron add
@@ -1346,7 +1301,6 @@ Install a named ordinary lf command on this Machine
 | `<name>` | Stable job name, retained across command changes |
 | `--schedule` | Daily or every-minute cron expression, or a schedule alias Default: daily. |
 | `<command>` | Arguments passed to lf, after -- |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf wave cron list
@@ -1358,7 +1312,6 @@ List installed loopflow cron jobs
 | `--wave / -w` | Only commands with this --wave selector |
 | `--task` | Only commands with this --task selector |
 | `--json` | Emit machine-readable job state Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf wave cron preflight
@@ -1369,7 +1322,6 @@ Validate configured commands and Machine placement without installing jobs
 |---|---|
 | `--wave / -w` | Only commands with this --wave selector |
 | `--task` | Only commands with this --task selector |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf wave cron sync
@@ -1382,21 +1334,6 @@ Reconcile installed jobs with the repository configuration's cron list
 | `--task` | Only commands with this --task selector |
 | `--repo` | Install the finite repository Task check on this Machine Default: false. |
 | `--disable` | Remove the repository schedule; running work retains its authority Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
-| `--help / -h` | Print help |
-
-## lf wave cron run
-
-Execute one installed cron job and persist its terminal receipt
-
-Internal command; invoked by the owning operation.
-
-| Argument | What it does |
-|---|---|
-| `--wave / -w` | Wave whose installed declaration is executed |
-| `--flow` | Flow or skill name to run |
-| `--scheduled` | Mark a launchd-owned invocation Default: false. Internal. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf wave cron history
@@ -1409,7 +1346,6 @@ Show durable cron receipts
 | `--flow` | Only receipts for this flow or skill |
 | `--days` | Receipt window in days Default: 35. |
 | `--json` | Emit machine-readable receipts Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf wave cron trigger
@@ -1422,7 +1358,6 @@ Ask launchd to fire an installed job
 | `--flow` | Flow or skill name to run |
 | `--wait` | Wait for and return the scheduled receipt Default: false. |
 | `--timeout` | Maximum wait for a receipt Default: 15m. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf wave cron remove
@@ -1433,7 +1368,6 @@ Uninstall a scheduled lf invocation
 |---|---|
 | `--wave / -w` | Wave name passed to `lf <flow> --wave <wave>` |
 | `--flow` | Flow or skill name to remove |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf wave list
@@ -1445,7 +1379,6 @@ List authored Waves and retained planning identities without starting work
 | `--json` | Emit the wave snapshot as JSON (Loopflow's dashboard snapshot) Default: false. |
 | `--all` | List Waves from every repository on this machine, not just the current repository (worktrees collapse to their main checkout) Default: false. |
 | `--current` | Exclude abandoned and retired registrations from current navigation Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf wave status
@@ -1457,7 +1390,6 @@ Show one Wave's current plan, Task details, and execution evidence
 | `<wave>` | Wave name (default: the ambient wave) |
 | `--json` | Emit the status snapshot as JSON Default: false. |
 | `--sync` | Refresh planning from Linear before reading Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf wave place
@@ -1469,7 +1401,6 @@ Set the Machine for Wave schedules and newly created work
 | `<name>` | name |
 | `<machine_id>` | machine id |
 | `--json` | json Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf wave rename
@@ -1483,7 +1414,6 @@ Rename or relocate an authored Wave and its provider mapping
 | `--name` | name |
 | `--title` | Change the linked Initiative display title |
 | `--json` | json Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf wave update-plan
@@ -1494,83 +1424,6 @@ Replace the current chapter's KRs, targets and workflow
 |---|---|
 | `--wave / -w` | wave |
 | `--plan` | The complete plan as JSON |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
-| `--help / -h` | Print help |
-
-## lf project
-
-Project-owned planning configuration
-
-| Argument | What it does |
-|---|---|
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
-| `--help / -h` | Print help |
-
-## lf project edit
-
-Update a Project's name, summary or prose
-
-| Argument | What it does |
-|---|---|
-| `<project>` | project |
-| `--name` | name |
-| `--summary` | summary |
-| `--description` | Authored prose; managed Workflow, KRs and targets stay unchanged |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
-| `--help / -h` | Print help |
-
-## lf project workflow
-
-Select and inspect reusable Workflows
-
-| Argument | What it does |
-|---|---|
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
-| `--help / -h` | Print help |
-
-## lf project workflow source
-
-Read the authored definition without creating a repository file
-
-| Argument | What it does |
-|---|---|
-| `<project>` | project |
-| `<name>` | name |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
-| `--help / -h` | Print help |
-
-## lf project workflow list
-
-List Workflow definitions, including unavailable local files
-
-| Argument | What it does |
-|---|---|
-| `--project` | Include this Project's stored Wave Workflow definitions |
-| `--json` | json Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
-| `--help / -h` | Print help |
-
-## lf project workflow show
-
-Show the Project's selected Workflow
-
-| Argument | What it does |
-|---|---|
-| `<project>` | project |
-| `--json` | json Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
-| `--help / -h` | Print help |
-
-## lf project workflow set
-
-Select the Workflow future Tasks take up; captured Tasks stay unchanged
-
-| Argument | What it does |
-|---|---|
-| `<project>` | project |
-| `<name>` | name |
-| `--file` | Store this definition in the Wave |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task
@@ -1579,7 +1432,6 @@ Concrete work and Task lifecycle
 
 | Argument | What it does |
 |---|---|
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task sync
@@ -1589,7 +1441,6 @@ Synchronize a Task; observed planning conflicts adopt Linear
 | Argument | What it does |
 |---|---|
 | `<issue>` | issue |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task workflow
@@ -1598,7 +1449,6 @@ Inspect or reset this Task's captured Workflow
 
 | Argument | What it does |
 |---|---|
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task workflow show
@@ -1609,7 +1459,6 @@ Show the Task's captured graph, position and history
 |---|---|
 | `<issue>` | issue |
 | `--json` | json Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task workflow restart
@@ -1619,7 +1468,6 @@ Move the captured Workflow to start without executing or reloading it
 | Argument | What it does |
 |---|---|
 | `<issue>` | issue |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task automation
@@ -1629,7 +1477,6 @@ Inspect delivery scheduling and Task CI repair settings
 | Argument | What it does |
 |---|---|
 | `--json` | json Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task reconcile
@@ -1639,7 +1486,6 @@ Check authorized deliveries once, then exit
 | Argument | What it does |
 |---|---|
 | `--json` | json Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task automate
@@ -1650,20 +1496,6 @@ Enable or hold CI repair for a Task without interrupting running work
 |---|---|
 | `<issue>` | issue |
 | `<state>` | state |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
-| `--help / -h` | Print help |
-
-## lf task __repair
-
-Run a reserved CI repair in its own process
-
-Internal command; invoked by the owning operation.
-
-| Argument | What it does |
-|---|---|
-| `<incident>` | incident |
-| `<launcher>` | launcher |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task checkout
@@ -1678,12 +1510,11 @@ Ensure tracked Task Work and its worktree without launching a Flow
 | `--directive` | directive |
 | `--design` | Hand off a child-specific design from the caller's checkout |
 | `--json` | json Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task run
 
-Place a Task's worktree, then run a Flow there like `lf --task ISSUE run FLOW`
+Place a Task's worktree, then run a Flow there like `lf --task ISSUE flow FLOW`
 
 | Argument | What it does |
 |---|---|
@@ -1693,7 +1524,6 @@ Place a Task's worktree, then run a Flow there like `lf --task ISSUE run FLOW`
 | `--stack-on` | Fork this Task's worktree from another Task's active PR |
 | `--directive` | directive |
 | `--reason` | Direction for this run, published to the Task |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task complete
@@ -1704,7 +1534,6 @@ Complete a Task without moving its Workflow
 |---|---|
 | `<issue>` | issue |
 | `--reason` | Why, kept in the Task's completion request |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task reopen
@@ -1715,7 +1544,6 @@ Reopen local planning without moving Workflow or replacing the PR
 |---|---|
 | `<issue>` | issue |
 | `--reason` | reason |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task move
@@ -1727,7 +1555,6 @@ Move Workflow position without running anything; `end` requests completion
 | `<issue>` | issue |
 | `<node>` | `start`, `end` or one of the workflow's nodes |
 | `--reason` | Why, kept in the Task's workflow history |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task create
@@ -1740,7 +1567,50 @@ Create a planning Task without allocating a checkout or starting work
 | `--title` | Task title; omitted when stdin supplies the report and first line |
 | `--notes` | Description; defaults to a report read from stdin |
 | `--json` | json Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf task admission
+
+Inspect or reserve the Task's permanent first execution owner
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `--claim` | Request first execution on this Machine; an existing owner wins |
+| `--request` | Correlate a coordinator reply with this request |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf task location
+
+Read recorded execution location without preparing or transferring Work
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `--peers` | Observe added Machines as well as this one; never reserve first start Default: false. |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf task shell
+
+Open a shell in an existing Task checkout, without preparing work
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `--checkout` | checkout |
+| `--help / -h` | Print help |
+
+## lf task watch-files
+
+Stream invalidations from an existing Task checkout (JSON lines)
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `--checkout` | checkout |
+| `--request` | request |
 | `--help / -h` | Print help |
 
 ## lf task status
@@ -1751,7 +1621,6 @@ Show durable Task facts and its recorded work
 |---|---|
 | `<issue>` | Task issue; defaults to the Task in this checkout |
 | `--json` | json Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task diff
@@ -1766,7 +1635,6 @@ Show this Task's patch or list its changed files
 | `--base` | base Default: parent. |
 | `--draft` | Compare a UTF-8 draft read from stdin without writing the worktree Default: false. |
 | `--json` | json Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task files
@@ -1780,7 +1648,6 @@ List one directory in this Task's worktree
 | `--cursor` | cursor |
 | `--show-ignored` | show ignored Default: false. |
 | `--json` | json Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task file
@@ -1793,7 +1660,6 @@ Read one file from the Task checkout
 | `<path>` | path |
 | `--recoveries` | Inspect retained versions, including late writes; omitted for fast content reads Default: false. |
 | `--json` | json Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task save
@@ -1806,7 +1672,6 @@ Save UTF-8 stdin with an expected revision and retained recovery files
 | `<path>` | path |
 | `--revision` | revision |
 | `--json` | json Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task abandon
@@ -1818,7 +1683,6 @@ Cancel the Task in Linear and locally, close its PRs and delete its branches
 | `<issue>` | Issue ID or branch; defaults to the Task in this checkout |
 | `--force / -f` | force Default: false. |
 | `--json` | json Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task sweep
@@ -1829,7 +1693,6 @@ Preview open issues outside current chapters; apply safe cancellations explicitl
 |---|---|
 | `--apply` | apply Default: false. |
 | `--json` | json Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task delete
@@ -1839,7 +1702,6 @@ Cancel unfinished placed work, clean up delivery, then trash the Linear issue
 | Argument | What it does |
 |---|---|
 | `<issue>` | issue |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task edit
@@ -1855,7 +1717,6 @@ Edit a Task's title or notes, before or after placement
 | `--assignee` | Assignee identity; provider user ID in connected plans |
 | `--unassign` | unassign Default: false. |
 | `--wave / -w` | wave |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task refile
@@ -1866,7 +1727,6 @@ Move a Task that has no recorded work to another Wave's current Project
 |---|---|
 | `<issue>` | issue |
 | `--wave / -w` | The Wave to file it under |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task comment
@@ -1880,7 +1740,6 @@ Read the thread or publish a comment; agent comments default to progress
 | `--steer` | Save a steer even when commenting from an agent Session Default: false. |
 | `--wave / -w` | wave |
 | `--json` | json Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task interrupt
@@ -1891,7 +1750,6 @@ Interrupt the active provider turn
 |---|---|
 | `<issue>` | issue |
 | `--json` | json Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task wait
@@ -1904,7 +1762,6 @@ Wait without polling an LM
 | `--until` | until Default: terminal. |
 | `--timeout` | timeout |
 | `--json` | json Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf context
@@ -1916,19 +1773,6 @@ Show memory and scratch size targets, their sources, and current usage
 | `--json` | json Default: false. |
 | `--wave` | Inspect a Wave's local authored context |
 | `--task` | Inspect a Task's checkout and Wave context |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
-| `--help / -h` | Print help |
-
-## lf __telemetry-scorecard
-
-Internal: render the repository maintainer scorecard for telemetry-daily
-
-Internal command; invoked by the owning operation.
-
-| Argument | What it does |
-|---|---|
-| `--json` | Emit structured JSON for operator automation Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf list
@@ -1939,7 +1783,6 @@ Discover commands, skills, and flows
 |---|---|
 | `<path>` | path |
 | `--json` | json Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf help
@@ -1950,41 +1793,79 @@ Explain a command, skill, or flow without launching it
 |---|---|
 | `<path>` | path |
 | `--all` | all Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--json` | Describe installed command arguments and available result schemas Default: false. |
 | `--help / -h` | Print help |
 
-## lf roadmap
+## lf history
 
-Show the current repository's roadmap: every open Task across the repo's Waves, joined to live evidence and bucketed into Now / Waiting / Available / Later. `--wave` scopes it; `--all` spans every repository on this machine. Local-only, deterministic
+Read durable Work history, recorded commands and provider usage
 
 | Argument | What it does |
 |---|---|
-| `--wave` | Scope to one Wave (default: every Wave in the current repository) |
-| `--task` | Find an exact issue identifier, including retained historical Tasks |
-| `--json` | Emit the roadmap snapshot as JSON Default: false. |
-| `--all` | Span every repository on this machine, not just the current one Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--since` | Relative window (7d, 24h, 30m) or RFC3339 start Default: 7d. |
+| `--limit` | Maximum rows after Work filters (1-200) Default: 50. |
+| `--wave` | Scope to one Wave by name |
+| `--project` | Scope to one Project by slug |
+| `--task` | Scope to one Task by Linear identifier |
+| `--json` | Emit the typed activity snapshot as JSON Default: false. |
 | `--help / -h` | Print help |
 
-## lf replay
+## lf history list
 
-Launch the immutable provider request retained for a captured input
+List a bounded page of recorded commands, newest first
+
+| Argument | What it does |
+|---|---|
+| `--json` | json Default: false. |
+| `--all` | Include all repositories Default: false. |
+| `--limit` | limit Default: 100. |
+| `--after` | Continue with the previous page's next object, encoded as JSON |
+| `--parent` | Direct children of an exact or unambiguous parent Process |
+| `--caller` | Commands issued by this Session |
+| `--search` | Literal command text, ignoring ASCII case |
+| `--outcome` | outcome |
+| `--task` | Recorded work for a Task, including completed Tasks |
+| `--wave` | Recorded work for a Wave |
+| `--help / -h` | Print help |
+
+## lf history show
+
+Inspect a process or Session by identity
+
+| Argument | What it does |
+|---|---|
+| `<id>` | id |
+| `--json` | json Default: false. |
+| `--events` | Print a Session's retained raw input events Default: false. |
+| `--final` | Print a Session's last recorded provider conclusion Default: false. |
+| `--input` | Inspect an exact retained input belonging to this Session |
+| `--context` | Print only what the step's submitted input was made of, by source Default: false. |
+| `--help / -h` | Print help |
+
+## lf history usage
+
+Show direct provider-authored usage from recorded Session inputs
+
+| Argument | What it does |
+|---|---|
+| `--json` | Emit Session usage evidence as JSON Default: false. |
+| `--days` | Observation window, in days (zero means all time) Default: 30. |
+| `--weekly` | Report context cost and turn time by week since 2026-09-30 Default: false. |
+| `--binds` | Compare Task and Wave usage under prospective and post-hoc bind attribution Default: false. |
+| `--parent` | Inputs issued by this Session or retained capture |
+| `--wave` | Limit to Session inputs attributed to one Wave |
+| `--project` | Limit to Session inputs attributed to one Project |
+| `--task` | Limit to Session inputs attributed to one Task |
+| `--context` | Break each step's submitted input down by source, flagged against budgets Default: false. |
+| `--help / -h` | Print help |
+
+## lf history replay
+
+Launch a new execution from an immutable captured provider request
 
 | Argument | What it does |
 |---|---|
 | `<run>` | Captured input identity or an unambiguous displayed prefix |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
-| `--help / -h` | Print help |
-
-## lf run
-
-Run a definition, preferring a flow over a same-named skill
-
-| Argument | What it does |
-|---|---|
-| `<name>` | name |
-| `<args>` | args |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf flow
@@ -1993,7 +1874,6 @@ Run or inspect authored flows
 
 | Argument | What it does |
 |---|---|
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf flow list
@@ -2012,7 +1892,6 @@ List authored flows, or Flows that ran
 | `--for-task` | Retained Task ID or issue identifier, including completed Tasks |
 | `--for-wave` | Retained Wave ID or name |
 | `--taskless` | taskless Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf flow show
@@ -2024,7 +1903,6 @@ Inspect an authored flow, or one that ran
 | `<name>` | name |
 | `--json` | json Default: false. |
 | `--processes` | processes Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf flow customize
@@ -2034,7 +1912,6 @@ Print the repository file that defines a Flow, creating it from the builtin when
 | Argument | What it does |
 |---|---|
 | `<name>` | name |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf skill
@@ -2043,5 +1920,4 @@ Run a skill explicitly
 
 | Argument | What it does |
 |---|---|
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |

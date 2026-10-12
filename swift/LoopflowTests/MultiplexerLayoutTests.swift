@@ -6,6 +6,36 @@ import Testing
 // resize, and round-trip must hold, because focus/color/persistence all read it.
 @Suite("Multiplexer layout")
 struct MultiplexerLayoutTests {
+    @Test("Pane locations preserve terminal capture and refuse unavailable file owners")
+    func contentLocations() {
+        let captured = WorkspaceIdentity(machineId: "local", worktree: "/captured")
+        let remote = WorkspaceIdentity(machineId: "peer", worktree: "/remote")
+        let readings: [(TaskLocation, WorkspaceIdentity?)] = [
+            (.recorded(taskID: "task", checkout: "/remote"), remote),
+            (.recorded(taskID: "task", checkout: nil), nil),
+            (.unrecorded, nil),
+            (.unavailable(reason: "offline"), nil),
+        ]
+        for (reading, expected) in readings {
+            let owner = TaskLocationObservation(request: "read", repositoryID: "repo",
+                taskID: "task", machineID: "peer", observedAt: 1, location: reading)
+            let contents: [(PaneContent, WorkspaceIdentity?)] = [
+                (.empty, nil),
+                (.session(id: "session", location: captured, execution: owner), captured),
+                (.shell(location: captured, execution: owner), captured),
+                (.files(taskId: "task", location: captured, execution: owner), expected),
+                (.flowLog(taskId: "task", location: captured, execution: owner), expected),
+                (.files(taskId: "task", location: captured), captured),
+                (.flowLog(taskId: "task", location: captured), captured),
+            ]
+            for (content, location) in contents {
+                #expect(content.location == location)
+                let inspected = DesktopLayoutInspection(.leaf(PaneState(content: content))) { _ in nil }
+                #expect(inspected.location == location)
+            }
+        }
+    }
+
     @Test("default layout is a single empty pane")
     func defaultIsOneLeaf() {
         let layout = LayoutNode.defaultLayout()
@@ -17,11 +47,11 @@ struct MultiplexerLayoutTests {
     func splittingAddsAPane() {
         let base = PaneState(content: .empty)
         let layout = LayoutNode.leaf(base)
-        let shell = PaneState(content: .shell)
+        let shell = PaneState(content: .shell(location: nil))
         let split = layout.splitting(base.id, axis: .vertical, newPane: shell)
 
         #expect(split.allPanes.count == 2)
-        #expect(split.pane(for: shell.id)?.content == .shell)
+        #expect(split.pane(for: shell.id)?.content == .shell(location: nil))
         if case .split(let axis, _, _, let ratio) = split {
             #expect(axis == .vertical)
             #expect(ratio == 0.5)
@@ -33,10 +63,10 @@ struct MultiplexerLayoutTests {
     @Test("removing a pane collapses its split back to the sibling")
     func removingCollapses() {
         let a = PaneState(content: .empty)
-        let b = PaneState(content: .shell)
+        let b = PaneState(content: .shell(location: nil))
         let split = LayoutNode.leaf(a).splitting(a.id, axis: .horizontal, newPane: b)
 
-        let collapsed = split.removing(b.id)
+        let collapsed = split.removing([b.id])
         #expect(collapsed == .leaf(a))          // back to a bare leaf
         #expect(collapsed?.allPanes.count == 1)
     }
@@ -44,13 +74,37 @@ struct MultiplexerLayoutTests {
     @Test("removing the only pane returns nil")
     func removingLastReturnsNil() {
         let a = PaneState(content: .empty)
-        #expect(LayoutNode.leaf(a).removing(a.id) == nil)
+        #expect(LayoutNode.leaf(a).removing([a.id]) == nil)
+    }
+
+    @Test("Pruning nested panes retains surviving occurrences, axes and ratios")
+    func pruningRetainsSurvivingSplits() {
+        let a = PaneState(content: .session(id: "draft"))
+        let b = PaneState(content: .shell(location: nil))
+        let c = PaneState(content: .files(taskId: "task"))
+        let left = LayoutNode.split(.horizontal, first: .leaf(a), second: .leaf(b), ratio: 0.3)
+        let tree = LayoutNode.split(.vertical, first: left, second: .leaf(c), ratio: 0.7)
+        let cases: [(Set<String>, LayoutNode?)] = [
+            ([], tree),
+            (["absent"], tree),
+            ([a.id], .split(.vertical, first: .leaf(b), second: .leaf(c), ratio: 0.7)),
+            ([b.id], .split(.vertical, first: .leaf(a), second: .leaf(c), ratio: 0.7)),
+            ([c.id], left),
+            ([a.id, b.id], .leaf(c)),
+            ([a.id, c.id], .leaf(b)),
+            ([b.id, c.id], .leaf(a)),
+            ([a.id, b.id, c.id], nil),
+        ]
+        for (hidden, expected) in cases {
+            #expect(tree.visible(excluding: hidden) == expected)
+            #expect(tree.removing(hidden) == expected)
+        }
     }
 
     @Test("replacing pane content preserves identity and tree shape")
     func replacePreservesShape() {
         let a = PaneState(content: .empty)
-        let b = PaneState(content: .shell)
+        let b = PaneState(content: .shell(location: nil))
         let split = LayoutNode.leaf(a).splitting(a.id, axis: .vertical, newPane: b)
 
         let replaced = split.replacingContent(of: b.id, with: .session(id: "session-1"))
@@ -62,7 +116,7 @@ struct MultiplexerLayoutTests {
     @Test("resizing updates the split between two panes")
     func updatingRatioChangesContainingSplit() {
         let a = PaneState(content: .empty)
-        let b = PaneState(content: .shell)
+        let b = PaneState(content: .shell(location: nil))
         let split = LayoutNode.leaf(a).splitting(a.id, axis: .vertical, newPane: b)
 
         let resized = split.updatingRatio(between: a.id, and: b.id, ratio: 0.3)
@@ -76,7 +130,7 @@ struct MultiplexerLayoutTests {
     @Test("a nested tree round-trips through Codable")
     func codableRoundTrip() throws {
         let a = PaneState(content: .session(id: "session-1"))
-        let b = PaneState(content: .shell)
+        let b = PaneState(content: .shell(location: nil))
         let c = PaneState(content: .empty)
         let tree = LayoutNode
             .leaf(a)

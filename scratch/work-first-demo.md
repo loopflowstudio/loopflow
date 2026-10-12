@@ -222,3 +222,25 @@ Rehearsal finished with exit 0: LOO-376 completed locally and its checkout was
 retained because execution observations were unresolved. No history was deleted;
 this does not establish live process state from a snapshot. The earlier live-process
 note above is superseded by this terminal receipt. The real database is unchanged.
+
+### Installed cleanup and Workflow rendering
+
+The private app now permits read-only access to user skill-definition directories,
+not provider credentials/history or provider execution. Native Product view renders
+the feature Workflow (start, design, demo, end); the earlier sandbox error is gone.
+No app code or installed configuration changed for this correction.
+
+Live backup: `live-before-376-cleanup.db` in the demo directory, SQLite-consistent
+and mode 0600. Initial live completion saved a request but refused unresolved old
+follow-through scope. No completion was claimed from that failed command. The
+installed binary was then rehearsed against `installed-rehearsal-home` with that
+backup's original schema: record no further performance follow-up under Jack Heart's
+October 7 retirement/closure decision, then complete. Both returned exit 0; the
+checkout was retained for unresolved execution. Early sandbox dispatch and obsolete
+`--repo` spelling attempts failed before the successful rehearsal and are logged.
+
+Applied the same supported follow-through/completion operations to live LOO-376.
+Fresh read shows `planning_state=completed`, `planning_completed=1`, no pending
+completion request/error. Its final cleanup process is still being observed; the
+snapshot's unresolved process IDs never established live liveness. Other Tasks and
+historical Sessions were not retired. No snapshot was restored over the live store.

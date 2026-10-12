@@ -833,6 +833,7 @@ fn public_local_planning_survives_restart_with_generated_identity() {
         &["task", "status", other_id, "--json"],
     );
     assert_eq!(canceled["execution"]["status"], "abandoned");
+    assert_eq!(canceled["task"]["state"], "canceled");
     for _ in 0..2 {
         lf(repo.path(), home.path(), &["task", "delete", other_id]);
     }

@@ -456,3 +456,23 @@ expected present outcome, and exact retained/restored records before repair. The
 unclassified bucket stays explicit; it is not an excuse to mark every old Task done.
 
 Check: `cargo test -p loopflow --lib a_finished_task_stays_current_only_while_execution_is_unresolved`, `cargo clippy --all-targets -- -D warnings`, `cargo fmt` — pass; native refresh of the stopped-failure correction remains.
+
+October 11 follow-up: live/copy comparison identified 126 Loopflow Tasks with an
+existing abandonment timestamp but no planning disposition. LOO-149 is one rendered
+example. Today's abandonment transaction queues `canceled` through the common
+planning writer before commit; an explicit regression now checks both abandoned
+execution and canceled planning after repeat abandonment. This supports treating
+the missing-disposition cohort as legacy reconciliation, not adding a permanent
+sidebar exception. It does not by itself authorize all 126 repairs: retain newer
+provider intent, unsettled work and per-record provenance when selecting candidates.
+
+LOO-376 is a different case: its brief explicitly records Jack Heart's closure
+request and retired performance scope. The branch-copy rehearsal completed, but
+the installed CLI additionally required disposition of an old serial-PR continuation.
+A fresh copy of the live schema with the installed CLI passed `follow-up --none`
+then `task complete`, retaining checkout/history. The same supported operations
+have now committed live completion (fresh SQLite reading: completed, no pending
+request/error). Final cleanup subprocess still needs its terminal receipt. Backup
+and failures remain in `work-first-demo.md`; no blanket historical cleanup occurred.
+
+Check: `cargo test -p loopflow --test local_planning public_local_planning_survives_restart_with_generated_identity`, `cargo fmt`, `cargo clippy --all-targets -- -D warnings` — pass, including repeated abandonment preserving canceled planning.

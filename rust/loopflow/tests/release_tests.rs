@@ -2153,6 +2153,7 @@ fn release_run_reintegrates_a_dirty_existing_pr() {
     git(&repo, &["add", "RELEASE_NOTES.md"]);
     git(&repo, &["commit", "-m", "release: v0.9.2"]);
     git(&repo, &["push", "-u", "origin", release_branch]);
+    let published_head = git_output(&repo, &["rev-parse", "HEAD"]);
     git(&repo, &["checkout", &main_branch]);
     git(&repo, &["branch", "-D", release_branch]);
     git(
@@ -2216,6 +2217,11 @@ fn release_run_reintegrates_a_dirty_existing_pr() {
     );
     let integrated_parent = git_output_bare(&repo, &["rev-parse", &format!("{integrated_head}^")]);
     assert_eq!(receipt.commit, integrated_head);
+    assert_eq!(
+        git_output_bare(&repo, &["merge-base", &published_head, &integrated_head]),
+        published_head,
+        "release retries must retain published history"
+    );
     assert_eq!(
         fs::read_to_string(&prepare_runs)
             .expect("read preparation runs")

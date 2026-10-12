@@ -88,6 +88,10 @@ and Git launches, SQLite statement/returned-row counts, and time to provider
 handoff; [native readiness measurements](scripts/benchmarks/agent-startup/README.md)
 remain a separate opt-in benchmark.
 
+Changes to Git default-branch discovery, checkout roots, or commit/push behavior
+also run `agent_startup_tests`, `release_tests`, and `release_lock_tests`. These
+cover startup cost and release retries that share the same Git operations.
+
 Changes to builtin Flows affect the parser, graph, Task controller and CLI fixtures.
 Run the affected controller progression and CLI behavior tests as well as graph
 checks; use authored fixture Flows when a test needs a fixed sequence independent

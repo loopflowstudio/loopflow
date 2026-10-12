@@ -188,6 +188,11 @@ pub fn git_common_dir(repo: &Path) -> Result<PathBuf, GitError> {
 }
 
 pub fn main_repo_root(repo: &Path) -> Result<PathBuf, GitError> {
+    if let Ok(root) = crate::git::worktree_root(repo) {
+        if root.join(".git").is_dir() {
+            return Ok(root);
+        }
+    }
     let worktrees = list_porcelain(repo)?;
     // A bare or separate Git directory can appear first instead of a checkout.
     if let Some((path, _)) = worktrees

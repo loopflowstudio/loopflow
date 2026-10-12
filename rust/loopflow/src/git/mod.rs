@@ -494,6 +494,7 @@ pub fn get_default_branch(repo: &Path) -> Result<String, GitError> {
             "for-each-ref",
             "--format=%(refname) %(symref)",
             "refs/remotes",
+            "refs/heads",
         ],
     )?;
     let heads: Vec<_> = defaults
@@ -514,14 +515,9 @@ pub fn get_default_branch(repo: &Path) -> Result<String, GitError> {
     {
         return Ok((*branch).to_string());
     }
-    let branches = git_stdout(
-        repo,
-        &["for-each-ref", "--format=%(refname:strip=2)", "refs/heads"],
-    )?;
-    let configured = run_git(repo, &["config", "--get", "init.defaultBranch"])?;
-    let configured = String::from_utf8_lossy(&configured.stdout);
-    for candidate in [configured.trim(), "main", "master"] {
-        if !candidate.is_empty() && branches.lines().any(|branch| branch == candidate) {
+    for candidate in ["main", "master"] {
+        let reference = format!("refs/heads/{candidate} ");
+        if defaults.lines().any(|line| line == reference) {
             return Ok(candidate.to_string());
         }
     }

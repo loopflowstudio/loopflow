@@ -331,12 +331,7 @@ fn prepare_task_input(
             .get_task(&task.id)
             .await?
             .ok_or_else(|| anyhow!("Task is missing"))?;
-        let seed = crate::ops::task_input::read_seed(
-            &store,
-            &task,
-            wave.slug(),
-        )
-        .await?;
+        let seed = crate::ops::task_input::read_seed(&store, &task, wave.slug()).await?;
         Ok(Some((store, seed)))
     })
 }

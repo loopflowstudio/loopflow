@@ -1,26 +1,19 @@
 # infrastructure wave memory
 
-## Global agent override (LOO-440, 2026-10-08)
+## Global agent override (LOO-440, curated 2026-10-11)
 
-Jack Heart selected one global `-a` / `--agent`, overriding Task, nested Flow,
-step, skill and child-command agents; omission preserves defaults. Jack approved
-the demo and shipping October 10, superseding stop-at-demo: land, then complete
-after verified merge. No logins, credential reads or real-provider tests.
-Installed 0.13.9's parsing failure is historical.
+Jack Heart selected global `-a`/`--agent` over Task, Flow, step, skill and child
+choices; omission preserves defaults. October 10 approval authorizes landing and
+completion after verified merge. No logins, credential reads or real-provider tests.
+Six fixture Sessions prove Claude across child overrides; replay/native history
+retain their provider. Conflicting resume explains starting anew.
 
-Explicit selection reaches prepared/direct launches; defaults never override.
-Six fixture Sessions record Claude across
-Task/Flow/provider children, even when a child requests Codex; no-flag launches
-retain declared models. Replay preserves its source; native history keeps its
-provider and conflicting resume explains how to start anew. Synthetic accounts
-need isolation: shared macOS activation attempted a Keychain write and failed.
-Remote and installed/live-provider acceptance remain unproved.
-
-October 11 gate repaired synthetic native-login isolation, replay's fixture
-ledger pin and pruning's NULL-worktree read. Six-Session override acceptance
-passed. The prior release-lock failure did not reproduce; its cause remains
-unknown. Gate still reports unchanged homepage overflow at 1,440 px; nested
-Python sandbox coverage remains CI-owned. No landing or completion followed.
+October 11 gate fixed synthetic login isolation, replay ledger pinning and pruning's
+NULL-worktree read. Override acceptance passed; the prior release-lock failure
+never reproduced and its cause remains unknown. Homepage overflow at 1,440 px
+remains; nested Python sandbox tests belong to CI. Remote/live/installed acceptance,
+landing and completion remain unproved. Exact history, including the synthetic
+Keychain failure: `7fdbe0aea6:wave/infrastructure/MEMORY.md`, this heading.
 
 ## Plan ownership (LOO-406, revised 2026-10-08)
 
@@ -356,29 +349,24 @@ LOO-408 owns completion, LOO-324 native/account discovery, LOO-400 terminology.
 CLI/PTY proofs pass; installed reconnect still fails. No migration. The legacy
 Session lacks exact process evidence; lf success proves no provider exit.
 
-## Storage footprint (LOO-390, 2026-10-07)
+## Storage footprint (LOO-390, curated 2026-10-11)
 
-Jack Heart authorized autonomous investigation, cleanup and delivery. Evidence
-and proposals: [storage footprint review](../../docs/reviews/storage-footprint.md).
-`session_events` was 92% of a 2.6 GiB store: each streamed token was two rows,
-also kept in `runs/*/events.jsonl`. PR #1474 (v0.13.9, installed October 7 and
-measured): new captures keep 28% of rows and 72% of bytes, preflight validates
-an exact store in place (1.0 s, no copy), WAL holds 64 MiB, two fingerprinted
-migration backups remain (13.6 → 5.9 GiB). Old rows are not rewritten.
-PR #1501 merged as `812d8cc55` (installation unproved): promotion appended every
-release to `retained_published_sets`; a settled install now retains its fallback and the
-prior one, then removes unnamed content-addressed binaries/bundles no live
-process executes. Projected 11.4 GiB here by `du`; APFS clone sharing unmeasured.
-Store growth stays unbounded, about 1.7 MB per capture. Next condition is Jack's
-retention choice: system of record (SQLite or `events.jsonl`) and capture expiry;
-then sizes in `lf home doctor`. 27.9 GiB was reclaimed October 6; Jack's 78.7 GiB
-recording and 81-copy leads were gone before measurement. Left intact: 23 GiB of
-unread legacy `traces`, `backups`, `lfd.db*`, `logs`; LOO-304's 40 GiB of
-`/private/tmp` fixtures. Unknown ownership is not permission to delete. Test
-`session_record` with `LF_*` cleared.
+Jack Heart authorized investigation, cleanup and delivery.
+[Storage review](../../docs/reviews/storage-footprint.md) owns measurements;
+full dated evidence: `7fdbe0aea6257313ede79fd6d03ea4e5a34b6276:wave/infrastructure/MEMORY.md`,
+this heading. PR #1474 shipped in v0.13.9 and was measured October 7:
+new captures retain 28% of rows/72% of bytes; exact-store preflight takes 1 s
+without copying; WAL holds 64 MiB; two migration backups remain (13.6 → 5.9 GiB).
+Old rows stay unchanged. #1501 merged as `812d8cc55`, installation unproved:
+settled installs retain fallback/prior artifacts and remove unnamed binaries no
+live process executes. Projected reclamation was 11.4 GiB; APFS sharing unmeasured.
 
-Earlier cleanup history: `66da3fdf7:wave/infrastructure/MEMORY.md` under
-“Retained capture storage and autonomous cleanup.” Current direction is under Capture cutover.
+Capture growth remains unbounded (~1.7 MB/capture). Jack's choice of record
+(SQLite or events.jsonl) and expiry precedes retention work and doctor sizes.
+October 6 reclaimed 27.9 GiB; the 78.7 GiB recording/81-copy leads disappeared
+before measurement. Retained 23 GiB legacy data and LOO-304's 40 GiB temporary
+fixtures have unknown ownership, granting no deletion authority. Run session_record
+fixtures without inherited LF_*; current capture direction is under Capture cutover.
 
 ## Project configuration and review direction (2026-10-05)
 
@@ -445,63 +433,45 @@ Release owns re-entry leases, transfer deadlines and pending-version lessons.
 #1459's exact-reflog PR-base repair shipped in v0.13.5; #1456 merged October 6.
 Absent evidence and foreign ancestry refuse. Evidence: `cad03fe6d:wave/infrastructure/MEMORY.md`, this heading and its references.
 
-## Scheduled release accounting (LOO-285, source reconciliation October 2)
+## Scheduled release accounting (LOO-285, curated 2026-10-11)
 
 Jack Heart retained one execution per wake for frozen missed dues. Completion
-still requires two adjacent original configured dues, two automatic executions,
-at least one artifact publication, required verification and no manual repair.
-Collapsed misses supply accounting coverage, never additional settlements.
+requires two adjacent original configured dues, two automatic executions, at
+least one artifact publication, required verification and no manual repair.
+Collapsed misses prove accounting coverage only. Jack waived the interactive
+demo and authorized #1419 landing October 4; installed acceptance and both
+automatic settlements remain unproved.
 
-Earlier saved-candidate and CI-repair source proofs:
-`07dc2e34f:wave/infrastructure/MEMORY.md`, this heading. Replacement still
-requires affirmative unpublished evidence; unknown/partial publication blocks.
-Preserve rejected candidates and original due ownership. Source is not settlement.
+Detailed decisions, counterevidence and receipt references:
+`7fdbe0aea6257313ede79fd6d03ea4e5a34b6276:wave/infrastructure/MEMORY.md`, this heading.
+Replacement requires affirmative unpublished evidence; unknown/partial publication
+blocks. Preserve rejected candidates, original due ownership and caller edits.
+Physical cron exit, product settlement, publisher stages, public artifact proof
+and dated repair ownership are separate facts. Assigning an owner never resumes
+an opportunity. Same-Home continuation is implemented; attribution transfers no
+old-Home authority. Child-held mutation locks and checkout leases have distinct
+scopes. Cleanup reacquires after dropping the shared handle; parent death or
+elapsed wait grants no mutation/deletion authority. Main reset/stash can replace
+a held lock inode; explicit source selection avoids that failure.
 
-Separate durable facts: physical cron exit, product settlement, publisher stages,
-public artifact proof and dated repair ownership. Assigning a closed opportunity
-an owner does not resume it. Same-Home continuation is implemented locally;
-old-Home authority is never transferred by attribution. Child-held mutation locks
-and exact checkout leases protect different scopes; cleanup must independently
-reacquire after dropping the parent's shared handle. Parent death and elapsed
-wait grant neither mutation nor deletion authority. Main-reset/stash helpers can
-replace a held lock inode; explicit source selection avoids that failure class.
+[Release memory](release/MEMORY.md) owns re-entry, transfer deadlines, pending
+versions and v0.12.24 activation evidence. Successful reporting proves no operation
+success; activation proves neither accounting installation nor settlement.
+October 5 installed jobs retained the machine gate and 09:00/10:00 schedules.
+Infrastructure retains ownership; the child is unregistered. Three unresolved
+opportunities had unknown timezone provenance, zero executions and no qualifying
+pair. Schedule repair cannot backfill them.
 
-Historical same-Home overlap/interruption proofs and #1457's installer-isolation
-boundary remain at `30a4d48c8:wave/infrastructure/MEMORY.md`, this heading and its
-linked receipts. They preserve due ownership, candidate, uncertain publication,
-caller edits and child-held leases; simulated passes establish neither public
-container/macOS acceptance nor configured automatic settlement.
-
-Telemetry repair/publication authorization: `85490d96ec:wave/infrastructure/MEMORY.md`.
-Isolated passes prove no automatic settlement; receipts retain repair ownership.
-
-Release's operation-entry lesson and v0.12.24 activation history remain at
-`ff1dc403c4:wave/infrastructure/MEMORY.md`, this heading, and in
-[release memory](release/MEMORY.md). Successful reporting proves no operation
-success; activation proves neither accounting installation nor qualifying settlement.
-October 5 child evidence records repaired installed jobs using the machine gate
-at unchanged 09:00/10:00 schedules. Ownership remains Infrastructure; the child
-is not registered. History exposed three unresolved opportunities with unknown
-timezone provenance, zero executions and no qualifying pair. Schedule repair
-cannot backfill that evidence or count as an unattended settlement.
-
-All 36 telemetry failures, including the original 35, remain dated counterevidence
-from September 24. The missing `agent_turns` diagnosis is historical: integrated
-scorecard source consumes SessionHistory. The isolated doctor/scorecard Flow
-regression proves Recovery cannot replace natural Scheduled evidence. No installed
-pass or accepted Intelligence handoff is established; reproduce current failure
-before commissioning duplicate analytics repair. Required headless Desktop/public proof and
-actual automatic settlement observations remain outstanding. LOO-357 retired
-the UI-host prerequisite; PR #1441 removed its scheduled validator requirement. The working plan
-owns remaining implementation; no production release, install, schedule change,
-Home transfer or review completion is authorized by local reconciliation.
-
-
-On October 4, Jack Heart waived the interactive demo and authorized landing
-PR #1419. This supersedes the earlier review requirement for this delivery;
-installed acceptance and the two automatic settlement observations remain
-unproved. The branch’s prior memory curation remains in Git history at
-`e2eccdd257f0f3e2cf34db7583f7309eb0084394:wave/infrastructure/MEMORY.md`.
+All 36 September 24 telemetry failures remain counterevidence. The missing
+`agent_turns` diagnosis is historical: integrated scorecards use SessionHistory.
+The isolated doctor/scorecard Flow proves Recovery cannot replace natural
+Scheduled evidence; no installed pass or accepted Intelligence handoff follows.
+Reproduce current failure before commissioning duplicate repair. Required headless
+Desktop/public proofs and automatic settlement remain outstanding. LOO-357 and
+#1441 removed UI-host prerequisites, not verification. Local reconciliation grants
+no production release, installation, schedule change, Home transfer or review
+completion. Historical interruption/overlap and #1457 isolation fixtures prove
+neither public container/macOS acceptance nor configured automatic settlement.
 
 ## Operator acceptance and account direction (2026-10-04)
 
@@ -1009,9 +979,8 @@ runs prove no firing, and old gaps do not keep later telemetry red.
 ## Durable model lessons (curated 2026-10-02)
 
 [Earlier model and planning records](https://github.com/loopflowstudio/loopflow/blob/d281370191844294ce0ad877752f2aa6a6402282/wave/infrastructure/MEMORY.md#model-design-settled)
-preserve their exact decisions and implementation history. Current objective,
-accepted optional-workflow direction and authored release schedule supersede old
-nightly/weekly cadence, daemon-chat and mandatory Project assumptions.
+preserve their exact decisions and implementation history. Current planning and release decisions supersede archived cadence, daemon-chat
+and mandatory Project assumptions.
 
 Self-hosting remains the default; credentials follow the repository Doppler
 policy. Products own release substance; avoid a generic deploy platform before
@@ -1026,13 +995,10 @@ Preserve first accepted usage and conflicting-repeat partiality. Window by the
 owning fact's terminal time; publish measured coverage beside percentiles.
 Unknown authority cannot be inferred from observer time or trace prose.
 
-LOO-406's October 8 direction selects local Wave/Project/Task ownership with optional
-provider mappings and explicit ingestion of Git-authored definitions; #1503 is
-integrated, not installed acceptance. Historical label migration
-and old command names are archived, not current instructions. KRs are explicit
-judgments, never inferred completion. Preserve unrelated provider associations;
-ambiguous moves remain diagnoses. Standing frontier plans need not acquire an
-invented completion date. No fourth user-facing planning noun was selected.
+Plan ownership above records LOO-406's current direction. KRs are explicit
+judgments; preserve unrelated provider associations and diagnose ambiguous moves.
+Standing frontier plans need no invented completion date. No fourth planning noun
+was selected. Earlier detail: `7fdbe0aea6:wave/infrastructure/MEMORY.md`, this heading.
 
 ## Earlier follow-ups
 

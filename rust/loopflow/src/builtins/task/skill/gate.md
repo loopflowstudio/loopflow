@@ -78,7 +78,7 @@ Make the change easy to review.
    Compare the checks above with the accepted outcome. Record meaningful
    before/after numbers and any CI deferral; leave judgment to demo/review.
    Do not start a second verification pass. For substantial UI work, identify
-   its production performance signal or propose one for the Wave.
+   its production performance signal; propose one for the Wave when associated.
 
 2. **Prepare delivery context**
 

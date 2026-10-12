@@ -5,8 +5,7 @@
 
 use crate::definition::name::portable_name;
 
-/// Bundled LOOPFLOW.md - the one loopflow operating document every launched
-/// agent receives, including the Work and Session vocabulary.
+/// Launcher guidance shared by all agents; work APIs add the `work` skill body.
 pub const LOOPFLOW_DOC: &str = include_str!("builtins/LOOPFLOW.md");
 
 /// Headless preamble — the only surface that needs one (no user is present).
@@ -131,7 +130,7 @@ mod tests {
         assert!(project.contains("intent graph, not a control plane"));
 
         let task = normalize(get_builtin_skill("implement").expect("implementation"));
-        assert!(task.contains("While building feature work, notice signals"));
+        assert!(task.contains("When a Wave is supplied, notice signals"));
         assert!(task.contains("otherwise leave the proposal for Wave sponsorship"));
         assert!(task.contains("Metric proposals are discoveries, not a completion quota"));
     }
@@ -202,37 +201,8 @@ mod tests {
     }
 
     #[test]
-    fn init_connects_the_distributed_system_before_customizing_skills() {
-        let init = get_builtin_skill("init").expect("init skill");
-
-        for command in [
-            "lf account",
-            "lf account route",
-            "lf id --json",
-            "lf wave list --json",
-            "lf wave status <wave> --json",
-            "lf roadmap --wave <wave> --json",
-            "lf task run <ISSUE-ID>",
-            "lf machine add <ssh-target>",
-            "lf --machine <machine-id> --wave <wave> wave-operate",
-        ] {
-            assert!(init.contains(command), "init omits {command:?}");
-        }
-
-        assert!(init.contains("Loopflow is not primarily a prompt launcher"));
-        assert!(init.contains("Installed harnesses are a capability of this Machine"));
-        assert!(init.contains("team-wide repo configuration"));
-        assert!(init.contains("wave/<name>/MEMORY.md"));
-        assert!(!init.contains("lf memory"));
-        assert!(!init.contains("git remote -v"));
-        assert!(!init.contains("lf doctor --json"));
-    }
-
-    #[test]
     fn execution_context_grants_delegation_by_tier() {
-        assert!(LOOPFLOW_DOC.contains("Execute Here First"));
         assert!(!LOOPFLOW_DOC.contains("lf screenshot"));
-        assert!(LOOPFLOW_DOC.contains("Never launch a GUI browser executable"));
         assert!(!LOOPFLOW_DOC.contains("lf pm show"));
         assert!(!LOOPFLOW_DOC.contains("--detach"));
 

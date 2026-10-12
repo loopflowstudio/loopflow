@@ -93,6 +93,7 @@ exit 23
                 .unwrap();
             serde_json::from_str::<String>(value).unwrap()
         };
+        assert_eq!(instructions.matches("<lf:work-guidance>").count(), 1);
         assert!(!instructions.contains("CURRENT_SCRATCH"));
         assert!(!instructions.contains("CURRENT_WAVE_MEMORY"));
         assert!(!instructions.contains("Saved active skill."));
@@ -232,6 +233,10 @@ while read -r line; do :; done
         .as_str()
         .unwrap()
         .contains("<lf:loopflow>"));
+    assert!(!thread["params"]["developerInstructions"]
+        .as_str()
+        .unwrap()
+        .contains("<lf:work-guidance>"));
     assert!(thread["params"]["baseInstructions"].is_null());
     assert!(thread["params"]["config"]["model_instructions_file"].is_null());
     assert!(!thread["params"]["developerInstructions"]
@@ -289,4 +294,63 @@ fn terminal_rejects_only_the_oversized_first_turn_before_provider_spawn() {
         "{stderr}"
     );
     assert!(!home.path().join("provider-started").exists());
+}
+
+#[test]
+fn existing_task_checkout_preloads_work_without_enrolling_other_checkouts() {
+    let repo = TestRepo::new();
+    repo.create_branch("launcher");
+    let task_checkout = repo.create_named_worktree("managed");
+    let home = tempfile::tempdir().unwrap();
+    let machine = home.path().join("machine");
+    fs::create_dir(&machine).unwrap();
+    let registered =
+        support::register_task_without_pr(&machine, &task_checkout, "managed", &repo.head_sha());
+    let bin = home.path().join("bin");
+    fs::create_dir(&bin).unwrap();
+    let provider = bin.join("claude");
+    fs::write(
+        &provider,
+        r#"#!/bin/sh
+if [ "$1" = --version ]; then echo fixture; exit 0; fi
+while [ "$#" -gt 0 ]; do
+    if [ "$1" = --append-system-prompt-file ]; then
+        shift
+        cp "$1" "$HOME/instructions"
+        exit 0
+    fi
+    shift
+done
+exit 17
+"#,
+    )
+    .unwrap();
+    fs::set_permissions(&provider, fs::Permissions::from_mode(0o755)).unwrap();
+    for (checkout, work) in [(repo.path(), false), (task_checkout.as_path(), true)] {
+        let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+            .env_clear()
+            .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+            .env("HOME", home.path())
+            .env("LF_HOME", &machine)
+            .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+            .current_dir(checkout)
+            .args(["-i", "-a", "claude", ":", "inspect this checkout"])
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let instructions = fs::read_to_string(home.path().join("instructions")).unwrap();
+        assert_eq!(instructions.contains("<lf:work-guidance>"), work);
+        assert!(!instructions.contains("You are this Task's operator"));
+    }
+    let db = rusqlite::Connection::open(&registered.database).unwrap();
+    let tasks: i64 = db
+        .query_row("SELECT count(*) FROM tasks", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(tasks, 1, "launching never creates another Task");
+    fs::remove_dir_all(task_checkout).unwrap();
 }

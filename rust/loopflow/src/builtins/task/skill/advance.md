@@ -5,8 +5,9 @@ action_style: procedural
 Advance the work the User is discussing. Resolve the context, carry out the next
 action, and report what actually started or what is waiting.
 
-Read the current conversation and scratch design, then run `lf session list --json`. Use explicit Task identity or the current checkout's tracked Task;
-never select a different Task merely because it is the only waiting session.
+Read the current conversation and existing design. Continue the explicitly
+selected Task or the current checkout's existing Task when one is supplied.
+Do not inventory Sessions or search other Tasks to find something to operate.
 
 ## A review is ready
 
@@ -30,23 +31,14 @@ alone is not a request to run it again.
 
 ## An approved design has no Task
 
-Use the owning repository, not whichever repository hosted the conversation.
-Inspect `lf wave list --json` and the relevant Wave status to place the work. Reuse an
-existing matching Task when there is one. Otherwise create and prepare a Task
-through `lf task create` and `lf checkout`, carrying the complete approved
-scope, constraints, and proof into its directive.
+Continue in the owning checkout. Implement directly or run the selected Flow,
+such as `lf run pursue`, using the accepted design. No Task, Wave, Linear setup,
+or Workflow enrollment is required. Preserve an explicit choice to perform
+implement → compress → refresh in this conversation.
 
-Choose the next Flow from the actual catalog. An approved design can proceed
-directly to the `pursue` Flow (implement → compress → refresh
-→ loop-or-next, repeated on Iterate, then pr-publish): `lf task run <issue> code`
-takes up the `code` workflow, whose first edge is that Flow. Its PR review
-happens in the Task conversation, not as a Flow step. Do not repeat initial
-design work merely to launch implementation. For work that still
-needs design, take up the `feature` workflow, whose first edge drafts the
-design. A Task on a workflow takes only the edges leaving its current node;
-`lf task run <issue>` names them. Preserve any explicit User choice
-to perform implement → compress → refresh directly in this conversation.
-Ask only when intent or placement cannot be resolved from available evidence.
+When the user explicitly requests managed work, load `work` and use
+`launch-plan` to place and prepare it. An approved design or request to continue
+coding alone does not request Task creation.
 
 ## Verify the handoff
 
@@ -56,6 +48,6 @@ commands only when they express the same action. Do not claim an old
 finite Flow will repeat automatically. Never upgrade the installation as a hidden
 prerequisite.
 
-After launching, refresh `lf session list --json` and the Task status.
-Report the Task link, actual running step or wait, and what next needs the User.
+After launching, inspect the selected execution and, when associated, its Task
+status. Report the actual running step or wait and what next needs the user.
 Follow the selected delivery policy through its review and merge steps.

@@ -30,7 +30,8 @@ releases the landing lock. Timeout leaves intent intact and returns held;
 interruption returns stopped. Neither reports merge.
 A successful handoff proves neither merge nor Task completion.
 
-After verified merge, complete the Task when its accepted outcome is delivered.
+For an associated Task, after verified merge, complete it when its accepted
+outcome is delivered.
 File independently accepted later work as ordinary Tasks and link them with
 `lf task comment`; a saved Task survives a failed linking comment, so retry only
 that comment. No empty disposition or separate finishing Flow is required.

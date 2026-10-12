@@ -60,6 +60,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         skill: args.skill,
         message: None,
         operate: !args.no_loopflow,
+        work: wave.is_some(),
         surface: args.surface.unwrap_or_default(),
         docs: args.docs,
         files: Vec::new(),

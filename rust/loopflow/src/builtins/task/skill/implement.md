@@ -113,7 +113,7 @@ launch a competing implementation. A failed planning read is a named gap;
 continue independent work from the supplied evidence without repairing auth.
 Publication, landing and navigation belong to the caller's explicit steps.
 
-While building feature work, notice signals that could help the Wave steer.
+When a Wave is supplied, notice signals that could help it steer.
 Name the outcome, candidate measure, decision value and cheapest credible
 producer. Add a useful instrument when it fits the coherent change;
 otherwise leave the proposal for Wave sponsorship.

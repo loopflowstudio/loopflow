@@ -151,6 +151,7 @@ fn run_bound_prompt(
         binding
     };
     let mut launch = cli.process_options();
+    launch.wave = Some(binding.wave_name.clone());
     let arguments = message.unwrap_or_default();
     let message = if let crate::durable::WorkRef::Task(id) = &binding.work {
         launch.task = Some(id.to_string());
@@ -409,6 +410,7 @@ fn build_prompt_at(
             message: message.map(|value| value.to_string()),
             skill_arguments: arguments.to_string(),
             no_loopflow: cli.no_loopflow,
+            work: cli.task.is_some() || cli.wave.is_some(),
             agent: task_input
                 .as_ref()
                 .and_then(|(_, seed)| seed.task.agent.clone())
@@ -841,6 +843,17 @@ pub(crate) fn attributed_context(
                 .is_file()
                 .then(|| source_path.to_string_lossy().to_string()),
             "operate",
+        );
+    }
+    if let Some(guidance) = tagged_block(system_prompt, "<lf:work-guidance>", "</lf:work-guidance>")
+    {
+        push(
+            guidance,
+            Kind::OperatingInstructions,
+            Scope::Global,
+            "work".to_string(),
+            None,
+            "work",
         );
     }
     if let Some(guidance) = tagged_block(
@@ -1849,6 +1862,14 @@ for line in sys.stdin:
         )
         .unwrap();
 
+        assert_eq!(
+            built
+                .agent_config
+                .system_prompt
+                .matches("<lf:work-guidance>")
+                .count(),
+            1
+        );
         assert!(!built.agent_config.system_prompt.contains(goal));
         let context = built
             .agent_config

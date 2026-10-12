@@ -56,7 +56,7 @@ scope and Task completion.
      `lf arm`. Arm prepares the exact head, pushes it, enables auto-merge,
      and returns without waiting for CI or merge.
    - Preserve the recorded Task and PR identity. CI repair does not decide new
-     scope or complete the Task. Record independent later work as ordinary Tasks
+     scope or complete the Task. For an associated Task, record independent accepted later work as ordinary Tasks
      and linking comments.
    - Verify the published `headRefOid` matches local `HEAD` and GitHub shows
      auto-merge enabled (or already merged). Local edits or a local commit

@@ -3,8 +3,10 @@
 `lf` is the API agents call to launch, steer, and observe other agents. There
 is no SDK. The verbs are the same binary you use; every read surface takes
 `--json`; and every launched agent receives the
-operating contract (`LOOPFLOW.md`) in its context, so it already knows these
-verbs when it starts.
+launcher contract (`LOOPFLOW.md`) in its context. Work-associated launches also
+receive the `work` skill body. Read `lf help skill work` before using Task, Wave or
+Project APIs in an existing conversation. Choose the commands and Skills that
+fit the requested work.
 
 ## Install the external skill
 
@@ -25,7 +27,7 @@ kind as the Mac app. It may inspect status and start a Session when the person
 asks it to converse with a Wave.
 
 A Loopflow-launched Wave or Task agent is an internal participant.
-It receives `LOOPFLOW.md`; typed Work observations carry durable coordination,
+It receives `LOOPFLOW.md` and work guidance; typed Work observations carry durable coordination,
 and headless failures remain visible in ordinary output and recorded outcomes.
 
 A Wave directing a task is the internal case:

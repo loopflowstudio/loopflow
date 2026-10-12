@@ -122,7 +122,7 @@ Push and create or update a draft PR, then open its GitHub page. Existing ready 
 
 ## lf pr submit
 
-Prepare a PR to land: sync, clear scratch, mark ready, and assign it to you. Nothing merges until you click merge on GitHub
+Prepare a PR to land: sync, clear added scratch files, mark ready, and assign it to you. Nothing merges until you click merge on GitHub
 
 | Argument | What it does |
 |---|---|
@@ -189,7 +189,7 @@ Create a low-level sibling worktree
 |---|---|
 | `<name>` | Worktree name |
 | `--plan` | Print the placement plan without creating a worktree Default: false. |
-| `--persistent` | Keep this workspace after delivery and keep scratch local Default: false. |
+| `--persistent` | Keep this workspace after delivery Default: false. |
 | `--help / -h` | Print help |
 
 ## lf wt switch
@@ -251,6 +251,22 @@ Merge upstream into the current branch (default: main or stack parent)
 | `--abort` | Abort the local sync in progress Default: false. |
 | `--adopt` | Explicitly claim a raw sync that has no Loopflow owner Default: false. |
 | `<onto>` | Branch to sync onto |
+| `--help / -h` | Print help |
+
+## lf scratch
+
+Manage working notes
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
+## lf scratch clear
+
+Remove scratch files added in this branch's diff, keeping existing files and edits
+
+| Argument | What it does |
+|---|---|
 | `--help / -h` | Print help |
 
 ## lf commit
@@ -1840,6 +1856,7 @@ Inspect a process or Session by identity
 | `--final` | Print a Session's last recorded provider conclusion Default: false. |
 | `--input` | Inspect an exact retained input belonging to this Session |
 | `--context` | Print only what the step's submitted input was made of, by source Default: false. |
+| `--instructions` | Explain recorded instruction inclusion and omission Default: false. |
 | `--help / -h` | Print help |
 
 ## lf history usage

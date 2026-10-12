@@ -1857,3 +1857,62 @@ fn program_status_cli_observes_waiting_without_completing_work() {
     assert!(item["program_status"].is_null());
     assert!(item["attention"].is_null());
 }
+
+#[test]
+fn instruction_inspection_reports_recorded_reasons_and_missing_evidence() {
+    let home = tempfile::tempdir().unwrap();
+    let (id, _, dir) = prepare_conversation(
+        home.path(),
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")),
+        "codex",
+        "Do not launch",
+    );
+    let path = dir.join("context.json");
+    let mut artifact = serde_json::json!({
+        "context": {"system": null, "task": {"assets": []}, "decisions": []}
+    });
+    artifact["context"]["decisions"] = serde_json::json!([
+        {
+            "position": 0, "kind": "operating_instructions", "scope": "global",
+            "label": "work", "source_path": null, "decision": "excluded",
+            "reason": "no Task or Wave association", "original_bytes": null,
+            "original_tokens": null, "asset_position": null
+        },
+        {
+            "position": 1, "kind": "memory", "scope": "repo",
+            "label": "memory", "source_path": null, "decision": "included",
+            "reason": "captured memory", "original_bytes": null,
+            "original_tokens": null, "asset_position": null
+        }
+    ]);
+    std::fs::write(&path, serde_json::to_vec(&artifact).unwrap()).unwrap();
+    let args = ["history", "show", &id, "--instructions"];
+    let output = run(home.path(), &args);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(text.contains("excluded  work — no Task or Wave association"));
+    assert!(!text.contains("captured memory"));
+    let output = run(
+        home.path(),
+        &["history", "show", &id, "--instructions", "--json"],
+    );
+    assert!(output.status.success());
+    let decisions: Vec<loopflow::trace::ContextDecision> =
+        serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(decisions.len(), 1);
+    assert_eq!(decisions[0].reason, "no Task or Wave association");
+    assert!(!run(
+        home.path(),
+        &["history", "show", &id, "--instructions", "--context"]
+    )
+    .status
+    .success());
+    std::fs::remove_file(path).unwrap();
+    let output = run(home.path(), &args);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Instruction evidence unavailable"));
+}

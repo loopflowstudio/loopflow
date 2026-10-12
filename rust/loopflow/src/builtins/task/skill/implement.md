@@ -30,7 +30,9 @@ Produce a working change, resolve reversible ambiguity, and verify it. Preserve 
 
 Run `lf context` to read memory and scratch size targets, their configuration
 sources, and current usage. Read complete sources before curating them.
-Bring over-budget material under both token and byte limits as part of this step.
+Bring over-budget scratch under both token and byte limits as part of this step.
+Curate `wave/` only when the selected Loopflow Flow calls for it; otherwise
+record proposed memory changes in scratch.
 Merge duplicates, summarize long evidence, remove obsolete notes inherited from a
 stacked parent, and keep historical detail in git rather than ambient context.
 Preserve live decisions, attribution, unresolved work, and contrary evidence;
@@ -113,7 +115,7 @@ launch a competing implementation. A failed planning read is a named gap;
 continue independent work from the supplied evidence without repairing auth.
 Publication, landing and navigation belong to the caller's explicit steps.
 
-While building feature work, notice signals that could help the Wave steer.
+When a Wave is supplied, notice signals that could help it steer.
 Name the outcome, candidate measure, decision value and cheapest credible
 producer. Add a useful instrument when it fits the coherent change;
 otherwise leave the proposal for Wave sponsorship.
@@ -125,7 +127,8 @@ If `<lf:wave>` is present, check `wave/<wave>/GOAL.md` and `MEMORY.md` in docs:
 
 - Follow the wave's intent and principles during implementation
 - Respect decisions and constraints recorded in `MEMORY.md`
-- Edit GOAL.md and MEMORY.md directly in this checkout like any other files
+- Edit GOAL.md and MEMORY.md only when the selected Loopflow Flow calls for
+  maintaining them. Association alone leaves `wave/` read-only.
 - Note drift from wave constraints in `scratch/questions.md`
 
 ## When the design is wrong

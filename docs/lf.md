@@ -372,7 +372,8 @@ lf mon active --watch --json        # NDJSON until stdin closes
 lf history show SESSION --final     # provider conclusion
 lf usage --days 30                  # measured consumption and missing evidence
 lf usage --task LOO-265 --context   # each step's input by source, flagged over budget
-lf history show SESSION --context   # one step: instructions, memory, scratch, goal, steers, carried, tools
+lf history show SESSION --context       # input cost by source
+lf history show SESSION --instructions  # why guidance was included or omitted
 lf session ensure                   # this repository's one ongoing conversation
 lf session ensure -w growth         # a Wave's one ongoing conversation
 lf session ensure --task EXP-12     # a Task's primary conversation
@@ -466,7 +467,7 @@ lf task complete EXP-12
 
 Verified merge leaves an open Task available for optional follow-up work. New
 work uses ordinary Task creation; no filing, disposition or “none needed” record
-is required. Preserve useful findings in the PR before scratch cleanup.
+is required. Preserve useful findings in the PR before cleanup of added scratch files.
 
 `ship` runs gate and waited landing. Reaching its Workflow endpoint requests
 completion. Bare landing or a manual GitHub merge alone does not complete the
@@ -916,14 +917,12 @@ They display a workspace without gaining Task membership. Moved checkouts are
 rediscovered; missing checkouts recover committed branch state. Live conversations
 keep their placement until their attached LfProcess is idle.
 
-Persistent workspaces retain scratch locally through commit, sync, publication and
-landing. A scratch-only selection with no committable changes explains that policy
-and suggests moving durable notes outside `scratch/`. In ordinary Task worktrees,
-selected scratch files are committed. Selected-path commits preserve unrelated
-staged edits. Publication pushes
-the committed range, leaving later local edits alone. Inspect the complete range
-before publishing. PR landing clears scratch in non-persistent workspaces, whether
-or not the work belongs to a Task.
+Scratch follows ordinary Git behavior in every workspace. Skills write there
+and agent runs include its Markdown automatically. `lf pr submit` and `lf pr land` invoke `lf scratch clear` during preparation. The cleanup command
+removes only added files in the work's diff; existing files and edits remain.
+Ordinary PR open and publish do not run general scratch cleanup. No scratch configuration is needed.
+Selected-path commits preserve unrelated staged edits; publication pushes the
+committed range, leaving later local edits alone.
 
 If a sync resolver creates a file where an untracked file was stashed, sync restores
 the original and keeps the resolver's file beside it as `<name>.lf-sync-1` (or the

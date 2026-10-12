@@ -178,9 +178,10 @@ local, outside planning merge. Lost replies retry the same owner; later delegati
 cannot replace it. Historical shared Tasks with no coordinator still refuse.
 Race/exchange and lost-reply CLI fixtures pass. This is isolated SSH/provider simulation,
 not live migration or native acceptance. LOO-414 keeps unavailable-coordinator
-recovery and detached launch retries. Rust gate: 2544 passed; five failures repaired
-and passed focused. Parent integration: 102/103 pass, last selector repair passes;
-45 Desktop DTO tests pass. CI and native proof remain.
+recovery and detached launch retries. After #1491 merged (`d1973e5942`), integration
+checks passed: 2521 Rust cases across broad/focused runs, 18 skipped; Desktop
+build/66 focused tests; fmt and Clippy. Sync interrupted CLI-rebuilding tests;
+all affected cases passed on the stable checkout. CI and native proof remain.
 
 Jack Heart accepted LOO-427 for queue then Task-completing shipping on October 10
 (`16e9c950b9`), superseding the demo hold without claiming missing proof. LOO-397
@@ -189,8 +190,8 @@ remote panes and running-Flow exchange proof; LOO-416 relaunch persistence;
 LOO-452 richer keys; LOO-453 readiness/events. Owners: comparison.
 Jack subsequently selected stacking on LOO-412 and landing after it; the earlier
 baseline-first interpretation is superseded.
-Queue repairs pass focused checks; full matrix stays with CI. No installation,
-live migration/publication or provider-account use is authorized.
+Jack requested publication and merge; full matrix stays with CI. No installation,
+live migration or provider-account use is authorized.
 
 ## Task delivery boundary (LOO-418, revised 2026-10-11)
 

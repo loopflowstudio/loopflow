@@ -2687,7 +2687,7 @@ mod tests {
         for invocation in [
             vec!["--task", "LOO-438", "skill", "task/session"],
             vec!["--wt", "feature", "skill", "debug"],
-            vec!["-b", "-c", "--account", "fixture", "run", "ship-api"],
+            vec!["-b", "-c", "--account", "fixture", "flow", "ship-api"],
             vec!["task", "run", "LOO-438", "pursue"],
             vec!["pr", "publish"],
             vec!["pr", "open"],
@@ -2719,7 +2719,7 @@ mod tests {
         }
         for invocation in [
             vec!["lf", "skill", "debug", "--", "-a", "literal"],
-            vec!["lf", "run", "debug", "--", "-a", "literal"],
+            vec!["lf", "flow", "debug", "--", "-a", "literal"],
             vec!["lf", "debug", "--", "-a", "literal"],
         ] {
             let args = invocation.into_iter().map(String::from).collect();

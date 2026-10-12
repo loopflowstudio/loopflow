@@ -1,20 +1,14 @@
 # Desktop control on shared Work — LOO-427
 
-**Status (October 11, 2026):** Jack Heart requested preparing LOO-427 stacked
-on LOO-412, with landing only after 412 lands. The recorded parent is PR #1491.
-Merge `cd60b8db8a` integrates parent `0514221be4`; remaining integration edits are local.
-The earlier baseline-first delivery interpretation is superseded. This integration
-preserves accepted Work tabs, pane controls and recorded-Machine execution while
-adopting 412's canonical Work and configured planning transport. Reduction for both
-Tasks remains coordinated with 412; no publication or landing readiness is claimed.
+**Status (October 11, 2026):** Jack Heart requested landing 412 before 427.
+PR #1491 merged as `d1973e5942`; `9002aeae16` integrates that main into this branch.
+The integration preserves Work tabs, pane controls and recorded-Machine execution
+and uses 412's single typed Work journal, including delegation and admission.
 
-Check: optional-follow-up cut — affected Rust 250 passes, then 65 passes plus repaired regression passes; 82 Desktop tests/build, fmt, all-target Clippy, CLI/help/golden checks pass. Previous broad gate: `f1e8cd19ff`; CI owns release matrix, LOO-391 native proof.
+Check: network-wrapped `cargo nextest run -p loopflow` — 2521 cases passed across broad run and focused reruns (18 skipped); Desktop build/66 focused tests, fmt and all-target Clippy pass. Sync interrupted CLI-rebuilding tests; all affected cases passed on the stable checkout. CI owns release matrix; LOO-391 native proof.
 
-**This slice — integrate and land:** Jack Heart requested landing 412 before 427.
-The optional follow-up API/gate deletion is published. Integration with 412 keeps
-its single typed Work journal and private recovery of historical reserved filings;
-427's delegation and admission use that same writer. Finish conflict checks,
-checkpoint the integration, then publish and land after 412. No live migration.
+**This slice — publish and land:** Local integration repairs are complete.
+Publish and request merge, then verify CI and actual delivery. No live migration.
 
 ## Shipping scope — Jack Heart, October 10
 

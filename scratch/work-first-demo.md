@@ -27,17 +27,9 @@ alone did not establish rendered usability or normal Quit.
 Next demo must compare populated Loopflow navigation with shared planning;
 client takeover remains explicit.
 
-The October 11 snapshot preparation and sandboxed launch are archived at
-`6f9bd12f85:scratch/work-first-demo.md`, this heading: exact 55 Wave/52 Project/
-546 Task IDs survived preparation. Window existence did not prove rendering,
-conversation continuation or minimal chrome; Jack Heart's screenshot failed
-repository validation. Subsequent inspection follows.
-
-October 11's denied real Git executables, screenshot correction and CPU-bound
-first reader are preserved at `2a56c9937d:scratch/work-first-demo.md`,
-**Review priority**. Allowing the actual Git binaries repaired repository
-validation, not Work loading. The window stayed responsive; no write or native
-conversation acceptance followed.
+October 11 preparation, validation failures and denied Git execution remain at
+`9a23582588:scratch/work-first-demo.md`, **Review priority**. Copies preserved exact
+planning IDs; early windows did not prove rendering or conversation continuation.
 
 Loading repair: repeated samples located the delay in Flow membership reads. The
 snapshot holds 299,139 Processes and only 250 Flow records. Flow reads now restrict
@@ -286,3 +278,14 @@ near-black. Explicit TerminalPalette inks fix it; native relaunch confirms reada
 Check: RegistryQuery/WorkDestination PASS (68); palette repair WorkDestination PASS (51); configured participant read and diff check PASS.
 Native LOO-462 click selected its exact Session, then sandbox denied launcher
 inspection. Closing that failed terminal exposed the contrast defect. No takeover.
+
+## Live-reader diagnosis — October 12
+
+Comparing v0.13.12 with this branch found identical WorkFrame and shared wire
+models (Portfolio is new). A generic decode failure therefore does not establish
+version incompatibility. LocalLineObservation now retains the decoder's field/path
+error instead of Foundation's opaque localized message; its wrong-type regression
+identifies `sequence`. Check: WorkObservationTransportTests PASS (8); diff check PASS.
+One installed, repository-scoped read is captured privately under
+`/tmp/loo462-live-wire/`; the linked production Swift decoder accepts the branch's
+copied-data frames. Await the live read before deciding the runtime requirement.

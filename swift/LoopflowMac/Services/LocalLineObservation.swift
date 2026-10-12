@@ -150,7 +150,7 @@ final class LocalLineObservation<Frame: Sendable>: @unchecked Sendable {
                     lastFrame = ProcessInfo.processInfo.systemUptime
                     continuation.yield(frame)
                 } catch {
-                    fail(RegistryQueryError("Invalid \(name.prefix(1).lowercased() + name.dropFirst()) observation: \(error.localizedDescription)"))
+                    fail(RegistryQueryError("Invalid \(name.prefix(1).lowercased() + name.dropFirst()) observation: \(error)"))
                     return
                 }
                 bytes.removeSubrange(...end)

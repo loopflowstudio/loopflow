@@ -317,11 +317,30 @@ Tasks/PRs, retaining this Task's aggregate measurement obligation.
 
 PR #1543's first hosted candidate is
 [run 38314949621](https://github.com/loopflowstudio/loopflow/actions/runs/38314949621),
-head `3b124e6b943da363c34ff1b7991142f675d88678`. Swift passed in 4:24,
-installation in 5:28, and Xcode compilation in 2:14. Rust remained running at
-22:25 UTC on October 12. These partial observations already rule out meeting
-five minutes for this candidate; complete Rust timing and logs remain pending.
-They do not isolate runner/cache variation from the source change.
+head `3b124e6b943da363c34ff1b7991142f675d88678`. The full run passed. Swift took
+4:24, installation 5:28, Xcode compilation 2:14, and Rust 17:49. Aggregate
+non-skipped job occupancy was 34:29 versus 46:44 in the detailed baseline run;
+these observations do not isolate runner/cache variation from the source change.
+The candidate does not meet five minutes.
+
+Rust compilation took 2:11 and nextest execution 886.890s (14:47), with all
+2,548 cases passing and 17 skipped, matching the baseline counts. Test durations
+sum to 3,516.38s versus 4,148.43s in the baseline, while execution wall time
+falls from 1,043.868s. The combined build/test command used 2,855.76 user CPU
+seconds and 349.40 system seconds. Four test slots remained well occupied;
+this is still substantial test work after eliminating nested Cargo entry.
+
+The longest remaining cases are watcher reconnect (156.008s), idle native
+runner/no-poll (120.359s), and the resolution matrix (105.311s). Sharding alone
+cannot erase the longest individual case, and a two-minute compilation plus
+that case and artifact/setup overhead can still exceed five minutes. Investigate
+fixture cost and scheduling order alongside any partition experiment.
+
+Installation's managed step took 4:02: its consolidated cold compilation took
+3:07, followed by nine executed one-test proofs. Subsequent Cargo calls each
+took 0.15–0.17s instead of rebuilding. The separate published-title step took
+1:19, including 1:09 compilation. Distinct provenance remains a real build
+cost; reducing test assertions cannot remove that compile floor.
 
 A local macOS nextest archive contains 60 binaries, including the fixture CLI,
 and occupies 411,556,926 bytes (392 MiB). Packaging took 0.75s after compilation;

@@ -673,7 +673,7 @@ def _seed_native_task(home: Path, checkout: Path, repo: Path, session: str) -> t
     now = int(time.time())
     config_path = repo / ".lf/config.yaml"
     config = yaml.safe_load(config_path.read_text()) if config_path.is_file() else {}
-    team = ((config or {}).get("pm") or {}).get("linear_team") or wave
+    team = ((config or {}).get("linear") or {}).get("team") or wave
     plan = dict(
         id=project,
         slug="desktop-performance",
@@ -1513,7 +1513,7 @@ def _verify_native_fixture(output: Path, cli: Path, *, mounted: bool = False) ->
         source.mkdir()
         repo = output / "repository"
         (repo / ".lf").mkdir(parents=True)
-        (repo / ".lf/config.yaml").write_text("pm:\n  linear_team: " + str(uuid.uuid4()) + "\n")
+        (repo / ".lf/config.yaml").write_text("linear:\n  team: " + str(uuid.uuid4()) + "\n")
         subprocess.run(
             [str(_benchmark_git()), "init", "--quiet", str(repo)], check=True, capture_output=True
         )

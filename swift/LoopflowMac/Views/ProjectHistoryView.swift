@@ -31,7 +31,7 @@ struct ProjectHistoryView: View {
                 if let project = projects.first(where: { $0.id == selected }) {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Workflow: \(project.workflow)")
-                        if let sync = project.sync { PlanningSyncView(sync: sync) }
+                        PlanningSyncView(sync: project.sync)
                         ForEach(project.krs) { kr in
                             Label(kr.text, systemImage: kr.holds ? "checkmark.circle.fill" : "circle")
                         }
@@ -45,7 +45,7 @@ struct ProjectHistoryView: View {
                 let status = try await RegistryQueryLocal.shared.status(wave: wave, cwd: repo)
                 projects = status.projects.items
                 error = status.projects.unavailableReason
-                selected = projects.first(where: { $0.id == sourceReference || $0.slug == sourceReference || (sourceReference != nil && $0.workId == sourceReference) })?.id
+                selected = projects.first(where: { $0.id == sourceReference || $0.slug == sourceReference || (sourceReference != nil && $0.linearId == sourceReference) })?.id
                     ?? status.currentProject?.id ?? projects.first?.id
             } catch { self.error = error.localizedDescription }
             loaded = true

@@ -59,6 +59,11 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.remove_machine(&label)).await
     }
 
+    pub async fn find_placement(&self, work: &WorkRef) -> StoreResult<Option<Placement>> {
+        let work = work.clone();
+        run_sqlite(&self.sqlite, move |store| store.find_placement(&work)).await
+    }
+
     pub async fn placement(&self, work: &WorkRef) -> StoreResult<Placement> {
         let work = work.clone();
         run_sqlite(&self.sqlite, move |store| store.placement(&work)).await

@@ -1195,14 +1195,14 @@ fn run_admitted_agent(
         launch.env.extend(capture.0.environment());
         capture.0.mark_spawn_requested();
     }
-    let _planning_sync = process
-        .task_input
-        .as_ref()
-        .map(crate::ops::task_input::TaskInput::start_planning_sync)
-        .transpose()
+    let directory = match &launch.cwd {
+        Some(cwd) => cwd.clone(),
+        None => std::env::current_dir()?,
+    };
+    let _planning_sync = crate::ops::planning_sync::PlanningSync::start_for_directory(&directory)
         .map_err(|error| {
-            CoreError::ExecutionFailed(format!("cannot start planning sync: {error}"))
-        })?;
+        CoreError::ExecutionFailed(format!("cannot start planning sync: {error}"))
+    })?;
     let result = _run_with_transient_retries(
         &launch,
         &process,

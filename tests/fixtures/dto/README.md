@@ -43,13 +43,6 @@ The optional `task_pr_id` retains the PR captured by the managed Flow;
 Session capture/provider history, PR and Steer facts retain their original
 identities. Rust and Swift round-trip this shared history.
 
-`pm_show.json` pins the internal planning snapshot used by Task resolution
-and status refresh: a Project carries exactly one Wave Initiative and the repository
-Team; its Task carries the stable Project and Team ids used for ownership.
-The shared `LOO-*` identifier and canonical Project name remain presentation;
-the provider's Wave-qualified title is normalized before this reader returns.
-It is not a CLI/app DTO; Wave detail and roadmap fixtures cover those boundaries.
-
 `task_execution_stalled.json` retains stalled Session evidence. `flow_process_progress.json` retains ordinary execution graphs and loop coordinates; run legality lives on the Task projection.
 
 `task_files.json` pins `lf diff --files`, `lf diff`, `lf file` and `lf save` JSON:

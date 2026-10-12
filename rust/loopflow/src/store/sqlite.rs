@@ -25,17 +25,19 @@ mod children;
 mod ci_incidents;
 mod durable;
 mod flow_inventory;
+#[cfg(test)]
+mod linear_migration_tests;
 mod metrics;
-mod plan_read;
-mod planning;
 pub(crate) mod planning_changes;
 pub(crate) mod planning_export;
 pub(crate) mod planning_order;
+mod planning_peers;
 mod planning_sync;
+pub(crate) mod planning_write;
 mod pr_landings;
 mod processes;
 mod program_status;
-mod project_content;
+pub(crate) mod project_content;
 mod project_rotation;
 pub(crate) mod project_selection;
 mod project_transitions;
@@ -44,7 +46,7 @@ mod session_events;
 pub(crate) mod sessions;
 mod task_comments;
 mod task_content;
-mod task_follow_through;
+pub(crate) mod task_history;
 pub(crate) mod task_state_delivery;
 mod task_work;
 pub(crate) mod wave_definitions;
@@ -83,7 +85,7 @@ fn configure_write_connection(conn: &Connection, path: &Path) -> StoreResult<()>
 
 #[derive(Debug, Clone)]
 pub struct SqliteStore {
-    conn: Arc<Mutex<Connection>>,
+    pub(crate) conn: Arc<Mutex<Connection>>,
 }
 
 impl SqliteStore {
@@ -136,7 +138,7 @@ pub(crate) fn read_nonterminal_task_worktrees(path: &Path) -> StoreResult<Vec<Pa
     crate::performance::observe_sqlite(&conn);
     conn.execute_batch("PRAGMA query_only = ON; PRAGMA busy_timeout = 5000;")?;
     let mut statement = conn.prepare(&format!(
-        "SELECT t.worktree FROM tasks t WHERE t.worktree IS NOT NULL AND {}",
+        "SELECT t.worktree FROM tasks t WHERE t.worktree IS NOT NULL AND t.worktree != '' AND {}",
         durable::task_open_sql("t")
     ))?;
     let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
@@ -691,26 +693,39 @@ impl SqliteStore {
             wave.repo(),
             wave.parent_wave_id(),
         )?;
+        let parent: Option<Option<String>> = tx
+            .query_row(
+                "SELECT parent_wave_id FROM waves WHERE id=?1",
+                [wave.id()],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let saved = parent.is_some();
+        let edits = if saved {
+            vec![crate::work::edit::WorkValue::WaveParent(
+                parent
+                    .flatten()
+                    .or_else(|| wave.parent_wave_id().map(ToString::to_string)),
+            )]
+        } else {
+            vec![
+                crate::work::edit::WorkValue::WaveName(wave.name().into()),
+                crate::work::edit::WorkValue::WaveParent(
+                    wave.parent_wave_id().map(ToString::to_string),
+                ),
+            ]
+        };
+        planning_write::create(
+            &tx,
+            wave.repo(),
+            &crate::work::edit::WorkEdit::for_target(wave.id().as_str(), &edits),
+        )?;
+        if !saved {
+            tx.execute("UPDATE waves SET created_at=?2,retired_at=?3,superseded_by_wave_id=?4,retirement_reason=?5 WHERE id=?1",params![wave.id(),created_at,wave.retired_at().map(|at|at.unix_timestamp()),wave.superseded_by_wave_id(),wave.retirement_reason()])?;
+        }
         tx.execute(
-            "INSERT INTO waves (
-                 id, name, repo, created_at, parent_wave_id, promoted_at,
-                 retired_at, superseded_by_wave_id, retirement_reason
-             )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-             ON CONFLICT(id) DO UPDATE SET
-               parent_wave_id = COALESCE(waves.parent_wave_id, excluded.parent_wave_id),
-               promoted_at = COALESCE(waves.promoted_at, excluded.promoted_at)",
-            params![
-                wave.id(),
-                wave.name(),
-                wave.repo(),
-                created_at,
-                wave.parent_wave_id(),
-                wave.promoted_at().map(|at| at.unix_timestamp()),
-                wave.retired_at().map(|at| at.unix_timestamp()),
-                wave.superseded_by_wave_id(),
-                wave.retirement_reason(),
-            ],
+            "UPDATE waves SET promoted_at=COALESCE(promoted_at,?2) WHERE id=?1",
+            params![wave.id(), wave.promoted_at().map(|at| at.unix_timestamp())],
         )?;
         durable::create_wave_work(&tx, wave.id(), created_at)?;
         wave_definitions::import_workflows_on(&tx, wave.id().as_str(), Path::new(wave.repo()))?;
@@ -1905,9 +1920,18 @@ impl SqliteStore {
             };
             validate_wave_parent(&tx, &update.wave_id, name, &repo, parent.as_ref())?;
             tx.execute(
-                "UPDATE waves SET repo = ?2, name = ?3, parent_wave_id = ?4
-                 WHERE id = ?1 AND (repo != ?2 OR name != ?3 OR parent_wave_id IS NOT ?4)",
-                params![update.wave_id, repo, name, parent],
+                "UPDATE waves SET repo=?2 WHERE id=?1 AND repo IS NOT ?2",
+                params![update.wave_id, repo],
+            )?;
+            planning_write::local(
+                &tx,
+                &crate::work::edit::WorkEdit::for_target(
+                    update.wave_id.as_str(),
+                    &[
+                        crate::work::edit::WorkValue::WaveName(name.into()),
+                        crate::work::edit::WorkValue::WaveParent(parent.map(|p| p.to_string())),
+                    ],
+                ),
             )?;
         }
         tx.commit()?;

@@ -570,7 +570,7 @@ private extension MetricReading {
     }
 }
 
-private extension MetricTarget {
+private extension Threshold {
     func display(unit: String) -> String {
         switch self {
         case let .atLeast(value): return "≥ \(formatted(value, unit: unit))"
@@ -719,18 +719,6 @@ private struct WaveTaskWorkView: View {
                 Text("\(task.task.historyLabel ?? task.runtime?.status.label ?? "unstarted") · next: \(task.nextMove.owner.rawValue)")
                     .font(Typography.caption(10))
                     .foregroundStyle(palette.textSecondary)
-                if let label = task.task.followUpLabel {
-                    Text(label)
-                        .font(Typography.caption(10))
-                        .foregroundStyle(palette.textSecondary)
-                }
-                if let label = task.followThrough.deliveryLabel(
-                    merged: task.pr?.phase == .merged, done: task.runtime?.status == .done
-                ) {
-                    Text(label)
-                        .font(Typography.caption(10))
-                        .foregroundStyle(palette.textSecondary)
-                }
                 if let directive = task.directive {
                     Text("direction v\(directive.version) · \(directive.incorporatedAt == nil ? "pending" : "incorporated")")
                         .font(Typography.caption(10))
@@ -881,7 +869,7 @@ struct WaveProjectView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(project.name).font(Typography.sectionTitle(15)).textSelection(.enabled)
-            if let sync = project.sync { PlanningSyncView(sync: sync) }
+            PlanningSyncView(sync: project.sync)
             ForEach(project.krs) { kr in
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     Circle()

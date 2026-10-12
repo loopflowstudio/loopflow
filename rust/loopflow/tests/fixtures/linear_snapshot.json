@@ -1,0 +1,44 @@
+{
+  "projects": [
+    {
+      "id": "project-gmail",
+      "slug": "gmail",
+      "name": "Gmail",
+      "summary": "Keep mail flowing.",
+      "krs": [
+        {
+          "text": "Mail processing survives restart",
+          "holds": true
+        }
+      ],
+      "initiative_ids": [
+        "initiative-infrastructure"
+      ],
+      "team_ids": [
+        "team-loo"
+      ],
+      "metric_targets": [],
+      "workflow": "feature",
+      "status": "started"
+    }
+  ],
+  "items": [
+    {
+      "id": "issue-gmail",
+      "identifier": "LOO-2",
+      "url": "https://linear.app/loopflow/issue/LOO-2/gmail",
+      "name": "Route incoming mail",
+      "description": "Resolve through the owning Project.",
+      "rank": 1,
+      "completed": false,
+      "project_id": "project-gmail",
+      "team_id": "team-loo",
+      "assignee": null,
+      "state": "unstarted",
+      "revision": "2026-09-29T12:00:00.123Z",
+      "branch_name": null,
+      "completed_at": null,
+      "due_date": null
+    }
+  ]
+}

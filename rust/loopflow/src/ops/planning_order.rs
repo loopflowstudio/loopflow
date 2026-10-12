@@ -5,7 +5,7 @@ use std::path::Path;
 use serde_json::json;
 
 use crate::durable::ProjectId;
-use crate::pm::linear::{LinearClient, OrderedIssue};
+use crate::linear::{LinearClient, OrderedIssue};
 use crate::store::sqlite::planning_order::{include_members, OrderEffect};
 use crate::store::Store;
 
@@ -26,16 +26,19 @@ pub(super) async fn sync_order(
         .await
         .map_err(message)?
         .ok_or_else(|| message("Project is missing"))?;
-    let external = local.plan.linear_id()?.as_str();
+    let external = local.linear_id()?.as_str();
     // The caller bounds the entire operation. Each confirmed move is durable;
     // a timeout preserves the exact last attempt for the next foreground pass.
     loop {
         let issues = client.ordered_items(external).await.map_err(message)?;
         let items = issues.iter().map(|i| i.item.clone()).collect::<Vec<_>>();
-        if !store
-            .sqlite
-            .put_pm_project_order(&repo.to_string_lossy(), external, &items)
-            .map_err(message)?
+        if !crate::linear::acceptance::accept_linear_project_order_in(
+            &store.sqlite,
+            &repo.to_string_lossy(),
+            external,
+            &items,
+        )
+        .map_err(message)?
         {
             return Err(message(
                 "Incomplete or older Project order; saved reorder retained",

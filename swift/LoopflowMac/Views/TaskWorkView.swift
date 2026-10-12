@@ -63,7 +63,7 @@ struct TaskWorkflowHeader: View {
                 }
                 if acting { ProgressView().controlSize(.small) }
             }
-            TaskDeliveryView(task: task)
+            TaskDueDateView(task: task)
             // Completion may fail after the Workflow has already arrived.
             if let conflict = task.runtime?.completionPending {
                 HStack(spacing: Spacing.sm) {
@@ -104,46 +104,14 @@ struct TaskWorkflowHeader: View {
     }
 }
 
-/// Delivery evidence stays beside the conversation and in Task details.
-struct TaskDeliveryView: View {
+/// The Task due date stays beside the conversation and in Task details.
+struct TaskDueDateView: View {
     let task: RoadmapTask
     @Environment(\.palette) private var palette
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.xxs) {
-            if let label = task.followThrough.deliveryLabel(
-                merged: task.pr?.phase == .merged, done: task.runtime?.status == .done
-            ) {
-                Text(label)
-                    .font(Typography.body(13))
-                    .foregroundStyle(palette.textSecondary)
-                    .accessibilityIdentifier("task-follow-through-status")
-            }
-            ForEach(Array(task.followThrough.scopeNotes.enumerated()), id: \.offset) { _, note in
-                Text(note)
-                    .font(Typography.body(12.5))
-                    .foregroundStyle(palette.textSecondary)
-            }
-            ForEach(task.followThrough.links) { followUp in
-                if let url = followUp.url {
-                    Link("Follow-up \(followUp.identifier)", destination: url)
-                        .font(Typography.body(12.5))
-                        .tint(palette.accentInk)
-                } else {
-                    Text("Follow-up \(followUp.identifier)")
-                        .font(Typography.body(12.5))
-                }
-            }
-            if let reason = task.followThrough.reason {
-                Text(reason)
-                    .font(Typography.body(12.5))
-                    .foregroundStyle(palette.textSecondary)
-            }
-            if let label = task.task.followUpLabel {
-                Text(label)
-                    .font(Typography.body(12.5))
-                    .foregroundStyle(palette.textSecondary)
-            } else if let due = task.task.dueDate {
+            if let due = task.task.dueDate {
                 Text("Due \(due)")
                     .font(Typography.body(12.5))
                     .foregroundStyle(palette.textSecondary)

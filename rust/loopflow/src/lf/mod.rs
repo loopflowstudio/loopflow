@@ -1,3 +1,5 @@
+/// Saved Task identity and pushed-code requirements for one SSH invocation.
+pub const TASK_SOURCE_ENV: &str = "LF_TASK_SOURCE";
 /// Explicit Work declaration inherited by descendants; checkout inference never writes it.
 pub const WORK_DECLARATION_ENV: &str = "LF_AS";
 
@@ -553,13 +555,16 @@ pub enum SkillCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum ProjectCommand {
-    /// Update a Project's name or summary
+    /// Update a Project's name, summary or prose
     Edit {
         project: String,
         #[arg(long)]
         name: Option<String>,
         #[arg(long)]
         summary: Option<String>,
+        /// Authored prose; managed Workflow, KRs and targets stay unchanged
+        #[arg(long)]
+        description: Option<String>,
     },
     /// Select and inspect reusable Workflows
     Workflow {
@@ -906,27 +911,6 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// File or link follow-up Tasks after merge, then record the disposition
-    FollowUp {
-        issue: String,
-        #[arg(long, conflicts_with_all = ["existing", "none", "finish"], requires = "notes")]
-        title: Option<String>,
-        #[arg(long, requires = "title")]
-        notes: Option<String>,
-        #[arg(long, requires = "title")]
-        due: Option<String>,
-        #[arg(long)]
-        wave: Option<String>,
-        #[arg(long, conflicts_with_all = ["title", "none", "finish"])]
-        existing: Option<String>,
-        #[arg(long, conflicts_with_all = ["title", "existing", "finish"])]
-        none: Option<String>,
-        #[arg(long, conflicts_with_all = ["title", "existing", "none"])]
-        finish: Option<String>,
-        /// Stable obligation key; use a distinct key for each additional follow-up
-        #[arg(long)]
-        key: Option<String>,
-    },
     /// Enable or hold CI repair for a Task without interrupting running work
     Automate {
         issue: String,
@@ -1160,8 +1144,7 @@ impl TaskCommand {
             | Self::Refile { issue, .. }
             | Self::Comment { issue, .. }
             | Self::Interrupt { issue, .. }
-            | Self::Wait { issue, .. }
-            | Self::FollowUp { issue, .. } => Some(issue),
+            | Self::Wait { issue, .. } => Some(issue),
         }
     }
 }
@@ -1342,42 +1325,46 @@ pub enum CronCommand {
         #[arg(long)]
         reason: String,
     },
-    /// Install or replace a scheduled lf invocation
+    /// Install a named ordinary lf command on this Machine
     Add {
-        /// Wave name passed to `lf <flow> --wave <wave>` (ambient if omitted)
-        #[arg(short = 'w', long = "wave")]
-        wave: Option<String>,
-        /// Flow or skill name to run
-        #[arg(long = "flow")]
-        flow: String,
+        /// Stable job name, retained across command changes
+        name: String,
         /// Daily or every-minute cron expression, or a schedule alias
-        #[arg(long = "schedule", default_value = "daily")]
+        #[arg(long, default_value = "daily")]
         schedule: String,
+        /// Arguments passed to lf, after --
+        #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
+        command: Vec<String>,
     },
     /// List installed loopflow cron jobs
     List {
-        /// Only jobs for this Wave
-        #[arg(short = 'w', long = "wave")]
+        /// Only commands with this --wave selector
+        #[arg(short = 'w', long)]
         wave: Option<String>,
+        /// Only commands with this --task selector
+        #[arg(long)]
+        task: Option<String>,
         /// Emit machine-readable job state
         #[arg(long)]
         json: bool,
     },
-    /// Validate Machine authority and declared jobs without changing launchd
+    /// Validate configured commands and Machine placement without installing jobs
     Preflight {
-        /// Wave whose GOAL.md `crons:` are validated
-        #[arg(short = 'w', long = "wave")]
-        wave: String,
-    },
-    /// Reconcile installed launchd jobs to match a wave's declared `crons:`
-    Sync {
-        #[arg(
-            short = 'w',
-            long,
-            required_unless_present = "repo",
-            conflicts_with = "repo"
-        )]
+        /// Only commands with this --wave selector
+        #[arg(short = 'w', long)]
         wave: Option<String>,
+        /// Only commands with this --task selector
+        #[arg(long)]
+        task: Option<String>,
+    },
+    /// Reconcile installed jobs with the repository configuration's cron list
+    Sync {
+        /// Only commands with this --wave selector
+        #[arg(short = 'w', long, conflicts_with = "repo")]
+        wave: Option<String>,
+        /// Only commands with this --task selector
+        #[arg(long, conflicts_with = "repo")]
+        task: Option<String>,
         /// Install the finite repository Task check on this Machine
         #[arg(long)]
         repo: bool,
@@ -1465,7 +1452,28 @@ pub enum CiCommand {
 }
 
 #[derive(Subcommand, Debug)]
+pub enum PlanningCommand {
+    /// Show, explicitly create, or recover the same planning user key on another machine
+    Key {
+        #[arg(long, conflicts_with = "recover")]
+        new: bool,
+        #[arg(long, value_name = "UUID")]
+        recover: Option<String>,
+    },
+    /// Show selection, retained imports and held records without contacting Git
+    Status {
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
 pub enum RepoCommand {
+    /// Inspect planning synchronization and personal identity
+    Planning {
+        #[command(subcommand)]
+        cmd: PlanningCommand,
+    },
     /// Connect a Wave to its Initiative and the repository's Team (Task prefix)
     Connect {
         /// Wave name (auto-detected if omitted)

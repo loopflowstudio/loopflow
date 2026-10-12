@@ -2387,7 +2387,7 @@ impl SessionCapture {
         let title = generated_session_title(
             context,
             manifest.skill.as_deref(),
-            task.as_ref().map(|task| task.plan.title.as_str()),
+            task.as_ref().map(|task| task.title.as_str()),
             &manifest.cwd,
         );
         let session = store.create_session(

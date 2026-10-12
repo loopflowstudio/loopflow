@@ -628,8 +628,11 @@ mod tests {
     async fn claude_cached_identity_requires_current_verified_credentials() {
         let _env = crate::journal::test_env_lock();
         let root = tempfile::tempdir().unwrap();
-        let _native = crate::test_ambient::EnvGuard::clear(&["CLAUDE_CONFIG_DIR"]);
-        std::env::set_var("CLAUDE_CONFIG_DIR", root.path().join("native"));
+        let _homes = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "CLAUDE_CONFIG_DIR"]);
+        std::env::set_var("LF_HOME", root.path().join("machine"));
+        // Status also inspects the native login before polling stored accounts.
+        // Keep that read independent of the developer's provider credentials.
+        std::env::set_var("CLAUDE_CONFIG_DIR", root.path().join("native-claude"));
         let store = std::sync::Arc::new(
             crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
                 root.path().join("store.db"),

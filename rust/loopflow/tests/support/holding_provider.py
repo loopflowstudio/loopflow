@@ -17,6 +17,9 @@ def wait_for_stop() -> None:
 if "--version" in sys.argv:
     print("fixture")
     sys.exit(0)
+if launches := os.environ.get("FIXTURE_LAUNCHES"):
+    with Path(launches).open("a") as log:
+        log.write("launch\n")
 if "--input-format" not in sys.argv:
     wait_for_stop()
     sys.exit(0)

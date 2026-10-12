@@ -278,7 +278,7 @@ table's row count; branch identity and Work snapshot then succeeded (21.66 s).
 This is fixture schema preparation, not a supported live promotion receipt.
 Evidence: demo directory `compatibility-{check,after-sync,with-draft}.log`,
 `compatibility-fixture-counts.json`, `compatibility-work.json`.
-Snapshot membership is 11 Tasks (correcting the conversational count of 12): Growth 312; Infrastructure 367 and lf-9c03797;
+Snapshot: 11 Tasks, not 12: Growth 312; Infrastructure 367 and lf-9c03797;
 Product 462/427/382/380/378/371/330; Spend 389; Intelligence none. Missing checkout,
 merged-but-uncompleted, retained dirty files and unsettled commits explain those
 inclusions. That explains the rule, not Jack Heart's approval of every remaining

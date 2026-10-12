@@ -45,14 +45,14 @@ def main() -> int:
         ],
         check=True,
     )
-    wave = repo / "wave/infrastructure"
+    wave = repo / ".lf/wave/infrastructure"
     wave.mkdir(parents=True)
     for name in ["GOAL.md", "MEMORY.md"]:
-        shutil.copyfile(source / "wave/infrastructure" / name, wave / name)
+        shutil.copyfile(source / ".lf/wave/infrastructure" / name, wave / name)
     config = repo / ".lf"
     config.mkdir()
     (config / "config.yaml").write_text(
-        "diff: false\ndiff_files: false\npaste: false\ndocs: [wave/infrastructure, probe.md]\n"
+        "diff: false\ndiff_files: false\npaste: false\ndocs: [.lf/wave/infrastructure, probe.md]\n"
     )
     marker = secrets.token_hex(12)
     (repo / "probe.md").write_text(

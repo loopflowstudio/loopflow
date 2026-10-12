@@ -82,7 +82,7 @@ Jack Heart authorized this regression repair. Tests distinguish observed reopeni
 (adopt Linear, retain both values, retire delivery, preserve execution) from unseen
 reopening (unconditional writes can overwrite it). This supersedes frozen test
 disposition. Readback settles state, not atomicity; `7d2bc4279f`'s Linear schema
-has no expected-revision update. [Rationale](../../docs/architecture/planning.md).
+has no expected-revision update. [Rationale](../../../docs/architecture/planning.md).
 Linux: 54 tests, fmt/Clippy pass; CI remains open.
 
 Comments retain provider authorship and losing edits without echo. Cancellation
@@ -322,7 +322,7 @@ Session lacks exact process evidence; lf success proves no provider exit.
 ## Storage footprint (LOO-390, 2026-10-07)
 
 Jack Heart authorized autonomous investigation, cleanup and delivery. Evidence
-and proposals: [storage footprint review](../../docs/reviews/storage-footprint.md).
+and proposals: [storage footprint review](../../../docs/reviews/storage-footprint.md).
 `session_events` was 92% of a 2.6 GiB store: each streamed token was two rows,
 also kept in `runs/*/events.jsonl`. PR #1474 (v0.13.9, installed October 7 and
 measured): new captures keep 28% of rows and 72% of bytes, preflight validates
@@ -578,7 +578,7 @@ required boundary is headless app/view checks; mounted judgment is optional.
 ## One migration draft per Task (LOO-344, 2026-10-01)
 
 Jack Heart selected one editable draft per Task and immutable released SQL.
-Mechanics: [MIGRATIONS.md](../../rust/loopflow/src/store/MIGRATIONS.md).
+Mechanics: [MIGRATIONS.md](../../../rust/loopflow/src/store/MIGRATIONS.md).
 Unshipped branch evidence: `986be7988:wave/infrastructure/MEMORY.md`.
 
 ## One main Home (LOO-342, curated 2026-10-10)
@@ -594,7 +594,7 @@ Exact retirement paths, release evidence and current-document links:
 ## Worktree listing and fenced dispatch (LOO-375, reconciled 2026-10-07)
 
 PR #1456 shipped in v0.13.6. Installed measurements, batching and limits:
-[report](../../scripts/benchmarks/wt-list/README.md),
+[report](../../../scripts/benchmarks/wt-list/README.md),
 `07bbd801e:wave/infrastructure/MEMORY.md` under this heading.
 
 - Store opens validate ledger/schema, leaving full integrity scans to migration,
@@ -612,7 +612,7 @@ PR #1456 shipped in v0.13.6. Installed measurements, batching and limits:
 
 ## Environment variables (LOO-341, reconciled 2026-10-07)
 
-Jack Heart's audit lives in [Environment](../../docs/architecture/environment.md).
+Jack Heart's audit lives in [Environment](../../../docs/architecture/environment.md).
 `LF_HOME` selects the machine's data directory and `loopflow.db`; shared Exec
 names drive shell/tmux clearing. Earlier branch evidence remains at
 `c31279995a4ea0eec09c053e39c2f71a81d26034:wave/infrastructure/MEMORY.md`.
@@ -630,7 +630,7 @@ acceptance remain at
 
 Jack Heart approved PR #1491 for landing on October 11 after the complete
 fifteen-area reduction and +/- review, superseding review-only authority.
-Design/checks: `6fabcd0734:scratch/`; [mechanics](../../docs/architecture/planning.md).
+Design/checks: `6fabcd0734:scratch/`; [mechanics](../../../docs/architecture/planning.md).
 
 Jack selected Linear, shared or default user-keyed Git per repository. One typed
 writer owns local/imported Work; canonical Task/Project fields replace plan/PM
@@ -705,7 +705,7 @@ subject, not workspace identity; usage proves no login. Unavailable identity is 
 rejection. Native refresh, sole browser ownership and installed acceptance remain
 unproved; no installed repair is authorized. Exact decisions, isolation requirements
 and proofs: `32607f1d2:wave/infrastructure/MEMORY.md`, this heading; mechanics:
-[subscriptions](../../docs/subscriptions.md).
+[subscriptions](../../../docs/subscriptions.md).
 
 Main #1511 (`e69d5103f`): Codex terminals use `--no-daemon` (0.161.0-verified).
 Explicit account selection, not launch-time switching, reconciles the shared daemon
@@ -718,14 +718,14 @@ coordination and headroom ranking. Selected account precedes native history;
 usage proves no login or capacity. Browser login, first connection, remembered
 Linear profile and live usage windows remain unproved; Claude returned
 `invalid_grant`. Branch binaries never migrate the installed Home.
-[Mechanics](../../docs/subscriptions.md); constraints and proof limits: `be4a2b2af:wave/infrastructure/MEMORY.md`, this heading and its
+[Mechanics](../../../docs/subscriptions.md); constraints and proof limits: `be4a2b2af:wave/infrastructure/MEMORY.md`, this heading and its
 `b2228bce8` archive.
 
 ## Task deletion and command ownership (LOO-305, curated 2026-10-10)
 
 Jack Heart selected provider/local deletion and command consolidation; execution
 settlement stayed deferred. History:
-`58de9907b6:wave/infrastructure/MEMORY.md`, this heading. [Mechanics](../../docs/lf.md).
+`58de9907b6:wave/infrastructure/MEMORY.md`, this heading. [Mechanics](../../../docs/lf.md).
 Fresh ownership authorizes deletion; acknowledgment or trash confirms it, never
 missing membership. Preserve Done outcomes, terminal times, PR/Git evidence and
 positive confirmation across retries/stale reads. Allocation failure retains created
@@ -794,7 +794,7 @@ checkpoints. Provider stubs must contain conflict-agent launches.
 Jack Heart retired numeric targets, soak and deeper optimization October 7.
 LOO-291/300's evidence limits are historical, not open acceptance:
 `07bbd801e:wave/infrastructure/MEMORY.md`, this heading;
-[scripts/benchmarks/desktop-performance](../../scripts/benchmarks/desktop-performance).
+[scripts/benchmarks/desktop-performance](../../../scripts/benchmarks/desktop-performance).
 
 Historical S5 binding and source-install counterexamples:
 `d0a0a1ee3:wave/infrastructure/MEMORY.md`, this heading. Current Session attribution,
@@ -869,7 +869,7 @@ The full operational cause of run_liveness removal remains unknown. UI projects
 shared evidence and triggers operations; it is not another scheduler or synthetic
 controller. Historical automatic-trigger/default-wait proposals need current
 selection, not automatic resurrection. Current delivery mechanics live in
-[delivery documentation](../../docs/architecture/delivery.md); TESTING.md owns
+[delivery documentation](../../../docs/architecture/delivery.md); TESTING.md owns
 populated migration and clean-PATH proofs. Refresh exported skills after changes;
 Wave learning stays with its identified owner, never miscellaneous .lf notes.
 
@@ -1074,7 +1074,7 @@ also retains an in-memory invocation. PATH discovery replaces availability's
 
 Fixtures prove native model/argument/context fidelity, collisions, out-of-catalog
 Codex expansion, custom-prompt translation and fake-API asset reads. Comparisons:
-[scripts/benchmarks/skill-invocation](../../scripts/benchmarks/skill-invocation/README.md).
+[scripts/benchmarks/skill-invocation](../../../scripts/benchmarks/skill-invocation/README.md).
 PR-base startup shows no added second; base's post-provider Git failure limits
 that evidence. Plain-native overhead remains; production speedup, live compliance
 and terminal UI are unproved. Prior costs: `d505007b1:scratch/run-any-claude-or-codex.md`.
@@ -1090,7 +1090,7 @@ completion remain unproved.
 
 Jack Heart requested landing #1505 on October 8, superseding review-only Flow feedback.
 Keep the Task open for outstanding cold-cache verification.
-[The report](../../scripts/benchmarks/agent-startup/README.md) owns numbers,
+[The report](../../../scripts/benchmarks/agent-startup/README.md) owns numbers,
 release wall-stack SVGs and rejected patches. Provider-probe removal, absent-Wave
 resolution and directory reuse have matched evidence; capture-store reuse and
 ancestor-probe deferral did not and were removed. The last rejection meets

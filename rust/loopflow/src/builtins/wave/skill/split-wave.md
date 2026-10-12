@@ -1,6 +1,6 @@
 ---
-requires: wave/<wave>/GOAL.md
-produces: wave/<child>/ directories
+requires: .lf/wave/<wave>/GOAL.md
+produces: .lf/wave/<child>/ directories
 ---
 Decompose a wave into smaller, independent waves. Move future responsibility into the children; retain the parent's history and any active delivery until it settles.
 
@@ -11,7 +11,7 @@ Before starting, orient yourself in this branch:
 - Read `scratch/` — design docs and notes for the current work live here
   (`scratch/<branch>.md` is this PR's design; `scratch/questions.md` holds open
   questions and assumptions).
-- If a `wave/<name>/` directory matches this work, skim its `GOAL.md`/`MEMORY.md`,
+- If a `.lf/wave/<name>/` directory matches this work, skim its `GOAL.md`/`MEMORY.md`,
   PM snapshot, and live tasks (`lf wave status <name>`).
 - Read the repo's agent doc (`AGENTS.md`) for conventions.
 
@@ -37,7 +37,7 @@ Assign new work to one child. Existing active Tasks keep their owning Wave and d
 ## Workflow
 
 1. Read the parent wave
-   - Use the wave passed by argument, or ask which `wave/<name>/` to split
+   - Use the wave passed by argument, or ask which `.lf/wave/<name>/` to split
    - Read `GOAL.md`, `MEMORY.md`, and the PM snapshot (`lf wave status <parent> --json`)
 
 2. Find split boundaries
@@ -50,9 +50,9 @@ Assign new work to one child. Existing active Tasks keep their owning Wave and d
      active Tasks retain the parent Wave and delivery identity until settled.
 
 4. Create the new waves
-   - `wave/<child>/GOAL.md` — fresh intent and process judgment for each child; draw scope boundaries between siblings
-   - `wave/<child>/MEMORY.md` — the decisions and context this child inherits
-   - `wave/<child>/metrics/*.md` — contracts allocated to that child
+   - `.lf/wave/<child>/GOAL.md` — fresh intent and process judgment for each child; draw scope boundaries between siblings
+   - `.lf/wave/<child>/MEMORY.md` — the decisions and context this child inherits
+   - `.lf/wave/<child>/metrics/*.md` — contracts allocated to that child
    - `lf repo connect <child>` — create each child's Linear Initiative
    - Connection does not create a Project. Inspect each child's Linear plans:
      one In Progress Project is current; Planned and Completed Projects retain

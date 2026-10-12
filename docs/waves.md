@@ -20,9 +20,9 @@ Flow execution; each Machine retains command and conversation history.
 
 | Path | Holds |
 |------|-------|
-| `wave/<name>/GOAL.md` | Objective and operating guidance |
-| `wave/<name>/MEMORY.md` | Curated decisions and lessons |
-| `wave/<name>/metrics/*.md` | Metric meaning, window and freshness |
+| `.lf/wave/<name>/GOAL.md` | Objective and operating guidance |
+| `.lf/wave/<name>/MEMORY.md` | Curated decisions and lessons |
+| `.lf/wave/<name>/metrics/*.md` | Metric meaning, window and freshness |
 
 In Loopflow on macOS, select a Wave to read its plan, Tasks and execution history. Start a
 Session for a conversation, or invoke `wave-operate` for one finite pass. The
@@ -32,10 +32,10 @@ pass each time you return.
 ## Nested Waves
 
 ```text
-wave/infrastructure/GOAL.md
-wave/infrastructure/MEMORY.md
-wave/infrastructure/release/GOAL.md
-wave/infrastructure/release/MEMORY.md
+.lf/wave/infrastructure/GOAL.md
+.lf/wave/infrastructure/MEMORY.md
+.lf/wave/infrastructure/release/GOAL.md
+.lf/wave/infrastructure/release/MEMORY.md
 ```
 
 Address Release as `infrastructure/release`. It has its own objective, plan,
@@ -228,7 +228,7 @@ non-resumable failure receipt. Open Tasks are excluded. A user-landed PR or
 manual Git repair inside the Task fails the metric.
 ```
 
-Save this as `wave/<name>/metrics/task-loop-trust.md`. The filename and `id`
+Save this as `.lf/wave/<name>/metrics/task-loop-trust.md`. The filename and `id`
 must match. The enclosing Wave owns the metric across chapter boundaries.
 Contracts define no command, query, schedule, secret, or KR copy. Product code
 registered as the named instrument pushes pre-aggregated, revision-bound
@@ -265,7 +265,7 @@ inform chapter KR judgment but never check a KR automatically.
 ### Discord bridge
 
 ```yaml
-# wave/product/GOAL.md frontmatter
+# .lf/wave/product/GOAL.md frontmatter
 chat:
   provider: discord
   guild_id: "123456789012345678"
@@ -296,13 +296,13 @@ decisions, dead ends, what a downstream task should know. It is an ordinary
 reviewed repository file:
 
 ```bash
-$EDITOR wave/shipper/MEMORY.md
+$EDITOR .lf/wave/shipper/MEMORY.md
 ```
 
 Prompts read every top-level `.md` in the selected Wave directory and each
 ancestor directory, root first, from the executing checkout. For
-`infrastructure/release`, that means `wave/infrastructure/*.md` followed by
-`wave/infrastructure/release/*.md`. Memory uses the same reader as goals and
+`infrastructure/release`, that means `.lf/wave/infrastructure/*.md` followed by
+`.lf/wave/infrastructure/release/*.md`. Memory uses the same reader as goals and
 notes. Children, siblings and unrelated Waves stay out of ordinary context;
 `scratch/` remains recursive. No registry lookup is needed to gather these files.
 
@@ -471,13 +471,13 @@ uncertain chapter KR. Each Task returns evidence, an artifact, an exact gap,
 or a counterexample. The Wave compares the findings and directs the next work.
 Keep these Tasks in the one current chapter; no additional Project is needed.
 
-To remove a wave, stop it, then delete `wave/<name>/`.
+To remove a wave, stop it, then delete `.lf/wave/<name>/`.
 
 ## Worked example
 
-A `wave/billing/` directory for a billing rewrite. `GOAL.md` sets the intent —
+A `.lf/wave/billing/` directory for a billing rewrite. `GOAL.md` sets the intent —
 "replace the legacy billing system with a metered usage model." The current chapter
-holds the proof claims. Reviewed contracts under `wave/billing/metrics/` define
+holds the proof claims. Reviewed contracts under `.lf/wave/billing/metrics/` define
 live evidence such as usage-event latency and invoice correctness; the Wave
 re-judges strategy from their current readings each iteration.
 
@@ -502,3 +502,11 @@ file-writing change. Each shipped PR folds into memory and closes its task.
 ## Reference
 
 [Configuration](config.md) · [Troubleshooting](troubleshooting.md)
+
+### Move existing Wave files
+
+Keep authored Wave definitions under `.lf/wave/`. Move each existing Wave's
+`GOAL.md`, `MEMORY.md`, metrics and child Wave directories there, preserving the
+hierarchy and authored IDs. Update repository references to the old paths.
+Top-level `wave/` is ordinary repository content; lf neither reads nor migrates
+it automatically. Wave names and commands such as `lf --wave product` are unchanged.

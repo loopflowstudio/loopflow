@@ -28,7 +28,7 @@ lf checkout <id>
 
 Wave, Project and Task planning use one local SQLite owner with optional
 repository-wide Linear synchronization. Creation without a Wave uses `inbox`.
-Wave goals, memory and other Markdown live only in `wave/<name>/` in the
+Wave goals, memory and other Markdown live only in `.lf/wave/<name>/` in the
 checkout. Edit them like any other file; context and summaries read them directly.
 Ancestor context uses the same checkout. Linear Initiative creation uses that
 checkout; explicit planning sync reads GOAL.md at the committed local default-branch

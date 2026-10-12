@@ -46,7 +46,7 @@ fn commit(repo: &Path, message: &str) {
 }
 
 fn author_wave(repo: &Path, slug: &str, marker: &str) {
-    let wave = repo.join("wave").join(slug);
+    let wave = repo.join(".lf/wave").join(slug);
     std::fs::create_dir_all(&wave).unwrap();
     std::fs::write(wave.join("GOAL.md"), format!("# {marker}\n")).unwrap();
     commit(repo, &format!("author {slug}"));
@@ -408,7 +408,7 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     .await
     .unwrap_err();
     assert!(overlap.to_string().contains("parent"), "{overlap}");
-    assert!(repo_a.join("wave/infrastructure/GOAL.md").is_file());
+    assert!(repo_a.join(".lf/wave/infrastructure/GOAL.md").is_file());
 
     for (repo, team) in [
         (&repo_a, "team-alpha"),
@@ -478,10 +478,10 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         store.get_wave(alpha.id()).await.unwrap().unwrap().slug(),
         "infrastructure"
     );
-    assert!(repo_a.join("wave/infrastructure").is_dir());
-    assert!(repo_a.join("wave/platform").is_dir());
+    assert!(repo_a.join(".lf/wave/infrastructure").is_dir());
+    assert!(repo_a.join(".lf/wave/platform").is_dir());
     assert_eq!(
-        std::fs::read_to_string(repo_a.join("wave/platform/GOAL.md")).unwrap(),
+        std::fs::read_to_string(repo_a.join(".lf/wave/platform/GOAL.md")).unwrap(),
         "# divergent\n"
     );
     rusqlite::Connection::open(&database)
@@ -506,21 +506,21 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     let renamed = store.get_wave(alpha.id()).await.unwrap().unwrap();
     assert_eq!(renamed.slug(), "platform");
     assert_eq!(
-        std::fs::read_to_string(repo_a.join("wave/infrastructure/GOAL.md")).unwrap(),
+        std::fs::read_to_string(repo_a.join(".lf/wave/infrastructure/GOAL.md")).unwrap(),
         "# alpha\n"
     );
-    assert!(repo_a.join("wave/infrastructure").exists());
+    assert!(repo_a.join(".lf/wave/infrastructure").exists());
     let renamed_child = store.get_wave(child.id()).await.unwrap().unwrap();
     assert_eq!(renamed_child.slug(), "platform/child");
     assert_eq!(
-        std::fs::read_to_string(repo_a.join("wave/infrastructure/child/GOAL.md")).unwrap(),
+        std::fs::read_to_string(repo_a.join(".lf/wave/infrastructure/child/GOAL.md")).unwrap(),
         "# child\n"
     );
     let renamed_grandchild = store.get_wave(grandchild.id()).await.unwrap().unwrap();
     assert_eq!(renamed_grandchild.slug(), "platform/child/leaf");
     assert_eq!(renamed_grandchild.parent_wave_id(), Some(child.id()));
     assert_eq!(
-        std::fs::read_to_string(repo_a.join("wave/infrastructure/child/leaf/GOAL.md")).unwrap(),
+        std::fs::read_to_string(repo_a.join(".lf/wave/infrastructure/child/leaf/GOAL.md")).unwrap(),
         "# grandchild\n"
     );
     assert_eq!(
@@ -536,9 +536,9 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     relocate_wave(&store, alpha.id(), &repo_a, Some(&repo_c), None)
         .await
         .unwrap();
-    assert!(repo_a.join("wave/platform").exists());
+    assert!(repo_a.join(".lf/wave/platform").exists());
     assert_eq!(
-        std::fs::read_to_string(repo_a.join("wave/infrastructure/GOAL.md")).unwrap(),
+        std::fs::read_to_string(repo_a.join(".lf/wave/infrastructure/GOAL.md")).unwrap(),
         "# alpha\n"
     );
 
@@ -563,7 +563,7 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     assert_eq!(moved_grandchild.repo(), moved.repo());
     assert_eq!(moved_grandchild.slug(), "platform/child/leaf");
     assert_eq!(moved_grandchild.parent_wave_id(), Some(child.id()));
-    assert!(!repo_d.join("wave/platform").exists());
+    assert!(!repo_d.join(".lf/wave/platform").exists());
     let conn = rusqlite::Connection::open(&database).unwrap();
     assert_eq!(
         conn.query_row(
@@ -702,7 +702,7 @@ async fn relocation_retires_an_identical_destination_shadow_without_losing_ident
             .unwrap();
         assert_eq!(receipt.wave_id, established.id().as_str());
         assert!(source
-            .join("wave")
+            .join(".lf/wave")
             .join(established.slug())
             .join("GOAL.md")
             .is_file());

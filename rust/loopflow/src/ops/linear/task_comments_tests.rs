@@ -163,8 +163,8 @@ async fn task_comments_read_and_publish_without_starting_work() {
     std::env::set_var("LF_HOME", directory.path());
     let repo = directory.path().join("repo");
     std::fs::create_dir_all(repo.join(".lf")).unwrap();
-    std::fs::create_dir_all(repo.join("wave/product")).unwrap();
-    std::fs::create_dir_all(repo.join("wave/other")).unwrap();
+    std::fs::create_dir_all(repo.join(".lf/wave/product")).unwrap();
+    std::fs::create_dir_all(repo.join(".lf/wave/other")).unwrap();
     for args in [
         vec!["init", "-q"],
         vec![
@@ -184,7 +184,7 @@ async fn task_comments_read_and_publish_without_starting_work() {
     std::fs::write(repo.join(".lf/config.yaml"), "linear:\n  team: team-1\n").unwrap();
     for (wave, initiative) in [("product", "initiative-1"), ("other", "initiative-2")] {
         std::fs::write(
-            repo.join(format!("wave/{wave}/GOAL.md")),
+            repo.join(format!(".lf/wave/{wave}/GOAL.md")),
             format!("---\nlinear:\n  initiative: {initiative}\n---\nMandate.\n"),
         )
         .unwrap();

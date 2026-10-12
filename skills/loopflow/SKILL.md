@@ -1,6 +1,6 @@
 ---
 name: loopflow
-description: Operate a repository through loopflow (`lf`) — persistent Wave, Project, and Task Work, PRs, and typed control. Use when a repo contains `.lf/` or `wave/`, or when the user mentions loopflow, waves, or `lf`.
+description: Operate a repository through loopflow (`lf`) — persistent Wave, Project, and Task Work, PRs, and typed control. Use when a repo contains `.lf/`, or when the user mentions loopflow, waves, or `lf`.
 ---
 
 # Operating Through Loopflow
@@ -126,7 +126,7 @@ Answer the user's message in turn text. Tasks, Projects, and Waves communicate
 through durable Task facts and targeted Ask Sessions.
 
 Sessions are the conversation surface. Work Steer is the live correction path. When the
-active skill calls for a durable Wave learning, edit `wave/<name>/MEMORY.md`
+active skill calls for a durable Wave learning, edit `.lf/wave/<name>/MEMORY.md`
 through the ordinary repository workflow. Keep it curated rather than appending
 a transcript. `realign` reconciles memory with the plan and code; no live Wave
 is required.

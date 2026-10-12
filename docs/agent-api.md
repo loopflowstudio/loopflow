@@ -141,7 +141,7 @@ skills. Edit their definition or goal when the guidance should persist.
 
 ## Memory
 
-`wave/<name>/MEMORY.md` is the Wave's durable memory. Read or edit it through
+`.lf/wave/<name>/MEMORY.md` is the Wave's durable memory. Read or edit it through
 the ordinary repository workflow; the file is truth, running Wave or not, and
 there is no separate CLI or server surface for it.
 

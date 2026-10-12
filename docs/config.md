@@ -93,7 +93,7 @@ context_budgets:
   scratch_tokens: 8000
 ```
 
-Override individual fields for a Wave in `wave/<name>/GOAL.md` frontmatter:
+Override individual fields for a Wave in `.lf/wave/<name>/GOAL.md` frontmatter:
 
 ```yaml
 ---
@@ -270,7 +270,7 @@ Each entry is a file (`README.md`), a glob (`'*.md'`), or a directory (`swift/`
 gathers `*.md` under it). Resolved paths appear in the context listing; file
 bodies are not inlined. This doesn't restrict which files the agent can edit.
 Scratch and the selected Wave's checkout Markdown are gathered automatically.
-Wave context reads `wave/<name>/` and each path-segment ancestor, excluding siblings
+Wave context reads `.lf/wave/<name>/` and each path-segment ancestor, excluding siblings
 and children; listings point to those files, not database snapshots.
 
 ### Branch Files (diff_files)

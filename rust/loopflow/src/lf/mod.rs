@@ -1498,7 +1498,7 @@ pub enum RepoCommand {
     Connect {
         /// Wave name (auto-detected if omitted)
         wave: Option<String>,
-        /// Recursively initialize every Wave under wave/
+        /// Recursively initialize every Wave under .lf/wave/
         #[arg(long, conflicts_with = "wave")]
         all: bool,
         /// Repository Team key = Task prefix (e.g. LOO). Defaults from the repository name.

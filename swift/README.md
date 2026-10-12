@@ -325,7 +325,7 @@ can take their place.
 
 Current Wave navigation reads `lf wave list --all --current --json`. The CLI excludes
 abandoned and retired registrations; unfiltered `lf wave list` retains historical
-registry visibility. Authored `wave/<name>/GOAL.md` files still appear before
+registry visibility. Authored `.lf/wave/<name>/GOAL.md` files still appear before
 their first registration.
 
 Repository scope filters the Work and Wave snapshots locally; live process

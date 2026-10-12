@@ -122,7 +122,7 @@ their durable owner before shipping.
 
 Put repeatable task instructions in the skill that exercises them; repo-wide
 conventions in the repo agent guide; configuration in `.lf/config.yaml`.
-Edit Wave `wave/<address>/GOAL.md` and `MEMORY.md` like any other files in the
+Edit Wave `.lf/wave/<address>/GOAL.md` and `MEMORY.md` like any other files in the
 checkout; launches read them directly. Curate decisions through `realign`. Child
 memories live in nested directories; find relevant ones with filesystem tools.
 Do not create miscellaneous `.lf/` handoff notes or copy maintainer
@@ -156,7 +156,7 @@ Bring the plan and the implementation into agreement with what the work has taug
    from the supplied conversation, review feedback, plan, and relevant code. Read existing
    evidence and inspect the affected behavior. Use the context available;
    do not require a Task, branch, previous pass, or particular document layout.
-   When the work identifies a Wave, read its objective and `wave/<name>/MEMORY.md`
+   When the work identifies a Wave, read its objective and `.lf/wave/<name>/MEMORY.md`
    alongside the plan. Recover accepted decisions, lessons, and evidence limits
    that should shape the work. Use supplied Wave context or the repository's
    memory location; do not invent a Wave for unbound work.
@@ -188,7 +188,7 @@ Bring the plan and the implementation into agreement with what the work has taug
    When a change needs a product decision, show the exact choice and leave it
    unresolved. Do not silently promote a proposal into an accepted decision.
 
-   Before curating the selected Wave's memory, inspect `wave/<address>/` with
+   Before curating the selected Wave's memory, inspect `.lf/wave/<address>/` with
    ordinary filesystem tools for immediate child directories containing
    `MEMORY.md`, including scopes without a `GOAL.md` or registry entry. Read
    those memories for lessons that apply across the parent scope. For large

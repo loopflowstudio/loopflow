@@ -1,7 +1,7 @@
 # Authoring
 
 The prompt library lives in your repo and is reviewed like code: skills
-and flows under `.lf/`, goals under `wave/`. This page is how to
+and flows under `.lf/`, goals under `.lf/wave/`. This page is how to
 write each one well. Where they resolve and what ships builtin is reference —
 see [`lf` → Skills](lf.md#skills).
 
@@ -324,7 +324,7 @@ receives only Task direction newer than its last run. The option works on any
 body is the prompt the wave runs each wake.
 
 ```markdown
-<!-- wave/infra/GOAL.md -->
+<!-- .lf/wave/infra/GOAL.md -->
 
 ## Objective
 
@@ -342,7 +342,7 @@ blast radius crosses storage, auth, or public APIs.
 The two sections carry different weight. **Objective** is identity — what this
 wave is for and how it moves. **Process** is constraint — when to design first,
 what never to touch. Project definitions and KRs live in Linear. Official live
-measurement lives in reviewed `wave/<wave>/metrics/*.md` contracts, not a
+measurement lives in reviewed `.lf/wave/<wave>/metrics/*.md` contracts, not a
 `GOAL.md` Measures section.
 
 ### Frontmatter
@@ -431,7 +431,7 @@ while keeping local detail in the child. Unread coverage stays explicit.
 ## Adaptation
 
 Curate durable lessons and decisions in the owning Wave's
-`wave/<name>/MEMORY.md`. Identify the owner from the work's context and Wave
+`.lf/wave/<name>/MEMORY.md`. Identify the owner from the work's context and Wave
 objectives. A repository with no Waves gets one named for the repository, with
 a repo-wide GOAL grounded in its purpose and a MEMORY for durable lessons.
 This local setup needs no PM binding or running Wave. If existing Waves leave

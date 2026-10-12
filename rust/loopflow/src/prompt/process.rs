@@ -347,7 +347,7 @@ Test skill body.
         )
         .unwrap();
         for scope in ["infrastructure", "infrastructure/release"] {
-            let directory = tmp.path().join("wave").join(scope);
+            let directory = tmp.path().join(".lf/wave").join(scope);
             fs::create_dir_all(&directory).unwrap();
             fs::write(directory.join("MEMORY.md"), "Keep rollback available.").unwrap();
         }
@@ -359,8 +359,8 @@ Test skill body.
                     docs: vec![
                         "LOOPFLOW.md".into(),
                         "custom/LOOPFLOW.md".into(),
-                        "wave/infrastructure/MEMORY.md".into(),
-                        "wave/infrastructure/release/MEMORY.md".into(),
+                        ".lf/wave/infrastructure/MEMORY.md".into(),
+                        ".lf/wave/infrastructure/release/MEMORY.md".into(),
                     ],
                     no_loopflow,
                     ..Default::default()
@@ -477,9 +477,9 @@ Test skill body.
         let intent = "> $kickoff\n> ok just run kickoff here then";
         fs::write(tmp.path().join("scratch/plan.md"), plan).unwrap();
         fs::write(tmp.path().join("scratch/nested/intent.md"), intent).unwrap();
-        fs::create_dir_all(tmp.path().join("wave/product")).unwrap();
+        fs::create_dir_all(tmp.path().join(".lf/wave/product")).unwrap();
         fs::write(
-            tmp.path().join("wave/product/MEMORY.md"),
+            tmp.path().join(".lf/wave/product/MEMORY.md"),
             "Jack previously invoked $kickoff.",
         )
         .unwrap();

@@ -4526,9 +4526,9 @@ mod tests {
             let repo = loopflow_test_support::TestRepo::new();
             let fixture = runtime.block_on(task_fixture_at("EXISTING", repo.path().to_path_buf()));
             std::env::set_var("LF_HOME", fixture._database.path());
-            std::fs::create_dir_all(repo.path().join("wave/task-recovery")).unwrap();
+            std::fs::create_dir_all(repo.path().join(".lf/wave/task-recovery")).unwrap();
             std::fs::write(
-                repo.path().join("wave/task-recovery/GOAL.md"),
+                repo.path().join(".lf/wave/task-recovery/GOAL.md"),
                 "Recover work.",
             )
             .unwrap();

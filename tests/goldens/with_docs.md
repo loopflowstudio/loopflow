@@ -122,7 +122,7 @@ their durable owner before shipping.
 
 Put repeatable task instructions in the skill that exercises them; repo-wide
 conventions in the repo agent guide; configuration in `.lf/config.yaml`.
-Edit Wave `wave/<address>/GOAL.md` and `MEMORY.md` like any other files in the
+Edit Wave `.lf/wave/<address>/GOAL.md` and `MEMORY.md` like any other files in the
 checkout; launches read them directly. Curate decisions through `realign`. Child
 memories live in nested directories; find relevant ones with filesystem tools.
 Do not create miscellaneous `.lf/` handoff notes or copy maintainer
@@ -153,9 +153,9 @@ Wave: rust (context refreshed by provider hooks)
 
 Reference: scratch/design.md (32 UTF-8 bytes)
 
-Reference: wave/rust/MEMORY.md (87 UTF-8 bytes)
+Reference: .lf/wave/rust/MEMORY.md (87 UTF-8 bytes)
 
-Reference: wave/rust/README.md (39 UTF-8 bytes)
+Reference: .lf/wave/rust/README.md (39 UTF-8 bytes)
 
 Reference: README.md (26 UTF-8 bytes)
 

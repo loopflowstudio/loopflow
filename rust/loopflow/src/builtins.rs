@@ -222,7 +222,7 @@ mod tests {
         assert!(init.contains("Loopflow is not primarily a prompt launcher"));
         assert!(init.contains("Installed harnesses are a capability of this Machine"));
         assert!(init.contains("team-wide repo configuration"));
-        assert!(init.contains("wave/<name>/MEMORY.md"));
+        assert!(init.contains(".lf/wave/<name>/MEMORY.md"));
         assert!(!init.contains("lf memory"));
         assert!(!init.contains("git remote -v"));
         assert!(!init.contains("lf doctor --json"));

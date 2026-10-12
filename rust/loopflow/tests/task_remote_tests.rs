@@ -34,8 +34,11 @@ fn source(branch: &str, commit: &str) -> String {
 #[test]
 fn machine_selector_acquires_unknown_planning_and_reuses_the_pushed_checkout() {
     let repo = TestRepo::new();
-    repo.create_file("wave/task-pr-tests/GOAL.md", "Keep work.\n");
-    repo.create_file("wave/task-pr-tests/MEMORY.md", "Retain fixture context.\n");
+    repo.create_file(".lf/wave/task-pr-tests/GOAL.md", "Keep work.\n");
+    repo.create_file(
+        ".lf/wave/task-pr-tests/MEMORY.md",
+        "Retain fixture context.\n",
+    );
     repo.stage_all();
     repo.commit("Author local-only planning intent");
     repo.push();

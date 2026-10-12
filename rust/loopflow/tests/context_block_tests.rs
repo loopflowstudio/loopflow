@@ -46,14 +46,14 @@ fn hook_refreshes_checkout_ancestors_and_scratch_without_replaying_the_request()
     let home = tempfile::tempdir().unwrap();
     fs::create_dir_all(home.path().join("machine")).unwrap();
     let repo_path = repo.path().canonicalize().unwrap();
-    fs::create_dir_all(repo.path().join("wave/parent/child")).unwrap();
+    fs::create_dir_all(repo.path().join(".lf/wave/parent/child")).unwrap();
     fs::write(
-        repo.path().join("wave/parent/child/MEMORY.md"),
+        repo.path().join(".lf/wave/parent/child/MEMORY.md"),
         "Current checkout memory",
     )
     .unwrap();
     fs::write(
-        repo.path().join("wave/parent/MEMORY.md"),
+        repo.path().join(".lf/wave/parent/MEMORY.md"),
         "Inherited checkout direction",
     )
     .unwrap();
@@ -79,12 +79,12 @@ fn hook_refreshes_checkout_ancestors_and_scratch_without_replaying_the_request()
     assert!(!start.contains("Saved active skill\n"));
 
     fs::write(
-        repo.path().join("wave/parent/MEMORY.md"),
+        repo.path().join(".lf/wave/parent/MEMORY.md"),
         "Fresh inherited direction",
     )
     .unwrap();
     fs::write(
-        repo.path().join("wave/parent/child/MEMORY.md"),
+        repo.path().join(".lf/wave/parent/child/MEMORY.md"),
         "Fresh child memory",
     )
     .unwrap();
@@ -122,7 +122,7 @@ fn hook_refreshes_checkout_ancestors_and_scratch_without_replaying_the_request()
         .as_array()
         .unwrap()
         .iter()
-        .filter(|file| file["source"].as_str().unwrap().starts_with("wave/"))
+        .filter(|file| file["source"].as_str().unwrap().starts_with(".lf/wave/"))
         .collect();
     assert_eq!(wave_files.len(), 2);
     for file in wave_files {

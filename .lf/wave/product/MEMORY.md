@@ -63,7 +63,7 @@ and herdr Task publication remain unproven. No host integration was added.
 Native resume's **Loopflow operating guide** is one repeated observation;
 first-content naming stays a hypothesis. Preserve native hooks/titles before
 adding outer Flow metadata that could obscure attention. Jack authorized landing
-the fix after these demos; remaining trials keep LOO-421 open. [Findings](../../docs/reviews/terminal-host-trial.md)
+the fix after these demos; remaining trials keep LOO-421 open. [Findings](../../../docs/reviews/terminal-host-trial.md)
 preserve evidence and limits. No external-progress proof.
 
 ## Live Home reconciliation (2026-10-05)
@@ -291,7 +291,7 @@ disabled-cron observation: `6448e3c9e:wave/product/MEMORY.md`, this heading.
 An operator once reported `next_move.owner: wave` as someone else's handoff:
 name the reader's own responsibility explicitly. Nothing re-invokes a
 conversation. Inspect every Flow/unfinished Exec against `lf ps --json` before
-launching again. The [review](../../docs/reviews/session-operate-prompts.md) has
+launching again. The [review](../../../docs/reviews/session-operate-prompts.md) has
 simulations and two read-only model runs, not installed proof. Open conversations
 keep old instructions until `lf session replace`.
 
@@ -344,7 +344,7 @@ snapshot/`lf`, five samples, load 32–65: warm 152 ms and reopen 38 ms versus
 9–10 s; one window, no Task-link sheet. Cold stays 8.4 s behind one `lf` read.
 Fast OCR split `LOO- 368` and timed out a 9/9 sweep: verify the observer
 before blaming the product. LOO-376 owned startup; its performance acceptance
-was retired October 7 (see below). [Evidence](../../scripts/benchmarks/desktop-performance/20261005-task-open/README.md).
+was retired October 7 (see below). [Evidence](../../../scripts/benchmarks/desktop-performance/20261005-task-open/README.md).
 
 Jack Heart requested current work without obsolete duplicates, completed Tasks
 hidden initially, and Show completed with 7 days, positive N days and All time
@@ -379,7 +379,7 @@ queue gate and native visual/focus review remain separate. Jack's Growth screens
 shows six current Tasks without the seven duplicates. The isolated offline capture
 has no successful completions or Sessions, so it cannot prove recency or native
 Session continuation. Live refresh and retained-Session review remain unproven.
-See [the review evidence](../../docs/reviews/task-history.md). These observations
+See [the review evidence](../../../docs/reviews/task-history.md). These observations
 provide no sustained-use KR or external-progress credit.
 
 ## Ask removal decision (2026-10-01)
@@ -457,8 +457,8 @@ Primary Sessions runtime moved to LOO-364.
 Jack also accepted ordinary Projects independent of optional chapter coordination
 (LOO-366), and a Task admission/completion audit (LOO-367). Task supplies purpose and
 continuity to Flows, not separate execution semantics. See
-[the dated review and retained design references](../../docs/reviews/task-workspace.md)
-and [research](../../docs/reviews/independent-operations.md). These decisions do not
+[the dated review and retained design references](../../../docs/reviews/task-workspace.md)
+and [research](../../../docs/reviews/independent-operations.md). These decisions do not
 authorize an automatic Project reset, Task cancellation or claims of measured gains.
 
 ## CI repair and waited landing (2026-10-01, reconciled 2026-10-08)
@@ -637,7 +637,7 @@ merge, Task completion or individual scenario coverage. The
 [design and evidence ledger](https://github.com/loopflowstudio/loopflow/blob/611ed031a031e6798652a15b5d250ba0f132a4e8/scratch/file-browser.md)
 and [demo feedback](https://github.com/loopflowstudio/loopflow/blob/611ed031a031e6798652a15b5d250ba0f132a4e8/scratch/file-browser-demo-feedback.md)
 preserve the failed attempts and superseded proposals. Current usage lives in
-[the Mac README](../../swift/README.md) and [CLI reference](../../docs/lf.md).
+[the Mac README](../../../swift/README.md) and [CLI reference](../../../docs/lf.md).
 
 - **Task placement owns both surfaces.** The September 30 internal cut expands
   the original `scratch/` and `diff` navigator to paged immediate directories,
@@ -821,7 +821,7 @@ deleted Monitor scenarios no longer compare. Retain these obligations:
 ## Chapter decisions and review lessons (2026-09-23)
 
 The accepted start, not the summer draft, is frozen at
-[the chapter start](../../.lf/chapters/20260923T000959Z-502f011b/start.md)
+[the chapter start](../../../.lf/chapters/20260923T000959Z-502f011b/start.md)
 (23 September–21 October). Gate 2 accepted planning, not publication. The later
 September 24 hierarchy decisions govern. Historical KR counts and dated review
 mechanics remain at `b1e3f623a:wave/product/MEMORY.md`, this heading.
@@ -1122,4 +1122,4 @@ proof; LOO-282 client provenance; LOO-283 the shared-viewing comparison.
   existing databases without a required column. Preserve released migrations and
   test upgrades from the released frontier. The incident detail and June's
   superseded remote-client recipes are in the
-  [pre-chapter memory](../../.lf/chapters/20260923T000959Z-502f011b/sources/wave/product/MEMORY.md). AGENTS.md owns the current one-draft-per-Task rule.
+  [pre-chapter memory](../../../.lf/chapters/20260923T000959Z-502f011b/sources/wave/product/MEMORY.md). AGENTS.md owns the current one-draft-per-Task rule.

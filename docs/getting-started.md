@@ -26,7 +26,7 @@ A single prompt (`lf debug -c`, `lf : "..."`) needs only the first three.
 | I want to... | Start here |
 |---|---|
 | Try loopflow from terminal | `lf init` |
-| Run autonomous waves | Author `wave/<name>/GOAL.md`, open it in Loopflow (macOS) |
+| Run autonomous waves | Author `.lf/wave/<name>/GOAL.md`, open it in Loopflow (macOS) |
 | Steer and inspect from terminal | `lf --wave <name> wave-operate` → `lf wave status` |
 | Run on another machine | `lf --machine <machine-id> --wave <name> wave-operate` ([Go Remote](#go-remote)) |
 
@@ -228,7 +228,7 @@ lf wave status shipper
 lf ps --json
 ```
 
-Author `wave/shipper/GOAL.md` with an objective and operating guidance. Optional
+Author `.lf/wave/shipper/GOAL.md` with an objective and operating guidance. Optional
 `crons:` schedules recurring commands; `pm:` connects shared planning. Each
 `wave-operate` invocation reviews the plan and keeps every started Task moving.
 Tasks own implementation in stable worktrees; `lf land` hands off delivery and

@@ -1828,7 +1828,7 @@ for line in sys.stdin:
         );
         let goal =
             "## Objective\nShip a reliable release.\n\n## Bounds\nKeep rollback available.\n";
-        repo.create_file("wave/release/GOAL.md", goal);
+        repo.create_file(".lf/wave/release/GOAL.md", goal);
         let store =
             crate::store::sqlite::SqliteStore::open_ephemeral(&home.path().join(".lf/loopflow.db"))
                 .unwrap();
@@ -1871,7 +1871,7 @@ for line in sys.stdin:
                     source: DocumentSource::Scratch,
                 },
                 Document {
-                    path: "wave/product/MEMORY.md".into(),
+                    path: ".lf/wave/product/MEMORY.md".into(),
                     content: "Earlier $design".into(),
                     source: DocumentSource::Wave,
                 },
@@ -1962,7 +1962,7 @@ for line in sys.stdin:
     fn attributed_context_keeps_nested_message_and_repeated_channel_sources() {
         let components = PromptComponents {
             docs: vec![Document {
-                path: "wave/product/MEMORY.md".to_string(),
+                path: ".lf/wave/product/MEMORY.md".to_string(),
                 content: "MEMORY".to_string(),
                 source: DocumentSource::Wave,
             }],

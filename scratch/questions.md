@@ -7,8 +7,7 @@
 - Which actual fork-publication, sparse/submodule/LFS and setup-heavy repositories
   should define the next acceptance cases? Default-base integration now follows
   Git tracking; publication/stack/host assumptions still need a coherent cut.
-- How should repository preparation checks be expressed without hardcoding
-  `scratch-clear` or duplicating the host's required-check policy?
+- Scratch cleanup follows Jack Heart's 2026-10-12 direction in `levels-of-lf`: clear Flow-added scratch by default, preserve pre-existing files. Reconcile this branch's opt-in setting and `scratch-clear` CI classification with that implementation; do not design a separate policy here.
 - Is GitHub enough for the first invitations? A second host needs identity,
   publication, review reads and completion together, not a command override.
 - Does two-example parent inference match expectations for mixed-tool repos?

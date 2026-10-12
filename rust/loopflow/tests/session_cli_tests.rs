@@ -673,9 +673,9 @@ for line in sys.stdin:
         caller.to_str().unwrap().into(),
     );
     store.create_wave(&wave).unwrap();
-    std::fs::create_dir_all(saved.join("wave/caller-wave")).unwrap();
+    std::fs::create_dir_all(saved.join(".lf/wave/caller-wave")).unwrap();
     std::fs::write(
-        saved.join("wave/caller-wave/GOAL.md"),
+        saved.join(".lf/wave/caller-wave/GOAL.md"),
         "CALLER_WAVE_CONTEXT",
     )
     .unwrap();

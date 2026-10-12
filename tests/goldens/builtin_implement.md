@@ -122,7 +122,7 @@ their durable owner before shipping.
 
 Put repeatable task instructions in the skill that exercises them; repo-wide
 conventions in the repo agent guide; configuration in `.lf/config.yaml`.
-Edit Wave `wave/<address>/GOAL.md` and `MEMORY.md` like any other files in the
+Edit Wave `.lf/wave/<address>/GOAL.md` and `MEMORY.md` like any other files in the
 checkout; launches read them directly. Curate decisions through `realign`. Child
 memories live in nested directories; find relevant ones with filesystem tools.
 Do not create miscellaneous `.lf/` handoff notes or copy maintainer
@@ -268,7 +268,7 @@ Metric proposals are discoveries, not a completion quota.
 
 ## Wave context
 
-If `<lf:wave>` is present, check `wave/<wave>/GOAL.md` and `MEMORY.md` in docs:
+If `<lf:wave>` is present, check `.lf/wave/<wave>/GOAL.md` and `MEMORY.md` in docs:
 
 - Follow the wave's intent and principles during implementation
 - Respect decisions and constraints recorded in `MEMORY.md`

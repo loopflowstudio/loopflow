@@ -242,7 +242,7 @@ pub(crate) async fn resolve_context(
     let repository = resolve_repository_context(repo).await?;
     let initiative = read_initiative(repo, wave).ok_or_else(|| {
         OpsError::Message(format!(
-            "wave/{wave}/GOAL.md has no `linear.initiative`. \
+            ".lf/wave/{wave}/GOAL.md has no `linear.initiative`. \
              Run `lf repo connect {wave}` to connect its Linear Initiative."
         ))
     })?;
@@ -1207,7 +1207,7 @@ async fn apply_or_plan_repository_reteam(
         })?;
         if let Some(owner) = seen_initiatives.insert(initiative.clone(), wave.clone()) {
             return Err(OpsError::Message(format!(
-                "Linear Initiative {initiative} is bound by both wave/{owner} and wave/{wave}; repair GOAL.md ownership before reteam"
+                "Linear Initiative {initiative} is bound by both .lf/wave/{owner} and .lf/wave/{wave}; repair GOAL.md ownership before reteam"
             )));
         }
         progress.status(&format!("preflighting wave/{wave} Initiative {initiative}"));
@@ -1468,13 +1468,13 @@ async fn refresh_async(
             if wave.parent_wave_id().is_some()
                 && wave.promoted_at().is_none()
                 && !origin
-                    .join("wave")
+                    .join(".lf/wave")
                     .join(wave.slug())
                     .join("GOAL.md")
                     .is_file()
             {
                 diagnostics.push(format!(
-                    "prepared child wave/{} has no GOAL.md; resume or abandon its promotion",
+                    "prepared child .lf/wave/{} has no GOAL.md; resume or abandon its promotion",
                     wave.slug()
                 ));
             }
@@ -1538,7 +1538,7 @@ async fn refresh_async(
     let mut wave_updates = Vec::new();
     let mut seen_projects: BTreeMap<String, String> = BTreeMap::new();
     for wave in &waves {
-        let goal = format!("wave/{wave}/GOAL.md");
+        let goal = format!(".lf/wave/{wave}/GOAL.md");
         let Some(content) = crate::git::show_file(repo, &summary_revision, &goal)? else {
             let message = format!(
                 "{goal} is missing on default branch {default_branch}; cannot sync its summary"
@@ -1572,7 +1572,7 @@ async fn refresh_async(
         }
         if summary.is_some() {
             actions.push(format!(
-                "update Linear Initiative {initiative_id} summary from {default_branch}:wave/{wave}/GOAL.md"
+                "update Linear Initiative {initiative_id} summary from {default_branch}:.lf/wave/{wave}/GOAL.md"
             ));
         }
 
@@ -2188,7 +2188,7 @@ mod tests {
     }
 
     fn write_goal(repo: &Path, wave: &str, frontmatter: &str) {
-        let dir = repo.join("wave").join(wave);
+        let dir = repo.join(".lf/wave").join(wave);
         std::fs::create_dir_all(&dir).expect("create wave dir");
         std::fs::write(
             dir.join("GOAL.md"),
@@ -2379,7 +2379,7 @@ mod tests {
             "agent: codex\nplanning:\n  provider: git\n  shared: colleagues\n",
         );
         write_goal(repo.path(), "product", "agent: claude\n");
-        let goal = repo.path().join("wave/product/GOAL.md");
+        let goal = repo.path().join(".lf/wave/product/GOAL.md");
 
         write_repository_linear_config(repo.path(), "team-product").unwrap();
         write_initiative_to_goal(repo.path(), "product", "initiative-product").unwrap();

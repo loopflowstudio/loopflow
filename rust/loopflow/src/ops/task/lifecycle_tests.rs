@@ -362,9 +362,9 @@ fn fixture(
         "linear:\n  team: team-1\n",
     )
     .unwrap();
-    std::fs::create_dir_all(repo.path().join("wave/product")).unwrap();
+    std::fs::create_dir_all(repo.path().join(".lf/wave/product")).unwrap();
     std::fs::write(
-        repo.path().join("wave/product/GOAL.md"),
+        repo.path().join(".lf/wave/product/GOAL.md"),
         "---\nlinear:\n  initiative: initiative-1\n---\nProduct\n",
     )
     .unwrap();

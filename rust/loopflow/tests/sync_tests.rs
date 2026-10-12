@@ -842,7 +842,7 @@ fn wave_changes_are_protected() {
     let _env = EnvGuard::new(&[]);
     let repo = TestRepo::new();
     repo.create_branch("feature");
-    repo.create_file("wave/goals/MEMORY.md", "state");
+    repo.create_file(".lf/wave/goals/MEMORY.md", "state");
     repo.stage_all();
     repo.commit("update wave memory");
 

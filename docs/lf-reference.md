@@ -776,7 +776,7 @@ Connect a Wave to its Initiative and the repository's Team (Task prefix)
 | Argument | What it does |
 |---|---|
 | `<wave>` | Wave name (auto-detected if omitted) |
-| `--all` | Recursively initialize every Wave under wave/ Default: false. |
+| `--all` | Recursively initialize every Wave under .lf/wave/ Default: false. |
 | `--team-key` | Repository Team key = Task prefix (e.g. LOO). Defaults from the repository name |
 | `--team-name` | Repository Team display name. Defaults to the repository name |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |

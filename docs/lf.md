@@ -183,7 +183,7 @@ Reads create nothing.
 
 ```bash
 lf wave ensure parser
-# Edit wave/parser/GOAL.md and wave/parser/MEMORY.md directly.
+# Edit .lf/wave/parser/GOAL.md and .lf/wave/parser/MEMORY.md directly.
 lf task create --wave parser --title "Retain escaped quotes"
 ```
 
@@ -227,8 +227,8 @@ Readback cannot protect against unseen concurrent provider writes.
 Ranks are zero-based within a Project. Selected workflow definitions stay in SQLite
 for every Wave; Desktop’s Customize and Edit controls use the same editor. Stored
 definitions are imported by `lf wave ensure`; builtin definitions remain available.
-Nested Waves use names such as `parser/tokenizer`. Edit `wave/<name>/GOAL.md`
-and `wave/<name>/MEMORY.md` like any other file; the next launch reads that
+Nested Waves use names such as `parser/tokenizer`. Edit `.lf/wave/<name>/GOAL.md`
+and `.lf/wave/<name>/MEMORY.md` like any other file; the next launch reads that
 checkout's files, including ancestor context. Creation writes missing files without
 overwriting existing content. Registry renaming retains IDs and descendants;
 move the authored directory separately to match its new address. Workflow imports
@@ -653,7 +653,7 @@ lf session ensure --wave product     # separate persistent Wave conversation
 Inside the conversation's persistent checkout:
 
 ```bash
-lf commit -m "Record accepted decisions" wave/product/MEMORY.md
+lf commit -m "Record accepted decisions" .lf/wave/product/MEMORY.md
 lf pr publish
 ```
 

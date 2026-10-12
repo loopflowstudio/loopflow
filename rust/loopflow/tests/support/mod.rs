@@ -305,7 +305,7 @@ impl Drop for EnvGuard {
 pub fn bind_task_planning(repo: &TestRepo) {
     repo.create_file(".lf/config.yaml", "linear:\n  team: team-task-pr-tests\n");
     repo.create_file(
-        "wave/task-pr-tests/GOAL.md",
+        ".lf/wave/task-pr-tests/GOAL.md",
         "---\nlinear:\n  initiative: initiative-task-pr-tests\n---\nKeep work.\n",
     );
     repo.stage_all();

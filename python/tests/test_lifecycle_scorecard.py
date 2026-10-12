@@ -332,5 +332,5 @@ def test_generator_runs_with_current_tables_and_current_run_projection(
     assert (attempt["eligible"], attempt["measured"], attempt["p50"]) == (1, 1, 40)
     assert "Observed lower bound" in envelope["text"]
     # The accepted chapter retired task-loop-trust; reporting needs no metric contract.
-    assert not (tmp_path / "wave/product/metrics/task-loop-trust.md").exists()
+    assert not (tmp_path / ".lf/wave/product/metrics/task-loop-trust.md").exists()
     assert envelope["metric_observations"] == []

@@ -110,7 +110,7 @@ struct PortfolioRepoStateTests {
 
     @Test("createWave writes GOAL.md at the origin repo, not the worktree")
     func createWaveWritesAtOrigin() async throws {
-        // Authoring from a worktree rail must land wave/<name>/GOAL.md at the
+        // Authoring from a worktree rail must land .lf/wave/<name>/GOAL.md at the
         // ORIGIN — every reader (endpoint discovery, launcher, probe) resolves
         // the origin, so a worktree-local GOAL.md is a wave nobody finds.
         // Real git, like WaveOriginTests: the origin resolution is the point.
@@ -143,10 +143,10 @@ struct PortfolioRepoStateTests {
         let state = PortfolioRepoState(repo: repo)
         try await state.createWave(name: "goals")
 
-        let originGoal = origin.appendingPathComponent("wave/goals/GOAL.md")
-        let worktreeGoal = worktree.appendingPathComponent("wave/goals/GOAL.md")
+        let originGoal = origin.appendingPathComponent(".lf/wave/goals/GOAL.md")
+        let worktreeGoal = worktree.appendingPathComponent(".lf/wave/goals/GOAL.md")
         #expect(FileManager.default.fileExists(atPath: originGoal.path), "GOAL.md lands at the origin")
-        #expect(FileManager.default.fileExists(atPath: origin.appendingPathComponent("wave/goals/MEMORY.md").path))
+        #expect(FileManager.default.fileExists(atPath: origin.appendingPathComponent(".lf/wave/goals/MEMORY.md").path))
         #expect(!FileManager.default.fileExists(atPath: worktreeGoal.path), "nothing written into the worktree")
     }
 

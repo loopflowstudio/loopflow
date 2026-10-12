@@ -121,7 +121,7 @@ Metric proposals are discoveries, not a completion quota.
 
 ## Wave context
 
-If `<lf:wave>` is present, check `wave/<wave>/GOAL.md` and `MEMORY.md` in docs:
+If `<lf:wave>` is present, check `.lf/wave/<wave>/GOAL.md` and `MEMORY.md` in docs:
 
 - Follow the wave's intent and principles during implementation
 - Respect decisions and constraints recorded in `MEMORY.md`

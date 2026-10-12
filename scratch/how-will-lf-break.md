@@ -14,11 +14,28 @@ not evidence of Jack's acceptance of the resulting behavior.
 
 ## Placement
 
-Wave: [product](../wave/product/GOAL.md), confirmed by Jack Heart on 2026-10-12.
+Wave: [product](../.lf/wave/product/GOAL.md), confirmed by Jack Heart on 2026-10-12.
 This fits Product's ownership of external usefulness and the shared user contract.
 Companion `levels-of-lf` owns instruction tiers:
 launcher-only use remains useful without adopting Tasks or a planning service.
 This branch owns compatibility of the native operations those instructions use.
+
+## Scratch ownership — updated direction, 2026-10-12
+
+Jack Heart moved scratch policy to the companion `levels-of-lf` work:
+“we will clear whatever files we added in scratch as part of our flows by default.
+if your repo has scratch/FOO, pre-existing, no worries.” This supersedes this
+branch's repository-opt-in cleanup proposal as the intended end state; the
+opt-in code below describes the current implementation, not accepted policy.
+
+Follow the companion's implementation before integrating delivery changes here;
+do not build a competing scratch policy. Its working tree already selects
+branch-added paths through `git::scratch::{base, added}` and preserves existing
+files and edits. Branch-added is the observed mechanism, not yet proof of
+Flow authorship. Its design notes still describe an older opt-in policy.
+Reconcile the obsolete `clear_scratch_on_land` setting and CI classification
+with the companion's finished contract before delivery. Keep the pre-existing
+tracked/untracked-file and stacked-work preservation acceptance cases.
 
 ## Scope and decisions
 
@@ -161,7 +178,7 @@ model. Removing self-assignment fixes the misleading handoff; leaving queue
 strategy unset preserves host authority. The remaining hardcoded CI check and
 remote-role assumptions are explicit follow-ups rather than compatibility claims.
 
-Check: isolated `cargo test --offline -p loopflow` worktree/sync/Task-range suites and `--lib git::tests` — 102 passed; `uv run python scratch/demo-worktree-placement.py` — 4/4 layouts passed; `cargo fmt --check`, `cargo clippy --offline --all-targets -- -D warnings`, and `git diff --check` passed; complete platform/release matrix remains with CI.
+Check: canonical Wave migration — isolated Rust Wave/store/context/discovery/sync/DTO suites: 135 passed; Python path consumers: 63 passed; standalone Swift parser fixture passed; fmt, Clippy all-targets and diff checks passed; full Desktop tests deferred to CI (ViewInspector/Ghostty dependencies unavailable).
 
 ## Adaptive Git increment — 2026-10-12
 
@@ -194,3 +211,25 @@ layout demo passed again against the completed binary. Review finding: preservin
 Git tracking as the owner avoids a second remote policy; local targets and existing
 checkouts need no remote refresh. Remaining origin assumptions are explicitly
 limited above rather than represented as full fork compatibility.
+
+## Canonical Wave directory — accepted 2026-10-12
+
+Jack Heart approved `.lf/wave/` as the single authored Wave location and migration
+of this repository alongside the code. This is one indivisible path cutover:
+Rust readers/writers, context, metrics, sync classification, Desktop discovery
+and authoring, documentation, fixtures and the repository's Wave files move
+together. Wave identities, slugs, hierarchy, Tasks and planning storage survive;
+no database migration or alternate-path configuration is needed.
+
+**Delete — do not maintain:** top-level `wave/` path construction and repository
+definitions. No dual lookup, alias directory, or automatic takeover of another
+repository's arbitrary `wave/` directory. Preserve historical revision links and
+command/skill namespaces such as `wave/session`. Existing users move authored
+Wave definitions explicitly; this change migrates this checkout's definitions.
+
+**Implemented:** live consumers, repository files, documentation and fixtures now
+use `.lf/wave/`. The read/write fixture ignores and preserves a top-level
+lookalike directory. Review found and corrected metrics root resolution for
+the deeper path, and retained historical revision paths while updating live links.
+Headless verification: focused Rust Wave/config/context/metrics tests, Desktop
+parser tests where available, Python path-consumer tests, formatting and Clippy.

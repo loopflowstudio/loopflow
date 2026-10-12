@@ -135,7 +135,7 @@ unresolved choices. It supplies evidence for loop-decide without selecting its
 verdict. Mandatory replacement counts and pass ledgers confused that purpose
 with ceremony; designs can still require architecture-specific replacement
 proof. Independent audits and chapter histories retain their distinct readers.
-Authoring rules live in [PROMPTS.md](../../PROMPTS.md) and builtin prompt;
+Authoring rules live in [PROMPTS.md](../../../PROMPTS.md) and builtin prompt;
 reconciliation instructions live in builtin realign.
 
 Jack Heart requested retiring `update-wave` and `record-learnings`; the
@@ -148,7 +148,7 @@ their presence is not evidence that the source catalog still offers those skills
 Commit `1a1baa883` records passing prompt goldens, formatting, and all-target
 Clippy after the guidance reduction. Those checks establish rendered guidance
 and static validity, not installed skill refresh or successful live curation.
-Current Flow composition is documented in [CLI docs](../../docs/lf.md).
+Current Flow composition is documented in [CLI docs](../../../docs/lf.md).
 
 The [preserved design and proof limits](https://github.com/loopflowstudio/loopflow/blob/60ee8daff36b2c97ad5a6f30e1f5daa98a40bca4/scratch/realign.md)
 record passing assembled-prompt, export, catalog, and Flow checks. These prove
@@ -159,7 +159,7 @@ branch placement, live acceptance, or a prompting-outcome KR.
 
 ## Current evidence boundary (2026-09-23)
 
-The [accepted chapter](../../.lf/chapters/20260923T000959Z-502f011b/start.md)
+The [accepted chapter](../../../.lf/chapters/20260923T000959Z-502f011b/start.md)
 requires exact authored/submitted context, causal identities, an honest attempted-
 operation population, and usable reconstruction against long-lived records.
 Intelligence owns evidence; Infrastructure owns execution repair; Product judges
@@ -233,7 +233,7 @@ research were not all accepted commitments. Current Task directives govern scope
 
 ## Lessons from the retired SQLite ledger
 
-The [pre-chapter memory](../../.lf/chapters/20260923T000959Z-502f011b/sources/wave/intelligence/MEMORY.md)
+The [pre-chapter memory](../../../.lf/chapters/20260923T000959Z-502f011b/sources/wave/intelligence/MEMORY.md)
 retains exact migration, schema, dashboard and historical code-map details.
 Do not restore those paths to satisfy a present evidence gap.
 
@@ -328,7 +328,7 @@ Do not restore those paths to satisfy a present evidence gap.
 
 ## Wave memory
 
-- **`wave/<name>/MEMORY.md` is the whole durable memory.** There is no journal
+- **`.lf/wave/<name>/MEMORY.md` is the whole durable memory.** There is no journal
   delta, replay buffer, runtime copy, broadcast, HTTP write route, SSE frame, or
   second checkpoint to reconcile with it.
 - **Memory is Wave-owned, not process-owned.** A running listener or provider
@@ -412,6 +412,6 @@ and context contracts are documented in `docs/architecture/execution.md`.
 `RunSnapshot` is a disposable Run projection; `FinalAnswer` reports prose and
 exactness. Neither becomes a wire-model default or a source of execution authority.
 
-Wave memory remains committed `wave/<name>/MEMORY.md`, curated by ordinary
+Wave memory remains committed `.lf/wave/<name>/MEMORY.md`, curated by ordinary
 repository edits. There is no live delta, memory backend, or cross-machine replay
 protocol beside it.

@@ -206,7 +206,7 @@ struct WorkModelTests {
         defer { try? FileManager.default.removeItem(at: repo) }
         for name in ["infrastructure", "intelligence", "product"] {
             let wave = repo
-                .appendingPathComponent("wave", isDirectory: true)
+                .appendingPathComponent(".lf/wave", isDirectory: true)
                 .appendingPathComponent(name, isDirectory: true)
             try FileManager.default.createDirectory(at: wave, withIntermediateDirectories: true)
             try Data("# \(name)\n".utf8).write(to: wave.appendingPathComponent("GOAL.md"))
@@ -261,16 +261,16 @@ struct WorkModelTests {
         let origin = root.appendingPathComponent("repo", isDirectory: true)
         let worktree = root.appendingPathComponent("repo.wt", isDirectory: true)
         try FileManager.default.createDirectory(
-            at: origin.appendingPathComponent("wave/product", isDirectory: true),
+            at: origin.appendingPathComponent(".lf/wave/product", isDirectory: true),
             withIntermediateDirectories: true
         )
         try Data("# product\n".utf8).write(
-            to: origin.appendingPathComponent("wave/product/GOAL.md")
+            to: origin.appendingPathComponent(".lf/wave/product/GOAL.md")
         )
         defer { try? FileManager.default.removeItem(at: root) }
 
         try git(["init", "-q"], at: origin)
-        try git(["add", "wave/product/GOAL.md"], at: origin)
+        try git(["add", ".lf/wave/product/GOAL.md"], at: origin)
         try git(
             ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "init"],
             at: origin

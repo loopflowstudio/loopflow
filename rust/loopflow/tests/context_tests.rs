@@ -203,8 +203,12 @@ fn gather_context_with_wave() {
     let repo = temp.path();
     init_repo(repo);
 
-    fs::create_dir_all(repo.join("wave/auth")).unwrap();
-    fs::write(repo.join("wave/auth/README.md"), "# Auth Wave\nBuild auth.").unwrap();
+    fs::create_dir_all(repo.join(".lf/wave/auth")).unwrap();
+    fs::write(
+        repo.join(".lf/wave/auth/README.md"),
+        "# Auth Wave\nBuild auth.",
+    )
+    .unwrap();
     write_skill(repo, "implement", "Do work.");
     make_commit(repo, "initial");
 
@@ -337,9 +341,9 @@ fn format_prompt_includes_wave_context() {
     let repo = temp.path();
     init_repo(repo);
 
-    fs::create_dir_all(repo.join("wave/payments")).unwrap();
+    fs::create_dir_all(repo.join(".lf/wave/payments")).unwrap();
     fs::write(
-        repo.join("wave/payments/README.md"),
+        repo.join(".lf/wave/payments/README.md"),
         "# Payments\nStripe integration.",
     )
     .unwrap();
@@ -376,7 +380,7 @@ fn setup_multi_wave_repo(repo: &Path) {
         ("payments/stripe.md", "Stripe integration guide."),
         ("search/README.md", "Elastic search setup."),
     ] {
-        let path = repo.join("wave").join(path);
+        let path = repo.join(".lf/wave").join(path);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, text).unwrap();
     }
@@ -398,12 +402,12 @@ fn wave_filtering_includes_only_specified_wave() {
             .collect::<Vec<_>>(),
         [
             (
-                "wave/auth/README.md",
+                ".lf/wave/auth/README.md",
                 "Authentication system.",
                 DocumentSource::Wave
             ),
             (
-                "wave/auth/oauth.md",
+                ".lf/wave/auth/oauth.md",
                 "OAuth provider setup.",
                 DocumentSource::Wave
             ),
@@ -429,7 +433,7 @@ fn wave_filtering_excludes_waves_without_a_matching_selection() {
 #[test]
 fn wave_filtering_includes_all_markdown_in_path_order() {
     let repo = TempDir::new().unwrap();
-    let directory = repo.path().join("wave/features");
+    let directory = repo.path().join(".lf/wave/features");
     fs::create_dir_all(&directory).unwrap();
     let files = [
         "01-core.md",
@@ -448,7 +452,7 @@ fn wave_filtering_includes_all_markdown_in_path_order() {
     .unwrap();
     assert_eq!(docs.len(), files.len());
     for (doc, file) in docs.iter().zip(files) {
-        assert_eq!(doc.path, format!("wave/features/{file}"));
+        assert_eq!(doc.path, format!(".lf/wave/features/{file}"));
         assert_eq!(doc.content, file);
         assert_eq!(doc.source, DocumentSource::Wave);
     }
@@ -461,19 +465,22 @@ fn nested_wave_reads_checkout_ancestor_markdown_in_order() {
     let repo = temp.path();
     for (path, content) in [
         ("MEMORY.md", "Repository decisions"),
-        ("wave/infrastructure/README.md", "Parent introduction"),
-        ("wave/infrastructure/GOAL.md", "Parent goal"),
-        ("wave/infrastructure/MEMORY.md", "Parent decisions"),
-        ("wave/infrastructure/release/GOAL.md", "Release goal"),
-        ("wave/infrastructure/release/MEMORY.md", "Release decisions"),
-        ("wave/infrastructure/release/notes.md", "Release notes"),
-        ("wave/infrastructure/auth/MEMORY.md", "Sibling secrets"),
+        (".lf/wave/infrastructure/README.md", "Parent introduction"),
+        (".lf/wave/infrastructure/GOAL.md", "Parent goal"),
+        (".lf/wave/infrastructure/MEMORY.md", "Parent decisions"),
+        (".lf/wave/infrastructure/release/GOAL.md", "Release goal"),
         (
-            "wave/infrastructure/release/child/MEMORY.md",
+            ".lf/wave/infrastructure/release/MEMORY.md",
+            "Release decisions",
+        ),
+        (".lf/wave/infrastructure/release/notes.md", "Release notes"),
+        (".lf/wave/infrastructure/auth/MEMORY.md", "Sibling secrets"),
+        (
+            ".lf/wave/infrastructure/release/child/MEMORY.md",
             "Child details",
         ),
-        ("wave/product/MEMORY.md", "Unrelated details"),
-        ("wave/infrastructure/release/data.json", "Not Markdown"),
+        (".lf/wave/product/MEMORY.md", "Unrelated details"),
+        (".lf/wave/infrastructure/release/data.json", "Not Markdown"),
         ("scratch/deep/design.md", "Recursive scratch"),
     ] {
         let file = repo.join(path);
@@ -483,7 +490,7 @@ fn nested_wave_reads_checkout_ancestor_markdown_in_order() {
     let mut components = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
         wave: Some("infrastructure/release".into()),
-        docs: vec!["wave/infrastructure/release/GOAL.md".into()],
+        docs: vec![".lf/wave/infrastructure/release/GOAL.md".into()],
         ..Default::default()
     })
     .unwrap();
@@ -503,12 +510,12 @@ fn nested_wave_reads_checkout_ancestor_markdown_in_order() {
         paths,
         [
             "MEMORY.md",
-            "wave/infrastructure/GOAL.md",
-            "wave/infrastructure/MEMORY.md",
-            "wave/infrastructure/README.md",
-            "wave/infrastructure/release/GOAL.md",
-            "wave/infrastructure/release/MEMORY.md",
-            "wave/infrastructure/release/notes.md",
+            ".lf/wave/infrastructure/GOAL.md",
+            ".lf/wave/infrastructure/MEMORY.md",
+            ".lf/wave/infrastructure/README.md",
+            ".lf/wave/infrastructure/release/GOAL.md",
+            ".lf/wave/infrastructure/release/MEMORY.md",
+            ".lf/wave/infrastructure/release/notes.md",
         ]
     );
     let prompt = components
@@ -596,13 +603,13 @@ async fn worktree_reads_its_checkout_wave_memory() {
     let origin = temp.path().join("repo");
     fs::create_dir_all(&origin).unwrap();
     init_repo(&origin);
-    fs::create_dir_all(origin.join("wave/goals")).unwrap();
+    fs::create_dir_all(origin.join(".lf/wave/goals")).unwrap();
     fs::write(
-        origin.join("wave/goals/MEMORY.md"),
+        origin.join(".lf/wave/goals/MEMORY.md"),
         "- previous committed memory",
     )
     .unwrap();
-    fs::write(origin.join("wave/goals/GOAL.md"), "Origin goal.").unwrap();
+    fs::write(origin.join(".lf/wave/goals/GOAL.md"), "Origin goal.").unwrap();
     make_commit(&origin, "initial");
 
     // A sibling worktree, as `lf wave` bootstraps: <repo>.goals.
@@ -620,12 +627,12 @@ async fn worktree_reads_its_checkout_wave_memory() {
         .expect("git worktree add");
     // Checkout edits are the next launch context, independent of main.
     fs::write(
-        worktree.join("wave/goals/MEMORY.md"),
+        worktree.join(".lf/wave/goals/MEMORY.md"),
         "- checkout-local decisions",
     )
     .unwrap();
 
-    fs::write(worktree.join("wave/goals/GOAL.md"), "Checkout goal.").unwrap();
+    fs::write(worktree.join(".lf/wave/goals/GOAL.md"), "Checkout goal.").unwrap();
     loopflow::store::sqlite::SqliteStore::new(&loopflow::store::database_path_from_env().unwrap())
         .unwrap()
         .ensure_wave(origin.canonicalize().unwrap().to_str().unwrap(), "goals")

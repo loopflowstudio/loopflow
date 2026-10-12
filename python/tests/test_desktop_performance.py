@@ -178,8 +178,8 @@ def test_repository_inputs_keep_exact_authored_files_and_missing_evidence(tmp_pa
     repo = tmp_path / "repository"
     (repo / ".lf").mkdir(parents=True)
     (repo / ".lf/config.yaml").write_text("pm: {}\n")
-    (repo / "wave/current").mkdir(parents=True)
-    (repo / "wave/current/GOAL.md").write_text("Current goal")
+    (repo / ".lf/wave/current").mkdir(parents=True)
+    (repo / ".lf/wave/current/GOAL.md").write_text("Current goal")
     database = tmp_path / "schema.db"
     with sqlite3.connect(database) as db:
         db.execute("CREATE TABLE waves(repo TEXT, name TEXT)")
@@ -189,7 +189,7 @@ def test_repository_inputs_keep_exact_authored_files_and_missing_evidence(tmp_pa
     inputs = performance._repository_configs(database)
     assert len(inputs) == 3
     assert {entry["path"]: entry["sha256"] for entry in inputs}[
-        str(repo / "wave/missing/GOAL.md")
+        str(repo / ".lf/wave/missing/GOAL.md")
     ] is None
     assert all(entry["sha256"] for entry in inputs if "missing" not in entry["path"])
 

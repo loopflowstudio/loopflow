@@ -81,7 +81,7 @@ pub struct GatherSpec {
     /// Specific files to include in context.
     pub files: Vec<String>,
     pub include_files: bool,
-    /// Wave name for wave/ scoping.
+    /// Wave name for .lf/wave/ scoping.
     pub wave: Option<String>,
     /// Related repos resolved from the edge graph.
     pub related_repos: Vec<RelatedRepoContext>,
@@ -101,7 +101,7 @@ pub struct GatherContextOpts {
     pub docs: Vec<String>,
     /// Specific files to include in context.
     pub files: Vec<String>,
-    /// Wave name for wave/ scoping.
+    /// Wave name for .lf/wave/ scoping.
     pub wave: Option<String>,
     pub include_diff: bool,
     pub include_diff_files: bool,
@@ -536,7 +536,7 @@ fn gather_wave_docs(repo_root: &Path, wave: Option<&str>) -> Result<Vec<Document
             prefix.push('/');
         }
         prefix.push_str(segment);
-        let directory = repo_root.join("wave").join(&prefix);
+        let directory = repo_root.join(".lf/wave").join(&prefix);
         let entries = match std::fs::read_dir(&directory) {
             Ok(entries) => entries,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
@@ -556,7 +556,7 @@ fn gather_wave_docs(repo_root: &Path, wave: Option<&str>) -> Result<Vec<Document
                 .to_string_lossy();
             let content = std::fs::read_to_string(&path)?;
             docs.push(Document {
-                path: format!("wave/{prefix}/{name}"),
+                path: format!(".lf/wave/{prefix}/{name}"),
                 content,
                 source: DocumentSource::Wave,
             });
@@ -1678,7 +1678,7 @@ mod tests {
     #[test]
     fn wave_context_reads_fresh_checkout_files_without_a_registry() {
         let repo = tempfile::tempdir().unwrap();
-        let parent = repo.path().join("wave/tools");
+        let parent = repo.path().join(".lf/wave/tools");
         let child = parent.join("parser");
         std::fs::create_dir_all(&child).unwrap();
         std::fs::write(parent.join("MEMORY.md"), "Inherited decision").unwrap();

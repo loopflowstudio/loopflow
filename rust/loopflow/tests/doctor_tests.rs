@@ -202,13 +202,13 @@ fn copied_production_history_does_not_block_the_telemetry_scorecard() {
     )
     .unwrap();
     fs::create_dir_all(home.path().join("performance")).unwrap();
-    fs::create_dir_all(home.path().join("wave/product/metrics")).unwrap();
+    fs::create_dir_all(home.path().join(".lf/wave/product/metrics")).unwrap();
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     for file in ["scripts/lifecycle_scorecard.py", "performance/budgets.json"] {
         fs::copy(source.join(file), home.path().join(file)).unwrap();
     }
     fs::write(
-        home.path().join("wave/product/metrics/task-loop-trust.md"),
+        home.path().join(".lf/wave/product/metrics/task-loop-trust.md"),
         "---\nschema: 1\nid: task-loop-trust\nstage: installed\ninstrument: lifecycle-scorecard\nunit: ratio\nwindow: 7d\nfreshness: 30h\n---\n\n# Task loops earn trust\n\nCount settled Task loops.\n",
     )
     .unwrap();

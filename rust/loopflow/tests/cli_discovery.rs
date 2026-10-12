@@ -754,13 +754,13 @@ fn flow_help_validates_expansion_and_review_boundaries_without_effects() {
 fn wave_catalog_reads_imported_definitions_and_keeps_empty_goals() {
     let repo = fixture();
     let home = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(repo.path().join("wave/parent/child")).unwrap();
+    std::fs::create_dir_all(repo.path().join(".lf/wave/parent/child")).unwrap();
     std::fs::write(
-        repo.path().join("wave/parent/GOAL.md"),
+        repo.path().join(".lf/wave/parent/GOAL.md"),
         "# Parent\n\nKeep exports reliable.\n",
     )
     .unwrap();
-    std::fs::write(repo.path().join("wave/parent/child/GOAL.md"), "").unwrap();
+    std::fs::write(repo.path().join(".lf/wave/parent/child/GOAL.md"), "").unwrap();
     assert!(json_entries(repo.path(), home.path(), &["list", "wave", "--json"]).is_empty());
     assert!(!home.path().join(".lf").exists());
     let store =

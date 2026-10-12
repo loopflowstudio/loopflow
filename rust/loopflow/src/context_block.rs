@@ -153,7 +153,7 @@ pub struct ContextBlock {
 }
 
 fn order_documents(documents: &mut [Document], wave: Option<&str>, branch: Option<&str>) {
-    let memory = wave.map(|wave| format!("wave/{wave}/MEMORY.md"));
+    let memory = wave.map(|wave| format!(".lf/wave/{wave}/MEMORY.md"));
     let plan = branch.map(|branch| format!("scratch/{branch}.md"));
     let priority = |doc: &Document| {
         if memory.as_deref() == Some(doc.path.as_str()) {
@@ -212,7 +212,7 @@ fn render_block(
     // exactly the same sources, including the scratch/Wave roots and saved skill.
     let manifest = serde_json::to_string_pretty(&serde_json::json!({
         "scratch": repo_root.join("scratch"),
-        "wave": wave.map(|wave| repo_root.join("wave").join(wave)),
+        "wave": wave.map(|wave| repo_root.join(".lf/wave").join(wave)),
         "files": files,
     }))
     .expect("context manifest is JSON serializable");
@@ -367,9 +367,9 @@ mod tests {
     #[test]
     fn saved_context_reads_checkout_wave_without_registration() {
         let repo = tempdir().unwrap();
-        fs::create_dir_all(repo.path().join("wave/parent/child")).unwrap();
-        fs::write(repo.path().join("wave/parent/GOAL.md"), "Ancestor goal").unwrap();
-        let memory = repo.path().join("wave/parent/child/MEMORY.md");
+        fs::create_dir_all(repo.path().join(".lf/wave/parent/child")).unwrap();
+        fs::write(repo.path().join(".lf/wave/parent/GOAL.md"), "Ancestor goal").unwrap();
+        let memory = repo.path().join(".lf/wave/parent/child/MEMORY.md");
         fs::write(&memory, "Initial memory").unwrap();
         let delivery = ContextDelivery::prepare(&crate::prompt::PromptComponents {
             repo_root: repo.path().display().to_string(),
@@ -390,7 +390,7 @@ mod tests {
             .as_array()
             .unwrap()
             .iter()
-            .find(|file| file["source"] == "wave/parent/child/MEMORY.md")
+            .find(|file| file["source"] == ".lf/wave/parent/child/MEMORY.md")
             .unwrap();
         assert_eq!(
             Path::new(file["path"].as_str().unwrap()),
@@ -456,7 +456,7 @@ mod tests {
     fn context_block_prioritizes_selected_memory_then_branch_plan_then_small_scratch() {
         let mut docs = vec![
             document("scratch/b.md", "four", DocumentSource::Scratch),
-            document("wave/parent/MEMORY.md", "p", DocumentSource::Wave),
+            document(".lf/wave/parent/MEMORY.md", "p", DocumentSource::Wave),
             document("scratch/a.md", "one", DocumentSource::Scratch),
             document(
                 "scratch/topic.md",
@@ -464,7 +464,7 @@ mod tests {
                 DocumentSource::Scratch,
             ),
             document(
-                "wave/parent/child/MEMORY.md",
+                ".lf/wave/parent/child/MEMORY.md",
                 "selected memory",
                 DocumentSource::Wave,
             ),
@@ -473,11 +473,11 @@ mod tests {
         assert_eq!(
             docs.iter().map(|doc| doc.path.as_str()).collect::<Vec<_>>(),
             [
-                "wave/parent/child/MEMORY.md",
+                ".lf/wave/parent/child/MEMORY.md",
                 "scratch/topic.md",
                 "scratch/a.md",
                 "scratch/b.md",
-                "wave/parent/MEMORY.md",
+                ".lf/wave/parent/MEMORY.md",
             ]
         );
     }

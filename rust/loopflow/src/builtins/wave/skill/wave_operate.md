@@ -167,7 +167,7 @@ worktrees, placement and execution history.
 - Read existing Tasks before `lf task create --wave <wave>`. Give work an
   observable outcome.
 - Update the plan through `lf update-plan --wave <wave> --plan
-  <plan.json>`; curate durable decisions in `wave/<wave>/MEMORY.md`. Change
+  <plan.json>`; curate durable decisions in `.lf/wave/<wave>/MEMORY.md`. Change
   GOAL.md only within accepted direction. Supply the complete content object
   with `metric_targets`, required nonempty `workflow` and `krs`; for example
   `{"metric_targets":[],"workflow":"feature","krs":[]}`. This edits the Wave's

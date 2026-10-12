@@ -35,15 +35,9 @@ after using Python SQLite; not an app latency benchmark). Five Rust task-work te
 pass, including candidate filtering preserving historical association outside the
 checkout. The branch CLI was rebuilt and repackaged in the isolated app.
 
-First populated capture `/tmp/loopflow-20261011-201523.png` showed Growth and
-Infrastructure but still had Session counts; no conversation or full-inventory
-proof. Canceled opening receipt and unexplained cmux permission notification:
-`9a23582588:scratch/work-first-demo.md`, **Review priority**.
-
-Check: `cargo test -p loopflow --lib store::sqlite::task_work::tests` — 5 passed;
-`cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` — pass.
-Native capture proves first populated rendering, not complete inventory, input,
-conversation continuation or final review acceptance.
+First populated capture, five Rust membership checks and failed native launch
+receipts: `9a23582588:scratch/work-first-demo.md`, **Review priority**. Those
+prove rendering/filtering primitives, not provider continuation or acceptance.
 
 October 11 sidebar revision (`63a20694d5`): removed numeric Session menus and fixed
 terminal Tasks remaining current solely through retained conversations. Rebuilt and
@@ -283,3 +277,10 @@ sync; current wire compatibility is proved, usable loading/opening is not.
 Screen locked: native review unavailable.
 Current app staged at `loo462-native.FgtDmE/staged/Loopflow Work Demo.app` under
 /private/tmp; Old app unchanged; no install/takeover.
+
+Live output selects 17 Loopflow Tasks under the current Swift predicate; the branch
+snapshot selects 11. Six extra completed Tasks have only old blocked Flow evidence:
+LOO-440/412, lf-b978097/df7e403/cb9012a/6f396c0. `c229a29648` fixes that shared
+Rust projection; Desktop decoding compatibility does not deliver this unreleased
+behavior. Do not delete failed history or duplicate the fix in Swift. Screen remains
+locked on recheck; staged build and existing clients are unchanged.

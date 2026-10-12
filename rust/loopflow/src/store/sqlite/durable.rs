@@ -157,40 +157,28 @@ impl SqliteStore {
             [machine_id.as_str()],
             |_| Ok(()),
         )?;
-        let kind = match work {
-            WorkRef::Wave(_) => crate::planning_exchange::PlanningKind::Wave,
-            WorkRef::Project(_) => crate::planning_exchange::PlanningKind::Project,
-            WorkRef::Task(_) => crate::planning_exchange::PlanningKind::Task,
-        };
-        let object = crate::planning_exchange::PlanningObject {
-            kind,
-            id: work.id().to_owned(),
-        };
-        let current = super::planning_write::read(&tx, &object)?
-            .into_iter()
-            .find_map(|edit| {
-                if let super::planning_write::PlanningEdit::Delegation(_, assignment) = edit {
-                    assignment
-                } else {
-                    None
-                }
-            });
+        use crate::work::edit::{Delegation, WorkEdit, WorkValue};
+        let current = find_placement_in(&tx, work)?;
         if !current.as_ref().is_some_and(|assignment| {
             assignment.machine_id == *machine_id
                 && assignment.provenance == PlacementProvenance::Explicit
         }) {
+            let assignment = Some(Delegation {
+                machine_id: machine_id.clone(),
+                placed_at: now_unix(),
+                provenance: PlacementProvenance::Explicit,
+            });
+            let change = match work {
+                WorkRef::Wave(_) => WorkValue::WaveDelegation(assignment),
+                WorkRef::Project(_) => WorkValue::ProjectDelegation(assignment),
+                WorkRef::Task(_) => WorkValue::TaskDelegation(assignment),
+            };
             super::planning_write::local(
                 &tx,
-                kind,
-                work.id(),
-                &[super::planning_write::PlanningEdit::Delegation(
-                    kind,
-                    Some(super::planning_write::Delegation {
-                        machine_id: machine_id.clone(),
-                        placed_at: now_unix(),
-                        provenance: PlacementProvenance::Explicit,
-                    }),
-                )],
+                &[WorkEdit {
+                    target: work.id().into(),
+                    change,
+                }],
             )?;
         }
         let placement = placement_in(&tx, work)?;
@@ -1069,7 +1057,8 @@ mod durable_store_tests {
     #[test]
     fn delegation_exchange_retains_checkout_and_does_not_echo_imports() {
         use crate::durable::{MachineId, WorkRef};
-        use crate::planning_exchange::{PlanningKind, PlanningMutation, PlanningObject};
+        use crate::planning_exchange::PlanningMutation;
+        use crate::work::edit::{WorkEdit, WorkValue};
         let (_dir, store, task_id) = store_with_task();
         store.ensure_repository("/repo").unwrap();
         let before = store.task_execution_route(&task_id).unwrap();
@@ -1087,13 +1076,13 @@ mod durable_store_tests {
         .unwrap();
         let destination = store.bind_peer_planning("/repo", &binding).unwrap();
         let mut snapshot = store.export_peer_planning("/repo", &destination).unwrap();
-        let object = PlanningObject {
-            kind: PlanningKind::Wave,
-            id: task.wave_id.to_string(),
-        };
+
         let parents = snapshot
             .heads()
-            .filter(|(_, change)| change.object == object && change.field == "delegation")
+            .filter(|(_, change)| {
+                change.edit.target == task.wave_id.as_str()
+                    && change.edit.change.field() == "wave_delegation"
+            })
             .map(|(id, _)| id.to_owned())
             .collect();
         let clock = snapshot
@@ -1106,9 +1095,10 @@ mod durable_store_tests {
         snapshot.changes.insert(
             "remote-reset".into(),
             PlanningMutation {
-                object,
-                field: "delegation".into(),
-                value: serde_json::Value::Null,
+                edit: WorkEdit {
+                    target: task.wave_id.to_string(),
+                    change: WorkValue::WaveDelegation(None),
+                },
                 clock,
                 parents,
             },

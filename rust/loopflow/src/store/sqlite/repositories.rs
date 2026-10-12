@@ -33,10 +33,10 @@ pub(super) fn repository_id_in(conn: &Connection, repo: &str) -> StoreResult<Opt
 }
 
 /// Routing and transactional preparation use the same sharing boundary.
-/// Membership is planning evidence, never an execution reservation.
+/// Shared mutation routes are planning evidence, never an execution reservation.
 pub(super) fn task_is_shared_in(conn: &Connection, task: &TaskId) -> StoreResult<bool> {
     Ok(conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM planning_members WHERE kind='task' AND object_id=?1)",
+        "SELECT EXISTS(SELECT 1 FROM planning_peer_changes c JOIN planning_peer_routes r ON r.mutation_id=c.id WHERE c.record_table='tasks' AND c.object_id=?1)",
         [task.as_str()],
         |row| row.get(0),
     )?)

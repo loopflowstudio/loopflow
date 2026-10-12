@@ -2,7 +2,7 @@
 
 **Status (October 11, 2026):** Jack Heart requested preparing LOO-427 stacked
 on LOO-412, with landing only after 412 lands. The recorded parent is PR #1491.
-Merge `b3d9341cc7` integrates published parent `7d9bf0a4d8`; later 412 work stays there.
+Merge `cd60b8db8a` integrates parent `0514221be4`; remaining integration edits are local.
 The earlier baseline-first delivery interpretation is superseded. This integration
 preserves accepted Work tabs, pane controls and recorded-Machine execution while
 adopting 412's canonical Work and configured planning transport. Reduction for both
@@ -10,13 +10,11 @@ Tasks remains coordinated with 412; no publication or landing readiness is claim
 
 Check: optional-follow-up cut — affected Rust 250 passes, then 65 passes plus repaired regression passes; 82 Desktop tests/build, fmt, all-target Clippy, CLI/help/golden checks pass. Previous broad gate: `f1e8cd19ff`; CI owns release matrix, LOO-391 native proof.
 
-**This slice — publish:** Jack Heart's October 11 clarification is implemented:
-merge leaves a Task available for optional ordinary Task creation before completion.
-No required disposition or special API. Delete — do not maintain: follow-up CLI,
-filing/store/projection/UI, relation exporter, special skill/Flow and exclusive tests.
-Historical payloads and ordinary creation/export remain. Review also removed the
-completed-Task Flow exception and the full-history read needed only by that projection.
-Publish the stacked PR; landing still waits for LOO-412 and integration/CI.
+**This slice — integrate and land:** Jack Heart requested landing 412 before 427.
+The optional follow-up API/gate deletion is published. Integration with 412 keeps
+its single typed Work journal and private recovery of historical reserved filings;
+427's delegation and admission use that same writer. Finish conflict checks,
+checkpoint the integration, then publish and land after 412. No live migration.
 
 ## Shipping scope — Jack Heart, October 10
 

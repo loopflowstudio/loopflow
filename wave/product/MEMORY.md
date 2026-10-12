@@ -206,8 +206,8 @@ position and Process liveness are independent. Failed end requests retry without
 replaying the Flow; reopening supersedes old intent. Linear completion preserves
 execution. Completion rechecks a verified merge for a Task with a PR. Failed cleanup
 never reverses completion. Common planning owns creation and optional export;
-already-saved uncertain export receipts retain their identity. Old event-only filing
-intents remain readable and do not automatically create new Tasks.
+412 retains private recovery of historical filing intents and uncertain exports
+under their originally reserved identities; this adds no new filing API or gate.
 
 Jack authorized shipping #1499 October 9; native acceptance was not established.
 Observed provider conflicts win; matching readback does not guarantee atomic writes

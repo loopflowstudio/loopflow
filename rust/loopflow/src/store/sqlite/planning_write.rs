@@ -395,6 +395,9 @@ pub(crate) fn ensure_record(
     id: &str,
     edits: &[WorkEdit],
 ) -> StoreResult<()> {
+    if table == "waves" {
+        super::repositories::ensure_repository_in(conn, repo)?;
+    }
     let exists = conn.query_row(
         &format!("SELECT EXISTS(SELECT 1 FROM {} WHERE id=?1)", table),
         [id],

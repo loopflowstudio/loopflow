@@ -2733,9 +2733,8 @@ for line in sys.stdin:
                 "-a",
                 "claude",
                 "-b",
-                "run",
+                "flow",
                 "claude-decision",
-                "--no-loopflow",
             ],
             Some(&format!("{}:/usr/bin:/bin", bin.display())),
         )

@@ -3152,6 +3152,14 @@ mod tests {
         select_project(&store, &project);
         let task = make_task(&wave, &project);
         store.seed_task(&task, &make_task_pr(&task)).await.unwrap();
+        // Separate creation from the edit without depending on a wall-clock tick.
+        rusqlite::Connection::open(&database)
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET updated_at=1 WHERE id=?1",
+                [task.id.as_str()],
+            )
+            .unwrap();
         let persisted = store.get_task(&task.id).await.unwrap().unwrap();
         let before_pr = store.active_task_pr(&task.id).await.unwrap();
         let mut expected = persisted.clone();
@@ -3164,6 +3172,7 @@ mod tests {
         snapshot.snapshot.items[0].name = expected.title.clone();
         snapshot.snapshot.items[0].description = expected.description.clone();
         expected.state = snapshot.snapshot.items[0].state.clone();
+        let edit_started_at = OffsetDateTime::now_utc().unix_timestamp();
         store.seed_inventory(snapshot, None).await.unwrap();
         let by_stable_id = store
             .get_task_by_issue(task.id.as_str())
@@ -3171,6 +3180,12 @@ mod tests {
             .unwrap()
             .unwrap();
 
+        assert!(
+            (edit_started_at..=OffsetDateTime::now_utc().unix_timestamp())
+                .contains(&by_stable_id.updated_at.unix_timestamp()),
+            "planning edits must advance the update timestamp"
+        );
+        expected.updated_at = by_stable_id.updated_at;
         assert_eq!(
             by_stable_id, expected,
             "editing planning facts must preserve execution facts"

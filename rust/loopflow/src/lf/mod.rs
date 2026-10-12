@@ -1128,6 +1128,9 @@ pub enum TaskCommand {
         /// Hand off a child-specific design from the caller's checkout
         #[arg(long, value_name = "PATH")]
         design: Option<PathBuf>,
+        /// Restore a missing Task branch from a deliberately recovered commit; never reset existing work
+        #[arg(long, value_name = "COMMIT", conflicts_with_all = ["stack_on", "name", "directive", "design"])]
+        recover_from: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -2643,6 +2646,7 @@ mod tests {
                     directive,
                     design,
                     json,
+                    ..
                 },
         }) = cli.command
         else {

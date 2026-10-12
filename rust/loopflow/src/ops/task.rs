@@ -120,6 +120,7 @@ pub struct TaskCheckoutOptions {
     pub stack_on: Option<String>,
     pub directive: Option<String>,
     pub design: Option<PathBuf>,
+    pub recover_from: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -489,7 +490,7 @@ pub fn task_place(
         reason,
         ..
     } = options.clone();
-    let mut task = prepare_task(repo, issue, options)?;
+    let mut task = prepare_task(repo, issue, options, None)?;
     block_on_task(async {
         let store = task_store().await?;
         let reason = reason
@@ -812,6 +813,7 @@ pub fn task_checkout(repo: &Path, issue: &str, options: TaskCheckoutOptions) -> 
             directive: options.directive,
             ..Default::default()
         },
+        options.recover_from.as_deref(),
     )?;
     if let Some(design) = design {
         handoff::write_design(&task, &design)?;
@@ -819,7 +821,12 @@ pub fn task_checkout(repo: &Path, issue: &str, options: TaskCheckoutOptions) -> 
     Ok(task)
 }
 
-fn prepare_task(repo: &Path, issue: &str, options: TaskProcessOptions) -> OpsResult<Task> {
+fn prepare_task(
+    repo: &Path,
+    issue: &str,
+    options: TaskProcessOptions,
+    recover_from: Option<&str>,
+) -> OpsResult<Task> {
     options.validate_directive(None)?;
     block_on_task(async {
         let store = task_store().await?;
@@ -879,6 +886,11 @@ fn prepare_task(repo: &Path, issue: &str, options: TaskProcessOptions) -> OpsRes
         validate_task_preparation(&store, &task).await?;
         options.validate_directive((!acquired).then_some(&task))?;
         options.validate_workspace_name(&task)?;
+        if recover_from.is_some() && task.worktree.is_none() {
+            return Err(task_error(
+                "Recovery needs the Task's recorded checkout and branch",
+            ));
+        }
         let task = if task.worktree.is_none() {
             if let Some(flow) = options.flow.as_deref().filter(|flow| *flow != END) {
                 if super::project::load_workflow(&store, wave.id(), flow, repo)?.is_none() {
@@ -901,7 +913,7 @@ fn prepare_task(repo: &Path, issue: &str, options: TaskProcessOptions) -> OpsRes
             if let Some(parent) = options.stack_on.as_deref() {
                 stack_existing_task(&store, &task, parent).await?;
             }
-            restore_task_checkout(&store, &task).await?;
+            restore_task_checkout(&store, &task, recover_from).await?;
             task
         };
         if let Some(source) = &source {
@@ -934,11 +946,42 @@ fn validate_preparation_status(task: &Task, status: WorkStatus) -> OpsResult<()>
     }
 }
 
-async fn restore_task_checkout(store: &SharedStore, task: &Task) -> OpsResult<()> {
+async fn restore_task_checkout(
+    store: &SharedStore,
+    task: &Task,
+    recover_from: Option<&str>,
+) -> OpsResult<()> {
     let wave = owning_wave(store, task).await?;
     let repo = crate::git::worktrees::main_repo_root(Path::new(wave.repo()))?;
     let worktree = task.worktree()?;
     let _lease = crate::git::acquire_worktree_lease(&repo, worktree, "Task checkout")?;
+    let recovered = recover_from
+        .map(|commit| {
+            let output = git_output_bytes(
+                &repo,
+                &[
+                    "rev-parse",
+                    "--verify",
+                    "--end-of-options",
+                    &format!("{commit}^{{commit}}"),
+                ],
+            )?;
+            let commit = String::from_utf8_lossy(&output).trim().to_string();
+            if crate::git::worktrees::branch_exists(&repo, &task.branch)?
+                && rev_parse(&repo, &task.branch)? != commit
+            {
+                return Err(task_error(
+                    "Recovery never replaces an existing Task branch",
+                ));
+            }
+            if worktree.join(".git").try_exists()? && rev_parse(worktree, "HEAD")? != commit {
+                return Err(task_error(
+                    "Recovery never replaces an existing Task checkout",
+                ));
+            }
+            Ok(commit)
+        })
+        .transpose()?;
     if worktree.join(".git").try_exists()? {
         return finish_task_checkout(store, task).await;
     }
@@ -948,7 +991,8 @@ async fn restore_task_checkout(store: &SharedStore, task: &Task) -> OpsResult<()
     // A different registered path was rejected above; no branch is reset.
     if !crate::git::worktrees::branch_exists(&repo, &task.branch)? {
         let remote = format!("refs/remotes/origin/{}", task.branch);
-        if !ref_exists(&repo, &remote)?
+        if recovered.is_none()
+            && !ref_exists(&repo, &remote)?
             && store
                 .active_task_pr(&task.id)
                 .await
@@ -957,7 +1001,9 @@ async fn restore_task_checkout(store: &SharedStore, task: &Task) -> OpsResult<()
         {
             fetch(&repo, "origin", &task.branch)?;
         }
-        let base = if ref_exists(&repo, &remote)? {
+        let base = if let Some(commit) = recovered {
+            commit
+        } else if ref_exists(&repo, &remote)? {
             remote
         } else {
             let started = store
@@ -972,7 +1018,7 @@ async fn restore_task_checkout(store: &SharedStore, task: &Task) -> OpsResult<()
                     )
                 });
             if started {
-                return Err(task_error(format!("Task branch {} is missing locally and remotely; its committed work cannot be recovered from the base alone", task.branch)));
+                return Err(task_error(format!("Task branch {} is missing locally and remotely; its committed work cannot be recovered from the base alone; use --recover-from COMMIT only after locating its retained history", task.branch)));
             }
             task.base_commit.clone()
         };
@@ -1284,7 +1330,7 @@ async fn place_prepared_task(
     }
     if task.worktree.is_some() {
         select_task_agent(store, &mut task, requested_agent.as_deref()).await?;
-        restore_task_checkout(store, &task).await?;
+        restore_task_checkout(store, &task, None).await?;
         return Ok(task);
     }
     let now = time::OffsetDateTime::now_utc();
@@ -1329,7 +1375,7 @@ async fn place_prepared_task(
     }
     // A competing reservation may have won. Restore its persisted placement,
     // never the losing caller's plan or PR.
-    if let Err(error) = restore_task_checkout(store, &task).await {
+    if let Err(error) = restore_task_checkout(store, &task, None).await {
         if let Err(event_error) = store
             .append_task_event(
                 &task.id,

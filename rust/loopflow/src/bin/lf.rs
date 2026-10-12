@@ -1828,6 +1828,7 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
                 stack_on,
                 directive,
                 design,
+                recover_from,
                 ..
             },
     }) = &cli.command
@@ -1842,6 +1843,9 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
                 ..Default::default()
             },
         )?;
+        if let Some(commit) = recover_from {
+            report.unavailable.push(format!("Explicit recovery from {commit}; commit availability and existing branch/checkout equality are checked under the checkout lease before restoring. No branch is reset."));
+        }
         if let Some(path) = design {
             report.unavailable.push(format!(
                 "Design handoff from {} is requested; source validation, retained receipt and child-file conflict checks have not run",
@@ -2123,6 +2127,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
                 stack_on,
                 directive,
                 design,
+                recover_from,
                 json,
             },
     }) = &cli.command
@@ -2150,6 +2155,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
                     stack_on: stack_on.clone(),
                     directive: directive.clone(),
                     design: design.clone(),
+                    recover_from: recover_from.clone(),
                 },
             )?;
             print_task(&task, *json)

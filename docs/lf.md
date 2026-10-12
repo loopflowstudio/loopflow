@@ -212,6 +212,18 @@ lf task checkout <id>
 lf task run <id> research
 ```
 
+Restore a lost Task branch only after locating its committed history:
+
+```sh
+lf task checkout EXP-12 --recover-from COMMIT
+```
+
+Recovery uses the recorded checkout and branch without starting a Flow or
+changing Task identity. It never replaces an existing branch or checkout with
+a different commit. Without an explicit recovery commit, a lost started branch
+is not recreated from its old base.
+
+
 Without a selected Wave, explicit creation uses `inbox`. A Task gets its
 identity before placement; creation starts no agent and requires no Linear login.
 Projects and comments stay in SQLite; Wave goals and memory live in the checkout.

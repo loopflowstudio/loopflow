@@ -188,6 +188,50 @@ fn checkout_restores_exact_task_history_from_a_dirty_checkout() {
         fs::read_to_string(worktree.join("work.txt")).unwrap(),
         "committed Task work"
     );
+    // Losing the branch as well must not silently restart from the base.
+    fs::remove_dir_all(worktree).unwrap();
+    assert!(Command::new("git")
+        .current_dir(repo.path())
+        .args(["update-ref", "-d", "refs/heads/test/checkout-recovery"])
+        .status()
+        .unwrap()
+        .success());
+    let missing = checkout();
+    assert!(!missing.status.success());
+    assert!(!worktree.exists());
+    let recover = |commit: &str| {
+        unbound_command(
+            Path::new(env!("CARGO_BIN_EXE_lf")),
+            &invoking,
+            &[
+                "task",
+                "checkout",
+                "INF-123",
+                "--recover-from",
+                commit,
+                "--json",
+            ],
+        )
+        .env("LF_HOME", home.path())
+        .output()
+        .unwrap()
+    };
+    assert!(!recover("missing-object").status.success());
+    assert!(!worktree.exists());
+    let recovered = recover(&head);
+    assert!(
+        recovered.status.success(),
+        "{}",
+        String::from_utf8_lossy(&recovered.stderr)
+    );
+    assert_eq!(loopflow::git::rev_parse(worktree, "HEAD").unwrap(), head);
+    assert_eq!(
+        fs::read_to_string(worktree.join("work.txt")).unwrap(),
+        "committed Task work"
+    );
+    assert!(recover(&head).status.success());
+    assert!(!recover(&fixture.pr.base_commit).status.success());
+    assert_eq!(loopflow::git::rev_parse(worktree, "HEAD").unwrap(), head);
     let persisted = runtime
         .block_on(fixture.store.get_task(&fixture.task.id))
         .unwrap()

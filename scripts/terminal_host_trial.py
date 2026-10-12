@@ -625,11 +625,11 @@ class _Trial:
     def _register_task(self) -> Path:
         _write(
             self.repo / ".lf/config.yaml",
-            "agent: claude\npm:\n  provider: linear\n  linear_team: trial-team\n",
+            "agent: claude\nlinear:\n  team: trial-team\n",
         )
         _write(
             self.repo / "wave/trial/GOAL.md",
-            "---\npm:\n  linear_initiative: trial-initiative\n---\nSynthetic trial.\n",
+            "---\nlinear:\n  initiative: trial-initiative\n---\nSynthetic trial.\n",
         )
         planning = self._lf("prepare-planning", ["commit", "-m", "Bind synthetic planning"])
         if planning["returncode"]:
@@ -951,7 +951,7 @@ def _outcome(receipt: dict) -> str:
     if receipt["problem"] is not None or receipt["returncode"] is None:
         return "failure"
     boundaries = {
-        "fresh-checkout": "pm.linear_team",
+        "fresh-checkout": "linear.team",
         "publish": "default branch cannot open a PR",
         "checkout-publish": "gh CLI not found",
         "task-flow": "a connected managed account is required",

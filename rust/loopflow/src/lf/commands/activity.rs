@@ -146,7 +146,7 @@ pub(crate) fn build_snapshot(
             .ok_or_else(|| anyhow!("Task {} is missing from the Work catalog", task.id))?;
         for pr in store
             .task_prs(&task.id)
-            .map_err(|error| anyhow!("failed to read PRs for {}: {error}", task.plan.identifier))?
+            .map_err(|error| anyhow!("failed to read PRs for {}: {error}", task.identifier))?
         {
             entries.extend(pr_entries(&pr, work, since));
         }

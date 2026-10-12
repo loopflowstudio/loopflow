@@ -64,6 +64,7 @@ config files.
 | Behavior | CLI Flag | Config |
 |----------|----------|--------|
 | Agent | `-a claude:opus` | `agent: claude:opus` |
+| [Planning synchronization](lf.md#choose-planning-synchronization) | — | `planning: {provider: linear}` or `planning: {provider: git, shared: team}` |
 | Interactive terminal | direct TTY or `-i` | — |
 | Include docs | `--docs README.md,docs/` | `docs: [README.md, docs/]` |
 | Include branch files | `--diff files` | `diff_files: true` |
@@ -155,6 +156,10 @@ agent: codex        # overrides global
 context:
   - docs/api.md           # combined with global context
 ```
+
+`crons` is one list of scheduled `lf` commands; a repository list replaces the
+global list. Definitions activate only through explicit `lf cron sync`. See
+[Schedule ordinary commands](lf.md#schedule-ordinary-commands).
 
 Example repo config:
 

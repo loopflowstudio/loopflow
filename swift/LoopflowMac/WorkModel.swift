@@ -312,6 +312,12 @@ final class WorkModel {
     }
     private(set) var waves: WorkReading<[Wave]> = .loading
     private(set) var processActivity: WorkReading<ActivitySnapshot> = .loading
+    private var peerPlanningReadings: [String: WorkReading<[PeerPlanningStatus]>] = [:]
+    private(set) var peerPlanning: WorkReading<[PeerPlanningStatus]> {
+        get { peerPlanningReadings[repoPath ?? ""] ?? .loading }
+        set { peerPlanningReadings[repoPath ?? ""] = newValue }
+    }
+    private var peerPlanningGeneration = 0
     private var sessionReadings: [String: WorkReading<[SessionRecord]>] = [:]
     private(set) var sessions: WorkReading<[SessionRecord]> {
         get { sessionReadings[repoPath ?? ""] ?? .loading }
@@ -668,6 +674,10 @@ final class WorkModel {
         if let value = roadmap.value { roadmap = .unavailable(lastGood: value, reason: reason) }
         if let value = waves.value { waves = .unavailable(lastGood: value, reason: reason) }
         if repoPath != nil, let value = sessions.value { sessions = .unavailable(lastGood: value, reason: reason) }
+        peerPlanningReadings = peerPlanningReadings.mapValues {
+            .unavailable(lastGood: $0.value, reason: reason)
+        }
+        if repoPath != nil { peerPlanning = .unavailable(lastGood: peerPlanning.value, reason: reason) }
         if let value = processActivity.value { processActivity = .unavailable(lastGood: value, reason: reason) }
     }
 
@@ -688,6 +698,16 @@ final class WorkModel {
             await applyPlanning(body, wire: frame.wire, reason: reason)
             planningSequence = frame.sequence
             resumePlanningWaiters(through: answers)
+        case .peerPlanning(let body):
+            guard answers >= max(planningFloor, scopeFloor), let repoPath else { return }
+            guard let body else {
+                peerPlanning = .unavailable(lastGood: peerPlanning.value, reason: reason)
+                break
+            }
+            guard body.repo.normalizedFilePath == repoPath.normalizedFilePath else { return }
+            peerPlanningGeneration &+= 1
+            let next = WorkReading.available(body.destinations)
+            if peerPlanning != next { peerPlanning = next }
         case .sessions(let body):
             guard answers >= max(sessionsFloor, scopeFloor), let repoPath else { return }
             guard let body else {
@@ -789,6 +809,8 @@ final class WorkModel {
             navigation.content = .overview
         }
         sessionReadings = [:]
+        peerPlanningReadings = [:]
+        peerPlanningGeneration &+= 1
         savedSessionRepos = []
         waveDetail = nil
         taskWork = TaskReadings<TaskWork>()
@@ -805,8 +827,21 @@ final class WorkModel {
             return
         }
         async let sessions: Void = refreshSessions()
+        async let peers: Void = refreshPeerPlanning()
         await refreshPlanning()
         await sessions
+        await peers
+    }
+
+    private func refreshPeerPlanning() async {
+        guard !usesFixedFixture, let repo = repoPath else { return }
+        peerPlanningGeneration &+= 1
+        let generation = peerPlanningGeneration
+        let result: Result<[PeerPlanningStatus], Error>
+        do { result = .success(try await query.peerPlanningStatus(cwd: repo)) }
+        catch { result = .failure(error) }
+        guard generation == peerPlanningGeneration, repo == repoPath else { return }
+        peerPlanning = reading(from: result, lastGood: peerPlanning.value)
     }
 
     func refreshPlanning() async {
@@ -896,6 +931,7 @@ final class WorkModel {
             historyLookup?.cancel()
             historyLookup = nil
             sessionsGeneration &+= 1
+            peerPlanningGeneration &+= 1
             workActivityGeneration &+= 1
             if !usesFixedFixture { workActivity = .loading }
         }
@@ -965,7 +1001,7 @@ final class WorkModel {
             let result = try? await query.status(wave: wave.wave.name, cwd: wave.wave.repo)
             guard !Task.isCancelled else { return }
             guard let entries = result?.projects.items else { continue }
-            if entries.contains(where: { $0.id == reference || $0.slug == reference || $0.workId == reference }) {
+            if entries.contains(where: { $0.id == reference || $0.slug == reference || $0.linearId == reference }) {
                 select(.wave(id: wave.wave.id))
                 historyReference = reference
                 historyWave = wave.wave
@@ -1331,7 +1367,7 @@ final class WorkModel {
     }
 
     func waveForChapter(projectId: String) -> WaveRoadmap? {
-        roadmap.value?.waves.first { $0.currentProject?.id == projectId || $0.currentProject?.slug == projectId || $0.currentProject?.workId == projectId }
+        roadmap.value?.waves.first { $0.currentProject?.id == projectId || $0.currentProject?.slug == projectId || $0.currentProject?.linearId == projectId }
     }
 
     func task(id: String) -> (wave: WaveRoadmap, task: RoadmapTask)? {

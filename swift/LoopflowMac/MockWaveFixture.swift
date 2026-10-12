@@ -298,7 +298,8 @@ enum MockWaveFixture {
             "items": [
               {
                 "id": "project-1",
-                "work_id": null,
+                "linear_id": null,
+                "sync": {"connected": false, "changes": []},
                 "slug": "release-feedback",
                 "name": "current",
                 "workflow": "incident",
@@ -324,7 +325,7 @@ enum MockWaveFixture {
                   "name": "Surface nightly failures",
                   "description": "Surface one focused failure.",
                   "rank": 1,
-                  "completed": false, "state": "unstarted", "completed_at": null, "due_date": null, "follow_up_sources": [],
+                  "completed": false, "state": "unstarted", "completed_at": null, "due_date": null,  "acquisition": {"state": "available", "observed_at": null}, "linear_id": null, "sync": {"connected": false, "changes": []},
                   "assignee": "user-1"
                 },
                 "reference": {
@@ -343,7 +344,7 @@ enum MockWaveFixture {
                   "provider": "codex",
                   "started": true
                 },
-                "workflow_name":"feature","latest_flow_process":null,"execution":null,"run_control":{"unavailable":null}, "follow_through": {"intents":[],"links":[],"reason":null,"needs_conversion":false,"scope_notes":[]},
+                "workflow_name":"feature","latest_flow_process":null,"execution":null,"run_control":{"unavailable":null},
                 "directive": {
                   "version": 2,
                   "kind": "replacement",
@@ -413,7 +414,7 @@ enum MockWaveFixture {
                   "name": "Classify publish failures",
                   "description": "",
                   "rank": 2,
-                  "completed": false, "state": "unstarted", "completed_at": null, "due_date": null, "follow_up_sources": [],
+                  "completed": false, "state": "unstarted", "completed_at": null, "due_date": null,  "acquisition": {"state": "available", "observed_at": null}, "linear_id": null, "sync": {"connected": false, "changes": []},
                   "assignee": null
                 },
                 "reference": {
@@ -421,7 +422,7 @@ enum MockWaveFixture {
                   "workspace": null
                 },
                 "runtime": null,
-                "workflow_name":"feature","latest_flow_process":null,"execution":null,"run_control":{"unavailable":null}, "follow_through": {"intents":[],"links":[],"reason":null,"needs_conversion":false,"scope_notes":[]},
+                "workflow_name":"feature","latest_flow_process":null,"execution":null,"run_control":{"unavailable":null},
                 "directive": null,
                 "next_move": {
                   "owner": "wave",

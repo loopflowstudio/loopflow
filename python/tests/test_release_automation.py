@@ -190,22 +190,25 @@ def test_host_publisher_owns_credentialed_release_steps():
     assert publisher.index('"latest_dmg_uploaded"') < publisher.index('"--finalize"')
 
 
-def test_release_subwave_cron_runs_the_host_release_after_telemetry():
-    goal = (ROOT / "wave/infrastructure/GOAL.md").read_text()
-    frontmatter = yaml.safe_load(goal.split("---", 2)[1])
-    assert frontmatter["crons"] == [
-        {"flow": "telemetry-daily", "schedule": "0 0 9 * * *"},
-    ]
-    release_goal = (ROOT / "wave/infrastructure/release/GOAL.md").read_text()
-    release_frontmatter = yaml.safe_load(release_goal.split("---", 2)[1])
-    assert release_frontmatter["crons"] == [
-        {"flow": "release-run", "schedule": "0 0 10 * * *"},
+def test_release_cron_keeps_its_machine_scope_and_runs_after_telemetry():
+    config = yaml.safe_load((ROOT / ".lf/config.yaml").read_text())
+    jobs = [job for job in config["crons"] if job["command"][:2] == ["--wave", "infrastructure"]]
+    assert jobs == [
+        {
+            "name": "telemetry-daily",
+            "command": ["--wave", "infrastructure", "--batch", "flow", "telemetry-daily"],
+            "schedule": "0 0 9 * * *",
+        },
+        {
+            "name": "release-run",
+            "command": ["--wave", "infrastructure", "--batch", "flow", "release-run"],
+            "schedule": "0 0 10 * * *",
+        },
     ]
     assert yaml.safe_load((ROOT / ".lf/flows/release-run.yaml").read_text()) == [
         {"cmd": "repo release run patch"}
     ]
 
-    config = yaml.safe_load((ROOT / ".lf/config.yaml").read_text())
     assert config["release"]["targets"]["default"]["publisher"] == [
         "loopflow-release-publisher",
         "uv",

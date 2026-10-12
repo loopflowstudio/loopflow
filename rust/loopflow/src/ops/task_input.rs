@@ -2,8 +2,8 @@
 use crate::child::ChildRef;
 use crate::durable::WorkRef;
 use crate::harness::Harness;
-use crate::planning::ProjectPlan;
 use crate::store::SharedStore;
+use crate::work::project::Project;
 use crate::work::task::Task;
 use anyhow::{anyhow, Result};
 use std::io::BufRead;
@@ -29,7 +29,7 @@ pub(crate) async fn read_seed(store: &SharedStore, task: &Task, wave: &str) -> R
         .ok_or_else(|| anyhow!("Task Project is missing"))?;
     let message = format!(
         "{}\n\n{}",
-        task_seed(task, &project.plan, pr.as_ref(), wave),
+        task_seed(task, &project, pr.as_ref(), wave),
         crate::ops::task::task_workspace_context(task)?
     );
     Ok(TaskSeed {
@@ -72,18 +72,6 @@ impl TaskInput {
         }
     }
 
-    pub(crate) fn start_planning_sync(&self) -> Result<crate::ops::linear_observe::PlanningSync> {
-        let wave = self
-            .store
-            .sqlite
-            .get_wave(&self.task.wave_id)?
-            .ok_or_else(|| anyhow!("Task Wave is missing"))?;
-        Ok(crate::ops::linear_observe::PlanningSync::start(
-            self.store.clone(),
-            wave.repo().to_owned(),
-        )?)
-    }
-
     pub(crate) async fn poll(&self, harness: &mut dyn Harness) -> Result<()> {
         let mut controls = self.controls.lock().await;
         let store = &self.store;
@@ -105,7 +93,7 @@ impl TaskInput {
             });
             println!(
                 "task {}> attached; /status, /interrupt, /detach, or type a message/instruction",
-                task.plan.identifier
+                task.identifier
             );
             receiver
         });
@@ -140,11 +128,7 @@ async fn handle_attachment(
         let work = store
             .work_for_child(&ChildRef::Task(task.id.clone()))
             .await?;
-        println!(
-            "{}  {:?}",
-            task.plan.identifier,
-            store.work_status(&work).await?
-        );
+        println!("{}  {:?}", task.identifier, store.work_status(&work).await?);
         return Ok(());
     }
     if line == "/detach" {
@@ -165,12 +149,12 @@ async fn handle_attachment(
 
 pub(crate) fn task_seed(
     task: &Task,
-    project: &ProjectPlan,
+    project: &Project,
     pr: Option<&crate::work::task::TaskPr>,
     wave_name: &str,
 ) -> String {
     let context = crate::ops::render_task_context(task, project, pr, wave_name);
     format!(
-        "{context}\n\nA Task has zero or one pull request. After merge, file accepted follow-ups or record none needed, then complete the Task. Dependent pull requests belong to separate stacked Tasks."
+        "{context}\n\nA Task has zero or one pull request. After merge, record independent later work as Tasks and comments; complete the delivered outcome. Dependent pull requests belong to separate stacked Tasks."
     )
 }

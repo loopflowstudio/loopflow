@@ -618,8 +618,8 @@ fn print_task_snapshot(
         println!("{}", serde_json::to_string_pretty(&snapshot)?);
     } else {
         let pm_writeback = match &snapshot.pm_writeback {
-            loopflow::work::task::PmWritebackState::Current => "current".to_string(),
-            loopflow::work::task::PmWritebackState::Pending { error, .. } => {
+            loopflow::work::task::LinearWritebackState::Current => "current".to_string(),
+            loopflow::work::task::LinearWritebackState::Pending { error, .. } => {
                 format!("pending: {error}")
             }
         };
@@ -678,38 +678,6 @@ fn print_task_snapshot(
         println!("  project: {}", snapshot.project_id);
         if let Some(pr) = &snapshot.pr {
             println!("{}", format_task_pr_line(pr));
-        }
-        let follow_through = &snapshot.follow_through;
-        if snapshot
-            .pr
-            .as_ref()
-            .is_some_and(|pr| pr.phase() == loopflow::work::task::PrPhase::Merged)
-            && !snapshot.status.is_terminal()
-        {
-            let state = if follow_through.needs_conversion {
-                "scope needs conversion"
-            } else if follow_through.resolved() {
-                "recorded; ready to complete"
-            } else {
-                "pending"
-            };
-            println!("  Merged · Follow-through {state}");
-        }
-        for link in &follow_through.links {
-            println!(
-                "  Follow-up: {}{}",
-                link.identifier,
-                link.url
-                    .as_ref()
-                    .map(|url| format!(" · {url}"))
-                    .unwrap_or_default()
-            );
-        }
-        for note in &follow_through.scope_notes {
-            println!("  Scope needs conversion: {note}");
-        }
-        if let Some(reason) = &follow_through.reason {
-            println!("  Follow-through: {reason}");
         }
         match &snapshot.observation {
             loopflow::work::task::Observation::Cached { observed_at } => {
@@ -827,12 +795,22 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
             loopflow::lf::commands::placement::wave(repo, command)
         }
         WaveCommand::UpdatePlan { wave, plan } => {
-            let saved = tokio::runtime::Runtime::new()?.block_on(update_plan(
+            #[derive(serde::Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Input {
+                workflow: String,
+                krs: Vec<loopflow::work::project::ProjectKR>,
+                metric_targets: Vec<loopflow::work::wave::metrics::MetricTarget>,
+            }
+            let input: Input = serde_json::from_slice(&std::fs::read(plan)?)?;
+            let (_, sync) = tokio::runtime::Runtime::new()?.block_on(update_plan(
                 repo,
                 wave.as_deref(),
-                serde_json::from_slice(&std::fs::read(plan)?)?,
+                &input.workflow,
+                &input.krs,
+                &input.metric_targets,
             ))?;
-            print_planning_sync(&saved.sync);
+            print_planning_sync(&sync);
             Ok(())
         }
     }
@@ -890,36 +868,6 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             if !result.errors.is_empty() {
                 anyhow::bail!("{}", result.errors.join("\n"));
             }
-            Ok(())
-        }
-        TaskCommand::FollowUp {
-            issue,
-            title,
-            notes,
-            due,
-            wave,
-            existing,
-            none,
-            finish,
-            key,
-        } => {
-            println!(
-                "{}",
-                loopflow::ops::task::task_follow_up(
-                    repo,
-                    issue,
-                    &loopflow::ops::task::FollowUpOptions {
-                        title: title.clone(),
-                        notes: notes.clone(),
-                        due: due.clone(),
-                        wave: wave.clone(),
-                        existing: existing.clone(),
-                        none: none.clone(),
-                        finish: finish.clone(),
-                        key: key.clone(),
-                    }
-                )?
-            );
             Ok(())
         }
         TaskCommand::Automate { issue, state } => Ok(loopflow::ops::task_automation::select(
@@ -1007,13 +955,12 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             if *json {
                 println!("{}", serde_json::to_string_pretty(&issue)?);
             } else {
-                println!("{} · {}", issue.id, issue.name);
+                println!("{} · {}", issue.id, issue.title);
             }
-            if loopflow::config::load_config_or_default(Some(repo))
-                .pm
-                .and_then(|pm| pm.linear_team)
-                .is_some()
-            {
+            if matches!(
+                loopflow::config::load_config_or_default(Some(repo)).planning_transport(),
+                loopflow::config::PlanningConfig::Linear {}
+            ) {
                 eprintln!("Saved locally; pending Linear sync.");
             }
             Ok(())
@@ -1029,24 +976,25 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                         .as_str()
                         .expect("planning state is a string")
                 );
-                if let Some(planning) = &status.planning {
-                    println!("{} · {}", planning.item.identifier, planning.item.name);
+                if let Some(task) = &status.task {
+                    println!("{} · {}", task.identifier, task.title);
                     println!(
-                        "Planning: {} · {} · observed at {}",
-                        planning.item.state.as_deref().unwrap_or("unknown"),
+                        "Planning: {} · {}",
+                        task.state.as_deref().unwrap_or("unknown"),
                         if status.planning_stale {
                             "stale"
                         } else {
                             "current"
-                        },
-                        planning.observed_at
+                        }
                     );
-                    if let Some(due) = &planning.item.due_date {
+                    if let Some(due) = &task.due_date {
                         println!("Due: {due}");
                     }
-                    if planning.project.is_none() {
-                        println!("No Project assigned; managed work requires ownership.");
-                    }
+                } else {
+                    println!("No owned Task; retained observations do not establish ownership.");
+                }
+                if let Some(at) = status.observed_at {
+                    println!("Observed at: {at}");
                 }
                 if let Some(sync) = &status.sync {
                     for line in sync.lines() {
@@ -1210,11 +1158,10 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
         TaskCommand::Delete { issue } => {
             let identifier = loopflow::ops::task::task_delete(repo, issue)?;
             println!("{identifier}: removed locally; execution history retained");
-            if loopflow::config::load_config_or_default(Some(repo))
-                .pm
-                .and_then(|pm| pm.linear_team)
-                .is_some()
-            {
+            if matches!(
+                loopflow::config::load_config_or_default(Some(repo)).planning_transport(),
+                loopflow::config::PlanningConfig::Linear {}
+            ) {
                 println!("Pending Linear sync");
             }
             Ok(())
@@ -1232,8 +1179,8 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                 repo,
                 issue,
                 wave.as_deref(),
-                loopflow::pm::PmItemUpdate {
-                    name: title.clone(),
+                loopflow::work::task::TaskUpdate {
+                    title: title.clone(),
                     description: notes.clone(),
                     rank: *rank,
                     assignee: if *unassign {
@@ -1249,7 +1196,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
         }
         TaskCommand::Refile { issue, wave } => {
             let result = loopflow::ops::task::task_refile(repo, issue, wave)?;
-            println!("{}: filed task {}", result.wave, result.id);
+            println!("{wave}: filed task {}", result.id);
             Ok(())
         }
         TaskCommand::Comment {
@@ -1273,10 +1220,12 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             } else {
                 for comment in &result.comments {
                     let author = match &comment.author {
-                        loopflow::ops::pm::TaskCommentAuthor::Person { name } => {
+                        loopflow::work::task::comment::TaskCommentAuthor::Person { name } => {
                             name.as_deref().unwrap_or("unnamed person")
                         }
-                        loopflow::ops::pm::TaskCommentAuthor::Integration => "integration",
+                        loopflow::work::task::comment::TaskCommentAuthor::Integration => {
+                            "integration"
+                        }
                     };
                     let date = comment.created_at.as_deref().unwrap_or("date unavailable");
                     let sync = if result.pending_sync.contains(&comment.id) {
@@ -1523,6 +1472,8 @@ fn run() -> anyhow::Result<()> {
             let directory = loopflow::repo::working_directory()?;
             let repo = loopflow::ops::task::task_repository(&directory, Some(task))?;
             let mut binding = prepare_work_binding(&format!("task:{task}"), &repo)?;
+            // The source applies only to this invocation, not its descendants.
+            std::env::remove_var(loopflow::lf::TASK_SOURCE_ENV);
             if let Some(cwd) = cli.bound_cwd.clone() {
                 binding.cwd = cwd;
             }
@@ -1605,11 +1556,12 @@ fn dispatch(
                 directive: directive.clone(),
             },
         )?;
+        std::env::remove_var(loopflow::lf::TASK_SOURCE_ENV);
         let Some(flow) = flow else {
             // An edge that runs nothing: setting out on it is the whole move.
             println!(
                 "Task {} moved along a workflow edge that runs no Flow",
-                task.plan.identifier
+                task.identifier
             );
             return Ok(());
         };
@@ -1618,7 +1570,7 @@ fn dispatch(
         // still on the edge.
         loopflow::lf::commands::flow::run_for_task(
             &cli,
-            &task.plan.identifier,
+            &task.identifier,
             &flow,
             task.worktree()?,
         )?;
@@ -1858,17 +1810,20 @@ fn execute_command(
                     project,
                     name,
                     summary,
+                    description,
                 },
         }) => {
             let cwd = std::env::current_dir()?;
             let repo = loopflow::repo::discover_repo_root(&cwd)?.unwrap_or(cwd);
-            let saved = tokio::runtime::Runtime::new()?.block_on(loopflow::ops::project::edit(
-                &repo,
-                project,
-                name.as_deref(),
-                summary.as_deref(),
-            ))?;
-            print_planning_sync(&saved.sync);
+            let (_, sync) =
+                tokio::runtime::Runtime::new()?.block_on(loopflow::ops::project::edit(
+                    &repo,
+                    project,
+                    name.as_deref(),
+                    summary.as_deref(),
+                    description.as_deref(),
+                ))?;
+            print_planning_sync(&sync);
             Ok(())
         }
         Some(Commands::Project {
@@ -1905,16 +1860,15 @@ fn execute_command(
                     Ok(())
                 }
                 loopflow::lf::ProjectWorkflowCommand::Show { project, json } => {
-                    let selected = tokio::runtime::Runtime::new()?
+                    let (project, sync) = tokio::runtime::Runtime::new()?
                         .block_on(loopflow::ops::project::workflow(&repo, project, None, None))?;
                     if *json {
-                        println!("{}", serde_json::to_string_pretty(&selected)?);
+                        let mut value = serde_json::to_value(project)?;
+                        value["sync"] = serde_json::to_value(sync)?;
+                        println!("{}", serde_json::to_string_pretty(&value)?);
                     } else {
-                        println!(
-                            "{} · Workflow {}",
-                            selected.project.name, selected.project.workflow
-                        );
-                        print_planning_sync(&selected.sync);
+                        println!("{} · Workflow {}", project.name, project.workflow);
+                        print_planning_sync(&sync);
                     }
                     Ok(())
                 }
@@ -1923,7 +1877,7 @@ fn execute_command(
                     name,
                     file,
                 } => with_runtime(&repo, args, || {
-                    let saved = tokio::runtime::Runtime::new()?.block_on(
+                    let (_, sync) = tokio::runtime::Runtime::new()?.block_on(
                         loopflow::ops::project::workflow(
                             &repo,
                             project,
@@ -1932,7 +1886,7 @@ fn execute_command(
                         ),
                     )?;
                     println!("Project {project}: Workflow {name}");
-                    print_planning_sync(&saved.sync);
+                    print_planning_sync(&sync);
                     Ok(())
                 }),
             }
@@ -2026,7 +1980,7 @@ fn finish_command(result: anyhow::Result<()>) -> anyhow::Result<()> {
     result
 }
 
-fn print_planning_sync(sync: &loopflow::planning::PlanningSyncStatus) {
+fn print_planning_sync(sync: &loopflow::store::planning_sync::PlanningSyncStatus) {
     for line in sync.lines() {
         eprintln!("{line}");
     }

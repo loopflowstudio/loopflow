@@ -20,7 +20,7 @@ fn task_abandonment_cli_saves_offline_and_preserves_unresolved_work() {
         std::fs::write(
             repo.path().join(".lf/config.yaml"),
             if connected {
-                "pm:\n  provider: linear\n  linear_team: offline-fixture\n"
+                "linear:\n  team: offline-fixture\n"
             } else {
                 "{}\n"
             },

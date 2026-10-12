@@ -104,7 +104,7 @@
     "items": [
       {
         "task": {
-          "id": "issue-1",
+          "id": "ts_22222222222222222222222222222222",
           "identifier": "INF-123",
           "name": "Surface nightly failures",
           "description": "Surface one focused failure.",
@@ -114,7 +114,6 @@
           "state": "unstarted",
           "completed_at": null,
           "due_date": null,
-          "follow_up_sources": [],
           "sync": {
             "connected": true,
             "changes": [
@@ -141,7 +140,7 @@
               },
               {
                 "id": "title-task",
-                "field": "name",
+                "field": "task_title",
                 "state": "adopted_linear",
                 "local_value": "Local title",
                 "linear_value": "Linear title",
@@ -149,7 +148,7 @@
               },
               {
                 "id": "assignee-task",
-                "field": "assignee",
+                "field": "task_assignee",
                 "state": "adopted_linear",
                 "local_value": "person-id",
                 "linear_value": null,
@@ -171,6 +170,11 @@
                 "error": "Offline"
               }
             ]
+          },
+          "linear_id": "issue-1",
+          "acquisition": {
+            "state": "available",
+            "observed_at": null
           }
         },
         "reference": {
@@ -560,13 +564,6 @@
           },
           "merge_commit": null,
           "abandoned_at": null
-        },
-        "follow_through": {
-          "intents": [],
-          "links": [],
-          "reason": null,
-          "needs_conversion": false,
-          "scope_notes": []
         }
       },
       {
@@ -581,7 +578,6 @@
           "state": "unstarted",
           "completed_at": null,
           "due_date": null,
-          "follow_up_sources": [],
           "sync": {
             "connected": true,
             "changes": [
@@ -608,7 +604,7 @@
               },
               {
                 "id": "title-task",
-                "field": "name",
+                "field": "task_title",
                 "state": "adopted_linear",
                 "local_value": "Local title",
                 "linear_value": "Linear title",
@@ -616,7 +612,7 @@
               },
               {
                 "id": "assignee-task",
-                "field": "assignee",
+                "field": "task_assignee",
                 "state": "adopted_linear",
                 "local_value": "person-id",
                 "linear_value": null,
@@ -638,6 +634,11 @@
                 "error": "Offline"
               }
             ]
+          },
+          "linear_id": null,
+          "acquisition": {
+            "state": "available",
+            "observed_at": null
           }
         },
         "reference": {
@@ -680,14 +681,7 @@
         "run_control": {
           "unavailable": null
         },
-        "pr": null,
-        "follow_through": {
-          "intents": [],
-          "links": [],
-          "reason": null,
-          "needs_conversion": false,
-          "scope_notes": []
-        }
+        "pr": null
       }
     ],
     "truncated": false
@@ -707,8 +701,7 @@
     "state": "ok",
     "items": [
       {
-        "id": "project-1",
-        "work_id": null,
+        "id": "proj_0123456789ab40008000000000000001",
         "slug": "release-feedback",
         "name": "current",
         "workflow": "task-design",
@@ -754,14 +747,15 @@
               "error": "Reply lost; awaiting readback"
             }
           ]
-        }
+        },
+        "linear_id": "project-1"
       }
     ],
     "truncated": false
   },
   "project_readiness": {
     "state": "ready",
-    "project_id": "project-1",
+    "project_id": "proj_0123456789ab40008000000000000001",
     "observed_at": null,
     "pending_successor": null,
     "activation": null

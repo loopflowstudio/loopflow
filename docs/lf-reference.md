@@ -758,6 +758,36 @@ Save a steer for associated Sessions without starting a turn
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
+## lf repo planning
+
+Inspect planning synchronization and personal identity
+
+| Argument | What it does |
+|---|---|
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf repo planning key
+
+Show, explicitly create, or recover the same planning user key on another machine
+
+| Argument | What it does |
+|---|---|
+| `--new` | new Default: false. |
+| `--recover` | recover |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf repo planning status
+
+Show selection, retained imports and held records without contacting Git
+
+| Argument | What it does |
+|---|---|
+| `--json` | json Default: false. |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
 ## lf repo connect
 
 Connect a Wave to its Initiative and the repository's Team (Task prefix)
@@ -1309,13 +1339,13 @@ Record repair ownership without changing the failed evidence
 
 ## lf wave cron add
 
-Install or replace a scheduled lf invocation
+Install a named ordinary lf command on this Machine
 
 | Argument | What it does |
 |---|---|
-| `--wave / -w` | Wave name passed to `lf <flow> --wave <wave>` (ambient if omitted) |
-| `--flow` | Flow or skill name to run |
+| `<name>` | Stable job name, retained across command changes |
 | `--schedule` | Daily or every-minute cron expression, or a schedule alias Default: daily. |
+| `<command>` | Arguments passed to lf, after -- |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
@@ -1325,28 +1355,31 @@ List installed loopflow cron jobs
 
 | Argument | What it does |
 |---|---|
-| `--wave / -w` | Only jobs for this Wave |
+| `--wave / -w` | Only commands with this --wave selector |
+| `--task` | Only commands with this --task selector |
 | `--json` | Emit machine-readable job state Default: false. |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf wave cron preflight
 
-Validate Machine authority and declared jobs without changing launchd
+Validate configured commands and Machine placement without installing jobs
 
 | Argument | What it does |
 |---|---|
-| `--wave / -w` | Wave whose GOAL.md `crons:` are validated |
+| `--wave / -w` | Only commands with this --wave selector |
+| `--task` | Only commands with this --task selector |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf wave cron sync
 
-Reconcile installed launchd jobs to match a wave's declared `crons:`
+Reconcile installed jobs with the repository configuration's cron list
 
 | Argument | What it does |
 |---|---|
-| `--wave / -w` | wave |
+| `--wave / -w` | Only commands with this --wave selector |
+| `--task` | Only commands with this --task selector |
 | `--repo` | Install the finite repository Task check on this Machine Default: false. |
 | `--disable` | Remove the repository schedule; running work retains its authority Default: false. |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
@@ -1475,13 +1508,14 @@ Project-owned planning configuration
 
 ## lf project edit
 
-Update a Project's name or summary
+Update a Project's name, summary or prose
 
 | Argument | What it does |
 |---|---|
 | `<project>` | project |
 | `--name` | name |
 | `--summary` | summary |
+| `--description` | Authored prose; managed Workflow, KRs and targets stay unchanged |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
@@ -1605,24 +1639,6 @@ Check authorized deliveries once, then exit
 | Argument | What it does |
 |---|---|
 | `--json` | json Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
-| `--help / -h` | Print help |
-
-## lf task follow-up
-
-File or link follow-up Tasks after merge, then record the disposition
-
-| Argument | What it does |
-|---|---|
-| `<issue>` | issue |
-| `--title` | title |
-| `--notes` | notes |
-| `--due` | due |
-| `--wave` | wave |
-| `--existing` | existing |
-| `--none` | none |
-| `--finish` | finish |
-| `--key` | Stable obligation key; use a distinct key for each additional follow-up |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 

@@ -149,6 +149,16 @@ the Kata lock holder and exact cause remain unconfirmed. The background shell
 alone is no causal evidence. Separate-directory, consecutive-callback fixtures
 retain held contention across prompts; installed Kata acceptance remains open.
 
+Gate recovery after main `092ab7ba5b`: hosted run 38206293132 failed only
+`task_facts_update_without_rewriting_work_progression`: the planning writer
+advanced `updated_at` across a second boundary while the fixture expected the
+creation timestamp. Pinning an older timestamp reproduced it locally; the
+fixture now verifies edit-time advancement separately and retains its full
+Task/PR preservation comparison. No production planning behavior changed.
+All 133 affected network-isolated tests pass, including the upstream account
+repair; fmt, Clippy and architecture checks pass. Hosted materialized/Linux CI
+and installed concurrent-Flow acceptance remain unproved.
+
 ## Program Status direction (LOO-398, 2026-10-07)
 
 Jack Heart selected every-pane Desktop reading, unchanged native passthrough and

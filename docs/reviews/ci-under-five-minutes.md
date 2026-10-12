@@ -361,3 +361,26 @@ Independent maintenance cleanup is captured in Infrastructure Task `lf-6d3ff35`,
 “Remove duplicate and brittle test assertions,” in the loopflow repository. It
 retains one architecture-check owner and meaningful behavior/safety assertions;
 it does not own the under-five-minute acceptance or run workers automatically.
+
+## Matrix fixture reuse experiment
+
+The [historical timing audit](ci-timing-history.md) identified repeated fixture
+seeding as a concrete regression. A matched local macOS experiment measured
+`matrix_every_command_every_environment` at **53.62s before, 13.22s after**
+restoring a prepared fixture for each case. All 70 command/environment cells
+remain, with unchanged expected outcomes; no tests were removed or demoted.
+Temporary instrumentation measured roughly 0.54s per original seed versus
+0.02s per restore and was removed after measurement. This is local evidence,
+not a measured hosted CI reduction.
+
+The fixture seeds once, closes the SQLite store, and saves the complete Home
+and repository. Every command receives independent restored bytes at the same
+absolute paths recorded by the registry; its mutated files are removed before
+the next case. No live database or mutable plan is shared. Review retained the
+existing classifier limitation noted in the coverage audit: unknown downstream
+errors can count as resolved. This optimization does not establish stronger
+resolution coverage than the original test.
+
+Raw measurements: `/tmp/ci-matrix-baseline.log` and
+`/tmp/ci-matrix-snapshot.log`. Final focused checks and Clippy are recorded with
+the working plan before checkpointing.

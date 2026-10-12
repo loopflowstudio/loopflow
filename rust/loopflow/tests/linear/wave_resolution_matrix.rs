@@ -425,16 +425,29 @@ fn run_lf(home: &Path, repo: &Path, cmd: &Cmd, env: &Env) -> std::process::Outpu
 fn matrix_every_command_every_environment() {
     let mut failures = Vec::new();
     let mut total = 0usize;
-    // Each cell gets its own plan: explicit Task creation can provision a Wave.
+    let tmp = tempfile::tempdir().unwrap();
+    let cell = tmp.path().join("cell");
+    let pristine = tmp.path().join("pristine");
+    let home = cell.join("home");
+    let repo = cell.join("repo");
+    let wave = seed(&home, &repo);
+    // Seed once, after closing the store, then restore independent bytes for
+    // each command. Keep the original paths: the registry stores absolute paths.
+    // Sharing live state would let Task creation provision a later cell's Wave.
+    std::fs::rename(&cell, &pristine).unwrap();
     for index in 0..make_envs("", "").len() {
         for cmd in COMMANDS {
-            let tmp = tempfile::tempdir().unwrap();
-            let home = tmp.path().join("home");
-            let repo = tmp.path().join("repo");
-            let wave = seed(&home, &repo);
+            assert!(Command::new("cp")
+                .arg("-R")
+                .arg(&pristine)
+                .arg(&cell)
+                .status()
+                .unwrap()
+                .success());
             let env = make_envs(wave.id().as_str(), WaveId::new().as_str()).remove(index);
             total += 1;
             let output = run_lf(&home, &repo, cmd, &env);
+            std::fs::remove_dir_all(&cell).unwrap();
             let outcome = classify(&output);
             let expected = if cmd.id == "task create"
                 && matches!(

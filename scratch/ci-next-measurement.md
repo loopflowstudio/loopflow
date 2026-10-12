@@ -6,6 +6,16 @@ test-count growth versus compilation, per-test cost and workflow changes.
 An independent read-only contribution is researching this into
 `docs/reviews/ci-timing-history.md`; it does not own implementation.
 
+The historical audit is complete. September 30's last verified full PR ran in
+4:36; later short PRs were checkpoint deferrals. Recent test-count growth is
+31%, versus 6.6x execution time. Prioritize measured fixture and repeated-work
+reductions before selecting the proposed shard count below.
+
+Matrix fixture reuse retains all 70 independent cases: local execution fell
+53.62s to 13.22s by restoring a closed, fully seeded Home/repository before
+each command. Final three-test module pass: 12.64s. Hosted benefit remains
+unmeasured; the existing broad error classifier is still a coverage limitation.
+
 Jack Heart's target remains required CI under five minutes across ten consecutive
 real typical-code PR runs. PR #1543 passes but does not meet that target. Its
 first build-reuse improvement awaits Jack's merge decision; no arming is implied.

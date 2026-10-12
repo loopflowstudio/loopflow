@@ -898,6 +898,7 @@ the checkout. A stopped Flow is history and blocks nothing.
 ```bash
 lf session ensure                    # persistent repository conversation
 lf session ensure --wave product     # separate persistent Wave conversation
+lf session connect SESSION           # open the prepared conversation
 ```
 
 Inside the conversation's persistent checkout:

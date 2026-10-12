@@ -23,6 +23,8 @@ process-group death rules remain unchanged. Death does not invent success.
 
 ## Delete — do not maintain
 
+All targets below are removed; no remaining predecessor path.
+
 - Primary `start` background launch: replace with input preparation.
 - `serve-conversation` hidden command and its sole serving function; the unused
   `start_home_session` wrapper.
@@ -40,6 +42,11 @@ The retired/no-history case found in the actual reported records is covered
 without clearing completion or stealing primary selection. Unknown native
 identity stays unknown; no generic process reaper or alternate launch path was added.
 
+Preparation accepts only an ID, keeping the locked read as its sole Session
+snapshot. Input replacement validates completion once at admission; the SQL
+writer runs in that same transaction and needs no second completion predicate.
+The CI-repair caller also loads its Session inside the writer's transaction.
+
 ## Remaining
 
 - Gate: affected Session/connection/store suites and automated acceptance;
@@ -47,4 +54,4 @@ identity stays unknown; no generic process reaper or alternate launch path was a
   interaction remain unproved. Stand-in CLI tests establish source behavior.
 - Publication and landing remain with the supplied Flow's later steps.
 
-Checks: `cargo test -p loopflow --lib` with primary/native_resume/retired_input filters and `cargo test -p loopflow --test session_lifecycle_tests ensured_` — 10 passed; `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` pass; broader suites and installed acceptance deferred to gate/CI.
+Checks: `cargo test -p loopflow --lib` with `primary::tests`/`retrying_retired_input` filters and `cargo test -p loopflow --test session_lifecycle_tests ensured_` — 9 passed; unchanged native-resume proof reused; `cargo fmt`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` pass; broader suites and installed acceptance deferred to gate/CI.

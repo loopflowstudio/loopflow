@@ -1404,9 +1404,9 @@ pub(super) fn replace_input_in(
         process,
     )?);
     conn.execute("UPDATE agent_sessions SET current_capture=?2,input_published=?3,skill=?4,provider=?5,model=?6
-        WHERE id=?1 AND completed_at IS ?7",
+        WHERE id=?1",
         params![session.id,session.captured,session.input_published,
-            session.skill,session.provider,session.model,session.completed_at])?;
+            session.skill,session.provider,session.model])?;
     Ok(())
 }
 

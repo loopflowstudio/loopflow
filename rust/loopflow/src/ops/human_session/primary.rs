@@ -37,7 +37,7 @@ pub(crate) async fn ensure(
     let _lock = lock_scope(&scope).await?;
     session.cwd = ensure_scope_worktree(&session.cwd, &scope)?.path;
     let session = store.ensure_primary_session(&scope, None, session).await?;
-    prepare(store, session).await
+    prepare(store, &session.id).await
 }
 
 /// A Task's primary is one of its own conversations: the one already chosen,
@@ -78,7 +78,7 @@ pub(crate) async fn ensure_task(
     let session = store
         .ensure_primary_session(&scope, None, task_session(store, &binding, id)?)
         .await?;
-    prepare(store, session).await
+    prepare(store, &session.id).await
 }
 
 /// Give the scope a fresh conversation. The predecessor's provider stops
@@ -118,7 +118,7 @@ pub(crate) async fn replace(store: &SharedStore, id: &str) -> Result<SessionReco
     let session = store
         .ensure_primary_session(&scope, Some(id), successor)
         .await?;
-    prepare(store, session).await
+    prepare(store, &session.id).await
 }
 
 pub(crate) fn ensure_scope_worktree(
@@ -258,13 +258,13 @@ fn conversation(cwd: &Path, agent: Option<&str>, skill: &str, title: String) -> 
 }
 
 /// Prepare the first input; connecting owns the foreground provider launch.
-async fn prepare(store: &SharedStore, session: LfSession) -> Result<SessionRecord> {
-    let id = session.id.clone();
-    let _launch = tokio::task::spawn_blocking(move || lock_session_process(&id)).await??;
+async fn prepare(store: &SharedStore, id: &str) -> Result<SessionRecord> {
+    let lock_id = id.to_string();
+    let _launch = tokio::task::spawn_blocking(move || lock_session_process(&lock_id)).await??;
     let session = store
-        .session(&session.id)
+        .session(id)
         .await?
-        .ok_or_else(|| session_not_found(&session.id))?;
+        .ok_or_else(|| session_not_found(id))?;
     let session = admit_workspace(store, session).await?;
     let session = if session.input_published {
         session

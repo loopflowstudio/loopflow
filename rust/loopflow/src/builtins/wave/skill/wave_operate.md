@@ -9,7 +9,7 @@ after a number of moves. No chat or schedule is required. Another conversation
 or scheduled pass may be operating this Wave at the same time; work it is
 driving is moving, and you leave it alone.
 
-Writes to `wave/` belong to the selected Loopflow Flow's procedure. Outside
+Writes to `.lf/wave/` belong to the selected Loopflow Flow's procedure. Outside
 that Flow, keep proposed Wave changes in scratch; Work association alone
 does not select memory maintenance.
 

@@ -387,7 +387,9 @@ async fn resolve_repository_context(repo: &Path) -> OpsResult<RepositoryPmContex
     require_linear_config(repo)?;
     let team_id = require_repository_team(repo)?;
     let repo_id = repository_id(repo)?;
-    let client = build_client(Some(team_id.clone())).await?;
+    let client = build_client(Some(team_id.clone()))
+        .await?
+        .for_repository(repo);
     client
         .validate_team_claim(&team_id, repo_id.as_str())
         .await
@@ -401,11 +403,18 @@ async fn resolve_repository_context(repo: &Path) -> OpsResult<RepositoryPmContex
 
 /// A configured Linear client for repository-scoped webhook and exact-Issue operations.
 pub async fn linear_client(repo: &Path) -> OpsResult<LinearClient> {
-    Ok(resolve_repository_context(repo).await?.client)
+    Ok(resolve_repository_context(repo)
+        .await?
+        .client
+        .for_repository(repo))
 }
 
 /// A Task already names its linked issue; comment access needs no team discovery.
 pub(crate) async fn issue_client(repo: &Path) -> OpsResult<LinearClient> {
+    Ok(unchecked_issue_client(repo).await?.for_repository(repo))
+}
+
+pub(crate) async fn unchecked_issue_client(repo: &Path) -> OpsResult<LinearClient> {
     require_linear_config(repo)?;
     build_client(None).await
 }
@@ -630,7 +639,7 @@ mod task_comments_tests;
 // ── snapshot freshness policy ────────────────────────────────────────
 
 /// Past this age an Auto read opportunistically refreshes before serving.
-pub(super) const PM_SOFT_STALE_SECS: i64 = 60 * 60; // 1 hour
+const PM_SOFT_STALE_SECS: i64 = 60 * 60; // 1 hour
 /// Past this age a failed refresh is an error, not a silent cache fallback.
 const PM_HARD_STALE_SECS: i64 = 7 * 24 * 60 * 60; // 1 week
 /// Ceiling on an opportunistic refresh; exceeding it counts as a failure.
@@ -1585,7 +1594,9 @@ async fn resolve_reteam_context(repo: &Path) -> OpsResult<ResolvedReteamContext>
         )
     })?;
     let repo_id = repository_id(repo)?;
-    let client = build_client(Some(team_id.clone())).await?;
+    let client = build_client(Some(team_id.clone()))
+        .await?
+        .for_repository(repo);
     let binding = client
         .validate_team_claim(&team_id, repo_id.as_str())
         .await

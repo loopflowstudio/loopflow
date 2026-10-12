@@ -401,6 +401,12 @@ pub enum Commands {
         #[arg(long, value_enum)]
         moment: crate::context_block::ContextMoment,
     },
+    /// Internal end-of-turn planning acquisition and pending delivery.
+    #[command(name = "__planning-check", hide = true)]
+    PlanningCheck {
+        #[arg(long)]
+        delivery: std::path::PathBuf,
+    },
     /// Native provider naming callback.
     #[command(name = "__session-title", hide = true)]
     SessionTitle {

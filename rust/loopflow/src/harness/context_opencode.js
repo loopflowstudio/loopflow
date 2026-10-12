@@ -15,6 +15,15 @@ export default async () => {
     return JSON.parse(output).hookSpecificOutput.additionalContext;
   };
   return {
+    event: async ({ event }) => {
+      if (event.type !== "session.idle" || event.properties.sessionID !== session) return;
+      try {
+        execFileSync(spec.executable, ["__planning-check", "--delivery", delivery], {
+          env: { ...process.env, LF_HOME: spec.delivery.home }, cwd: spec.delivery.repo,
+          timeout: 10000, stdio: "ignore",
+        });
+      } catch { /* Planning remains local and pending until another boundary. */ }
+    },
     "chat.message": async (input) => {
       session ??= input.sessionID;
     },

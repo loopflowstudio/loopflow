@@ -2894,6 +2894,11 @@ pub struct TaskStatus {
 }
 
 pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
+    block_on_task(async {
+        let store = task_store().await?;
+        super::linear_observe::sync_repository(&store, &repo.to_string_lossy()).await;
+        Ok(())
+    })?;
     if let Some(task) = task_execution_status(repo, issue)? {
         let (read, sync) = block_on_task(async {
             let store = task_store().await?;

@@ -115,19 +115,25 @@ pub(crate) async fn sync_export(store: &Store, repo: &Path, work: &WorkRef) -> O
         {
             return Ok(());
         }
-        if let Err(error) = client.deliver_planning_creation(project, input).await {
-            if matches!(error, crate::pm::PmError::RateLimited { .. }) {
-                store
-                    .sqlite
-                    .reject_planning_export(owner, false)
-                    .map_err(message)?;
+        let response = match client.deliver_planning_creation(project, input).await {
+            Ok(response) => response,
+            Err(error) => {
+                if matches!(error, crate::pm::PmError::RateLimited { .. }) {
+                    store
+                        .sqlite
+                        .reject_planning_export(owner, false)
+                        .map_err(message)?;
+                }
+                return Err(message(error));
             }
-            return Err(message(error));
-        }
-        if !observe(store, repo, owner, &client, &export, &wave_id).await? {
-            return Err(message(
-                "Creation acknowledgement lacks exact readback; receipt retained",
-            ));
+        };
+        match response {
+            crate::pm::linear::PlanningResponse::Project { project, .. } => {
+                attach_project(store, owner, &client, &export, &wave_id, *project).await?;
+            }
+            response => {
+                super::planning_delivery::apply_response(store, repo, owner, response).await?
+            }
         }
         Ok(())
     };
@@ -152,66 +158,19 @@ async fn observe(
     export: &PlanningExport,
     wave: &crate::id::WaveId,
 ) -> OpsResult<bool> {
-    let (attempted, link_attempted) = store
+    let (attempted, _) = store
         .sqlite
         .planning_export_attempts(owner)
         .map_err(message)?;
     match owner {
         PlanningChanges::Project(_) => {
-            let Some(mut project) = client.find_project(&export.id).await.map_err(message)? else {
+            let Some(project) = client.find_project(&export.id).await.map_err(message)? else {
                 return Ok(false);
             };
             if project.id != export.id || !attempted {
                 return Err(message("Project identity already exists without an attempted creation; receipt retained"));
             }
-            if project.initiative_ids.is_empty() {
-                if link_attempted {
-                    return Err(message(
-                        "Project attachment remains uncertain; no repeated attachment issued",
-                    ));
-                }
-                if !store
-                    .sqlite
-                    .attempt_planning_export(owner, &export.input, true)
-                    .map_err(message)?
-                {
-                    return Ok(false);
-                }
-                if let Err(error) = client
-                    .deliver_project_attachment(&export.link_id, &export.id, &export.initiative)
-                    .await
-                {
-                    if matches!(error, crate::pm::PmError::RateLimited { .. }) {
-                        store
-                            .sqlite
-                            .reject_planning_export(owner, true)
-                            .map_err(message)?;
-                    }
-                    return Err(message(error));
-                }
-                project = client
-                    .find_project(&export.id)
-                    .await
-                    .map_err(message)?
-                    .ok_or_else(|| message("Created Project is unavailable"))?;
-            }
-            if project.id != export.id
-                || project.initiative_ids.as_slice() != [export.initiative.as_str()]
-            {
-                return Err(message(
-                    "Created Project has conflicting Initiative membership; receipt retained",
-                ));
-            }
-            store
-                .sqlite
-                .put_pm_project(
-                    wave,
-                    "linear",
-                    &export.initiative,
-                    &project,
-                    time::OffsetDateTime::now_utc().unix_timestamp(),
-                )
-                .map_err(message)?;
+            attach_project(store, owner, client, export, wave, project).await?;
         }
         PlanningChanges::Task(_) => {
             let Some((item, project)) = client
@@ -239,6 +198,66 @@ async fn observe(
         }
     }
     Ok(true)
+}
+
+async fn attach_project(
+    store: &Store,
+    owner: PlanningChanges<'_>,
+    client: &LinearClient,
+    export: &PlanningExport,
+    wave: &crate::id::WaveId,
+    mut project: crate::pm::PmProject,
+) -> OpsResult<()> {
+    if project.initiative_ids.is_empty() {
+        let (_, attempted) = store
+            .sqlite
+            .planning_export_attempts(owner)
+            .map_err(message)?;
+        if attempted {
+            return Err(message(
+                "Project attachment remains uncertain; no repeated attachment issued",
+            ));
+        }
+        if !store
+            .sqlite
+            .attempt_planning_export(owner, &export.input, true)
+            .map_err(message)?
+        {
+            return Ok(());
+        }
+        project = match client
+            .deliver_project_attachment(&export.link_id, &export.id, &export.initiative)
+            .await
+        {
+            Ok(project) => project,
+            Err(error) => {
+                if matches!(error, crate::pm::PmError::RateLimited { .. }) {
+                    store
+                        .sqlite
+                        .reject_planning_export(owner, true)
+                        .map_err(message)?;
+                }
+                return Err(message(error));
+            }
+        };
+    }
+    if project.id != export.id || project.initiative_ids.as_slice() != [export.initiative.as_str()]
+    {
+        return Err(message(
+            "Created Project has conflicting Initiative membership; receipt retained",
+        ));
+    }
+    store
+        .sqlite
+        .put_pm_project(
+            wave,
+            "linear",
+            &export.initiative,
+            &project,
+            time::OffsetDateTime::now_utc().unix_timestamp(),
+        )
+        .map_err(message)?;
+    Ok(())
 }
 
 // Local filing settles independently. Exporting either endpoint makes its retained

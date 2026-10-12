@@ -562,6 +562,7 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
             return no_registry(json, "null");
         };
         let wave = resolve_status_wave(&store, wave).await?;
+        crate::ops::linear_observe::sync_repository(&store, wave.repo()).await;
         let status = wave_detail(&store, &wave).await?;
         if json {
             println!("{}", serde_json::to_string(&status)?);
@@ -607,7 +608,7 @@ pub(crate) async fn wave_detail(store: &SharedStore, wave: &Wave) -> Result<Wave
 /// `lf roadmap [wave]` — the machine-wide intent plane. Every Wave (or one, when
 /// scoped) with its plan joined to live evidence and each row bucketed into a
 /// section. Deterministic and local: one runtime observation for the whole
-/// read, bounded Git probes for Task Work, and no network. `lf wave status`
+/// read and bounded Git probes for Task Work, after a fresh team check. `lf wave status`
 /// answers "is it healthy"; this answers "what is being worked on and what
 /// could be".
 pub fn roadmap(wave: Option<&str>, task: Option<&str>, json: bool, all: bool) -> Result<()> {
@@ -668,6 +669,12 @@ pub fn roadmap(wave: Option<&str>, task: Option<&str>, json: bool, all: bool) ->
             }
             Err(other) => return Err(anyhow!(other)),
         };
+        let mut checked = std::collections::HashSet::new();
+        for wave in &waves {
+            if checked.insert(wave.repo()) {
+                crate::ops::linear_observe::sync_repository(&store, wave.repo()).await;
+            }
+        }
         let roadmap =
             roadmap_snapshot(&store, waves, include_history, task, evaluation_time).await?;
         if json {

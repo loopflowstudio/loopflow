@@ -135,10 +135,12 @@ lf pr reconcile                                      # check recorded deliveries
 lf ci watch                                          # watch PR checks; start a ci-fix when a landing fails
 ```
 
-Task comments in Linear also reach the Task's running Flow. Foreground connections
-share comment acquisition for unfinished Tasks every 15 seconds; planning inventory
-uses the one-hour cache. A Linear rate limit pauses requests across repositories in
-the same Home until reset, retaining pending writes. Steering never starts
+Task comments in Linear reach the Task's next useful boundary: before a Flow step,
+after an agent turn, when showing planning, and before a Linear write. Team checks
+share ten-second freshness. Only Desktop and `--watch` keep a slow clock, backing
+off while nothing changes; idle agents do not poll. Teams without live Tasks make
+no acquisition requests. A rate limit pauses requests across repositories in the
+same Home until reset, retaining pending writes. Steering never starts
 an idle Task or broadcasts to independent conversations. A stopped Flow is
 history: `task run` never continues it, so inspect `lf task status` first.
 

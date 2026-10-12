@@ -96,16 +96,20 @@ impl TaskInput {
         );
     }
 
-    pub(crate) fn start_planning_sync(&self) -> Result<crate::ops::linear_observe::PlanningSync> {
+    pub(crate) fn check_planning(&self) -> Result<()> {
         let wave = self
             .store
             .sqlite
             .get_wave(&self.task.wave_id)?
             .ok_or_else(|| anyhow!("Task Wave is missing"))?;
-        Ok(crate::ops::linear_observe::PlanningSync::start(
-            self.store.clone(),
-            wave.repo().to_owned(),
-        )?)
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?;
+        runtime.block_on(crate::ops::linear_observe::sync_repository(
+            &self.store,
+            wave.repo(),
+        ));
+        Ok(())
     }
 
     pub(crate) async fn poll(

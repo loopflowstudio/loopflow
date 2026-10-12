@@ -40,25 +40,25 @@ pub(crate) fn codex_config(context: Option<&ContextDelivery>, capture: bool) -> 
             }));
     }
     let mut states = serde_json::Map::new();
-    for (index, group) in hooks["SessionStart"]
-        .as_array()
-        .expect("hook groups")
-        .iter()
-        .enumerate()
-    {
-        let mut handler = group["hooks"][0].clone();
-        handler["async"] = json!(false);
-        let mut identity =
-            json!({"event_name":"session_start", "matcher":group["matcher"], "hooks":[handler]});
-        identity.sort_all_objects();
-        let hash = format!(
-            "sha256:{}",
-            hex::encode(Sha256::digest(serde_json::to_vec(&identity)?))
-        );
-        states.insert(
-            format!("/<session-flags>/config.toml:session_start:{index}:0"),
-            json!({"trusted_hash":hash}),
-        );
+    for (name, event) in [("SessionStart", "session_start"), ("Stop", "stop")] {
+        let Some(groups) = hooks[name].as_array() else {
+            continue;
+        };
+        for (index, group) in groups.iter().enumerate() {
+            let mut handler = group["hooks"][0].clone();
+            handler["async"] = json!(false);
+            let mut identity =
+                json!({"event_name":event, "matcher":group["matcher"], "hooks":[handler]});
+            identity.sort_all_objects();
+            let hash = format!(
+                "sha256:{}",
+                hex::encode(Sha256::digest(serde_json::to_vec(&identity)?))
+            );
+            states.insert(
+                format!("/<session-flags>/config.toml:{event}:{index}:0"),
+                json!({"trusted_hash":hash}),
+            );
+        }
     }
     hooks["state"] = Value::Object(states);
     Ok(json!({"hooks":hooks}))

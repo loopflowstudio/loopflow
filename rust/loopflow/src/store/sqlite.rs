@@ -25,6 +25,7 @@ mod children;
 mod ci_incidents;
 mod durable;
 mod flow_inventory;
+mod linear_team_checks;
 mod metrics;
 mod plan_read;
 mod planning;

@@ -597,6 +597,7 @@ impl SkillExecutor for &RunningFlow<'_> {
         skill: &ConcreteSkill,
         ctx: ExecutionContext,
     ) -> Result<SkillOutcome> {
+        crate::ops::linear_observe::sync_repository(&self.store, &self.cwd.to_string_lossy()).await;
         let name = &skill.skill.name;
         print_step_progress(ctx.progress, name);
         let current = self.current();
@@ -702,6 +703,7 @@ impl SkillExecutor for &RunningFlow<'_> {
         ops: &crate::flow::ConcreteCommand,
         _ctx: ExecutionContext,
     ) -> Result<SkillOutcome> {
+        crate::ops::linear_observe::sync_repository(&self.store, &self.cwd.to_string_lossy()).await;
         let label = ops.item.display_name();
         eprintln!("op: {label}");
         // Authored spellings outlive the CLI's; the step runs today's.

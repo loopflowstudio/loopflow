@@ -130,10 +130,18 @@ impl ContextDelivery {
             quote(&executable),
             quote(&path)
         );
-        Ok(serde_json::json!({"SessionStart": [
-            {"matcher": "startup|resume", "hooks": [{"type":"command", "command": format!("{command} start"), "timeout": 30}]},
-            {"matcher": "compact", "hooks": [{"type":"command", "command": format!("{command} compact"), "timeout": 30}]}
-        ]}))
+        let check = format!(
+            "env LF_HOME={} {} __planning-check --delivery {}",
+            quote(&self.home),
+            quote(&executable),
+            quote(&path)
+        );
+        Ok(
+            serde_json::json!({"Stop": [{"hooks":[{"type":"command","command":check,"timeout":10}]}], "SessionStart": [
+                {"matcher": "startup|resume", "hooks": [{"type":"command", "command": format!("{command} start"), "timeout": 30}]},
+                {"matcher": "compact", "hooks": [{"type":"command", "command": format!("{command} compact"), "timeout": 30}]}
+            ]}),
+        )
     }
 }
 

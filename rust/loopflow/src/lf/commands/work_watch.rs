@@ -364,7 +364,7 @@ struct Reader {
     /// The sessions revision a quiet deadline was read at, and that deadline.
     quiet: Option<(i64, Option<i64>)>,
     runtime: tokio::runtime::Runtime,
-    planning_sync: Option<(String, crate::ops::linear_observe::PlanningSync)>,
+    planning_sync: Option<(String, crate::ops::linear_observe::PlanningWatch)>,
 }
 
 impl Reader {
@@ -407,7 +407,7 @@ impl Reader {
             let store = Arc::new(
                 crate::store::open_store(&StorageConfig::sqlite(self.database.clone())).await?,
             );
-            crate::ops::linear_observe::PlanningSync::start(store, repo.clone())
+            crate::ops::linear_observe::PlanningWatch::start(store, repo.clone())
                 .map_err(anyhow::Error::from)
         });
         match result {

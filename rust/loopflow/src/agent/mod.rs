@@ -1195,14 +1195,6 @@ fn run_admitted_agent(
         launch.env.extend(capture.0.environment());
         capture.0.mark_spawn_requested();
     }
-    let _planning_sync = process
-        .task_input
-        .as_ref()
-        .map(crate::ops::task_input::TaskInput::start_planning_sync)
-        .transpose()
-        .map_err(|error| {
-            CoreError::ExecutionFailed(format!("cannot start planning sync: {error}"))
-        })?;
     let result = _run_with_transient_retries(
         &launch,
         &process,
@@ -1210,6 +1202,11 @@ fn run_admitted_agent(
         |attempt, retry| _run_agent_once(attempt, &process, capabilities, retry),
         thread::sleep,
     );
+    if let Some(input) = &process.task_input {
+        if let Err(error) = input.check_planning() {
+            tracing::debug!(%error, "end-of-turn planning check pending");
+        }
+    }
     if let Some(capture) = implicit_capture {
         let outcome = match &result {
             Ok(result) if result.exit_code == 0 => "completed",

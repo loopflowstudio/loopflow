@@ -1,4 +1,5 @@
 mod cooldown;
+mod team_changes;
 
 use reqwest::StatusCode;
 use serde::de::DeserializeOwned;
@@ -156,9 +157,7 @@ const LIST_ITEMS_QUERY: &str = r#"query ListProjectIssues($projectId: String!, $
   }
 }"#;
 
-const ISSUE_OWNERSHIP_QUERY: &str = r#"query IssueOwnership($id: String!) {
-  issue(id: $id) {
-    id
+const ISSUE_RESPONSE_FIELDS: &str = r#"    id
     identifier
     branchName
     completedAt
@@ -181,13 +180,8 @@ const ISSUE_OWNERSHIP_QUERY: &str = r#"query IssueOwnership($id: String!) {
       status { type }
       initiatives(first: 50) { nodes { id } }
       teams(first: 50) { nodes { id } }
-    }
-  }
-}"#;
-
-const PROJECT_OWNERSHIP_QUERY: &str = r#"query ProjectOwnership($id: String!) {
-  project(id: $id) {
-    id
+    }"#;
+const PROJECT_RESPONSE_FIELDS: &str = r#"    id
     name
     updatedAt
     archivedAt
@@ -195,17 +189,7 @@ const PROJECT_OWNERSHIP_QUERY: &str = r#"query ProjectOwnership($id: String!) {
     content
     status { type }
     initiatives(first: 50) { nodes { id } }
-    teams(first: 50) { nodes { id } }
-  }
-}"#;
-
-const SET_ITEM_STATE_MUTATION: &str = r#"mutation SetIssueState($id: String!, $stateId: String!) {
-  issueUpdate(id: $id, input: { stateId: $stateId }) {
-    issue {
-      id
-    }
-  }
-}"#;
+    teams(first: 50) { nodes { id } }"#;
 
 // Selects `identifier` back because Linear reassigns the issue number on a team
 // move (`W2-155` → `PRD-<next>`); the caller cannot predict the new value.
@@ -343,6 +327,7 @@ pub struct LinearClient {
     token: String,
     team_id: Option<String>,
     base_url: String,
+    repository: Option<std::path::PathBuf>,
 }
 
 impl LinearClient {
@@ -352,6 +337,7 @@ impl LinearClient {
             token,
             team_id,
             base_url: LINEAR_BASE_URL.to_string(),
+            repository: None,
         }
     }
 
@@ -362,7 +348,13 @@ impl LinearClient {
             token,
             team_id,
             base_url,
+            repository: None,
         }
+    }
+
+    pub(crate) fn for_repository(mut self, repo: &std::path::Path) -> Self {
+        self.repository = Some(repo.to_owned());
+        self
     }
 
     /// Adopt or create the team a repository should own, keyed by `key`.
@@ -539,6 +531,16 @@ impl LinearClient {
     where
         T: DeserializeOwned,
     {
+        if query.trim_start().starts_with("mutation") {
+            if let Some(repo) = &self.repository {
+                // The delta reader uses an unbound client and performs no writes.
+                if let Err(error) =
+                    Box::pin(crate::ops::linear_observe::check_before_write(repo)).await
+                {
+                    tracing::debug!(%error, "pre-write Linear check pending");
+                }
+            }
+        }
         let request = GraphqlRequest { query, variables };
 
         let cooldown = cooldown::Cooldown::for_endpoint(&self.base_url);
@@ -848,12 +850,15 @@ impl LinearClient {
             "mutation FollowUpRelation($input: IssueRelationCreateInput!) { issueRelationCreate(input: $input) { success issueRelation { id } } }",
             json!({"input": {"id": id, "issueId": source, "relatedIssueId": target, "type": "related"}}),
         ).await;
-        if self.follow_up_relation_exists(source, target).await? {
+        let response = result?;
+        if response["issueRelationCreate"]["success"] == true
+            && response["issueRelationCreate"]["issueRelation"]["id"] == id
+        {
             return Ok(());
         }
-        Err(result.err().unwrap_or_else(|| {
-            PmError::Message("Linear did not confirm the follow-up relation".into())
-        }))
+        Err(PmError::Message(
+            "Linear did not confirm the follow-up relation".into(),
+        ))
     }
 
     async fn follow_up_relation_exists(&self, source: &str, target: &str) -> PmResult<bool> {
@@ -930,7 +935,10 @@ impl LinearClient {
         issue_id: &str,
     ) -> PmResult<Option<(PmItem, Option<PmProject>)>> {
         let response: IssueOwnershipData = self
-            .graphql(ISSUE_OWNERSHIP_QUERY, json!({ "id": issue_id }))
+            .graphql(
+                &format!("query IssueOwnership($id: String!) {{ issue(id: $id) {{ {ISSUE_RESPONSE_FIELDS} }} }}"),
+                json!({ "id": issue_id }),
+            )
             .await?;
         response.issue.map(IssueNode::into_ownership).transpose()
     }
@@ -1095,30 +1103,33 @@ impl LinearClient {
         &self,
         project: bool,
         input: Value,
-    ) -> PmResult<()> {
-        let (query, result) = if project {
+    ) -> PmResult<PlanningResponse> {
+        let (name, operation, input_type, object, fields) = if project {
             (
-                r#"mutation DeliverProjectCreation($input: ProjectCreateInput!) {
-                projectCreate(input: $input) { success project { id } }
-            }"#,
+                "DeliverProjectCreation",
                 "projectCreate",
+                "ProjectCreateInput",
+                "project",
+                PROJECT_RESPONSE_FIELDS,
             )
         } else {
             (
-                r#"mutation DeliverTaskCreation($input: IssueCreateInput!) {
-                issueCreate(input: $input) { success issue { id } }
-            }"#,
+                "DeliverTaskCreation",
                 "issueCreate",
+                "IssueCreateInput",
+                "issue",
+                ISSUE_RESPONSE_FIELDS,
             )
         };
-        let response: Value = self.graphql(query, json!({"input":input})).await?;
-        let object = if project { "project" } else { "issue" };
-        if response[result]["success"] != true || response[result][object]["id"] != input["id"] {
-            return Err(PmError::Message(
-                "Creation lacks an exact acknowledgement; receipt retained".into(),
-            ));
-        }
-        Ok(())
+        let query = format!("mutation {name}($input: {input_type}!) {{ {operation}(input: $input) {{ success {object} {{ {fields} }} }} }}");
+        let response: Value = self.graphql(&query, json!({"input":input})).await?;
+        planning_response(
+            &response[operation],
+            project,
+            input["id"]
+                .as_str()
+                .ok_or_else(|| PmError::Message("creation identity is missing".into()))?,
+        )
     }
 
     pub(crate) async fn deliver_project_attachment(
@@ -1126,52 +1137,58 @@ impl LinearClient {
         id: &str,
         project: &str,
         initiative: &str,
-    ) -> PmResult<()> {
+    ) -> PmResult<PmProject> {
+        let query = format!("mutation DeliverProjectAttachment($input: InitiativeToProjectCreateInput!) {{ initiativeToProjectCreate(input: $input) {{ success initiativeToProject {{ project {{ {PROJECT_RESPONSE_FIELDS} }} }} }} }}");
         let response: Value = self
             .graphql(
-                r#"mutation DeliverProjectAttachment($input: InitiativeToProjectCreateInput!) {
-            initiativeToProjectCreate(input: $input) { success }
-        }"#,
+                &query,
                 json!({"input":{"id":id,"projectId":project,"initiativeId":initiative}}),
             )
             .await?;
-        if response["initiativeToProjectCreate"]["success"] != true {
+        let payload = &response["initiativeToProjectCreate"];
+        if payload["success"] != true {
             return Err(PmError::Message(
                 "Project attachment was not confirmed; receipt retained".into(),
             ));
         }
-        Ok(())
+        let node: ProjectNode =
+            serde_json::from_value(payload["initiativeToProject"]["project"].clone())
+                .map_err(|error| PmError::Message(format!("invalid attached Project: {error}")))?;
+        if node.id != project {
+            return Err(PmError::Message(
+                "Project attachment returned a different identity".into(),
+            ));
+        }
+        node.into_pm_project()
     }
 
-    /// The caller persists its receipt before starting this one provider effect.
+    /// The mutation's own response supplies confirmation; no follow-up read.
     pub(crate) async fn deliver_planning_field(
         &self,
         id: &str,
         project: bool,
         input: Value,
-    ) -> PmResult<()> {
-        let (query, result) = if project {
+    ) -> PmResult<PlanningResponse> {
+        let (name, operation, input_type, object, fields) = if project {
             (
-                r#"mutation DeliverProjectField($id: String!, $input: ProjectUpdateInput!) {
-                projectUpdate(id: $id, input: $input) { success }
-            }"#,
+                "DeliverProjectField",
                 "projectUpdate",
+                "ProjectUpdateInput",
+                "project",
+                PROJECT_RESPONSE_FIELDS,
             )
         } else {
             (
-                r#"mutation DeliverTaskField($id: String!, $input: IssueUpdateInput!) {
-                issueUpdate(id: $id, input: $input) { success }
-            }"#,
+                "DeliverTaskField",
                 "issueUpdate",
+                "IssueUpdateInput",
+                "issue",
+                ISSUE_RESPONSE_FIELDS,
             )
         };
-        let response: Value = self.graphql(query, json!({"id":id,"input":input})).await?;
-        if response[result]["success"] != true {
-            return Err(PmError::Message(
-                "Linear did not confirm the field write; receipt retained".into(),
-            ));
-        }
-        Ok(())
+        let query = format!("mutation {name}($id: String!, $input: {input_type}!) {{ {operation}(id: $id,input: $input) {{ success {object} {{ {fields} }} }} }}");
+        let response: Value = self.graphql(&query, json!({"id":id,"input":input})).await?;
+        planning_response(&response[operation], project, id)
     }
 
     // Only migration-marked Projects reach this path. Ordinary parsing reads
@@ -1238,21 +1255,25 @@ impl LinearClient {
 
     async fn project_node(&self, project_id: &str) -> PmResult<ProjectNode> {
         let response: ProjectOwnershipData = self
-            .graphql(PROJECT_OWNERSHIP_QUERY, json!({ "id": project_id }))
+            .graphql(
+                &format!("query ProjectOwnership($id: String!) {{ project(id: $id) {{ {PROJECT_RESPONSE_FIELDS} }} }}"),
+                json!({ "id": project_id }),
+            )
             .await?;
         response
             .project
             .ok_or_else(|| PmError::Message(format!("no Linear Project with id {project_id}")))
     }
 
-    pub(crate) async fn set_item_state(&self, item_id: &str, state_id: &str) -> PmResult<()> {
-        let _: Value = self
-            .graphql(
-                SET_ITEM_STATE_MUTATION,
-                json!({ "id": item_id, "stateId": state_id }),
-            )
+    pub(crate) async fn set_item_state(&self, item_id: &str, state_id: &str) -> PmResult<PmItem> {
+        let query = format!("mutation SetIssueState($id: String!, $stateId: String!) {{ issueUpdate(id: $id,input: {{stateId: $stateId}}) {{ success issue {{ {ISSUE_RESPONSE_FIELDS} }} }} }}");
+        let response: Value = self
+            .graphql(&query, json!({"id":item_id,"stateId":state_id}))
             .await?;
-        Ok(())
+        match planning_response(&response["issueUpdate"], false, item_id)? {
+            PlanningResponse::Task { record, .. } => Ok(record.item),
+            PlanningResponse::Project { .. } => unreachable!("issue mutation returns an issue"),
+        }
     }
 
     /// Post a new comment and return its Linear id so callers can update it in
@@ -1436,23 +1457,7 @@ impl LinearClient {
         let mut page = issue.comments;
         let mut comments = Vec::new();
         loop {
-            comments.extend(page.nodes.into_iter().map(|node| IssueComment {
-                id: node.id,
-                created_at: node.created_at,
-                revision: node.updated_at,
-                body: node.body,
-                author_name: node.user.as_ref().and_then(|user| {
-                    user.display_name
-                        .as_deref()
-                        .and_then(crate::config::normalize_user_name)
-                        .or_else(|| {
-                            user.name
-                                .as_deref()
-                                .and_then(crate::config::normalize_user_name)
-                        })
-                }),
-                author_id: node.user.map(|user| user.id),
-            }));
+            comments.extend(page.nodes.into_iter().map(IssueComment::from));
             if !page.page_info.has_next_page {
                 break;
             }
@@ -1481,6 +1486,52 @@ impl LinearClient {
             title: issue.title,
             description: issue.description.unwrap_or_default(),
             comments,
+        })
+    }
+}
+
+#[derive(Debug)]
+pub(crate) enum PlanningResponse {
+    Task {
+        record: Box<crate::store::PmTaskRecord>,
+        priority_sort_order: f64,
+        sort_order: f64,
+    },
+    Project {
+        project: Box<PmProject>,
+        content: String,
+    },
+}
+
+fn planning_response(payload: &Value, project: bool, id: &str) -> PmResult<PlanningResponse> {
+    let object = if project { "project" } else { "issue" };
+    if payload["success"] != true || payload[object]["id"] != id {
+        return Err(PmError::Message(
+            "Linear mutation lacks an exact acknowledgement; receipt retained".into(),
+        ));
+    }
+    if project {
+        let node: ProjectNode = serde_json::from_value(payload[object].clone())
+            .map_err(|error| PmError::Message(error.to_string()))?;
+        let content = node.content.clone().unwrap_or_default();
+        Ok(PlanningResponse::Project {
+            project: Box::new(node.into_pm_project()?),
+            content,
+        })
+    } else {
+        let node: IssueNode<ProjectNode> = serde_json::from_value(payload[object].clone())
+            .map_err(|error| PmError::Message(error.to_string()))?;
+        let priority_sort_order = node.fields.priority_sort_order;
+        let sort_order = node.fields.sort_order;
+        let (item, project) = node.into_ownership()?;
+        Ok(PlanningResponse::Task {
+            record: Box::new(crate::store::PmTaskRecord {
+                item,
+                project,
+                observed_at: time::OffsetDateTime::now_utc().unix_timestamp(),
+            }),
+            priority_sort_order,
+            sort_order,
         })
     }
 }
@@ -2298,15 +2349,6 @@ mod tests {
         assert_eq!(adopted.status, crate::pm::ProjectStatus::Started);
     }
 
-    #[test]
-    fn issue_mutations_use_linear_string_ids() {
-        for query in [SET_ITEM_STATE_MUTATION, CREATE_COMMENT_MUTATION] {
-            assert!(!query.contains(": ID!"));
-        }
-        assert!(SET_ITEM_STATE_MUTATION.contains("$stateId: String!"));
-        assert!(CREATE_COMMENT_MUTATION.contains("$issueId: String!"));
-    }
-
     /// A wrong argument on a Linear mutation must fail here, not ship a 400 on
     /// every publish (#1010, where `subtitle` on `attachmentLinkURL` shipped green
     /// because the mock echoed success). `subtitle` is legal on `attachmentUpdate`
@@ -3047,7 +3089,12 @@ mod tests {
                 ),
                 json_response(
                     StatusCode::OK,
-                    json!({ "data": { "issueUpdate": { "issue": { "id": "ENG-7" } } } }),
+                    json!({ "data": { "issueUpdate": { "success":true,"issue": {
+                        "id":"ENG-7","identifier":"ENG-7","title":"Fixture","description":null,
+                        "branchName":null,"completedAt":null,"dueDate":null,"url":null,
+                        "updatedAt":"2026-10-11T12:00:00Z","prioritySortOrder":0.0,"sortOrder":0.0,
+                        "state":{"type":target},"assignee":null,"team":{"id":"team-eng"},"project":null
+                    } } } }),
                 ),
             ])
             .await;

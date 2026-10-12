@@ -6,8 +6,6 @@
 //! Exactly-once, the baseline, and the monotonic-revision guard all live in the
 //! store; acquisition supplies observations without proposing a second write.
 
-use std::future::Future;
-use std::io::{Read, Seek, SeekFrom, Write};
 use std::time::Duration;
 
 use sha2::{Digest, Sha256};
@@ -75,15 +73,189 @@ pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> O
     Ok(())
 }
 
-/// A foreground connection's independent planning acquisition and delivery.
-/// Dropping the connection cancels requests; durable identities survive cancellation.
+fn message(error: impl std::fmt::Display) -> OpsError {
+    OpsError::Message(error.to_string())
+}
+
+pub(crate) async fn check_before_write(repo: &std::path::Path) -> OpsResult<()> {
+    let store = super::pm::pm_store().await?;
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        check_repository(&store, &repo.to_string_lossy()),
+    )
+    .await
+    .map_err(message)??;
+    Ok(())
+}
+
+/// Acquire only when a caller can consume the result. Freshness belongs to the
+/// team, even when several repositories or processes share it.
+pub(crate) async fn check_repository(store: &Store, repository: &str) -> OpsResult<bool> {
+    if !connected(repository) {
+        return Ok(false);
+    }
+    let repo = std::path::Path::new(repository);
+    let team = super::pm::repository_team_id(repo)?;
+    let mut live = Vec::new();
+    let mut finished = Vec::new();
+    let waves = store.list_waves(None).await.map_err(message)?;
+    for wave in &waves {
+        if super::pm::repository_team_id(std::path::Path::new(wave.repo()))
+            .ok()
+            .as_ref()
+            != Some(&team)
+        {
+            continue;
+        }
+        for task in store.list_tasks(Some(wave.id())).await.map_err(message)? {
+            let Some(issue) = task.plan.linear_id else {
+                continue;
+            };
+            if store
+                .task_state(&task.id)
+                .await
+                .map_err(message)?
+                .is_terminal()
+            {
+                finished.push(issue.as_str().to_owned());
+            } else {
+                live.push(issue.as_str().to_owned());
+            }
+        }
+    }
+    if live.is_empty() {
+        return Ok(false);
+    }
+    let key = format!("{:x}", Sha256::digest(team.as_bytes()));
+    let path = store
+        .sqlite
+        .home_dir()
+        .map_err(message)?
+        .join("locks/linear-teams")
+        .join(key);
+    let Some(_lock) = super::planning_delivery::lock_delivery(&path)? else {
+        return Ok(false);
+    };
+    let now = OffsetDateTime::now_utc();
+    let Some(since) = store
+        .sqlite
+        .begin_linear_team_check(&team, now.unix_timestamp())
+        .map_err(message)?
+    else {
+        return Ok(false);
+    };
+    let through = now
+        .format(&time::format_description::well_known::Rfc3339)
+        .map_err(message)?;
+    let client = super::pm::unchecked_issue_client(repo).await?;
+    let changes = client
+        .team_changes(&team, since.as_deref(), &through, &live, &finished)
+        .await
+        .map_err(message)?;
+    let changed = !changes.is_empty();
+    for (record, observation) in changes {
+        // Provider filters limit traffic; the current local decision still wins
+        // when completion races the request.
+        let existing = store
+            .get_task_by_issue(&record.item.id)
+            .await
+            .map_err(message)?;
+        if let Some(task) = &existing {
+            if store
+                .task_state(&task.id)
+                .await
+                .map_err(message)?
+                .is_terminal()
+            {
+                continue;
+            }
+        }
+        let owner = if let Some(task) = &existing {
+            store
+                .get_wave(&task.wave_id)
+                .await
+                .map_err(message)?
+                .map(|wave| wave.repo().to_owned())
+        } else {
+            // Ingestion resolves the returned Project against authored Wave mappings.
+            waves
+                .iter()
+                .find(|wave| {
+                    super::pm::repository_team_id(std::path::Path::new(wave.repo()))
+                        .ok()
+                        .as_ref()
+                        == Some(&team)
+                        && super::pm::read_initiative(
+                            std::path::Path::new(wave.repo()),
+                            wave.slug(),
+                        )
+                        .is_some_and(|initiative| {
+                            record
+                                .project
+                                .as_ref()
+                                .is_some_and(|project| project.initiative_ids.contains(&initiative))
+                        })
+                })
+                .map(|wave| wave.repo().to_owned())
+        };
+        let Some(owner) = owner else { continue };
+        super::planning_delivery::ingest_task(store, std::path::Path::new(&owner), &record).await?;
+        if let Some(task) = store
+            .get_task_by_issue(&record.item.id)
+            .await
+            .map_err(message)?
+        {
+            store
+                .apply_linear_observation(&task.id, observation, now)
+                .await
+                .map_err(message)?;
+        }
+    }
+    store
+        .sqlite
+        .finish_linear_team_check(&team, &through)
+        .map_err(message)?;
+    Ok(changed)
+}
+
+/// Bound on-demand work and retain local planning when Linear is unavailable.
+pub(crate) async fn sync_repository(store: &Store, repository: &str) -> bool {
+    let check =
+        tokio::time::timeout(Duration::from_secs(5), check_repository(store, repository)).await;
+    let changed = match check {
+        Ok(Ok(changed)) => changed,
+        result => {
+            tracing::debug!(?result, "Linear team check pending");
+            false
+        }
+    };
+    for result in futures_util::future::join_all([
+        sync_repository_deliveries(store, repository, false),
+        sync_repository_deliveries(store, repository, true),
+    ])
+    .await
+    {
+        if let Err(error) = result {
+            tracing::debug!(%error, "planning delivery pending");
+        }
+    }
+    if let Err(error) = super::planning_export::sync_repository_exports(store, repository).await {
+        tracing::debug!(%error, "planning export pending");
+    }
+    if let Err(error) = super::planning_delivery::sync_repository_fields(store, repository).await {
+        tracing::debug!(%error, "planning field delivery pending");
+    }
+    changed
+}
+
+/// Only an attached watcher owns a clock. Idle agents own no timer.
 #[derive(Debug)]
-pub(crate) struct PlanningSync {
+pub(crate) struct PlanningWatch {
     stop: Option<tokio::sync::oneshot::Sender<()>>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
-impl PlanningSync {
+impl PlanningWatch {
     pub(crate) fn start(store: SharedStore, repo: String) -> std::io::Result<Self> {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -92,30 +264,19 @@ impl PlanningSync {
         #[cfg(test)]
         let context = super::pm::PM_TEST_CONTEXT.try_with(Clone::clone).ok();
         let thread = std::thread::Builder::new()
-            .name("planning-sync".into())
+            .name("planning-watch".into())
             .spawn(move || {
                 let drive = async {
                     tokio::select! {
                         _ = stopped => {},
-                        _ = repeat_sync("comment acquisition", Duration::from_secs(15), || {
-                            refresh_repository_comments(&store, &repo)
-                        }) => {},
-                        _ = repeat_sync("planning acquisition", Duration::from_secs(15), || async {
-                            tokio::time::timeout(Duration::from_secs(5), refresh_repository_planning(&store, &repo))
-                                .await.map_err(|error| OpsError::Message(error.to_string()))?
-                        }) => {},
-                        _ = repeat_sync("comment delivery", Duration::from_secs(1), || {
-                            sync_repository_deliveries(&store, &repo, false)
-                        }) => {},
-                        _ = repeat_sync("planning export", Duration::from_secs(1), || {
-                            super::planning_export::sync_repository_exports(&store, &repo)
-                        }) => {},
-                        _ = repeat_sync("field delivery", Duration::from_secs(1), || {
-                            super::planning_delivery::sync_repository_fields(&store, &repo)
-                        }) => {},
-                        _ = repeat_sync("Task state delivery", Duration::from_secs(1), || {
-                            sync_repository_deliveries(&store, &repo, true)
-                        }) => {},
+                        _ = async {
+                            let mut delay = 30;
+                            loop {
+                                let changed = sync_repository(&store, &repo).await;
+                                delay = if changed { 30 } else { (delay * 2).min(240) };
+                                tokio::time::sleep(Duration::from_secs(delay)).await;
+                            }
+                        } => {},
                     }
                 };
                 #[cfg(test)]
@@ -132,22 +293,7 @@ impl PlanningSync {
     }
 }
 
-// Each branch has its own delay after an attempt. A slow delivery cannot
-// postpone acquisition or cause missed ticks to burst when the request returns.
-async fn repeat_sync<F: Future<Output = OpsResult<()>>>(
-    operation: &str,
-    delay: Duration,
-    mut attempt: impl FnMut() -> F,
-) {
-    loop {
-        if let Err(error) = attempt().await {
-            tracing::debug!(%error, operation, "planning synchronization pending");
-        }
-        tokio::time::sleep(delay).await;
-    }
-}
-
-impl Drop for PlanningSync {
+impl Drop for PlanningWatch {
     fn drop(&mut self) {
         if let Some(stop) = self.stop.take() {
             let _ = stop.send(());
@@ -156,136 +302,6 @@ impl Drop for PlanningSync {
             let _ = thread.join();
         }
     }
-}
-
-// Share acquisition attempts, including failures, across foreground connections.
-// Holding this inode through acquisition also prevents overlap on slow reads.
-fn acquire_poll(store: &Store, repo: &str, kind: &str) -> OpsResult<Option<std::fs::File>> {
-    let key = format!("{:x}", Sha256::digest(repo.as_bytes()));
-    let path = store
-        .sqlite
-        .home_dir()
-        .map_err(|error| OpsError::Message(error.to_string()))?
-        .join("locks/planning-acquisition")
-        .join(format!("{key}-{kind}"));
-    let Some(mut file) = super::planning_delivery::lock_delivery(&path)? else {
-        return Ok(None);
-    };
-    let mut saved = String::new();
-    file.read_to_string(&mut saved)?;
-    let now = OffsetDateTime::now_utc().unix_timestamp();
-    if saved.parse::<i64>().is_ok_and(|last| now - last < 15) {
-        return Ok(None);
-    }
-    file.seek(SeekFrom::Start(0))?;
-    file.set_len(0)?;
-    write!(file, "{now}")?;
-    Ok(Some(file))
-}
-
-async fn refresh_repository_comments(store: &SharedStore, repo: &str) -> OpsResult<()> {
-    if !connected(repo) {
-        return Ok(());
-    }
-    let Some(_acquisition) = acquire_poll(store, repo, "comments")? else {
-        return Ok(());
-    };
-    let waves = store
-        .list_waves(Some(repo))
-        .await
-        .map_err(|error| OpsError::Message(error.to_string()))?;
-    futures_util::future::join_all(waves.iter().map(|wave| async {
-        let tasks = store
-            .list_tasks(Some(wave.id()))
-            .await
-            .map_err(|error| OpsError::Message(error.to_string()))?;
-        futures_util::future::join_all(
-            tasks
-                .iter()
-                .filter(|task| task.plan.linear_id.is_some())
-                .map(|task| async {
-                    if !store
-                        .task_state(&task.id)
-                        .await
-                        .is_ok_and(|state| !state.is_terminal())
-                    {
-                        return;
-                    }
-                    if store
-                        .task_linear_observation(&task.id)
-                        .await
-                        .ok()
-                        .flatten()
-                        .is_some_and(|observation| {
-                            !observation.last_revision.is_empty()
-                                && (OffsetDateTime::now_utc() - observation.last_success_at)
-                                    .whole_seconds()
-                                    < 15
-                        })
-                    {
-                        return;
-                    }
-                    match tokio::time::timeout(
-                        Duration::from_secs(5),
-                        refresh_task_comments(store, task),
-                    )
-                    .await
-                    {
-                        Ok(Ok(())) => {}
-                        result => {
-                            tracing::debug!(?result, task = %task.id, "comment acquisition pending")
-                        }
-                    }
-                }),
-        )
-        .await;
-        Ok::<(), OpsError>(())
-    }))
-    .await
-    .into_iter()
-    .collect::<OpsResult<Vec<_>>>()?;
-    Ok(())
-}
-
-async fn refresh_repository_planning(store: &Store, repository: &str) -> OpsResult<()> {
-    // An absent mapping is not a reason to disable acquisition in a connected
-    // repository. Connection configuration, rather than outbound work, selects it.
-    let repo = std::path::Path::new(repository);
-    if !connected(repository) {
-        return Ok(());
-    }
-    let Some(_acquisition) = acquire_poll(store, repository, "planning")? else {
-        return Ok(());
-    };
-    let owners = store
-        .list_waves(Some(repository))
-        .await
-        .map_err(|error| OpsError::Message(error.to_string()))?;
-    let results = futures_util::future::join_all(owners.iter().map(|owner| async {
-        let guard = super::pm::lock_wave_planning(owner).await?;
-        if store
-            .pm_snapshot(owner.id())
-            .await
-            .map_err(|error| OpsError::Message(error.to_string()))?
-            .is_some_and(|snapshot| {
-                OffsetDateTime::now_utc().unix_timestamp() - snapshot.synced_at
-                    < super::pm::PM_SOFT_STALE_SECS
-            })
-        {
-            return Ok(None);
-        }
-        let ctx = super::pm::resolve_context(repo, owner.slug()).await?;
-        super::pm::refresh_pm_snapshot_locked(repo, owner, &ctx, store, guard)
-            .await
-            .map(Some)
-    }))
-    .await;
-    for result in results {
-        if let Err(error) = result {
-            tracing::debug!(%error, "Wave acquisition pending");
-        }
-    }
-    Ok(())
 }
 
 async fn sync_repository_deliveries(store: &Store, repository: &str, state: bool) -> OpsResult<()> {
@@ -394,20 +410,18 @@ pub(crate) async fn sync_task_state(store: &Store, task: &Task) -> OpsResult<()>
         // Linear has no expected-revision guard here. A reopening between the
         // observation and this mutation can be overwritten; matching readback
         // settles observed state, not the absence of an intervening edit.
-        if let Err(error) = client.set_item_state(issue.as_str(), &state_id).await {
-            if matches!(error, crate::pm::PmError::RateLimited { .. }) {
-                store
-                    .sqlite
-                    .reject_task_state(&delivery)
-                    .map_err(|e| message(&e))?;
+        let confirmed = match client.set_item_state(issue.as_str(), &state_id).await {
+            Ok(confirmed) => confirmed,
+            Err(error) => {
+                if matches!(error, crate::pm::PmError::RateLimited { .. }) {
+                    store
+                        .sqlite
+                        .reject_task_state(&delivery)
+                        .map_err(|e| message(&e))?;
+                }
+                return Err(message(&error));
             }
-            return Err(message(&error));
-        }
-        let (confirmed, _) = client
-            .issue_ownership(issue.as_str())
-            .await
-            .map_err(|e| message(&e))?
-            .ok_or_else(|| OpsError::Message("Linear state write has no readback".into()))?;
+        };
         if store
             .sqlite
             .observe_task_state(&delivery, &confirmed)

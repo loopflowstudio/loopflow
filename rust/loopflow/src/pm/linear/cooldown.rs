@@ -70,12 +70,11 @@ impl Cooldown {
         body: &[u8],
     ) -> PmResult<()> {
         let now = now_ms();
-        let errors = serde_json::from_slice::<serde_json::Value>(body)
-            .ok()
-            .and_then(|body| body.get("errors").cloned());
+        let parsed = serde_json::from_slice::<serde_json::Value>(body).ok();
         let limited = status == StatusCode::TOO_MANY_REQUESTS
-            || errors
+            || parsed
                 .as_ref()
+                .and_then(|body| body.get("errors"))
                 .and_then(|errors| errors.as_array())
                 .is_some_and(|errors| {
                     errors.iter().any(|error| {
@@ -139,7 +138,7 @@ fn read_deadline(file: &mut File) -> PmResult<i64> {
 
 fn reset_at(headers: &HeaderMap, limited: bool, now: i64) -> Option<i64> {
     let number = |key: &str| headers.get(key)?.to_str().ok()?.parse::<i64>().ok();
-    let mut reset = None;
+    let mut reset: Option<i64> = None;
     let mut exhausted = limited;
     for scope in ["requests", "endpoint-requests", "complexity"] {
         let empty = number(&format!("x-ratelimit-{scope}-remaining")).is_some_and(|n| n <= 0);
@@ -149,7 +148,7 @@ fn reset_at(headers: &HeaderMap, limited: bool, now: i64) -> Option<i64> {
                 number(&format!("x-ratelimit-{scope}-reset")).filter(|value| *value >= 0)
             {
                 let value = value.max(now);
-                reset = Some(reset.map_or(value, |current: i64| current.max(value)));
+                reset = Some(reset.unwrap_or(value).max(value));
             }
         }
     }
@@ -171,7 +170,7 @@ fn reset_at(headers: &HeaderMap, limited: bool, now: i64) -> Option<i64> {
                     .map(|date| date.timestamp_millis().max(now))
             })
     }) {
-        reset = Some(reset.map_or(value, |current| current.max(value)));
+        reset = Some(reset.unwrap_or(value).max(value));
     }
     Some(reset.unwrap_or(now + 3_600_000))
 }

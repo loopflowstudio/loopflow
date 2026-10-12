@@ -152,22 +152,29 @@ CLI and Desktop project creation, field/order edits, state and comments through
 pending in connected repositories; attempted effects retain uncertainty and errors.
 Observed conflicts show both values after adopting Linear. Disconnected repositories
 show no pending Linear delivery; retained losing values remain inspectable.
-A foreground connection synchronizes its repository, independent of Desktop Task
-selection. Inventory, comments and delivery use separate bounded loops; closing
-or clearing the repository connection ends them. Cross-process acquisition locks
-and attempt timestamps share polling across connections in the same Home. Comments
-poll unfinished linked Tasks at most once per 15 seconds; explicit reads can still
-acquire finished Tasks. Inventory checks the one-hour snapshot policy under the
-Wave lock, including after another connection refreshed it. Read projections stay read-only.
+Planning acquisition runs at useful boundaries: before Flow steps, after agent
+turns, before Linear mutations, and when CLI commands show planning. One team
+query obtains issues and comments changed since its successful watermark; large
+deltas paginate without advancing that watermark early. SQLite shares a ten-second
+attempt stamp per team across repositories and processes; an acquisition lock
+covers the short request/ingestion operation, with no resident owner or hand-off.
+Failed checks keep the prior watermark and local planning.
+
+Teams without live Tasks are not checked. Locally finished/abandoned identities
+are excluded from acquisition. Explicit detail reads remain available. Desktop and
+`--watch` alone own a clock: 30–60 seconds initially, backing off to four minutes
+while unchanged. Closing the watcher stops it; idle agents own no sync thread.
+Projection functions remain local; command boundaries acquire before projecting.
 
 Linear HTTP 400 rate-limit errors, 429 and exhausted request/endpoint/complexity
 headers establish a Home-wide pause across repositories and refreshed logins.
 Reset headers are epoch milliseconds; missing deadlines fall back to one hour.
 In-flight requests may finish, and a successful final response remains usable.
 One warning announces the window; later calls return its deadline without network
-access. After reset, foreground delivery retries the same pending identities.
-Only positive rate-limit rejection clears the newly attempted mutation's flag;
-lost responses retain uncertainty. Independent Homes do not share this pause.
+access. After reset, the next boundary retries pending identities. Successful
+mutation payloads supply confirmation without a follow-up read. Lost responses
+retain uncertainty; positive rate-limit rejection makes that receipt retryable.
+Independent Homes do not share this pause.
 Ingestion adopts observed Linear conflicts and retains the losing
 local intentions in field, state and comment receipts. Retired intentions never
 reenter delivery after a late acknowledgement or matching observation.

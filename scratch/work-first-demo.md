@@ -1,63 +1,10 @@
-# Work-first native demo — October 11, 2026
+# Work-first native demo
 
-Jack Heart invoked demo and selected real configured repositories. This authorizes
-this demonstration, not cleanup or landing. Design: [get-me-using-lf.md](get-me-using-lf.md).
-Published review: https://github.com/loopflowstudio/loopflow/pull/1531.
-
-Built revision `0baa92dc16` with the repository development launcher and launched
-`~/Applications/Loopflow Dev.app` against the Loopflow repository and normal Machine.
-The installed production app was left running. The dev CLI forwards normal-Machine
-commands to the installed CLI; this does not install branch CLI/schema changes.
-Build and launched app share Mach-O UUID `82458694-00C4-3CFB-99D2-F6978A19DBFC`.
-Byte comparison differs after app signing, so it is not a binary-parity assertion.
-
-Check: `uv run python scripts/loopflow-dev.py build` and `run` succeeded; the Dev
-app process was observed. Build log: `/tmp/loo462-demo-launch.log`. Existing
-Ghostty linker/deprecation warnings remain; process launch proves no usable UI.
-
-## Remaining native acceptance
-
-Repository-name opening must reuse the retained conversation without duplication.
-Task opening must show the conversation first with a usable compact Overview;
-switching Work must retain unsent input and focus. These observations remain absent.
-Empty-repository entry is separate: no real empty repository was created or planning
-records removed for this demonstration. No data cleanup or landing occurred.
-
-## Failed real-data opening
-
-Jack Heart supplied a screenshot of the Dev app's Open Work alert:
-`error: unrecognized subcommand 'identity'`. The repository conversation did not
-open. This is a failed demo, not native acceptance of the workspace changes.
-
-The installed `lf 0.13.11` lacks `repo identity` in `lf repo --help`.
-`RegistryQuery.repositoryIdentity` calls `repo identity --json`; invoking that
-read through the Dev app's bundled CLI reproduces the same error. The bundled
-CLI's `repo identity --help` succeeds because it describes branch syntax, while
-ordinary main-Machine execution forwards to the installed CLI. Build parity alone
-therefore does not establish runtime capability parity. The demo launcher should
-have checked the actual installed command path before asking Jack Heart to try it.
-
-Real configured-repository review is blocked on a compatible installed release
-containing the LOO-427 foundation, or an explicitly reviewed supported delivery
-path for that foundation. Do not add a fake identity fallback, override the Home,
-or bypass release/migration authority to make the screenshot disappear. A private
-fixture can test the branch together but cannot satisfy Jack Heart's requested
-real-repository demo. No installation of the branch CLI or migration was attempted.
-
-## Next pursuit — Jack Heart, October 11
-
-Jack Heart requested stacking on LOO-427 and continued pursuit through publication
-for another demo, not landing. Parent `f1e8cd19ff5b` is integrated at `c040d9fa03`;
-both focused WorkCache conflict tests passed. Stacking did not supply the compatible
-installed runtime. No live migration, Session takeover or data deletion was authorized.
-
-The continuation at `1787d94bc9`, compressed at `df40c477ef`, repairs `run` and `run-debug` to check repository opening through
-the bundled helper's ordinary dispatch before launch, retaining the actual error
-and naming the compatible-release dependency. The misleading claim that bundled
-source always reads branch data is removed. This operation can register a repository;
-it is not a read-only capability probe. Headless executable fixtures cover installed
-support/refusal and explicit private-Machine launch. No new real-data demo was run.
-
+Jack Heart requested real configured-repository review, main Work views before
+Portfolio. Initial installed-CLI mismatch, failed launch and stacking history:
+`ce367d7143:scratch/work-first-demo.md`, opening sections. Those failures remain
+unaccepted; no live installation or landing is authorized. Current design:
+[get-me-using-lf.md](get-me-using-lf.md), PR #1531.
 
 ## Isolated branch demo — October 11
 
@@ -289,3 +236,40 @@ This repairs presentation, not missing checkouts or sandbox-blocked providers.
 The running demo has not been replaced; native continuation remains unproved.
 
 Check: `scripts/test_desktop.sh --filter WorkDestinationTests -Xswiftc -gnone --no-parallel` — PASS, 51 tests; regression retains failure after navigation/dismissal. Earlier builds failed on an optional WorkReference in the inline Retry action; extraction and optional binding fixed it. `git diff --check` — PASS. Native demo remains separate.
+
+
+## Provider-backed conversation — October 12
+
+Jack Heart authorized a fresh configured-provider conversation in an isolated
+checkout, preserving existing Sessions. Separate app: demo directory's
+`Loopflow Conversation Demo.app` (`com.loopflow.mac.demo.loo462conversation`),
+private `conversation-home`, and private `conversation-tmux` via TMUX_TMPDIR.
+`launch_conversation.py` and `conversation_command.py` retain exact launch setup.
+The older populated app remains sandboxed; copied live Session identities have
+not been connected. No provider secrets were copied or printed.
+
+Offline-clone checkout failed because it lacked main. `get_default_branch` now
+uses the current branch only when there are no remotes and no local main; main
+and connected-repository behavior stay unchanged. Review kept this fallback
+limited to standalone repositories. Check: two focused default-branch tests,
+`cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` — PASS.
+Task `lf-9154ddb` lives only in the private Home, with its own lf-created checkout.
+
+First Session `311515627f5c4860a9d7f37006cce02a` timed out before provider identity:
+Codex was waiting for folder trust inside hidden tmux. Later opens failed with
+Previous AgentProcess has no observed exit. Its failure history remains. The
+supported session replace operation settled that failed demo provider and created
+`f3135941b2d84df9afa164ba2962d937`. Native inspection confirmed folder trust was the
+blocker; trust was limited to this authorized disposable clone. An unrelated
+UserPromptSubmit hook remained untrusted, not globally enabled. The provider
+then greeted Jack and waited. Explicit Move here transferred only this demo
+client into Desktop. After skipping the untrusted-hook prompt, the actual native
+terminal displayed the retained greeting. Native keyboard input submitted
+“Reply only: demo input received”; the provider visibly replied “demo input received”.
+This establishes provider-backed Desktop input/reply, not automatic first opening.
+
+Remaining defects: hidden first-use prompts and timeout recovery; initial opening
+starts elsewhere and needs Move here; light-mode placeholders are nearly invisible
+on the dark terminal background. Failed pane exits obscure launch errors. These
+are reachable product failures, not old database debris. No Task completion,
+Workflow start, real Session takeover, installation or demo approval is inferred.

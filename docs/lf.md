@@ -274,8 +274,8 @@ Placement, native Sessions, workflow skills and GitHub delivery use the same Tas
 identity. `lf land` requests merge; `lf pr reconcile` observes delivery. After
 merge, optional new work uses ordinary Task creation;
 `lf task complete <task-id>` completes the source. A repository without a code
-remote supports local work and refuses hosted landing. Local planning does not
-require Linear at any of these boundaries.
+remote supports local work and refuses hosted landing. If it has no `main` branch,
+new checkouts use its current branch. Local planning does not require Linear.
 
 ## Choose planning synchronization
 

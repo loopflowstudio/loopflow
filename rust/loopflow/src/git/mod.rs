@@ -486,6 +486,20 @@ pub fn get_default_branch(repo: &Path) -> Result<String, GitError> {
         ],
     )?;
     if !output.status.success() {
+        // A standalone checkout may have only its current branch. Do not ask
+        // Git to fork a conversation from a nonexistent main in that case.
+        if git_stdout(repo, &["remote"])?.trim().is_empty()
+            && !run_git(
+                repo,
+                &["show-ref", "--verify", "--quiet", "refs/heads/main"],
+            )?
+            .status
+            .success()
+        {
+            if let Some(branch) = current_branch(repo)? {
+                return Ok(branch);
+            }
+        }
         return Ok("main".to_string());
     }
     let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -1611,6 +1625,16 @@ mod tests {
         let repo = init_repo();
         let branch = get_default_branch(repo.path()).expect("default branch");
         assert_eq!(branch, "main");
+    }
+
+    #[test]
+    fn git_get_default_branch_uses_the_standalone_branch_without_main() {
+        let repo = init_repo();
+        commit_file(repo.path(), "README.md", "hello");
+        git_stdout(repo.path(), &["branch", "-m", "demo"]).unwrap();
+        assert_eq!(get_default_branch(repo.path()).unwrap(), "demo");
+        git_stdout(repo.path(), &["branch", "main"]).unwrap();
+        assert_eq!(get_default_branch(repo.path()).unwrap(), "main");
     }
 
     #[test]

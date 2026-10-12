@@ -60,7 +60,8 @@ the new website assessment uses `website/home.html` and `website/content.yaml`.
 
 ## Data structures and key functions
 
-The existing `operate`/`--no-loopflow` switch still controls automatic guidance.
+The internal `operate` switch controls automatic guidance. Main removed the
+public `--no-loopflow` flag; standalone native skills select the omission internally.
 An optional `WorkContext` (Task or Wave scope) in `ProcessPromptInput`,
 `GatherContextOpts` and `PromptComponents` selects the additional contract and
 explains the selection. It is derived from explicit Task/Wave scope and existing
@@ -180,7 +181,7 @@ for the three usage experiences. No new user mode, store, or schema.
 The prompt's optional Task/Wave scope replaces the anonymous Work boolean;
 the same value selects guidance and explains it. Record inclusion, opt-out,
 absence, and explicit-skill deduplication through existing `ContextDecision`s.
-`lf mon show SESSION --instructions [--json]` reads those retained decisions;
+`lf history show SESSION --instructions [--json]` reads those retained decisions;
 old captures report only what they recorded, never inferred historical authority.
 Keep `--context` token accounting intact. Selected skills, repository guides,
 provider instructions and surface guidance retain separate provenance.

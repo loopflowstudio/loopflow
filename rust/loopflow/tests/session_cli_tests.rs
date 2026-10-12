@@ -1886,7 +1886,7 @@ fn instruction_inspection_reports_recorded_reasons_and_missing_evidence() {
         }
     ]);
     std::fs::write(&path, serde_json::to_vec(&artifact).unwrap()).unwrap();
-    let args = ["mon", "show", &id, "--instructions"];
+    let args = ["history", "show", &id, "--instructions"];
     let output = run(home.path(), &args);
     assert!(
         output.status.success(),
@@ -1898,7 +1898,7 @@ fn instruction_inspection_reports_recorded_reasons_and_missing_evidence() {
     assert!(!text.contains("captured memory"));
     let output = run(
         home.path(),
-        &["mon", "show", &id, "--instructions", "--json"],
+        &["history", "show", &id, "--instructions", "--json"],
     );
     assert!(output.status.success());
     let decisions: Vec<loopflow::trace::ContextDecision> =
@@ -1907,7 +1907,7 @@ fn instruction_inspection_reports_recorded_reasons_and_missing_evidence() {
     assert_eq!(decisions[0].reason, "no Task or Wave association");
     assert!(!run(
         home.path(),
-        &["mon", "show", &id, "--instructions", "--context"]
+        &["history", "show", &id, "--instructions", "--context"]
     )
     .status
     .success());

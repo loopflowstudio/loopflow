@@ -12,8 +12,8 @@ memory maintenance; the selected Loopflow Flow owns that procedure.
 ## Inspect instruction selection
 
 ```bash
-lf mon show SESSION --instructions
-lf mon show SESSION --instructions --json
+lf history show SESSION --instructions
+lf history show SESSION --instructions --json
 ```
 
 The retained input records why launcher guidance, Work guidance and selected
@@ -218,20 +218,12 @@ built on exactly these calls — it keeps no second database.
 
 ## The contract
 
-Every launched agent gets `LOOPFLOW.md` — the operating contract — in context
-(opt out with `--no-loopflow`). Its spine:
+Loopflow launches receive a small launcher contract: work in the supplied
+checkout, follow the requested tools and repository conventions, and answer in
+the current Session. Standalone native skills retain their own guidance.
 
-- Route git, worktrees, and PRs through `lf`; never raw `git worktree`.
-- Execute here first; delegation must make the problem smaller.
-- Checkpoint and proceed: don't ask permission for reversible work.
-- Answer the user in the current conversation; use typed Work observations for durable
-  coordination and ordinary `lf --task` conversations for another agent perspective.
-  Missing required input stops headless work; its existing logs supply the evidence.
-- Keep repeatable instructions with their skill, repository rules in its agent guide,
-  and durable Wave learning in its existing memory.
-
-Source: `rust/loopflow/src/builtins/LOOPFLOW.md`.
-
-## Next
-
-[Conducting →](conducting.md) · [Waves →](waves.md) · [`lf` reference](lf.md)
+Task- and Wave-associated launches also receive Work guidance. Read
+`lf help skill work` when entering Work APIs from an existing conversation.
+Association supplies context and ownership; the selected skill or Flow supplies
+the procedure. Keep repeatable instructions with that skill and repository rules
+in its agent guide.

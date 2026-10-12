@@ -30,7 +30,7 @@ here. Preserve existing contributions before checkpointing with `lf commit`.
 ## Inspect and act
 
 Read `lf task status <issue> --json`, `lf wave status <wave> --json`,
-`lf wave list --json`, or `lf roadmap --json` for the requested scope.
+`lf wave list --json`, or `lf wave show --json` for the requested scope.
 Use these shared reads instead of reconstructing Work state from processes or
 worktrees. Unknown or unavailable evidence is not an empty plan. Report the
 missing service and continue independent work; do not repair auth unasked.

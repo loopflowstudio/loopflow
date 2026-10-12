@@ -244,3 +244,31 @@ Fresh read shows `planning_state=completed`, `planning_completed=1`, no pending
 completion request/error. Its final cleanup process is still being observed; the
 snapshot's unresolved process IDs never established live liveness. Other Tasks and
 historical Sessions were not retired. No snapshot was restored over the live store.
+
+### Verified live result and legacy cleanup
+
+Live LOO-376 completion returned exit 0; fresh supported status says done. Its
+checkout remains because ef54b06d-9896-467f-a920-f8d4648f9d8b and
+e2d3d8d6-a9d5-43ef-83d8-022aadd47295 have unresolved execution evidence. No attempt
+was made to erase those records. This supersedes the pending-process note above.
+
+The one-time missing-disposition repair selected 126 exact already-abandoned rows;
+all had no subsequent Task edit/comment, no provider revision, pending completion,
+state delivery or planning edit. `repair_abandoned.py` in the demo directory refuses
+the newer journal schema and captures full preimages before commit. The installed-
+schema copy passed repair and conditional rollback. Live application then changed
+only planning state/revision; the native Work revision trigger handles refresh.
+Live before/after counts: 547 Tasks, 564 PRs, 3292 Sessions, 68406 Task events—
+unchanged. No new provider requests were created. Backup `live-before-abandoned-repair.db`,
+preimages `abandoned-live-before.json`; rollback refuses any subsequently edited row.
+Do not restore a whole snapshot over concurrent live activity.
+
+The newer private demo copy used the existing common planning writer for these
+same IDs, not direct journal edits. Temporary helper source remains only in the
+demo directory (`clone_abandonment_repair.rs`), removed from production source
+after its successful invocation (`/tmp/loo462-clone-abandonment-repair.log`).
+Native Product Task inventory now reads 24 rather than 65; old LOO-149 etc. are
+absent, Workflow renders, and other open Work tabs survive. Provider opening remains
+intentionally sandbox-blocked; an Open Task error was canceled without retrying
+against a real provider. Remaining plan rows include LOO-299's superseded title,
+which is not by itself authority for another cancellation.

@@ -472,7 +472,23 @@ the installed CLI additionally required disposition of an old serial-PR continua
 A fresh copy of the live schema with the installed CLI passed `follow-up --none`
 then `task complete`, retaining checkout/history. The same supported operations
 have now committed live completion (fresh SQLite reading: completed, no pending
-request/error). Final cleanup subprocess still needs its terminal receipt. Backup
-and failures remain in `work-first-demo.md`; no blanket historical cleanup occurred.
+request/error). The installed command returned exit 0 and retained the checkout for two unresolved
+Processes. Backup and failures remain in `work-first-demo.md`.
 
 Check: `cargo test -p loopflow --test local_planning public_local_planning_survives_restart_with_generated_identity`, `cargo fmt`, `cargo clippy --all-targets -- -D warnings` — pass, including repeated abandonment preserving canceled planning.
+
+### Applied legacy reconciliation
+
+Jack Heart authorized live cleanup after rehearsal. The 126 absent-disposition
+rows were already abandoned, had no newer Task edit/comment, no provider revision,
+no pending completion, and no state-delivery or planning-edit records. Rehearsed
+field repair and conditional rollback on the installed-schema copy, then applied
+the exact manifest transactionally to live data after another SQLite backup. Only
+missing planning state becomes canceled and planning revision advances; original
+abandonment, content, placement, PRs, Sessions and execution history remain. This
+is a one-time old-schema repair, not a migration or new cancellation request.
+The newer demo copy uses its common planning writer to retain its journal contract;
+the temporary invocation was removed from source afterward. Native Product Task
+list dropped from 65 to 24 without deleting records or hiding all past Projects.
+Remaining titled-superseded and merged-but-uncompleted rows still need individual
+disposition. No provider continuation or full demo acceptance is claimed.

@@ -1,5 +1,4 @@
--- depends_on: local_planning, planning_peers
-
+-- draft: task_checkout_machine
 ALTER TABLE tasks ADD COLUMN checkout_machine_id TEXT REFERENCES machines(id);
 ALTER TABLE tasks ADD COLUMN admission_authority TEXT CHECK(admission_authority IS NULL OR json_valid(admission_authority));
 

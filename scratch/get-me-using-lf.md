@@ -480,15 +480,17 @@ paused. Keep historical completion and abandonment independently readable.
 Delete the need for an undocumented sidebar-only parked flag or automatic restart
 on resume. Test persistence, repeat writes, retained Workflow/execution, sidebar
 filtering and API controls before applying LOO-389 to the real store.
-The CI title still needs host attribution inspection, not assumed reassignment;
-native CI selection and its retained Session agree. Codex hook trust awaits Jack.
+Codex hook trust awaits Jack. Native CI selection and Session identity agree.
 
-Local pause implementation is not deployed: a development helper cannot advance
-main's schema. Preserve active native clients; use the supported installation
-boundary rather than bypassing migration authority. LOO-427 completed through `lf task complete` after verifying merge
+Paused is not deployed: main's schema needs supported installation; preserve
+active clients. LOO-427 completed through `lf task complete` after verifying merge
 `9211b47c47bf986348af00b5a546c7cce2048c8c`; native sidebar removed it.
 Checkout/unknown Process `f1482ca7-35a6-4bea-89f8-1f2d5c3de5b2` remain.
-Review fixed historical journal seeding before the pause column exists. Early
-pause tests exposed incomplete raw Task fixtures; use normal creation with the
-Wave's selected Project. Logs: `/tmp/loo462-paused-{test*,final,checks,verified*}.log`.
+Pause fixture failures and historical journal-seeding repair:
+`81ae973322:scratch/get-me-using-lf.md`, **Paused**.
 Check: pause persistence/migration/exchange and Rust/Swift DTO tests pass; 17 focused Swift tests pass; fmt, all-target Clippy and diff-check pass. Native pause controls and live migration remain unproved.
+
+Title leak: running demo PID 44545 inherited CMUX workspace/surface/socket keys;
+`terminal_title.rs` uses them to rename the launching host. GUI environment now
+scrubs CMUX alongside other terminal contexts. No identity edits or host rename. Deployment pending.
+Check: LocalWaveAgentLauncherTests — 8 pass; diff check passes.

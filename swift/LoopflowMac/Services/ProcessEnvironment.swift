@@ -67,5 +67,5 @@ enum GUIProcessEnvironment {
     private static let providerAccountKeys: Set<String> = [
         "CODEX_HOME", "CODEX_ACCESS_TOKEN", "CODEX_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN",
     ]
-    private static let launcherTerminalPrefixes = ["WARP_", "CLAUDE_CODE_", "CODEX_"]
+    private static let launcherTerminalPrefixes = ["WARP_", "CMUX_", "CLAUDE_CODE_", "CODEX_"]
 }

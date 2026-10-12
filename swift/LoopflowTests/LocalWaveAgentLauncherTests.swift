@@ -46,6 +46,8 @@ struct LocalWaveAgentLauncherTests {
             "CI": "1", "PAGER": "cat", "GIT_PAGER": "cat", "GH_PAGER": "cat",
             "AI_AGENT": "codex", "CLAUDECODE": "1", "WARP_IS_LOCAL_SHELL_SESSION": "1",
             "CLAUDE_CODE_ENTRYPOINT": "cli", "CODEX_CI": "1", "CODEX_THREAD_ID": "t",
+            "CMUX_WORKSPACE_ID": "launching-workspace", "CMUX_SURFACE_ID": "launching-surface",
+            "CMUX_SOCKET_PATH": "/tmp/cmux.sock",
         ]
         let environment = GUIProcessEnvironment.enriched(kept.merging(leaked) { first, _ in first })
 

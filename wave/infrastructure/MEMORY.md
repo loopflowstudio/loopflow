@@ -654,11 +654,10 @@ cron list replaces WaveCronDef/GOAL declarations. Conversion retains labels,
 Machine, activation, dues, receipt classifications and child-held locks. Release
 remains Infrastructure-owned. Main #1523's terminal draft stays separate; conversion retains local liveness/placement.
 
-Hosted `72b1e98dd6`: Rust 2,412/2,415 passed; installation failed a stale
-preservation assertion. Website, Swift/UI and migration checks passed. CI repair
-updates disposable-Home isolation, canonical reconnect SQL, outage setup and
-post-acquisition preservation assertions. All four repaired cases plus migration
-checks pass in isolated Linux; fmt/Clippy/Ruff pass. New head still needs CI.
+Hosted `2f5a99100a` passed all required checks after the registry-limited
+installation retry (run 38179408870). Prior fixture failures and isolated repairs
+remain at `0514221be4:wave/infrastructure/MEMORY.md`. Syncing main #1507 preserves
+Task source and agent forwarding; seven SSH tests pass. Integrated head needs CI.
 Git pending/unconfirmed publication can return without a short-command warning;
 status retains the uncertainty. Jack approved landing after this disclosure.
 Real SSH, live Linear, installation and schedule activation remain unproved.
@@ -757,56 +756,34 @@ Flows. September 30's counterexamples, delivery decisions and draft inventory
 remain at `72c58cac5d2f4f1700186379e0645446341b1373:wave/infrastructure/MEMORY.md`.
 Current contracts live in the architecture and CLI references.
 
-**One client, one main Home.** Jack reported manually moving active Tasks to
-`~/.lf` and retiring the pinned development Home; that proves no conversion.
-No fleet compatibility, historical import, old formats or intermediate drafts
-are required. Preserve current Work/links, account routes and resumable Sessions.
-Branch checks use disposable stores with inherited authority removed; no branch
-binary writes the installed store. Released SQL remains immutable.
+Jack Heart's one-Home cutover and conversion counterexamples remain at
+`0514221be4:wave/infrastructure/MEMORY.md`, this heading; LOO-298's checklist is
+`ab901f1f1:scratch/remaining-work.md`. Manual Task moves prove no conversion.
+Preserve current Work/links, accounts and resumable Sessions; no fleet compatibility
+or historical import is required. Source checks use disposable stores without
+inherited authority; released SQL stays immutable. Before conversion, quiesce
+writers, retain consistent database/filesystem and executable backups, rehearse
+and verify before reopening. Live sidecar reads plus SQLite backup are not atomic.
+Preserve native IDs, reviews and captures; import no old turns or attachment authority.
 
-**Merge and conversion have different proof.** LOO-298's checklist remains at
-`ab901f1f1:scratch/remaining-work.md`. Fixtures prove no configured provider/Desktop
-continuity. Before conversion, quiesce writers and launches, preserve a consistent
-SQLite/filesystem backup and matching executable, rehearse the exact candidate,
-and verify before reopening. The private-copy converter's live sidecar reads
-plus SQLite backup are not atomic. Preserve native IDs, pending reviews, selected
-captures and manually transferred Tasks; import neither old turns nor attachment authority.
+September 29–30 owner/compilation decisions and superseded schema proofs remain at
+`fe07245a3614334aea71dc40e802b54b47ccaf17:wave/infrastructure/MEMORY.md`, this heading.
+Current Process/AgentSession/compiled Flow contracts supersede Exec/FlowSession.
+Skill steps use ordinary commands. Process ancestry preserves proven generations
+but grants no Task/Flow authority. Loop passes are positions, not child Flows;
+retry retains the pass. Captured inputs belong to Session history. Deleted RunId
+and intermediate conversion owners stay deleted; older proofs establish no
+final-frontier or configured provider/Desktop continuity.
 
-September 29–30's detailed owner/compilation decisions and superseded schema
-proofs remain at `fe07245a3614334aea71dc40e802b54b47ccaf17:wave/infrastructure/MEMORY.md`
-under this heading. Current Process vocabulary supersedes Exec/FlowSession names:
-one actual lf Process, one durable AgentSession conversation and one compiled
-Flow graph with step Processes. History has no independent lifecycle. Skill steps
-use ordinary `lf skill`; operations use their own commands. Parent means Process
-ancestry, matched to Session/provider generation and origin, never Task or Flow
-authority. Replacement preserves proven historical ancestry. Loop passes are
-node/iteration positions, not child Flows; retry keeps the pass and iteration
-advances its counters. Captured input belongs to Session history and names its
-Process; deleted RunId and intermediate conversion owners stay deleted. Older
-proofs establish no final-frontier conversion.
-
-- **Flow decisions are typed results** of the selected successful turn,
-  modelled on PydanticAI and Jev: the step declares its output schema. The
-  in-turn decide and route commands are removed; Jack said the command "felt
-  wrong". On 2026-09-30 Jack selected Blocked with a required reason in that
-  structured result; the blocked command is removed. A keyed Ask returns
-  feedback to another turn of the same conversation without moving the cursor.
-- **Bind** is write-once null to Task, allowed on done Tasks, and sets Started
-  once. Jack selected prospective usage attribution for now on 2026-09-30;
-  earlier usage retains its recorded owner. Keep this one read-time choice for
-  Intelligence to re-evaluate; do not invent a mid-turn token split.
-- Every denormalization has a validator or is deleted. Method for any model
-  review: derive the user's objects and APIs from the product first, then check
-  the infrastructure for hops.
-- **Naming remains a choice.** Jack kept `session_events` → `agent_events` and
-  the earlier `exec_events` rename proposals open. `run_events` is now deleted;
-  Exec results live on `execs`, so there is no current journal table to rename.
-  This observation neither closes the proposal nor authorizes a new event owner.
-- **Optional chapters, explicit selection.** Jack Heart's October 4–5 direction
-  supersedes this cutover's status-based selection and backlog expiration: one
-  shared local binding selects each Wave's Project; chapters and Flow are optional.
-  Chapter creation requires KRs, and backlog survives until explicit disposition.
-  No Chapter table, second deployed client or distributed transaction is implied.
+Jack Heart's typed Flow-result, write-once bind, prospective usage and optional
+chapter decisions remain at `0514221be4:wave/infrastructure/MEMORY.md`, this heading.
+Selected successful turns supply decisions; Blocked requires a reason. Retired
+in-turn decision commands stay deleted. Bind permits done Tasks, preserves earlier
+usage and never splits a turn. Validate denormalization or delete it; derive
+models from product objects. Explicit Project selection supersedes status inference
+and backlog expiry; retain unreviewed work until disposition. No Chapter table.
+The `session_events`/`agent_events` and earlier event-renaming proposals remain
+unresolved; deleted event owners are not authority to recreate them.
 
 LOO-298's gate, diff and unaudited real-provider fixture escape:
 `0f1858c647:wave/infrastructure/MEMORY.md`, this heading.

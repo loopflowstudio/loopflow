@@ -1,0 +1,1 @@
+Sync resolution: cargo test -p loopflow --lib lf::commands::ssh::tests (inherited LF_* unset, stdin /dev/null) — 7 passed; broader verification remains with gate/CI. Formatting, Clippy and diff checks pass.

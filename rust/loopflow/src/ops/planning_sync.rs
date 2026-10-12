@@ -332,7 +332,7 @@ pub(crate) fn check_directory(directory: &Path) -> OpsResult<()> {
         })
 }
 
-/// A foreground connection's independent Git acquisition and publication.
+/// Foreground Git exchange, or on-demand Linear checks while watching.
 /// Dropping the connection cancels requests; durable identities survive cancellation.
 #[derive(Debug)]
 pub(crate) struct PlanningSync {
@@ -347,22 +347,25 @@ impl PlanningSync {
             .map_err(message)?
             .to_string();
         let config = storage_config_from_env()?;
-        Self::connect(repo, async move {
+        Self::connect(repo, false, async move {
             open_planning_store(&config).await.map(Arc::new)
         })
     }
 
-    pub(crate) fn start(store: SharedStore, repo: String) -> OpsResult<Self> {
-        Self::connect(repo, async move { Ok(store) })
+    /// Watchers keep the selected transport active; providers only keep Git active.
+    pub(crate) fn start_watch(store: SharedStore, repo: String) -> OpsResult<Self> {
+        Self::connect(repo, true, async move { Ok(store) })
     }
 
     // One thread owns initialization and exchange. Callers may already be inside
     // an async runtime; startup errors still return before the provider launches.
     fn connect(
         repo: String,
+        watching: bool,
         open: impl Future<Output = OpsResult<SharedStore>> + Send + 'static,
     ) -> OpsResult<Self> {
-        if super::linear_observe::connected(&repo) {
+        let linear = super::linear_observe::connected(&repo);
+        if linear && !watching {
             return Ok(Self {
                 stop: None,
                 thread: None,
@@ -400,12 +403,13 @@ impl PlanningSync {
                     }
                     tokio::select! {
                         _ = stopped => {},
+                        _ = super::linear_observe::watch_repository(&store, &repo), if linear => {},
                         _ = repeat_sync("Git planning acquisition", Duration::from_secs(5), || {
                             acquire_repository(&store, &repo)
-                        }) => {},
+                        }), if !linear => {},
                         _ = repeat_sync("Git planning publication", Duration::from_secs(1), || {
                             publish_repository(&store, &repo)
-                        }) => {},
+                        }), if !linear => {},
                     }
                 };
                 #[cfg(test)]

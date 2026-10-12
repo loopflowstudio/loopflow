@@ -252,66 +252,13 @@ pub(crate) async fn sync_repository(store: &Store, repository: &str) -> bool {
 }
 
 /// Only an attached watcher owns a Linear clock. Idle agents own no Linear timer.
-#[derive(Debug)]
-pub(crate) struct PlanningWatch {
-    _git: super::planning_sync::PlanningSync,
-    stop: Option<tokio::sync::oneshot::Sender<()>>,
-    thread: Option<std::thread::JoinHandle<()>>,
-}
-
-impl PlanningWatch {
-    pub(crate) fn start(store: SharedStore, repo: String) -> OpsResult<Self> {
-        let git = super::planning_sync::PlanningSync::start(store.clone(), repo.clone())?;
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()?;
-        let (stop, stopped) = tokio::sync::oneshot::channel();
-        #[cfg(test)]
-        let context = super::linear::LINEAR_TEST_CONTEXT
-            .try_with(Clone::clone)
-            .ok();
-        let thread = std::thread::Builder::new()
-            .name("planning-watch".into())
-            .spawn(move || {
-                let drive = async {
-                    tokio::select! {
-                        _ = stopped => {},
-                        _ = watch_repository(&store, &repo) => {},
-                    }
-                };
-                #[cfg(test)]
-                if let Some(context) = context {
-                    runtime.block_on(super::linear::LINEAR_TEST_CONTEXT.scope(context, drive));
-                    return;
-                }
-                runtime.block_on(drive);
-            })?;
-        Ok(Self {
-            _git: git,
-            stop: Some(stop),
-            thread: Some(thread),
-        })
-    }
-}
-
-async fn watch_repository(store: &Store, repo: &str) {
+pub(super) async fn watch_repository(store: &Store, repo: &str) {
     let mut delay = 30;
     loop {
         let changed = sync_repository(store, repo).await;
         delay = if changed { 30 } else { (delay * 2).min(240) };
         tracing::debug!(target: "loopflow::linear_watch", delay, "Linear watcher waiting");
         tokio::time::sleep(Duration::from_secs(delay)).await;
-    }
-}
-
-impl Drop for PlanningWatch {
-    fn drop(&mut self) {
-        if let Some(stop) = self.stop.take() {
-            let _ = stop.send(());
-        }
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
-        }
     }
 }
 
@@ -539,6 +486,44 @@ pub(crate) fn render_comment(
 #[cfg(test)]
 mod tests {
     use super::{is_direction_comment, render_comment};
+
+    #[test]
+    fn linear_on_demand_watch_connection_acquires_and_closes() {
+        use crate::ops::linear::task_planning_tests::{mark_issue_updated, with_planning_task};
+
+        with_planning_task(|runtime, fixture, repo, task, state| {
+            runtime.block_on(async {
+                let mut provider = state.lock().await;
+                provider.issues[0]["title"] = serde_json::json!("Acquired by watcher");
+                mark_issue_updated(&mut provider.issues[0]);
+            });
+            let watch = crate::ops::planning_sync::PlanningSync::start_watch(
+                fixture.store.clone(),
+                repo.to_string_lossy().into_owned(),
+            )
+            .unwrap();
+            runtime.block_on(async {
+                tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                    while fixture
+                        .store
+                        .get_task(&task.id)
+                        .await
+                        .unwrap()
+                        .unwrap()
+                        .title
+                        != "Acquired by watcher"
+                    {
+                        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                    }
+                })
+                .await
+                .unwrap();
+            });
+            let closing = std::time::Instant::now();
+            drop(watch);
+            assert!(closing.elapsed() < std::time::Duration::from_secs(5));
+        });
+    }
 
     #[test]
     fn linear_on_demand_watcher_backs_off_and_resets_on_change() {

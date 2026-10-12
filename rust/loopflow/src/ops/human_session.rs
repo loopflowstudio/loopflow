@@ -1120,7 +1120,10 @@ pub(crate) async fn spawn_session_process(
         .kill_on_drop(true)
         .spawn()
         .with_context(|| format!("could not start {launch}"))?;
-    let deadline = tokio::time::Instant::now() + SESSION_START_TIMEOUT;
+    // This child owns the visible foreground terminal. First-use trust and
+    // authentication can wait for a person before native history exists; an
+    // elapsed startup deadline must not kill that conversation. Keep the launch
+    // lock until history is resumable or the child exits.
     loop {
         match crate::session_record::resolve_manifest(&home, artifact_key.as_str()) {
             Ok((dir, _manifest)) => {
@@ -1142,9 +1145,6 @@ pub(crate) async fn spawn_session_process(
                 }
             }
             bail!("{launch}: exited with {status} before becoming resumable");
-        }
-        if tokio::time::Instant::now() >= deadline {
-            bail!("{launch}: did not become resumable within 30s");
         }
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
@@ -2130,6 +2130,35 @@ mod tests {
         );
         assert!(argv.contains(&format!("LF_HOME={}", home.home.path().display())));
         assert!(!argv.iter().any(|argument| argument == "tmux"));
+    }
+
+    #[test]
+    fn foreground_session_can_wait_for_first_use_before_native_history() {
+        let _lock = crate::journal::test_env_lock();
+        let home = SessionHome::new();
+        let _store =
+            crate::store::sqlite::SqliteStore::new(&home.home.path().join("loopflow.db")).unwrap();
+        let mut command = tokio::process::Command::new("/bin/sleep");
+        command.arg("60").stdin(std::process::Stdio::null());
+        let input = crate::session_record::new_artifact_key();
+        // Virtual time passes the old startup deadline while the owned child
+        // waits. Canceling the future then reaps it through kill_on_drop.
+        let result = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .start_paused(true)
+            .build()
+            .unwrap()
+            .block_on(async {
+                tokio::time::timeout(
+                    std::time::Duration::from_secs(31),
+                    super::spawn_session_process(&mut command, &input),
+                )
+                .await
+            });
+        assert!(
+            result.is_err(),
+            "foreground launch ended before first-use input: {result:?}"
+        );
     }
 
     #[test]

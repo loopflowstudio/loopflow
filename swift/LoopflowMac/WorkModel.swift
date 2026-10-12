@@ -706,6 +706,7 @@ final class WorkModel {
     private(set) var planningSequence = 0
     @ObservationIgnored private var workObservation: WorkObservation?
     private var workMachine: String?
+    private var workDataDirectory: String?
     @ObservationIgnored private var workOpened = ContinuousClock.now
     @ObservationIgnored private var nextRequestId = 0
     @ObservationIgnored private var sentScope: WorkScope?
@@ -1018,11 +1019,12 @@ final class WorkModel {
         let part = frame.content.part
         if case .heartbeat = frame.content { return }
         guard frame.sequence > appliedSequence[part] ?? 0 else { return }
-        if let workMachine, workMachine != frame.home {
-            // Another Machine answers now; nothing shown from the previous one names anything here.
+        if let workDataDirectory, workDataDirectory != frame.home {
+            // The stream names its data directory, not the opaque Machine ID
+            // returned by machine id and used by Session locations.
             dropMachineContent()
         }
-        workMachine = frame.home
+        workDataDirectory = frame.home
         let answers = frame.answers ?? 0
         let reason = frame.unavailable ?? "Work reader returned no \(part) reading"
         switch frame.content {
@@ -1049,7 +1051,10 @@ final class WorkModel {
             }
             guard body.repo.normalizedFilePath == repoPath.normalizedFilePath,
                   !body.includesHeadless else { return }
-            let remote = (sessions.value ?? []).filter { $0.workspace?.machineId != nil && $0.workspace?.machineId != frame.home }
+            let remote = (sessions.value ?? []).filter {
+                guard let machine = $0.workspace?.machineId else { return false }
+                return workMachine == nil || machine != workMachine
+            }
             let next = WorkReading.available(body.entries + remote)
             if sessions != next { sessions = next }
             if savedSessionRepos.remove(repositoryReadingKey(repoPath)) != nil {

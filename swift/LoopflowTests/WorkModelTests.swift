@@ -409,6 +409,30 @@ struct WorkModelTests {
 @Suite("Work observation stream", .serialized)
 @MainActor
 struct WorkModelStreamTests {
+    @Test("Data-directory frames and confirmed Machine identity preserve the same workspace")
+    func streamDirectoryIsNotMachineIdentity() async throws {
+        let fixture = try WorkTestFixture.load()
+        let feed = WorkFeed()
+        let model = WorkModel(query: fixture.streaming(feed), repoPath: "/src/loopflow")
+        model.confirmMachine("machine-local")
+        let keeping = Task { await model.keepWorkCurrent() }
+        defer { keeping.cancel() }
+        try await feed.opened(1)
+        let scope = try await feed.request(1)
+        await feed.send(try fixture.planningFrame(sequence: 1, answers: scope.id, home: "/data/lf"))
+        try await eventually { model.task(id: "issue-now") != nil }
+        model.select(.task(id: "issue-now"))
+        model.confirmMachine("machine-local")
+        #expect(model.task(id: "issue-now") != nil)
+        #expect(model.selection == .task(id: "issue-now"))
+        #expect(model.observingMachineId == "machine-local")
+        await feed.send(try fixture.planningFrame(sequence: 2, answers: scope.id, renaming: "Updated", home: "/data/lf"))
+        try await eventually { model.task(id: "issue-now")?.task.task.name == "Updated" }
+        model.confirmMachine("machine-local")
+        #expect(model.selection == .task(id: "issue-now"))
+        #expect(model.observingMachineId == "machine-local")
+    }
+
     @Test("Peer status updates independently, preserves failures and rejects old scopes")
     func peerPlanningFrames() async throws {
         let fixture = try WorkTestFixture.load()

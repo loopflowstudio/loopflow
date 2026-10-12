@@ -191,20 +191,10 @@ Work stream (`watch-first-results.json`, same audit directory): 35–64 seconds
 per scope, not a missing Workflow reply. This latency is not usable-endpoint proof.
 A redundant second observer was interrupted; it grants no stronger evidence.
 
-`session ensure --prepare` admits and publishes input without a detached provider;
-Desktop then connects through the visible pane. Existing explicit non-prepare CLI
-ensure/replacement semantics remain. Task selection/foreign-choice validation now
-precedes checkout restoration, so a foreign choice cannot restore a folder;
-valid retained conversations still receive missing-checkout recovery. Native first-use trust and existing-client attachment
-still need proof. Review found the prior inline-error change hid recent-Task lookup
-failures before a Task page existed; only a selected matching Task suppresses the
-lookup sheet now. Initial Swift run: 86/88 passed, two assertions exposed that bug.
-
-Git fsck found LOO-312's ten-commit chain from recorded base `102522bc25` to
-`d5c043c13a44dd793ed1efec295f623422f8fa8e`, including installer code and reviewed
-design. Objects exist but branch restoration is not yet performed. Recovery must
-preserve that tip and Task identity, not reset to base. The existing Task checkout
-API restores a retained branch but cannot yet name a recovered commit.
+The temporary `session ensure --prepare` design and pre-recovery findings are
+superseded below; exact failed attempts remain at
+`bdb1658348:scratch/work-first-demo.md`, this section. Preserve foreign-choice
+validation before checkout restoration and inline errors only on a matching Task page.
 
 ## CI conversation rate-limit incident — October 12
 
@@ -236,23 +226,38 @@ Recovery backup: `/tmp/loo462-sidebar-audit/LOO-312-recovered-history.patch`, SH
 
 ## Recovery and upstream composition — October 12
 
-Live 0.13.13 installation changed the schema during this audit; the old demo
-now refuses newer data rather than presenting a fresh reading. Main
-`2f6945ed04` is merged (TESTING.md retained both independent additions).
-
-`2235694dd4` adds `task checkout --recover-from COMMIT`: recover an absent
-recorded branch at a deliberately located commit, never reset existing work.
-Missing object, implicit lost-branch refusal, exact recovery, repeated recovery,
-existing-branch mismatch and preserved Task/PR identity pass the focused checkout
-test; fmt/all-target Clippy passed. LOO-312's live restoration has not run yet.
-
-Jack Heart separately commissioned lf-8fed729 for ensured-conversation recovery;
-its driver was observed live, left alone. Integrated its committed `9ccaac2e48`
-checkpoint, not its later gate or acceptance. Its ordinary ensure/replace now
-prepare input and connect owns foreground launch; exact dead interactive-process
-recovery preserves live/unknown refusals and retired Session history. This
-supersedes our temporary --prepare flag, which is removed. Retain this Task's
-missing-checkout restoration and inline-error fixes. Dependency design/evidence:
-`9ccaac2e48:scratch/open-a-task-s-conversation.md`; its native proof remains absent.
+Main 0.13.13 and lf-8fed729's committed `9ccaac2e48` are composed; its live
+driver was left alone, no gate or acceptance borrowed. Ordinary ensure/replace
+prepare input; connect owns foreground launch. Our temporary --prepare is removed;
+missing-checkout recovery and inline errors survive. Exact integration, failed
+checks and dependency design: `bdb1658348:scratch/work-first-demo.md`, this heading.
+`2235694dd4` adds explicit `task checkout --recover-from COMMIT` without resetting
+existing work; focused recovery test, fmt and all-target Clippy passed.
 
 Composed check: three Session lifecycle cases and 37 Swift navigation tests PASS; all-target Clippy/fmt/diff PASS. LOO-312 recovered through the new API at exact `d5c043c13a`, clean checkout and unchanged branch. Fresh roster is 13 after lf-8fed729 appeared; every ensured Session has its exact Task membership. JSON connect passes 12; LOO-462 refuses its active other terminal (no takeover). These are preparation, not native acceptance. Records: `prepare-results.json` in the audit directory.
+
+## Native foreground opening — October 12
+
+Candidate `com.loopflow.mac.demo.loo462candidate`, private path
+`/private/tmp/loo462-native.FgtDmE/candidate/Loopflow Work Demo.app`, uses the
+real store and this diff's bundled 0.13.13. Fresh native sidebar shows the 13
+prepared Tasks without Session counts. The older app was left alive to preserve
+its retained surfaces; no takeover or global installation.
+
+Clicking LOO-312 did invoke connect and display Codex. Its first-use hook-trust
+prompt preceded native history; the 30-second resumability timeout killed the
+launcher. The pane later showed “Open here”, hiding the original failure; a
+retry captured the prompt and timeout together. This disproves the initial
+hypothesis that the sidebar failed to launch. Process evidence:
+`/tmp/loo462-sidebar-audit/312-native-commands.json` and `312-retry-commands.json`.
+Remove that foreground timeout, preserving the launch lock, child-exit handling
+and explicit trust choice. Native review remains incomplete; no trust was granted.
+
+Native relaunch also exposed `WorkFrame.home` (data-directory path) being assigned
+to Desktop's opaque Machine ID. Subsequent `machine id` confirmation cleared the
+fresh plan, creating the loading loop and hiding the live terminal. Keep streamed
+directory and confirmed Machine identity separate; Session location comparisons
+use only the latter. Same-directory frames plus repeated Machine confirmation
+must preserve Task selection and planning. No wire change or second identity store.
+
+Check: foreground wait regression PASS after fixing missing fixture database; Clippy initially rejected awaiting with the test environment lock, then PASS after using a scoped runtime; fmt/diff PASS. Fixed native launcher remained alive over five minutes before trust, unlike the two timed-out attempts. Seven Swift stream tests PASS, including directory/ID regression; final native relaunch remains pending.

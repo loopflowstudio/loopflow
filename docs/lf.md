@@ -417,7 +417,8 @@ The repository and each Wave have one ongoing conversation. `session ensure`
 finds it or prepares it, a Wave's with its goal and memory, and repeats return the
 same Session. `replace` stops that conversation, keeps it as history, and prepares
 a fresh one. Neither launches a provider; `session connect SESSION` opens it in
-the current terminal.
+the current terminal. First-use trust or sign-in prompts stay open until answered
+or canceled; waiting for input does not time out the foreground conversation.
 
 A Task's primary is one of its own conversations: the one named with
 `--choose SESSION`, else its only unfinished interactive conversation, else the

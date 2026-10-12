@@ -53,16 +53,9 @@ code or duplicated planning. Ownership is independently reviewable. Jack invoked
 replication here or real plan publication to the public code repo is authorized.
 
 Foreground acquisition and delivery are independent; effect locks block neither
-saves nor acquisition. Matching observations settle captured attempts and advance
-later saves' unchanged baselines; retired receipts retain losing values.
-`b1f175bbf` delivers Project ordering with captured moves; only complete-list
-acquisition recognizes partial progress, never detail reads.
-`6bb8b935a` adds CLI/Desktop sync status; `086d3560c` removes pending-only
-projections, retaining baselines. Configuration selects pending display; creation
-receipts advance revision. `29777b8cb` scopes sync to repositories;
-`b6f34a6f8` separates Linux reconnect and portable abandonment fixtures.
-LOO-406 #1503 is integrated; peer and installed acceptance remain unproved.
-Dated checks and queue uncertainty: `09709a05cc:wave/infrastructure/MEMORY.md`.
+saves nor acquisition. Captured receipts retain losing values and concurrent saves;
+only complete-list observations settle Project ordering. LOO-406 #1503 is integrated;
+peer and installed acceptance remain unproved. Earlier checks: `b078a83f3b:wave/infrastructure/MEMORY.md`, this heading.
 
 Jack Heart's `8821db44-0480-4493-8609-953207663f1d` removes public creation tokens.
 Each create generates/saves/returns a distinct ID, even for identical titles;
@@ -107,6 +100,28 @@ placement stay distinct. No landing/install. Design:
 `scratch/explore-loopflow-s-own-store.md`. Disposable workers prove no backup/export.
 
 Superseded split proofs and recovery evidence: `dfe18ab6060901992b55e64842e23c4295673b08:wave/infrastructure/MEMORY.md`.
+
+## On-demand Linear acquisition (lf-6f396c0, 2026-10-11)
+
+Jack Heart's `2d140be4` replaces per-agent polling with team deltas at turn, Flow,
+planning-read and write boundaries; only watchers retain a slow clock. No daemon,
+webhook or pub/sub. Ten-second shared attempt freshness differs from the successful
+watermark: failed/interrupted ingestion retains the latter. Exclude terminal Tasks
+and teams without live Tasks; pagination may require multiple requests. Successful
+mutations settle captured receipts directly; uncertain effects retain identity.
+Home-wide reset cooldown handles HTTP 400 limits as well as rate-limit headers.
+
+#1491's Git exchange remains intact. One foreground connection selects Git exchange
+or watcher-only Linear checks; removing Linear timers must not remove Git lifetime.
+Release's operation-entry lesson applies: generated Stop-hook child processes,
+Flow launches, watcher backoff/shutdown and populated migration fixtures prove their
+boundaries, not installed behavior. Idle providers issue no timed Linear requests.
+
+Jack authorized landing after checks. His `6d169dc1` permits publication before live
+measurement while Linear is paused. Live request counts, rejected-request quota
+accounting and installed pending-write recovery remain unproved. After installing,
+manual restoration of `linear.team` with `planning.provider: linear` in loopflow,
+etude, kata and fantasia precedes measurement; rollout notes belong in the PR.
 
 ## Session titles (LOO-439, 2026-10-08)
 
@@ -530,29 +545,14 @@ Rotation accepts confirmed readbacks; reteam requires exact Team/full issue
 readbacks and preserves newer facts. Deleted identity shortcuts and generic
 writers stay deleted. Source-only evidence: `d4d77d8e22f4244ad83027ba9c85bb8644a622e6`.
 
-October 5: queued SQLite workers own Wave guards through commit, including after
-caller cancellation; one shared writer preserves that lifetime. Multi-Wave
-operations lock in stable ID order and reuse held guards. Cold detail re-reads
-ownership under the lock; delayed absence compares the queried revision/age.
-Inspection follows UUID across renames. Cancellation proofs exclude competing
-reteam preview until commit; separate apply fixtures cover cached recovery and
-expansion/move/narrowing response loss. These supersede the unrepaired-reteam
-finding; the registration and rotation proofs below establish later boundaries,
-not installed acceptance.
-
-Exact-ID rotation supersedes the name-selector failure retained at
-`42e6c2706b1:scratch/keep-every-wave-ready-for.md`; cross-process recovery remains
-unproved. Desktop activation
-must preserve #1447's cached plans and independent Session reads, outside polling.
-#1446's ongoing procedures retain started-Task follow-through; reads never provision.
-
-October 5 registration/rotation proofs and exact Intelligence repair authorization:
-`7d9bf0a4d8:wave/infrastructure/MEMORY.md`, this heading. Preserve workspace
-membership, Task/PR identity, unset Started, frozen input, unfinished KRs, later
-starts and external moves. LOO-406's writer supersedes registration writers;
-ordered Wave/checkout locks remain distinct from Git leases. The archived
-file-binding design and output-handle leak prove no crash recovery. Public
-crash/retry, configured Intelligence repair and installed acceptance remain open.
+Queued SQLite workers retain ordered Wave guards through commit/cancellation.
+Cold reads recheck ownership; delayed absence compares revision and age. Rotation
+preserves frozen membership, Task/PR identity, unset Started, unfinished KRs, later
+starts and external moves. LOO-406 supersedes registration writers, not ordered
+Wave/checkout locks or cached plans and independent Session reads. Public crash/retry,
+configured Intelligence repair and installed acceptance remain unproved. October 5
+reteam/rotation proofs, superseded name selection and exact repair authorization:
+`b078a83f3b:wave/infrastructure/MEMORY.md`, this heading.
 
 October 6: Jack Heart authorized SQLite selection and LOO-382's stream, deleting
 the YAML selector and `ProjectPreparation`. Dependency `e887a21c1` entered through

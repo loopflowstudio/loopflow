@@ -14,9 +14,18 @@ use time::OffsetDateTime;
 use crate::child::{prefixed_uuid_id, AbandonIntent};
 pub use crate::durable::TaskId;
 use crate::id::WaveId;
-use crate::pm::{LinearBindingError, LinearIssueId};
+use crate::linear::{LinearBindingError, LinearIssueId};
 use crate::pr_landing::PrLandingId;
 use crate::work::project::ProjectId;
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct TaskUpdate {
+    pub rank: Option<u32>,
+    /// Omitted preserves assignment; explicit None clears it.
+    pub assignee: Option<Option<String>>,
+    pub title: Option<String>,
+    pub description: Option<String>,
+}
 
 /// The caller retains this identity across a retry; a separate create mints another.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -644,10 +653,10 @@ pub struct TaskFollowUp {
 pub enum TaskEventKind {
     // Historical follow-through events remain readable; no current writers.
     FollowThroughIntent {
-        intent: FollowThroughIntent,
+        intent: serde_json::Value,
     },
     FollowThroughLinked {
-        link: FollowThroughLink,
+        link: serde_json::Value,
     },
     FollowThroughRelationConfirmed {
         relation_id: String,
@@ -803,7 +812,7 @@ mod tests {
         GithubPr, LinearWritebackOperation, LinearWritebackState, PrPhase, PrPublication, Task,
         TaskId, TaskPr, TaskPrId,
     };
-    use crate::pm::LinearIssueId;
+    use crate::linear::LinearIssueId;
 
     fn task() -> Task {
         let now = time::OffsetDateTime::now_utc();
@@ -1207,29 +1216,4 @@ mod tests {
         };
         assert!(task.validate().is_ok());
     }
-}
-
-/// Historical follow-through filing input; retained for event decoding only.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FollowThroughIntent {
-    pub key: String,
-    pub issue_id: String,
-    pub relation_id: String,
-    pub project_id: String,
-    pub team_id: String,
-    pub state_id: Option<String>,
-    pub wave: String,
-    pub title: String,
-    pub notes: String,
-    pub due: Option<String>,
-    pub existing: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FollowThroughLink {
-    pub key: String,
-    pub issue_id: String,
-    pub identifier: String,
-    pub url: Option<String>,
-    pub due: Option<String>,
 }

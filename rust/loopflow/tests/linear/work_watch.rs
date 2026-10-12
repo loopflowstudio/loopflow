@@ -1,6 +1,7 @@
 //! `lf monitor work --watch` shows another process's commits. Each test
 //! drives the real binary against a seeded `LF_HOME` and writes from here.
 
+use crate::test_linear_input::{InventoryFixture, SeedLinearSqlite};
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
@@ -12,7 +13,6 @@ use loopflow::id::WaveId;
 use loopflow::lf::commands::waves::{Evidence, RoadmapSnapshot};
 use loopflow::lf::commands::work_watch::{WorkContent, WorkFrame};
 use loopflow::store::sqlite::SqliteStore;
-use loopflow::store::PmSnapshotRow;
 #[cfg(target_os = "macos")]
 use loopflow::work::task::{TaskEventKind, TaskPr, TaskPrId};
 use loopflow::work::wave::Wave;
@@ -41,7 +41,7 @@ struct Machine {
 }
 
 fn lf(home: &Path, args: &[&str]) -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+    let mut command = Command::new(loopflow_test_support::lf_binary());
     for (key, _) in std::env::vars_os() {
         let key = key.to_string_lossy().into_owned();
         if key.starts_with("LF_") || key.starts_with("LOOPFLOW_") || key.starts_with("LINEAR_") {
@@ -52,7 +52,7 @@ fn lf(home: &Path, args: &[&str]) -> Command {
         .args(args)
         .current_dir(home)
         .env("LF_HOME", home)
-        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+        .env("LF_BIN", loopflow_test_support::lf_binary())
         .env("HOME", home)
         .stderr(Stdio::inherit());
     command
@@ -104,7 +104,7 @@ impl Machine {
             "items": items
         });
         self.store
-            .put_pm_snapshot(&PmSnapshotRow {
+            .seed_inventory(&InventoryFixture {
                 wave_id: self.wave.id().clone(),
                 provider: "linear".into(),
                 initiative: "initiative-product".into(),
@@ -862,7 +862,7 @@ fn offline_cli_completion_and_reopening_reach_desktop_without_refresh() {
     std::fs::create_dir_all(&config).unwrap();
     std::fs::write(
         config.join("config.yaml"),
-        "pm:\n  linear_team: team-product\n",
+        "linear:\n  team: team-product\n",
     )
     .unwrap();
     home.plan(1);
@@ -950,7 +950,7 @@ fn an_offline_cli_comment_reaches_the_open_desktop_thread() {
     std::fs::create_dir_all(&config).unwrap();
     std::fs::write(
         config.join("config.yaml"),
-        "pm:\n  linear_team: team-product\n",
+        "linear:\n  team: team-product\n",
     )
     .unwrap();
     home.plan(1);
@@ -987,7 +987,8 @@ fn an_offline_cli_comment_reaches_the_open_desktop_thread() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let saved: loopflow::ops::pm::TaskComments = serde_json::from_slice(&output.stdout).unwrap();
+    let saved: loopflow::work::task::comment::TaskComments =
+        serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(saved.comments.len(), 1);
     assert_eq!(saved.pending_sync, [saved.comments[0].id.clone()]);
     assert_eq!(thread(&watch, 1), saved);
@@ -1035,8 +1036,9 @@ fn peer_planning_receipts_reach_open_desktop_without_refresh() {
     )
     .unwrap();
     let id = home.store.bind_peer_planning(repo, &destination).unwrap();
-    home.store.use_peer_planning(repo, Some(&id)).unwrap();
-    let statuses = read(&|statuses| statuses.iter().any(|status| status.active));
+    home.store.export_peer_planning(repo, &id).unwrap();
+    let statuses = read(&|statuses| !statuses.is_empty());
+    assert!(!statuses[0].active);
     assert_eq!(statuses.len(), 1);
     assert_eq!(statuses[0].id, id);
     assert!(statuses[0].pending_local);
@@ -1063,11 +1065,23 @@ fn peer_planning_receipts_reach_open_desktop_without_refresh() {
     ));
     assert_eq!(statuses[0].imported_revision, None);
     assert!(statuses[0].pending_local);
-    home.store.use_peer_planning(repo, None).unwrap();
-    let statuses = read(&|statuses| !statuses[0].active);
+    let config_dir = Path::new(repo).join(".lf");
+    std::fs::create_dir_all(&config_dir).unwrap();
+    std::fs::write(
+        config_dir.join("config.yaml"),
+        "planning: {provider: linear}\n",
+    )
+    .unwrap();
+    assert!(read(&|statuses| statuses.is_empty()).is_empty());
+    std::fs::write(
+        config_dir.join("config.yaml"),
+        "planning: {provider: git, shared: team}\n",
+    )
+    .unwrap();
+    let statuses = read(&|statuses| !statuses.is_empty());
     assert_eq!(
         statuses[0].selected_records,
-        home.store.peer_planning_status(repo).unwrap()[0].selected_records
+        home.store.peer_planning_status(repo, None).unwrap()[0].selected_records
     );
     assert_eq!(
         statuses[0].publication_state.as_deref(),

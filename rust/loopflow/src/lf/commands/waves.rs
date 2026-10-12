@@ -879,7 +879,7 @@ fn roadmap_task(detail: TaskDetailSnapshot) -> RoadmapTask {
 /// A Task's section, from the same planning primitives the row already carries.
 fn task_section(task: &TaskDetailSnapshot) -> RoadmapSection {
     let Some(runtime) = &task.runtime else {
-        return if crate::pm::terminal_reason(task.task.state.as_deref(), task.task.completed)
+        return if crate::linear::terminal_reason(task.task.state.as_deref(), task.task.completed)
             .is_some()
         {
             RoadmapSection::Later
@@ -890,7 +890,8 @@ fn task_section(task: &TaskDetailSnapshot) -> RoadmapSection {
     // Linear completing a Task that never left `start` withdraws it from what
     // is offered; an active one keeps its place and shows the conflict.
     let withdrawn = matches!(runtime.status, TaskState::NotReady | TaskState::Ready)
-        && crate::pm::terminal_reason(task.task.state.as_deref(), task.task.completed).is_some();
+        && crate::linear::terminal_reason(task.task.state.as_deref(), task.task.completed)
+            .is_some();
     if runtime.status.is_terminal() || withdrawn {
         return RoadmapSection::Later;
     }
@@ -1036,7 +1037,7 @@ async fn validate_linear_ownership(
             .push((wave.id(), wave.slug()));
     }
     for (repo, waves) in ownership {
-        let expected_team = crate::ops::pm::repository_team_for_snapshot_validation(&repo, store)
+        let expected_team = crate::ops::linear::selected_linear_team(&repo)
             .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()));
         store
             .sqlite
@@ -1225,7 +1226,7 @@ async fn snapshot_task_detail(
     {
         NextMove {
             owner: NextMoveOwner::Wave,
-            reason: "Merged · Ready to complete the Task".into(),
+            reason: "Merged; complete the Task".into(),
         }
     } else {
         next_move_for_task(
@@ -1246,7 +1247,7 @@ async fn snapshot_task_detail(
         worktree_blocker.as_ref(),
     );
     let completion_refusal = if runtime.status != TaskState::Abandoned {
-        crate::ops::task::CompletionGate::from_delivery(pr.as_ref()).refusal(&task.identifier)
+        crate::ops::task::completion_refusal(pr.as_ref(), &task.identifier)
     } else {
         None
     };
@@ -1288,8 +1289,11 @@ async fn snapshot_task_detail(
         crate::ops::task_run::task_run_control(&crate::ops::task_run::TaskRunEvidence {
             status: Some(&work_status),
             // Shared completion withdraws an unstarted Task, never advances its Workflow.
-            plan_terminal_reason: crate::pm::terminal_reason(task.state.as_deref(), task.completed)
-                .filter(|_| matches!(runtime.status, TaskState::NotReady | TaskState::Ready)),
+            plan_terminal_reason: crate::linear::terminal_reason(
+                task.state.as_deref(),
+                task.completed,
+            )
+            .filter(|_| matches!(runtime.status, TaskState::NotReady | TaskState::Ready)),
             worktree_blocker: worktree_blocker
                 .as_ref()
                 .map(|blocker| blocker.reason.as_str()),
@@ -2280,6 +2284,7 @@ fn truncate_start(value: &str, width: usize) -> String {
 
 #[cfg(test)]
 mod tests {
+    use crate::test_linear_input::SeedLinear;
     use std::sync::Arc;
     use time::OffsetDateTime;
 
@@ -2314,13 +2319,13 @@ mod tests {
             directory.path().display().to_string(),
         );
         store.create_wave(&wave).await.unwrap();
-        let planning: crate::pm::PmSnapshot = serde_json::from_str(include_str!(
+        let planning: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
             "../../../../../tests/fixtures/dto/task_history_planning.json"
         ))
         .unwrap();
         store
-            .put_pm_snapshot(
-                crate::store::PmSnapshotRow {
+            .seed_inventory(
+                crate::test_linear_input::InventoryFixture {
                     wave_id: wave.id().clone(),
                     provider: "linear".into(),
                     initiative: "initiative".into(),
@@ -2352,7 +2357,7 @@ mod tests {
             assert_eq!(detail.task.state, item.state);
             assert_eq!(detail.task.completed_at, item.completed_at);
             assert_eq!(detail.task.completed, item.completed);
-            let terminal = item.terminal_reason();
+            let terminal = crate::linear::terminal_reason(item.state.as_deref(), item.completed);
             assert_eq!(
                 matches!(super::task_section(detail), super::RoadmapSection::Later),
                 terminal.is_some()
@@ -2428,8 +2433,8 @@ mod tests {
             );
             store.create_wave(&wave).await.unwrap();
             store
-                .put_pm_snapshot(
-                    crate::store::PmSnapshotRow {
+                .seed_inventory(
+                    crate::test_linear_input::InventoryFixture {
                         wave_id: wave.id().clone(),
                         provider: "linear".into(),
                         initiative: "initiative".into(),
@@ -2459,7 +2464,7 @@ mod tests {
         rusqlite::Connection::open(directory.path().join("registry.db"))
             .unwrap()
             .execute(
-                "UPDATE pm_projects SET body='not-json' WHERE id='first-ear'",
+                "UPDATE pm_projects SET initiative_ids='not-json' WHERE id='first-ear'",
                 [],
             )
             .unwrap();
@@ -2493,7 +2498,7 @@ mod tests {
             directory.path().display().to_string(),
         );
         store.create_wave(&wave).await.unwrap();
-        let mut item = crate::pm::PmItem {
+        let mut item = crate::linear::LinearIssue {
             branch_name: None,
             revision: None,
             id: "removed".into(),
@@ -2507,7 +2512,6 @@ mod tests {
             due_date: None,
             state: Some("unstarted".into()),
             project_id: Some("current".into()),
-            project: Some("current".into()),
             team_id: Some("team".into()),
             assignee: None,
         };
@@ -2517,7 +2521,7 @@ mod tests {
         item.completed = true;
         item.state = Some("completed".into());
         items.push(item);
-        let snapshot = crate::store::PmSnapshotRow {
+        let snapshot = crate::test_linear_input::InventoryFixture {
             wave_id: wave.id().clone(),
             provider: "linear".into(),
             initiative: "initiative".into(),
@@ -2529,7 +2533,7 @@ mod tests {
             }], "items":items}))
             .unwrap(),
         };
-        store.put_pm_snapshot(snapshot.clone(), None).await.unwrap();
+        store.seed_inventory(snapshot.clone(), None).await.unwrap();
         // Old applied abandonment receipts do not imply native deletion.
         let shared = super::SharedTaskReads::read(&store).await.unwrap();
         let before = super::wave_tasks(&store, &wave, false, None, &shared)
@@ -2553,7 +2557,7 @@ mod tests {
                     item.revision = Some("2026-09-30T00:00:01Z".into());
                 }
             }
-            store.put_pm_snapshot(stale, None).await.unwrap();
+            store.seed_inventory(stale, None).await.unwrap();
             let reopened = Arc::new(
                 crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
                     database.clone(),
@@ -2606,7 +2610,7 @@ mod tests {
             &missing.contract_issues[..],
             [crate::work::wave::metrics::MetricContractIssueDto::ChapterUnavailable { .. }]
         ));
-        store.put_pm_snapshot(crate::store::PmSnapshotRow {
+        store.seed_inventory(crate::test_linear_input::InventoryFixture {
             wave_id: wave.id().clone(), provider: "linear".into(), initiative: "initiative".into(), synced_at: 2,
             snapshot: serde_json::from_value(serde_json::json!({"projects":[{
                 "id":"999bdbdd-c045-41a6-8ffc-a97c4a40b0b3", "slug":"first", "name":"First chapter", "summary":"",
@@ -2631,17 +2635,17 @@ mod tests {
             items[0].status,
             crate::work::project::ProjectStatus::Started
         );
-        let unreadable = crate::store::PmSnapshotRow {
+        let unreadable = crate::test_linear_input::InventoryFixture {
             wave_id: wave.id().clone(),
             provider: "linear".into(),
             initiative: "initiative".into(),
             synced_at: 3,
-            snapshot: crate::pm::PmSnapshot {
+            snapshot: crate::test_linear_input::Inventory {
                 projects: vec![],
                 items: vec![],
             },
         };
-        assert!(store.put_pm_snapshot(unreadable, None).await.is_err());
+        assert!(store.seed_inventory(unreadable, None).await.is_err());
         assert!(matches!(
             super::project_planning(&store, &wave).await,
             super::Evidence::Ok { items, .. } if items.len() == 1
@@ -2649,7 +2653,7 @@ mod tests {
         // Invalid provider evidence cannot erase the owned plan, but prevents metric evaluation.
         rusqlite::Connection::open(directory.path().join("registry.db"))
             .unwrap()
-            .execute("UPDATE pm_projects SET body='not-json'", [])
+            .execute("UPDATE pm_projects SET initiative_ids='not-json'", [])
             .unwrap();
         let super::Evidence::Ok {
             items,
@@ -2693,7 +2697,7 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let selected = "999bdbdd-c045-41a6-8ffc-a97c4a40b0b3";
         let predecessor = "218967b6-a760-4b7c-9a46-11d9d61a42c2";
-        let project = |id: &str, name: &str| crate::pm::linear::LinearProject {
+        let project = |id: &str, name: &str| crate::linear::LinearProject {
             description: None,
             id: id.into(),
             name: name.into(),
@@ -2707,7 +2711,7 @@ mod tests {
             initiative_ids: vec!["initiative".into()],
             team_ids: vec!["team".into()],
         };
-        let item = crate::pm::PmItem {
+        let item = crate::linear::LinearIssue {
             id: "issue".into(),
             identifier: "FIX-1".into(),
             name: "Unreviewed backlog".into(),
@@ -2718,7 +2722,6 @@ mod tests {
             due_date: None,
             state: Some("unstarted".into()),
             project_id: Some(predecessor.into()),
-            project: Some("Old ordinary plan".into()),
             team_id: Some("team".into()),
             assignee: None,
             branch_name: None,
@@ -2726,13 +2729,13 @@ mod tests {
             url: None,
         };
         store
-            .put_pm_snapshot(
-                crate::store::PmSnapshotRow {
+            .seed_inventory(
+                crate::test_linear_input::InventoryFixture {
                     wave_id: wave.id().clone(),
                     provider: "linear".into(),
                     initiative: "initiative".into(),
                     synced_at: 2,
-                    snapshot: crate::pm::PmSnapshot {
+                    snapshot: crate::test_linear_input::Inventory {
                         projects: vec![
                             project(predecessor, "Old ordinary plan"),
                             project(selected, "Summer work — customer requests"),

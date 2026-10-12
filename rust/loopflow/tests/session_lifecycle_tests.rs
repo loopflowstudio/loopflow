@@ -1225,8 +1225,10 @@ fn declared_agent_can_start_another_tasks_flow() {
     .unwrap();
     let store = loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
         .unwrap();
-    // Y needs a harness that supports the checkout boundary. Its mechanical
-    // Flow never starts a provider; X's interactive OpenCode only issues the command.
+    // Saved Task defaults stay local to each Task. An explicit --agent would
+    // override Y too, selecting OpenCode without a managed checkout boundary.
+    // Y's mechanical Flow never starts a provider; X's OpenCode issues the command.
+    store.set_task_agent(&caller.id, "opencode").unwrap();
     store.set_task_agent(&target.task.id, "claude").unwrap();
     store
         .select_project_workflow(
@@ -1256,9 +1258,7 @@ fn declared_agent_can_start_another_tasks_flow() {
     )
     .unwrap();
     let output = fixture
-        .command(&[
-            "--task", "INF-124", "-i", "--agent", "opencode", ":", "Start Y",
-        ])
+        .command(&["--task", "INF-124", "-i", ":", "Start Y"])
         .env("LF_BIN", bin.join("lf"))
         .output()
         .unwrap();

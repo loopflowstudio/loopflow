@@ -10,7 +10,8 @@ use axum::{extract::State, routing::post, Json, Router};
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
 
-use super::{task_comment_async, PmTestContext, PM_TEST_CONTEXT};
+use super::{LinearTestContext, LINEAR_TEST_CONTEXT};
+use crate::ops::task::task_comment_async;
 use crate::store::{open_ephemeral_store, CredentialType, ProviderToken, StorageConfig};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -180,15 +181,11 @@ async fn task_comments_read_and_publish_without_starting_work() {
             .unwrap()
             .success());
     }
-    std::fs::write(
-        repo.join(".lf/config.yaml"),
-        "pm:\n  provider: linear\n  linear_team: team-1\n",
-    )
-    .unwrap();
+    std::fs::write(repo.join(".lf/config.yaml"), "linear:\n  team: team-1\n").unwrap();
     for (wave, initiative) in [("product", "initiative-1"), ("other", "initiative-2")] {
         std::fs::write(
             repo.join(format!("wave/{wave}/GOAL.md")),
-            format!("---\npm:\n  linear_initiative: {initiative}\n---\nMandate.\n"),
+            format!("---\nlinear:\n  initiative: {initiative}\n---\nMandate.\n"),
         )
         .unwrap();
     }
@@ -234,12 +231,12 @@ async fn task_comments_read_and_publish_without_starting_work() {
         .route("/", post(graphql))
         .with_state(provider.clone());
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-    let context = PmTestContext {
+    let context = LinearTestContext {
         path: database,
         store: store.clone(),
         graphql_url: url,
     };
-    PM_TEST_CONTEXT
+    LINEAR_TEST_CONTEXT
         .scope(context, async {
             let read = task_comment_async(&repo, None, "FIX-7", None, false)
                 .await
@@ -368,12 +365,12 @@ async fn task_comments_read_and_publish_without_starting_work() {
                     ]),
                     ..Default::default()
                 };
-                let context = PM_TEST_CONTEXT.with(Clone::clone);
+                let context = LINEAR_TEST_CONTEXT.with(Clone::clone);
                 // The blocking invocation and its capture share this fixture's store.
                 let ledger = crate::store::database_path_from_env().unwrap();
                 let running = tokio::task::spawn_blocking(move || {
                     crate::journal::with_test_ledger(ledger, || {
-                        PM_TEST_CONTEXT.sync_scope(context, || crate::agent::run_agent(
+                        LINEAR_TEST_CONTEXT.sync_scope(context, || crate::agent::run_agent(
                             &launch, &process, &crate::agent::AgentCapabilities::default()))
                     })
                 });

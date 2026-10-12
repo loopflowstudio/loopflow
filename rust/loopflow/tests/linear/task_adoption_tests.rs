@@ -1,4 +1,5 @@
-mod support;
+use crate::test_linear_input::{InventoryFixture, SeedLinear};
+use crate::test_support as support;
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -6,8 +7,8 @@ use std::path::Path;
 use std::process::Command;
 
 use loopflow::id::WaveId;
-use loopflow::pm::LinearProjectId;
-use loopflow::store::{open_ephemeral_store, PmSnapshotRow, StorageConfig};
+use loopflow::linear::LinearProjectId;
+use loopflow::store::{open_ephemeral_store, StorageConfig};
 use loopflow::work::project::{Project, ProjectId};
 use loopflow::work::wave::Wave;
 use loopflow_test_support::TestRepo;
@@ -20,11 +21,11 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
         let repo = TestRepo::new();
         repo.create_file(
             ".lf/config.yaml",
-            "agent: claude\npm:\n  provider: linear\n  linear_team: team-1\n",
+            "agent: claude\nlinear:\n  team: team-1\n",
         );
         repo.create_file(
             "wave/product/GOAL.md",
-            "---\npm:\n  linear_initiative: initiative-1\n---\nKeep working.\n",
+            "---\nlinear:\n  initiative: initiative-1\n---\nKeep working.\n",
         );
         repo.create_file(".lf/flows/adoption.yaml", "- cmd: sync --plan\n");
         // The Project names a workflow; its planning is what the launches below test.
@@ -111,7 +112,7 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
             created_at: now,
             updated_at: now,
         };
-        let snapshot: loopflow::pm::PmSnapshot = serde_json::from_value(json!({
+        let snapshot: crate::test_linear_input::Inventory = serde_json::from_value(json!({
             "projects": [{"id":"project-1", "slug":"chapter", "name":"Chapter",
                 "summary":"", "metric_targets":[], "workflow":"adoption", "status":"started",
                 "krs":[], "initiative_ids":["initiative-1"], "team_ids":["team-1"]}],
@@ -134,8 +135,8 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
             let mut historical = snapshot.clone();
             historical.items[0].branch_name = None;
             store
-                .put_pm_snapshot(
-                    PmSnapshotRow {
+                .seed_inventory(
+                    InventoryFixture {
                         wave_id: wave.id().clone(),
                         provider: "linear".into(),
                         initiative: "initiative-1".into(),
@@ -147,8 +148,8 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
                 .await
                 .unwrap();
             store
-                .put_pm_snapshot(
-                    PmSnapshotRow {
+                .seed_inventory(
+                    InventoryFixture {
                         wave_id: wave.id().clone(),
                         provider: "linear".into(),
                         initiative: "initiative-1".into(),
@@ -181,7 +182,7 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
         fs::write(&gh, format!("#!/bin/sh\n[ \"$1\" = --version ] && exit 0\nif [ \"$1 $2\" = 'pr list' ]; then\n  printf '%s\\n' '[{{\"url\":\"https://example.test/pull/42\",\"number\":42,\"state\":\"OPEN\",\"isDraft\":true,\"mergeCommit\":null,\"headRefOid\":\"{head}\"}}]'\nelse\n  exit 1\nfi\n")).unwrap();
         fs::set_permissions(&gh, fs::Permissions::from_mode(0o755)).unwrap();
         let command = |cwd: &Path, args: &[&str]| {
-            let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+            let mut command = Command::new(loopflow_test_support::lf_binary());
             for (key, _) in std::env::vars_os() {
                 if key.to_string_lossy().starts_with("LF_") {
                     command.env_remove(key);
@@ -191,7 +192,7 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
                 .current_dir(cwd)
                 .args(args)
                 .env("LF_HOME", home.path())
-                .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+                .env("LF_BIN", loopflow_test_support::lf_binary())
                 .env(
                     "PATH",
                     format!("{}:{}", bin.display(), std::env::var("PATH").unwrap()),
@@ -299,7 +300,7 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
             // admission. A connection edit must not strand this adopted Task.
             fs::write(
                 checkout.join(".lf/config.yaml"),
-                "agent: claude\npm:\n  provider: linear\n  linear_team: another-team\n",
+                "agent: claude\nlinear:\n  team: another-team\n",
             )
             .unwrap();
             let output = run(repo.path(), &["-b", "--task", "FIX-1", "flow", "adoption"]);
@@ -313,17 +314,17 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
             assert!(saved.iter().all(|flow| current.contains(flow)));
             let saved = current;
             let scope = repo.path().canonicalize().unwrap().display().to_string();
-            let original = runtime
-                .block_on(store.pm_task_observation(&scope, "linear", "FIX-1"))
-                .unwrap()
-                .record
-                .unwrap();
-            let task_before = runtime.block_on(store.get_task(&task.id)).unwrap();
+            let original: crate::test_linear_input::IssueFixture =
+                loopflow_test_support::retained_task_input(
+                    &home.path().join("loopflow.db"),
+                    &scope,
+                    "FIX-1",
+                );
             let pr_before = runtime.block_on(store.active_task_pr(&task.id)).unwrap();
             for (index, (condition, expected)) in [
                 ("canceled", "terminal"),
                 ("moved", "invalid ownership"),
-                ("team", "Team"),
+                ("team", "invalid ownership"),
                 ("removed", "deleted"),
             ]
             .into_iter()
@@ -334,7 +335,7 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
                 let mut restored = original.clone();
                 restored.item.revision = Some(format!("2026-09-30T12:00:{:02}Z", index * 2));
                 runtime
-                    .block_on(store.put_pm_task(&scope, "linear", restored, None, None))
+                    .block_on(store.seed_issue(&scope, "linear", restored, None, None))
                     .unwrap();
                 let mut observed = original.clone();
                 observed.item.revision = Some(format!("2026-09-30T12:00:{:02}Z", index * 2 + 1));
@@ -349,13 +350,16 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
                     observed.item.team_id = Some("another-team".into());
                 }
                 runtime
-                    .block_on(store.put_pm_task(&scope, "linear", observed, None, None))
+                    .block_on(store.seed_issue(&scope, "linear", observed, None, None))
                     .unwrap();
                 if condition == "removed" {
                     runtime
                         .block_on(store.observe_pm_issue_change("issue-1", None, true))
                         .unwrap();
                 }
+                // Acquisition may update shared content and state. Refusing execution
+                // must preserve the Task as it stands after that observation.
+                let task_before = runtime.block_on(store.get_task(&task.id)).unwrap();
                 let output = run(repo.path(), &["-b", "task", "run", "FIX-1"]);
                 assert!(
                     !output.status.success(),

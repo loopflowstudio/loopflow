@@ -1,11 +1,11 @@
 //! Current Project selection has one owner: the Wave row. YAML is import evidence only.
+use crate::work::edit::WorkValue as Edit;
 use rusqlite::{params, Connection, OptionalExtension};
 
-use super::planning_write::{self, PlanningEdit as Edit};
+use super::planning_write;
 use super::SqliteStore;
 use crate::durable::ProjectId;
 use crate::id::WaveId;
-use crate::planning_exchange::PlanningKind;
 use crate::store::{PlanningLocks, StoreError, StoreResult};
 use crate::work::project::Project;
 
@@ -56,9 +56,10 @@ fn bind_in(conn: &Connection, wave: &WaveId, project: &str) -> StoreResult<Proje
     }
     planning_write::local(
         conn,
-        PlanningKind::Wave,
-        wave.as_str(),
-        &[Edit::WaveProject(Some(id.to_string()))],
+        &crate::work::edit::WorkEdit::for_target(
+            wave.as_str(),
+            &[Edit::WaveProject(Some(id.to_string()))],
+        ),
     )?;
     Ok(id)
 }
@@ -77,9 +78,10 @@ fn write_in(
     let id = resolve_project_id(conn, wave, project)?;
     planning_write::local(
         conn,
-        PlanningKind::Wave,
-        wave.as_str(),
-        &[Edit::WaveProject(Some(id.to_string()))],
+        &crate::work::edit::WorkEdit::for_target(
+            wave.as_str(),
+            &[Edit::WaveProject(Some(id.to_string()))],
+        ),
     )?;
     Ok(())
 }
@@ -177,14 +179,15 @@ impl SqliteStore {
                 planning_write::create(
                     &tx,
                     "",
-                    PlanningKind::Project,
-                    id.as_str(),
-                    &[
-                        Edit::ProjectWave(wave.to_string()),
-                        Edit::ProjectSlug(Some(name.into())),
-                        Edit::ProjectName(Some(name.into())),
-                        Edit::ProjectStatus(crate::work::project::ProjectStatus::Started),
-                    ],
+                    &crate::work::edit::WorkEdit::for_target(
+                        id.as_str(),
+                        &[
+                            Edit::ProjectWave(wave.to_string()),
+                            Edit::ProjectSlug(Some(name.into())),
+                            Edit::ProjectName(Some(name.into())),
+                            Edit::ProjectStatus(crate::work::project::ProjectStatus::Started),
+                        ],
+                    ),
                 )?;
                 if pending.is_none() {
                     tx.execute("INSERT INTO project_transitions(wave_id,successor_id,created_at,local_plan_json)
@@ -207,17 +210,17 @@ impl SqliteStore {
         }
         super::planning_changes::PlanningChanges::Project(&id).record(
             &tx,
-            "status",
-            serde_json::to_value(project.status)?,
-            serde_json::json!("started"),
+            &Edit::ProjectStatus(project.status),
+            &Edit::ProjectStatus(crate::work::project::ProjectStatus::Started),
         )?;
         planning_write::local(
             &tx,
-            PlanningKind::Project,
-            id.as_str(),
-            &[Edit::ProjectStatus(
-                crate::work::project::ProjectStatus::Started,
-            )],
+            &crate::work::edit::WorkEdit::for_target(
+                id.as_str(),
+                &[Edit::ProjectStatus(
+                    crate::work::project::ProjectStatus::Started,
+                )],
+            ),
         )?;
         write_in(&tx, wave, selected.as_deref(), id.as_str())?;
         if readiness_in(&tx, wave)?.state == ProjectReadinessState::Unavailable {
@@ -348,9 +351,9 @@ fn readiness_in(conn: &Connection, wave: &WaveId) -> StoreResult<ProjectReadines
             "SELECT p.id, p.pm_snapshot_synced_at,
              CASE WHEN w.current_project_id IS NULL THEN 'unconfigured'
                   WHEN p.id IS NULL OR p.project_name IS NULL OR p.project_slug IS NULL OR p.description IS NULL THEN 'unavailable'
-                  WHEN f.id IS NOT NULL AND NOT json_valid(f.body) THEN 'unavailable'
+                  WHEN f.id IS NOT NULL AND NOT json_valid(f.initiative_ids) THEN 'unavailable'
                   WHEN f.id IS NOT NULL AND (f.archived OR f.membership_unresolved OR p.pm_snapshot_synced_at IS NOT f.observed_at
-                    OR (s.wave_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM json_each(f.body,'$.initiative_ids') WHERE value=s.initiative)))
+                    OR (s.wave_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM json_each(f.initiative_ids) WHERE value=s.initiative)))
                     THEN 'unavailable'
                   WHEN p.status IN ('completed','canceled') THEN 'terminal'
                   WHEN p.status='started' THEN 'ready' ELSE 'inactive' END,

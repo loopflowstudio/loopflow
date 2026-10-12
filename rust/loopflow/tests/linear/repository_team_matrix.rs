@@ -1,13 +1,12 @@
-//! PRD-43: one repository Team, stable Project ownership, and a fail-closed migration.
+//! Repository Team bindings preserve independent Wave and Project ownership.
 
-use std::path::{Path, PathBuf};
+use crate::test_linear_input::{Inventory, InventoryFixture, SeedLinearSqlite};
+use std::path::Path;
 use std::process::{Command, Output};
 
 use loopflow::id::WaveId;
-use loopflow::ops::pm::{canonical_wave_title_path, list_local_waves};
-use loopflow::pm::PmSnapshot;
+use loopflow::ops::linear::{canonical_wave_title_path, list_local_waves};
 use loopflow::store::sqlite::SqliteStore;
-use loopflow::store::PmSnapshotRow;
 use loopflow::work::wave::{Wave, WaveLocator};
 
 fn git(repo: &Path, args: &[&str]) {
@@ -24,19 +23,12 @@ fn git(repo: &Path, args: &[&str]) {
     );
 }
 
-fn write_goal(repo: &Path, wave: &str, initiative: &str, legacy: bool) {
+fn write_goal(repo: &Path, wave: &str, initiative: &str) {
     let directory = repo.join("wave").join(wave);
     std::fs::create_dir_all(&directory).unwrap();
-    let legacy = if legacy {
-        "  provider: linear\n  linear_team: team-old\n"
-    } else {
-        ""
-    };
     std::fs::write(
         directory.join("GOAL.md"),
-        format!(
-            "---\npm:\n{legacy}  linear_initiative: {initiative}\n---\n\n## Objective\n\nTest {wave}.\n"
-        ),
+        format!("---\nlinear:\n  initiative: {initiative}\n---\n\n## Objective\n\nTest {wave}.\n"),
     )
     .unwrap();
 }
@@ -49,7 +41,7 @@ fn snapshot(
     issue_id: &str,
     identifier: &str,
     completed: bool,
-) -> PmSnapshot {
+) -> Inventory {
     serde_json::from_value(serde_json::json!({
         "projects": [{
             "id": project_id,
@@ -84,7 +76,7 @@ fn put_snapshot(
     repo: &Path,
     wave: &str,
     initiative: &str,
-    snapshot: PmSnapshot,
+    snapshot: Inventory,
 ) {
     let registered = store
         .get_wave_at(&WaveLocator::discover(repo, wave).unwrap())
@@ -92,12 +84,12 @@ fn put_snapshot(
         .expect("registered Wave");
     let goal = std::fs::read_to_string(repo.join("wave").join(wave).join("GOAL.md"))
         .unwrap_or_else(|_| {
-            format!("---\npm:\n  linear_initiative: {initiative}\n---\nFixture Wave.\n")
+            format!("---\nlinear:\n  initiative: {initiative}\n---\nFixture Wave.\n")
         });
     std::fs::create_dir_all(repo.join("wave").join(wave)).unwrap();
     std::fs::write(repo.join("wave").join(wave).join("GOAL.md"), goal).unwrap();
     store
-        .put_pm_snapshot(&PmSnapshotRow {
+        .seed_inventory(&InventoryFixture {
             wave_id: registered.id().clone(),
             provider: "linear".to_string(),
             initiative: initiative.to_string(),
@@ -108,7 +100,7 @@ fn put_snapshot(
 }
 
 fn lf_command(home: &Path, repo: &Path, args: &[&str]) -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+    let mut command = Command::new(loopflow_test_support::lf_binary());
     command
         .args(args)
         .current_dir(repo)
@@ -133,19 +125,10 @@ fn assert_success(output: &Output, command: &str) -> String {
 
 fn seed_repository(repo: &Path) {
     std::fs::create_dir_all(repo.join(".lf")).unwrap();
-    std::fs::write(
-        repo.join(".lf/config.yaml"),
-        "pm:\n  provider: linear\n  linear_team: team-loo\n",
-    )
-    .unwrap();
-    write_goal(repo, "survival", "initiative-survival", false);
-    write_goal(
-        repo,
-        "survival/infrastructure",
-        "initiative-infrastructure",
-        false,
-    );
-    write_goal(repo, "intelligence", "initiative-intelligence", false);
+    std::fs::write(repo.join(".lf/config.yaml"), "linear:\n  team: team-loo\n").unwrap();
+    write_goal(repo, "survival", "initiative-survival");
+    write_goal(repo, "survival/infrastructure", "initiative-infrastructure");
+    write_goal(repo, "intelligence", "initiative-intelligence");
     git(repo, &["init", "-b", "main"]);
     git(repo, &["config", "user.email", "matrix@loopflow.test"]);
     git(repo, &["config", "user.name", "Repository Team Matrix"]);
@@ -337,7 +320,7 @@ fn repository_team_matrix() {
         .unwrap()
         .unwrap();
     let accepted = reopened.list_projects(Some(survival.id())).unwrap();
-    let mut planning = PmSnapshotRow {
+    let mut planning = InventoryFixture {
         wave_id: survival.id().clone(),
         provider: "linear".into(),
         initiative: "initiative-survival".into(),
@@ -346,7 +329,7 @@ fn repository_team_matrix() {
     };
     planning.snapshot.projects.extend(ambiguous.projects);
     planning.snapshot.items.extend(ambiguous.items);
-    let error = reopened.put_pm_snapshot(&planning).unwrap_err();
+    let error = reopened.seed_inventory(&planning).unwrap_err();
     assert!(
         error.to_string().contains("does not belong to Initiative"),
         "{error}"
@@ -369,112 +352,4 @@ fn repository_team_matrix() {
         .path()
         .join("fixture.a-real-task-reaches-done")
         .exists());
-
-    // Legacy provider configuration cannot prevent a local save. Delivery
-    // remains pending until the connection is repaired.
-    let legacy_repo = fixture.path().join("legacy");
-    std::fs::create_dir_all(legacy_repo.join(".lf")).unwrap();
-    std::fs::write(
-        legacy_repo.join(".lf/config.yaml"),
-        "pm:\n  provider: linear\n  linear_team: team-loo\nlinear:\n  team: team-old\n",
-    )
-    .unwrap();
-    write_goal(&legacy_repo, "product", "initiative-product", true);
-    git(&legacy_repo, &["init", "-b", "main"]);
-    git(
-        &legacy_repo,
-        &["config", "user.email", "matrix@loopflow.test"],
-    );
-    git(
-        &legacy_repo,
-        &["config", "user.name", "Repository Team Matrix"],
-    );
-    git(
-        &legacy_repo,
-        &[
-            "remote",
-            "add",
-            "origin",
-            "https://github.com/loopflowstudio/legacy-fixture.git",
-        ],
-    );
-    git(&legacy_repo, &["add", "."]);
-    git(&legacy_repo, &["commit", "-m", "seed legacy fixture"]);
-    let legacy_store = SqliteStore::new(&home.join("loopflow.db")).unwrap();
-    let legacy_locator = WaveLocator::discover(&legacy_repo, "product").unwrap();
-    legacy_store
-        .create_wave(&Wave::new(
-            WaveId::new(),
-            "product".to_string(),
-            legacy_locator.repo().to_string(),
-        ))
-        .unwrap();
-    put_snapshot(
-        &legacy_store,
-        &legacy_repo,
-        "product",
-        "initiative-product",
-        snapshot(
-            "initiative-product",
-            "project-api",
-            "loopflow-api",
-            "Loopflow API",
-            "issue-legacy",
-            "OLD-1",
-            true,
-        ),
-    );
-    let legacy_wave = legacy_store.get_wave_at(&legacy_locator).unwrap().unwrap();
-    rusqlite::Connection::open(&database).unwrap().execute(
-        "UPDATE waves SET current_project_id=(SELECT id FROM projects WHERE wave_id=?1 AND external_project_id='project-api') WHERE id=?1",
-        [legacy_wave.id()],
-    ).unwrap();
-    drop(legacy_store);
-    assert_success(
-        &run_lf(
-            &home,
-            &legacy_repo,
-            &["wave", "status", "product", "--json"],
-        ),
-        "legacy cached read",
-    );
-    let saved = run_lf(
-        &home,
-        &legacy_repo,
-        &[
-            "task",
-            "create",
-            "--wave",
-            "product",
-            "--title",
-            "Retain offline work",
-            "--json",
-        ],
-    );
-    let item: serde_json::Value =
-        serde_json::from_str(&assert_success(&saved, "save local Task")).unwrap();
-    assert_eq!(item["title"], "Retain offline work");
-    let task: loopflow::work::task::Task = serde_json::from_value(item).unwrap();
-    assert!(task.linear_id.is_none());
-    assert_eq!(
-        SqliteStore::new(&home.join("loopflow.db"))
-            .unwrap()
-            .task(&task.id)
-            .unwrap(),
-        Some(task)
-    );
-
-    // PRD-44 leaves the repository Team as the sole PM authority after the
-    // provider migration verifies successfully.
-    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let config = std::fs::read_to_string(source.join(".lf/config.yaml")).unwrap();
-    assert!(config.contains("linear_team:"));
-    assert!(!config.contains("linear:\n  team:"));
-    for wave in ["infrastructure", "intelligence", "product"] {
-        let goal = std::fs::read_to_string(source.join(format!("wave/{wave}/GOAL.md"))).unwrap();
-        assert!(!goal.contains("provider: linear"), "{wave}");
-        assert!(!goal.contains("linear_team:"), "{wave}");
-    }
-
-    println!("one Team team-loo: Survival — A real task reaches done; Survival / Infrastructure — Gmail; LOO-1 and LOO-2 resolve independently");
 }

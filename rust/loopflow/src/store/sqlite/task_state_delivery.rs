@@ -1,7 +1,7 @@
 //! Delivery evidence for local Task decisions; never another lifecycle owner.
 
-use super::planning_write::{self, PlanningEdit as Edit};
-use crate::planning_exchange::PlanningKind;
+use super::planning_write;
+use crate::work::edit::WorkValue as Edit;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::durable::TaskId;
@@ -39,18 +39,19 @@ pub(super) fn queue_in(conn: &Connection, task: &TaskId, target: &str) -> StoreR
         .map_err(|error| StoreError::InvalidData(error.to_string()))?;
     planning_write::local(
         conn,
-        PlanningKind::Task,
-        task.as_str(),
-        &[Edit::Disposition(super::planning_write::Disposition {
-            planning_state: Some(target.into()),
-            planning_completed: i64::from(target == "completed"),
-            planning_completed_at: completed_at,
-        })],
+        &crate::work::edit::WorkEdit::for_target(
+            task.as_str(),
+            &[Edit::Disposition(crate::work::edit::Disposition {
+                planning_state: Some(target.into()),
+                planning_completed: i64::from(target == "completed"),
+                planning_completed_at: completed_at,
+            })],
+        ),
     )?;
     conn.execute(
         "INSERT INTO task_state_deliveries(id,task_id,move_seq,target,base_revision,base_state)
          SELECT ?2,t.id,(SELECT max(seq) FROM task_workflow_moves WHERE task_id=t.id),?3,
-             json_extract(i.body,'$.revision'),json_extract(i.body,'$.state')
+             i.revision,i.state
          FROM tasks t JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id
          LEFT JOIN pm_items i ON i.id=t.external_issue_id AND i.repo=w.repo AND i.provider='linear'
          WHERE t.id=?1",
@@ -60,10 +61,12 @@ pub(super) fn queue_in(conn: &Connection, task: &TaskId, target: &str) -> StoreR
 }
 
 /// Acquisition and delivery use the same transaction rule. No execution rows change.
-pub(super) fn reconcile_in(
+pub(crate) fn reconcile_in(
     conn: &Connection,
     task: &TaskId,
-    observed: &crate::pm::PmItem,
+    observed_revision: Option<&str>,
+    observed: &crate::work::edit::Disposition,
+    evidence: &str,
 ) -> StoreResult<bool> {
     let pending: Option<(TaskStateDelivery, Option<String>)> = conn.query_row(
         "SELECT d.id,d.task_id,d.target,d.attempted,d.base_revision,d.base_state,t.planning_provider_revision
@@ -84,12 +87,12 @@ pub(super) fn reconcile_in(
         attempted,
         ..
     } = delivery;
-    if super::planning::revision_nanos(observed.revision.as_deref())?
-        < super::planning::revision_nanos(revision.as_deref())?
+    if crate::linear::observations::revision_nanos(observed_revision)?
+        < crate::linear::observations::revision_nanos(revision.as_deref())?
     {
         return Ok(false);
     }
-    let Some(state) = observed.state.as_deref() else {
+    let Some(state) = observed.planning_state.as_deref() else {
         return Ok(true);
     };
     if state == target {
@@ -101,26 +104,25 @@ pub(super) fn reconcile_in(
     }
     // An unrelated provider revision does not conflict with an unattempted save.
     // After an uncertain write, a changed revision may represent completion/reopening.
-    if observed.state == base_state && !(attempted && observed.revision != base_revision) {
+    if observed.planning_state == base_state
+        && !(attempted && observed_revision != base_revision.as_deref())
+    {
         return Ok(true);
     }
     conn.execute(
         "UPDATE task_state_deliveries SET settled=1,conflict_json=?2,error=NULL WHERE id=?1",
-        params![id, serde_json::to_string(observed)?],
+        params![id, evidence],
     )?;
     planning_write::local(
         conn,
-        PlanningKind::Task,
-        task.as_str(),
-        &[Edit::Disposition(super::planning_write::Disposition {
-            planning_state: observed.state.clone(),
-            planning_completed: i64::from(observed.completed),
-            planning_completed_at: observed.completed_at.clone(),
-        })],
+        &crate::work::edit::WorkEdit::for_target(
+            task.as_str(),
+            &[Edit::Disposition(observed.clone())],
+        ),
     )?;
     conn.execute(
         "UPDATE tasks SET planning_provider_revision=?2 WHERE id=?1",
-        params![task.as_str(), observed.revision],
+        params![task.as_str(), observed_revision],
     )?;
     super::children::insert_task_event_in(conn, task, &crate::work::task::TaskEventKind::Progress {
         summary: format!("Adopted Linear state {state}; local intention {target} remains in delivery {id}. Local Workflow unchanged."),
@@ -149,41 +151,6 @@ impl SqliteStore {
                 super::children::task_on(&conn, &TaskId::from_raw(id))?.ok_or(StoreError::NotFound)
             })
             .collect()
-    }
-
-    /// Reconcile a delivery's read; true means its saved intention remains pending.
-    pub(crate) fn observe_task_state(
-        &self,
-        delivery: &TaskStateDelivery,
-        observed: &crate::pm::PmItem,
-    ) -> StoreResult<bool> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        // Retain the provider baseline for the next local save. A response for an
-        // older delivery cannot ingest over the current decision.
-        let repo: Option<String> = tx
-            .query_row(
-                "SELECT w.repo FROM task_state_deliveries d JOIN tasks t ON t.id=d.task_id
-             JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id
-             WHERE d.id=?1 AND d.task_id=?2 AND d.settled=0 AND t.external_issue_id=?3
-             AND d.seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=t.id)",
-                params![delivery.id, delivery.task_id.as_str(), observed.id],
-                |row| row.get(0),
-            )
-            .optional()?;
-        let Some(repo) = repo else { return Ok(false) };
-        if !super::planning::put_item(
-            &tx,
-            &repo,
-            "linear",
-            super::super::rows::now_unix(),
-            observed,
-        )? {
-            return Ok(false);
-        }
-        let pending = reconcile_in(&tx, &delivery.task_id, observed)?;
-        tx.commit()?;
-        Ok(pending)
     }
 
     pub(crate) fn pending_task_state(

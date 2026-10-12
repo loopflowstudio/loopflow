@@ -1,15 +1,15 @@
 //! Task fields and their delivery evidence commit together, before provider I/O.
 
-use super::planning_write::{self, PlanningEdit as Edit};
-use crate::planning_exchange::PlanningKind;
+use super::planning_write;
+use crate::work::edit::WorkValue as Edit;
 use rusqlite::TransactionBehavior;
 
 use crate::durable::{ProjectId, TaskId};
-use crate::pm::PmItemUpdate;
 use crate::store::planning_sync::PlanningChange;
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
 use crate::work::task::Task;
+use crate::work::task::TaskUpdate;
 
 use super::planning_changes::PlanningChanges;
 use super::SqliteStore;
@@ -30,18 +30,18 @@ impl SqliteStore {
         } else {
             planning_write::local(
                 &tx,
-                PlanningKind::Task,
-                id.as_str(),
-                &[Edit::TaskDeletedAt(Some(now_unix()))],
+                &crate::work::edit::WorkEdit::for_target(
+                    id.as_str(),
+                    &[Edit::TaskDeletedAt(Some(now_unix()))],
+                ),
             )?
         };
         if changed {
-            PlanningChanges::Task(id).record(
-                &tx,
-                "deleted",
-                serde_json::json!(false),
-                serde_json::json!(true),
-            )?;
+            tx.execute("INSERT INTO task_changes(id,task_id,value_json,base_json)
+                SELECT ?1,t.id,'true',CASE WHEN o.id IS NOT NULL THEN json_object('revision',o.revision,'value',json('false')) END
+                FROM tasks t JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id
+                LEFT JOIN pm_items o ON o.id=t.external_issue_id AND o.repo=w.repo AND o.provider='linear'
+                WHERE t.id=?2", rusqlite::params![uuid::Uuid::new_v4().to_string(),id.as_str()])?;
         }
         tx.commit()?;
         Ok(())
@@ -85,7 +85,7 @@ impl SqliteStore {
         &self,
         id: &TaskId,
         expected_revision: u64,
-        patch: &PmItemUpdate,
+        patch: &TaskUpdate,
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         validate_edit(&conn, id, expected_revision, patch).map(|_| ())
@@ -101,13 +101,13 @@ impl SqliteStore {
         &self,
         id: &TaskId,
         expected_revision: u64,
-        patch: &PmItemUpdate,
+        patch: &TaskUpdate,
     ) -> StoreResult<Task> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let task = validate_edit(&tx, id, expected_revision, patch)?;
         let mut edits = Vec::new();
-        if let Some(value) = &patch.name {
+        if let Some(value) = &patch.title {
             edits.push(Edit::TaskTitle(Some(value.clone())));
         }
         if let Some(value) = &patch.description {
@@ -130,7 +130,7 @@ fn validate_edit(
     conn: &rusqlite::Connection,
     id: &TaskId,
     expected_revision: u64,
-    patch: &PmItemUpdate,
+    patch: &TaskUpdate,
 ) -> StoreResult<Task> {
     let task = super::children::task_on(conn, id)?.ok_or(StoreError::NotFound)?;
     super::children::require_task_not_deleted(conn, &task)?;
@@ -140,7 +140,7 @@ fn validate_edit(
         ));
     }
     if patch
-        .name
+        .title
         .as_ref()
         .is_some_and(|title| title.trim().is_empty())
     {

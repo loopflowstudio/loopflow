@@ -1,15 +1,18 @@
-mod support;
+use crate::test_linear_input::SeedLinear;
+use crate::test_support as support;
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
+use loopflow::store::{CredentialState, ProviderAccount, ProviderAccountId, RoutingState};
 use loopflow::work::task::{GithubPr, PrPublication};
 use loopflow_test_support::TestRepo;
+use sha2::{Digest, Sha256};
 
 fn command(repo: &Path, home: &Path, args: &[&str]) -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+    let mut command = Command::new(loopflow_test_support::lf_binary());
     for (name, _) in
         std::env::vars_os().filter(|(name, _)| name.to_string_lossy().starts_with("LF_"))
     {
@@ -19,7 +22,7 @@ fn command(repo: &Path, home: &Path, args: &[&str]) -> Command {
         .args(args)
         .current_dir(repo)
         .env("LF_HOME", home)
-        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+        .env("LF_BIN", loopflow_test_support::lf_binary())
         .env("HTTPS_PROXY", "http://127.0.0.1:1")
         .env("HTTP_PROXY", "http://127.0.0.1:1");
     command
@@ -32,6 +35,246 @@ const LAUNCHES: [&[&str]; 3] = [
     &["-b", "--task", "INF-123", "flow", "proof"],
     &["-b", "flow", "proof"],
 ];
+
+#[test]
+fn explicit_agent_wins_through_task_nested_flows_and_provider_children() {
+    let repo = TestRepo::new();
+    support::bind_task_planning(&repo);
+    repo.create_branch("agent-proof");
+    let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(
+        &[
+            ("open", "#!/bin/sh\nexit 0\n"),
+            ("gh", "#!/bin/sh\nexit 1\n"),
+            (
+                "codex",
+                "#!/bin/sh\necho unexpected Codex launch >&2\nexit 99\n",
+            ),
+            (
+                "claude",
+                r#"#!/usr/bin/python3
+import json
+import os
+import subprocess
+import sys
+
+if '--version' in sys.argv:
+    print('fixture')
+    sys.exit(0)
+message = json.loads(sys.stdin.readline())
+message['session_id'] = 'agent-fixture'
+print(json.dumps(message), flush=True)
+print(json.dumps({'type': 'system', 'subtype': 'init', 'session_id': 'agent-fixture'}), flush=True)
+if os.environ.get('LF_AGENT_CHILD') != 'yes':
+    with open(os.path.join(os.environ['LF_HOME'], 'child-output'), 'w') as output:
+        subprocess.run(
+            [os.environ['LF_BIN'], '-b', 'skill', 'child', '-a', 'codex'],
+            env={**os.environ, 'LF_AGENT_CHILD': 'yes'},
+            stdout=output, stderr=subprocess.STDOUT, check=True, timeout=30,
+        )
+print(json.dumps({'type': 'result', 'uuid': 'fixture-result', 'session_id': 'agent-fixture', 'subtype': 'success', 'is_error': False, 'result': 'done'}), flush=True)
+for line in sys.stdin:
+    pass
+"#,
+            ),
+        ],
+        Some(home.path()),
+    );
+    let registered = support::register_task_without_pr(
+        home.path(),
+        &repo.path().canonicalize().unwrap(),
+        "agent-proof",
+        &repo.head_sha(),
+    );
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    // A headless Task requires an account record even when the provider is a
+    // stand-in. Its synthetic credential never leaves the network sandbox.
+    let account_home = home.path().join("accounts/claude/fixture");
+    fs::create_dir_all(&account_home).unwrap();
+    let credential =
+        r#"{"claudeAiOauth":{"accessToken":"fixture-only","expiresAt":4102444800000}}"#;
+    fs::write(account_home.join(".credentials.json"), credential).unwrap();
+    runtime
+        .block_on(registered.store.upsert_provider_account(&ProviderAccount {
+            provider: "claude".into(),
+            account_id: ProviderAccountId::parse("fixture").unwrap(),
+            home: Some(account_home),
+            login_email: Some(
+                loopflow::profile::EmailAddress::parse("fixture@example.com").unwrap(),
+            ),
+            observed_email: Some("fixture@example.com".into()),
+            observed_subject: Some("fixture".into()),
+            observed_credential_digest: Some(format!(
+                "{:x}",
+                Sha256::digest(credential.as_bytes())
+            )),
+            observed_plan: None,
+            credential_state: CredentialState::Connected,
+            routing_state: RoutingState::Automatic,
+            plan: None,
+            paid_through: None,
+            utilization_percent: None,
+            cooldown_until: None,
+            cooldown_reason: None,
+            last_selected_at: None,
+            created_at: 1,
+            updated_at: 1,
+        }))
+        .unwrap();
+    runtime
+        .block_on(
+            registered
+                .store
+                .set_task_agent(&registered.task.id, "codex"),
+        )
+        .unwrap();
+    for (path, content) in [
+        (".lf/skills/first.md", "---\nagent: codex\n---\nFirst step."),
+        (
+            ".lf/skills/second.md",
+            "---\nagent: codex\n---\nSecond step.",
+        ),
+        (
+            ".lf/skills/child.md",
+            "---\nagent: codex\n---\nProvider-issued child.",
+        ),
+        (
+            ".lf/flows/pursue.yaml",
+            "- step: {name: first, agent: codex}\n- flow: inner\n",
+        ),
+        (
+            ".lf/flows/inner.yaml",
+            "- step: {name: second, agent: codex}\n",
+        ),
+        (
+            ".lf/workflows/feature.yaml",
+            "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, flow: pursue}\n",
+        ),
+    ] {
+        let path = repo.path().join(path);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, content).unwrap();
+    }
+    repo.stage_all();
+    repo.commit("Define agent selection fixtures");
+    let store =
+        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let workflow = fs::read_to_string(repo.path().join(".lf/workflows/feature.yaml")).unwrap();
+    store
+        .select_project_workflow(&registered.task.project_id, "feature", &workflow)
+        .unwrap();
+    // Direct Task binding used to prefer the saved Task agent over -a.
+    for args in [
+        vec![
+            "-b",
+            "--isolate",
+            "--task",
+            "INF-123",
+            "skill",
+            "first",
+            "-a",
+            "claude",
+        ],
+        vec![
+            "-b",
+            "--isolate",
+            "-a",
+            "claude",
+            "task",
+            "run",
+            "INF-123",
+            "pursue",
+        ],
+    ] {
+        let output = command(repo.path(), home.path(), &args).output().unwrap();
+        assert!(
+            output.status.success(),
+            "{args:?}: {}\nchild: {}",
+            String::from_utf8_lossy(&output.stderr),
+            fs::read_to_string(home.path().join("child-output")).unwrap_or_default()
+        );
+    }
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let sessions = db
+        .prepare("SELECT skill, provider FROM agent_sessions ORDER BY skill")
+        .unwrap()
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(
+        sessions,
+        ["child", "child", "child", "first", "first", "second"]
+            .map(|skill| (skill.to_owned(), "claude".to_owned()))
+    );
+    assert_eq!(support::recorded_flows(home.path()).len(), 1);
+    let session: String = db
+        .query_row(
+            "SELECT id FROM agent_sessions WHERE skill='first' LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let refused = command(
+        repo.path(),
+        home.path(),
+        &["session", "resume", &session, "-a", "codex"],
+    )
+    .output()
+    .unwrap();
+    assert!(!refused.status.success());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("native history belongs to claude"));
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM agent_sessions", [], |row| row
+            .get::<_, i64>(0))
+            .unwrap(),
+        6
+    );
+
+    // A separate invocation with no -a keeps skill and step declarations.
+    let unbound = TestRepo::new();
+    for (path, content) in [
+        (
+            ".lf/skills/default-proof.md",
+            "---\nagent: claude:haiku\n---\nUse the declared agent.",
+        ),
+        (
+            ".lf/flows/default-proof.yaml",
+            "- step: {name: default-proof, agent: 'claude:sonnet'}\n",
+        ),
+    ] {
+        let path = unbound.path().join(path);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, content).unwrap();
+    }
+    unbound.stage_all();
+    unbound.commit("Define default agent fixtures");
+    for owner in ["skill", "run"] {
+        let output = command(
+            unbound.path(),
+            home.path(),
+            &["-b", "--isolate", owner, "default-proof"],
+        )
+        .env("LF_AGENT_CHILD", "yes")
+        .output()
+        .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let models = db
+        .prepare("SELECT model FROM agent_sessions WHERE skill='default-proof' ORDER BY model")
+        .unwrap()
+        .query_map([], |row| row.get::<_, String>(0))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(models, ["haiku", "sonnet"]);
+}
 
 #[test]
 fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
@@ -69,15 +312,8 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
         }
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let scope = repo.path().canonicalize().unwrap().display().to_string();
-        let mut record = runtime
-            .block_on(
-                registered
-                    .store
-                    .pm_task_observation(&scope, "linear", "INF-123"),
-            )
-            .unwrap()
-            .record
-            .unwrap();
+        let mut record: crate::test_linear_input::IssueFixture =
+            loopflow_test_support::retained_task_input(&registered.database, &scope, "INF-123");
         record.project.as_mut().unwrap().workflow = "proof".into();
         record.project.as_mut().unwrap().revision = Some("2026-10-07T12:00:00Z".into());
         record.item.revision = Some("2026-10-04T12:00:00Z".into());
@@ -103,7 +339,7 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
             .block_on(
                 registered
                     .store
-                    .put_pm_task(&scope, "linear", record, None, None),
+                    .seed_issue(&scope, "linear", record, None, None),
             )
             .unwrap();
         // Old valid planning still admits a launch without reaching the provider.
@@ -592,16 +828,17 @@ impl WorkflowTask {
             .display()
             .to_string();
         let store = &self.registered.store;
-        let mut record = runtime
-            .block_on(store.pm_task_observation(&scope, "linear", "INF-123"))
-            .unwrap()
-            .record
-            .unwrap();
+        let mut record: crate::test_linear_input::IssueFixture =
+            loopflow_test_support::retained_task_input(
+                &self.registered.database,
+                &scope,
+                "INF-123",
+            );
         record.item.revision = Some("2026-10-06T12:00:00Z".into());
         record.item.state = Some("completed".into());
         record.item.completed = true;
         runtime
-            .block_on(store.put_pm_task(&scope, "linear", record, None, None))
+            .block_on(store.seed_issue(&scope, "linear", record, None, None))
             .unwrap();
     }
 
@@ -676,17 +913,18 @@ fn checkout_leaves_workflow_selection_to_the_first_run() {
     let sqlite =
         loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
             .unwrap();
-    let mut observation = runtime
-        .block_on(store.pm_task_observation(&scope, "linear", &fixture.registered.task.identifier))
-        .unwrap()
-        .record
-        .unwrap();
+    let mut observation: crate::test_linear_input::IssueFixture =
+        loopflow_test_support::retained_task_input(
+            &fixture.registered.database,
+            &scope,
+            &fixture.registered.task.identifier,
+        );
     observation.item.id = "unplaced-issue".into();
     observation.item.identifier = "INF-124".into();
     observation.item.name = "Workflow chosen at first run".into();
     observation.item.branch_name = None;
     runtime
-        .block_on(store.put_pm_task(&scope, "linear", observation, None, None))
+        .block_on(store.seed_issue(&scope, "linear", observation, None, None))
         .unwrap();
     let task = runtime
         .block_on(store.get_task_by_issue("INF-124"))
@@ -1027,7 +1265,7 @@ fn one_task_run_starts_its_flow_again_until_an_attempt_succeeds_or_attempts_run_
             "#!/bin/sh\ncase \"$*\" in *'flow show late'*)\n  echo asked >> '{count}'\n  [ \"$(wc -l < '{count}')\" -ge 3 ] && printf -- '- cmd: task sync --plan\\n' > '{late}';;\nesac\nexec '{real}' \"$@\"\n",
             count = bin.path().join("asked").display(),
             late = task.repo.path().join(".lf/flows/late.yaml").display(),
-            real = env!("CARGO_BIN_EXE_lf"),
+            real = loopflow_test_support::lf_binary(),
         ),
     )
     .unwrap();
@@ -1072,7 +1310,7 @@ fn a_held_command_stops_the_task_run_without_repeating_the_flow() {
         &lf,
         format!(
             "#!/bin/sh\ncase \"$*\" in *'flow show late'*) exit 3;; esac\nexec '{}' \"$@\"\n",
-            env!("CARGO_BIN_EXE_lf")
+            loopflow_test_support::lf_binary()
         ),
     )
     .unwrap();
@@ -1237,18 +1475,15 @@ fn linear_completion_and_reopening_preserve_workflow_and_supersede_old_end() {
         .display()
         .to_string();
     let store = &task.registered.store;
-    let mut record = rt
-        .block_on(store.pm_task_observation(&scope, "linear", "INF-123"))
-        .unwrap()
-        .record
-        .unwrap();
+    let mut record: crate::test_linear_input::IssueFixture =
+        loopflow_test_support::retained_task_input(&task.registered.database, &scope, "INF-123");
     let stale = record.clone();
     record.item.revision = Some("2026-10-07T12:00:00Z".into());
     record.item.state = Some("started".into());
     record.item.completed = false;
-    rt.block_on(store.put_pm_task(&scope, "linear", record, None, None))
+    rt.block_on(store.seed_issue(&scope, "linear", record, None, None))
         .unwrap();
-    rt.block_on(store.put_pm_task(&scope, "linear", stale, None, None))
+    rt.block_on(store.seed_issue(&scope, "linear", stale, None, None))
         .unwrap();
     assert_eq!(task.state(), "active");
     assert_eq!(task.workflow(), ended);
@@ -1374,7 +1609,7 @@ fn merged_delivery_completes_without_disposition_and_is_idempotent() {
 }
 
 #[test]
-fn failed_completion_in_finishing_flow_is_retryable_without_replaying_it() {
+fn unmerged_completion_in_flow_is_retryable_without_replaying_it() {
     let task = WorkflowTask::new();
     fs::write(
         task.repo.path().join(".lf/flows/finish-proof.yaml"),

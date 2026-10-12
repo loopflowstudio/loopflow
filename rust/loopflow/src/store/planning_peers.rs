@@ -1,20 +1,20 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::planning_exchange::{PlanningMutation, PlanningObject};
+use crate::planning_exchange::PlanningMutation;
 
 use crate::planning_git::PlanningDestination;
 
 use super::{run_sqlite, Store, StoreResult};
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PeerProjectionConflict {
-    pub object: PlanningObject,
+    pub target: String,
     pub reason: String,
 }
 
 /// Local routing and import evidence. Endpoints are deliberately not displayed:
 /// Git URLs can contain credentials. A checkpoint is not publication evidence.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PeerPlanningStatus {
     pub id: String,
     pub reference: String,
@@ -35,23 +35,15 @@ pub struct PeerPlanningStatus {
 }
 
 impl Store {
-    pub async fn use_peer_planning(
+    pub async fn peer_planning_status(
         &self,
         repo: &str,
-        destination: Option<&str>,
-    ) -> StoreResult<()> {
+        active: Option<&str>,
+    ) -> StoreResult<Vec<PeerPlanningStatus>> {
         let repo = repo.to_string();
-        let destination = destination.map(str::to_string);
+        let active = active.map(str::to_string);
         run_sqlite(&self.sqlite, move |sqlite| {
-            sqlite.use_peer_planning(&repo, destination.as_deref())
-        })
-        .await
-    }
-
-    pub async fn peer_planning_status(&self, repo: &str) -> StoreResult<Vec<PeerPlanningStatus>> {
-        let repo = repo.to_string();
-        run_sqlite(&self.sqlite, move |sqlite| {
-            sqlite.peer_planning_status(&repo)
+            sqlite.peer_planning_status(&repo, active.as_deref())
         })
         .await
     }

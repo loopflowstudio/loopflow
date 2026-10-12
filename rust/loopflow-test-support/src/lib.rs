@@ -3,6 +3,53 @@ use std::process::Command;
 
 use tempfile::TempDir;
 
+/// One lock for every fixture mutating process-global environment or store identity.
+pub fn env_lock() -> &'static std::sync::Mutex<()> {
+    static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| std::sync::Mutex::new(()))
+}
+
+/// Build the current CLI and use Cargo's artifact path, including custom target directories.
+pub fn lf_binary() -> &'static str {
+    static BINARY: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    BINARY.get_or_init(|| {
+        let mut command = Command::new(env!("CARGO"));
+        command
+            .args([
+                "build",
+                "--offline",
+                "-p",
+                "loopflow",
+                "--bin",
+                "lf",
+                "--message-format=json",
+            ])
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .stdin(std::process::Stdio::null());
+        for (name, _) in std::env::vars_os() {
+            if name.to_string_lossy().starts_with("LF_") {
+                command.env_remove(name);
+            }
+        }
+        let output = command.output().expect("build fixture CLI");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout)
+            .expect("Cargo JSON output")
+            .lines()
+            .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+            .find_map(|entry| {
+                (entry["target"]["name"] == "lf")
+                    .then(|| entry["executable"].as_str().map(str::to_owned))
+                    .flatten()
+            })
+            .expect("Cargo reports the CLI artifact")
+    })
+}
+
 #[derive(Debug)]
 pub struct TestRepo {
     bare: TempDir,
@@ -198,4 +245,39 @@ pub fn journal_files_under(root: &Path) -> Vec<PathBuf> {
     }
     found.sort();
     found
+}
+
+/// Read retained provider input for replay and preservation assertions in fixtures.
+/// This never resolves Work or makes an acquisition/admission decision.
+pub fn retained_task_input<T: serde::de::DeserializeOwned>(
+    database: &Path,
+    repo: &str,
+    selector: &str,
+) -> T {
+    let conn = rusqlite::Connection::open(database).expect("fixture database");
+    retained_task_input_in(&conn, repo, selector)
+}
+
+pub fn retained_task_input_in<T: serde::de::DeserializeOwned>(
+    conn: &rusqlite::Connection,
+    repo: &str,
+    selector: &str,
+) -> T {
+    let (item, project, observed_at): (String, Option<String>, i64) = conn
+        .query_row(
+            "SELECT json_object('id',i.id,'identifier',i.identifier,'project_id',i.project_id,'revision',i.revision,'branch_name',i.branch_name,'url',i.url,'name',i.name,'description',i.description,'rank',i.rank,'completed',json(CASE i.completed WHEN 1 THEN 'true' ELSE 'false' END),'completed_at',i.completed_at,'due_date',i.due_date,'state',i.state,'team_id',i.team_id,'assignee',i.assignee),CASE WHEN p.id IS NOT NULL THEN json_object('id',p.id,'revision',p.revision,'slug',p.slug,'name',p.name,'summary',p.summary,'workflow',p.workflow,'status',p.status,'krs',json(p.krs),'metric_targets',json(p.metric_targets),'initiative_ids',json(p.initiative_ids),'team_ids',json(p.team_ids)) END,i.observed_at FROM pm_items i LEFT JOIN pm_projects p
+         ON p.repo=i.repo AND p.provider=i.provider AND p.id=i.project_id
+         WHERE i.repo=?1 AND i.provider='linear' AND (i.id=?2 OR i.identifier=?2)",
+            rusqlite::params![repo, selector],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .expect("retained fixture input");
+    let item: serde_json::Value = serde_json::from_str(&item).expect("issue input");
+    let project: serde_json::Value = project
+        .map(|body| serde_json::from_str(&body).expect("project input"))
+        .unwrap_or(serde_json::Value::Null);
+    serde_json::from_value(
+        serde_json::json!({"item":item,"project":project,"observed_at":observed_at}),
+    )
+    .expect("typed fixture input")
 }

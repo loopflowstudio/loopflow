@@ -5,10 +5,10 @@ use std::time::Duration;
 use serde_json::json;
 
 use crate::durable::WorkRef;
-use crate::pm::linear::LinearClient;
+use crate::linear::LinearClient;
 use crate::store::sqlite::planning_changes::PlanningChanges;
 use crate::store::sqlite::planning_export::PlanningExport;
-use crate::store::{PmTaskRecord, Store};
+use crate::store::Store;
 
 use super::{OpsError, OpsResult};
 
@@ -20,12 +20,14 @@ pub(crate) async fn sync_repository_exports(store: &Store, repo: &str) -> OpsRes
     if !super::linear_observe::connected(repo) {
         return Ok(());
     }
+    store.sqlite.recover_task_filings(repo).map_err(message)?;
     // Projects precede Tasks; each failure is bounded and leaves other exports eligible.
     for work in store.sqlite.planning_export_owners(repo).map_err(message)? {
         if let Err(error) = sync_export(store, Path::new(repo), &work).await {
             tracing::debug!(%error, "planning export pending");
         }
     }
+    sync_retained_relations(store, Path::new(repo)).await?;
     Ok(())
 }
 
@@ -68,14 +70,14 @@ pub(crate) async fn sync_export(store: &Store, repo: &Path, work: &WorkRef) -> O
             .await
             .map_err(message)?
             .ok_or_else(|| message("Wave is missing"))?;
-        let initiative = super::pm::read_initiative(repo, wave.slug())
+        let initiative = super::linear::read_initiative(repo, wave.slug())
             .ok_or_else(|| message("Wave has no Linear Initiative; export remains pending"))?;
-        let team = super::pm::repository_team_id(repo)?;
+        let team = super::linear::repository_team_id(repo)?;
         let export = store
             .sqlite
             .prepare_planning_export(owner, &team, &initiative)
             .map_err(message)?;
-        let client = super::pm::linear_client(repo).await?;
+        let client = super::linear::linear_client(repo).await?;
         if observe(store, repo, owner, &client, &export, &wave_id).await? {
             return Ok(());
         }
@@ -92,7 +94,12 @@ pub(crate) async fn sync_export(store: &Store, repo: &Path, work: &WorkRef) -> O
         let project = matches!(owner, PlanningChanges::Project(_));
         if project {
             input["statusId"] = client
-                .project_field_input("status", &export.model["status"], "")
+                .project_field_input(
+                    &crate::work::edit::WorkValue::ProjectStatus(
+                        export.project_status().map_err(message)?,
+                    ),
+                    "",
+                )
                 .await
                 .map_err(message)?["statusId"]
                 .clone();
@@ -102,7 +109,7 @@ pub(crate) async fn sync_export(store: &Store, repo: &Path, work: &WorkRef) -> O
                     input["teamId"]
                         .as_str()
                         .ok_or_else(|| message("creation Team is missing"))?,
-                    export.model["state"].as_str().unwrap_or("unstarted")
+                    export.task_state.as_deref().unwrap_or("unstarted")
                 )
                 .await
                 .map_err(message)?);
@@ -188,16 +195,14 @@ async fn observe(
                     "Created Project has conflicting Initiative membership; receipt retained",
                 ));
             }
-            store
-                .sqlite
-                .put_pm_project(
-                    wave,
-                    "linear",
-                    &export.initiative,
-                    &project,
-                    time::OffsetDateTime::now_utc().unix_timestamp(),
-                )
-                .map_err(message)?;
+            crate::linear::acceptance::accept_linear_project_in(
+                &store.sqlite,
+                wave,
+                &export.initiative,
+                &project,
+                time::OffsetDateTime::now_utc().unix_timestamp(),
+            )
+            .map_err(message)?;
         }
         PlanningChanges::Task(_) => {
             let Some((item, project)) = client
@@ -215,14 +220,57 @@ async fn observe(
             super::planning_delivery::ingest_task(
                 store,
                 repo,
-                &PmTaskRecord {
-                    item,
-                    project,
-                    observed_at: time::OffsetDateTime::now_utc().unix_timestamp(),
-                },
+                &item,
+                project.as_ref(),
+                time::OffsetDateTime::now_utc().unix_timestamp(),
             )
             .await?;
         }
     }
     Ok(true)
+}
+
+// Local filing settles independently. Exporting either endpoint makes its retained
+// relation eligible, including after the source Task has already completed.
+async fn sync_retained_relations(store: &Store, repo: &Path) -> OpsResult<()> {
+    for relation in store
+        .sqlite
+        .pending_retained_relations(&repo.to_string_lossy())
+        .map_err(message)?
+    {
+        let path = store
+            .sqlite
+            .home_dir()
+            .map_err(message)?
+            .join("locks/follow-through-relations")
+            .join(format!("{}.lock", relation.task_id));
+        let Some(_lock) = super::planning_delivery::lock_delivery(&path)? else {
+            continue;
+        };
+        let attempt = async {
+            super::linear::issue_client()
+                .await?
+                .ensure_follow_up_relation(
+                    &relation.source_issue_id,
+                    &relation.target_issue_id,
+                    &relation.relation_id,
+                )
+                .await
+                .map_err(message)?;
+            store
+                .sqlite
+                .confirm_retained_relation(&relation)
+                .map_err(message)
+        };
+        match tokio::time::timeout(Duration::from_secs(5), attempt).await {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                tracing::debug!(%error, task = %relation.task_id, "follow-up relation synchronization pending")
+            }
+            Err(_) => {
+                tracing::debug!(task = %relation.task_id, "follow-up relation synchronization timed out; receipt retained")
+            }
+        }
+    }
+    Ok(())
 }

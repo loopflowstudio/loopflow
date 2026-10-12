@@ -593,7 +593,7 @@ fn process_ci_fix(
         .map(|task_id| format!("\nTask context: {task_id}"))
         .unwrap_or_default();
     let mut prompt = format!(
-        "{skill}\n\nRepair the exact recorded landing incident below. Start with `lf sync`. Repair and verify, then run `lf arm` to publish and enable auto-merge. Do not invoke `lf pr land` or wait for merge; a later finite check observes the merge; Task completion remains with its Flow or operator.\n\nRepository: {}\nPull request: #{}\nBranch: {}\nFailed head: {}\nFailing checks:\n{}{}",
+        "{skill}\n\nRepair the exact recorded landing incident below. Start with `lf sync`. Repair and verify, then run `lf arm` to publish and enable auto-merge. Do not invoke `lf pr land` or wait for merge; a later finite check observes the merge; Task completion remains with its Workflow or conversation.\n\nRepository: {}\nPull request: #{}\nBranch: {}\nFailed head: {}\nFailing checks:\n{}{}",
         incident.repo,
         incident.pr_number,
         landing.branch,
@@ -1455,7 +1455,7 @@ async fn wait_for_landing(
                 PrLandingState::Merged => return Ok(()),
                 PrLandingState::Closed => {
                     return Err(OpsError::DeliveryHeld(
-                        "Pull request closed without merging".into(),
+                        "Pull request closed without merging; Task completion is pending".into(),
                     ))
                 }
                 PrLandingState::Blocked => {

@@ -1,6 +1,6 @@
 //! Linear observations stay adapter-internal; ingestion preserves ordered direction.
 use crate::durable::TaskId;
-use crate::pm::linear::{LinearComment, LinearIssueObservation};
+use crate::linear::{LinearComment, LinearIssueObservation};
 use crate::store::sqlite::SqliteStore;
 use crate::work::task::NewTask;
 use time::OffsetDateTime;
@@ -19,7 +19,7 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
     let home = tempfile::tempdir().unwrap();
     let store = SqliteStore::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
     let project = store
-        .ensure_wave_project(home.path().to_str().unwrap(), "inbox")
+        .ensure_wave_project(&home.path().to_string_lossy(), "inbox")
         .unwrap();
     let task = store
         .create_task(&NewTask {

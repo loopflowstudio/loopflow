@@ -115,6 +115,10 @@ pub fn run(
         ));
         extra_env.push(crate::provider_account::activation::isolation_env(true));
     }
+    let agent = crate::config::agent_override();
+    if let Some(agent) = agent.as_deref() {
+        extra_env.push((crate::config::AGENT_OVERRIDE_ENV, agent));
+    }
     if let Some(source) = source_json.as_deref() {
         extra_env.push((crate::lf::TASK_SOURCE_ENV, source));
     }

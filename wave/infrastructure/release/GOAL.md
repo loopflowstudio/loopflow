@@ -1,9 +1,3 @@
----
-crons:
-- flow: release-run
-  schedule: 0 0 10 * * *
----
-
 ## Objective
 
 Deliver new and updated Loopflow to the public at regular intervals, with

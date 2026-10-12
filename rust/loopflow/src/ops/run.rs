@@ -332,6 +332,7 @@ fn run_error(error: impl std::fmt::Display) -> OpsError {
 
 #[cfg(test)]
 mod tests {
+    use crate::test_linear_input::{InventoryFixture, SeedLinear};
     use std::sync::Arc;
 
     use time::OffsetDateTime;
@@ -339,11 +340,11 @@ mod tests {
     use super::{resolve_work_binding, resolve_work_selection, WorkSelection};
     use crate::durable::{ProjectId, TaskId, WorkRef};
     use crate::id::WaveId;
-    use crate::pm::linear::LinearProject;
-    use crate::pm::PmSnapshot;
-    use crate::pm::{LinearIssueId, LinearProjectId};
+    use crate::linear::LinearProject;
+    use crate::linear::{LinearIssueId, LinearProjectId};
     use crate::store::SharedStore;
-    use crate::store::{PmSnapshotRow, StorageConfig};
+    use crate::store::StorageConfig;
+    use crate::test_linear_input::Inventory;
     use crate::work::project::Project;
     use crate::work::project::ProjectKR;
     use crate::work::task::{LinearWritebackState, Observation, Task, TaskPr, TaskPrId};
@@ -910,6 +911,7 @@ mod tests {
     async fn controller_free_task_supports_multiple_independent_bindings() {
         let (directory, store) = test_store().await;
         let repo = directory.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
         let worktree = directory.path().join("repo.runtime-research");
         std::fs::create_dir_all(&worktree).unwrap();
         let wave = Wave::new(
@@ -1227,6 +1229,7 @@ mod tests {
     async fn hierarchical_work_selectors_must_match() {
         let (directory, store) = test_store().await;
         let repo = directory.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
         let worktree = directory.path().join("repo.runtime-research");
         std::fs::create_dir_all(&worktree).unwrap();
         let wave = Wave::new(
@@ -1289,7 +1292,7 @@ mod tests {
             .create_project(&project(&wave, "loopflow-api", "project-api"))
             .await
             .unwrap();
-        let snapshot = PmSnapshot {
+        let snapshot = Inventory {
             projects: vec![LinearProject {
                 description: None,
                 revision: None,
@@ -1311,8 +1314,8 @@ mod tests {
             items: Vec::new(),
         };
         store
-            .put_pm_snapshot(
-                PmSnapshotRow {
+            .seed_inventory(
+                InventoryFixture {
                     wave_id: wave.id().clone(),
                     provider: "linear".to_string(),
                     initiative: "initiative-1".to_string(),

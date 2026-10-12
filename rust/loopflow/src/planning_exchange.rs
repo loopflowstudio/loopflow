@@ -4,55 +4,20 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::work::edit::WorkEdit;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[non_exhaustive]
-pub enum PlanningKind {
-    Wave,
-    Project,
-    Task,
-    Comment,
-}
-
-impl PlanningKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Wave => "wave",
-            Self::Project => "project",
-            Self::Task => "task",
-            Self::Comment => "comment",
-        }
-    }
-
-    /// The portable allowlist deliberately excludes execution, paths and controls.
-    pub fn fields(self) -> Vec<&'static str> {
-        crate::store::sqlite::planning_write::fields(self)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PlanningObject {
-    pub kind: PlanningKind,
-    pub id: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlanningMutation {
-    pub object: PlanningObject,
-    pub field: String,
-    pub value: Value,
+    pub edit: WorkEdit,
     /// Hybrid logical milliseconds, advanced beyond every observed mutation.
     pub clock: i64,
     /// Observed heads of this field, not a global revision or Git ancestry.
     pub parents: BTreeSet<String>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlanningSnapshot {
     pub changes: BTreeMap<String, PlanningMutation>,
@@ -60,23 +25,7 @@ pub struct PlanningSnapshot {
 
 impl PlanningSnapshot {
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, PlanningExchangeError> {
-        let mut snapshot: Self = serde_json::from_slice(bytes)?;
-        // Retained Git history predates typed relationship and author values.
-        // Decode those values at acquisition without minting new causal identities.
-        for change in snapshot.changes.values_mut() {
-            let value = match (change.object.kind, change.field.as_str()) {
-                (PlanningKind::Project, "planning_initiatives" | "planning_teams") => {
-                    Some(&mut change.value)
-                }
-                (PlanningKind::Comment, "content") => change.value.get_mut("author"),
-                _ => None,
-            };
-            if let Some(value) = value {
-                if let Some(encoded) = value.as_str() {
-                    *value = serde_json::from_str(encoded)?;
-                }
-            }
-        }
+        let snapshot: Self = serde_json::from_slice(bytes)?;
         snapshot.validate()?;
         Ok(snapshot)
     }
@@ -114,7 +63,7 @@ impl PlanningSnapshot {
                 change.parents.iter().filter(|id| {
                     self.changes
                         .get(*id)
-                        .is_some_and(|parent| parent.object == change.object)
+                        .is_some_and(|parent| parent.edit.key() == change.edit.key())
                 })
             })
             .collect();
@@ -131,10 +80,14 @@ impl PlanningSnapshot {
 
     pub fn validate(&self) -> Result<(), PlanningExchangeError> {
         for (id, change) in &self.changes {
-            if id.is_empty() || change.object.id.is_empty() || change.clock < 0 {
+            if id.is_empty() || change.edit.target.is_empty() || change.clock < 0 {
                 return Err(PlanningExchangeError::Invalid("invalid planning mutation"));
             }
-            validate_value(change)?;
+            change
+                .edit
+                .change
+                .validate()
+                .map_err(|_| PlanningExchangeError::Invalid("invalid Work value"))?;
             for parent in &change.parents {
                 let previous = self
                     .changes
@@ -142,10 +95,7 @@ impl PlanningSnapshot {
                     .ok_or(PlanningExchangeError::Invalid(
                         "missing planning predecessor",
                     ))?;
-                if previous.object != change.object
-                    || previous.field != change.field
-                    || previous.clock >= change.clock
-                {
+                if previous.edit.key() != change.edit.key() || previous.clock >= change.clock {
                     return Err(PlanningExchangeError::Invalid("invalid planning causality"));
                 }
             }
@@ -163,23 +113,13 @@ pub(crate) fn winning_heads<'a>(
     for (id, change) in heads {
         let priority = (change.clock, id);
         let winner = fields
-            .entry((&change.object, change.field.as_str()))
+            .entry(change.edit.key())
             .or_insert((priority, (id, change)));
         if priority > winner.0 {
             *winner = (priority, (id, change));
         }
     }
     fields.into_values().map(|(_, winner)| winner)
-}
-
-fn validate_value(change: &PlanningMutation) -> Result<(), PlanningExchangeError> {
-    crate::store::sqlite::planning_write::PlanningEdit::from_value(
-        change.object.kind,
-        &change.field,
-        change.value.clone(),
-    )
-    .map(|_| ())
-    .map_err(|_| PlanningExchangeError::Invalid("invalid planning field value"))
 }
 
 #[derive(Debug, thiserror::Error)]

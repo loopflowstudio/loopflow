@@ -76,6 +76,12 @@ live state; its stored values and historical judgment events remain readable evi
 The typed field writer—not either complete domain struct—defines portable content;
 flattening records does not make checkout or execution fields synchronizable.
 
+`linear/` owns provider responses and acceptance; there is no generic PM facade.
+`ops/planning_sync.rs` owns foreground exchange, store access and Wave locks for
+both transports. Ordinary Task lookup and comments belong to `ops/task.rs`.
+A Git lookup miss stays a Git lookup miss; it cannot fall through to Linear.
+Unmapped local Projects remain local during Linear refresh until their export links them.
+
 `work::task::comment::TaskComment` owns shared discussion. `TaskComments` joins
 the thread with local delivery status. Linear comment IDs, author IDs and revisions
 stay in adapter-internal observations and retained receipts; one adapter conversion
@@ -87,7 +93,12 @@ derive the Task ID from the issue UUID; existing mapped Tasks keep their IDs.
 Ticket aliases remain optional mappings. Repeated imports and ticket changes retain
 identity. Unowned observations stay in provider evidence tables. Released-frontier
 migration preserves existing identities, provider observations, PRs, Workflows and
-Session links.
+Session links. Provider content is retained as individual observation fields;
+ordinary readers and ingestion never reconstruct a stored Project or issue object.
+The membership index and provider claim remain separate when historical evidence
+contradicts itself. Confirming refreshes compare the claim; receipt baselines retain
+omitted versus explicitly null membership. Conversion refuses scalar type changes that SQLite would otherwise coerce,
+retaining the original schema and input on failure.
 
 `lf task create` generates the durable ID, saves the Task and returns that ID.
 Each explicit invocation creates a distinct Task, including identical titles.
@@ -102,6 +113,10 @@ ambiguous references return candidates instead of selecting a Task.
 Saved Tasks use the same checkout preparation and placement transaction with or
 without Linear. Checkout reads retained planning and branch metadata; it does not
 refresh Linear. An unknown provider alias still needs initial acquisition.
+Acquisition returns the saved Task. Its freshness and ownership lookup reads only
+retained Linear identity, revision, membership, invalidation, removal and age;
+it never reconstructs provider content. A delayed absent response invalidates only
+the exact issue revision and observation age it queried.
 Preparation uses the saved Task identity and title directly. New branch names retain
 the full Task UUID; default checkout names use up to four title words and an ID
 suffix. Retained provider branch names take precedence.
@@ -138,8 +153,12 @@ observations from another Wave to adopt conflicting Linear membership, retain bo
 values and advance unrelated fields. It never grants execution or provider-write authority.
 
 One typed writer, `sqlite/planning_write.rs`, owns planning field persistence and
-Git mutation capture. Local operations and incoming planning use the same typed
-edits and record construction. The caller's transaction includes admission, planning,
+Git mutation capture. Local writes and journal mutations carry `WorkEdit`: a target
+identity and a typed `WorkValue`. The value determines its scope and conflict field;
+Git and the local journal retain the same typed mutation, including its causal
+parents. SQLite derives target, field and clock indexes from that value; its table
+routing stays private to the writer. Import uses those values
+directly, with the same record construction as local writes. The caller's transaction includes admission, planning,
 local delivery receipts and mutation identity. Execution columns are absent from
 this writer. Local creation attaches machine-specific metadata afterward in the
 same transaction. Import never creates execution placement or provider attempts.
@@ -160,6 +179,13 @@ objects advance. Wave selection follows Project projection. Invalid documents,
 reused mutation IDs and foreign repository ownership roll back the import. Repeated
 imports create no echo edits. Fetch, import and publication have distinct receipts;
 a lost push reply requires readback before publication is reported confirmed.
+
+Current Work ownership selects new Git exports. Each exported or imported mutation
+retains its repository and destination in `planning_peer_routes`, independently of
+live Work rows. Switching refs, moving Work or deleting a row cannot erase earlier
+routing or rejected imports. Status derives the active destination from configuration;
+there is no stored selection or per-Work membership inventory. These routes are
+exchange evidence and grant no Machine placement or first-start authority.
 
 Task and Project Linear field receipts share `sqlite/planning_changes.rs`, with
 separate foreign keys. They retain stable mutation identity, provider baseline and
@@ -358,8 +384,11 @@ carry `revision`; a newer Project observation updates independently of the issue
 revision. Older observations cannot overwrite it. Project responses must include
 nullable content fields and relationship sets.
 
-Snapshot and detail ingestion project accepted entities into durable Project and
-Task rows in the same SQLite transaction. Projection uses each stored entity's
+Private Linear inventory/detail acquisition commits retained observations and
+Projects/Tasks in the same SQLite transaction. Public Store APIs expose canonical
+Work and narrow acquisition evidence, never fetched response models. Ordering
+receipts receive accepted local Task IDs; new disposition conflict receipts retain
+revision/state/completion evidence. Historical receipts keep their original bytes. Projection uses each stored entity's
 acquisition time, never the Wave's aggregate sync time. A projection failure rolls
 back observation acceptance. It preserves execution fields and retained identity;
 an unknown destination does not authorize a Task transfer. Restart changes

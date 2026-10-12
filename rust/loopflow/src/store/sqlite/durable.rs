@@ -800,7 +800,7 @@ mod durable_store_tests {
     use crate::durable::{ProjectId, TaskId, WorkRef};
 
     use crate::id::WaveId;
-    use crate::pm::{LinearIssueId, LinearProjectId};
+    use crate::linear::{LinearIssueId, LinearProjectId};
     use crate::session::{LfSession, TitleSource, WorkSource};
     use crate::store::sqlite::SqliteStore;
 

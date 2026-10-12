@@ -1,3 +1,5 @@
+#[cfg(test)]
+use crate::test_linear_input::SeedLinearSqlite;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -6,11 +8,17 @@ use serde_json::json;
 
 use super::{mark_issue_updated, seed_provider_task, with_planning_task, PlanningState};
 use crate::durable::WorkRef;
-use crate::ops::pm::refresh_wave;
-use crate::ops::pm::test_fixture::Fixture;
-use crate::pm::PmItemUpdate;
+use crate::ops::linear::refresh_wave;
+use crate::ops::linear::test_fixture::Fixture;
 use crate::store::Store;
 use crate::work::task::Task;
+use crate::work::task::TaskUpdate;
+
+fn saved_order(fixture: &Fixture, task: &Task) -> (String, serde_json::Value) {
+    let conn = rusqlite::Connection::open(&fixture.database).unwrap();
+    let (id,value):(String,String)=conn.query_row("SELECT id,value_json FROM project_changes WHERE project_id=?1 AND field='task_order' ORDER BY seq DESC LIMIT 1", [task.project_id.as_str()], |r|Ok((r.get(0)?,r.get(1)?))).unwrap();
+    (id, serde_json::from_str(&value).unwrap())
+}
 
 fn with_order(
     test: impl FnOnce(
@@ -53,7 +61,7 @@ fn reorder(store: &Store, task: &Task, rank: u32) {
         .edit_task(
             &task.id,
             current.revision,
-            &PmItemUpdate {
+            &TaskUpdate {
                 rank: Some(rank),
                 ..Default::default()
             },
@@ -113,25 +121,20 @@ fn planning_order_active_connection_delivers_after_outage() {
     with_order(|runtime, fixture, repo, tasks, state| {
         runtime.block_on(async {
             state.lock().await.field_outage = true;
-            let sync = crate::ops::linear_observe::PlanningSync::start(
+            let sync = crate::ops::planning_sync::PlanningSync::start(
                 fixture.store.clone(),
                 repo.to_string_lossy().into_owned(),
             )
             .unwrap();
             reorder(&fixture.store, &tasks[3], 0);
-            let receipt = fixture
-                .store
-                .sqlite
-                .pending_project_changes(&tasks[0].project_id)
-                .unwrap()[0]
-                .clone();
+            let receipt = saved_order(fixture, &tasks[0]);
             let conn = rusqlite::Connection::open(&fixture.database).unwrap();
             tokio::time::timeout(Duration::from_secs(8), async {
                 loop {
                     let failed: bool = conn
                         .query_row(
                             "SELECT error IS NOT NULL FROM project_changes WHERE id=?1",
-                            [&receipt.id],
+                            [&receipt.0],
                             |r| r.get(0),
                         )
                         .unwrap();
@@ -143,15 +146,7 @@ fn planning_order_active_connection_delivers_after_outage() {
             })
             .await
             .unwrap();
-            assert_eq!(
-                fixture
-                    .store
-                    .sqlite
-                    .pending_project_changes(&tasks[0].project_id)
-                    .unwrap()[0]
-                    .id,
-                receipt.id
-            );
+            assert_eq!(saved_order(fixture, &tasks[0]).0, receipt.0);
             state.lock().await.field_outage = false;
             tokio::time::timeout(Duration::from_secs(8), async {
                 while fixture
@@ -252,14 +247,7 @@ fn planning_order_acquisition_during_write_preserves_newer_save_and_scalar_edits
             let concurrent = async {
                 arrived.notified().await;
                 reorder(&fixture.store, &tasks[2], 0);
-                let receipt = fixture
-                    .store
-                    .sqlite
-                    .pending_project_changes(&tasks[0].project_id)
-                    .unwrap()
-                    .into_iter()
-                    .find(|c| c.field == "task_order")
-                    .unwrap();
+                let receipt = saved_order(fixture, &tasks[0]);
                 {
                     let mut provider = state.lock().await;
                     provider.issues[0]["title"] = json!("Inbound title during reorder");
@@ -280,18 +268,7 @@ fn planning_order_acquisition_during_write_preserves_newer_save_and_scalar_edits
                         .title,
                     "Inbound title during reorder"
                 );
-                assert_eq!(
-                    fixture
-                        .store
-                        .sqlite
-                        .pending_project_changes(&tasks[0].project_id)
-                        .unwrap()
-                        .into_iter()
-                        .find(|c| c.field == "task_order")
-                        .unwrap()
-                        .id,
-                    receipt.id
-                );
+                assert_eq!(saved_order(fixture, &tasks[0]).0, receipt.0);
                 assert_no_conflicts(fixture);
                 // Another delivery connection cannot duplicate the in-flight move.
                 deliver(&fixture.store, repo, &tasks[0]).await.unwrap();
@@ -318,12 +295,7 @@ fn planning_order_observed_conflict_adopts_linear_and_retains_losing_list() {
     with_order(|runtime, fixture, repo, tasks, state| {
         runtime.block_on(async {
             reorder(&fixture.store, &tasks[3], 0);
-            let receipt = fixture
-                .store
-                .sqlite
-                .pending_project_changes(&tasks[0].project_id)
-                .unwrap()
-                .remove(0);
+            let receipt = saved_order(fixture, &tasks[0]);
             {
                 let mut provider = state.lock().await;
                 provider.issues[2]["prioritySortOrder"] = json!(-10.0);
@@ -339,17 +311,17 @@ fn planning_order_observed_conflict_adopts_linear_and_retains_losing_list() {
             let (saved, conflict): (String, String) = conn
                 .query_row(
                     "SELECT value_json,conflict_json FROM project_changes WHERE id=?1",
-                    [&receipt.id],
+                    [&receipt.0],
                     |r| Ok((r.get(0)?, r.get(1)?)),
                 )
                 .unwrap();
             assert_eq!(
                 serde_json::from_str::<serde_json::Value>(&saved).unwrap(),
-                receipt.value
+                receipt.1
             );
             assert_ne!(
                 serde_json::from_str::<serde_json::Value>(&conflict).unwrap()["value"],
-                receipt.value
+                receipt.1
             );
         });
     });
@@ -412,18 +384,19 @@ fn planning_order_equal_keys_preserve_groups_through_intermediate_moves() {
 fn planning_order_stale_list_cannot_undo_confirmed_reorder() {
     with_order(|runtime, fixture, repo, tasks, state| {
         runtime.block_on(async {
-            let ctx = crate::ops::pm::resolve_context(repo, "product")
+            let (ctx, initiative) = crate::ops::linear::resolve_context(repo, "product")
                 .await
                 .unwrap();
-            let stale = crate::store::PmSnapshotRow {
+            let stale = crate::test_linear_input::InventoryFixture {
                 wave_id: tasks[0].wave_id.clone(),
                 provider: "linear".into(),
-                initiative: ctx.initiative.clone(),
+                initiative: initiative.clone(),
                 synced_at: time::OffsetDateTime::now_utc().unix_timestamp(),
-                snapshot: crate::ops::pm::fetch_pm_snapshot_with_store(
+                snapshot: crate::ops::linear::test_fixture::capture_inventory(
                     repo,
                     "product",
                     &ctx,
+                    &initiative,
                     &fixture.store,
                 )
                 .await
@@ -432,7 +405,7 @@ fn planning_order_stale_list_cannot_undo_confirmed_reorder() {
             reorder(&fixture.store, &tasks[3], 0);
             deliver(&fixture.store, repo, &tasks[0]).await.unwrap();
             let expected = remote_order(&state).await;
-            fixture.store.sqlite.put_pm_snapshot(&stale).unwrap();
+            fixture.store.sqlite.seed_inventory(&stale).unwrap();
             assert_eq!(local_order(&fixture.store, &tasks), expected);
             assert_no_conflicts(fixture);
         });
@@ -521,8 +494,13 @@ fn planning_order_uncertainty_does_not_stall_project_field_delivery() {
                 .sqlite
                 .pending_project_changes(&tasks[0].project_id)
                 .unwrap();
-            assert_eq!(pending.len(), 1);
-            assert_eq!(pending[0].field, "task_order");
+            assert!(pending.is_empty());
+            assert!(fixture
+                .store
+                .sqlite
+                .project_order_delivery(&tasks[0].project_id)
+                .unwrap()
+                .is_some());
             assert_no_conflicts(fixture);
         });
     });

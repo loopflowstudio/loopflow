@@ -1,6 +1,6 @@
 //! Linear Markdown and released-content conversion; never an ordinary Work model.
 
-use super::{PmError, PmResult};
+use super::{LinearError, LinearResult};
 use crate::work::project::ProjectKR;
 use crate::work::wave::metrics::MetricTarget;
 
@@ -52,7 +52,7 @@ impl ProjectDocument<'_> {
         parts.join("\n\n")
     }
 
-    pub fn replace_description(&self, description: &str) -> PmResult<String> {
+    pub fn replace_description(&self, description: &str) -> LinearResult<String> {
         // Prose and managed fields share Markdown syntax. Fenced examples are
         // prose; an unclosed fence or live managed declaration cannot silently
         // change the independently saved fields.
@@ -67,7 +67,7 @@ impl ProjectDocument<'_> {
             || parsed.metric_targets != self.metric_targets
             || parsed.description().trim() != description.trim()
         {
-            return Err(PmError::Message(
+            return Err(LinearError::Message(
                 "Project prose changes managed fields; put Markdown examples in closed fences"
                     .into(),
             ));
@@ -97,7 +97,7 @@ impl ProjectDocument<'_> {
     }
 }
 
-pub(crate) fn parse_project_document(source: &str) -> PmResult<ProjectDocument<'_>> {
+pub(crate) fn parse_project_document(source: &str) -> LinearResult<ProjectDocument<'_>> {
     use ProjectField::{Krs, Targets, Workflow};
     let mut section = None;
     let mut fields = Vec::new();
@@ -209,7 +209,7 @@ pub(crate) fn parse_project_document(source: &str) -> PmResult<ProjectDocument<'
         krs.push(kr);
     }
     if fence.is_some_and(|(_, _, managed)| managed) {
-        return Err(PmError::Message(
+        return Err(LinearError::Message(
             "unterminated Project metric targets fence".into(),
         ));
     }
@@ -225,13 +225,14 @@ pub(crate) fn parse_project_document(source: &str) -> PmResult<ProjectDocument<'
     let metric_targets = if targets.iter().all(|line| line.trim().is_empty()) {
         Vec::new()
     } else {
-        serde_json::from_str(&targets.concat())
-            .map_err(|error| PmError::Message(format!("invalid Project metric targets: {error}")))?
+        serde_json::from_str(&targets.concat()).map_err(|error| {
+            LinearError::Message(format!("invalid Project metric targets: {error}"))
+        })?
     };
     if workflow.is_empty() {
         workflow = authored_as_flow;
     }
-    crate::work::project::validate_metric_targets(&metric_targets).map_err(PmError::Message)?;
+    crate::work::project::validate_metric_targets(&metric_targets).map_err(LinearError::Message)?;
     fields.sort_unstable_by_key(|(range, _)| range.start);
     Ok(ProjectDocument {
         metric_targets,

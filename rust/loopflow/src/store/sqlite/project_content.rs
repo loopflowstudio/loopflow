@@ -1,6 +1,6 @@
 //! Project content and stored Wave workflows share one transaction in every repository.
 
-use super::planning_write::PlanningEdit as Edit;
+use crate::work::edit::WorkValue as Edit;
 use rusqlite::{params, OptionalExtension, TransactionBehavior};
 
 use crate::durable::ProjectId;
@@ -126,18 +126,83 @@ mod tests {
     use crate::work::wave::Wave;
 
     #[test]
+    fn project_name_receipt_does_not_reconstruct_unrelated_order_evidence() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let wave = Wave::new(WaveId::new(), "product".into(), "/repo".into());
+        store.create_wave(&wave).unwrap();
+        let observed = serde_json::from_value(serde_json::json!({
+            "id":"linear-project", "revision":"2026-10-10T12:00:00Z", "slug":"product", "name":"Product", "summary":"",
+            "workflow":"", "krs":[], "metric_targets":[], "status":"started", "initiative_ids":["initiative"], "team_ids":["team"]
+        })).unwrap();
+        crate::linear::acceptance::accept_linear_project_in(
+            &store,
+            wave.id(),
+            "initiative",
+            &observed,
+            17,
+        )
+        .unwrap();
+        let project = store.list_projects(Some(wave.id())).unwrap().remove(0);
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE pm_projects SET task_order_json='{}' WHERE id='linear-project'",
+                [],
+            )
+            .unwrap();
+        store
+            .edit_project(&project.id, Some("Renamed"), None, None)
+            .unwrap();
+        let change = store
+            .pending_project_changes(&project.id)
+            .unwrap()
+            .remove(0);
+        assert_eq!(
+            serde_json::to_value(&change.base).unwrap(),
+            serde_json::json!({"revision":"2026-10-10T12:00:00Z", "value":{"field":"project_name","value":"Product"}})
+        );
+        assert!(store
+            .attempt_planning_field(
+                super::super::planning_changes::PlanningChanges::Project(&project.id),
+                &change,
+                Some("2026-10-10T12:00:00Z"),
+            )
+            .unwrap());
+        assert_eq!(store.project(&project.id).unwrap().unwrap().name, "Renamed");
+        let retained: (String, i64) = store
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT task_order_json,observed_at FROM pm_projects WHERE id='linear-project'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(retained, ("{}".into(), 17));
+    }
+
+    #[test]
     fn project_prose_unobserved_baseline_stays_unknown_at_the_same_revision() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         let wave = Wave::new(WaveId::new(), "product".into(), "/repo".into());
         store.create_wave(&wave).unwrap();
-        let mut observed: crate::pm::linear::LinearProject = serde_json::from_value(serde_json::json!({
+        let mut observed: crate::linear::LinearProject = serde_json::from_value(serde_json::json!({
             "id":"linear-project", "revision":"2026-10-10T12:00:00Z", "slug":"product", "name":"Product", "summary":"",
             "workflow":"", "krs":[], "metric_targets":[], "status":"started", "initiative_ids":["initiative"], "team_ids":["team"]
         })).unwrap();
-        store
-            .put_pm_project(wave.id(), "linear", "initiative", &observed, 1)
-            .unwrap();
+        crate::linear::acceptance::accept_linear_project_in(
+            &store,
+            wave.id(),
+            "initiative",
+            &observed,
+            1,
+        )
+        .unwrap();
         let project = store.list_projects(Some(wave.id())).unwrap().remove(0);
         store
             .edit_project(&project.id, None, None, Some("Saved without a baseline"))
@@ -148,9 +213,14 @@ mod tests {
             .remove(0);
         assert_eq!(change.base, None);
         observed.description = Some(String::new());
-        store
-            .put_pm_project(wave.id(), "linear", "initiative", &observed, 2)
-            .unwrap();
+        crate::linear::acceptance::accept_linear_project_in(
+            &store,
+            wave.id(),
+            "initiative",
+            &observed,
+            2,
+        )
+        .unwrap();
         assert_eq!(store.project(&project.id).unwrap().unwrap().description, "");
         let conn = store.conn.lock().unwrap();
         let (value, conflict): (String, String) = conn
@@ -161,11 +231,13 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            serde_json::from_str::<String>(&value).unwrap(),
-            "Saved without a baseline"
+            serde_json::from_str::<crate::work::edit::WorkValue>(&value).unwrap(),
+            crate::work::edit::WorkValue::ProjectDescription(Some(
+                "Saved without a baseline".into()
+            ))
         );
         assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&conflict).unwrap()["value"],
+            serde_json::from_str::<serde_json::Value>(&conflict).unwrap()["value"]["value"],
             ""
         );
     }
@@ -176,20 +248,30 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         let wave = Wave::new(WaveId::new(), "product".into(), "/repo".into());
         store.create_wave(&wave).unwrap();
-        let mut observed: crate::pm::linear::LinearProject = serde_json::from_value(serde_json::json!({
+        let mut observed: crate::linear::LinearProject = serde_json::from_value(serde_json::json!({
             "id":"linear-project", "revision":"2026-10-10T12:00:00Z", "slug":"product", "name":"Product", "summary":"", "description":"Baseline",
             "workflow":"", "krs":[], "metric_targets":[], "status":"started", "initiative_ids":["initiative"], "team_ids":["team"]
         })).unwrap();
-        store
-            .put_pm_project(wave.id(), "linear", "initiative", &observed, 17)
-            .unwrap();
+        crate::linear::acceptance::accept_linear_project_in(
+            &store,
+            wave.id(),
+            "initiative",
+            &observed,
+            17,
+        )
+        .unwrap();
         let project = store.list_projects(Some(wave.id())).unwrap().remove(0);
         observed.description = None;
         observed.revision = Some("2026-10-10T12:01:00Z".into());
         observed.summary = "New summary".into();
-        store
-            .put_pm_project(wave.id(), "linear", "initiative", &observed, 29)
-            .unwrap();
+        crate::linear::acceptance::accept_linear_project_in(
+            &store,
+            wave.id(),
+            "initiative",
+            &observed,
+            29,
+        )
+        .unwrap();
         let saved = store.project(&project.id).unwrap().unwrap();
         assert_eq!(saved.description, "Baseline");
         assert_eq!(saved.summary, "New summary");
@@ -201,15 +283,15 @@ mod tests {
             .unwrap()
             .remove(0);
         assert_eq!(
-            change.base,
-            Some(serde_json::json!({"value":"Baseline", "revision":"2026-10-10T12:00:00Z"}))
+            serde_json::to_value(&change.base).unwrap(),
+            serde_json::json!({"value":{"field":"project_description","value":"Baseline"}, "revision":"2026-10-10T12:00:00Z"})
         );
         let prose: String = store
             .conn
             .lock()
             .unwrap()
             .query_row(
-                "SELECT prose_json FROM pm_projects WHERE id='linear-project'",
+                "SELECT json_object('value',description,'revision',description_revision,'observed_at',description_observed_at) FROM pm_projects WHERE id='linear-project'",
                 [],
                 |r| r.get(0),
             )
@@ -219,9 +301,14 @@ mod tests {
             serde_json::json!({"value":"Baseline", "revision":"2026-10-10T12:00:00Z", "observed_at":17})
         );
         observed.description = Some("Baseline".into());
-        store
-            .put_pm_project(wave.id(), "linear", "initiative", &observed, 30)
-            .unwrap();
+        crate::linear::acceptance::accept_linear_project_in(
+            &store,
+            wave.id(),
+            "initiative",
+            &observed,
+            30,
+        )
+        .unwrap();
         assert_eq!(
             store.project(&project.id).unwrap().unwrap().description,
             "Next save"

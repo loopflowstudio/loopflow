@@ -1,4 +1,5 @@
-mod support;
+use crate::test_linear_input::SeedLinear;
+use crate::test_support as support;
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -7,8 +8,8 @@ use std::process::Command;
 use loopflow::durable::WorkStatus;
 use loopflow::ops::task::{task_complete, task_snapshot, task_status};
 use loopflow::ops::{
-    commit_workflow, create_or_update_pr, current_pr, present_pr_review, CommitOptions,
-    NullProgress, OpsError, PrOptions,
+    commit_workflow, current_pr, present_pr_review, CommitOptions, NullProgress, OpsError,
+    PrOptions,
 };
 use loopflow::work::task::{
     GithubPr, PrMergeMode, PrMergeRequest, PrPhase, PrPresentation, PrPublication,
@@ -18,6 +19,19 @@ use support::{
     codex_app_server_script, counting_open_script, presentation_attempts, register_task_with_pr,
     EnvGuard,
 };
+
+// These acquisition fixtures run inside the library. Pin its test-only process
+// ledger to the same disposable Machine as Session captures and Work.
+fn create_or_update_pr(
+    repo: &std::path::Path,
+    options: &PrOptions,
+    progress: &impl loopflow::ops::Progress,
+) -> Result<loopflow::ops::PrResult, OpsError> {
+    let home = std::env::var_os("LF_HOME").expect("fixture selects a disposable Machine");
+    crate::journal::with_test_ledger(std::path::PathBuf::from(home).join("loopflow.db"), || {
+        loopflow::ops::create_or_update_pr(repo, options, progress)
+    })
+}
 
 fn write_gh_script(pr_list: &str, pr_diff: Option<&str>) -> String {
     let diff = pr_diff.unwrap_or("");
@@ -80,7 +94,7 @@ fn task_delivery_works_on_an_ordinary_branch_without_registration() {
     repo.create_file("feature.txt", "local work");
     let before = repo.head_sha();
     let run = |args: &[&str]| {
-        let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+        let output = Command::new(loopflow_test_support::lf_binary())
             .env_clear()
             .env("HOME", home.path())
             .env("LF_HOME", home.path())
@@ -179,7 +193,7 @@ fn draft_open_stays_draft_until_publish() {
                 "Current work.",
             ];
             {
-                let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+                let output = Command::new(loopflow_test_support::lf_binary())
                     .args(["pr"])
                     .args(args)
                     .current_dir(repo.path())
@@ -491,21 +505,18 @@ fn task_snapshot_reads_its_current_parent_project() {
     repo.create_branch(branch);
     let task = register_task_with_pr(home.path(), repo.path(), branch, &base);
     let runtime = tokio::runtime::Runtime::new().expect("task runtime");
-    let mut observation = runtime
-        .block_on(task.store.pm_task_observation(
+    let mut observation: crate::test_linear_input::IssueFixture =
+        loopflow_test_support::retained_task_input(
+            &task.database,
             &repo.path().to_string_lossy(),
-            "linear",
             &task.task.identifier,
-        ))
-        .unwrap()
-        .record
-        .unwrap();
+        );
     let project = observation.project.as_mut().unwrap();
     project.slug = "current-project".into();
     project.revision = Some("2026-10-05T12:00:00Z".into());
     let project_id = project.id.clone();
     runtime
-        .block_on(task.store.put_pm_task(
+        .block_on(task.store.seed_issue(
             &repo.path().to_string_lossy(),
             "linear",
             observation,
@@ -919,19 +930,16 @@ fn task_pr_missing_cached_linear_url_refuses_before_remote_mutation() {
     push_branch(&repo, branch);
     let task = register_task_with_pr(home.path(), repo.path(), branch, &base);
     let runtime = tokio::runtime::Runtime::new().expect("task runtime");
-    let mut observation = runtime
-        .block_on(task.store.pm_task_observation(
+    let mut observation: crate::test_linear_input::IssueFixture =
+        loopflow_test_support::retained_task_input(
+            &task.database,
             &repo.path().to_string_lossy(),
-            "linear",
             &task.task.identifier,
-        ))
-        .unwrap()
-        .record
-        .unwrap();
+        );
     observation.item.url = None;
     observation.item.revision = Some("2026-09-30T00:00:00Z".into());
     runtime
-        .block_on(task.store.put_pm_task(
+        .block_on(task.store.seed_issue(
             &repo.path().to_string_lossy(),
             "linear",
             observation,
@@ -1291,7 +1299,7 @@ fn publishing_after_the_pr_merged_names_the_next_step() {
 }
 
 #[test]
-fn observed_auto_merge_waits_for_explicit_task_completion() {
+fn observed_auto_merge_waits_for_an_explicit_completion_request() {
     let home = tempfile::TempDir::new().expect("temp home");
     let _env = EnvGuard::with_lf_home(&[("gh", gh_merged_pr_script())], home.path());
     let repo = TestRepo::new();
@@ -1478,6 +1486,8 @@ fn end_is_refused_while_a_published_pr_is_unmerged() {
 
 #[test]
 fn default_branch_refuses_pr_before_committing_or_pushing() {
+    let home = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
     let repo = TestRepo::new();
     let head = repo.head_sha();
     repo.create_file("notes.md", "unpublished\n");

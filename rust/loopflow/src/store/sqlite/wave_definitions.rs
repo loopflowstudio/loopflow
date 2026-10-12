@@ -1,5 +1,6 @@
 //! Wave registration and the separately retained Workflow import.
 
+use crate::work::edit::WorkValue as Edit;
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -9,11 +10,7 @@ use crate::id::WaveId;
 use crate::store::{StoreError, StoreResult};
 use crate::work::project::Project;
 
-use super::{
-    planning_write::{self, PlanningEdit as Edit},
-    SqliteStore,
-};
-use crate::planning_exchange::PlanningKind;
+use super::{planning_write, SqliteStore};
 
 impl SqliteStore {
     /// Provision a Wave hierarchy without a provider, preserving existing authored files.
@@ -64,12 +61,13 @@ impl SqliteStore {
                     planning_write::create(
                         &tx,
                         &repo,
-                        PlanningKind::Wave,
-                        wave.as_str(),
-                        &[
-                            Edit::WaveName(part.into()),
-                            Edit::WaveParent(parent.as_ref().map(ToString::to_string)),
-                        ],
+                        &crate::work::edit::WorkEdit::for_target(
+                            wave.as_str(),
+                            &[
+                                Edit::WaveName(part.into()),
+                                Edit::WaveParent(parent.as_ref().map(ToString::to_string)),
+                            ],
+                        ),
                     )?;
                     wave
                 }

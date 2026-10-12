@@ -1,13 +1,20 @@
+use crate::test_linear_input::{IssueFixture, SeedLinear};
 use std::process::Command;
 
 use loopflow::ops::task::TaskStatus;
-use loopflow::store::{open_ephemeral_store, PlanningState, PmTaskRecord, StorageConfig};
+use loopflow::store::{open_ephemeral_store, PlanningState, StorageConfig};
 use loopflow_test_support::TestRepo;
 use serde_json::json;
 
 #[test]
 fn task_status_reads_projectless_planning_without_allocating_execution() {
     let repo = TestRepo::new();
+    std::fs::create_dir_all(repo.path().join(".lf")).unwrap();
+    std::fs::write(
+        repo.path().join(".lf/config.yaml"),
+        "planning:\n  provider: linear\nlinear:\n  team: team-1\n",
+    )
+    .unwrap();
     let home = tempfile::tempdir().unwrap();
     let database = home.path().join("loopflow.db");
     let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -16,7 +23,7 @@ fn task_status_reads_projectless_planning_without_allocating_execution() {
             database.clone(),
         )))
         .unwrap();
-    let record: PmTaskRecord = serde_json::from_value(json!({
+    let record: IssueFixture = serde_json::from_value(json!({
         "item":{"id":"issue-1","identifier":"FIX-1","url":null,
             "name":"Inspect before allocating execution","description":"Planning only",
             "rank":0,"completed":false,"state":"unstarted","project_id":null,
@@ -26,7 +33,7 @@ fn task_status_reads_projectless_planning_without_allocating_execution() {
     .unwrap();
     let scope = repo.path().canonicalize().unwrap();
     runtime
-        .block_on(store.put_pm_task(
+        .block_on(store.seed_issue(
             &scope.to_string_lossy(),
             "linear",
             record.clone(),
@@ -39,7 +46,7 @@ fn task_status_reads_projectless_planning_without_allocating_execution() {
     stale.item.identifier = "FIX-2".into();
     stale.observed_at -= 7 * 86400 + 1;
     runtime
-        .block_on(store.put_pm_task(
+        .block_on(store.seed_issue(
             &scope.to_string_lossy(),
             "linear",
             stale.clone(),
@@ -51,7 +58,7 @@ fn task_status_reads_projectless_planning_without_allocating_execution() {
     invalid.item.id = "issue-3".into();
     invalid.item.identifier = "FIX-3".into();
     runtime
-        .block_on(store.put_pm_task(
+        .block_on(store.seed_issue(
             &scope.to_string_lossy(),
             "linear",
             invalid.clone(),
@@ -60,18 +67,21 @@ fn task_status_reads_projectless_planning_without_allocating_execution() {
         ))
         .unwrap();
     runtime
-        .block_on(store.invalidate_pm_task(
-            &scope.to_string_lossy(),
-            "linear",
-            invalid.clone(),
-            None,
-        ))
+        .block_on(
+            store.invalidate_linear_issue(
+                &scope.to_string_lossy(),
+                runtime
+                    .block_on(store.linear_issue_evidence(&scope.to_string_lossy(), "FIX-3"))
+                    .unwrap(),
+                None,
+            ),
+        )
         .unwrap();
     let mut removed = record.clone();
     removed.item.id = "issue-4".into();
     removed.item.identifier = "FIX-4".into();
     runtime
-        .block_on(store.put_pm_task(
+        .block_on(store.seed_issue(
             &scope.to_string_lossy(),
             "linear",
             removed.clone(),
@@ -94,7 +104,7 @@ fn task_status_reads_projectless_planning_without_allocating_execution() {
         ("uncached-removal", None, PlanningState::Removed, false),
         ("UNKNOWN", None, PlanningState::Unavailable, true),
     ] {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+        let mut command = Command::new(loopflow_test_support::lf_binary());
         for (name, _) in std::env::vars_os() {
             if name.to_string_lossy().starts_with("LF_") {
                 command.env_remove(name);

@@ -1,8 +1,23 @@
+# Definitions do not activate jobs. Explicit cron sync installs on the placed Machine.
+crons:
+- name: telemetry-daily
+  command: [--wave, infrastructure, --batch, flow, telemetry-daily]
+  schedule: 0 0 9 * * *
+- name: release-run
+  command: [--wave, infrastructure, --batch, flow, release-run]
+  schedule: 0 0 10 * * *
+- name: telemetry-daily
+  command: [--wave, intelligence, --batch, flow, telemetry-daily]
+  schedule: 0 0 8 * * * *
+- name: wave/operate
+  command: [--wave, product, --batch, flow, wave/operate]
+  schedule: 0 0 8 * * * *
 exclude:
 - uv.lock
-pm:
+planning:
   provider: linear
-  linear_team: 3871bed0-8c95-4077-ab72-728327d615b3
+linear:
+  team: 3871bed0-8c95-4077-ab72-728327d615b3
 release:
   targets:
     default:

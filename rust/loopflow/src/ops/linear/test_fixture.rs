@@ -4,7 +4,7 @@ use std::sync::Arc;
 use rusqlite::OptionalExtension;
 use tempfile::TempDir;
 
-use super::PmTestContext;
+use super::LinearTestContext;
 use crate::id::WaveId;
 use crate::store::{open_ephemeral_store, CredentialType, ProviderToken, StorageConfig, Store};
 use crate::work::wave::Wave;
@@ -32,6 +32,18 @@ impl Fixture {
         }
     }
 
+    pub(super) fn retained_task(
+        &self,
+        repo: &std::path::Path,
+        selector: &str,
+    ) -> crate::test_linear_input::IssueFixture {
+        loopflow_test_support::retained_task_input(
+            &self.database,
+            &repo.to_string_lossy(),
+            selector,
+        )
+    }
+
     pub(super) fn wave_refresh_at(&self, wave: &Wave) -> Option<i64> {
         rusqlite::Connection::open(&self.database)
             .unwrap()
@@ -44,8 +56,8 @@ impl Fixture {
             .unwrap()
     }
 
-    pub(super) fn context(&self, graphql_url: &str) -> PmTestContext {
-        PmTestContext {
+    pub(super) fn context(&self, graphql_url: &str) -> LinearTestContext {
+        LinearTestContext {
             path: self.database.clone(),
             store: self.store.clone(),
             graphql_url: graphql_url.into(),
@@ -78,15 +90,11 @@ impl Fixture {
                 .unwrap()
                 .success());
         }
-        std::fs::write(
-            repo.join(".lf/config.yaml"),
-            "pm:\n  provider: linear\n  linear_team: team-1\n",
-        )
-        .unwrap();
+        std::fs::write(repo.join(".lf/config.yaml"), "linear:\n  team: team-1\n").unwrap();
         std::fs::create_dir_all(repo.join("wave/product")).unwrap();
         std::fs::write(
             repo.join("wave/product/GOAL.md"),
-            "---\npm:\n  linear_initiative: initiative-1\n---\nKeep working.\n",
+            "---\nlinear:\n  initiative: initiative-1\n---\nKeep working.\n",
         )
         .unwrap();
         let repo = std::fs::canonicalize(repo).unwrap();
@@ -155,4 +163,48 @@ impl Drop for PlanningEnvironment {
             }
         }
     }
+}
+
+/// Refresh through the actual acquisition path, then retain its input for replay.
+pub(crate) async fn refresh_task_input(
+    repo: &std::path::Path,
+    selector: &str,
+    refresh: super::LinearRefresh,
+) -> crate::ops::OpsResult<crate::test_linear_input::IssueFixture> {
+    let read = super::inspect_task_planning_async(repo, selector, refresh).await?;
+    if read.observation.state != crate::store::PlanningState::Available {
+        return Err(crate::ops::OpsError::Message(
+            read.refresh_error.unwrap_or_else(|| {
+                format!(
+                    "Task {selector:?} planning is {:?}; refresh planning",
+                    read.observation.state
+                )
+            }),
+        ));
+    }
+    let store = super::planning_store().await?;
+    let database = store.sqlite.home_dir().unwrap().join("loopflow.db");
+    let scope = crate::repository::CanonicalRepo::discover(repo).unwrap();
+    Ok(loopflow_test_support::retained_task_input(
+        &database,
+        &scope.to_string(),
+        selector,
+    ))
+}
+
+pub(super) async fn capture_inventory(
+    repo: &std::path::Path,
+    wave: &str,
+    context: &super::LinearRepository,
+    initiative: &str,
+    store: &Store,
+) -> crate::ops::OpsResult<crate::test_linear_input::Inventory> {
+    let projects =
+        super::checked_projects_with_store(repo, context, initiative, wave, store).await?;
+    let items = context
+        .client
+        .list_project_issues(&projects)
+        .await
+        .map_err(super::linear_error)?;
+    Ok(crate::test_linear_input::Inventory { projects, items })
 }

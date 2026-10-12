@@ -1,3 +1,5 @@
+#[cfg(test)]
+use crate::test_linear_input::{Inventory, InventoryFixture, SeedLinear};
 use std::future::Future;
 use std::path::Path;
 use std::sync::Arc;
@@ -8,20 +10,21 @@ use serde_json::json;
 use tokio::sync::Barrier;
 
 use super::test_fixture::{now, token, Fixture, PlanningEnvironment};
-use super::{linear_refresh_lock, refresh_wave, resolve_pm_token, PmTestContext, PM_TEST_CONTEXT};
+use super::{
+    linear_refresh_lock, refresh_wave, resolve_linear_token, LinearTestContext, LINEAR_TEST_CONTEXT,
+};
 use crate::durable::Author;
+use crate::linear::test_server::{self, json_response, QueuedResponse};
+use crate::linear::LinearProjectId;
 use crate::ops::error::OpsResult;
-use crate::pm::test_server::{self, json_response, QueuedResponse};
-use crate::pm::LinearProjectId;
-use crate::pm::PmSnapshot;
 use crate::provider_auth::{LinearRefreshError, LINEAR_REFRESH_CONFIG, LINEAR_REFRESH_URL};
-use crate::store::{open_ephemeral_store, PmSnapshotRow, ProviderToken, StorageConfig};
+use crate::store::{open_ephemeral_store, ProviderToken, StorageConfig};
 use crate::work::project::{Project, ProjectId};
 use crate::work::wave::Wave;
 
 impl Fixture {
     async fn resolve(&self, url: &str) -> OpsResult<String> {
-        scoped(self.context(""), url, resolve_pm_token()).await
+        scoped(self.context(""), url, resolve_linear_token()).await
     }
 
     async fn assert_token(&self, expected: &ProviderToken) {
@@ -32,18 +35,18 @@ impl Fixture {
         );
     }
 
-    async fn seed_snapshot(&self, wave: &Wave) -> PmSnapshotRow {
-        let row = PmSnapshotRow {
+    async fn seed_snapshot(&self, wave: &Wave) -> InventoryFixture {
+        let row = InventoryFixture {
             wave_id: wave.id().clone(),
             provider: "linear".into(),
             initiative: "initiative-1".into(),
             synced_at: 1,
-            snapshot: PmSnapshot {
+            snapshot: Inventory {
                 projects: vec![],
                 items: vec![],
             },
         };
-        self.store.put_pm_snapshot(row.clone(), None).await.unwrap();
+        self.store.seed_inventory(row.clone(), None).await.unwrap();
         row
     }
 }
@@ -56,8 +59,8 @@ fn failure_message<T>(result: OpsResult<T>) -> String {
     }
 }
 
-async fn scoped<T>(context: PmTestContext, url: &str, future: impl Future<Output = T>) -> T {
-    PM_TEST_CONTEXT
+async fn scoped<T>(context: LinearTestContext, url: &str, future: impl Future<Output = T>) -> T {
+    LINEAR_TEST_CONTEXT
         .scope(context, LINEAR_REFRESH_URL.scope(url.to_string(), future))
         .await
 }
@@ -366,14 +369,14 @@ async fn linear_oauth_concurrent_alias_readers_share_one_rotation() {
     let first_ctx = fixture.context("");
     let first_url = url.clone();
     let first =
-        tokio::spawn(async move { scoped(first_ctx, &first_url, resolve_pm_token()).await });
+        tokio::spawn(async move { scoped(first_ctx, &first_url, resolve_linear_token()).await });
     entered.wait().await;
-    let second_ctx = PmTestContext {
+    let second_ctx = LinearTestContext {
         path: alias,
         store: other,
         graphql_url: String::new(),
     };
-    let second = scoped(second_ctx, &url, resolve_pm_token());
+    let second = scoped(second_ctx, &url, resolve_linear_token());
     let (second, _) = tokio::join!(second, release.wait());
     assert!(first.await.unwrap().unwrap() == "A2");
     assert!(second.unwrap() == "A2");
@@ -392,7 +395,7 @@ async fn linear_oauth_interactive_connection_and_deletion_win_inflight_exchange(
         let (response, entered, release) = gated(response);
         let (url, requests) = test_server::spawn(vec![response]).await;
         let ctx = fixture.context("");
-        let resolver = tokio::spawn(async move { scoped(ctx, &url, resolve_pm_token()).await });
+        let resolver = tokio::spawn(async move { scoped(ctx, &url, resolve_linear_token()).await });
         entered.wait().await;
         let winner = token("interactive", "interactive-refresh", now() + 86400);
         if delete {
@@ -501,7 +504,7 @@ async fn linear_oauth_failed_refresh_checks_expiry_at_return() {
         let (response, entered, release) = gated(rejected("unknown"));
         let (url, _) = test_server::spawn(vec![response]).await;
         let ctx = fixture.context("");
-        let resolver = tokio::spawn(async move { scoped(ctx, &url, resolve_pm_token()).await });
+        let resolver = tokio::spawn(async move { scoped(ctx, &url, resolve_linear_token()).await });
         entered.wait().await;
         if expires_during_request {
             let remaining = (expires as i128 * 1_000_000_000
@@ -589,7 +592,7 @@ fn linear_oauth_proactive_failure_tracing_is_secret_free() {
     let output = std::process::Command::new(std::env::current_exe().unwrap())
         .args([
             "--exact",
-            "ops::pm::oauth_tests::oauth_trace_process_entry",
+            "ops::linear::oauth_tests::oauth_trace_process_entry",
             "--ignored",
             "--nocapture",
         ])
@@ -640,7 +643,7 @@ async fn linear_oauth_stalled_first_attempt_leaves_time_for_one_replay() {
     let (url, requests) = test_server::spawn(vec![response, rotated()]).await;
     let ctx = fixture.context("");
     let start = Instant::now();
-    let resolver = tokio::spawn(async move { scoped(ctx, &url, resolve_pm_token()).await });
+    let resolver = tokio::spawn(async move { scoped(ctx, &url, resolve_linear_token()).await });
     entered.wait().await;
     let value = resolver.await.unwrap().unwrap();
     assert!(value == "A2");
@@ -655,7 +658,7 @@ async fn linear_oauth_stale_rejection_does_not_condemn_expired_winner() {
     let (response, entered, release) = gated(rejected("invalid_grant"));
     let (url, _) = test_server::spawn(vec![response]).await;
     let ctx = fixture.context("");
-    let resolver = tokio::spawn(async move { scoped(ctx, &url, resolve_pm_token()).await });
+    let resolver = tokio::spawn(async move { scoped(ctx, &url, resolve_linear_token()).await });
     entered.wait().await;
     let winner = token("newer-access", "newer-refresh", now() - 1);
     fixture.store.upsert_provider_token(&winner).await.unwrap();

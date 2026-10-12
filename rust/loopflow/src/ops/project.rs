@@ -33,7 +33,7 @@ pub(crate) fn current_project(store: &Store, wave: &Wave) -> OpsResult<Project> 
 /// Explicitly seed a Wave's shared selection with an existing Project UUID.
 /// Switching an established binding belongs to Project rotation.
 pub async fn bind_project(repo: &Path, name: &str, project_id: &str) -> OpsResult<Project> {
-    let store = super::pm::pm_store().await?;
+    let store = super::planning_sync::planning_store().await?;
     let wave = crate::work::wave::context::resolve_managed_wave(
         Some(&store),
         Some(repo),
@@ -42,7 +42,7 @@ pub async fn bind_project(repo: &Path, name: &str, project_id: &str) -> OpsResul
     )
     .await
     .map_err(project_error)?;
-    let acquisition = super::pm::lock_wave_planning(&wave).await?;
+    let acquisition = super::planning_sync::lock_wave_planning(&wave).await?;
     import_binding(&store, &wave, &acquisition)?;
     store
         .sqlite
@@ -52,7 +52,7 @@ pub async fn bind_project(repo: &Path, name: &str, project_id: &str) -> OpsResul
 
 /// Explicit activation; ordinary planning reads never call this operation.
 pub async fn ensure(repo: &Path, name: &str) -> OpsResult<Project> {
-    let store = super::pm::pm_store().await?;
+    let store = super::planning_sync::planning_store().await?;
     let wave = crate::work::wave::ensure_wave_row(&store, repo, name)
         .await
         .map_err(project_error)?;
@@ -60,7 +60,7 @@ pub async fn ensure(repo: &Path, name: &str) -> OpsResult<Project> {
         .sqlite
         .record_project_activation(wave.id(), crate::journal::current_lf_process_id().as_ref())
         .map_err(project_error)?;
-    let acquisition = super::pm::lock_wave_planning(&wave).await?;
+    let acquisition = super::planning_sync::lock_wave_planning(&wave).await?;
     import_binding(&store, &wave, &acquisition)?;
     let id = store
         .sqlite
@@ -80,7 +80,7 @@ pub async fn update_plan(
     krs: &[crate::work::project::ProjectKR],
     metric_targets: &[crate::work::wave::metrics::MetricTarget],
 ) -> OpsResult<(Project, PlanningSyncStatus)> {
-    let store = super::pm::pm_store().await?;
+    let store = super::planning_sync::planning_store().await?;
     let ambient = std::env::var(crate::work::wave::context::WAVE_ID_ENV).ok();
     let wave = crate::work::wave::context::resolve_managed_wave(
         Some(&store),
@@ -90,7 +90,7 @@ pub async fn update_plan(
     )
     .await
     .map_err(project_error)?;
-    let _acquisition = super::pm::lock_wave_planning(&wave).await?;
+    let _acquisition = super::planning_sync::lock_wave_planning(&wave).await?;
     let project = current_project(&store, &wave)?;
     super::metrics::validate_chapter_targets(&wave, metric_targets).map_err(project_error)?;
     store
@@ -234,7 +234,7 @@ async fn resolve_plan(store: &Store, repo: &Path, target: PlanTarget<'_>) -> Ops
 
 fn read_store() -> OpsResult<Store> {
     #[cfg(test)]
-    if let Ok(store) = super::pm::PM_TEST_CONTEXT
+    if let Ok(store) = super::linear::LINEAR_TEST_CONTEXT
         .try_with(|ctx| Store::from_sqlite_for_test(ctx.store.sqlite.clone()))
     {
         return Ok(store);
@@ -316,14 +316,14 @@ pub async fn edit(
             "wave edit-plan requires --name, --summary or --description",
         ));
     }
-    let store = super::pm::pm_store().await?;
+    let store = super::planning_sync::planning_store().await?;
     let project = resolve_plan(&store, repo, target).await?;
     let wave = store
         .get_wave(&project.wave_id)
         .await
         .map_err(project_error)?
         .ok_or_else(|| project_error("Project Wave is unavailable"))?;
-    let _acquisition = super::pm::lock_wave_planning(&wave).await?;
+    let _acquisition = super::planning_sync::lock_wave_planning(&wave).await?;
     store
         .sqlite
         .edit_project(&project.id, name, summary, description)
@@ -348,7 +348,7 @@ pub async fn set_workflow(
     name: &str,
     file: Option<&Path>,
 ) -> OpsResult<(Project, PlanningSyncStatus)> {
-    let store = super::pm::pm_store().await?;
+    let store = super::planning_sync::planning_store().await?;
     let project = resolve_plan(&store, repo, target).await?;
     let definition = match file {
         Some(path) => std::fs::read_to_string(path).map_err(project_error)?,
@@ -361,7 +361,7 @@ pub async fn set_workflow(
         .await
         .map_err(project_error)?
         .ok_or_else(|| project_error("Project Wave is unavailable"))?;
-    let _acquisition = super::pm::lock_wave_planning(&wave).await?;
+    let _acquisition = super::planning_sync::lock_wave_planning(&wave).await?;
     store
         .sqlite
         .select_project_workflow(&project.id, name, &definition)

@@ -8,15 +8,16 @@ use serde::{Deserialize, Serialize};
 
 use crate::git::{is_clean, rev_parse};
 use crate::id::WaveId;
+use crate::linear::LinearProject;
 use crate::ops::{OpsError, OpsResult};
-use crate::pm::linear::LinearProject;
 use crate::store::sqlite::project_selection::read_project_binding;
 use crate::store::Store;
 use crate::work::project::{Project, ProjectStatus};
 use crate::work::task::Task;
 use crate::work::wave::{Wave, WaveLocator};
 
-use super::pm::{lock_wave_planning, pm_store, project_is_foreign, PmContext};
+use super::linear::{project_is_foreign, LinearRepository};
+use super::planning_sync::{lock_wave_planning, planning_store};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -89,10 +90,10 @@ pub fn new_chapter(
         .map_err(error)?
         .block_on(rotate(repo, &plan, wave, dry_run))?;
     if !dry_run
-        && crate::config::load_config_or_default(Some(repo))
-            .pm
-            .and_then(|pm| pm.linear_team)
-            .is_some()
+        && matches!(
+            crate::config::load_config_or_default(Some(repo)).planning_transport(),
+            crate::config::PlanningConfig::Linear {}
+        )
     {
         eprintln!("Saved locally; pending Linear sync.");
     }
@@ -112,7 +113,7 @@ pub(crate) async fn rotate(
     {
         return Err(error("chapter name must be 1–160 characters on one line"));
     }
-    let store = pm_store().await?;
+    let store = planning_store().await?;
     let selected_wave = match only_wave {
         Some(name) => Some(
             store
@@ -377,7 +378,8 @@ pub(crate) async fn adopt_legacy_projects(
     repo: &Path,
     store: &Store,
     wave_name: &str,
-    ctx: &PmContext,
+    ctx: &LinearRepository,
+    initiative: &str,
     apply: bool,
 ) -> OpsResult<Vec<LinearProject>> {
     let locator = WaveLocator::discover(repo, wave_name).map_err(error)?;
@@ -396,11 +398,7 @@ pub(crate) async fn adopt_legacy_projects(
     if pending.is_empty() {
         return Ok(Vec::new());
     }
-    let mut projects = ctx
-        .client
-        .list_projects(&ctx.initiative)
-        .await
-        .map_err(error)?;
+    let mut projects = ctx.client.list_projects(initiative).await.map_err(error)?;
     for (id, _) in &pending {
         if !projects.iter().any(|project| &project.id == id) {
             projects.push(ctx.client.project_ownership(id).await.map_err(error)?);
@@ -460,7 +458,7 @@ pub(crate) async fn adopt_legacy_projects(
             ctx.client
                 .adopt_project(
                     id,
-                    &ctx.initiative,
+                    initiative,
                     &ctx.team_id,
                     promote == Some(id.as_str()),
                     false,
@@ -475,7 +473,7 @@ pub(crate) async fn adopt_legacy_projects(
                 .client
                 .adopt_project(
                     &project.id,
-                    &ctx.initiative,
+                    initiative,
                     &ctx.team_id,
                     promote == Some(project.id.as_str()),
                     true,

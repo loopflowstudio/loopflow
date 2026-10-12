@@ -301,6 +301,19 @@ struct DTOFixtureTests {
         }
     }
 
+    @Test("Task completion preserves execution and dated unstarted Tasks")
+    func taskDeliveryFixture() throws {
+        let rows = try JSONDecoder().decode([String: RoadmapTask].self, from: loadFixtureData("task_delivery_rows.json"))
+        let pending = try #require(rows["pending"])
+        #expect(pending.runtime?.completionPending?.contains("lf task complete") == true)
+        #expect(rows["completed_running"]?.runtime?.status == .done)
+        #expect(rows["completed_running"]?.execution == pending.execution)
+        let due = try #require(rows["due"])
+        #expect(due.runtime == nil)
+        #expect(due.task.dueDate == "2026-10-08")
+        #expect(!due.task.completed)
+    }
+
     @Test("Planning delivery retains uncertainty, errors and both conflict values")
     func planningSyncFixture() throws {
         let sync = try JSONDecoder().decode(PlanningSyncStatus.self, from: loadFixtureData("planning_sync.json"))
@@ -308,6 +321,8 @@ struct DTOFixtureTests {
         #expect(sync.changes[0].state == .pending)
         #expect(sync.changes[1].state == .uncertain)
         #expect(sync.changes[1].error == "Reply lost; awaiting readback")
+        #expect(sync.changes[2].field == "task_title")
+        #expect(sync.changes[3].field == "task_assignee")
         #expect(sync.changes[2].localValue == .string("Local title"))
         #expect(sync.changes[2].linearValue == .string("Linear title"))
         #expect(sync.changes[3].text.contains("Linear: null"))
@@ -817,14 +832,14 @@ struct DTOFixtureTests {
         #expect(statuses[0].publicationState == "unconfirmed")
         #expect(statuses[0].importedRevision == "retained-import")
         #expect(statuses[0].fetchedRevision == "newer-fetch")
-        #expect(statuses[0].conflicts[0].object.id == "retained-task")
+        #expect(statuses[0].conflicts[0].target == "retained-task")
         #expect(statuses[1].pendingLocal == true)
         #expect(statuses[1].active)
-        #expect(statuses[1].changes["title-loser"]?.value == .string("Retained title"))
+        #expect(statuses[1].changes["title-loser"]?.edit.change.value == .string("Retained title"))
         #expect(!statuses[1].candidates.contains("title-loser"))
         #expect(statuses[1].changes["title-head"]?.parents == ["title-loser"])
         #expect(statuses[1].changes["comment-head"]?.clock == 4)
-        guard case .object(let content) = statuses[1].changes["comment-head"]?.value else {
+        guard case .object(let content) = statuses[1].changes["comment-head"]?.edit.change.value else {
             Issue.record("expected typed comment content")
             return
         }

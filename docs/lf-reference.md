@@ -54,8 +54,9 @@ Open Loopflow or run its CLI
 | `--json` | Emit invocation previews as JSON Default: false. |
 | `--docs` | Docs paths, globs, or directories to include in context |
 | `--clipboard / -c` | Include clipboard content in prompt Default: false. |
-| `--agent / -a` | Agent to use (harness or harness:model) |
+| `--agent / -a` | Override agents named in Tasks, Flows and skills, including child commands (harness[:model]) Applies everywhere. |
 | `--skill-input` | Captured skill and arguments supplied by the invoking Flow process Internal. |
+| `--output-schema` | Native final-answer schema supplied by a deciding step Internal. |
 | `--account` | Prefer this managed provider login before the normal route. Repeat to select provider-qualified preferences such as `claude=jack@`. Logins spend; a profile is only the Chrome venue accounts log in through, so it is never a run-time selector |
 | `--only-account` | Restrict this invocation and its children to exactly these managed provider logins. Providers without a selection are unavailable |
 | `--isolate` | Run in the selected account's own provider home, unmoved by account switches. Applies to this invocation and its children Default: false. |
@@ -115,7 +116,6 @@ Publish a ready PR headlessly: push, create or refresh, print state + URL. Opens
 
 | Argument | What it does |
 |---|---|
-| `--agent / -a` | Agent to use (harness or harness:model) |
 | `--title` | title |
 | `--body` | body |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
@@ -127,7 +127,6 @@ Push and create or update a draft PR, then open its GitHub page. Existing ready 
 
 | Argument | What it does |
 |---|---|
-| `--agent / -a` | Agent to use (harness or harness:model) |
 | `--title` | title |
 | `--body` | body |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
@@ -377,6 +376,19 @@ Internal command; invoked by the owning operation.
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
+## lf __context-block
+
+Internal conversation context for native startup/compaction hooks
+
+Internal command; invoked by the owning operation.
+
+| Argument | What it does |
+|---|---|
+| `--delivery` | delivery |
+| `--moment` | moment |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
 ## lf __session-title
 
 Native provider naming callback
@@ -457,7 +469,7 @@ List Sessions
 
 ## lf session connect
 
-Connect to the live conversation, or resume its saved history
+Stop headless Claude/OpenCode and resume history; connect to Codex live
 
 | Argument | What it does |
 |---|---|
@@ -1540,13 +1552,13 @@ Record repair ownership without changing the failed evidence
 
 ## lf wave cron add
 
-Install or replace a scheduled lf invocation
+Install a named ordinary lf command on this Machine
 
 | Argument | What it does |
 |---|---|
-| `--wave / -w` | Wave name passed to `lf <flow> --wave <wave>` (ambient if omitted) |
-| `--flow` | Flow or skill name to run |
+| `<name>` | Stable job name, retained across command changes |
 | `--schedule` | Daily or every-minute cron expression, or a schedule alias Default: daily. |
+| `<command>` | Arguments passed to lf, after -- |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
@@ -1556,28 +1568,31 @@ List installed loopflow cron jobs
 
 | Argument | What it does |
 |---|---|
-| `--wave / -w` | Only jobs for this Wave |
+| `--wave / -w` | Only commands with this --wave selector |
+| `--task` | Only commands with this --task selector |
 | `--json` | Emit machine-readable job state Default: false. |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf wave cron preflight
 
-Validate Machine authority and declared jobs without changing launchd
+Validate configured commands and Machine placement without installing jobs
 
 | Argument | What it does |
 |---|---|
-| `--wave / -w` | Wave whose GOAL.md `crons:` are validated |
+| `--wave / -w` | Only commands with this --wave selector |
+| `--task` | Only commands with this --task selector |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf wave cron sync
 
-Reconcile installed launchd jobs to match a wave's declared `crons:`
+Reconcile installed jobs with the repository configuration's cron list
 
 | Argument | What it does |
 |---|---|
-| `--wave / -w` | wave |
+| `--wave / -w` | Only commands with this --wave selector |
+| `--task` | Only commands with this --task selector |
 | `--repo` | Install the finite repository Task check on this Machine Default: false. |
 | `--disable` | Remove the repository schedule; running work retains its authority Default: false. |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
@@ -2073,8 +2088,7 @@ Show context budgets from local sources
 |---|---|
 | `--json` | json Default: false. |
 | `--wave` | Inspect a Wave's local authored context |
-| `--task` | Inspect a Task's checkout and goal files |
-| `--skill` | Skill to include in the launch preview Default: realign. |
+| `--task` | Inspect a Task's checkout and Wave context |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 

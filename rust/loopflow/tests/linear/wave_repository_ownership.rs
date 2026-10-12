@@ -1,4 +1,5 @@
-mod support;
+use crate::test_linear_input::{InventoryFixture, SeedLinear};
+use crate::test_support as support;
 
 use support::planning;
 
@@ -7,8 +8,8 @@ use std::process::Command;
 
 use loopflow::durable::{MachineId, WorkRef, WorkStatus};
 use loopflow::id::WaveId;
-use loopflow::pm::{LinearIssueId, LinearProjectId};
-use loopflow::store::{PmSnapshotRow, StorageConfig};
+use loopflow::linear::{LinearIssueId, LinearProjectId};
+use loopflow::store::StorageConfig;
 use loopflow::work::project::{Project, ProjectId};
 use loopflow::work::task::{LinearWritebackState, Observation, Task, TaskId, TaskPr, TaskPrId};
 use loopflow::work::wave::context::{resolve_managed_wave, WaveResolveError};
@@ -139,7 +140,7 @@ fn task(wave: &Wave, project: &Project, repo: &Path) -> (Task, TaskPr) {
 }
 
 fn lf_command(home: &Path, repo: &Path, args: &[&str]) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_lf"))
+    Command::new(loopflow_test_support::lf_binary())
         .args(args)
         .current_dir(repo)
         .env("LF_HOME", home)
@@ -203,11 +204,11 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         store.create_wave(&legacy).await.unwrap();
         let sibling = Wave::new(WaveId::new(), "sibling".into(), alias.display().to_string());
         store.create_wave(&sibling).await.unwrap();
-        let snapshot: loopflow::pm::PmSnapshot =
-            serde_json::from_str(include_str!("fixtures/linear_snapshot.json")).unwrap();
+        let snapshot: crate::test_linear_input::Inventory =
+            serde_json::from_str(include_str!("../fixtures/linear_snapshot.json")).unwrap();
         store
-            .put_pm_snapshot(
-                PmSnapshotRow {
+            .seed_inventory(
+                InventoryFixture {
                     wave_id: legacy.id().clone(),
                     provider: "linear".into(),
                     initiative: "initiative-infrastructure".into(),
@@ -251,11 +252,12 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
             );
         }
         let observation = store
-            .pm_task_observation(resolved.repo(), "linear", "LOO-2")
+            .linear_issue_evidence(resolved.repo(), "LOO-2")
             .await
             .unwrap();
         assert_eq!(observation.state, loopflow::store::PlanningState::Available);
-        let detail = observation.record.unwrap();
+        let detail: crate::test_linear_input::IssueFixture =
+            loopflow_test_support::retained_task_input(&database, resolved.repo(), "LOO-2");
         assert_eq!(detail.item, snapshot.items[0]);
         assert_eq!(detail.project.as_ref(), Some(&snapshot.projects[0]));
     }
@@ -371,13 +373,13 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     );
 
     store
-        .put_pm_snapshot(
-            PmSnapshotRow {
+        .seed_inventory(
+            InventoryFixture {
                 wave_id: alpha.id().clone(),
                 provider: "linear".to_string(),
                 initiative: "initiative-alpha".to_string(),
                 synced_at: 1,
-                snapshot: loopflow::pm::PmSnapshot {
+                snapshot: crate::test_linear_input::Inventory {
                     projects: vec![],
                     items: vec![],
                 },
@@ -428,7 +430,7 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         std::fs::create_dir_all(repo.join(".lf")).unwrap();
         std::fs::write(
             repo.join(".lf/config.yaml"),
-            format!("pm:\n  linear_team: {team}\n"),
+            format!("linear:\n  team: {team}\n"),
         )
         .unwrap();
     }
@@ -447,13 +449,13 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     let occupied = registered_wave(&repo_a, "occupied");
     store.create_wave(&occupied).await.unwrap();
     store
-        .put_pm_snapshot(
-            PmSnapshotRow {
+        .seed_inventory(
+            InventoryFixture {
                 wave_id: occupied.id().clone(),
                 provider: "linear".to_string(),
                 initiative: "initiative-occupied".to_string(),
                 synced_at: 1,
-                snapshot: loopflow::pm::PmSnapshot {
+                snapshot: crate::test_linear_input::Inventory {
                     projects: vec![],
                     items: vec![],
                 },
@@ -839,13 +841,13 @@ async fn relocation_refuses_meaningful_destination_history() {
     let pm_shadow = registered_wave(&target, "with-pm");
     store.create_wave(&pm_shadow).await.unwrap();
     store
-        .put_pm_snapshot(
-            PmSnapshotRow {
+        .seed_inventory(
+            InventoryFixture {
                 wave_id: pm_shadow.id().clone(),
                 provider: "linear".to_string(),
                 initiative: "initiative-pm".to_string(),
                 synced_at: 1,
-                snapshot: loopflow::pm::PmSnapshot {
+                snapshot: crate::test_linear_input::Inventory {
                     projects: vec![],
                     items: vec![],
                 },

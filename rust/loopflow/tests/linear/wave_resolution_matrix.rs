@@ -5,6 +5,7 @@
 //! environment classify the same way. A completeness guard walks the clap tree
 //! and fails CI when a new `--wave`-bearing command is not registered.
 
+use crate::test_linear_input::{InventoryFixture, SeedLinearSqlite};
 use std::collections::HashSet;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
@@ -14,7 +15,6 @@ use clap::{ArgAction, CommandFactory};
 use loopflow::id::WaveId;
 use loopflow::lf::Cli;
 use loopflow::store::sqlite::SqliteStore;
-use loopflow::store::PmSnapshotRow;
 use loopflow::work::wave::Wave;
 
 // ─── Command registry ───────────────────────────────────────────────────
@@ -50,12 +50,9 @@ const AMBIENT_ONLY: &[&[&str]] = &[];
 /// ownership. Ambient Wave selection must not redirect an explicit Task.
 const ISSUE_OWNED: &[&[&str]] = &[&["task", "edit"], &["task", "comment"]];
 
-/// Local context previews accept authored Wave directories without registration.
-/// `global_commands` covers their config, usage and refresh behavior.
-const AUTHORED_CONTEXT: &[&[&str]] = &[&["context"]];
-
-/// Scheduling requires an explicit Wave or repository, never ambient selection.
-const REPOSITORY_OR_WAVE: &[&[&str]] = &[&["wave", "cron", "sync"]];
+/// Authored inputs do not select an ambient execution Wave: context reads
+/// directories, while cron add saves a command whose own selectors name its Work.
+const AUTHORED_CONTEXT: &[&[&str]] = &[&["context"], &["wave", "cron", "add"]];
 
 /// Primary conversations default to the repository unless `--wave` is explicit.
 /// `human_session::primary::tests` proves ambient Wave context cannot redirect them.
@@ -68,6 +65,8 @@ const FILTER_ONLY: &[&[&str]] = &[
     &["history"],
     &["repo", "ci"],
     &["wave", "cron", "list"],
+    &["wave", "cron", "preflight"],
+    &["wave", "cron", "sync"],
     &["history", "list"],
     &["history", "usage"],
     &["wave", "workflow", "list"],
@@ -79,7 +78,6 @@ const FILTER_ONLY: &[&[&str]] = &[
 const EXPLICIT_WAVE_ONLY: &[&[&str]] = &[
     &["wave", "rename"],
     &["discord", "serve"],
-    &["wave", "cron", "preflight"],
     &["wave", "cron", "run"],
     &["wave", "cron", "history"],
     &["wave", "cron", "disposition"],
@@ -145,21 +143,6 @@ const COMMANDS: &[Cmd] = &[
         base_args: &["repo", "refresh"],
         wave_form: WaveForm::Positional,
         global_default: true,
-    },
-    Cmd {
-        id: "cron add",
-        path: &["wave", "cron", "add"],
-        base_args: &[
-            "wave",
-            "cron",
-            "add",
-            "--flow",
-            "matrix-test-flow",
-            "--schedule",
-            "daily",
-        ],
-        wave_form: WaveForm::Flag,
-        global_default: false,
     },
     Cmd {
         id: "task create",
@@ -349,12 +332,12 @@ fn seed(home: &Path, repo: &Path) -> Wave {
     );
     store.create_wave(&wave).expect("register wave");
     store
-        .put_pm_snapshot(&PmSnapshotRow {
+        .seed_inventory(&InventoryFixture {
             wave_id: wave.id().clone(),
             provider: "linear".to_string(),
             initiative: "initiative-1".to_string(),
             synced_at: chrono::Utc::now().timestamp(),
-            snapshot: loopflow::pm::PmSnapshot {
+            snapshot: crate::test_linear_input::Inventory {
                 projects: vec![],
                 items: vec![],
             },
@@ -408,7 +391,7 @@ fn build_args(cmd: &Cmd, env: &Env) -> Vec<String> {
 fn run_lf(home: &Path, repo: &Path, cmd: &Cmd, env: &Env) -> std::process::Output {
     let args = build_args(cmd, env);
 
-    let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+    let mut command = Command::new(loopflow_test_support::lf_binary());
     command
         .args(&args)
         .current_dir(repo)
@@ -421,8 +404,6 @@ fn run_lf(home: &Path, repo: &Path, cmd: &Cmd, env: &Env) -> std::process::Outpu
                 std::env::var("PATH").unwrap_or_default()
             ),
         )
-        // Redirect HOME so `lf cron add` writes plists into the temp dir,
-        // not the real ~/Library/LaunchAgents.
         .env("HOME", home)
         .env_remove("LF_TRACE_ID")
         .env_remove("LF_WAVE_ID");
@@ -549,7 +530,6 @@ fn registry_is_complete() {
         .iter()
         .chain(ISSUE_OWNED)
         .chain(AUTHORED_CONTEXT)
-        .chain(REPOSITORY_OR_WAVE)
         .chain(REPOSITORY_DEFAULT)
         .map(|path| path.iter().map(|s| s.to_string()).collect())
         .collect();
@@ -597,7 +577,6 @@ fn registry_is_complete() {
         .chain(FILTER_ONLY)
         .chain(ISSUE_OWNED)
         .chain(AUTHORED_CONTEXT)
-        .chain(REPOSITORY_OR_WAVE)
         .chain(REPOSITORY_DEFAULT)
     {
         assert!(
@@ -618,17 +597,6 @@ fn registry_is_complete() {
             }),
             "explicit-only command {path:?} must require one `wave` argument"
         );
-    }
-
-    for path in REPOSITORY_OR_WAVE {
-        let mut args = vec!["lf"];
-        args.extend_from_slice(path);
-        assert!(Cli::command().try_get_matches_from(&args).is_err());
-        for target in [vec!["--repo"], vec!["--wave", "fixture"]] {
-            let mut explicit = args.clone();
-            explicit.extend(target);
-            assert!(Cli::command().try_get_matches_from(explicit).is_ok());
-        }
     }
 
     // 6. Every registry entry must map to a real clap command (no stale
@@ -655,9 +623,7 @@ fn registry_is_complete() {
 // ─── Mutation targeting ─────────────────────────────────────────────────
 
 /// Cron installation refuses a development binary before writing host state.
-/// The matrix above already proves the command resolves an ambient Wave; this
-/// boundary proves that successful resolution cannot leave a disposable binary
-/// in launchd.
+/// Valid command arguments cannot leave a disposable binary in launchd.
 #[test]
 fn cron_add_rejects_a_development_binary_before_mutation() {
     let tmp = tempfile::tempdir().expect("tempdir");
@@ -692,15 +658,20 @@ fn cron_add_rejects_a_development_binary_before_mutation() {
 
     let alpha_uuid = alpha.id().as_str();
 
-    let cron = Command::new(env!("CARGO_BIN_EXE_lf"))
+    let cron = Command::new(loopflow_test_support::lf_binary())
         .args([
             "wave",
             "cron",
             "add",
-            "--flow",
             "mutation-test",
             "--schedule",
             "daily",
+            "--",
+            "--wave",
+            "alpha",
+            "--batch",
+            "flow",
+            "mutation-test",
         ])
         .current_dir(&repo)
         .env("LF_HOME", &home)

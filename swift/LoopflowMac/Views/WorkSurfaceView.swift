@@ -279,7 +279,7 @@ struct WorkSurfaceView: View {
                     }
                     .tint(palette.accentInk)
                     .foregroundStyle(palette.accentInk)
-                    TaskDeliveryView(task: task)
+                    TaskDueDateView(task: task)
                     if task.task.acquisition.state != .available {
                         Text("Planning evidence: \(task.task.acquisition.state.rawValue)")
                             .font(Typography.caption())

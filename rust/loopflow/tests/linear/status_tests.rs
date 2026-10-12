@@ -2,8 +2,8 @@
 //! promises must be the JSON it emits, and the wave you are standing in must be
 //! the wave it reports. Drives the real binary against a seeded `LF_HOME`.
 
-#[path = "support/planning.rs"]
-mod planning;
+use crate::test_linear_input::{InventoryFixture, SeedLinearSqlite};
+use crate::test_support::planning;
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
@@ -11,10 +11,10 @@ use std::process::Command;
 
 use loopflow::child::ChildRef;
 use loopflow::id::WaveId;
-use loopflow::pm::{LinearIssueId, LinearProjectId};
+use loopflow::linear::{LinearIssueId, LinearProjectId};
 use loopflow::store::migrations;
 use loopflow::store::sqlite::SqliteStore;
-use loopflow::store::{PmSnapshotRow, StorageConfig};
+use loopflow::store::StorageConfig;
 use loopflow::work::project::{Project, ProjectEventKind, ProjectId};
 use loopflow::work::task::{
     LinearWritebackState, Observation, PrMergeMode, Task, TaskId, TaskPr, TaskPrId,
@@ -25,7 +25,7 @@ use loopflow::work::wave::metrics::{
 use loopflow::work::wave::Wave;
 use time::OffsetDateTime;
 
-const PREVIOUS_RELEASE_TASK_PR_FIXTURE: &str = include_str!("fixtures/store_0_12_8_task_pr.sql");
+const PREVIOUS_RELEASE_TASK_PR_FIXTURE: &str = include_str!("../fixtures/store_0_12_8_task_pr.sql");
 const PERSISTED_TASK_ID: &str = "task_40fbeeaadfbca5367aa7391432ae84ff";
 
 /// A machine home holding one Wave.
@@ -99,7 +99,7 @@ fn put_project_snapshot(home: &Path, wave: &Wave, project: &Project) {
     let store = SqliteStore::new(&home.join("loopflow.db")).expect("open status store");
     select_project(home, wave, project.linear_id.as_ref().unwrap().as_str());
     store
-        .put_pm_snapshot(&PmSnapshotRow {
+        .seed_inventory(&InventoryFixture {
             wave_id: wave.id().clone(),
             provider: "linear".to_string(),
             initiative: "initiative-infrastructure".to_string(),
@@ -137,7 +137,7 @@ fn seed_credential_history(home: &Path) -> Project {
 
 /// `lf wave status --json` in a clean environment, optionally standing inside a wave.
 fn status_json(home: &Path, args: &[&str], ambient_wave_id: Option<&str>) -> serde_json::Value {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+    let mut command = Command::new(loopflow_test_support::lf_binary());
     command
         .args(["wave", "status"])
         .args(args)
@@ -161,7 +161,7 @@ fn status_json(home: &Path, args: &[&str], ambient_wave_id: Option<&str>) -> ser
 }
 
 fn status_human(home: &Path, wave: &str) -> String {
-    let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+    let output = Command::new(loopflow_test_support::lf_binary())
         .args(["wave", "status", wave])
         .env("LF_HOME", home)
         .current_dir(home.join("repo"))
@@ -176,7 +176,7 @@ fn status_human(home: &Path, wave: &str) -> String {
 }
 
 fn roadmap_json(home: &Path, wave: &str) -> serde_json::Value {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+    let mut command = Command::new(loopflow_test_support::lf_binary());
     command
         .args(["wave", "show", wave, "--json"])
         .env("LF_HOME", home)
@@ -207,7 +207,7 @@ fn seed_stale_project_work(
     home: &Path,
     abandon_stale_project: bool,
     current_task: bool,
-) -> PmSnapshotRow {
+) -> InventoryFixture {
     const STALE_WORK_ID: &str = "proj_e972b70272fbb5e91c096ebe657f9f9b";
     const STALE_PROJECT_ID: &str = "f56c583c-c360-4dc4-ba12-4b5a02268623";
     const STALE_TASK_WORK_ID: &str = "task_40fbeeaadfbca5367aa7391432ae84ff";
@@ -379,14 +379,14 @@ fn seed_stale_project_work(
             }
         ]
     });
-    let snapshot = PmSnapshotRow {
+    let snapshot = InventoryFixture {
         wave_id: wave.id().clone(),
         provider: "linear".into(),
         initiative: "initiative-product".into(),
         synced_at: now.unix_timestamp(),
         snapshot: serde_json::from_value(payload).unwrap(),
     };
-    store.put_pm_snapshot(&snapshot).expect("seed PM snapshot");
+    store.seed_inventory(&snapshot).expect("seed PM snapshot");
     snapshot
 }
 
@@ -548,7 +548,7 @@ fn all_roadmaps_ignore_inherited_wave_from_a_gui_launch() {
     let first = seed(home.path(), "one");
     let second = seed(home.path(), "two");
     for ambient in [first.id().as_str(), "stale-wave-id"] {
-        let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+        let output = Command::new(loopflow_test_support::lf_binary())
             .args(["wave", "show", "--all", "--json"])
             .env("LF_HOME", home.path())
             .env_remove("LF_TRACE_ID")
@@ -581,7 +581,7 @@ fn current_wave_reads_exclude_abandoned_registrations_without_deleting_history()
     let work = loopflow::durable::WorkRef::Wave(abandoned.id().clone());
     store.abandon(&work, "accidental registration").unwrap();
     let run = |args: &[&str]| {
-        Command::new(env!("CARGO_BIN_EXE_lf"))
+        Command::new(loopflow_test_support::lf_binary())
             .args(args)
             .env("LF_HOME", home.path())
             .env_remove("LF_WAVE_ID")
@@ -646,7 +646,7 @@ Count dispatched Task loops that settle without rescue.
     let sqlite = SqliteStore::new(&home.path().join("loopflow.db")).expect("open store");
     let now = OffsetDateTime::now_utc();
     sqlite
-        .put_pm_snapshot(&PmSnapshotRow {
+        .seed_inventory(&InventoryFixture {
             wave_id: wave.id().clone(),
             provider: "linear".to_string(),
             initiative: "initiative-product".to_string(),
@@ -815,7 +815,7 @@ fn provider_inventory_loss_preserves_saved_planning_in_both_views() {
         let before = status_json(home.path(), &["product"], None);
         let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
         if let Some(payload) = payload {
-            conn.execute("UPDATE pm_projects SET body=?1", [payload])
+            conn.execute("UPDATE pm_projects SET team_ids=?1", [payload])
                 .unwrap();
         } else {
             conn.execute("DELETE FROM pm_wave_sync", []).unwrap();
@@ -846,7 +846,7 @@ fn provider_inventory_loss_preserves_saved_planning_in_both_views() {
                     assert_eq!(
                         task["task"]["acquisition"],
                         serde_json::json!({
-                            "state": "invalid", "observed_at": null
+                            "state": "invalid", "observed_at": previous["task"]["acquisition"]["observed_at"]
                         })
                     );
                 } else {
@@ -968,7 +968,7 @@ fn exact_task_roadmap_retains_history_without_starting_work() {
         )
         .unwrap();
     for identifier in ["W2-127", "PRD-52", "not-a-task"] {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+        let mut command = Command::new(loopflow_test_support::lf_binary());
         command
             .args(["wave", "show", "--task", identifier, "--all", "--json"])
             .env("LF_HOME", home.path())
@@ -1042,7 +1042,7 @@ fn exact_task_roadmap_scopes_duplicate_identifiers_to_registered_repositories() 
     snapshot.snapshot.items[0].completed = true;
     snapshot.wave_id = other.id().clone();
     snapshot.initiative = "other-initiative".into();
-    store.put_pm_snapshot(&snapshot).unwrap();
+    store.seed_inventory(&snapshot).unwrap();
     assert!(store
         .task_by_issue("PRD-52")
         .unwrap_err()
@@ -1050,7 +1050,7 @@ fn exact_task_roadmap_scopes_duplicate_identifiers_to_registered_repositories() 
         .contains("multiple stable Tasks"));
 
     for all in [true, false] {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+        let mut command = Command::new(loopflow_test_support::lf_binary());
         command.args(["wave", "show", "--task", "PRD-52", "--json"]);
         if all {
             command.arg("--all");
@@ -1102,7 +1102,7 @@ fn ordinary_task_due_date_is_visible_before_checkout() {
     child.completed_at = None;
     planning.snapshot.items.push(child.clone());
     planning.synced_at += 1;
-    store.put_pm_snapshot(&planning).unwrap();
+    store.seed_inventory(&planning).unwrap();
     let status = status_json(home.path(), &["product"], None);
     let row = status["tasks"]["items"]
         .as_array()

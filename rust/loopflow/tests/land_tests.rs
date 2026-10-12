@@ -1253,9 +1253,9 @@ fn same_head_publication_preserves_the_armed_merge_request() {
         .expect("refreshed reviewer copy");
     assert_eq!(copy.title, "refresh published PR");
     assert!(copy.body.starts_with("same head\n\n<!--"));
-    assert!(copy
-        .body
-        .contains("Complete the Task when its outcome is satisfied."));
+    assert!(copy.body.contains(
+        "Record independent later work as Tasks and comments; complete the delivered outcome."
+    ));
     assert!(!copy.body.contains("no Task settlement is requested"));
     let preserved = preserved.merge_request().expect("preserved merge request");
     assert_eq!(preserved.head_sha, head);
@@ -2133,7 +2133,7 @@ fn waited_task_landing_repairs_without_a_watcher_and_preserves_other_work() {
     let worktree = repo.path().canonicalize().unwrap();
     for (path, contents) in [
         ("feature.txt", "keep the feature"),
-        (".lf/config.yaml", "agent: codex\npm:\n  provider: linear\n  linear_team: team-task-pr-tests\n"),
+        (".lf/config.yaml", "agent: codex\nlinear:\n  team: team-task-pr-tests\n"),
         (".lf/workflows/delivery-proof.yaml", "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, flow: delivery-proof}\n  - {from: review, to: end}\n"),
         (".lf/flows/delivery-proof.yaml", "- cmd: flow show ship\n- cmd: pr land --wait-and-fix --strict --title waited-repair --body Repair-without-Desktop\n"),
     ] {
@@ -2248,7 +2248,7 @@ fn waited_task_landing_repairs_without_a_watcher_and_preserves_other_work() {
     assert!(status.success(), "{output}\n{error}");
     assert_eq!(fs::read_to_string(&launches).unwrap().lines().count(), 1);
     assert!(
-        output.contains("Pull request merged; the Task can be completed"),
+        output.contains("Pull request merged; Task completion can proceed"),
         "{output}"
     );
     let workflow: (String, String) = db
@@ -2271,7 +2271,7 @@ fn waited_task_landing_repairs_without_a_watcher_and_preserves_other_work() {
     let status: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
     assert_eq!(
         status["execution"]["status"], "active",
-        "landing alone must not complete a Task"
+        "merge observation alone must not complete a Task"
     );
     assert_eq!(support::recorded_flows(home.path()).len(), 2);
 }
@@ -2541,7 +2541,7 @@ esac
     );
     assert!(fs::read_to_string(&stdout)
         .unwrap()
-        .contains("merged; the Task can be completed"));
+        .contains("merged; Task completion can proceed"));
     pending();
     let mut failures = Vec::new();
     fs::write(

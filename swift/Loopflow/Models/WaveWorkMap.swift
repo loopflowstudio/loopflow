@@ -111,8 +111,6 @@ public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable 
         case dueDate = "due_date"
     }
 
-
-
     public var terminalLabel: String? {
         switch state {
         case "canceled": "Canceled"

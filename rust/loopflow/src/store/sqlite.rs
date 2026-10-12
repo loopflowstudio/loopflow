@@ -25,8 +25,9 @@ mod children;
 mod ci_incidents;
 mod durable;
 mod flow_inventory;
+#[cfg(test)]
+mod linear_migration_tests;
 mod metrics;
-pub(crate) mod planning;
 pub(crate) mod planning_changes;
 pub(crate) mod planning_export;
 pub(crate) mod planning_order;
@@ -47,6 +48,7 @@ pub(crate) mod sessions;
 pub(crate) mod task_admission;
 mod task_comments;
 mod task_content;
+pub(crate) mod task_history;
 pub(crate) mod task_state_delivery;
 mod task_work;
 pub(crate) mod wave_definitions;
@@ -85,7 +87,7 @@ fn configure_write_connection(conn: &Connection, path: &Path) -> StoreResult<()>
 
 #[derive(Debug, Clone)]
 pub struct SqliteStore {
-    conn: Arc<Mutex<Connection>>,
+    pub(crate) conn: Arc<Mutex<Connection>>,
 }
 
 impl SqliteStore {
@@ -137,22 +139,9 @@ pub(crate) fn read_nonterminal_task_worktrees(path: &Path) -> StoreResult<Vec<Pa
     )?;
     crate::performance::observe_sqlite(&conn);
     conn.execute_batch("PRAGMA query_only = ON; PRAGMA busy_timeout = 5000;")?;
-    // This guard reads the installed release without migrating it. Its completion
-    // owner may still be the Workflow, rather than the candidate's planning field.
-    let planning_completion: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('tasks') WHERE name='planning_completed')",
-        [],
-        |row| row.get(0),
-    )?;
-    let open = if planning_completion {
-        durable::task_open_sql("t")
-    } else {
-        "t.abandoned_at IS NULL AND NOT EXISTS(SELECT 1 FROM task_workflows wf \
-         WHERE wf.task_id=t.id AND wf.node='end' AND wf.edge IS NULL)"
-            .to_owned()
-    };
     let mut statement = conn.prepare(&format!(
-        "SELECT t.worktree FROM tasks t WHERE t.worktree IS NOT NULL AND ({open})"
+        "SELECT t.worktree FROM tasks t WHERE t.worktree IS NOT NULL AND t.worktree != '' AND {}",
+        durable::task_open_sql("t")
     ))?;
     let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
     rows.map(|row| row.map(PathBuf::from).map_err(StoreError::from))
@@ -716,15 +705,15 @@ impl SqliteStore {
             .optional()?;
         let saved = parent.is_some();
         let edits = if saved {
-            vec![planning_write::PlanningEdit::WaveParent(
+            vec![crate::work::edit::WorkValue::WaveParent(
                 parent
                     .flatten()
                     .or_else(|| wave.parent_wave_id().map(ToString::to_string)),
             )]
         } else {
             vec![
-                planning_write::PlanningEdit::WaveName(wave.name().into()),
-                planning_write::PlanningEdit::WaveParent(
+                crate::work::edit::WorkValue::WaveName(wave.name().into()),
+                crate::work::edit::WorkValue::WaveParent(
                     wave.parent_wave_id().map(ToString::to_string),
                 ),
             ]
@@ -732,9 +721,7 @@ impl SqliteStore {
         planning_write::create(
             &tx,
             wave.repo(),
-            crate::planning_exchange::PlanningKind::Wave,
-            wave.id().as_str(),
-            &edits,
+            &crate::work::edit::WorkEdit::for_target(wave.id().as_str(), &edits),
         )?;
         if !saved {
             tx.execute("UPDATE waves SET created_at=?2,retired_at=?3,superseded_by_wave_id=?4,retirement_reason=?5 WHERE id=?1",params![wave.id(),created_at,wave.retired_at().map(|at|at.unix_timestamp()),wave.superseded_by_wave_id(),wave.retirement_reason()])?;
@@ -1842,7 +1829,6 @@ impl SqliteStore {
         }
 
         for update in updates {
-            repositories::ensure_repository_in(&tx, &update.target.repo().to_string())?;
             if let Some(collision) = &update.retire_collision {
                 let retired_at = now_unix();
                 tx.execute(
@@ -1885,12 +1871,13 @@ impl SqliteStore {
             )?;
             planning_write::local(
                 &tx,
-                crate::planning_exchange::PlanningKind::Wave,
-                update.wave_id.as_str(),
-                &[
-                    planning_write::PlanningEdit::WaveName(name.into()),
-                    planning_write::PlanningEdit::WaveParent(parent.map(|p| p.to_string())),
-                ],
+                &crate::work::edit::WorkEdit::for_target(
+                    update.wave_id.as_str(),
+                    &[
+                        crate::work::edit::WorkValue::WaveName(name.into()),
+                        crate::work::edit::WorkValue::WaveParent(parent.map(|p| p.to_string())),
+                    ],
+                ),
             )?;
         }
         tx.commit()?;

@@ -912,9 +912,6 @@ pub enum SessionCommand {
         /// Make this conversation of the Task its primary
         #[arg(long, value_name = "SESSION", requires = "task")]
         choose: Option<String>,
-        /// Prepare the conversation without launching a hidden provider; connect in a terminal next
-        #[arg(long)]
-        prepare: bool,
         #[arg(long)]
         json: bool,
     },

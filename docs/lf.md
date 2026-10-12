@@ -406,7 +406,6 @@ lf history show SESSION --instructions  # why guidance was included or omitted
 lf session ensure                   # this repository's one ongoing conversation
 lf session ensure -w growth         # a Wave's one ongoing conversation
 lf session ensure --task EXP-12     # a Task's primary conversation
-lf session ensure --task EXP-12 --prepare --json  # prepare; connect in a visible terminal
 lf --task EXP-12 skill task-session # another conversation about that Task
 lf session connect SESSION         # stop headless Claude/OpenCode and resume history
 lf session replace SESSION         # fresh conversation for the same scope

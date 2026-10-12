@@ -183,17 +183,14 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
             wave,
             task,
             choose,
-            prepare,
             json,
         } => {
             use crate::ops::human_session::primary;
             let store = open_shared_store().await?;
             let repo = crate::repo::find_repo_root()?;
             let session = match task {
-                Some(task) => {
-                    primary::ensure_task(&store, &repo, task, choose.as_deref(), *prepare).await?
-                }
-                None => primary::ensure(&store, &repo, wave.as_deref(), *prepare).await?,
+                Some(task) => primary::ensure_task(&store, &repo, task, choose.as_deref()).await?,
+                None => primary::ensure(&store, &repo, wave.as_deref()).await?,
             };
             report_primary(&session, *json)
         }

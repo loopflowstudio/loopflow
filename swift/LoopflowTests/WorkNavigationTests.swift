@@ -49,7 +49,7 @@ struct WorkNavigationTests {
         let primaryJSON = String(decoding: try data("primary"), as: UTF8.self)
         let query = RegistryQuery { args, _ in
             if args == ["wave", "list", "--json"] { return "[]" }
-            if args == ["session", "ensure", "--prepare", "--json"] || args == ["session", "connect", primary.id, "--json"] { return primaryJSON }
+            if args == ["session", "ensure", "--json"] || args == ["session", "connect", primary.id, "--json"] { return primaryJSON }
             throw RegistryQueryError("Unexpected operation: \(args)")
         }
         let model = WorkModel(query: query, repoPath: repo)

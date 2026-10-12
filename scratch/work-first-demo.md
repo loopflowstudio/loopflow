@@ -233,3 +233,26 @@ Check: three focused Linear cooldown tests PASS (including five callers/one requ
 
 Check: Task primary lifecycle plus seven primary-scope tests PASS; 88 Swift WorkDestination/WorkNavigation tests PASS; fmt/all-target Clippy/diff PASS. Earlier launcher-failure fixture exposed a remaining tmux inspection during preparation; preparation now avoids that too. Initial Clippy found 14 test callers needing the new explicit prepare argument; corrected before the final pass. Native launch remains pending.
 Recovery backup: `/tmp/loo462-sidebar-audit/LOO-312-recovered-history.patch`, SHA256 `75dc37dcb326c5760bb6115f585e282d19f4c4d99b101f3cdfb898ce36dde006`; no branch or live Task changed.
+
+## Recovery and upstream composition — October 12
+
+Live 0.13.13 installation changed the schema during this audit; the old demo
+now refuses newer data rather than presenting a fresh reading. Main
+`2f6945ed04` is merged (TESTING.md retained both independent additions).
+
+`2235694dd4` adds `task checkout --recover-from COMMIT`: recover an absent
+recorded branch at a deliberately located commit, never reset existing work.
+Missing object, implicit lost-branch refusal, exact recovery, repeated recovery,
+existing-branch mismatch and preserved Task/PR identity pass the focused checkout
+test; fmt/all-target Clippy passed. LOO-312's live restoration has not run yet.
+
+Jack Heart separately commissioned lf-8fed729 for ensured-conversation recovery;
+its driver was observed live, left alone. Integrated its committed `9ccaac2e48`
+checkpoint, not its later gate or acceptance. Its ordinary ensure/replace now
+prepare input and connect owns foreground launch; exact dead interactive-process
+recovery preserves live/unknown refusals and retired Session history. This
+supersedes our temporary --prepare flag, which is removed. Retain this Task's
+missing-checkout restoration and inline-error fixes. Dependency design/evidence:
+`9ccaac2e48:scratch/open-a-task-s-conversation.md`; its native proof remains absent.
+
+Composed check: three Session lifecycle cases and 37 Swift navigation tests PASS; all-target Clippy/fmt/diff PASS. LOO-312 recovered through the new API at exact `d5c043c13a`, clean checkout and unchanged branch. Fresh roster is 13 after lf-8fed729 appeared; every ensured Session has its exact Task membership. JSON connect passes 12; LOO-462 refuses its active other terminal (no takeover). These are preparation, not native acceptance. Records: `prepare-results.json` in the audit directory.

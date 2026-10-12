@@ -55,7 +55,7 @@ this conversation. Captured Tasks start when the user selects them.
 
 ## Persistent workspace and document publication
 
-Keep accepted decisions in `wave/<wave>/MEMORY.md`, with names and dates.
+Keep accepted decisions in `.lf/wave/<wave>/MEMORY.md`, with names and dates.
 Keep working plans in `scratch/`. The scope's persistent checkout survives conversation
 replacement; publication needs no synthetic Task or separate export checkout.
 
@@ -70,8 +70,8 @@ edits are recovered.
 To publish a document:
 
 ```bash
-git diff -- wave/<wave>/MEMORY.md
-lf commit -m "Record accepted decisions" wave/<wave>/MEMORY.md
+git diff -- .lf/wave/<wave>/MEMORY.md
+lf commit -m "Record accepted decisions" .lf/wave/<wave>/MEMORY.md
 git diff origin/main...HEAD --stat
 lf pr publish
 ```

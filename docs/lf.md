@@ -202,7 +202,7 @@ Reads create nothing.
 
 ```bash
 lf wave ensure parser
-# Edit wave/parser/GOAL.md and wave/parser/MEMORY.md directly.
+# Edit .lf/wave/parser/GOAL.md and .lf/wave/parser/MEMORY.md directly.
 lf task create --wave parser --title "Retain escaped quotes"
 ```
 
@@ -250,8 +250,8 @@ Readback cannot protect against unseen concurrent provider writes.
 Ranks are zero-based within a Project. Selected workflow definitions stay in SQLite
 for every Wave; Desktop’s Customize and Edit controls use the same editor. Stored
 definitions are imported by `lf wave ensure`; builtin definitions remain available.
-Nested Waves use names such as `parser/tokenizer`. Edit `wave/<name>/GOAL.md`
-and `wave/<name>/MEMORY.md` like any other file; the next launch reads that
+Nested Waves use names such as `parser/tokenizer`. Edit `.lf/wave/<name>/GOAL.md`
+and `.lf/wave/<name>/MEMORY.md` like any other file; the next launch reads that
 checkout's files, including ancestor context. Creation writes missing files without
 overwriting existing content. Registry renaming retains IDs and descendants;
 move the authored directory separately to match its new address. Workflow imports
@@ -446,6 +446,30 @@ lf land                            # record delivery and return
 lf land --wait-and-fix              # wait for merge and repair failing CI
 lf sync --plan                     # preview integration with main or stack parent
 ```
+
+```bash
+lf pr request-review -r alice -r acme/platform  # request teammates on this PR
+lf pr reviews 42                               # inspect a teammate's PR
+lf pr reviews --json                           # provider review data and commit IDs
+lf pr checks --required                        # repository-required checks only
+```
+
+Review requests, assignments, approvals and merge permission are separate.
+`publish` makes work reviewable; `request-review` requests or re-requests people
+or teams on that existing PR. `submit` prepares a manual merge without changing
+assignments or review requests. Teammates can review and merge on GitHub without
+installing lf. `reviews` shows GitHub's aggregate decision and each submitted
+review's commit; an older approval is not proof of approval of the current head.
+Inline threads remain on the PR page. `--json` passes through GitHub CLI's review
+fields, not a stored lf review model. Provider errors remain errors.
+
+`checks` reports all checks by default, including external CI reported to GitHub.
+`--required` selects the host's required checks. Exit 8 means pending; it is not
+a test failure. `--logs` retrieves failed GitHub Actions logs; other CI retains
+its check link. Local test success never substitutes for remote checks or review.
+
+Auto-merge follows [repository merge policy](config.md#merge-policy) and leaves
+protection and queue enforcement to GitHub. Manual review is a normal endpoint.
 
 A Task has zero or one PR. Choose one delivery operation for the desired
 endpoint. Submit, arm and land own preparation and integration; publish does not
@@ -905,7 +929,7 @@ lf session connect SESSION           # open the prepared conversation
 Inside the conversation's persistent checkout:
 
 ```bash
-lf commit -m "Record accepted decisions" wave/product/MEMORY.md
+lf commit -m "Record accepted decisions" .lf/wave/product/MEMORY.md
 lf pr publish
 ```
 
@@ -917,12 +941,11 @@ They display a workspace without gaining Task membership. Moved checkouts are
 rediscovered; missing checkouts recover committed branch state. Live conversations
 keep their placement until their attached LfProcess is idle.
 
-Scratch follows ordinary Git behavior in every workspace. Skills write there
-and agent runs include its Markdown automatically. `lf pr submit` and `lf pr land` invoke `lf scratch clear` during preparation. The cleanup command
-removes only added files in the work's diff; existing files and edits remain.
-Ordinary PR open and publish do not run general scratch cleanup. No scratch configuration is needed.
-Selected-path commits preserve unrelated staged edits; publication pushes the
-committed range, leaving later local edits alone.
+Scratch files are ordinary repository content during commit, sync and publication.
+Selected-path commits preserve unrelated staged edits. Publication pushes the
+committed range, leaving later local edits alone. Delivery and `lf scratch clear`
+remove committed scratch additions relative to the Task's base, preserving
+existing files, edits and renames. Inspect the complete range before publishing.
 
 If a sync resolver creates a file where an untracked file was stashed, sync restores
 the original and keeps the resolver's file beside it as `<name>.lf-sync-1` (or the

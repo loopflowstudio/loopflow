@@ -2502,6 +2502,8 @@ mod tests {
         updated_task.title = task.title.clone();
         updated_task.description = task.description.clone();
         updated_task.pm_snapshot_synced_at = task.pm_snapshot_synced_at;
+        assert!(updated_task.updated_at >= task.updated_at);
+        updated_task.updated_at = task.updated_at;
         assert_eq!(updated_task, task);
         assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
         assert_eq!(wave_refresh_at(_directory.path(), &wave), None);

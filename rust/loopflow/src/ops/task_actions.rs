@@ -76,14 +76,14 @@ fn phase_action(evidence: &TaskActionEvidence) -> TaskActionModel {
             "refresh the reviewer-facing PR title and body for the current head, then settle it with `lf land`",
         ),
         Some(PrPhase::Open) => match evidence.ci {
-            Some(ci) if ci.state == CiState::Failing && !ci.only_land_time_preconditions() => {
+            Some(ci) if ci.state == CiState::Failing => {
                 action(TaskAction::Resume, ci_failure_reason(ci))
             }
             _ if evidence.latest_pr_merge_request.is_none() => action(
                 TaskAction::Resume,
                 "PR is published but settlement is not armed; run `lf land`",
             ),
-            Some(ci) if ci.only_land_time_preconditions() || ci.state == CiState::Passing => {
+            Some(ci) if ci.state == CiState::Passing => {
                 let request = evidence
                     .latest_pr_merge_request
                     .expect("checked merge request above");
@@ -332,7 +332,7 @@ mod tests {
     }
 
     #[test]
-    fn land_only_failure_does_not_reopen_the_task_body() {
+    fn repository_named_failure_requires_repair() {
         let ci = CiObservation {
             head_sha: "head".to_string(),
             state: CiState::Failing,
@@ -352,6 +352,6 @@ mod tests {
 
         let model = derive_task_actions(&evidence);
 
-        assert_eq!(model.recommended, Some(TaskAction::OpenPr));
+        assert_eq!(model.recommended, Some(TaskAction::Resume));
     }
 }

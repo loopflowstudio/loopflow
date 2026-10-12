@@ -81,7 +81,7 @@ pub struct GatherSpec {
     /// Specific files to include in context.
     pub files: Vec<String>,
     pub include_files: bool,
-    /// Wave name for wave/ scoping.
+    /// Wave name for .lf/wave/ scoping.
     pub wave: Option<String>,
     /// Related repos resolved from the edge graph.
     pub related_repos: Vec<RelatedRepoContext>,
@@ -119,7 +119,7 @@ pub struct GatherContextOpts {
     pub docs: Vec<String>,
     /// Specific files to include in context.
     pub files: Vec<String>,
-    /// Wave name for wave/ scoping.
+    /// Wave name for .lf/wave/ scoping.
     pub wave: Option<String>,
     pub include_diff: bool,
     pub include_diff_files: bool,
@@ -426,7 +426,7 @@ pub fn gather_documents(spec: &GatherSpec) -> Result<Vec<Document>, CoreError> {
     // Preserve ambient ordering: scratch -> inherited context -> explicit docs.
     docs.extend(gather_scratch_docs(&spec.repo_root)?);
     let repo_memory = spec.repo_root.join("MEMORY.md");
-    if repo_memory.is_file() {
+    if !repo_memory.is_symlink() && repo_memory.is_file() {
         docs.push(Document {
             path: "MEMORY.md".into(),
             content: fs::read_to_string(repo_memory)?,
@@ -557,7 +557,7 @@ fn gather_wave_docs(repo_root: &Path, wave: Option<&str>) -> Result<Vec<Document
             prefix.push('/');
         }
         prefix.push_str(segment);
-        let directory = repo_root.join("wave").join(&prefix);
+        let directory = repo_root.join(".lf/wave").join(&prefix);
         let entries = match std::fs::read_dir(&directory) {
             Ok(entries) => entries,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
@@ -577,7 +577,7 @@ fn gather_wave_docs(repo_root: &Path, wave: Option<&str>) -> Result<Vec<Document
                 .to_string_lossy();
             let content = std::fs::read_to_string(&path)?;
             docs.push(Document {
-                path: format!("wave/{prefix}/{name}"),
+                path: format!(".lf/wave/{prefix}/{name}"),
                 content,
                 source: DocumentSource::Wave,
             });
@@ -954,7 +954,7 @@ fn gather_md_files(
     docs: &mut Vec<Document>,
     source: DocumentSource,
 ) -> Result<(), CoreError> {
-    if !dir.is_dir() {
+    if dir.is_symlink() || !dir.is_dir() {
         return Ok(());
     }
 
@@ -972,6 +972,12 @@ fn gather_md_files_from(
 
     for entry in entries {
         let path = entry.path();
+
+        // Ambient context must not follow links into unrelated private files
+        // or recursive directory cycles. Explicit document requests are separate.
+        if entry.file_type()?.is_symlink() {
+            continue;
+        }
 
         if path.is_dir() {
             gather_md_files_from(root, &path, docs, source)?;
@@ -1354,9 +1360,13 @@ const ALWAYS_EXCLUDE: &[&str] = &[
 ];
 
 fn should_exclude(repo_root: &Path, path: &Path, gitignore: &ignore::gitignore::Gitignore) -> bool {
-    if path
-        .components()
-        .any(|component| component.as_os_str() == ".lf")
+    let relative = path.strip_prefix(repo_root).unwrap_or(path);
+    // Wave definitions are authored documents; other .lf state stays out of
+    // explicit file context. Ambient Wave selection still controls discovery.
+    if !relative.starts_with(".lf/wave")
+        && path
+            .components()
+            .any(|component| component.as_os_str() == ".lf")
     {
         return true;
     }
@@ -1367,7 +1377,6 @@ fn should_exclude(repo_root: &Path, path: &Path, gitignore: &ignore::gitignore::
         }
     }
 
-    let relative = path.strip_prefix(repo_root).unwrap_or(path);
     gitignore
         .matched_path_or_any_parents(relative, path.is_dir())
         .is_ignore()
@@ -1705,7 +1714,7 @@ mod tests {
     #[test]
     fn wave_context_reads_fresh_checkout_files_without_a_registry() {
         let repo = tempfile::tempdir().unwrap();
-        let parent = repo.path().join("wave/tools");
+        let parent = repo.path().join(".lf/wave/tools");
         let child = parent.join("parser");
         std::fs::create_dir_all(&child).unwrap();
         std::fs::write(parent.join("MEMORY.md"), "Inherited decision").unwrap();
@@ -2494,6 +2503,51 @@ mod tests {
             scratch.expect("scratch doc should be gathered").source,
             DocumentSource::Scratch
         );
+    }
+
+    #[test]
+    fn ambient_context_does_not_follow_symlinks_to_private_content() {
+        let repo = tempfile::tempdir().unwrap();
+        let private = tempfile::tempdir().unwrap();
+        fs::write(
+            private.path().join("private.md"),
+            "SYNTHETIC_PRIVATE_MARKER",
+        )
+        .unwrap();
+        fs::create_dir(repo.path().join("scratch")).unwrap();
+        fs::write(repo.path().join("scratch/plan.md"), "allowed plan").unwrap();
+        std::os::unix::fs::symlink(private.path(), repo.path().join("scratch/linked")).unwrap();
+        std::os::unix::fs::symlink(
+            private.path().join("private.md"),
+            repo.path().join("MEMORY.md"),
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(
+            repo.path().join("scratch"),
+            repo.path().join("scratch/cycle"),
+        )
+        .unwrap();
+        let gathered = gather_context(&GatherContextOpts {
+            repo_root: repo.path().to_path_buf(),
+            ..Default::default()
+        })
+        .unwrap();
+        assert!(gathered
+            .docs
+            .iter()
+            .any(|doc| doc.content == "allowed plan"));
+        assert!(!gathered
+            .docs
+            .iter()
+            .any(|doc| doc.content.contains("SYNTHETIC_PRIVATE_MARKER")));
+        fs::remove_dir_all(repo.path().join("scratch")).unwrap();
+        std::os::unix::fs::symlink(private.path(), repo.path().join("scratch")).unwrap();
+        let gathered = gather_context(&GatherContextOpts {
+            repo_root: repo.path().to_path_buf(),
+            ..Default::default()
+        })
+        .unwrap();
+        assert!(gathered.docs.is_empty());
     }
 
     #[test]

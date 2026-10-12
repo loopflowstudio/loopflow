@@ -196,14 +196,14 @@ def _tls_context(root: Path) -> ssl.SSLContext:
 def _exercise(lf: Path, root: Path, selection: dict, server: LinearServer) -> list[dict]:
     repo = root / "repo"
     (repo / ".lf").mkdir(parents=True)
-    (repo / "wave/product").mkdir(parents=True)
+    (repo / ".lf/wave/product").mkdir(parents=True)
     for args in [
         ["init", "-q"],
         ["remote", "add", "origin", "https://github.com/loopflowstudio/fixture.git"],
     ]:
         assert _run(["git", *args], cwd=repo).returncode == 0
     (repo / ".lf/config.yaml").write_text("linear:\n  team: team-1\n")
-    (repo / "wave/product/GOAL.md").write_text(
+    (repo / ".lf/wave/product/GOAL.md").write_text(
         "---\nlinear:\n  initiative: initiative-1\n---\nKeep working.\n"
     )
     key = AESGCM.generate_key(bit_length=256)

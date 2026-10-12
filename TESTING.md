@@ -2,7 +2,7 @@
 
 Publish checkpoints with working notes in `scratch/`; hosted CI defers the full
 matrix until scratch is clear. `lf pr submit`, `lf land`, and `lf pr land`
-clear scratch before pushing a landing candidate. Scratch-free PRs, including
+clear committed scratch additions before pushing a landing candidate. Scratch-free PRs, including
 small changes and Dependabot updates, run the full test matrix in parallel.
 Implement/compress only build changed code and run its focused test. Gate owns
 affected suites and automated acceptance once; see the verification cadence in
@@ -15,6 +15,10 @@ and the matrix jobs skip. That is not a passing test result. The required merge
 queue always rejects scratch artifacts and runs full tests before merging.
 Missing scratch, classifier failures, and unexpected skipped candidate jobs
 still fail the aggregate. Restoring scratch on a later PR head defers its tests.
+
+The repository owns the `scratch-clear` classifier; the native CLI does not exempt
+a failing required check by name. Delivery cleanup preserves existing scratch
+content, so repositories retaining it must define their own candidate policy.
 
 A new PR update cancels the previous CI run for that PR. Main and merge-group
 runs remain independent.
@@ -83,6 +87,10 @@ credentials. CI's ordinary Rust network isolation covers it. It bounds provider
 and Git launches, SQLite statement/returned-row counts, and time to provider
 handoff; [native readiness measurements](scripts/benchmarks/agent-startup/README.md)
 remain a separate opt-in benchmark.
+
+Changes to Git default-branch discovery, checkout roots, or commit/push behavior
+also run `agent_startup_tests`, `release_tests`, and `release_lock_tests`. These
+cover startup cost and release retries that share the same Git operations.
 
 Changes to builtin Flows affect the parser, graph, Task controller and CLI fixtures.
 Run the affected controller progression and CLI behavior tests as well as graph

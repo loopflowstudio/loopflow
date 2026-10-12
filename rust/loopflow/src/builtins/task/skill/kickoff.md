@@ -152,7 +152,7 @@ remaining work beside the decisions they inform.
 
 ## Wave alignment
 
-If `<lf:wave>` is present, check `wave/<wave>/GOAL.md` (and `MEMORY.md`) in docs:
+If `<lf:wave>` is present, check `.lf/wave/<wave>/GOAL.md` (and `MEMORY.md`) in docs:
 
 - **Intent** — design must serve the wave's north star, stated in GOAL.md.
 - **Evidence** — derive "Done when" from chapter KRs and user behavior. Use a

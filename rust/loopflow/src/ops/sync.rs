@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::git::{
-    abort_merge, continue_merge, current_branch, fetch, get_default_branch, intervention_state,
-    merge, rerere_remaining, rev_parse,
+    abort_merge, continue_merge, current_branch, get_default_branch, intervention_state, merge,
+    rerere_remaining, rev_parse,
 };
 
 use crate::ops::error::{OpsError, OpsResult};
@@ -83,7 +83,7 @@ pub fn plan_sync(
     let base_ref = if let Some(onto) = onto {
         onto.to_string()
     } else {
-        format!("origin/{default_branch}")
+        crate::git::integration_base(repo)?
     };
 
     let comparison_base = fork_base.as_deref().unwrap_or(&base_ref);
@@ -165,7 +165,7 @@ pub fn sync_with_recovery(
 ) -> OpsResult<SyncVerification> {
     let default = get_default_branch(repo)?;
     if current_branch(repo)?.as_deref() == Some(&default)
-        && options.onto == format!("origin/{default}")
+        && options.onto == crate::git::integration_base(repo)?
     {
         crate::ops::checkout::refresh_main(repo, progress)?;
         let target_sha = rev_parse(repo, &options.onto)?;
@@ -471,9 +471,7 @@ fn record_control_task_state(repo: &Path, owner: &GitOperationOwner) -> OpsResul
 }
 
 fn fetch_target(repo: &Path, target: &str) -> OpsResult<()> {
-    if let Some(branch) = target.strip_prefix("origin/") {
-        fetch(repo, "origin", branch)?;
-    }
+    crate::git::fetch_tracking_ref(repo, target)?;
     Ok(())
 }
 
@@ -613,7 +611,7 @@ fn replay(repo: &Path, onto: &str, commits: &str) -> OpsResult<Option<String>> {
 /// Commits made after the last push are carried over. Returns false and
 /// leaves the checkout alone when nothing has landed or Git is mid-operation.
 pub(crate) fn restart_landed_persistent(repo: &Path) -> OpsResult<bool> {
-    let base = format!("origin/{}", get_default_branch(repo)?);
+    let base = crate::git::integration_base(repo)?;
     // Offline, the last fetched base still answers for what it has seen.
     let _ = fetch_target(repo, &base);
     if rev_parse(repo, &base).is_err() {
@@ -753,7 +751,7 @@ fn generated_only(repo: &Path, base_ref: &str) -> OpsResult<bool> {
 }
 
 fn is_protected_path(path: &Path) -> bool {
-    path.starts_with(Path::new("wave"))
+    path.starts_with(Path::new(".lf/wave"))
         || path.starts_with(Path::new(".lf/skills"))
         || path.starts_with(Path::new(".lf/flows"))
         || path == Path::new(".lf/config.yaml")

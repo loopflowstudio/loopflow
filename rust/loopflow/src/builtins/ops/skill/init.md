@@ -172,7 +172,7 @@ when Linear is absent; do not block that path on PM setup.
 
 ### Existing Wave
 
-Read its `wave/<name>/GOAL.md`, then verify its shared state:
+Read its `.lf/wave/<name>/GOAL.md`, then verify its shared state:
 
 ```bash
 lf wave status <wave> --json
@@ -197,12 +197,12 @@ repository binding changes only through the repository-wide migration.
 Ask for one outcome and a short name. Create:
 
 ```text
-wave/<name>/GOAL.md
+.lf/wave/<name>/GOAL.md
 ```
 
 Write the goal as a durable operating contract: objective, observable success,
 boundaries, and when to stop or escalate. Keep chapter priorities, KRs and Tasks
-in the chapter plan. Curate durable decisions in `wave/<name>/MEMORY.md` through
+in the chapter plan. Curate durable decisions in `.lf/wave/<name>/MEMORY.md` through
 the repository workflow; do not invent runtime memory commands or duplicate the
 plan in the goal body.
 

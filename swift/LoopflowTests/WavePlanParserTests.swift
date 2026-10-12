@@ -9,7 +9,7 @@ struct WavePlanParserTests {
         let repoRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("loopflow-wave-plan-tests-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: repoRoot) }
-        let waveDir = repoRoot.appendingPathComponent("wave/loopflow", isDirectory: true)
+        let waveDir = repoRoot.appendingPathComponent(".lf/wave/loopflow", isDirectory: true)
         try FileManager.default.createDirectory(at: waveDir, withIntermediateDirectories: true)
         try """
         ---

@@ -99,7 +99,19 @@ fn launch(home: &Path, repo: &Path, bin: &Path, measurements: &Path, args: &[&st
         .map(|line| serde_json::from_str::<Value>(line).unwrap())
         .filter(|event| event["event"] == "start")
         .count();
-    assert!(git_count <= 25, "launch spawned {git_count} Git processes");
+    assert!(
+        git_count <= 25,
+        "launch spawned {git_count} Git processes: {}",
+        fs::read_to_string(measurements.join("git.jsonl"))
+            .unwrap()
+            .lines()
+            .filter_map(|line| {
+                let event: Value = serde_json::from_str(line).unwrap();
+                (event["event"] == "start").then(|| event["argv"].to_string())
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
 
     let mut rows = 0;
     let mut statements = 0;
@@ -159,6 +171,8 @@ read -r finish
         &["init", "--quiet", "-b", "fixture"][..],
         &["add", "."],
         &["commit", "--quiet", "-m", "fixture"],
+        // Measure startup on an existing feature branch, without checkout creation.
+        &["branch", "main"],
     ] {
         assert!(Command::new("git")
             .args([

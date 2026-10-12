@@ -1,5 +1,5 @@
 ---
-requires: wave/
+requires: .lf/wave/
 produces: scratch/wave-report.md
 ---
 Read health signals across all waves. Surface where the system is stressed.
@@ -164,8 +164,8 @@ Interpret:
 
 ## Workflow
 
-1. **Enumerate waves.** Read `wave/*/` directories. For each, load the
-   YAML config, README, and all item files. Skip `wave/old/`.
+1. **Enumerate waves.** Read `.lf/wave/*/` directories. For each, load the
+   YAML config, README, and all item files. Skip `.lf/wave/old/`.
 
 2. **Gather signals.** For each of the five signal types, run the
    gathering steps described above. Use git, gh, and file reads.

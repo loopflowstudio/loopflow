@@ -40,7 +40,7 @@ impl SqliteStore {
                 prefix.push('/');
             }
             prefix.push_str(part);
-            let directory = checkout.join("wave").join(&prefix);
+            let directory = checkout.join(".lf/wave").join(&prefix);
             let authored_id = crate::work::wave::config::try_read_wave_config(checkout, &prefix)
                 .map_err(|error| StoreError::InvalidData(error.to_string()))?
                 .and_then(|config| config.id);
@@ -197,7 +197,7 @@ mod tests {
         let repo = loopflow_test_support::TestRepo::new();
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
-        let directory = repo.path().join("wave/tools/parser");
+        let directory = repo.path().join(".lf/wave/tools/parser");
         std::fs::create_dir_all(&directory).unwrap();
         let id = WaveId::new();
         let goal = format!("---\nid: {id}\n---\nKeep tokens λ.\n");
@@ -208,7 +208,7 @@ mod tests {
                 .unwrap(),
             id
         );
-        assert!(repo.path().join("wave/tools/GOAL.md").is_file());
+        assert!(repo.path().join(".lf/wave/tools/GOAL.md").is_file());
         assert!(directory.join("MEMORY.md").is_file());
         std::fs::write(directory.join("MEMORY.md"), "Edited directly.\n").unwrap();
         assert_eq!(
@@ -231,9 +231,9 @@ mod tests {
     fn released_frontier_retains_workflows_without_copying_documents() {
         let repo = loopflow_test_support::TestRepo::new();
         std::fs::create_dir_all(repo.path().join(".lf/workflows")).unwrap();
-        std::fs::create_dir_all(repo.path().join("wave/tools")).unwrap();
+        std::fs::create_dir_all(repo.path().join(".lf/wave/tools")).unwrap();
         std::fs::write(
-            repo.path().join("wave/tools/MEMORY.md"),
+            repo.path().join(".lf/wave/tools/MEMORY.md"),
             "Only in the repo.",
         )
         .unwrap();
@@ -273,7 +273,7 @@ mod tests {
             0
         );
         assert_eq!(
-            std::fs::read_to_string(repo.path().join("wave/tools/MEMORY.md")).unwrap(),
+            std::fs::read_to_string(repo.path().join(".lf/wave/tools/MEMORY.md")).unwrap(),
             "Only in the repo."
         );
     }
@@ -296,7 +296,11 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        std::fs::write(repo.path().join("wave/tools/parser/MEMORY.md"), "Retained").unwrap();
+        std::fs::write(
+            repo.path().join(".lf/wave/tools/parser/MEMORY.md"),
+            "Retained",
+        )
+        .unwrap();
         let collision = Wave::new(WaveId::new(), "occupied".into(), canonical.to_string());
         store.create_wave(&collision).await.unwrap();
         store
@@ -326,7 +330,7 @@ mod tests {
             "tools/parser"
         );
         assert_eq!(
-            std::fs::read_to_string(repo.path().join("wave/tools/parser/MEMORY.md")).unwrap(),
+            std::fs::read_to_string(repo.path().join(".lf/wave/tools/parser/MEMORY.md")).unwrap(),
             "Retained"
         );
     }

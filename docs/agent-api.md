@@ -157,7 +157,7 @@ skills. Edit their definition or goal when the guidance should persist.
 
 ## Memory
 
-`wave/<name>/MEMORY.md` is the Wave's durable memory. Read it for context;
+`.lf/wave/<name>/MEMORY.md` is the Wave's durable memory. Read it for context;
 a selected Loopflow Flow maintains it through ordinary file edits. Standalone
 Work use keeps proposed changes in scratch. The file remains the source of
 truth; there is no separate memory CLI or server surface.

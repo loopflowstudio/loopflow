@@ -176,6 +176,15 @@ pub enum ReleaseCompletion {
     GithubRelease,
 }
 
+/// Repository merge policy; GitHub's allowed methods remain authoritative.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum MergeMethod {
+    Merge,
+    Squash,
+    Rebase,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct LinearConfig {
     #[serde(default)]
@@ -268,6 +277,10 @@ pub struct Config {
     #[serde(default = "default_land")]
     pub land: String,
 
+    /// Repository-only merge preference; absent chooses an allowed method.
+    #[serde(default)]
+    pub merge_method: Option<MergeMethod>,
+
     /// Additional context files to include
     #[serde(default)]
     pub context: Vec<String>,
@@ -357,6 +370,7 @@ impl Default for Config {
             chrome: false,
             pr: false,
             land: default_land(),
+            merge_method: None,
             context: Vec::new(),
             exclude: Vec::new(),
             session: SessionConfig::default(),

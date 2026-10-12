@@ -2199,14 +2199,21 @@ pub(crate) fn fetch_task_refs(repo: &Path) -> OpsResult<()> {
     Ok(())
 }
 
-/// Fetch the upstream branch when a remote exists; otherwise use its local ref.
-fn resolve_upstream_base(repo: &Path, branch: &str) -> OpsResult<(String, String)> {
-    let base_ref = if has_remote(repo)? {
-        fetch(repo, "origin", branch)
-            .map_err(|error| task_error(format!("failed to fetch task base: {error}")))?;
-        format!("origin/{branch}")
+/// Resolve a new Task's base through the default branch's existing Git tracking.
+fn resolve_upstream_base(repo: &Path, default_branch: &str) -> OpsResult<(String, String)> {
+    let base = if default_branch == get_default_branch(repo)? {
+        crate::git::integration_base(repo)?
+    } else if has_remote(repo)? {
+        format!("origin/{default_branch}")
     } else {
-        format!("refs/heads/{branch}")
+        default_branch.to_string()
+    };
+    crate::git::fetch_tracking_ref(repo, &base)
+        .map_err(|error| task_error(format!("failed to fetch task base: {error}")))?;
+    let base_ref = if base == default_branch {
+        format!("refs/heads/{default_branch}")
+    } else {
+        base
     };
     let base_commit = rev_parse(repo, &base_ref)
         .map_err(|error| task_error(format!("failed to resolve task base {base_ref}: {error}")))?;
@@ -4502,9 +4509,9 @@ mod tests {
             let repo = loopflow_test_support::TestRepo::new();
             let fixture = runtime.block_on(task_fixture_at("EXISTING", repo.path().to_path_buf()));
             std::env::set_var("LF_HOME", fixture._database.path());
-            std::fs::create_dir_all(repo.path().join("wave/task-recovery")).unwrap();
+            std::fs::create_dir_all(repo.path().join(".lf/wave/task-recovery")).unwrap();
             std::fs::write(
-                repo.path().join("wave/task-recovery/GOAL.md"),
+                repo.path().join(".lf/wave/task-recovery/GOAL.md"),
                 "Recover work.",
             )
             .unwrap();

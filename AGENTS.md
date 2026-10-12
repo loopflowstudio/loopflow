@@ -5,6 +5,7 @@ This is the governing document of the loopflow codebase. Contributors and agents
 ## Quick Reference
 
 **Wave planning:**
+- Authored Wave goals, memory, and metrics live under `.lf/wave/<name>/`; top-level `wave/` is ordinary repository content.
 - Wave = durable objective, responsibility, memory, cadence, budget, chat, and metric instruments
 - Chapter = shared name of every Wave's In Progress Linear Project; no Chapter table
 - Project = one Wave's Linear plan: status, Tasks, KRs, targets, and the workflow its Tasks take up

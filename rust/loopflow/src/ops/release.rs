@@ -2673,6 +2673,18 @@ fn finish_release_pr(
                         .args(["reset", "--hard", &main_ref]);
                     lease.inherit(&mut reset);
                     command_stdout(&mut reset)?;
+                    // Regenerate from main while retaining the published release
+                    // ancestry, so preparation can push without rewriting history.
+                    let mut merge = lock.command("git");
+                    merge.current_dir(&wt.path).args([
+                        "merge",
+                        "--no-commit",
+                        "--no-ff",
+                        "--strategy=ours",
+                        &prepared.head_sha,
+                    ]);
+                    lease.inherit(&mut merge);
+                    command_stdout(&mut merge)?;
                     let changes = collect_release_changes_at(main_repo, target, &main_ref)?;
                     prepare_release_in_worktree(
                         &wt.path, version, &changes, target, None, progress, lock, &lease,

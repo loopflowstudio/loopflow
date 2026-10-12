@@ -237,7 +237,7 @@ print(json.dumps({"report": {"ok": True}, "metric_observations": [], "text": "sc
         let _ledger = crate::journal::TestLedgerGuard::new();
         let repo = tempfile::tempdir().expect("temp repo");
         let scripts = repo.path().join("scripts");
-        let metrics = repo.path().join("wave/product/metrics");
+        let metrics = repo.path().join(".lf/wave/product/metrics");
         std::fs::create_dir(&scripts).expect("create scripts directory");
         std::fs::create_dir_all(&metrics).expect("create metrics directory");
         std::fs::write(

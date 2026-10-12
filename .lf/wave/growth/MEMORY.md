@@ -108,7 +108,7 @@ presentation; it preserves the audience and hands-on/hands-off direction above.
 Jack cut the dedicated Wave showcase section for now, while keeping its detailed
 reference and capabilities in scope. Existing page addresses remain valid.
 
-The [CLI guide](../../docs/lf.md) and [reference](../../docs/lf-reference.md)
+The [CLI guide](../../../docs/lf.md) and [reference](../../../docs/lf-reference.md)
 describe the implemented owner tree. A disposable public-CLI walkthrough on
 2026-09-30 produced a real Codex-authored README in a fresh Git project without
 Linear or Task setup, then read Monitor, cached Account and each owner on that

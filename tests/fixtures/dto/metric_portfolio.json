@@ -340,7 +340,7 @@
   "contract_issues": [
     {
       "kind": "malformed_contract",
-      "path": "wave/product/metrics/bad.md",
+      "path": ".lf/wave/product/metrics/bad.md",
       "message": "missing target"
     },
     {

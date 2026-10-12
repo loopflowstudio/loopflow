@@ -1,6 +1,6 @@
 //! Flat naming for low-level Git worktrees.
 //!
-//! One name has two projections: `<name>` for the sibling directory suffix
+//! One name has two projections: `<name>` for the worktree directory component
 //! and `<author>/<name>` for the branch. It carries no Wave, Task, worker,
 //! timestamp, or ancestry semantics.
 

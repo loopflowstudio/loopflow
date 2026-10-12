@@ -480,14 +480,14 @@ paused. Keep historical completion and abandonment independently readable.
 Delete the need for an undocumented sidebar-only parked flag or automatic restart
 on resume. Test persistence, repeat writes, retained Workflow/execution, sidebar
 filtering and API controls before applying LOO-389 to the real store.
-Jack Heart reports LOO-427 landed: verify delivery before repairing its remaining
-Task disposition. The misleading CI conversation title still needs attribution
-and navigation inspection, not an assumed Session reassignment.
+The CI title still needs host attribution inspection, not assumed reassignment;
+native CI selection and its retained Session agree. Codex hook trust awaits Jack.
 
 Local pause implementation is not deployed: a development helper cannot advance
 main's schema. Preserve active native clients; use the supported installation
-boundary rather than bypassing migration authority. LOO-427's fresh status retains
-merge `9211b47c47bf986348af00b5a546c7cce2048c8c` but Task remains active.
+boundary rather than bypassing migration authority. LOO-427 completed through `lf task complete` after verifying merge
+`9211b47c47bf986348af00b5a546c7cce2048c8c`; native sidebar removed it.
+Checkout/unknown Process `f1482ca7-35a6-4bea-89f8-1f2d5c3de5b2` remain.
 Review fixed historical journal seeding before the pause column exists. Early
 pause tests exposed incomplete raw Task fixtures; use normal creation with the
 Wave's selected Project. Logs: `/tmp/loo462-paused-{test*,final,checks,verified*}.log`.

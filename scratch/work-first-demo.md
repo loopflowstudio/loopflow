@@ -282,7 +282,7 @@ LOO-312 fails with “no checkout to hold a conversation.” The copied record h
 this is not a wrong-conversation fallback. Keep it unresolved rather than inventing
 history or hiding the Task. Corrected the participant read to `config user --json`
 The first placeholder dark-appearance change failed native review: text remained
-near-black. Explicit TerminalPalette foregrounds now replace inferred system inks.
+near-black. Explicit TerminalPalette inks fix it; native relaunch confirms readable text/button.
 Check: RegistryQuery/WorkDestination PASS (68); palette repair WorkDestination PASS (51); configured participant read and diff check PASS.
 Native LOO-462 click selected its exact Session, then sandbox denied launcher
 inspection. Closing that failed terminal exposed the contrast defect. No takeover.

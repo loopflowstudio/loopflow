@@ -4114,15 +4114,6 @@ pub fn task_edit(
 pub fn task_refile(repo: &Path, issue: &str, wave: &str) -> OpsResult<Task> {
     block_on_task(async {
         let (store, task) = resolve_saved_task(repo, None, issue).await?;
-        let locator = crate::work::wave::WaveLocator::discover(repo, wave).map_err(task_error)?;
-        if store
-            .get_wave_at(&locator)
-            .await
-            .map_err(task_error)?
-            .is_none()
-        {
-            super::project::ensure(repo, wave).await?;
-        }
         let destination = match crate::work::wave::context::resolve_managed_wave(
             Some(&store),
             Some(repo),

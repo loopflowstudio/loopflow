@@ -1454,6 +1454,16 @@ fn run() -> anyhow::Result<()> {
             return Err(loopflow::process::CommandExit(code).into());
         }
     };
+    if cli.agent.is_some() && !cli.may_launch_agent() {
+        eprintln!("This command does not start an agent; --agent has no effect.");
+    }
+    // Only an explicit selection becomes an inherited override. Task and
+    // repository defaults are filled later and never acquire this precedence.
+    let selected_agent = loopflow::config::agent_override().or(cli.agent.clone());
+    let _agent_override = selected_agent
+        .as_ref()
+        .map(|agent| EnvGuard::set(loopflow::config::AGENT_OVERRIDE_ENV, agent));
+    cli.agent = selected_agent;
     let planning_read = matches!(
         &cli.command,
         Some(Commands::Wave {
@@ -1584,16 +1594,6 @@ fn run() -> anyhow::Result<()> {
         };
         return execute_command(&cli, &args, None);
     }
-    if cli.agent.is_some() && !cli.may_launch_agent() {
-        eprintln!("This command does not start an agent; --agent has no effect.");
-    }
-    // Only an explicit selection becomes an inherited override. Task and
-    // repository defaults are filled later and never acquire this precedence.
-    let selected_agent = loopflow::config::agent_override().or(cli.agent.clone());
-    let _agent_override = selected_agent
-        .as_ref()
-        .map(|agent| EnvGuard::set(loopflow::config::AGENT_OVERRIDE_ENV, agent));
-    cli.agent = selected_agent;
     if cli.task.is_none() && cli.wt.is_none() {
         if let Some(result) = loopflow::lf::navigation::inspect(&cli) {
             return finish_command(result);

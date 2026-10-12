@@ -580,10 +580,13 @@ fn every_displayed_session_fact_committed_elsewhere_is_shown() {
     for line in 0..50 {
         transcript(&conn, line);
     }
-    assert!(watch
-        .parts(Duration::from_millis(1500))
-        .iter()
-        .all(|frame| !matches!(frame.content, WorkContent::Sessions(_))));
+    let frames = watch.parts(Duration::from_millis(1500));
+    assert!(
+        frames
+            .iter()
+            .all(|frame| !matches!(frame.content, WorkContent::Sessions(_))),
+        "unexpected Session change: {frames:?}"
+    );
 
     // No database write announces this death: the OS clock must find it.
     provider.0.kill().unwrap();

@@ -1734,7 +1734,8 @@ pub(crate) async fn rename(
 pub fn list_local_waves(repo: &Path) -> OpsResult<Vec<String>> {
     let canonical = crate::repository::CanonicalRepo::discover(repo)
         .map_err(|error| OpsError::Message(error.to_string()))?;
-    let path = crate::store::database_path_from_env()?;
+    let crate::store::StorageConfig::Sqlite { path } =
+        super::planning_sync::storage_config_from_env()?;
     if !path
         .try_exists()
         .map_err(|error| OpsError::Message(error.to_string()))?

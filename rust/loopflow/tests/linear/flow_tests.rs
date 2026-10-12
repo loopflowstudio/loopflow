@@ -2729,13 +2729,7 @@ for line in sys.stdin:
         let output = lf_command(
             repo.path(),
             home.path(),
-            &[
-                "-a",
-                "claude",
-                "-b",
-                "flow",
-                "claude-decision",
-            ],
+            &["-a", "claude", "-b", "flow", "claude-decision"],
             Some(&format!("{}:/usr/bin:/bin", bin.display())),
         )
         .env("CORRECT_FIRST", correct_first.to_string())

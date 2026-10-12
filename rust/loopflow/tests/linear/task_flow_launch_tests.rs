@@ -251,7 +251,7 @@ for line in sys.stdin:
     }
     unbound.stage_all();
     unbound.commit("Define default agent fixtures");
-    for owner in ["skill", "run"] {
+    for owner in ["skill", "flow"] {
         let output = command(
             unbound.path(),
             home.path(),

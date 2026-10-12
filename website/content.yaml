@@ -101,17 +101,17 @@ cli:
     commands: |-
       $ lf -a codex : "fix the failing test"   # launch an agent with a prompt
       $ lf skill design "Add CSV export"       # a saved prompt: a Skill
-      $ lf run pursue                          # Skills in sequence: a Flow
+      $ lf flow pursue                          # Skills in sequence: a Flow
       $ lf flow show pursue                    # print its steps
       $ lf flow customize pursue               # copy it into your repo
-      $ lf -b -a claude:opus run pursue        # headless, on a model you pick
+      $ lf -b -a claude:opus flow pursue        # headless, on a model you pick
       $ lf resume                              # pick the last Session back up
       $ lf account                             # logins and remaining capacity
-      $ lf usage                               # tokens and cost per Session
+      $ lf history usage                               # tokens and cost per Session
       $ lf task create --wave exports --title "Add CSV export"
       $ lf task run EXP-12                     # its own worktree, then its Flow
       $ lf session ensure --task EXP-12        # back to that Task's conversation
-      $ lf usage --task EXP-12                 # what that Task cost
+      $ lf history usage --task EXP-12                 # what that Task cost
       $ lf land                                # merge when checks pass
     items:
     - name: Launcher
@@ -144,7 +144,7 @@ cli:
         agents can work without colliding.
     - name: Workflows
       text: '`lf` encodes the stages a Task goes through to become a shipped and validated PR, and
-        lets you customize, project by project, how and when you get involved.'
+        lets you customize, Wave by Wave, how and when you get involved.'
     links:
     - label: Skills and Flows ↗
       href: /docs/authoring#flows

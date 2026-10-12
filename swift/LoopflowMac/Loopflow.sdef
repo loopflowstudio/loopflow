@@ -2,6 +2,20 @@
 <!DOCTYPE dictionary SYSTEM "file://localhost/System/Library/DTDs/sdef.dtd">
 <dictionary title="Loopflow Terminology">
     <suite name="Loopflow Suite" code="CNRT" description="Loopflow scripting commands">
+        <command name="inspect desktop" code="CNRTinsp" description="Read registered repository windows without focusing or acquiring clients">
+            <cocoa class="LoopflowMac.InspectDesktopCommand"/>
+            <result type="text" description="JSON reading of retained windows and panes"/>
+        </command>
+        <command name="control pane" code="CNRTpane" description="Arrange or send explicit input to an exact retained pane">
+            <cocoa class="LoopflowMac.ControlPaneCommand"/>
+            <direct-parameter type="text" description="JSON exact target and pane action"/>
+            <result type="text" description="JSON reading after the action"/>
+        </command>
+        <command name="read terminal text" code="CNRTtext" description="Read an exact retained terminal surface without acquiring a client">
+            <cocoa class="LoopflowMac.ReadTerminalTextCommand"/>
+            <direct-parameter type="text" description="JSON exact pane, surface incarnation, region and byte limit"/>
+            <result type="text" description="JSON bounded text or explicit unavailability"/>
+        </command>
         <command name="capture screenshot" code="CNRTcapt" description="Capture Loopflow window screenshot and save to repository">
             <cocoa class="LoopflowMac.CaptureScreenshotCommand"/>
             <direct-parameter type="text" description="Repository path for saving screenshot"/>

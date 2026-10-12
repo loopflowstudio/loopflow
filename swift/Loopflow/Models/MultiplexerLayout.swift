@@ -12,17 +12,48 @@ public enum SplitAxis: String, Codable, Sendable, Equatable {
 
 public enum PaneContent: Codable, Sendable, Equatable {
     case empty
-    case session(id: String)
-    case shell
+    case session(id: String, location: WorkspaceIdentity? = nil, execution: TaskLocationObservation? = nil)
+    /// Unknown locations remain unavailable, never a local-shell fallback.
+    case shell(location: WorkspaceIdentity?, execution: TaskLocationObservation? = nil)
     /// Every Flow process of a Task.
-    case flowLog(taskId: String)
+    case flowLog(taskId: String, location: WorkspaceIdentity? = nil, execution: TaskLocationObservation? = nil)
     /// A Task's worktree files.
-    case files(taskId: String)
+    case files(taskId: String, location: WorkspaceIdentity? = nil, execution: TaskLocationObservation? = nil)
+
+    /// Terminals retain their captured location; Files and logs follow their
+    /// recorded owner. Unavailable owner evidence never falls back to a path.
+    public var location: WorkspaceIdentity? {
+        switch self {
+        case .empty: return nil
+        case .session(_, let location, _), .shell(let location, _): return location
+        case .files(_, let location, let execution), .flowLog(_, let location, let execution):
+            guard let execution else { return location }
+            guard case .recorded(_, let checkout?) = execution.location else { return nil }
+            return WorkspaceIdentity(machineId: execution.machineID, worktree: checkout)
+        }
+    }
+
+    /// The exact observed owner travels with the content, never the enclosing workspace.
+    public var executionLocation: TaskLocationObservation? {
+        switch self {
+        case .session(_, _, let execution), .shell(_, let execution),
+             .files(_, _, let execution), .flowLog(_, _, let execution): execution
+        case .empty: nil
+        }
+    }
 }
 
 public struct PaneState: Codable, Sendable, Identifiable, Equatable {
     public let id: String
     public let content: PaneContent
+    /// The content occurrence, distinct from the reusable pane slot.
+    public let incarnation: String
+    public var sessionId: String? {
+        guard case .session(let id, _, _) = content else { return nil }
+        return id
+    }
+
+    public var executionLocation: TaskLocationObservation? { content.executionLocation }
 
     public init(
         id: String = UUID().uuidString,
@@ -30,6 +61,7 @@ public struct PaneState: Codable, Sendable, Identifiable, Equatable {
     ) {
         self.id = id
         self.content = content
+        self.incarnation = UUID().uuidString
     }
 }
 
@@ -42,11 +74,17 @@ public indirect enum LayoutNode: Codable, Sendable, Equatable {
     }
 
     public func visible(excluding collapsed: Set<String>) -> LayoutNode? {
+        removing(collapsed)
+    }
+
+    /// Prune leaves in one traversal, preserving surviving occurrences and ratios.
+    /// Removing every leaf returns nil; the store owns the empty-workspace choice.
+    public func removing(_ paneIds: Set<String>) -> LayoutNode? {
         switch self {
-        case .leaf(let pane): return collapsed.contains(pane.id) ? nil : self
+        case .leaf(let pane): return paneIds.contains(pane.id) ? nil : self
         case .split(let axis, let first, let second, let ratio):
-            let left = first.visible(excluding: collapsed)
-            let right = second.visible(excluding: collapsed)
+            let left = first.removing(paneIds)
+            let right = second.removing(paneIds)
             switch (left, right) {
             case let (left?, right?): return .split(axis, first: left, second: right, ratio: ratio)
             case let (left?, nil): return left
@@ -99,24 +137,6 @@ public indirect enum LayoutNode: Codable, Sendable, Equatable {
         }
     }
 
-    /// Removes a leaf and collapses its parent. Removing the final leaf returns nil.
-    public func removing(_ paneId: String) -> LayoutNode? {
-        switch self {
-        case .leaf(let pane):
-            return pane.id == paneId ? nil : self
-        case .split(let axis, let first, let second, let ratio):
-            if first.pane(for: paneId) != nil {
-                guard let updated = first.removing(paneId) else { return second }
-                return .split(axis, first: updated, second: second, ratio: ratio)
-            }
-            if second.pane(for: paneId) != nil {
-                guard let updated = second.removing(paneId) else { return first }
-                return .split(axis, first: first, second: updated, ratio: ratio)
-            }
-            return self
-        }
-    }
-
     public func replacingContent(of paneId: String, with content: PaneContent) -> LayoutNode {
         _replacingLeaf(paneId) { pane in
             .leaf(PaneState(id: pane.id, content: content))
@@ -141,6 +161,10 @@ public indirect enum LayoutNode: Codable, Sendable, Equatable {
                     second: second,
                     ratio: ratio.clampedSplitRatio
                 )
+            }
+            if second.pane(for: firstPaneId) != nil,
+               first.pane(for: secondPaneId) != nil {
+                return .split(axis, first: first, second: second, ratio: (1 - ratio).clampedSplitRatio)
             }
             return .split(
                 axis,

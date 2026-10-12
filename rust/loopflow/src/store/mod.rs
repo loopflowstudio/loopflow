@@ -23,6 +23,7 @@ pub mod planning_sync;
 mod pr_landings;
 mod processes;
 pub(crate) mod project_transitions;
+mod repositories;
 pub mod rows;
 mod sessions;
 pub mod sqlite;
@@ -411,25 +412,16 @@ impl Store {
             }
         };
         let all = run_sqlite(&self.sqlite, move |store| store.list_waves(None)).await?;
-        for wave in all {
-            if wave.repo() == canonical.to_string() {
-                continue;
-            }
-            let equivalent = crate::repository::CanonicalRepo::discover(Path::new(wave.repo()))
-                .is_ok_and(|stored| stored == canonical);
-            if !equivalent {
-                continue;
-            }
-            let wave_id = wave.id().clone();
-            let expected_repo = wave.repo().to_string();
-            let target_repo = canonical.to_string();
-            run_sqlite(&self.sqlite, move |store| {
-                store.repair_wave_repo(&wave_id, &expected_repo, &target_repo)
+        // Repository aliases are a read concern; inspection must not relocate
+        // durable planning rows or require a writable store.
+        Ok(all
+            .into_iter()
+            .filter(|wave| {
+                wave.repo() == canonical.to_string()
+                    || crate::repository::CanonicalRepo::discover(Path::new(wave.repo()))
+                        .is_ok_and(|stored| stored == canonical)
             })
-            .await?;
-        }
-        let repo = canonical.to_string();
-        run_sqlite(&self.sqlite, move |store| store.list_waves(Some(&repo))).await
+            .collect())
     }
 
     /// A chord's contents: the waves whose `parent_wave_id` is `parent`,
@@ -473,14 +465,7 @@ impl Store {
             }
             return Ok(None);
         };
-        let wave_id = wave.id().clone();
-        let expected_repo = wave.repo().to_string();
-        let target_repo = locator.repo().to_string();
-        run_sqlite(&self.sqlite, move |store| {
-            store.repair_wave_repo(&wave_id, &expected_repo, &target_repo)
-        })
-        .await?;
-        self.get_wave(wave.id()).await
+        Ok(Some(wave.clone()))
     }
 
     pub async fn find_waves_by_slug(&self, slug: &str) -> StoreResult<Vec<Wave>> {
@@ -1139,6 +1124,22 @@ pub async fn open_ephemeral_store(cfg: &StorageConfig) -> StoreResult<Store> {
     })
 }
 
+/// Observe existing records without initializing, migrating, or claiming them.
+/// Missing and unreadable registries remain different outcomes.
+pub(crate) fn read_existing_registry() -> StoreResult<Option<Store>> {
+    let path =
+        database_path_from_env().map_err(|error| StoreError::InvalidData(error.to_string()))?;
+    if !path
+        .try_exists()
+        .map_err(|error| StoreError::InvalidData(error.to_string()))?
+    {
+        return Ok(None);
+    }
+    Ok(Some(Store {
+        sqlite: sqlite::SqliteStore::open_read_only(&path)?,
+    }))
+}
+
 /// Open the machine's shared registry store only if one already exists.
 /// Returns `None` if the registry is absent or incompatible; never creates it.
 pub async fn open_existing_store() -> Option<Store> {
@@ -1258,6 +1259,30 @@ mod tests {
                 PathBuf::from("/repo.waiting")
             ]
         );
+    }
+
+    #[test]
+    fn reads_released_task_ownership_without_migrating_or_losing_unknown_work() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("released.db");
+        let connection = rusqlite::Connection::open(&path).unwrap();
+        connection
+            .execute_batch(include_str!(
+                "../../tests/fixtures/migrations/task_ownership_released.sql"
+            ))
+            .unwrap();
+        drop(connection);
+        let before = std::fs::read(&path).unwrap();
+        let mut paths = read_nonterminal_task_worktrees(&path).unwrap();
+        paths.sort();
+        assert_eq!(
+            paths,
+            vec![
+                PathBuf::from("/repo.running"),
+                PathBuf::from("/repo.unknown")
+            ]
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), before);
     }
 
     #[test]
@@ -1795,6 +1820,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn selected_project_survives_missing_provider_membership_inventory() {
+        let (directory, store, wave) = planning_store().await;
+        let project = make_project(&wave);
+        store.create_project(&project).await.unwrap();
+        select_project(&store, &project);
+        let task = make_task(&wave, &project);
+        store
+            .seed_inventory(task_planning_snapshot(&wave, &project, &task), None)
+            .await
+            .unwrap();
+        let before = crate::ops::project::current_project(&store, &wave).unwrap();
+        rusqlite::Connection::open(directory.path().join("registry.db"))
+            .unwrap()
+            .execute_batch("DELETE FROM pm_wave_projects")
+            .unwrap();
+        assert_eq!(
+            crate::ops::project::current_project(&store, &wave).unwrap(),
+            before
+        );
+    }
+
+    #[tokio::test]
     async fn incoming_terminal_planning_prevents_placement_without_moving_workflow() {
         for (state, completed) in [
             (Some("completed"), true),
@@ -2321,7 +2368,6 @@ mod tests {
         // The first refresh has fetched its response, then pauses.
         let delayed = old;
         let predecessor_work = WorkRef::Project(predecessor.id.clone());
-        let retained_placement = store.placement(&predecessor_work).await.unwrap();
         let next_home = crate::durable::MachineId::new();
         store
             .add_machine(&next_home, "ssh://fixture", "ssh://fixture", ".")
@@ -2348,16 +2394,16 @@ mod tests {
         let transferred = store.get_task(&task.id).await.unwrap().unwrap();
         assert_ne!(transferred.project_id, predecessor.id);
         assert_eq!(
-            store.placement(&predecessor_work).await.unwrap(),
-            retained_placement
+            store.placement(&predecessor_work).await.unwrap().machine_id,
+            next_home
         );
-        // Acquiring a Project does not create a local execution placement.
-        assert!(store
+        // A new Project inherits its Wave's assignment without allocating execution.
+        let inherited = store
             .placement(&WorkRef::Project(transferred.project_id.clone()))
             .await
-            .unwrap_err()
-            .to_string()
-            .contains("has no Machine placement"));
+            .unwrap();
+        assert_eq!(inherited.machine_id, next_home);
+        assert_eq!(inherited.source, WorkRef::Wave(wave.id().clone()));
         // A delayed response omits the now-known successor. Rejection must
         // preserve both normalized facts and the durable Task transfer.
         assert!(store.seed_inventory(delayed, None).await.is_err());
@@ -2737,7 +2783,7 @@ mod tests {
             ["inspect the failing test", "preserve the public behavior"]
         );
 
-        // The cross-Work `lf activity` timeline reads the same comments through
+        // The cross-Work `lf history` timeline reads the same comments through
         // `steers_since`, attributed to their Work and ordered by time. Stamp the
         // two events so the `since` filter has something to bite on.
         let conn = rusqlite::Connection::open(&database_path).unwrap();
@@ -2954,11 +3000,7 @@ mod tests {
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
         select_project(&store, &project);
-        let home = crate::durable::MachineId::new();
-        store
-            .add_machine(&home, "ssh://fixture", "ssh://fixture", ".")
-            .await
-            .unwrap();
+        let home = store.local_machine().await.unwrap().id;
         store
             .place_work(&WorkRef::Project(project.id.clone()), &home)
             .await

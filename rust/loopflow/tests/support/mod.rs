@@ -565,7 +565,7 @@ fn write_executable(dir: &Path, name: &str, content: &str) {
     }
 }
 
-/// Record a Flow the way `lf run` leaves one: a Flow process, its FlowProcess row
+/// Record a Flow the way `lf flow` leaves one: a Flow process, its FlowProcess row
 /// and one step Process in `cwd`, both exited. Returns the Flow process's id, which
 /// names the Flow.
 #[allow(dead_code)] // Shared helper compiled into integration tests that record no Flow.
@@ -575,7 +575,7 @@ pub fn record_flow(home: &Path, cwd: &Path, flow: &str, label: &str, outcome: &s
     let flow_process = loopflow::id::LfProcessId::new();
     let step = loopflow::id::LfProcessId::new();
     for (id, parent, argv) in [
-        (flow_process.clone(), None, vec!["lf", "run", flow]),
+        (flow_process.clone(), None, vec!["lf", "flow", flow]),
         (
             step.clone(),
             Some(flow_process.clone()),

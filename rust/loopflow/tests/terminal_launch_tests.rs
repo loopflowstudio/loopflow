@@ -35,16 +35,7 @@ exit 0
     .unwrap();
     fs::set_permissions(&provider, fs::Permissions::from_mode(0o755)).unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args([
-            "-i",
-            "--no-loopflow",
-            "--diff",
-            "none",
-            "-a",
-            "codex",
-            ":",
-            "hello",
-        ])
+        .args(["-i", "--diff", "none", "-a", "codex", ":", "hello"])
         .env_clear()
         .env("HOME", home.path())
         .env("CODEX_HOME", &native)

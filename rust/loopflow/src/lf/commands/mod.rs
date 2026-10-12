@@ -5,16 +5,17 @@ pub mod ci;
 pub mod config;
 pub mod context;
 pub mod context_cost;
+pub mod desktop;
 pub mod discord;
 pub mod doctor;
 pub mod flow;
 pub mod flow_inventory;
+pub mod history;
 pub mod install;
 pub mod list;
 pub mod machine;
 mod machine_credentials;
 pub mod monitor;
-pub mod open;
 pub mod ops;
 pub mod placement;
 pub mod planning;
@@ -31,6 +32,7 @@ pub mod usage;
 pub mod util;
 pub mod waves;
 pub(crate) mod work_catalog;
+pub mod work_route;
 pub mod work_watch;
 
 /// One drill over the Wave → Project → Task Work hierarchy.

@@ -42,7 +42,7 @@ struct DesktopNativeSessionFixture: Decodable, Sendable {
             record["open_argv"] = isolatedCommand(argv)
             return String(decoding: try JSONSerialization.data(withJSONObject: record), as: UTF8.self)
         }
-        guard ["roadmap", "activity"].contains(args.first ?? "") || ["wave list", "machine id", "session list", "session history", "task status", "task files", "task file", "task diff", "flow list"].contains(args.prefix(2).joined(separator: " ")) else {
+        guard args.first == "history" || ["wave show", "wave list", "machine id", "session list", "session history", "task status", "task files", "task file", "task diff", "flow list"].contains(args.prefix(2).joined(separator: " ")) else {
             throw RegistryQueryError("Fixture does not execute this command")
         }
         return try await Task.detached { try capture([cli] + args) }.value
@@ -86,7 +86,7 @@ struct DesktopNativeSessionFixture: Decodable, Sendable {
         // Exact Task destinations resolve within the Wave's repository. The
         // owned checkout remains the cwd for native execution. File commands use
         // the Task’s recorded checkout through the shared CLI reader.
-        process.currentDirectoryURL = URL(fileURLWithPath: ["roadmap", "activity", "task", "flow", "wave"].contains(argv.dropFirst().first ?? "") ? repo : checkout)
+        process.currentDirectoryURL = URL(fileURLWithPath: ["history", "task", "flow", "wave"].contains(argv.dropFirst().first ?? "") ? repo : checkout)
         process.standardInput = FileHandle.nullDevice
         process.standardOutput = handle
         process.standardError = errorHandle
@@ -193,7 +193,7 @@ struct DesktopNativeSessionTests {
         let copiedRecords = try JSONDecoder().decode([SessionRecord].self, from: Data(copied.utf8))
         let copiedRecord = try #require(copiedRecords.first)
         let activityJSON = try await reads.read(binary: fixture.cli, home: snapshot,
-            args: ["activity", "--since", "7d", "--limit", "50", "--json"], cwd: fixture.repo).get()
+            args: ["history", "--since", "7d", "--limit", "50", "--json"], cwd: fixture.repo).get()
         let activity = try JSONDecoder().decode(WorkActivitySnapshot.self, from: Data(activityJSON.utf8))
         #expect(activity.items.contains { $0.work == copiedRecord.work })
         await #expect(throws: (any Error).self) { try await query.openSession(id: copiedRecord.id) }
@@ -208,10 +208,10 @@ struct DesktopNativeSessionTests {
         #expect(try JSONDecoder().decode([SessionRecord].self, from: Data(history.utf8)).count == copiedRecords.count + 1)
         let owned = try #require(try await fixture.records().first)
         let registry = SessionsWorkspaceRegistry(localMachineId: try await query.localMachineId())
-        let workspace = registry.workspace(for: try #require(owned.workspace).identity)
+        let workspace = fixtureWork(registry, try #require(owned.workspace).identity)
         let store = workspace.sessionStore(repoPath: fixture.repo, query: query)
-        workspace.multiplexer.load(sessionId: fixture.sessionId)
-        workspace.multiplexer.newShell()
+        workspace.multiplexer.load(sessionId: fixture.sessionId, location: owned.workspace?.identity)
+        workspace.multiplexer.newShell(location: workspace.location)
         let layout = workspace.multiplexer.layout
         let files = workspace.files(taskId: fixture.taskId, issue: fixture.issue, cwd: fixture.checkout, query: query)
         files.autosave = false
@@ -227,13 +227,13 @@ struct DesktopNativeSessionTests {
         for _ in 0..<3 {
             await model.openTaskLink(try #require(link.url))
             #expect(model.selection?.id == fixture.taskId)
-            #expect(model.linkedSession?.taskIds.contains(fixture.taskId) == true)
+            #expect(model.linkedSession?.record.taskIds.contains(fixture.taskId) == true)
             store.reconcile(try await fixture.records())
             await store.select(fixture.sessionId)
             let prepared = try #require(store.sessions.first?.surface)
             #expect(try await fixture.resume(prepared).contains("native:\(fixture.nativeId):retained-history"))
             store.recordPaneLive(fixture.sessionId)
-            store.noteSurfaceClosed(.session(fixture.sessionId))
+            store.noteSurfaceClosed(.session(fixture.sessionId, machineId: try #require(prepared.workspace).machineId))
             await model.refresh()
             await files.refresh()
             await files.loadFile()
@@ -262,7 +262,7 @@ struct DesktopNativeSessionTests {
             let result = try await fixture.resume(prepared)
             #expect(result.contains("native:\(fixture.nativeId):retained-history"))
             store.recordPaneLive(fixture.sessionId)
-            store.noteSurfaceClosed(.session(fixture.sessionId))
+            store.noteSurfaceClosed(.session(fixture.sessionId, machineId: try #require(prepared.workspace).machineId))
             let records = try await fixture.records()
             #expect(records.map(\.id) == [fixture.sessionId])
             #expect(try fixture.historyIsPreserved())

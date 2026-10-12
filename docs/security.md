@@ -136,7 +136,7 @@ provider evidence under `$LF_HOME/runs/`. Bundle directories are owner-only
 (`0700`) and artifact files are `0600`. Provider or tool output can contain
 sensitive material, so treat the Machine store and payloads as sensitive even though it is
 local. The bundles are not uploaded to Linear, GitHub, or another Loopflow
-Machine. Reading another Machine with `lf --machine <machine-id> monitor list` executes the read on
+Machine. Reading another Machine with `lf --machine <machine-id> history list` executes the read on
 that machine.
 
 ## Keep bridge credentials private

@@ -176,7 +176,9 @@ The test runner and CI use `test_network.py` for Python, Rust test executables,
 Swift tests, website tests and smoke tests. Each invocation proves loopback works
 and an external connection is denied; the OS boundary covers descendants too.
 Git transport is file-only. Local bare remotes and loopback protocol fixtures
-remain available. No developer shell or global Git configuration changes.
+remain available. macOS cannot nest Seatbelt profiles: the checkout-observation
+proof skips inside this wrapper and runs separately in gate/macOS CI, installing
+its own read-only, network-denying subprocess policy. No developer shell or global Git configuration changes.
 
 macOS uses `sandbox-exec`; Linux uses passwordless sudo, `unshare --net` and `ip`
 to create a private network namespace, enable loopback and restore the caller's
@@ -951,7 +953,7 @@ When changing harness event mapping, run the recorded-trace conformance tests
 alongside the provider's unit tests. Keep trace expectations aligned with the
 event contract, including durable final-answer receipts and usage checkpoints.
 
-After Session-history or schema changes, run `lf monitor list --json`, `lf usage --json`, and
+After Session-history or schema changes, run `lf history list --json`, `lf usage --json`, and
 `lf doctor --json` against a disposable Machine with inherited `LF_*` and
 `LOOPFLOW_*` authority removed and `LF_BIN` pinned to the compiled source CLI.
 Never use the installed store to prove a draft migration.

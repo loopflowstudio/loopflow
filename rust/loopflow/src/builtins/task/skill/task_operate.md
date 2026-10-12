@@ -48,7 +48,7 @@ or liveness evidence; never a reason to start a second Flow process). â€œReadyâ€
    Only an edge leaving the current node moves the Task:
    `lf task run <issue>` takes the only one or names them,
    `lf task run <issue> <flow>` picks one, `lf task run <issue> end` takes an
-   edge that runs nothing. `lf --task <issue> run <flow>` runs a Flow without
+   edge that runs nothing. `lf --task <issue> flow <flow>` runs a Flow without
    moving the Task. Without a workflow, choose as follows.
    Leave a Flow with a live process running. A stopped
    Flow is history: read what it finished and which effects it recorded before
@@ -62,8 +62,9 @@ or liveness evidence; never a reason to start a second Flow process). â€œReadyâ€
    work only; review happens in the conversation. Read composed steps before launching.
    Explain any departure from the default. Scratch history alone cannot approve
    a design or waive a review. A finished Flow proves neither completion nor
-   unfinished work: inspect its outcome. Preserve accepted remaining work as
-   ordinary Tasks and comments. Ask about consequential scope
+   unfinished work: inspect its outcome. Completion alone is not a stopping
+   point if the requested outcome still needs work. A merged PR alone does not
+   complete the Task. Ask about consequential scope
    or direction conflicts; when judgment is unavailable, name the exact decision.
 
 3. **Advance the work.** `lf task run <issue> [flow]` runs a
@@ -84,22 +85,20 @@ or liveness evidence; never a reason to start a second Flow process). â€œReadyâ€
    live Flow process. Continue through the authored steps, resolve recoverable failures,
    and use inline answers to unblock interactive work. Read a failure's log
    before retrying, and retry with `--reason "<what changed>"` only on new
-   evidence or a repaired cause. Stop when status confirms Task completion and
-   resolved delivery obligations, or a concrete blocker remains. Report publication,
+   evidence or a repaired cause. Stop when status confirms Task completion, or a concrete blocker remains. Report publication,
    review, merge and completion as separate facts. Arming a merge the Flow did not remains the
    person's choice. Each Task has zero or one PR; further implementation needing
    another PR belongs in another Task, stacked if dependent. Repeated calls must
    preserve existing work without duplicating Flows or conversations.
 
-5. **Finish merged delivery.** A verified merge is not Task completion. Inspect
-   every associated live Flow and unfinished Process; leave an authorized live
-   ship Flow to finish. Record independently accepted later work as ordinary
-   Tasks and linking comments. Retry a failed comment against the saved Task;
-   never recreate the Task or invent a no-work disposition. Complete the source
-   when its accepted outcome is delivered, without waiting for those Tasks.
-   Do not replay gate, re-arm a merged PR or reopen a completed Task to finish
-   a comment. A PR-less Task can complete with retained files and commits.
-   Completion changes status without moving Workflow or controlling Processes.
+5. **Finish merged delivery.** A verified merge leaves an open Task available for
+   optional new Task creation. No filing or disposition is required. First inspect
+   associated Flows and unfinished Processes; leave a live ship Flow to finish.
+   When the accepted outcome is satisfied and no live Flow owns its finish,
+   run `lf task complete <issue>` and reread status. Do not replay gate, re-arm the
+   PR or reopen a completed Task merely to create more work. A PR-less Task can reach end with retained files
+   and commits; no placeholder PR or landing ceremony is required. Completion
+   changes status without moving the Workflow and is safe to repeat after arrival.
    When status shows completion pending at end, retry `lf task complete <issue>`
    alone. Never run the successful edge again. A newer reopening supersedes the
    old request; standing at end alone does not authorize another completion.

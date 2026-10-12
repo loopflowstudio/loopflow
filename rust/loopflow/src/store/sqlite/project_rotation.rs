@@ -2,7 +2,7 @@
 
 use super::planning_changes::PlanningChanges;
 use super::planning_write;
-use super::{durable, SqliteStore};
+use super::SqliteStore;
 use crate::durable::ProjectId;
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
@@ -96,7 +96,6 @@ impl SqliteStore {
                         ],
                     ),
                 )?;
-                durable::inherit_project_placement(&tx, &successor)?;
             } else {
                 let available:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM projects WHERE id=?1 AND wave_id=?2 AND status IN ('backlog','planned','started'))",params![successor.as_str(),input.wave_id],|r|r.get(0))?;
                 if !available {

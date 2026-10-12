@@ -139,7 +139,7 @@ private actor DirectiveSource {
             roadmap = original.replacingOccurrences(of: oldJSON, with: newJSON)
             written = true
             return "product: updated task issue-review"
-        case "roadmap":
+        case "wave" where args.dropFirst().first == "show":
             if written && outcome == .unreadable { throw RegistryQueryError("Planning offline") }
             let result = roadmap
             if let gate = nextRead {
@@ -149,7 +149,7 @@ private actor DirectiveSource {
             return result
         case "wave" where args.dropFirst().first == "list": return "[]"
         case "session": return #"{"entries":[],"next":null}"#
-        case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
+        case "history": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
         default: throw RegistryQueryError("Unexpected directive proof operation")
         }
     }

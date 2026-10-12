@@ -1,5 +1,19 @@
 use std::io::IsTerminal;
 
+pub(crate) fn print_process(process: &crate::process::LfProcess) {
+    let command = process.command.as_deref().unwrap_or("unknown command");
+    let display = serde_json::from_str::<Vec<String>>(command)
+        .map(|argv| argv.join(" "))
+        .unwrap_or_else(|_| command.to_string());
+    println!(
+        "{}  {}  {}  {}",
+        process.id,
+        process.started_at,
+        process.outcome.as_deref().unwrap_or("unknown"),
+        display
+    );
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct Colors {
     pub cyan: &'static str,
@@ -152,7 +166,6 @@ pub fn format_reproducible_command(
     wave: Option<&str>,
     docs: &[String],
     clipboard: bool,
-    no_loopflow: bool,
     agent: Option<&str>,
 ) -> String {
     let mut parts = vec!["lf".to_string()];
@@ -167,9 +180,6 @@ pub fn format_reproducible_command(
     }
     if clipboard {
         parts.push("-c".to_string());
-    }
-    if no_loopflow {
-        parts.push("--no-loopflow".to_string());
     }
     if let Some(agent) = agent {
         parts.push(format!("-a {}", agent));
@@ -245,7 +255,7 @@ mod tests {
 
     #[test]
     fn format_reproducible_command_minimal() {
-        let cmd = format_reproducible_command(Some("debug"), None, &[], false, false, None);
+        let cmd = format_reproducible_command(Some("debug"), None, &[], false, None);
         assert_eq!(cmd, "lf debug");
     }
 
@@ -256,12 +266,11 @@ mod tests {
             Some("rust"),
             &["src/".to_string()],
             true,
-            true,
             Some("claude:opus"),
         );
         assert_eq!(
             cmd,
-            "lf implement --wave rust --docs src/ -c --no-loopflow -a claude:opus"
+            "lf implement --wave rust --docs src/ -c -a claude:opus"
         );
     }
 }

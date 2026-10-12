@@ -15,7 +15,7 @@ use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Transact
 use time::OffsetDateTime;
 
 use crate::child::AbandonIntent;
-use crate::durable::{Author, TaskState};
+use crate::durable::{Author, TaskState, WorkRef};
 use crate::id::WaveId;
 use crate::linear::{LinearIssueId, LinearProjectId};
 use crate::store::rows::now_unix;
@@ -28,8 +28,7 @@ use crate::work::task::{
     TaskLinearObservation, TaskPr, TaskPrId, TaskPrRepairKind,
 };
 
-use super::durable::{inherit_project_placement, inherit_task_placement};
-use super::SqliteStore;
+use super::{SqliteStore, TaskCheckout};
 
 fn task_creation_in(conn: &Connection, task: &TaskId) -> StoreResult<Option<NewTask>> {
     conn.query_row(
@@ -107,6 +106,22 @@ pub(super) fn create_task_in(conn: &Connection, input: &NewTask) -> StoreResult<
     };
     validate_task(&task)?;
     insert_task_row(conn, &task)?;
+    let repo: String = conn.query_row(
+        "SELECT repo FROM waves WHERE id=?1",
+        [&task.wave_id],
+        |row| row.get(0),
+    )?;
+    let authority = crate::durable::TaskAdmissionAuthority {
+        machine_id: super::durable::map_local_machine(conn)?.id,
+        repository_id: super::repositories::ensure_repository_in(conn, &repo)?,
+    };
+    planning_write::local(
+        conn,
+        &crate::work::edit::WorkEdit::for_target(
+            task.id.as_str(),
+            &[Edit::TaskAdmissionAuthority(Some(authority))],
+        ),
+    )?;
     conn.execute(
         "INSERT INTO task_creation_intents(task_id, project_id, title, description, due_date)
          VALUES(?1, ?2, ?3, ?4, ?5)",
@@ -154,6 +169,18 @@ impl SqliteStore {
         }
         super::durable::require_selected_project(&tx, &task.project_id)?;
         require_task_planning(&tx, &task)?;
+        super::task_admission::require_admission_in(&tx, &task.id)?;
+        let local = super::durable::map_local_machine(&tx)?.id;
+        let destination = match super::task_admission::owner_in(&tx, task_id)? {
+            Some(owner) => owner,
+            None => super::durable::placement_in(&tx, &WorkRef::Task(task_id.clone()))?.machine_id,
+        };
+        if destination != local {
+            return Err(StoreError::InvalidAuthority(format!(
+                "Task {task_id} is delegated to Machine {}; no local checkout was allocated",
+                destination,
+            )));
+        }
         task.worktree = Some(worktree.to_path_buf());
         task.workspace_slug = workspace_slug.to_string();
         task.branch = pr.branch.clone();
@@ -161,15 +188,14 @@ impl SqliteStore {
         task.parent_pr_id = pr.parent_pr_id.clone();
         validate_initial_task_pr(&task, pr)?;
         tx.execute(
-            "UPDATE tasks SET worktree=?2,workspace_slug=?3,updated_at=?4,branch=?5,base_commit=?6,parent_pr_id=?7 WHERE id=?1",
+            "UPDATE tasks SET worktree=?2,workspace_slug=?3,updated_at=?4,branch=?5,base_commit=?6,parent_pr_id=?7,checkout_machine_id=?8 WHERE id=?1",
             params![
                 task_id.as_str(),
                 worktree.display().to_string(),
                 workspace_slug,
-                now_unix(), task.branch, task.base_commit, task.parent_pr_id.as_ref().map(TaskPrId::as_str)
+                now_unix(), task.branch, task.base_commit, task.parent_pr_id.as_ref().map(TaskPrId::as_str), local.as_str()
             ],
         )?;
-        inherit_task_placement(&tx, &task)?;
         if pr.publication.is_some() {
             insert_task_pr(&tx, pr)?;
         }
@@ -199,24 +225,21 @@ impl SqliteStore {
         Ok(task)
     }
 
-    pub(crate) fn task_checkouts(&self) -> StoreResult<Vec<super::TaskCheckout>> {
+    pub(crate) fn task_checkout(&self, task: &TaskId) -> StoreResult<Option<TaskCheckout>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare(
-            "SELECT t.id, t.issue_identifier, t.worktree, p.machine_id
-             FROM tasks t LEFT JOIN work_placements p ON p.task_id=t.id WHERE t.worktree IS NOT NULL",
-        )?;
-        let rows = statement.query_map([], |row| {
-            let home: Option<String> = row.get(3)?;
-            Ok(super::TaskCheckout {
-                task_id: TaskId::from_raw(row.get::<_, String>(0)?),
-                issue_identifier: row.get(1)?,
-                worktree: PathBuf::from(row.get::<_, String>(2)?),
-                machine_id: home
-                    .map(|id| crate::durable::MachineId::parse(&id))
-                    .transpose()
-                    .map_err(|error| invalid_column(3, error))?,
-            })
-        })?;
+        conn.query_row(
+            &format!("{TASK_CHECKOUT_COLUMNS} AND id=?1"),
+            [task.as_str()],
+            map_task_checkout,
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+
+    pub(crate) fn task_checkouts(&self) -> StoreResult<Vec<TaskCheckout>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare(TASK_CHECKOUT_COLUMNS)?;
+        let rows = statement.query_map([], map_task_checkout)?;
         rows.map(|row| row.map_err(StoreError::from)).collect()
     }
 
@@ -385,8 +408,10 @@ impl SqliteStore {
     }
 
     pub fn task_by_issue(&self, issue: &str) -> StoreResult<Option<Task>> {
-        match self.resolve_task_id(issue, None)? {
-            Some(id) => self.task(&id),
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let snapshot = conn.unchecked_transaction()?;
+        match resolve_task_id_in(&snapshot, issue, None)? {
+            Some(id) => task_on(&snapshot, &id),
             None => Ok(None),
         }
     }
@@ -397,63 +422,9 @@ impl SqliteStore {
         issue: &str,
         repo: Option<&str>,
     ) -> StoreResult<Option<TaskId>> {
-        let prefix = issue
-            .strip_prefix("lf-")
-            .or_else(|| issue.strip_prefix("task_"))
-            .unwrap_or(issue);
-        let local_prefix = ((4..=32).contains(&prefix.len())
-            && prefix.bytes().all(|byte| byte.is_ascii_hexdigit()))
-        .then(|| prefix.to_ascii_lowercase());
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare(
-            "SELECT t.id, COALESCE(t.issue_title, t.issue_identifier, t.id), w.repo FROM tasks t
-             LEFT JOIN projects p ON p.id=t.project_id LEFT JOIN waves w ON w.id=p.wave_id
-             WHERE t.id=?1 OR t.external_issue_id=?1 OR t.issue_identifier=?1
-                OR t.id=(SELECT task_id FROM task_creation_intents WHERE json_extract(export_json,'$.id')=?1)
-                OR substr(lower(t.id), 6, length(?2))=?2
-             ORDER BY t.id",
-        )?;
-        let mut tasks = statement
-            .query_map(params![issue, local_prefix], |row| {
-                Ok((
-                    TaskId::from_raw(row.get::<_, String>(0)?),
-                    row.get::<_, Option<String>>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                ))
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        drop(statement);
-        drop(conn);
-        if let Some(repo) = repo {
-            let canonical =
-                crate::repository::CanonicalRepo::discover(std::path::Path::new(repo)).ok();
-            tasks.retain(|(id, _, owner)| {
-                id.as_str() == issue
-                    || owner.as_deref() == Some(repo)
-                    || owner.as_ref().is_some_and(|owner| {
-                        canonical.as_ref().is_some_and(|canonical| {
-                            canonical.contains(std::path::Path::new(owner))
-                        })
-                    })
-            });
-        }
-        if tasks.len() > 1 {
-            let candidates = tasks
-                .iter()
-                .map(|(id, title, _)| match title {
-                    Some(title) => format!("  {id} ({title})"),
-                    None => format!("  {id}"),
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
-            return Err(StoreError::InvalidData(format!(
-                "multiple stable Tasks resolve to {issue:?}; use a longer Task ID:\n{candidates}"
-            )));
-        }
-        if let Some((id, _, _)) = tasks.pop() {
-            return Ok(Some(id));
-        }
-        Ok(None)
+        let snapshot = conn.unchecked_transaction()?;
+        resolve_task_id_in(&snapshot, issue, repo)
     }
 
     pub fn task_by_branch(&self, branch: &str) -> StoreResult<Option<Task>> {
@@ -905,32 +876,31 @@ impl SqliteStore {
         transaction.execute("UPDATE projects SET pm_snapshot_synced_at=?2,abandon_requested_at=?3,abandon_reason=?4,created_at=?5,updated_at=?6 WHERE id=?1",params![
             project.id.as_str(),project.pm_snapshot_synced_at,project.abandon_intent.as_ref().map(|i|i.requested_at.unix_timestamp()),
             project.abandon_intent.as_ref().map(|i|i.reason.as_str()),project.created_at.unix_timestamp(),project.updated_at.unix_timestamp()])?;
-        inherit_project_placement(&transaction, &project.id)?;
         transaction.commit()?;
         Ok(())
     }
 
     pub fn project(&self, project_id: &ProjectId) -> StoreResult<Option<Project>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        project_in(&conn, project_id)
-            .optional()
-            .map_err(StoreError::from)
+        project_on(&conn, project_id)
     }
 
     pub fn project_by_project(&self, project: &str) -> StoreResult<Option<Project>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let snapshot = conn.unchecked_transaction()?;
         if let Ok(project_id) = ProjectId::parse(project) {
-            if let Some(project) = self.project(&project_id)? {
+            if let Some(project) = project_on(&snapshot, &project_id)? {
                 return Ok(Some(project));
             }
         }
-        let conn = self.conn.lock().expect("store mutex poisoned");
         let query = format!(
             "{PROJECT_COLUMNS}
              WHERE external_project_id=?1 OR project_slug=?1
              ORDER BY (external_project_id=?1) DESC, created_at DESC, id DESC
              LIMIT 1"
         );
-        conn.query_row(&query, params![project], map_project_row)
+        snapshot
+            .query_row(&query, params![project], map_project_row)
             .optional()
             .map_err(StoreError::from)
     }
@@ -1089,6 +1059,17 @@ pub(super) fn require_task_not_deleted(conn: &Connection, task: &Task) -> StoreR
 /// evidence still applies; missing inventory cannot erase the saved Task.
 pub(super) fn require_task_planning(conn: &Connection, task: &Task) -> StoreResult<()> {
     require_task_planning_identity(conn, task)?;
+    if task.worktree.is_none()
+        && super::repositories::task_is_shared_in(conn, &task.id)?
+        && super::task_admission::authority_in(conn, &task.id)?.is_none()
+    {
+        // Planning exchange excludes execution. Neither a local absence nor a
+        // negative peer reading can reserve first start across Machines.
+        return Err(StoreError::InvalidAuthority(
+            "shared Task first-start admission is unavailable; planning is retained and no checkout was allocated"
+                .into(),
+        ));
+    }
     let (state, completed): (Option<String>, bool) = conn.query_row(
         "SELECT planning_state,planning_completed FROM tasks WHERE id=?1",
         [task.id.as_str()],
@@ -1215,10 +1196,10 @@ fn insert_task_row(conn: &Connection, task: &Task) -> StoreResult<()> {
             ],
         ),
     )?;
-    conn.execute("UPDATE tasks SET pm_snapshot_synced_at=?2,worktree=?3,workspace_slug=?4,abandon_requested_at=?5,abandon_reason=?6,created_at=?7,updated_at=?8,agent=?9,branch=?10,base_commit=?11,parent_pr_id=?12 WHERE id=?1",params![
+    conn.execute("UPDATE tasks SET pm_snapshot_synced_at=?2,worktree=?3,workspace_slug=?4,abandon_requested_at=?5,abandon_reason=?6,created_at=?7,updated_at=?8,agent=?9,branch=?10,base_commit=?11,parent_pr_id=?12,checkout_machine_id=?13 WHERE id=?1",params![
         task.id.as_str(),task.pm_snapshot_synced_at,task.worktree.as_ref().map(|p|p.display().to_string()),task.workspace_slug,
         task.abandon_intent.as_ref().map(|i|i.requested_at.unix_timestamp()),task.abandon_intent.as_ref().map(|i|i.reason.as_str()),
-        task.created_at.unix_timestamp(),task.updated_at.unix_timestamp(),task.agent,task.branch,task.base_commit,task.parent_pr_id.as_ref().map(TaskPrId::as_str)])?;
+        task.created_at.unix_timestamp(),task.updated_at.unix_timestamp(),task.agent,task.branch,task.base_commit,task.parent_pr_id.as_ref().map(TaskPrId::as_str),task.worktree.as_ref().map(|_|super::durable::map_local_machine(conn).map(|m|m.id.to_string())).transpose()?])?;
     Ok(())
 }
 
@@ -1257,6 +1238,22 @@ fn validate_task_project(conn: &Connection, task: &Task) -> StoreResult<()> {
         )));
     }
     Ok(())
+}
+
+const TASK_CHECKOUT_COLUMNS: &str = "SELECT id, issue_identifier, worktree, checkout_machine_id
+    FROM tasks WHERE worktree IS NOT NULL";
+
+fn map_task_checkout(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskCheckout> {
+    let machine: Option<String> = row.get(3)?;
+    Ok(TaskCheckout {
+        task_id: TaskId::from_raw(row.get::<_, String>(0)?),
+        issue_identifier: row.get(1)?,
+        worktree: PathBuf::from(row.get::<_, String>(2)?),
+        machine_id: machine
+            .map(|id| crate::durable::MachineId::parse(&id))
+            .transpose()
+            .map_err(|error| invalid_column(3, error))?,
+    })
 }
 
 const TASK_VISIBLE: &str = "t.planning_deleted_at IS NULL
@@ -1484,6 +1481,71 @@ fn task_pr_github_observation_json(pr: &TaskPr) -> StoreResult<Option<String>> {
         .as_ref()
         .map(serde_json::to_string)
         .transpose()
+        .map_err(StoreError::from)
+}
+
+// Keep physical lookup, correspondence validation and record hydration in the
+// caller's read snapshot. A concurrent mapping change cannot mix generations.
+pub(super) fn resolve_task_id_in(
+    conn: &Connection,
+    issue: &str,
+    repo: Option<&str>,
+) -> StoreResult<Option<TaskId>> {
+    let prefix = issue
+        .strip_prefix("lf-")
+        .or_else(|| issue.strip_prefix("task_"))
+        .unwrap_or(issue);
+    let local_prefix = ((4..=32).contains(&prefix.len())
+        && prefix.bytes().all(|byte| byte.is_ascii_hexdigit()))
+    .then(|| prefix.to_ascii_lowercase());
+    let mut statement = conn.prepare(
+        "SELECT t.id, COALESCE(t.issue_title, t.issue_identifier, t.id), w.repo FROM tasks t
+         LEFT JOIN projects p ON p.id=t.project_id LEFT JOIN waves w ON w.id=p.wave_id
+         WHERE (t.id=?1 OR t.external_issue_id=?1 OR t.issue_identifier=?1
+            OR substr(lower(t.id), 6, length(?2))=?2
+            OR EXISTS(SELECT 1 FROM task_creation_intents c WHERE c.task_id=t.id
+                AND json_extract(c.export_json,'$.id')=?1))
+         ORDER BY t.id",
+    )?;
+    let mut tasks = statement
+        .query_map(params![issue, local_prefix], |row| {
+            Ok((
+                TaskId::from_raw(row.get::<_, String>(0)?),
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    if let Some(repo) = repo {
+        let canonical = crate::repository::CanonicalRepo::discover(std::path::Path::new(repo)).ok();
+        tasks.retain(|(_, _, owner)| {
+            owner.as_deref() == Some(repo)
+                || owner.as_ref().is_some_and(|owner| {
+                    canonical
+                        .as_ref()
+                        .is_some_and(|canonical| canonical.contains(std::path::Path::new(owner)))
+                })
+        });
+    }
+    if tasks.len() > 1 {
+        let candidates = tasks
+            .iter()
+            .map(|(id, title, _)| format!("  {id} ({title})"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        return Err(StoreError::InvalidData(format!(
+            "multiple stable Tasks resolve to {issue:?}; use a longer Task ID:\n{candidates}"
+        )));
+    }
+    if let Some((id, _, _)) = tasks.pop() {
+        return Ok(Some(id));
+    }
+    Ok(None)
+}
+
+fn project_on(conn: &Connection, project_id: &ProjectId) -> StoreResult<Option<Project>> {
+    conn.query_row(PROJECT_SELECT, [project_id.as_str()], map_project_row)
+        .optional()
         .map_err(StoreError::from)
 }
 
@@ -1983,7 +2045,6 @@ impl SqliteStore {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().unwrap();
         insert_task_row(&tx, &task).unwrap();
-        inherit_task_placement(&tx, &task).unwrap();
         tx.commit().unwrap();
     }
 
@@ -1996,16 +2057,16 @@ impl SqliteStore {
             insert_task_row(&tx, task)?;
         } else {
             tx.execute(
-                "UPDATE tasks SET worktree=?2,workspace_slug=?3,agent=?4,branch=?5,base_commit=?6,parent_pr_id=?7 WHERE id=?1",
+                "UPDATE tasks SET worktree=?2,workspace_slug=?3,agent=?4,branch=?5,base_commit=?6,parent_pr_id=?7,checkout_machine_id=?8 WHERE id=?1",
                 params![
                     task.id.as_str(),
                     task.worktree.as_ref().map(|p| p.display().to_string()),
                     task.workspace_slug,
-                    task.agent, task.branch, task.base_commit, task.parent_pr_id.as_ref().map(|id| id.as_str())
+                    task.agent, task.branch, task.base_commit, task.parent_pr_id.as_ref().map(|id| id.as_str()),
+                    task.worktree.as_ref().map(|_| super::durable::map_local_machine(&tx).map(|machine| machine.id.to_string())).transpose()?
                 ],
             )?;
         }
-        inherit_task_placement(&tx, task)?;
         insert_task_pr(&tx, pr)?;
         seed_task_linear_observation(&tx, task)?;
         let saved = task_on(&tx, &task.id)?.ok_or(StoreError::NotFound)?;
@@ -2034,6 +2095,57 @@ mod local_planning_tests {
             .ensure_wave_project(repo.to_str().unwrap(), "inbox")
             .unwrap()
             .id
+    }
+
+    #[test]
+    fn task_checkout_read_distinguishes_unplaced_and_unknown_machine() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&directory.path().join("db")).unwrap();
+        let task = store
+            .create_task(&NewTask {
+                due_date: None,
+                id: TaskId::new(),
+                project_id: local_project(&store),
+                title: "Locate files".into(),
+                description: String::new(),
+            })
+            .unwrap();
+        assert!(store.task_checkout(&TaskId::new()).unwrap().is_none());
+        assert!(store.task_checkout(&task.id).unwrap().is_none());
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET worktree='/retained/checkout' WHERE id=?1",
+                [task.id.as_str()],
+            )
+            .unwrap();
+        let checkout = store.task_checkout(&task.id).unwrap().unwrap();
+        assert_eq!(checkout.task_id, task.id);
+        assert_eq!(
+            checkout.issue_identifier,
+            format!("lf-{}", task.id.as_str().trim_start_matches("task_"))
+        );
+        assert_eq!(
+            checkout.worktree,
+            std::path::Path::new("/retained/checkout")
+        );
+        assert!(checkout.machine_id.is_none());
+        let local = store.local_machine().unwrap().id;
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET checkout_machine_id=?2 WHERE id=?1",
+                params![task.id.as_str(), local.as_str()],
+            )
+            .unwrap();
+        assert_eq!(
+            store.task_checkout(&task.id).unwrap().unwrap().machine_id,
+            Some(local)
+        );
     }
 
     #[test]
@@ -2454,6 +2566,15 @@ mod local_planning_tests {
                 |row| row.get(0),
             )
             .unwrap();
+        // Exercise current readers only after the complete candidate schema.
+        for draft in [
+            "agent_process",
+            "lf_process_ids",
+            "process_terminal",
+            "task_checkout_machine",
+        ] {
+            conn.execute_batch(&current_draft_sql(draft)).unwrap();
+        }
         let store = SqliteStore {
             conn: Arc::new(Mutex::new(conn)),
         };

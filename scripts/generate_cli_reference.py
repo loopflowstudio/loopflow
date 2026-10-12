@@ -2,6 +2,7 @@
 
 import argparse
 import json
+from collections.abc import Iterator
 from pathlib import Path
 
 
@@ -9,12 +10,18 @@ def _cell(value: str) -> str:
     return value.replace("|", "\\|").replace("\n", " ")
 
 
+def _commands(definition: dict) -> Iterator[dict]:
+    yield definition
+    for command in definition["commands"]:
+        yield from _commands(command)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("catalog", type=Path)
     parser.add_argument("--output", type=Path, default=Path("docs/lf-reference.md"))
     args = parser.parse_args()
-    rows = json.loads(args.catalog.read_text())
+    rows = _commands(json.loads(args.catalog.read_text())["definition"])
     lines = [
         "# lf command reference",
         "",
@@ -26,17 +33,17 @@ def main() -> None:
         "",
         "Generated from the compiled Clap tree. Canonical command paths are shown; "
         "unique shortcuts also resolve. See",
-        "[the workflow guide](lf.md) for examples. Hidden commands",
-        "are internal process boundaries and are marked below.",
+        "[the workflow guide](lf.md) for examples. This reference lists public commands.",
         "",
         "## Selection and output",
         "",
-        "`--machine <label-or-id>` runs the command in the saved remote repository.",
+        "`--machine <label-or-id>` runs the command remotely; "
+        "`--repo NAME_OR_PATH` overrides its saved repository.",
         "`--forward-agent` requires `--machine`.",
         "`--task` selects a Task checkout; `--wt` selects an existing worktree.",
         "`--wave` adds context without moving directories and must match a Task's",
         "owning Wave. `task run` places a Task's worktree and then runs like",
-        "`lf --task ISSUE run FLOW`; every Flow naming a Task is equally its work.",
+        "`lf --task ISSUE flow FLOW`; every Flow naming a Task is equally its work.",
         "",
         "A preference (`--account`) permits fallback. A restriction (`--only-account`)",
         "limits this launch and its children. A Flow retains its provider selections;",
@@ -64,18 +71,10 @@ def main() -> None:
         "",
     ]
     for row in rows:
-        if row["kind"] != "command":
-            continue
-        path = row["path"]
-        lines += ["## " + " ".join(path), "", row.get("about") or "Command namespace.", ""]
-        if row["hidden"]:
-            lines += ["Internal command; invoked by the owning operation.", ""]
+        lines += ["## " + row["command"], "", row.get("description") or "Command namespace.", ""]
         arguments = [
-            item
-            for item in rows
-            if item["kind"] == "argument"
-            and item["path"] == path
-            and (len(path) == 1 or not item["global"])
+            item for item in row["arguments"]
+            if row["command"] == "lf" or not item["global"]
         ]
         if arguments:
             lines += ["| Argument | What it does |", "|---|---|"]
@@ -83,17 +82,15 @@ def main() -> None:
                 label = (
                     "--" + item["long"]
                     if item["long"]
-                    else ("-" + item["short"] if item["short"] else "<" + item["id"] + ">")
+                    else ("-" + item["short"] if item["short"] else "<" + item["name"] + ">")
                 )
                 if item["short"] and item["long"]:
                     label += " / -" + item["short"]
-                detail = item.get("help") or item["id"].replace("_", " ")
+                detail = item.get("description") or item["name"].replace("_", " ")
                 if item["global"]:
                     detail += " Applies everywhere."
                 if item["defaults"]:
                     detail += " Default: " + ", ".join(item["defaults"]) + "."
-                if item["hidden"]:
-                    detail += " Internal."
                 lines.append(f"| `{_cell(label)}` | {_cell(detail)} |")
             lines.append("")
     args.output.write_text("\n".join(lines))

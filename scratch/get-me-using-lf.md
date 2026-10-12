@@ -424,3 +424,35 @@ not interpret that unavailable planning as an empty inventory or repair another
 checkout's active contribution.
 
 Check: `scripts/test_desktop.sh --filter WorkNavigationTests -Xswiftc -gnone` — 36 passed after count removal and terminal-visibility regression; native populated re-review remains.
+
+### Remaining classification after rendered sidebar review
+
+The config parse error was transient and is now gone. Native capture
+`/tmp/loopflow-20261011-213231.png` shows the current smaller sidebar without
+conversation tallies; all four main Waves fit in the viewport. The app still lands
+on “Choose Work”; repository conversation entry and Task workspace review remain.
+
+Second reproducible current-state bug: a completed Task retains a failed Flow,
+and the condition projection treats that stopped failure as unresolved execution
+forever. LOO-440 has a recorded merge and later completion at 1791767222, clean
+observed checkout, and an earlier blocked landing attempt. Exclude stopped failed
+Flow state from the terminal Task's unresolved-execution predicate, while retaining
+Starting/Running/Stalled/Unknown evidence, completion refusals and observed unsettled
+files/commits. Do not rewrite the execution reading or delete the failure history.
+
+Data-repair candidates, not dispositions: LOO-443/400/390/382/380/376/371 have
+recorded merges but no completion events in the copied history. This can also arise
+through ordinary unfinished delivery, so merge alone does not classify them as
+iteration debris. Inspect accepted remaining scope before completion. LOO-378 is
+explicitly paused with unpublished work in Product memory; preserve it. LOO-312 has
+a missing checkout and remains unfinished; missing files do not authorize closure.
+LOO-367/330/389 retain dirty files or unsettled commits; preserve them pending review.
+No real-data or copied-history deletion/retirement has been performed.
+
+Jack Heart's cleanup distinction is an acceptance boundary: do not add compatibility
+code for proven one-off iteration debris, and do not use a database patch to conceal
+a state ordinary use can reproduce. A candidate needs its originating operation,
+expected present outcome, and exact retained/restored records before repair. The
+unclassified bucket stays explicit; it is not an excuse to mark every old Task done.
+
+Check: `cargo test -p loopflow --lib a_finished_task_stays_current_only_while_execution_is_unresolved`, `cargo clippy --all-targets -- -D warnings`, `cargo fmt` — pass; native refresh of the stopped-failure correction remains.

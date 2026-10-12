@@ -1450,7 +1450,11 @@ fn derive_task_condition(
     let unresolved_execution = runtime.is_some_and(|runtime| {
         (runtime.started && !runtime.status.is_terminal())
             || action_evidence.is_some_and(|evidence| evidence.completion_refusal.is_some())
-            || execution.is_some_and(|execution| execution.state != TaskExecutionState::Idle)
+            || execution.is_some_and(|execution| {
+                execution.state != TaskExecutionState::Idle
+                    && !(runtime.status.is_terminal()
+                        && execution.state == TaskExecutionState::Blocked)
+            })
             || (local_progress.state == LocalProgressEvidenceState::Observed
                 && local_progress.unsettled == Some(true))
     });
@@ -3031,7 +3035,39 @@ mod tests {
         // A removed checkout alone does not reopen settled work.
         assert!(!unresolved(TaskState::Done, none, missing, true));
         assert!(unresolved(TaskState::Active, none, missing, true));
-        assert!(unresolved(TaskState::Done, review.as_ref(), missing, false));
+        // Blocked describes a stopped failed Flow, not a live Process. Later
+        // Task completion must not make that retained history current forever.
+        assert!(!unresolved(
+            TaskState::Done,
+            review.as_ref(),
+            missing,
+            false
+        ));
+        assert!(unresolved(
+            TaskState::Active,
+            review.as_ref(),
+            missing,
+            false
+        ));
+        for state in [
+            TaskExecutionState::Starting,
+            TaskExecutionState::Running,
+            TaskExecutionState::Stalled,
+            TaskExecutionState::Unknown,
+        ] {
+            let execution = TaskExecutionSnapshot {
+                state,
+                reason: "Process evidence remains unresolved".into(),
+                step: None,
+                captured: None,
+            };
+            assert!(unresolved(
+                TaskState::Done,
+                Some(&execution),
+                missing,
+                false
+            ));
+        }
         assert!(unresolved(
             TaskState::Done,
             none,

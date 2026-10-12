@@ -169,3 +169,18 @@ Check: `cargo test -p loopflow --lib store::sqlite::task_work::tests` — 5 pass
 `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` — pass.
 Native capture proves first populated rendering, not complete inventory, input,
 conversation continuation or final review acceptance.
+
+October 11 sidebar revision (`63a20694d5`): removed numeric Session menus and fixed
+terminal Tasks remaining current solely through retained conversations. Rebuilt and
+launched the private app; direct capture `/tmp/loopflow-20261011-213145.png` still
+shows loading, not the revised populated inventory. A fresh shared-reader probe
+reports a YAML parse error in the separately changing main checkout's config.
+The data audit and 36 navigation tests establish the local correction, not a
+successful refreshed native demo. No source or destination database cleanup yet.
+
+Subsequent direct capture `/tmp/loopflow-20261011-213231.png` and native inspection
+show the revised populated sidebar with no numeric conversation controls and a
+current reading. The transient main config error cleared without edits here. This
+supersedes the failed refreshed-view observation above, not the recorded failure.
+The latest stopped-failure projection correction has focused Rust and Clippy passes;
+it has not yet been packaged into that captured app.

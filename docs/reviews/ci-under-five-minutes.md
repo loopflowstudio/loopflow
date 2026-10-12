@@ -312,3 +312,33 @@ separately. One candidate run cannot satisfy it. Use its per-job/step result to
 choose the next reduction; macOS compilation and remaining Rust fixture work
 are still open. Independently deliverable further changes belong in separate
 Tasks/PRs, retaining this Task's aggregate measurement obligation.
+
+## Candidate observations and build-sharing experiment
+
+PR #1543's first hosted candidate is
+[run 38314949621](https://github.com/loopflowstudio/loopflow/actions/runs/38314949621),
+head `3b124e6b943da363c34ff1b7991142f675d88678`. Swift passed in 4:24,
+installation in 5:28, and Xcode compilation in 2:14. Rust remained running at
+22:25 UTC on October 12. These partial observations already rule out meeting
+five minutes for this candidate; complete Rust timing and logs remain pending.
+They do not isolate runner/cache variation from the source change.
+
+A local macOS nextest archive contains 60 binaries, including the fixture CLI,
+and occupies 411,556,926 bytes (392 MiB). Packaging took 0.75s after compilation;
+extraction took 3.24s. An isolated Flow proof passed using the extracted CLI
+without recompilation (3.831s test execution; 27.19s total including archive
+extraction and discovery across all binaries). The first extraction attempt
+failed because its destination directory did not exist; creating that directory
+resolved the setup error. This establishes local artifact usability, not Linux
+size, hosted transfer time, or cross-machine path compatibility.
+
+[Nextest build reuse](https://nexte.st/docs/ci-features/archiving/) can distribute
+one compilation across ordinary test runners. The next comparison must include
+build time, upload/download, extraction, discovery, partition balance and total
+runner occupancy. The source revision and materialized migrations must match
+the archive. No sharding or hardware change has yet been adopted.
+
+Independent maintenance cleanup is captured in Infrastructure Task `lf-6d3ff35`,
+“Remove duplicate and brittle test assertions,” in the loopflow repository. It
+retains one architecture-check owner and meaningful behavior/safety assertions;
+it does not own the under-five-minute acceptance or run workers automatically.

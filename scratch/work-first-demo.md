@@ -23,15 +23,10 @@ new buttons or chrome have been added. Portfolio remains wanted but needs furthe
 revision; review it second, after the main views feel right. This is not native
 acceptance of either surface.
 
-The reproduced freeze sampled a main-thread rendering loop. SessionsContentView
-construction and rendering used different repository path spellings and repeatedly
-changed the retained workspace location. Construction now uses the Session store's
-resolved path. The regression failed before the fix; focused WorkNavigation and
-WorktreeWorkspace suites passed afterward (44 tests). The repaired isolated app's
-sample shows an idle event loop, not the previous redraw loop. Rendered usability
-and normal Quit remain unconfirmed; screenshot capture failed and native scripting
-provided no usable inspection. Logs and samples remain under
-`/private/tmp/loo462-native.FgtDmE/`; test logs `/tmp/loo462-location-{before,after}.log`.
+The earlier redraw freeze, main-thread sample, failed screenshot attempts and
+44 passing location/navigation tests remain at
+`2a56c9937d:scratch/work-first-demo.md`, **Review priority**. The repaired launch
+alone did not establish rendered usability or normal Quit.
 
 Next demo must center the populated Loopflow repo and compare its displayed
 Wave/Task inventory with shared planning, not substitute an empty portfolio demo.
@@ -47,17 +42,11 @@ The October 11 snapshot preparation and sandboxed launch are archived at
 conversation continuation or minimal chrome; Jack Heart's screenshot failed
 repository validation. Subsequent inspection follows.
 
-Direct inspection correction: Jack Heart's screenshot showed repository validation
-failure, not a populated view. The demo sandbox allowed `/usr/bin/git` but denied
-its Xcode executable and the resolved Homebrew executable. Reproduced the exact
-sandbox error, allowed those concrete Git executables, and confirmed rev-parse.
-Native Apple-event inspection and screenshots now work; screenshot
-`/tmp/loopflow-20261011-200721.png` visibly shows “Loading work…” and a spinner,
-not Waves or Tasks. The app is responsive; its work-watch child is CPU-bound in
-SQLite while constructing Task detail snapshots (sample `reader.sample.txt` in
-the demo directory). The capture-on-launch helper instead selected the transient
-launch window and failed after it closed. Neither window existence nor an opening
-receipt proves the requested rendered view. No native acceptance is established.
+October 11's denied real Git executables, screenshot correction and CPU-bound
+first reader are preserved at `2a56c9937d:scratch/work-first-demo.md`,
+**Review priority**. Allowing the actual Git binaries repaired repository
+validation, not Work loading. The window stayed responsive; no write or native
+conversation acceptance followed.
 
 Loading repair: repeated samples located the delay in Flow membership reads. The
 snapshot holds 299,139 Processes and only 250 Flow records. Flow reads now restrict
@@ -285,3 +274,20 @@ inclusions. That explains the rule, not Jack Heart's approval of every remaining
 Task. Native clicks and installation remain unproved; no live schema change.
 Stopped only the owned orphan reader from the closed demo and redundant one-shot;
 the current app reader remains live. Task automation disabled; app CI watcher active.
+
+October 12 native copied-data review (PID 5673) renders all 11 expected Task rows,
+without Session counts. Clicking LOO-462 selects exact primary Session
+`955ff6f0a65047a18b191505e307fce1`, showing its breadcrumb and Open here action,
+not New shell. The sandbox blocks provider use; placeholder text is nearly
+invisible on the dark pane. This is target selection, not usable conversation proof.
+The live-data app instead ended its long read with a wire-decoding error and
+retained an older, larger roadmap; it must not be presented as current.
+
+Correction to the runtime diagnosis: Portfolio's root-json error also reproduces
+on the branch, not only the installed CLI. Argument ownership wrongly excluded
+all global flags below root, including globals declared by Portfolio. It now
+excludes inherited IDs only, retaining each nested global at its declaring owner.
+Review: shared Clap metadata remains the sole flag owner, with no command-name
+allowlist. Check: binary reorder_args tests and portfolio_cli_tests PASS;
+`cargo fmt`, `cargo clippy --all-targets -- -D warnings`, diff check PASS.
+Native repackaging/inspection of this flag repair remains; no live install.

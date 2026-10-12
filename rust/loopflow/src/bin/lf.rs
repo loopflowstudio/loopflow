@@ -62,19 +62,26 @@ struct CommandArgTables {
     subcommands: HashMap<String, CommandArgTables>,
 }
 
-fn command_arg_tables(command: &clap::Command, root: bool) -> CommandArgTables {
+fn command_arg_tables(command: &clap::Command, inherited: &HashSet<clap::Id>) -> CommandArgTables {
     let mut direct = FlagTables::default();
     for arg in command
         .get_arguments()
-        .filter(|arg| root || !arg.is_global_set())
+        .filter(|arg| !inherited.contains(arg.get_id()))
     {
         direct.insert(arg);
     }
 
     let mut recursive = direct.clone();
     let mut subcommands = HashMap::new();
+    let mut inherited = inherited.clone();
+    inherited.extend(
+        command
+            .get_arguments()
+            .filter(|arg| arg.is_global_set())
+            .map(|arg| arg.get_id().clone()),
+    );
     for subcommand in command.get_subcommands() {
-        let child = command_arg_tables(subcommand, false);
+        let child = command_arg_tables(subcommand, &inherited);
         recursive.extend(&child.recursive);
         subcommands.insert(subcommand.get_name().to_string(), child);
     }
@@ -89,7 +96,9 @@ fn command_arg_tables(command: &clap::Command, root: bool) -> CommandArgTables {
 /// Derive flag ownership from the same command tree used for navigation.
 fn arg_tables() -> &'static CommandArgTables {
     static TABLES: OnceLock<CommandArgTables> = OnceLock::new();
-    TABLES.get_or_init(|| command_arg_tables(&loopflow::lf::navigation::command_tree(), true))
+    TABLES.get_or_init(|| {
+        command_arg_tables(&loopflow::lf::navigation::command_tree(), &HashSet::new())
+    })
 }
 
 fn flag_name(arg: &str) -> &str {
@@ -2909,6 +2918,25 @@ mod tests {
         let result = reorder_args(args);
         // `-m` is local to commit, so the local meaning wins.
         assert_eq!(result, vec!["lf", "commit", "-m", "msg"]);
+    }
+
+    #[test]
+    fn reorder_args_keeps_nested_global_json_with_its_owner() {
+        for args in [
+            vec!["lf", "portfolio", "--json"],
+            vec!["lf", "portfolio", "manual", "--json"],
+            vec!["lf", "portfolio", "--json", "manual"],
+        ] {
+            let cli =
+                Cli::try_parse_from(reorder_args(args.into_iter().map(String::from).collect()))
+                    .and_then(Cli::checked)
+                    .unwrap();
+            assert!(!cli.json);
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Portfolio { json: true, .. })
+            ));
+        }
     }
 
     #[test]

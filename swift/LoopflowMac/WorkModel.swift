@@ -242,7 +242,9 @@ final class WorkModel {
         guard !Task.isCancelled, destinationGeneration == generation else { return }
         taskOpening = DesktopOpening(url: url.absoluteString, status: .failed, reason: error.localizedDescription)
         taskLinkReading = .unavailable(lastGood: nil, reason: error.localizedDescription)
-        showsTaskLink = true
+        // A sidebar opening already has its retained Task error and retry.
+        // Only unresolved external links need the lookup sheet.
+        showsTaskLink = !taskLinkConversation
     }
 
     /// The one Task a repository-qualified link names in planning this window holds.

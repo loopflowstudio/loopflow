@@ -246,7 +246,7 @@ LOO-440/412, lf-b978097/df7e403/cb9012a/6f396c0. `c229a29648` fixes that shared
 Rust projection; Desktop decoding compatibility does not deliver this unreleased
 behavior. Do not delete failed history or duplicate the fix in Swift.
 
-## Bundled runtime — October 12, in progress
+## Bundled runtime — October 12
 
 Jack Heart authorized the changes needed in this diff for a viable real-data demo,
 including bundled lf selection and its propagation into embedded terminals/Session
@@ -256,9 +256,8 @@ external helper override and provenance-only store refusal, not schema validatio
 or the exclusive migration boundary. Reattachment keeps an already-running
 provider's environment; it does not silently restart it for a new executable.
 
-Source includes main's unreleased `linear_team_checks` table. Real data has the
-released schema; no live table was added. Its Linear acquisition path and Flow
-schema revalidation still need composed proof before claiming all operations work.
+Main’s unreleased `linear_team_checks` table is absent from real data. Linear
+acquisition and Flow schema revalidation remain unproved; no live table was added.
 No global install, migration, provider takeover or additional cleanup performed.
 
 Check: bundled selection/shared-store Rust 7 PASS (initial over-specific filter ran zero, corrected); Desktop launcher/zsh 9 PASS; Python launcher 8 PASS; fmt, all-target Clippy, Ruff/diff PASS. Native preparation fixture remains display-only.
@@ -266,4 +265,10 @@ Live bundled app PID 8749 finished refreshing with 12 rows (new CI Task since th
 11-row snapshot); Portfolio error gone. Clicking LOO-462 launched exact
 `session connect 955ff6f0a65047a18b191505e307fce1`; provider shows hook-trust review,
 left for Jack. His LOO-312 click reproduces missing-checkout opening failure;
-restoration sequencing and duplicate error UI remain. No schema migration.
+restoration sequencing now calls ordinary Task checkout before primary acquisition;
+sidebar failure stays inline instead of duplicating the error sheet. No schema migration.
+Check: network-isolated primary Session lifecycle PASS (restores missing checkout at same HEAD, same Task/Session ownership); focused Swift failure-retention PASS; fmt/all-target Clippy PASS.
+LOO-312 still needs recovery: no local/remote-tracking branch or worktree registration,
+no direct Sessions, historical PR without GitHub/head evidence. Retained October 5
+progress describes actual implementation, so absence cannot classify it as debris.
+No real restoration, Session creation, abandonment or history deletion attempted.

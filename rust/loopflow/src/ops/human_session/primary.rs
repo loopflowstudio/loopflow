@@ -56,6 +56,16 @@ pub(crate) async fn ensure_task(
     let crate::durable::WorkRef::Task(id) = &binding.work else {
         unreachable!("a task selector binds a Task");
     };
+    if !binding.cwd.try_exists()? {
+        // Reuse Task preparation's recorded placement and restoration checks.
+        // Opening a conversation does not invent a checkout or start a Flow.
+        let repo = repo.to_path_buf();
+        let task = id.to_string();
+        tokio::task::spawn_blocking(move || {
+            crate::ops::task::task_checkout(&repo, &task, Default::default())
+        })
+        .await??;
+    }
     let scope = PrimaryScope::Task(id.clone());
     let _lock = lock_scope(&scope).await?;
     let chosen = match choose {

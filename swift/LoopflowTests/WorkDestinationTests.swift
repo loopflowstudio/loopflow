@@ -55,7 +55,7 @@ struct WorkDestinationTests {
         #expect(model.navigation.content == .terminals)
     }
 
-    @Test func failedTaskConversationRetainsItsReasonAfterDismissingTheAlert() async throws {
+    @Test func failedTaskConversationRetainsItsReasonWithoutADuplicateAlert() async throws {
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(try fixture().utf8))
         let wave = try #require(snapshot.waves.first)
         let task = try #require(wave.tasks.items.first)
@@ -67,6 +67,7 @@ struct WorkDestinationTests {
 
         await model.openTaskConversation(task.id)
         let entry = try #require(registry.retained(model.workspaceKey(for: .task(id: task.id), repository: "repo")))
+        #expect(!model.showsTaskLink)
         model.dismissTaskLink()
         model.select(.wave(id: wave.wave.id))
         #expect(entry.conversationError == "Conversation launcher unavailable")

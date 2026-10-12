@@ -1117,7 +1117,26 @@ fn a_task_primary_is_one_of_its_own_conversations() {
     let before = fixture.count("agent_sessions");
     assert!(members("INF-125").is_empty());
     assert_eq!(fixture.count("agent_sessions"), before);
+    // A retained Task whose checkout disappeared restores its recorded branch
+    // before creating the conversation; it neither resets Git nor starts a Flow.
+    let head = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(&empty_path)
+        .output()
+        .unwrap()
+        .stdout;
+    std::fs::remove_dir_all(&empty_path).unwrap();
     let created = primary(&["INF-125"]);
+    assert!(empty_path.join(".git").exists());
+    assert_eq!(
+        Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(&empty_path)
+            .output()
+            .unwrap()
+            .stdout,
+        head
+    );
     assert_eq!(created["title"], "Sibling INF-125");
     assert_eq!(fixture.count("agent_sessions"), before + 1);
     let (skill, cwd): (String, String) = fixture

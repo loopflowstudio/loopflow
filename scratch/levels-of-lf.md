@@ -91,6 +91,12 @@ separately. Native provider and surface instructions remain independent.
 
 ## Delete — do not maintain
 
+The cuts below are complete. `ScratchConfig`, `managed_scratch`,
+`UNTRACK_SCRATCH`, `prepare_persistent_publication`,
+`untrack_persistent_scratch`, and `restore_scratch_from_head` are absent.
+Their replacement is the shared diff selector and explicit cleanup operation;
+no predecessor path remains to maintain.
+
 - The all-or-nothing full operating document and its full-document assumptions
   in `builtins.rs`, `prompt/mod.rs`, and `commands/run.rs` attribution. Preserve
   opt-out, source attribution, native instructions, and exact-once coverage.
@@ -148,6 +154,11 @@ procedure. Wave memory's Flow boundary remains Jack's accepted requirement.
 Implemented correction: diff cleanup shared by submit/land and the standalone
 command, with reconciled fixtures and docs. Validation is recorded below.
 
+Compression removes repeated opt-out and sync classification branches and
+redundant stacked-checkout fixture setup. Review corrected a comment that
+conflated product cleanup with hosted CI: this repository still requires an
+empty scratch tree except `.gitkeep`; its CI workflow and policy tests are unchanged.
+
 ## Done when
 
 Gate runs `cargo test -p loopflow --test context_tests --test context_block_tests
@@ -158,7 +169,7 @@ live account, display, or person is required. Run `cargo fmt --check` and
 `cargo clippy --all-targets -- -D warnings` for the Rust cutover.
 
 Base contract: 1,037 → 282 words (73% reduction).
-Checks: focused Rust cleanup CLI, submit/land, commit, sync, Task checkout/handoff, Flow, command discovery/docs, automatic scratch-context and prompt-golden checks passed; `uv run pytest python/tests/test_instruction_levels.py -q` — 16 passed; nine inputs rendered; `cargo clippy --all-targets -- -D warnings`, `cargo fmt --check`, and `git diff --check` passed. Live model evaluations remain unrun.
+Checks: `cargo test -p loopflow --test task_initialization_tests --test sync_tests` (41 passed), `cargo test -p loopflow --lib work_guidance_is_additive` (1 passed), `uv run pytest python/tests/test_ci_proof.py -q` (35 passed), `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `git diff --check` passed; earlier cleanup/delivery/context checks remain applicable. Live model evaluations remain unrun.
 
 ## Instruction explanations and decision evaluations
 

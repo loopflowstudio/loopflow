@@ -1100,8 +1100,6 @@ pub(crate) fn attributed_context(
             ContextDecisionKind::Excluded,
             "--no-loopflow disables automatic guidance",
         );
-    }
-    if !components.operate {
         omitted(
             "work",
             ContextDecisionKind::Excluded,

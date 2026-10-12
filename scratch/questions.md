@@ -37,3 +37,7 @@
   or new schema. Nine fixtures and a scorer are provider-neutral. A live model,
   version and evaluation environment have not been selected; rendered inputs and
   scorer tests do not constitute model evaluation results.
+
+- 2026-10-12 — Jack clarified that this repository’s CI requirement for an empty
+  scratch directory is Loopflow repository policy. Preserve that check and its
+  tests; the product’s diff-based cleanup does not relax repository policy.

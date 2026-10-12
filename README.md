@@ -97,7 +97,7 @@ Flow exports yield to existing skills with the same name. See
 ```bash
 lf : "fix the failing test"  # launcher; no Task or Linear required
 lf run pursue               # run a Flow in this checkout
-lf help skill work                # read the Task/Wave API contract
+lf help skill work          # read the Task/Wave API contract
 lf --task INF-123 design     # continue an existing Task with work guidance
 ```
 

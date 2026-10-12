@@ -99,9 +99,10 @@ impl CiCheck {
     /// submit/land establishes, without a code repair turn.
     ///
     /// This is the one class of required check a Task body cannot act on.
-    /// `scratch-clear` fails whenever `scratch/` holds anything but `.gitkeep`,
-    /// which is true of a PR carrying its own design doc before delivery, and
-    /// `crate::ops::scratch::clear` is what greens it, not a code change. A
+    /// This repository's `scratch-clear` defers PR proof and rejects queue/main
+    /// trees containing anything under `scratch/` except `.gitkeep`. Delivery
+    /// removes the branch's added notes through `crate::ops::scratch::clear`;
+    /// product cleanup preserves existing files and edits. A
     /// body woken to "repair" it could only delete the Task's design artifact,
     /// before the selected delivery procedure needs to clean it.
     ///

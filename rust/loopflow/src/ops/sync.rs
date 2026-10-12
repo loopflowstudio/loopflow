@@ -99,13 +99,10 @@ pub fn plan_sync(
     let protected = changed_files.iter().any(|path| is_protected_path(path));
     let tree = git(repo, &["write-tree"])?;
     let added_scratch = crate::git::scratch::added(repo, comparison_base, tree.trim())?;
-    let scratch_only = !changed_files.is_empty()
-        && changed_files
-            .iter()
-            .all(|path| added_scratch.iter().any(|added| Path::new(added) == path));
     let has_non_scratch_changes = changed_files
         .iter()
         .any(|path| !added_scratch.iter().any(|added| Path::new(added) == path));
+    let scratch_only = !changed_files.is_empty() && !has_non_scratch_changes;
 
     let (class, strategy) = if branch == default_branch {
         let strategy = if crate::git::is_ancestor(repo, &base_ref, "HEAD")? {

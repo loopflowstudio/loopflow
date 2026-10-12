@@ -396,7 +396,8 @@ working set. Remove sidebar Session counts/dropdowns; retain exact conversations
 in their Work and contextual opening. Jack authorized real-database cleanup after
 figuring out and rehearsing the specific changes in the private copy. This supersedes
 the blanket live-cleanup hold, not the requirement to preserve active work and review
-uncertain cases. No actual live cleanup has occurred.
+uncertain cases. The exact rehearsed LOO-376 and 126-row repairs are recorded
+in `work-first-demo.md`; no broader cleanup is implied.
 
 Keep two tracks separate: iteration debris from retired implementations/experiments
 can receive a one-time restorable repair; states reachable through ordinary current
@@ -412,7 +413,8 @@ This is a snapshot, not current process liveness. Exact inventory is retained at
 Confirmed recurring bug: Task completion is independent of Session completion,
 but `inWorkingSet` returned true for any associated visible conversation, ahead of
 Task state. Settled completed/canceled/duplicate Tasks now stay out of ordinary
-navigation unless shared execution evidence remains unresolved. Conversations,
+navigation unless shared execution evidence remains unresolved. October 12 removes
+the same shortcut for unstarted Tasks: Session presence cannot establish Started. Conversations,
 Wave plan/history, retained panes and binding are not changed. Tests cover all three
 terminal planning states with/without unresolved execution while retaining Sessions.
 

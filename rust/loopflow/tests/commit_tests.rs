@@ -275,3 +275,31 @@ fn persistent_selection_preserves_scratch_and_unrelated_index() {
     );
     assert!(persistent.path.join("scratch/design.md").exists());
 }
+
+#[test]
+fn rejected_push_does_not_rewrite_remote_history() {
+    let _env = EnvGuard::new(&[]);
+    let repo = TestRepo::new();
+    repo.create_file("shared.txt", "already published");
+    repo.stage_all();
+    repo.commit("published work");
+    repo.push();
+    let published = repo.bare_head_sha();
+    git_output(repo.path(), &["reset", "--hard", "HEAD~1"]);
+    repo.create_file("replacement.txt", "divergent local work");
+    let result = commit_workflow(
+        repo.path(),
+        &CommitOptions {
+            push: true,
+            ..commit_options("replacement")
+        },
+        &NullProgress,
+        &|_| {},
+    );
+    assert!(
+        result.is_err(),
+        "ordinary publication must not force a rejected push"
+    );
+    assert_eq!(repo.bare_head_sha(), published);
+    assert_eq!(last_commit_message(&repo), "replacement");
+}

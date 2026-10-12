@@ -47,7 +47,7 @@ pub fn github_merge_response(
     request: Option<&str>,
 ) -> String {
     let queued = request.and_then(|request| request.strip_prefix("queued:"));
-    serde_json::json!({"data":{"repository":{"pullRequest":{
+    serde_json::json!({"data":{"repository":{"mergeCommitAllowed":true,"squashMergeAllowed":true,"rebaseMergeAllowed":true,"pullRequest":{
         "id":queued.unwrap_or("PR_fixture"), "number":number,
         "url":format!("https://example.com/pr/{number}"),
         "state":state, "isDraft":false, "headRefName":"fixture", "headRefOid":head,

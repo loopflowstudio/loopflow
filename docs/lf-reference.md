@@ -104,7 +104,27 @@ Show CI status for current branch
 |---|---|
 | `--watch / -w` | watch Default: false. |
 | `--logs / -l` | logs Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--required` | Show only checks required by repository protection Default: false. |
+| `--help / -h` | Print help |
+
+## lf pr request-review
+
+Request or re-request a teammate's review of an existing PR
+
+| Argument | What it does |
+|---|---|
+| `<pr>` | PR number, URL or branch; defaults to the current branch's PR |
+| `--reviewer / -r` | GitHub login or org/team. Repeat to request several reviewers |
+| `--help / -h` | Print help |
+
+## lf pr reviews
+
+Read requested reviews and review submissions from GitHub
+
+| Argument | What it does |
+|---|---|
+| `<pr>` | PR number, URL or branch; defaults to the current branch's PR |
+| `--json` | Emit GitHub CLI JSON, including each review's commit and body Default: false. |
 | `--help / -h` | Print help |
 
 ## lf pr publish
@@ -115,7 +135,6 @@ Publish a ready PR headlessly: push, create or refresh, print state + URL. Opens
 |---|---|
 | `--title` | title |
 | `--body` | body |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf pr open
@@ -126,12 +145,11 @@ Push and create or update a draft PR, then open its GitHub page. Existing ready 
 |---|---|
 | `--title` | title |
 | `--body` | body |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf pr submit
 
-Prepare a PR to land: sync, clear scratch, mark ready, and assign it to you. Nothing merges until you click merge on GitHub
+Prepare a PR to land: sync, apply configured scratch cleanup and mark ready. Leave it for manual merge without changing reviewers or assignees
 
 | Argument | What it does |
 |---|---|
@@ -141,7 +159,6 @@ Prepare a PR to land: sync, clear scratch, mark ready, and assign it to you. Not
 | `--message / -m` | message |
 | `--title` | title |
 | `--body` | body |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf pr arm

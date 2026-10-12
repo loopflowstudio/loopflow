@@ -405,7 +405,7 @@ pub fn gather_documents(spec: &GatherSpec) -> Result<Vec<Document>, CoreError> {
     // Preserve ambient ordering: scratch -> inherited context -> explicit docs.
     docs.extend(gather_scratch_docs(&spec.repo_root)?);
     let repo_memory = spec.repo_root.join("MEMORY.md");
-    if repo_memory.is_file() {
+    if !repo_memory.is_symlink() && repo_memory.is_file() {
         docs.push(Document {
             path: "MEMORY.md".into(),
             content: fs::read_to_string(repo_memory)?,
@@ -933,7 +933,7 @@ fn gather_md_files(
     docs: &mut Vec<Document>,
     source: DocumentSource,
 ) -> Result<(), CoreError> {
-    if !dir.is_dir() {
+    if dir.is_symlink() || !dir.is_dir() {
         return Ok(());
     }
 
@@ -951,6 +951,12 @@ fn gather_md_files_from(
 
     for entry in entries {
         let path = entry.path();
+
+        // Ambient context must not follow links into unrelated private files
+        // or recursive directory cycles. Explicit document requests are separate.
+        if entry.file_type()?.is_symlink() {
+            continue;
+        }
 
         if path.is_dir() {
             gather_md_files_from(root, &path, docs, source)?;
@@ -2465,6 +2471,51 @@ mod tests {
             scratch.expect("scratch doc should be gathered").source,
             DocumentSource::Scratch
         );
+    }
+
+    #[test]
+    fn ambient_context_does_not_follow_symlinks_to_private_content() {
+        let repo = tempfile::tempdir().unwrap();
+        let private = tempfile::tempdir().unwrap();
+        fs::write(
+            private.path().join("private.md"),
+            "SYNTHETIC_PRIVATE_MARKER",
+        )
+        .unwrap();
+        fs::create_dir(repo.path().join("scratch")).unwrap();
+        fs::write(repo.path().join("scratch/plan.md"), "allowed plan").unwrap();
+        std::os::unix::fs::symlink(private.path(), repo.path().join("scratch/linked")).unwrap();
+        std::os::unix::fs::symlink(
+            private.path().join("private.md"),
+            repo.path().join("MEMORY.md"),
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(
+            repo.path().join("scratch"),
+            repo.path().join("scratch/cycle"),
+        )
+        .unwrap();
+        let gathered = gather_context(&GatherContextOpts {
+            repo_root: repo.path().to_path_buf(),
+            ..Default::default()
+        })
+        .unwrap();
+        assert!(gathered
+            .docs
+            .iter()
+            .any(|doc| doc.content == "allowed plan"));
+        assert!(!gathered
+            .docs
+            .iter()
+            .any(|doc| doc.content.contains("SYNTHETIC_PRIVATE_MARKER")));
+        fs::remove_dir_all(repo.path().join("scratch")).unwrap();
+        std::os::unix::fs::symlink(private.path(), repo.path().join("scratch")).unwrap();
+        let gathered = gather_context(&GatherContextOpts {
+            repo_root: repo.path().to_path_buf(),
+            ..Default::default()
+        })
+        .unwrap();
+        assert!(gathered.docs.is_empty());
     }
 
     #[test]

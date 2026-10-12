@@ -4,7 +4,7 @@ use std::time::{Duration, SystemTime};
 use std::{fs, path::PathBuf};
 
 use loopflow::git::worktrees::{
-    create_named_worktree, list_worktrees, plan_placement, prune_worktrees,
+    create_named_worktree, list_worktrees, main_repo_root, plan_placement, prune_worktrees,
     push_branch_with_upstream, schedule_upstream_sync, sibling_worktree_name_with_main,
     PlacementStrategy, WorktreePrunePolicy, WorktreeSegment,
 };
@@ -57,7 +57,7 @@ fn placement_follows_existing_layout_without_configuration() {
         fs::remove_dir_all(&missing).unwrap();
 
         let plan = plan_placement(repo.path(), WorktreeSegment::parse("next").unwrap()).unwrap();
-        assert_eq!(plan.worktree_path, directory.join(format!("{prefix}next")));
+        assert_eq!(plan.worktree_path, directory.join("next"));
         let created = create_named_worktree(repo.path(), "next", None, &|_| {}).unwrap();
         assert_eq!(created.path, plan.worktree_path);
         let reused =
@@ -76,10 +76,7 @@ fn placement_follows_existing_layout_without_configuration() {
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
-        assert!(directory
-            .join(format!("{prefix}cli-example"))
-            .join(".git")
-            .is_file());
+        assert!(directory.join("cli-example").join(".git").is_file());
         let output = lf_command(home.path())
             .current_dir(repo.path())
             .args(["wt", "switch", "next"])
@@ -96,6 +93,68 @@ fn placement_follows_existing_layout_without_configuration() {
             .iter()
             .any(|wt| wt.path == created.path));
     }
+}
+
+#[test]
+fn placement_uses_host_directory_independently_of_branch_names() {
+    // Official host path conventions; these prove filesystem compatibility,
+    // not registration or setup in the host application.
+    for examples in [
+        [("warsaw", "alice/fix-login"), ("tokyo", "bob/add-search")],
+        [
+            ("feature-login", "feature/login"),
+            ("fix-search", "fix/search"),
+        ],
+        [("login", "worktree-login"), ("search", "worktree-search")],
+    ] {
+        let repo = TestRepo::new();
+        let directory = tempfile::tempdir().unwrap();
+        let directory = directory.path().canonicalize().unwrap();
+        for (folder, branch) in examples {
+            worktree_add(
+                repo.path(),
+                &directory.join(folder),
+                branch,
+                WorktreeBranch::New {
+                    start_point: "HEAD",
+                },
+            )
+            .unwrap();
+        }
+        let plan = plan_placement(repo.path(), WorktreeSegment::parse("next").unwrap()).unwrap();
+        assert_eq!(plan.worktree_path, directory.join("next"));
+        let created = create_named_worktree(repo.path(), "next", None, &|_| {}).unwrap();
+        assert_eq!(created.path, plan.worktree_path);
+    }
+}
+
+#[test]
+fn failed_checkout_hook_reports_failure_and_preserves_the_checkout() {
+    use std::os::unix::fs::PermissionsExt;
+    let repo = TestRepo::new();
+    let hook = repo.path().join(".git/hooks/post-checkout");
+    fs::write(
+        &hook,
+        "#!/bin/sh\necho 'dependency setup failed' >&2\nexit 1\n",
+    )
+    .unwrap();
+    fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let checkout = directory.path().join("kept");
+    let error = worktree_add(
+        repo.path(),
+        &checkout,
+        "kept",
+        WorktreeBranch::New {
+            start_point: "HEAD",
+        },
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(error.contains("dependency setup failed"), "{error}");
+    assert!(error.contains("Checkout retained"), "{error}");
+    assert!(checkout.join(".git").is_file());
+    assert_eq!(git_stdout(&checkout, &["branch", "--show-current"]), "kept");
 }
 
 #[test]
@@ -838,4 +897,52 @@ fn wt_list_sync_flag_owns_the_fast_forward() {
         upstream,
         "--sync explicitly fetches and fast-forwards main to origin/main"
     );
+}
+
+#[test]
+fn placement_resolves_separate_git_directory_and_linked_subdirectory() {
+    let repo = TestRepo::new();
+    let metadata = tempfile::tempdir().unwrap();
+    let git_dir = metadata.path().join("repository.git");
+    git_stdout(
+        repo.path(),
+        &["init", "--separate-git-dir", git_dir.to_str().unwrap()],
+    );
+    let root = repo.path().canonicalize().unwrap();
+    assert_eq!(main_repo_root(repo.path()).unwrap(), root);
+    let checkout_root = tempfile::tempdir().unwrap();
+    let checkout = checkout_root.path().join("linked");
+    worktree_add(
+        repo.path(),
+        &checkout,
+        "linked",
+        WorktreeBranch::New {
+            start_point: "HEAD",
+        },
+    )
+    .unwrap();
+    fs::create_dir(checkout.join("nested")).unwrap();
+    // Git does not retain a backlink to a separate primary checkout. Use the
+    // registered working checkout, never the metadata directory's parent.
+    let linked_root = checkout.canonicalize().unwrap();
+    assert_eq!(
+        main_repo_root(&checkout.join("nested")).unwrap(),
+        linked_root
+    );
+    let alias = checkout_root.path().join("alias");
+    std::os::unix::fs::symlink(&checkout, &alias).unwrap();
+    assert_eq!(main_repo_root(&alias).unwrap(), linked_root);
+    assert!(plan_placement(&alias, WorktreeSegment::parse("next").unwrap()).is_ok());
+}
+
+#[test]
+fn bare_repository_placement_uses_a_working_checkout_not_metadata_parent() {
+    let repo = TestRepo::new();
+    let directory = tempfile::tempdir().unwrap();
+    let main = directory.path().join("main");
+    worktree_add(repo.bare_path(), &main, "main", WorktreeBranch::Existing).unwrap();
+    assert_eq!(main_repo_root(&main).unwrap(), main.canonicalize().unwrap());
+    let created = create_named_worktree(&main, "next", None, &|_| {}).unwrap();
+    assert!(created.path.join(".git").is_file());
+    assert_ne!(created.path.parent(), repo.bare_path().parent());
 }

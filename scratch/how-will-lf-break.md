@@ -1,163 +1,162 @@
 # How lf breaks for friends
 
-Draft — 2026-10-11. Jack Heart supplied the direction below; implementation
-mechanisms and supported boundaries remain proposals.
+Draft implementation for Jack Heart's review — 2026-10-11.
 
 ## What to build
 
-Make lf fit an unfamiliar repository's existing practices without mandatory
-configuration, while making essential requirements and unsupported uses clear.
+Make lf honor unfamiliar repositories' existing practices while preserving a
+single meaning for publication, review handoff, merge, and release completion.
 
-Jack's framing:
+Jack's framing: “Imagine I give lf to my friends to use. How might it break?”
+Jack asked for “coherence over customizability” and a best-effort implementation
+to read and give feedback on. The mechanisms below are implemented proposals,
+not evidence of Jack's acceptance of the resulting behavior.
 
-> Imagine I give lf to my friends to use. How might it break?
+## Placement
 
-> Probably ok to require using worktrees
+Wave unresolved; none supplied. Companion `levels-of-lf` owns instruction tiers:
+launcher-only use remains useful without adopting Tasks or a planning service.
+This branch owns compatibility of the native operations those instructions use.
 
-> Where you put the worktrees should be pretty customizable
+## Scope and decisions
 
-> lf's in "new" repos should observe whats going on and align with existing protocols, but move to lf's standards if tehre is none
+Additive series. This reviewable keystone removes incidental destructive defaults
+and supplies explicit GitHub teammate handoffs. No generic command overrides or
+second review-host framework. Existing Flows/Workflows own procedure.
 
-This supersedes the earlier proposed restriction to a first-use smoke test.
-The question spans adoption: distinguish essential mechanics, incidental
-assumptions worth generalizing, and uses lf cannot support yet.
+Jack selected [failure-map](failure-map.md) concerns 01, 03, 06, 10, 12–16 and
+deprioritized 02, 04, 05, 07–09, 11. Remaining prioritization was delegated.
+Worktrees are provisionally acceptable; their placement should follow existing
+conventions without requiring lf configuration.
 
-## Placement and coordination
+Three boundaries keep generalization coherent:
 
-Wave unresolved; no Wave supplied. Companion: `levels-of-lf`.
-Its 2026-10-11 draft now describes a small launcher instruction contract and
-additional guidance when Work APIs are used. Repository instructions remain
-authoritative; taskless Sessions, Skills, Flows, worktrees and PRs remain useful.
-That branch owns instruction allocation. This branch investigates whether the
-underlying operations honor the conventions those instructions defer to.
-
-## Shape and proposed keystone
-
-Additive series. First map concrete ways friends' environments differ, then
-select coherent repairs. Worktree placement is the leading candidate: retain
-worktrees as a likely essential mechanic while removing sibling-directory
-placement as an assumed requirement. Jack's “probably” remains provisional.
-
-Inspect these seams, separating observed code from hypothetical failures:
-
-| Variation | Design question |
+| Owner | Choices |
 | --- | --- |
-| Existing worktree layout | Can lf reuse and create work where this repo already puts it? |
-| Review host | Can publication, status and completion use the actual host? |
-| Review procedure | Can teams retain manual review, custom checks and merge policies? |
-| Planning | Can launcher-only use and existing Git/Linear choices stay independent? |
-| Provider, OS, permissions | Which are supported, discoverable, or explicit limits? |
-| Build/test conventions | Do selected skills follow repo commands rather than impose this repo's tools? |
+| lf | Stable lifecycle operations, preserved work, revision-bound requests and observed completion |
+| Repository | Reviewer choice, procedure, checks, permitted merge methods, release build/publishing commands |
+| Host | PR identity, actual reviews, protection, queues and completion evidence |
 
-No implementation launches or follow-up Tasks are implied by this inventory.
-
-## Current system
-
-`git/worktrees.rs::dir_for_component` always creates sibling paths shaped
-`<repo>.<name>`. `worktree_dir` feeds named creation and `plan_placement`.
-`sibling_worktree_name_with_main` deliberately excludes non-sibling layouts;
-selectors and CLI display use it. Git's registered worktrees already provide
-actual checkout paths. Placement changes must include consumers, not merely
-change the constructor.
-
-`ops/pr.rs::create_or_update_pr` commits/pushes, creates or updates through `gh`,
-and attaches GitHub identity to the Task. `work/task/mod.rs::PrPublication`
-contains `Option<GithubPr>`; Task PR observations and merge validation also name
-GitHub. `ops/pr_landing.rs::observe_github` reconciles delivery. Replacing only
-`lf pr open` with an arbitrary command cannot make that lifecycle host-neutral.
-
-Flows and Workflows already express procedure. `docs/lf.md` documents Git-backed
-planning as the default and optional Linear; `docs/getting-started.md` still says
-Tasks and Waves require Linear. This is a concrete documentation inconsistency.
-
-Existing installer, installation-isolation and provider fixtures remain useful;
-installer smoke alone does not prove a complete useful experience.
-
-## Proposed resolution rule
-
-Honor explicit choices and repository instructions; reuse actual existing work;
-infer an unambiguous convention from relevant repository evidence; otherwise use
-lf's default. No setup questionnaire or generated config required for ordinary
-entry. Existing odd or conflicting layouts are not permission to relocate work.
-
-Keep semantic intent stable while varying mechanisms. Separate review host
-(GitHub, Bitbucket, etc.) from review procedure (people, checks, sequencing).
-Use authored Flows/Workflows for procedure before adding parallel policy knobs.
-A configurable command could implement an operation, but success must have a
-meaning the next operation can consume: identity, published revision, observed
-state. Exit zero alone cannot mean merged or Task complete. Whether to support
-external implementations at all remains open; no plugin framework is selected.
+An arbitrary replacement for `pr open` cannot satisfy GitHub-specific identity
+and reconciliation. Adapt whole host lifecycles only when a second concrete host
+is selected. A successful script is not proof that a PR merged or an artifact
+was delivered.
 
 ## The demo
 
-Enter a repo with an established non-sibling worktree layout and no lf config.
-Create work through lf; its location follows that convention, existing work stays
-put, and listing/selecting/resuming agree on the checkout. Repeat in a repo with
-no convention: lf uses its normal default. A team with custom review keeps that
-procedure instead of silently receiving lf's preferred merge behavior.
+1. In a real Git fixture with two Conductor-style city checkouts or Herdr,
+   Worktrunk or Claude-style directories, plan/create another worktree without
+   config. Observe the established parent; reuse existing branches in place.
+2. Fail a checkout hook. Observe an error with its output and the retained path.
+   Reject a normal push. Observe unchanged remote history and preserved local work.
+3. Preserve existing tracked and untracked scratch by default; opt in to cleanup
+   only in a repository that intentionally treats that directory as disposable.
+4. Publish a PR, then explicitly request `alice` and `acme/platform` with
+   `lf pr request-review -r alice -r acme/platform`. `lf pr reviews` reads the
+   requests, aggregate decision and review commits. `submit` leaves assignments
+   alone. A teammate reviews on GitHub without lf.
+5. In provider fixtures, disallow squash: auto-merge chooses another allowed
+   method. Configure rebase: it uses rebase. Enable a queue: the queue owns the
+   method. Required pending checks return 8, not a failure diagnosis.
+
+Provider fixtures are headless demos, not live GitHub interoperability proof.
+No live reviewer requests or merge mutations were performed for this review.
 
 ## Data structures and key functions
 
-Retain `WorktreeName`, `PlacementPlan`, Git's worktree registrations and existing
-Task/Session identity. The private `inferred_worktree_dir(repo: &Path, component: &str) -> Option<PathBuf>`
-feeds the existing directory resolver used by named creation and `plan_placement`.
-No new schema or saved repository-profile object is currently justified.
-Review-host adaptation requires a separate full lifecycle design if selected.
+- Existing `WorktreeName`, `PlacementPlan` and Git registrations remain the
+  placement model. `main_repo_root` chooses a working checkout, not bare metadata.
+  `inferred_worktree_dir(repo, component)` infers a common parent from at least two
+  live branch-bearing non-primary worktrees. Only genuine repository-prefixed
+  siblings retain `<repo>.`; other inferred layouts use the flat lf name.
+- `Config.clear_scratch_on_land: bool` defaults false. `clear_scratch` reads only
+  repository config; persistent workspace preservation remains. This repository
+  opts in to its existing scratch-clear convention.
+- `Config.merge_method: Option<MergeMethod>` is a repository-only preference.
+  `MergeMethods::select` honors it within GitHub's allowed methods, otherwise
+  chooses squash, merge, then rebase. A queue supplies its own strategy.
+- `PrCommand::RequestReview { pr, reviewer }` and `Reviews { pr, json }` operate on
+  the existing PR. Review JSON passes through GitHub CLI fields; no local review
+  database. Each submitted review retains its commit. Inline threads stay on GitHub.
+- `pr_checks(watch, logs, required)` uses provider check selection and preserves
+  provider exit codes. Pending does not launch failure-log retrieval.
+- Automatic scratch traversal and repository MEMORY inclusion skip symlinks.
+  This prevents incidental traversal into linked private files and cycles; it
+  is not a secret scanner or a general exclusion policy.
 
-## Delete — do not maintain
+No schema migration.
 
-Replace unconditional sibling construction in `dir_for_component`. Inspection
-found selector/display consumers already fall back to branch and directory names;
-retain their useful sibling parser and prove non-sibling behavior through the CLI.
-Preserve collision protection, branch naming and existing checkout reuse.
+## Current system and Delete — do not maintain
 
-## Forbidden outcomes
+Remove `push_with_fallback`, which escalated an ordinary push rejection into a
+force push. Remove `assign_to_me` and tests naming assignment as requested review.
+Replace fixed squash selection, branch-leaf filename inference, metadata-parent
+root inference, and the hook-failure-as-success path in the same diff.
 
-Mandatory lf config before using existing conventions; agents and native commands
-choosing different locations; inferred layouts relocating existing work; successful
-custom publication followed by GitHub-only status; script exit treated as merge
-proof; a broad provider framework without a concrete second use case.
+Retain observed PR/head identity, host protection, existing checkout reuse,
+collision handling, explicit sync recovery, and release candidate verification.
+Release already exposes `verify`, `prepare`, `workflow`, `publisher`, and
+`completion`; this cut documents their ownership instead of adding a second
+release customization system.
 
-## Internal slices and done when
+## Constraints and forbidden outcomes
 
-**This slice:** implement and demonstrate worktree layout discovery. Jack requested
-continued work and a demo on 2026-10-11. The chosen implementation uses at least
-two live, branch-bearing Git registrations with the same parent directory and
-the same filename prefix before the branch leaf. Ignore primary, detached and
-missing checkouts. Conflicting examples or insufficient evidence use the default;
-existing branch checkout reuse wins. This is a bounded mechanical discovery rule,
-not natural-language interpretation of repository instructions. No override
-configuration is introduced in this increment.
-Follow-ups: review-host lifecycle, team procedure compatibility, further supported
-boundary repairs only where the inventory identifies concrete value.
+No mandatory onboarding to discover a layout. No moving existing work to match
+an inference. Directory compatibility does not register a workspace with another
+app or run its setup. Explicit sync reset operations retain their existing lease
+semantics; removing fallback does not claim all history rewriting is gone.
 
-Headless acceptance for placement must cover established layout, existing branch
-reuse, no convention, conflicting evidence, and consistent selection/resume.
-Gate: `cargo test -p loopflow --test worktree_tests` under the repository network
-isolation wrapper, followed by `cargo clippy --all-targets -- -D warnings` and
-`cargo fmt --check`. Expected: layout discovery, defaults, reuse and CLI selection
-pass alongside the existing worktree suite. Real demo/review judges whether discovery matches a friend's expectation.
+No assignment treated as review; no stale review treated as current approval;
+no provider read failure treated as passing; no protection bypass; no successful
+handoff reported as merge. Personal configuration cannot grant scratch deletion
+or override repository merge policy.
 
-Check: isolated `cargo test -p loopflow --test worktree_tests` — 27 passed; `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` passed; 21 worktree library checks passed; `cargo build --bin lf` passed.
+A separate Git directory has no Git backlink to its original checkout. From that
+checkout lf uses its actual root; from a linked checkout it uses an available
+registered working checkout. This does not promise one canonical primary identity
+for every separate-directory layout.
 
+## Internal slices and remaining increments
 
-## Demo preparation — 2026-10-11
+**This slice:** native preservation and placement repairs, explicit teammate review
+requests/reads, repository merge method selection, pending/required CI semantics,
+and matching documentation. Focused verification is complete; the draft remains
+open for Jack's feedback.
 
-Implementation checkpoints: `8478f3826b`, `22f2bc1ddf`. Automated fixtures exercised real CLI
-creation and selection in nested and external layouts without lf configuration.
-No participant has yet reviewed or accepted the demonstrated behavior.
+Later increments, not filed or launched:
 
-To inspect placement without creating anything, run the checkout binary inside
-an example repo: `/Users/jack/src/loopflow.how-will-lf-break/target/debug/lf wt
-create fix-login --plan`. With `.worktrees/search` and `.worktrees/payments`
-on corresponding branch leaves, expect `.worktrees/fix-login`. Run without
-`--plan` to create it, then `lf wt switch fix-login` to select it. Use the same
-checkout binary for each command until this change is installed.
+- **Remote roles (10):** separate integration remote/base from publication remote
+  across refresh, sync, push, PR targeting and reconciliation. Origin assumptions
+  still span these operations; changing one call is not fork support.
+- **Checkout completeness (14/17):** prove sparse patterns, initialized submodules,
+  LFS filters and repo setup through a useful build. Hook failure truthfulness
+  does not supply dependencies or initialize missing content.
+- **CI preparation policy:** remove the global special treatment of a check named
+  `scratch-clear` in `CiCheck::land_time_precondition`. It still leaks this repo's
+  convention into repair selection. Preserve intentional preparation boundaries
+  through repository-owned policy, without duplicating required-check authority.
+- **Review feedback:** inline unresolved threads and revision-aware remediation.
+  This cut reads submissions, not every discussion or a computed “safe to merge.”
+- **Host reach:** select a real second host, then adapt identity/publication/read/
+  completion together. Current review and release completion remain GitHub-based.
 
-The baseline smoke restriction is superseded. Remaining broader work is the
-assumption inventory and review-host/procedure boundary; this increment does
-not claim general compatibility with every team's conventions.
+Existing dirty/index/untracked restoration tests cover part of concern 16; they
+are evidence to retain, not a claim that every interrupted Git state is handled.
 
-Review finding: selector/display fallbacks already handle alternate layouts; retain
-them rather than replacing working behavior. Corrected sibling-only CLI help and
-reference text. No general configuration or provider abstraction was added.
+## Done when
+
+Headless acceptance: `uv run python scripts/test_network.py cargo test --offline
+-p loopflow --test worktree_tests --test commit_tests --test land_tests --test
+pr_review_tests --test wt_ci_logs_tests --test task_pr_authority_tests` with stdin
+closed and inherited LF variables cleared by the wrapper. Focused library checks
+cover merge policy, ambient context and default scratch preservation; existing
+checkout-restoration tests cover index/untracked recovery. Required formatting,
+Clippy and documented-command checks pass. No display, network credentials, or
+live review mutation required. CI retains the complete platform/release matrix.
+
+Review finding: keeping review state at the provider avoids a second approval
+model. Removing self-assignment fixes the misleading handoff; leaving queue
+strategy unset preserves host authority. The remaining hardcoded CI check and
+remote-role assumptions are explicit follow-ups rather than compatibility claims.
+
+Check: isolated focused Cargo suites and selected library/recovery/documentation tests — 134 distinct tests passed (corrected merge fixture rerun); `cargo fmt --check`, `cargo clippy --offline --all-targets -- -D warnings`, and `git diff --check` passed; complete platform/release matrix remains with CI.

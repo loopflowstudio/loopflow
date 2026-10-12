@@ -412,6 +412,30 @@ lf land --wait-and-fix              # wait for merge and repair failing CI
 lf sync --plan                     # preview integration with main or stack parent
 ```
 
+```bash
+lf pr request-review -r alice -r acme/platform  # request teammates on this PR
+lf pr reviews 42                               # inspect a teammate's PR
+lf pr reviews --json                           # provider review data and commit IDs
+lf pr checks --required                        # repository-required checks only
+```
+
+Review requests, assignments, approvals and merge permission are separate.
+`publish` makes work reviewable; `request-review` requests or re-requests people
+or teams on that existing PR. `submit` prepares a manual merge without changing
+assignments or review requests. Teammates can review and merge on GitHub without
+installing lf. `reviews` shows GitHub's aggregate decision and each submitted
+review's commit; an older approval is not proof of approval of the current head.
+Inline threads remain on the PR page. `--json` passes through GitHub CLI's review
+fields, not a stored lf review model. Provider errors remain errors.
+
+`checks` reports all checks by default, including external CI reported to GitHub.
+`--required` selects the host's required checks. Exit 8 means pending; it is not
+a test failure. `--logs` retrieves failed GitHub Actions logs; other CI retains
+its check link. Local test success never substitutes for remote checks or review.
+
+Auto-merge follows [repository merge policy](config.md#merge-policy) and leaves
+protection and queue enforcement to GitHub. Manual review is a normal endpoint.
+
 A Task has zero or one PR. Choose one delivery operation for the desired
 endpoint. Submit, arm and land own preparation and integration; publish does not
 sync. PR operations also work on ordinary branches without creating a Task.
@@ -432,7 +456,7 @@ lf task complete EXP-12
 Record independently accepted later work as ordinary Tasks and linking comments.
 A saved Task survives a failed comment; retry only the comment against that Task.
 Complete the delivered source outcome without waiting for its follow-ups. Preserve
-accepted later checks in PR copy before landing clears scratch.
+accepted later checks in PR copy before any configured landing cleanup.
 
 Task and comment saves work locally. The configured transport delivers them while
 connected; an outage leaves local changes pending. Historical uncertain filings
@@ -647,8 +671,8 @@ and suggests moving durable notes outside `scratch/`. In ordinary Task worktrees
 selected scratch files are committed. Selected-path commits preserve unrelated
 staged edits. Publication pushes
 the committed range, leaving later local edits alone. Inspect the complete range
-before publishing. PR landing clears scratch in non-persistent workspaces, whether
-or not the work belongs to a Task.
+before publishing. PR landing preserves scratch unless the repository opts in
+with `clear_scratch_on_land: true`; persistent workspaces always retain it.
 
 If a sync resolver creates a file where an untracked file was stashed, sync restores
 the original and keeps the resolver's file beside it as `<name>.lf-sync-1` (or the

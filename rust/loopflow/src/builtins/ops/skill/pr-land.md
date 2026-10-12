@@ -5,7 +5,9 @@ produces: recorded PR delivery with auto-merge requested, or verified merge when
 Land the current change through Loopflow's delivery operation.
 
 Inspect the intended outcome, diff, proof and repository delivery requirements.
-Fix readiness gaps and preserve useful design conclusions before scratch cleanup.
+Fix readiness gaps and preserve useful design conclusions before any configured
+scratch cleanup. Scratch deletion requires `clear_scratch_on_land: true` in
+repository configuration; never enable it merely to make delivery pass.
 Keep unrelated active contributions out of this change. Preserve accepted later
 checks and their exact unverified outcomes in durable PR copy before cleanup;
 the Task conversation must be able to read them after merge without scratch.

@@ -188,12 +188,34 @@ pub fn git_common_dir(repo: &Path) -> Result<PathBuf, GitError> {
 }
 
 pub fn main_repo_root(repo: &Path) -> Result<PathBuf, GitError> {
-    git_common_dir(repo)?
-        .parent()
-        .map(PathBuf::from)
+    let worktrees = list_porcelain(repo)?;
+    // A bare or separate Git directory can appear first instead of a checkout.
+    if let Some((path, _)) = worktrees
+        .first()
+        .filter(|(path, _)| path.join(".git").exists())
+    {
+        return Ok(path.clone());
+    }
+    let own_git_dir = crate::git::absolute_git_dir(repo)?;
+    if own_git_dir == git_common_dir(repo)? {
+        if let Ok(root) = crate::git::worktree_root(repo) {
+            return Ok(root);
+        }
+    }
+    let default = get_default_branch(repo)?;
+    worktrees
+        .iter()
+        .find(|(path, branch)| branch.as_deref() == Some(&default) && path.join(".git").exists())
+        .or_else(|| {
+            worktrees
+                .iter()
+                .find(|(path, _)| path.join(".git").exists())
+        })
+        .map(|(path, _)| path.clone())
         .ok_or_else(|| GitError::CommandFailed {
-            command: "git rev-parse --git-common-dir".to_string(),
-            stderr: "unable to resolve common dir parent".to_string(),
+            command: "git worktree list --porcelain".to_string(),
+            stderr: "repository has no working checkout; create one before launching work"
+                .to_string(),
         })
 }
 
@@ -220,26 +242,35 @@ fn dir_for_component(repo: &Path, component: &str) -> PathBuf {
 
 fn inferred_worktree_dir(repo: &Path, component: &str) -> Option<PathBuf> {
     let worktrees = list_porcelain(repo).ok()?;
-    let mut layout = None;
+    let mut directory = None;
     let mut examples = 0;
+    let repo_prefix = format!("{}.", repo.file_name()?.to_str()?);
+    let mut prefixed_siblings = true;
     for (path, branch) in &worktrees {
         if path == repo || !path.is_dir() {
             continue;
         }
-        let Some(branch) = branch else { continue };
-        // A shared parent and a shared prefix before each branch's leaf are
-        // evidence of a layout. Conflicting examples never select a majority.
-        let leaf = branch.rsplit('/').next()?;
-        let prefix = path.file_name()?.to_str()?.strip_suffix(leaf)?;
-        let candidate = (path.parent()?, prefix);
-        if layout.is_some_and(|existing| existing != candidate) {
+        if branch.is_none() {
+            continue;
+        }
+        // Directory names can outlive branch renames (for example, a host's
+        // city names). Infer placement without guessing a branch transformation.
+        let parent = path.parent()?;
+        if directory.is_some_and(|existing| existing != parent) {
             return None;
         }
-        layout = Some(candidate);
+        directory = Some(parent);
+        prefixed_siblings &=
+            Some(parent) == repo.parent() && path.file_name()?.to_str()?.starts_with(&repo_prefix);
         examples += 1;
     }
-    let (directory, prefix) = layout.filter(|_| examples >= 2)?;
-    Some(directory.join(format!("{prefix}{component}")))
+    let directory = directory.filter(|_| examples >= 2)?;
+    let name = if prefixed_siblings {
+        format!("{repo_prefix}{component}")
+    } else {
+        component.to_string()
+    };
+    Some(directory.join(name))
 }
 
 /// The worktree directory for a branch or local name. Invalid flat names use a

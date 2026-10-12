@@ -89,16 +89,19 @@ lf wt create fix-login
 lf wt switch fix-login
 ```
 
-If at least two existing, live worktrees share a directory and the same naming
-prefix before their branch's last segment, lf follows that layout. For example,
-`.worktrees/search` and `.worktrees/payments` on branches `feature/search` and
-`feature/payments` place the new checkout at `.worktrees/fix-login`. No lf
-configuration is needed. Branch naming remains `<author>/fix-login`.
+If at least two live, branch-bearing worktrees share a parent directory, lf
+creates new worktrees there. Directory names can differ from branch names, as
+with city-named workspaces or branches renamed after checkout creation. No lf
+configuration is needed. New branches remain `<author>/fix-login`; lf uses
+`fix-login` as the directory name. Existing repo-prefixed siblings keep their
+`<repo>.fix-login` naming.
 
-With fewer examples or conflicting layouts, lf uses its default sibling path,
-`../<repo>.fix-login`. Detached and missing checkouts do not establish a layout.
-Task placement reuses an existing branch checkout wherever it lives; discovery
-never moves existing worktrees.
+With fewer examples or conflicting parent directories, lf uses its default
+sibling path, `../<repo>.fix-login`. Detached and missing checkouts do not
+establish a layout. Existing branch checkouts are reused wherever they live.
+Matching a host's worktree directory does not register a workspace in that host
+or run its setup scripts. Git checkout-hook failures retain the checkout and
+report the setup error instead of reporting success.
 
 ### Context flags
 

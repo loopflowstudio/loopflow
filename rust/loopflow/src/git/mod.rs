@@ -935,14 +935,18 @@ pub(crate) fn worktree_add_inheriting(
     };
     let output = run_git_inheriting(repo, &args, inherit)?;
     if !output.status.success() {
-        // A failing post-checkout hook causes git to exit non-zero even when
-        // the worktree was created successfully. Verify before reporting failure.
-        if path.join(".git").exists() {
-            return Ok(());
-        }
         return Err(GitError::CommandFailed {
             command: format!("git {}", args.join(" ")),
-            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+            stderr: format!(
+                "{}{}{}",
+                if path.join(".git").exists() {
+                    format!("Checkout retained at {}; Git checkout/setup failed. Repair the reported failure before continuing.\n", path.display())
+                } else {
+                    String::new()
+                },
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr),
+            ),
         });
     }
     Ok(())

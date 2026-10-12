@@ -37,6 +37,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
 
+mod review;
+
 pub fn run_pr(cmd: Option<&PrCommand>, cli_agent: Option<&str>) -> Result<()> {
     let progress = CliProgress;
     let wait_and_fix = matches!(
@@ -58,7 +60,13 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_agent: Option<&str>) -> Result<()> {
             progress.status("delivery check complete");
             Ok(())
         }
-        Some(PrCommand::Checks { watch, logs }) => pr_checks(*watch, *logs),
+        Some(PrCommand::Checks {
+            watch,
+            logs,
+            required,
+        }) => pr_checks(*watch, *logs, *required),
+        Some(PrCommand::RequestReview { pr, reviewer }) => review::request(pr.as_deref(), reviewer),
+        Some(PrCommand::Reviews { pr, json }) => review::show(pr.as_deref(), *json),
         Some(PrCommand::Publish { title, body }) => {
             publish_pr(title.clone(), body.clone(), cli_agent, &progress)
         }
@@ -2367,7 +2375,7 @@ fn protected_worktree_paths() -> Result<HashSet<PathBuf>> {
     Ok(protected)
 }
 
-fn pr_checks(watch: bool, logs: bool) -> Result<()> {
+fn pr_checks(watch: bool, logs: bool, required: bool) -> Result<()> {
     let repo_root = find_repo_root()?;
     let branch = current_branch(&repo_root)?.ok_or_else(|| anyhow!("not on a branch"))?;
 
@@ -2375,20 +2383,26 @@ fn pr_checks(watch: bool, logs: bool) -> Result<()> {
     if watch {
         args.push("--watch");
     }
+    if required {
+        args.push("--required");
+    }
 
     let status = Command::new("gh")
         .args(&args)
         .current_dir(&repo_root)
         .status()?;
 
-    if !status.success() && logs {
+    if status.code() == Some(1) && logs {
         print_failed_check_logs(&repo_root, &branch)?;
     }
 
     if status.success() {
         Ok(())
     } else {
-        Err(anyhow!("ci checks failed"))
+        if status.code() == Some(8) {
+            eprintln!("CI checks are pending.");
+        }
+        Err(crate::process::CommandExit(status.code().unwrap_or(1) as u8).into())
     }
 }
 

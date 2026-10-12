@@ -21,41 +21,11 @@ No previous launch or screenshot established real-provider continuation.
 
 ## October 11 native navigation and cleanup rehearsal
 
-Repackaged `c229a29648` into the same private app and launched PID 53987. Native
-Computer Use inspected the actual populated window and clicked Product, then
-LOO-462. The sidebar has no conversation tallies; completed LOO-440 is absent.
-Product opens in a retained Work tab and LOO-462 opens its conversation pane with
-collapsed Overview. The provider launcher is refused by the intentional account-free
-sandbox; this is not successful conversation continuation. Wave workflow discovery
-also encounters the sandbox's denied user skill directories. The demo policy needs
-read-only skill access, not provider credentials or a product-code workaround.
-Product capture: `/tmp/loopflow-20261011-214224.png`.
-
-The Product plan displays old Tasks, including LOO-149. Read-only comparison proves
-LOO-149 has the same `abandoned_at=1790172305`, null planning state and old Project
-in live and copied databases. The copy did not create that mismatch. The shared
-reader deliberately includes other Projects' backlog; do not hide every historical
-Project or delete its Tasks to repair a terminal/planning mismatch. Determine whether
-normal present-day abandonment still creates this combination before choosing code
-versus one-time data repair.
-
-LOO-376's current brief explicitly records Jack Heart's earlier closure request
-and retirement of numeric acceptance. Rehearsal backup:
-`/private/tmp/loo462-native.FgtDmE/before-376-cleanup.db` (SQLite backup, mode 0600).
-The first sandboxed `task complete` saved a request then failed obtaining the real
-checkout's PR mutation lock. Retry policy permits only that exact advisory-lock
-file; all real repository/data writes and networking remain denied. The retry has
-committed completion in the private database; live LOO-376 remains unstarted.
-Native sidebar refresh removed LOO-376 without restart, preserving adjacent paused
-LOO-378 and unfinished LOO-371. Cleanup subprocess 81008 remains live while checking
-retained execution, so its final cleanup result is not yet established. Logs:
-`376-cleanup-{rehearsal,retry}.log` in the demo directory. Do not apply the private
-full-database snapshot over the live database; ongoing unrelated writes must survive.
-
-Rehearsal finished with exit 0: LOO-376 completed locally and its checkout was
-retained because execution observations were unresolved. No history was deleted;
-this does not establish live process state from a snapshot. The earlier live-process
-note above is superseded by this terminal receipt. The real database is unchanged.
+The failed sandboxed launches, LOO-149 mismatch and LOO-376 rehearsal/rollback
+receipts remain at `2016119a88:scratch/work-first-demo.md`, under this heading.
+They established neither provider continuation nor live cleanup; the subsequent
+installed application below owns live changes. Preserve old-Project backlog,
+active execution and conditional rollback, never overwrite a live database copy.
 
 ### Installed cleanup and Workflow rendering
 
@@ -127,43 +97,12 @@ Check: `scripts/test_desktop.sh --filter WorkDestinationTests -Xswiftc -gnone --
 
 ## Provider-backed conversation — October 12
 
-Jack Heart authorized a fresh configured-provider conversation in an isolated
-checkout, preserving existing Sessions. Separate app: demo directory's
-`Loopflow Conversation Demo.app` (`com.loopflow.mac.demo.loo462conversation`),
-private `conversation-home`, and private `conversation-tmux` via TMUX_TMPDIR.
-`launch_conversation.py` and `conversation_command.py` retain exact launch setup.
-The older populated app remains sandboxed; copied live Session identities have
-not been connected. No provider secrets were copied or printed.
-
-Offline-clone checkout failed because it lacked main. `get_default_branch` now
-uses the current branch only when there are no remotes and no local main; main
-and connected-repository behavior stay unchanged. Review kept this fallback
-limited to standalone repositories. Check: two focused default-branch tests,
-`cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` — PASS.
-Task `lf-9154ddb` lives only in the private Home, with its own lf-created checkout.
-
-First Session `311515627f5c4860a9d7f37006cce02a` timed out before provider identity:
-Codex was waiting for folder trust inside hidden tmux. Later opens failed with
-Previous AgentProcess has no observed exit. Its failure history remains. The
-supported session replace operation settled that failed demo provider and created
-`f3135941b2d84df9afa164ba2962d937`. Native inspection confirmed folder trust was the
-blocker; trust was limited to this authorized disposable clone. An unrelated
-UserPromptSubmit hook remained untrusted, not globally enabled. The provider
-then greeted Jack and waited. Explicit Move here transferred only this demo
-client into Desktop. After skipping the untrusted-hook prompt, the actual native
-terminal displayed the retained greeting. Native keyboard input submitted
-“Reply only: demo input received”; the provider visibly replied “demo input received”.
-This establishes provider-backed Desktop input/reply, not automatic first opening.
-
-Remaining defects: hidden first-use prompts and timeout recovery; initial opening
-starts elsewhere and needs Move here; light-mode placeholders are nearly invisible
-on the dark terminal background. Failed pane exits obscure launch errors. These
-are reachable product failures, not old database debris. No Task completion,
-Workflow start, real Session takeover, installation or demo approval is inferred.
-
-Native follow-up: typed an unsent “retained demo draft”, selected the Wave, then
-clicked the sidebar Task. The same provider conversation and exact draft returned
-without New shell or another launch. Left this isolated demo open for Jack.
+Disposable configured-provider proof, exact Session IDs, failed hidden trust prompt,
+replacement and native input/reply remain at `2016119a88:scratch/work-first-demo.md`,
+**Provider-backed conversation**. This proves neither populated real-Task first
+opening nor takeover of copied execution. The no-remotes/default-branch repair
+passed focused Rust checks. Hidden first-use prompts, timeout recovery and client
+handoff remain adversarial cases; native placeholder contrast is repaired below.
 
 ## Correct repository and Started membership — October 12
 
@@ -272,3 +211,38 @@ LOO-312 still needs recovery: no local/remote-tracking branch or worktree regist
 no direct Sessions, historical PR without GitHub/head evidence. Retained October 5
 progress describes actual implementation, so absence cannot classify it as debris.
 No real restoration, Session creation, abandonment or history deletion attempted.
+
+## Every-sidebar-Task audit — October 12, in progress
+
+Jack Heart requested inspecting every visible Task as a concrete state case,
+repairing the resulting opening failures before another demo. Jack still wants
+LOO-312; the value of its prior implementation is unknown. Keep its identity and
+purpose active, investigate recoverable history, and do not conflate missing
+checkout/Session with abandoned Work. No approval to discard old implementation.
+The captured roster has 12 Tasks; current reads and per-Task evidence are in
+`/tmp/loo462-sidebar-audit/`. No new demo launch until this pass finishes.
+
+## CI conversation rate-limit incident — October 12
+
+Jack Heart reported Linear warning flooding made the CI-under-five Task Session
+unusable; audit this alongside Task entry, without discarding the Task or history.
+Native Codex history `01a131de-262e-74f2-b91b-4e25fb33e47d` shows the resumed
+headless audit child emitting `linear rate limited; retrying`, attempts 1–3 with
+`delay_seconds=0`. Its parent polled PTY tool session 19377: at 21:00:25Z the
+response reported 5,121 lines / 103,667 pre-truncation tokens. This is diagnostic
+flooding through tool output; the parent later answered at 21:00:49Z, so a provider
+crash or permanent conversation corruption is not established. No Session was
+replaced, provider killed or history deleted during inspection.
+
+#1540 (`9d0d41f5e0`, already in this branch) removes per-agent polling and shares
+cooldown across clients. The old warning text and immediate retry loop are absent
+here; existing launchers do not acquire new code merely by updating Desktop.
+A remaining current-code hole accepted stale reset / Retry-After: 0 as no pause.
+Use the existing conservative one-hour fallback when no future deadline is supplied;
+future provider deadlines remain unchanged. A five-client fixture requires only
+one rejected HTTP request. Live quota consumption and Session usability remain
+unverified; do not call another demo ready from this test.
+
+Review: reuse the existing fallback and shared cooldown; no new retry loop or
+per-Session rate-limit state. This does not prove aggregate live request volume.
+Check: three focused Linear cooldown tests PASS (including five callers/one request); `cargo fmt`, all-target Clippy and diff check PASS. No native relaunch or live provider requests for this check.

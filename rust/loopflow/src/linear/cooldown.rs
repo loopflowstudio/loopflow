@@ -172,7 +172,13 @@ fn reset_at(headers: &HeaderMap, limited: bool, now: i64) -> Option<i64> {
     }) {
         reset = Some(reset.unwrap_or(value).max(value));
     }
-    Some(reset.unwrap_or(now + 3_600_000))
+    // An exhausted response with a stale reset or Retry-After: 0 still needs
+    // a cooldown. Otherwise each caller immediately sends another request.
+    Some(
+        reset
+            .filter(|until| *until > now)
+            .unwrap_or(now + 3_600_000),
+    )
 }
 
 #[cfg(test)]
@@ -197,7 +203,10 @@ mod tests {
         );
         assert_eq!(reset_at(&headers, false, 1000), Some(5000));
         headers.remove("retry-after");
-        assert_eq!(reset_at(&headers, true, 6000), Some(6000));
+        assert_eq!(reset_at(&headers, true, 6000), Some(3_606_000));
+        headers.clear();
+        headers.insert("retry-after", "0".parse().unwrap());
+        assert_eq!(reset_at(&headers, true, 6000), Some(3_606_000));
         headers.clear();
         headers.insert(
             "retry-after",

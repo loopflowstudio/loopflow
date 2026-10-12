@@ -2749,6 +2749,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn zero_retry_after_still_pauses_other_callers_without_more_requests() {
+        let mut limited = json_response(
+            StatusCode::TOO_MANY_REQUESTS,
+            json!({"errors":[{"message":"Rate limit exceeded"}]}),
+        );
+        limited.headers.push(("retry-after".into(), "0".into()));
+        limited
+            .headers
+            .push(("x-ratelimit-requests-reset".into(), "1".into()));
+        let (url, requests) = test_server::spawn(vec![limited]).await;
+        for _ in 0..5 {
+            let client = LinearClient::with_base_url("token".into(), None, url.clone());
+            assert!(matches!(
+                client.initiatives().await,
+                Err(crate::linear::LinearError::RateLimited { .. })
+            ));
+        }
+        assert_eq!(requests.lock().await.len(), 1);
+    }
+
+    #[tokio::test]
     async fn last_allowed_response_is_returned_before_shared_pause() {
         let mut last = json_response(
             StatusCode::OK,

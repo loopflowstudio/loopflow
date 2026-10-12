@@ -270,11 +270,11 @@ Task. Native clicks and installation remain unproved; no live schema change.
 Stopped only the owned orphan reader from the closed demo and redundant one-shot;
 the current app reader remains live. Task automation disabled; app CI watcher active.
 
-October 12 native copied-data review (PID 5673) renders all 11 expected Task rows,
+October 12 copied-data review renders all 11 expected Task rows,
 without Session counts. Clicking LOO-462 selects exact primary Session
 `955ff6f0a65047a18b191505e307fce1`, showing its breadcrumb and Open here action,
 not New shell. The sandbox blocks provider use; placeholder text is nearly
-invisible on the dark pane. This is target selection, not usable conversation proof.
+invisible on the dark pane. No provider continuation is proved.
 The live-data app instead ended its long read with a wire-decoding error and
 retained an older, larger roadmap; it must not be presented as current.
 
@@ -285,4 +285,5 @@ excludes inherited IDs only, retaining each nested global at its declaring owner
 Review: shared Clap metadata remains the sole flag owner, with no command-name
 allowlist. Check: binary reorder_args tests and portfolio_cli_tests PASS;
 `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, diff check PASS.
-Native repackaging/inspection of this flag repair remains; no live install.
+Repackaged: native inspection shows the 11-row sidebar with the Portfolio error
+gone; direct packaged `portfolio --json` exits 0. No live install or provider proof.

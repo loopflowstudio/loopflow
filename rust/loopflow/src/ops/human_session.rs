@@ -1,3 +1,7 @@
+mod connection;
+pub(crate) use connection::explain_connect;
+pub use connection::{SessionConnectAction, SessionConnectExplanation, SessionConnectIntent};
+
 mod workspace;
 pub use workspace::SessionWorkspace;
 
@@ -92,11 +96,46 @@ pub(crate) enum HumanSessionToken {
     Primary { id: String },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum OpenMode {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OpenMode {
     Refuse,
     Replace,
     Try,
+}
+
+impl OpenMode {
+    pub(crate) fn from_flags(replace: bool, try_open: bool) -> Self {
+        if replace {
+            Self::Replace
+        } else if try_open {
+            Self::Try
+        } else {
+            Self::Refuse
+        }
+    }
+
+    fn require_action(self, state: SessionState) -> Result<()> {
+        if self == Self::Refuse {
+            require_session_action(state, SessionActionKind::Open)?;
+        }
+        Ok(())
+    }
+}
+
+/// The ordinary resume command and its preview choose the same conversation.
+pub(crate) async fn select_connection(
+    store: &SharedStore,
+    cwd: &Path,
+    id: Option<&str>,
+) -> Result<String> {
+    match id {
+        Some(id) => Ok(id.to_owned()),
+        None => latest_interactive_session(store, cwd)
+            .await?
+            .map(|session| session.id)
+            .context("No interactive session found in this worktree"),
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -108,14 +147,14 @@ pub enum SessionState {
     Closed,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionActionKind {
     Open,
     MoveHere,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SessionAction {
     pub kind: SessionActionKind,
     pub label: String,
@@ -390,7 +429,7 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
     };
     let state = session_state(session);
     let mut actions = session_actions(state);
-    let open_argv = match human_open_argv(None, &session.id) {
+    let open_argv = match human_open_argv(&session.id) {
         Ok(argv) => argv,
         Err(error) => {
             let reason = format!("Session connection unavailable: {error}");
@@ -647,9 +686,7 @@ pub(crate) async fn open(
         crate::harness::agent_process::stop_session_agent(&store.sqlite, &session.id)?;
     }
     let mut result = surface(store, session).await?;
-    if mode == OpenMode::Refuse {
-        require_session_action(result.state, SessionActionKind::Open)?;
-    }
+    mode.require_action(result.state)?;
     if resume {
         crate::lf::commands::util::resume_session(
             native.provider,
@@ -947,7 +984,7 @@ async fn surface(store: &SharedStore, session: &LfSession) -> Result<SessionReco
         state,
         ready_summary: session.ready_summary.clone(),
         terminal_ids: metadata.terminal_id.clone().into_iter().collect(),
-        open_argv: human_open_argv(None, &session.id)?,
+        open_argv: human_open_argv(&session.id)?,
     };
     workspace::associate(store, std::slice::from_mut(&mut reading)).await?;
     Ok(reading)
@@ -1192,26 +1229,20 @@ pub(crate) fn resume_native_session(
     Ok(true)
 }
 
-pub(crate) fn human_open_argv(
-    remote_machine: Option<&crate::durable::MachineId>,
-    id: &str,
-) -> Result<Vec<String>> {
+fn human_open_argv(id: &str) -> Result<Vec<String>> {
     let context = crate::os_process::execution_context()?;
     // A fresh terminal does not inherit the listing process's data selection.
     // Carry the executable and its data together, including when a different
     // installation becomes current between listing and opening.
-    let mut argv = vec![
+    Ok(vec![
         "/usr/bin/env".to_string(),
         format!("LF_BIN={}", context.lf_bin.display()),
         format!("LF_HOME={}", context.lf_home.display()),
         context.lf_bin.display().to_string(),
-    ];
-    if let Some(machine_id) = remote_machine {
-        argv.push("--machine".to_string());
-        argv.push(machine_id.to_string());
-    }
-    argv.extend(["session".to_string(), "connect".to_string(), id.to_string()]);
-    Ok(argv)
+        "session".to_string(),
+        "connect".to_string(),
+        id.to_string(),
+    ])
 }
 
 const PRIMARY_MESSAGE: &str = "<lf:primary-session>\nThis is the one ongoing primary conversation of its repository, Wave or Task. Reconcile current evidence, then work with the user.\n</lf:primary-session>";
@@ -2185,7 +2216,7 @@ mod tests {
     fn human_sessions_open_through_the_public_session_command() {
         let _lock = crate::journal::test_env_lock();
         let home = SessionHome::new();
-        let argv = human_open_argv(None, "session_123").unwrap();
+        let argv = human_open_argv("session_123").unwrap();
 
         assert_eq!(
             &argv[argv.len() - 3..],

@@ -11,6 +11,18 @@ enum RegistryQueryLocal {
         try await Task.detached(priority: .userInitiated) {
             try LocalWaveAgentLauncher.queryLf(args, cwd: cwd, input: input)
         }.value
+    }, watchFiles: { args, cwd in
+        try await Task.detached(priority: .userInitiated) {
+            let configuration = try ReaderLaunchConfiguration.current()
+            let process = LocalWaveAgentLauncher.queryProcess([configuration.helper] + args)
+            process.environment = configuration.environment
+            if let cwd { process.currentDirectoryURL = URL(fileURLWithPath: cwd) }
+            let reader = try LocalLineObservation<TaskFilesFrame>.start(
+                name: "Task files", process: process, frameLimit: 65536,
+                configurationChanged: { try ReaderLaunchConfiguration.current() != configuration },
+                decode: { try JSONDecoder().decode(TaskFilesFrame.self, from: $0) })
+            return TaskFilesObservation(frames: reader.frames, cancel: reader.cancel)
+        }.value
     }, watchWork: {
         try await Task.detached(priority: .userInitiated) {
             let configuration = try ReaderLaunchConfiguration.current()

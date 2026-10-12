@@ -97,7 +97,7 @@ struct TaskFilesView: View {
                     reader.scrollTo("\(rows[index].1.rawValue):\(rows[index].0)")
                 }
             }
-            if let directory = store.changes?.recoveryDirectory {
+            if store.query.remoteMachine == nil, let directory = store.changes?.recoveryDirectory {
                 Button("Open saved versions ↗") {
                     NSWorkspace.shared.open(URL(fileURLWithPath: directory))
                 }.buttonStyle(.plain).font(.caption).lineLimit(1).padding(8)

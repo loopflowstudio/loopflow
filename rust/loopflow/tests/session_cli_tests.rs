@@ -55,7 +55,7 @@ fn session_cli_uses_one_truthful_resolution_contract() {
 
     let removed = run(
         home.path(),
-        &["monitor", "show", "historical-input", "--resume"],
+        &["history", "show", "historical-input", "--resume"],
     );
     assert!(!removed.status.success());
     assert!(String::from_utf8_lossy(&removed.stderr).contains("unexpected argument '--resume'"));
@@ -192,7 +192,7 @@ fn prepared_conversation_keeps_captured_input_without_a_run_before_provider_star
     assert!(dir.join("prepared").exists());
     assert!(!dir.join("provider-clients").exists());
     assert!(!dir.join("terminal.json").exists());
-    let inspected = run(home.path(), &["monitor", "show", &id, "--json"]);
+    let inspected = run(home.path(), &["history", "show", &id, "--json"]);
     assert!(
         inspected.status.success(),
         "{}",
@@ -434,10 +434,131 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
 const CALLER: &str = "run_00000000000000000000000000000002";
 
 #[test]
-fn native_title_callback_keeps_lf_as_the_naming_owner() {
+fn native_title_callback_returns_while_store_is_busy() {
+    for exclusive in [false, true] {
+        let home = tempfile::tempdir().unwrap();
+        std::fs::create_dir(home.path().join(".lf")).unwrap();
+        prepare_conversation(home.path(), home.path(), "claude", "Original purpose");
+        let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+        database
+            .execute_batch(if exclusive {
+                "PRAGMA journal_mode=DELETE; BEGIN EXCLUSIVE"
+            } else {
+                "BEGIN IMMEDIATE"
+            })
+            .unwrap();
+        // Consecutive prompts must stay bounded while the same writer remains busy.
+        for _ in 0..2 {
+            let children: Vec<_> = (0..4)
+                .map(|_| spawn_title_callback(home.path(), "native-plain"))
+                .collect();
+            for child in children {
+                let output = finish_title_callback(child);
+                if exclusive {
+                    assert!(
+                        output.stdout.is_empty(),
+                        "unknown ownership must not rename: {output:?}"
+                    );
+                } else {
+                    let title: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+                    assert_eq!(
+                        title["hookSpecificOutput"]["sessionTitle"],
+                        "Plan store migration"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn native_title_callback_bounds_history_scans() {
+    let home = tempfile::tempdir().unwrap();
+    std::fs::create_dir(home.path().join(".lf")).unwrap();
+    let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    // A lazy billion-row history makes an unbounded ownership scan deterministic
+    // without allocating a large fixture on disk.
+    database
+        .execute_batch(
+            "CREATE TABLE agent_sessions(id TEXT, provider_thread TEXT);
+        CREATE VIEW session_events AS
+        WITH RECURSIVE history(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM history WHERE n<1000000000)
+        SELECT 'session' AS session_id, 'observed' AS kind,
+            json_object('evidence', json_object('provider_session_id', 'other-' || n)) AS payload
+        FROM history;",
+        )
+        .unwrap();
+    let output = finish_title_callback(spawn_title_callback(home.path(), "native-plain"));
+    assert!(
+        output.stdout.is_empty(),
+        "incomplete history must not rename: {output:?}"
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("interrupted"),
+        "{output:?}"
+    );
+}
+
+#[test]
+fn native_title_callback_does_not_initialize_a_store() {
+    let home = tempfile::tempdir().unwrap();
+    std::fs::create_dir(home.path().join(".lf")).unwrap();
+    let output = finish_title_callback(spawn_title_callback(home.path(), "native-plain"));
+    let title: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        title["hookSpecificOutput"]["sessionTitle"],
+        "Plan store migration"
+    );
+    assert!(!home.path().join("loopflow.db").exists());
+}
+
+fn spawn_title_callback(
+    home: &std::path::Path,
+    thread: &str,
+) -> (std::process::Child, std::time::Instant) {
     use std::io::Write;
     use std::process::Stdio;
 
+    let started = std::time::Instant::now();
+    let mut child = command(home, &["__session-title", "claude"])
+        .current_dir(home)
+        .env("HOME", home)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    write!(
+        child.stdin.take().unwrap(),
+        "{}",
+        serde_json::json!({
+            "cwd": home, "session_id": thread,
+            "hook_event_name": "UserPromptSubmit", "prompt": "Plan store migration"
+        })
+    )
+    .unwrap();
+    (child, started)
+}
+
+fn finish_title_callback(callback: (std::process::Child, std::time::Instant)) -> Output {
+    use std::time::Duration;
+
+    let (mut child, started) = callback;
+    while child.try_wait().unwrap().is_none() {
+        if started.elapsed() > Duration::from_secs(4) {
+            child.kill().unwrap();
+            let output = child.wait_with_output().unwrap();
+            panic!("title hook exceeded prompt budget: {output:?}");
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success(), "{output:?}");
+    output
+}
+
+#[test]
+fn native_title_callback_keeps_lf_as_the_naming_owner() {
     let home = tempfile::tempdir().unwrap();
     std::fs::create_dir(home.path().join(".lf")).unwrap();
     let (id, _, _) = prepare_conversation(home.path(), home.path(), "claude", "Original purpose");
@@ -449,34 +570,30 @@ fn native_title_callback_keeps_lf_as_the_naming_owner() {
         )
         .unwrap();
     for thread in ["native-owned", "native-plain"] {
-        let mut child = command(home.path(), &["__session-title", "claude"])
-            .env("HOME", home.path())
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
-        write!(
-            child.stdin.take().unwrap(),
-            "{}",
-            serde_json::json!({
-                "cwd": home.path(), "session_id": thread, "hook_event_name":"UserPromptSubmit",
-                "prompt":"A different request entirely"
-            })
-        )
-        .unwrap();
-        let output = child.wait_with_output().unwrap();
-        assert!(output.status.success(), "{output:?}");
+        let output = finish_title_callback(spawn_title_callback(home.path(), thread));
         if thread == "native-owned" {
             assert!(output.stdout.is_empty(), "{output:?}");
         } else {
             let title: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
             assert_eq!(
                 title["hookSpecificOutput"]["sessionTitle"],
-                "different request entirely"
+                "Plan store migration"
             );
         }
     }
+    let recorded: i64 = database
+        .query_row(
+            "SELECT COUNT(*) FROM processes
+             WHERE json_extract(command, '$[1]')='__session-title'
+               AND outcome='succeeded' AND completed_at IS NOT NULL",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        recorded, 2,
+        "uncontended hooks retain their Process history"
+    );
 }
 
 /// A prepared conversation, before a provider has started.
@@ -581,14 +698,7 @@ fn headless_resume_preserves_a_held_owners_capture_on_both_harnesses() {
         ));
         let output = command(
             home.path(),
-            &[
-                "--batch",
-                "--no-loopflow",
-                "session",
-                "resume",
-                &id,
-                "another instruction",
-            ],
+            &["--batch", "session", "resume", &id, "another instruction"],
         )
         .current_dir(&cwd)
         .env("PATH", std::env::join_paths(paths).unwrap())
@@ -629,6 +739,7 @@ fn headless_resume_reads_the_saved_workspace_and_retains_process_provenance() {
     std::fs::write(
         &provider,
         r#"#!/bin/sh
+set -eu
 if [ "${1:-}" = --version ]; then exit 0; fi
 pwd -P > "$LF_TEST_RESUME_PROOF.cwd"
 printf '%s\n' "$@" > "$LF_TEST_RESUME_PROOF.args"
@@ -638,7 +749,8 @@ import json, os, pathlib, subprocess, sys
 args = sys.argv[1:]
 settings = json.loads(pathlib.Path(args[args.index("--settings") + 1]).read_text())
 hook = settings["hooks"]["SessionStart"][0]["hooks"][0]["command"]
-block = json.loads(subprocess.check_output(hook, shell=True))["hookSpecificOutput"]["additionalContext"]
+event = {"session_id": args[args.index("--resume") + 1], "hook_event_name": "SessionStart", "source": "resume"}
+block = json.loads(subprocess.check_output(hook, shell=True, input=json.dumps(event).encode()))["hookSpecificOutput"]["additionalContext"]
 pathlib.Path(os.environ["LF_TEST_RESUME_PROOF"] + ".context").write_text(block)
 PYTHON
 python3 -c '
@@ -687,14 +799,7 @@ for line in sys.stdin:
     .unwrap();
     let output = command(
         home.path(),
-        &[
-            "-b",
-            "--no-loopflow",
-            "session",
-            "resume",
-            &id,
-            "Continue here",
-        ],
+        &["-b", "session", "resume", &id, "Continue here"],
     )
     .current_dir(&caller)
     .env("PATH", path)

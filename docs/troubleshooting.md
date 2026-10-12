@@ -75,7 +75,7 @@ for distinct contributions.
 
 Wave status shows up to 50 recent Session inputs from the last seven days.
 Read complete Task history with `lf usage --days 0 --task <task> --json`, or inspect
-one input with `lf mon show <session> --input <capture>`. An empty recent list
+one input with `lf history show <session> --input <capture>`. An empty recent list
 does not prove that no Flow or Session remains active.
 
 Answer an exact pending question, send durable direction through Steer, or

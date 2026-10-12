@@ -299,7 +299,7 @@ def _python_commands(changed: list[str]) -> list[Command]:
         argv = ["uv", "run", "--no-sync", "pytest", *test_files]
     else:
         argv = ["uv", "run", "--no-sync", "pytest", "python/tests/"]
-    return [
+    commands = [
         Command(["uv", "sync"], REPO_ROOT, "python-dependencies"),
         Command(
             ["uv", "run", "--no-sync", "python", "scripts/test_network.py", *argv],
@@ -307,6 +307,25 @@ def _python_commands(changed: list[str]) -> list[Command]:
             "python",
         ),
     ]
+    # macOS refuses nested Seatbelt profiles. This fixture installs its own
+    # network-denying, read-only policy around the observed subprocesses.
+    if platform.system() == "Darwin" and (
+        not test_files or touches_source or "python/tests/test_desktop_performance.py" in test_files
+    ):
+        commands.append(
+            Command(
+                [
+                    "uv",
+                    "run",
+                    "--no-sync",
+                    "pytest",
+                    "python/tests/test_desktop_performance.py::test_checkout_observation_preserves_read_boundary_and_detects_changes",
+                ],
+                REPO_ROOT,
+                "python-sandbox",
+            )
+        )
+    return commands
 
 
 def _website_commands(_changed: list[str]) -> list[Command]:

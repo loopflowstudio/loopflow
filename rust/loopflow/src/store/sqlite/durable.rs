@@ -1,16 +1,18 @@
+use crate::steer::Steer;
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use time::OffsetDateTime;
 
 use crate::child::ChildRef;
 use crate::durable::{
-    AbandonReceipt, Author, Machine, MachineId, Placement, ProjectId, Steer, SteerComment, TaskId,
-    TaskState, ToolResponseId, ToolResponseReceipt, ToolResponseWrite, WorkRef, WorkStatus,
+    AbandonReceipt, Author, Machine, MachineId, Placement, PlacementProvenance, ProjectId,
+    SteerComment, TaskId, TaskState, ToolResponseId, ToolResponseReceipt, ToolResponseWrite,
+    WorkRef, WorkStatus,
 };
 use crate::id::WaveId;
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
 use crate::work::project::ProjectEventKind;
-use crate::work::task::{Task, TaskEventKind};
+use crate::work::task::TaskEventKind;
 
 use super::SqliteStore;
 
@@ -138,8 +140,9 @@ impl SqliteStore {
     }
 
     pub fn placement(&self, work: &WorkRef) -> StoreResult<Placement> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        placement_in(&conn, work)
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let snapshot = conn.transaction()?;
+        placement_in(&snapshot, work)
     }
 
     pub(crate) fn place_work(
@@ -155,13 +158,30 @@ impl SqliteStore {
             [machine_id.as_str()],
             |_| Ok(()),
         )?;
-        if let Some(current) = find_placement_in(&tx, work)? {
-            if current.machine_id == *machine_id {
-                tx.commit()?;
-                return Ok(current);
-            }
+        use crate::work::edit::{Delegation, WorkEdit, WorkValue};
+        let current = find_placement_in(&tx, work)?;
+        if !current.as_ref().is_some_and(|assignment| {
+            assignment.machine_id == *machine_id
+                && assignment.provenance == PlacementProvenance::Explicit
+        }) {
+            let assignment = Some(Delegation {
+                machine_id: machine_id.clone(),
+                placed_at: now_unix(),
+                provenance: PlacementProvenance::Explicit,
+            });
+            let change = match work {
+                WorkRef::Wave(_) => WorkValue::WaveDelegation(assignment),
+                WorkRef::Project(_) => WorkValue::ProjectDelegation(assignment),
+                WorkRef::Task(_) => WorkValue::TaskDelegation(assignment),
+            };
+            super::planning_write::local(
+                &tx,
+                &[WorkEdit {
+                    target: work.id().into(),
+                    change,
+                }],
+            )?;
         }
-        write_placement(&tx, work, machine_id, now_unix())?;
         let placement = placement_in(&tx, work)?;
         tx.commit()?;
         Ok(placement)
@@ -242,112 +262,76 @@ impl SqliteStore {
 
     pub fn task_steers(&self, task_id: &TaskId) -> StoreResult<Vec<Steer>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(super::children::task_events_after_in(&conn, task_id, 0)?
-            .into_iter()
-            .filter_map(|event| match event.kind {
-                TaskEventKind::Steer { author, text } => Some(Steer {
-                    id: event.id,
-                    author,
-                    text,
-                }),
-                _ => None,
-            })
-            .collect())
+        let mut query = conn.prepare(&format!(
+            "SELECT {} FROM steers p WHERE task_id=?1 ORDER BY seq",
+            super::steers::COLUMNS
+        ))?;
+        let steers = query
+            .query_map([task_id.as_str()], super::steers::read_steer)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(steers)
     }
 
-    /// Steer comments across every Work, issued at or after `since` (unix
-    /// seconds) — the cross-Work `lf activity` timeline. Scans the Task and
-    /// Project event streams for the `Steer` comment; there is no steers table.
     pub fn steers_since(&self, since: i64) -> StoreResult<Vec<SteerComment>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut comments = Vec::new();
-        let mut task_statement = conn.prepare(
-            "SELECT task_id, id, kind_json, created_at FROM task_events
-             WHERE json_extract(kind_json, '$.kind')='steer' AND created_at >= ?1
-             ORDER BY created_at, id",
-        )?;
-        let task_rows = task_statement.query_map([since], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, i64>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, i64>(3)?,
-            ))
-        })?;
-        for row in task_rows {
-            let (task_id, id, kind_json, created_at) = row?;
-            let kind: TaskEventKind = serde_json::from_str(&kind_json)?;
-            if let TaskEventKind::Steer { author, text } = kind {
-                comments.push(SteerComment {
-                    work: WorkRef::Task(TaskId::parse(&task_id).map_err(invalid_durable)?),
-                    steer: Steer { id, author, text },
-                    issued_at: crate::store::rows::unix_to_datetime(created_at),
-                });
-            }
-        }
-        let mut project_statement = conn.prepare(
-            "SELECT project_id, id, kind_json, created_at FROM project_events
-             WHERE json_extract(kind_json, '$.kind')='steer' AND created_at >= ?1
-             ORDER BY created_at, id",
-        )?;
-        let project_rows = project_statement.query_map([since], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, i64>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, i64>(3)?,
-            ))
-        })?;
-        for row in project_rows {
-            let (project_id, id, kind_json, created_at) = row?;
-            let kind: ProjectEventKind = serde_json::from_str(&kind_json)?;
-            if let ProjectEventKind::Steer { author, text } = kind {
-                comments.push(SteerComment {
-                    work: WorkRef::Project(ProjectId::parse(&project_id).map_err(invalid_durable)?),
-                    steer: Steer { id, author, text },
-                    issued_at: crate::store::rows::unix_to_datetime(created_at),
-                });
-            }
-        }
-        Ok(comments)
+        let mut query = conn.prepare(&format!("SELECT {},task_id,project_id,created_at FROM steers p
+            WHERE created_at>=?1 AND (task_id IS NOT NULL OR project_id IS NOT NULL) ORDER BY created_at,seq", super::steers::COLUMNS))?;
+        let result = query
+            .query_map([since], |row| {
+                let task: Option<String> = row.get(6)?;
+                let work = match task {
+                    Some(task) => WorkRef::Task(TaskId::from_raw(task)),
+                    None => WorkRef::Project(ProjectId::from_raw(row.get::<_, String>(7)?)),
+                };
+                Ok(SteerComment {
+                    work,
+                    steer: super::steers::read_steer(row)?,
+                    issued_at: crate::store::rows::unix_to_datetime(row.get(8)?),
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(result)
     }
 
     #[cfg(test)]
-    pub fn append_steer(&self, work: &WorkRef, author: &Author, text: &str) -> StoreResult<Steer> {
-        let WorkRef::Task(task_id) = work else {
-            return Err(StoreError::InvalidData("only Tasks take steering".into()));
+    pub fn save_steer(&self, work: &WorkRef, author: &Author, text: &str) -> StoreResult<Steer> {
+        let WorkRef::Task(task) = work else {
+            return Err(StoreError::InvalidData(
+                "only Tasks take test steers".into(),
+            ));
         };
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let steer = Self::append_task_steer_in(&tx, task_id, author, text)?;
+        let tx = conn.transaction()?;
+        let steer = Self::save_task_steer_in(
+            &tx,
+            task,
+            author,
+            text,
+            &uuid::Uuid::new_v4().to_string(),
+            "1",
+        )?;
         tx.commit()?;
         Ok(steer)
     }
 
-    /// Local delivery projection. Authored input is published to Linear first.
-    pub(crate) fn append_task_steer_in(
+    pub(crate) fn save_task_steer_in(
         tx: &Transaction<'_>,
-        task_id: &TaskId,
+        task: &TaskId,
         author: &Author,
         text: &str,
+        source: &str,
+        revision: &str,
     ) -> StoreResult<Steer> {
-        let text = text.trim();
-        if text.is_empty() {
-            return Err(StoreError::InvalidData("Steer text cannot be empty".into()));
-        }
-        let event = super::children::insert_task_event_in(
+        let steer =
+            super::steers::save_in(tx, ("task", task.as_str()), source, revision, author, text)?;
+        super::children::insert_task_event_in(
             tx,
-            task_id,
+            task,
             &TaskEventKind::Steer {
-                author: author.clone(),
-                text: text.to_string(),
+                steer_id: steer.id.clone(),
             },
         )?;
-        Ok(Steer {
-            id: event.id,
-            author: author.clone(),
-            text: text.to_string(),
-        })
+        Ok(steer)
     }
 
     /// Record an interrupt request as a durable comment on the Work's event
@@ -463,7 +447,7 @@ impl SqliteStore {
     }
 }
 
-fn map_local_machine(conn: &Connection) -> StoreResult<Machine> {
+pub(super) fn map_local_machine(conn: &Connection) -> StoreResult<Machine> {
     conn.query_row(
         "SELECT id, route, created_at, observed_at, label, repo FROM machines WHERE route='local'",
         [],
@@ -492,98 +476,99 @@ fn map_machine_row(row: &rusqlite::Row<'_>) -> StoreResult<Machine> {
     })
 }
 
-fn placement_in(conn: &Connection, work: &WorkRef) -> StoreResult<Placement> {
-    find_placement_in(conn, work)?.ok_or_else(|| {
-        StoreError::InvalidData(format!(
-            "{} {} has no Machine placement",
-            work.kind(),
-            work.id()
-        ))
-    })
+pub(super) fn placement_in(conn: &Connection, work: &WorkRef) -> StoreResult<Placement> {
+    let mut source = work.clone();
+    let mut visited = std::collections::HashSet::new();
+    loop {
+        if !visited.insert(source.clone()) {
+            return Err(StoreError::InvalidData(
+                "cycle in Work delegation ancestry".into(),
+            ));
+        }
+        let (parent, created_at) = match &source {
+            WorkRef::Task(id) => conn.query_row(
+                "SELECT project_id,created_at FROM tasks WHERE id=?1",
+                [id.as_str()],
+                |row| {
+                    Ok((
+                        Some(WorkRef::Project(ProjectId::from_raw(
+                            row.get::<_, String>(0)?,
+                        ))),
+                        row.get::<_, i64>(1)?,
+                    ))
+                },
+            )?,
+            WorkRef::Project(id) => conn.query_row(
+                "SELECT wave_id,created_at FROM projects WHERE id=?1",
+                [id.as_str()],
+                |row| Ok((Some(WorkRef::Wave(row.get(0)?)), row.get(1)?)),
+            )?,
+            WorkRef::Wave(id) => conn.query_row(
+                "SELECT parent_wave_id,created_at FROM waves WHERE id=?1",
+                [id.as_str()],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<WaveId>>(0)?.map(WorkRef::Wave),
+                        row.get(1)?,
+                    ))
+                },
+            )?,
+        };
+        if let Some(mut placement) = find_placement_in(conn, &source)? {
+            placement.work = work.clone();
+            return Ok(placement);
+        }
+        match parent {
+            Some(parent) => source = parent,
+            None => {
+                return Ok(Placement {
+                    work: work.clone(),
+                    source,
+                    provenance: PlacementProvenance::LocalDefault,
+                    machine_id: map_local_machine(conn)?.id,
+                    placed_at: OffsetDateTime::from_unix_timestamp(created_at)
+                        .map_err(invalid_durable)?,
+                })
+            }
+        }
+    }
 }
 
 fn find_placement_in(conn: &Connection, work: &WorkRef) -> StoreResult<Option<Placement>> {
-    let row = match work {
-        WorkRef::Wave(id) => conn.query_row(
-            "SELECT machine_id, placed_at FROM work_placements WHERE wave_id=?1",
-            [id.as_str()],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
-        ),
-        WorkRef::Project(id) => conn.query_row(
-            "SELECT machine_id, placed_at FROM work_placements WHERE project_id=?1",
-            [id.as_str()],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
-        ),
-        WorkRef::Task(id) => conn.query_row(
-            "SELECT machine_id, placed_at FROM work_placements WHERE task_id=?1",
-            [id.as_str()],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
-        ),
-    }
-    .optional()?;
-    row.map(|(machine_id, placed_at)| {
+    let row = conn
+        .query_row(
+            &format!(
+                "SELECT machine_id, placed_at, provenance FROM work_placements WHERE {}_id=?1",
+                work.kind()
+            ),
+            [work.id()],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
+        )
+        .optional()?;
+    row.map(|(machine_id, placed_at, provenance)| {
         Ok(Placement {
             work: work.clone(),
+            source: work.clone(),
+            provenance: match provenance.as_str() {
+                "explicit" => PlacementProvenance::Explicit,
+                "legacy" => PlacementProvenance::Legacy,
+                other => {
+                    return Err(invalid_durable(format!(
+                        "unknown placement provenance {other}"
+                    )))
+                }
+            },
             machine_id: MachineId::parse(&machine_id).map_err(invalid_durable)?,
             placed_at: OffsetDateTime::from_unix_timestamp(placed_at).map_err(invalid_durable)?,
         })
     })
     .transpose()
-}
-
-fn write_placement(
-    tx: &Transaction<'_>,
-    work: &WorkRef,
-    machine_id: &MachineId,
-    placed_at: i64,
-) -> StoreResult<()> {
-    match work {
-        WorkRef::Wave(id) => tx.execute(
-            "INSERT INTO work_placements (wave_id, machine_id, enabled, placed_at)
-             VALUES (?1, ?2, 1, ?3)
-             ON CONFLICT(wave_id) DO UPDATE SET
-                machine_id=excluded.machine_id, placed_at=excluded.placed_at",
-            params![id.as_str(), machine_id.as_str(), placed_at],
-        )?,
-        WorkRef::Project(id) => tx.execute(
-            "INSERT INTO work_placements (project_id, machine_id, enabled, placed_at)
-             VALUES (?1, ?2, 1, ?3)
-             ON CONFLICT(project_id) DO UPDATE SET
-                machine_id=excluded.machine_id, placed_at=excluded.placed_at",
-            params![id.as_str(), machine_id.as_str(), placed_at],
-        )?,
-        WorkRef::Task(id) => tx.execute(
-            "INSERT INTO work_placements (task_id, machine_id, enabled, placed_at)
-             VALUES (?1, ?2, 1, ?3)
-             ON CONFLICT(task_id) DO UPDATE SET
-                machine_id=excluded.machine_id, placed_at=excluded.placed_at",
-            params![id.as_str(), machine_id.as_str(), placed_at],
-        )?,
-    };
-    Ok(())
-}
-
-fn inherit_placement(
-    tx: &Transaction<'_>,
-    work: &WorkRef,
-    parent: Option<&WorkRef>,
-    placed_at: i64,
-) -> StoreResult<()> {
-    if find_placement_in(tx, work)?.is_some() {
-        return Ok(());
-    }
-    // Imported planning has no execution placement. The operation creating a
-    // local placement uses this machine when its parent has never been placed;
-    // neither import nor this operation rewrites an existing placement.
-    let inherited = parent
-        .map(|parent| find_placement_in(tx, parent))
-        .transpose()?
-        .flatten();
-    let machine_id = match inherited {
-        Some(placement) => placement.machine_id,
-        None => map_local_machine(tx)?.id,
-    };
-    write_placement(tx, work, &machine_id, placed_at)
 }
 
 /// Completion and abandonment are durable; unfinished readiness follows the Workflow.
@@ -702,41 +687,6 @@ fn invalid_durable(error: impl std::fmt::Display) -> StoreError {
     StoreError::InvalidData(error.to_string())
 }
 
-pub(crate) fn create_wave_work(
-    tx: &Transaction<'_>,
-    wave_id: &WaveId,
-    created_at: i64,
-) -> StoreResult<()> {
-    let work = WorkRef::Wave(wave_id.clone());
-    inherit_placement(tx, &work, None, created_at)
-}
-
-pub(super) fn inherit_project_placement(
-    tx: &Transaction<'_>,
-    project_id: &ProjectId,
-) -> StoreResult<()> {
-    let (wave_id, created_at) = tx.query_row(
-        "SELECT wave_id,created_at FROM projects WHERE id=?1",
-        [project_id.as_str()],
-        |row| Ok((row.get::<_, WaveId>(0)?, row.get::<_, i64>(1)?)),
-    )?;
-    inherit_placement(
-        tx,
-        &WorkRef::Project(project_id.clone()),
-        Some(&WorkRef::Wave(wave_id)),
-        created_at,
-    )
-}
-
-pub(super) fn inherit_task_placement(tx: &Transaction<'_>, task: &Task) -> StoreResult<()> {
-    inherit_placement(
-        tx,
-        &WorkRef::Task(task.id.clone()),
-        Some(&WorkRef::Project(task.project_id.clone())),
-        task.created_at.unix_timestamp(),
-    )
-}
-
 pub(crate) fn work_for_child_in(conn: &Connection, target: &ChildRef) -> StoreResult<WorkRef> {
     match target {
         ChildRef::Project(project_id) => {
@@ -800,7 +750,7 @@ mod durable_store_tests {
     use std::thread;
 
     use super::super::sessions::reserve_session_in;
-    use crate::durable::{ProjectId, TaskId};
+    use crate::durable::{ProjectId, TaskId, WorkRef};
 
     use crate::id::WaveId;
     use crate::linear::{LinearIssueId, LinearProjectId};
@@ -859,13 +809,6 @@ mod durable_store_tests {
         )
         .unwrap();
         drop(conn);
-        // Reach the crate-private spine builder the public upsert path calls.
-        {
-            let mut raw = rusqlite::Connection::open(&path).unwrap();
-            let tx = raw.transaction().unwrap();
-            super::create_wave_work(&tx, &wave_id, 1_700_000_000).unwrap();
-            tx.commit().unwrap();
-        }
         let project = Project {
             id: project_id.clone(),
 
@@ -945,6 +888,283 @@ mod durable_store_tests {
         };
         store.seed_task(&task, &pr).unwrap();
         (dir, store, task_id)
+    }
+
+    #[test]
+    fn task_routing_pins_checkouts_while_delegating_unstarted_work() {
+        use crate::durable::TaskExecutionSource::{EffectiveDelegation, RecordedCheckout};
+        let (dir, store, task_id) = store_with_task();
+        let task = store.task(&task_id).unwrap().unwrap();
+        let wave = store.get_wave(&task.wave_id).unwrap().unwrap();
+        let repository = store.ensure_repository(wave.repo()).unwrap();
+        let local = store.local_machine().unwrap().id;
+        let remote = crate::durable::MachineId::new();
+        let saved_machine = store
+            .add_machine(&remote, "worker", "worker", "/saved/default")
+            .unwrap();
+        let work = WorkRef::Wave(task.wave_id.clone());
+        store.place_work(&work, &remote).unwrap();
+        let route = store.task_execution_route(&task_id).unwrap();
+        assert_eq!(route.machine_id, local);
+        assert_eq!(route.repository_id, repository);
+        assert_eq!(route.source, RecordedCheckout);
+
+        let (future, _) = unregistered_task(&store, &task_id, dir.path().join("future"));
+        store.seed_unplaced_task(&future);
+        assert_eq!(
+            store.task_execution_route(&future.id).unwrap().machine_id,
+            remote
+        );
+        assert_eq!(
+            store.task_execution_route(&future.id).unwrap().source,
+            EffectiveDelegation
+        );
+        // A retained checkout on a different Machine is execution evidence even
+        // when there is no running provider. Subsequent delegation cannot move it.
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET checkout_machine_id=?2 WHERE id=?1",
+                rusqlite::params![task_id.as_str(), remote.as_str()],
+            )
+            .unwrap();
+        store.place_work(&work, &local).unwrap();
+        assert_eq!(
+            store.task_execution_route(&task_id).unwrap().machine_id,
+            remote
+        );
+        assert_eq!(
+            store.task_execution_route(&future.id).unwrap().machine_id,
+            local
+        );
+        assert_eq!(store.machine_by_id(&remote).unwrap(), Some(saved_machine));
+        assert!(!store.task_started(&future.id).unwrap());
+        assert!(store.task(&future.id).unwrap().unwrap().worktree.is_none());
+        // Started evidence still pins a retired checkout, including provenance.
+        store
+            .create_session(
+                unpublished_conversation(Some(task_id.clone()), None, 1),
+                None,
+            )
+            .unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET worktree=NULL WHERE id=?1",
+                [task_id.as_str()],
+            )
+            .unwrap();
+        let route = store.task_execution_route(&task_id).unwrap();
+        assert_eq!(route.machine_id, remote);
+        assert_eq!(route.source, RecordedCheckout);
+
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET checkout_machine_id=NULL WHERE id=?1",
+                [task_id.as_str()],
+            )
+            .unwrap();
+        assert!(store
+            .task_execution_route(&task_id)
+            .unwrap_err()
+            .to_string()
+            .contains("unknown execution Machine"));
+    }
+
+    #[test]
+    fn delegation_updates_existing_and_future_children_without_copying() {
+        use crate::durable::{MachineId, PlacementProvenance, WorkRef};
+        let (dir, store, task_id) = store_with_task();
+        let task = store.task(&task_id).unwrap().unwrap();
+        let work = WorkRef::Task(task_id.clone());
+        let wave = WorkRef::Wave(task.wave_id.clone());
+        let project = WorkRef::Project(task.project_id.clone());
+        let local = store.local_machine().unwrap().id;
+        let remote = MachineId::new();
+        store
+            .add_machine(&remote, "worker", "worker", "/other/repo")
+            .unwrap();
+        let initial = store.placement(&work).unwrap();
+        assert_eq!(initial.source, wave);
+        assert_eq!(initial.provenance, PlacementProvenance::LocalDefault);
+        store.place_work(&wave, &remote).unwrap();
+        let inherited = store.placement(&work).unwrap();
+        assert_eq!(inherited.work, work);
+        assert_eq!(inherited.source, wave);
+        assert_eq!(inherited.provenance, PlacementProvenance::Explicit);
+        assert_eq!(inherited.machine_id, remote);
+
+        // Even selecting the same Machine establishes a narrower override.
+        store.place_work(&project, &remote).unwrap();
+        store.place_work(&wave, &local).unwrap();
+        assert_eq!(store.placement(&work).unwrap().source, project);
+        assert_eq!(store.placement(&work).unwrap().machine_id, remote);
+        let (future, _) = unregistered_task(&store, &task_id, dir.path().join("future"));
+        store.seed_unplaced_task(&future);
+        let future_work = WorkRef::Task(future.id.clone());
+        assert_eq!(store.placement(&future_work).unwrap().machine_id, remote);
+        store.place_work(&work, &remote).unwrap();
+        store.place_work(&project, &local).unwrap();
+        assert_eq!(store.placement(&work).unwrap().source, work);
+        assert_eq!(store.placement(&work).unwrap().machine_id, remote);
+        assert_eq!(store.placement(&future_work).unwrap().machine_id, local);
+        assert!(!store.task_started(&future.id).unwrap());
+        assert!(store.task(&future.id).unwrap().unwrap().worktree.is_none());
+    }
+
+    #[test]
+    fn delegation_exchange_retains_checkout_and_does_not_echo_imports() {
+        use crate::durable::{MachineId, WorkRef};
+        use crate::planning_exchange::PlanningMutation;
+        use crate::work::edit::{WorkEdit, WorkValue};
+        let (_dir, store, task_id) = store_with_task();
+        store.ensure_repository("/repo").unwrap();
+        let before = store.task_execution_route(&task_id).unwrap();
+        let task = store.task(&task_id).unwrap().unwrap();
+        let wave = WorkRef::Wave(task.wave_id.clone());
+        let remote = MachineId::new();
+        store
+            .add_machine(&remote, "worker", "worker", "/repo")
+            .unwrap();
+        store.place_work(&wave, &remote).unwrap();
+        let binding = crate::planning_git::PlanningDestination::new(
+            "/tmp/unused-planning.git",
+            "refs/loopflow/planning/shared/test",
+        )
+        .unwrap();
+        let destination = store.bind_peer_planning("/repo", &binding).unwrap();
+        let mut snapshot = store.export_peer_planning("/repo", &destination).unwrap();
+
+        let parents = snapshot
+            .heads()
+            .filter(|(_, change)| {
+                change.edit.target == task.wave_id.as_str()
+                    && change.edit.change.field() == "wave_delegation"
+            })
+            .map(|(id, _)| id.to_owned())
+            .collect();
+        let clock = snapshot
+            .changes
+            .values()
+            .map(|change| change.clock)
+            .max()
+            .unwrap()
+            + 1;
+        snapshot.changes.insert(
+            "remote-reset".into(),
+            PlanningMutation {
+                edit: WorkEdit {
+                    target: task.wave_id.to_string(),
+                    change: WorkValue::WaveDelegation(None),
+                },
+                clock,
+                parents,
+            },
+        );
+        store
+            .import_peer_planning("/repo", &destination, "remote-revision", &snapshot)
+            .unwrap();
+        assert_eq!(
+            store.placement(&wave).unwrap().machine_id,
+            store.local_machine().unwrap().id
+        );
+        assert_eq!(store.task_execution_route(&task_id).unwrap(), before);
+        assert_eq!(
+            store.export_peer_planning("/repo", &destination).unwrap(),
+            snapshot
+        );
+    }
+
+    #[test]
+    fn delegation_preserves_legacy_provenance_until_explicitly_selected() {
+        use crate::durable::{MachineId, PlacementProvenance, WorkRef};
+        let (_dir, store, task_id) = store_with_task();
+        let task = store.task(&task_id).unwrap().unwrap();
+        let work = WorkRef::Task(task_id.clone());
+        let local = store.local_machine().unwrap().id;
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO work_placements(task_id,machine_id,placed_at) VALUES(?1,?2,1)",
+                rusqlite::params![task_id.as_str(), local.as_str()],
+            )
+            .unwrap();
+        let remote = MachineId::new();
+        store
+            .add_machine(&remote, "worker", "worker", "/repo")
+            .unwrap();
+        store
+            .place_work(&WorkRef::Wave(task.wave_id), &remote)
+            .unwrap();
+        let legacy = store.placement(&work).unwrap();
+        assert_eq!(legacy.machine_id, local);
+        assert_eq!(legacy.source, work);
+        assert_eq!(legacy.provenance, PlacementProvenance::Legacy);
+        let selected = store.place_work(&work, &local).unwrap();
+        assert_eq!(selected.provenance, PlacementProvenance::Explicit);
+        assert_eq!(store.placement(&work).unwrap(), selected);
+    }
+
+    #[test]
+    fn delegation_follows_wave_ancestry_and_rejects_cycles() {
+        use crate::durable::{MachineId, WorkRef};
+        let (_dir, store, task_id) = store_with_task();
+        let task = store.task(&task_id).unwrap().unwrap();
+        let ancestor = WaveId::new();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'parent','/repo',1)",
+                [ancestor.as_str()],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE waves SET parent_wave_id=?2 WHERE id=?1",
+                rusqlite::params![task.wave_id.as_str(), ancestor.as_str()],
+            )
+            .unwrap();
+        }
+        let work = WorkRef::Task(task_id);
+        let remote = MachineId::new();
+        store
+            .add_machine(&remote, "worker", "worker", "/repo")
+            .unwrap();
+        store
+            .place_work(&WorkRef::Wave(ancestor.clone()), &remote)
+            .unwrap();
+        assert_eq!(
+            store.placement(&work).unwrap().source,
+            WorkRef::Wave(ancestor.clone())
+        );
+        assert_eq!(store.placement(&work).unwrap().machine_id, remote);
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "DELETE FROM work_placements WHERE wave_id=?1",
+                [ancestor.as_str()],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE waves SET parent_wave_id=?2 WHERE id=?1",
+                rusqlite::params![ancestor.as_str(), task.wave_id.as_str()],
+            )
+            .unwrap();
+        }
+        assert!(store
+            .placement(&work)
+            .unwrap_err()
+            .to_string()
+            .contains("cycle"));
+        assert!(store.placement(&WorkRef::Task(TaskId::new())).is_err());
     }
 
     #[test]

@@ -19,6 +19,29 @@ struct TaskLink: Equatable, Sendable {
     let issue: String
     let repo: String?
     let session: String?
+    let diff: Bool
+    let machine: String?
+    let repository: String?
+
+    init(issue: String, repo: String?, session: String? = nil, diff: Bool = false, machine: String? = nil, repository: String? = nil) {
+        self.issue = issue
+        self.repo = repo
+        self.session = session
+        self.diff = diff
+        self.machine = machine
+        self.repository = repository
+    }
+
+    var url: URL? {
+        var components = URLComponents()
+        components.scheme = "loopflow"
+        components.host = "task"
+        components.path = "/" + issue
+        components.queryItems = [("repo", repo), ("session", session), ("diff", diff ? "true" : nil), ("machine", machine), ("repository", repository)].compactMap { name, value in
+            value.map { URLQueryItem(name: name, value: $0) }
+        }
+        return components.url
+    }
 
     init(url: URL) throws {
         guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
@@ -35,91 +58,82 @@ struct TaskLink: Equatable, Sendable {
             throw RegistryQueryError("Task links require one issue identifier")
         }
         let items = components.queryItems ?? []
-        guard items.allSatisfy({ ["repo", "session"].contains($0.name) && $0.value?.isEmpty == false }),
-              Set(items.map(\.name)).count == items.count else {
-            throw RegistryQueryError("Task links accept one optional repo and session query")
+        guard items.allSatisfy({ ["repo", "session", "diff", "machine", "repository"].contains($0.name) && $0.value?.isEmpty == false }),
+              Set(items.map(\.name)).count == items.count,
+              items.first(where: { $0.name == "diff" }).map({ $0.value == "true" }) ?? true else {
+            throw RegistryQueryError("Task links accept one optional repo, session and diff=true query")
         }
+        guard items.contains(where: { $0.name == "machine" }) == items.contains(where: { $0.name == "repository" }) else {
+            throw RegistryQueryError("Remote Task links require both Machine and repository identity")
+        }
+        machine = items.first(where: { $0.name == "machine" })?.value
+        repository = items.first(where: { $0.name == "repository" })?.value
         self.issue = issue
         repo = items.first(where: { $0.name == "repo" })?.value
         session = items.first(where: { $0.name == "session" })?.value
-    }
-}
-
-/// Delivers to one repository window. A cold-start request waits for its first mounted window.
-@MainActor
-final class WorkLinkRouter {
-    private struct Target {
-        weak var window: NSWindow?
-        let contains: (URL) -> Bool
-        let receive: (URL) -> Void
-    }
-    private var targets: [UUID: Target] = [:]
-    private var pending: URL?
-
-    func register(_ id: UUID, window: NSWindow, contains: @escaping (URL) -> Bool = { _ in false },
-                  receive: @escaping (URL) -> Void) {
-        targets[id] = Target(window: window, contains: contains, receive: receive)
-        if let pending {
-            self.pending = nil
-            receive(pending)
-        }
-    }
-
-    func remove(_ id: UUID) { targets[id] = nil }
-
-    /// Returns false when a repository window must be opened.
-    @discardableResult
-    func deliver(_ url: URL) -> Bool {
-        targets = targets.filter { $0.value.window != nil }
-        let ordered = NSApp.orderedWindows
-        let orderedTargets = ordered.compactMap { window in
-            targets.values.first { $0.window === window }
-        }
-        let target = orderedTargets.first { $0.contains(url) }
-            ?? targets.values.first { $0.contains(url) }
-            ?? orderedTargets.first ?? targets.values.first
-        guard let target, let window = target.window else {
-            let windowRequested = pending != nil
-            pending = url
-            return windowRequested
-        }
-        window.makeKeyAndOrderFront(nil)
-        target.receive(url)
-        return true
+        diff = items.contains { $0.name == "diff" }
     }
 }
 
 struct WorkLinkReceiver: NSViewRepresentable {
     let router: WorkLinkRouter
-    let contains: (URL) -> Bool
-    let receive: (URL) -> Void
+    let repository: String
+    let openingRequests: Set<UUID>
+    let inspect: (String, UUID) -> DesktopWindowInspection
+    let controlPane: (DesktopPaneCommand) throws -> String
+    let readText: (DesktopTextRequest) throws -> DesktopTextReading
+    let receive: (URL) async -> Void
 
     func makeNSView(context: Context) -> Receiver {
-        Receiver(router: router, contains: contains, receive: receive)
+        Receiver(router: router, repository: repository, openingRequests: openingRequests, inspect: inspect, controlPane: controlPane, readText: readText, receive: receive)
     }
     func updateNSView(_ view: Receiver, context: Context) {
-        view.contains = contains
         view.receive = receive
+        view.inspect = inspect
+        view.controlPane = controlPane
+        view.readText = readText
     }
-    static func dismantleNSView(_ view: Receiver, coordinator: ()) { view.router.remove(view.id) }
+    static func dismantleNSView(_ view: Receiver, coordinator: ()) {
+        view.router.remove(view.id, repository: view.repository)
+    }
 
     final class Receiver: NSView {
         let id = UUID()
         let router: WorkLinkRouter
-        var contains: (URL) -> Bool
-        var receive: (URL) -> Void
-        init(router: WorkLinkRouter, contains: @escaping (URL) -> Bool, receive: @escaping (URL) -> Void) {
+        let repository: String
+        let openingRequests: Set<UUID>
+        var inspect: (String, UUID) -> DesktopWindowInspection
+        var controlPane: (DesktopPaneCommand) throws -> String
+        var readText: (DesktopTextRequest) throws -> DesktopTextReading
+        var receive: (URL) async -> Void
+
+        init(router: WorkLinkRouter, repository: String, openingRequests: Set<UUID>, inspect: @escaping (String, UUID) -> DesktopWindowInspection,
+             controlPane: @escaping (DesktopPaneCommand) throws -> String,
+             readText: @escaping (DesktopTextRequest) throws -> DesktopTextReading,
+             receive: @escaping (URL) async -> Void) {
             self.router = router
-            self.contains = contains
+            self.repository = repository
+            self.openingRequests = openingRequests
             self.receive = receive
+            self.inspect = inspect
+            self.controlPane = controlPane
+            self.readText = readText
             super.init(frame: .zero)
         }
         required init?(coder: NSCoder) { fatalError("init(coder:) is unsupported") }
         override func viewDidMoveToWindow() {
-            router.remove(id)
+            router.remove(id, repository: repository)
             if let window {
-                router.register(id, window: window, contains: { [weak self] url in self?.contains(url) == true }) {
-                    [weak self] url in self?.receive(url)
+                router.register(id, repository: repository, openingRequests: openingRequests, focus: { [weak window] in
+                    window?.makeKeyAndOrderFront(nil)
+                }, inspect: inspect, controlPane: { [weak self] request in
+                    guard let self else { throw RegistryQueryError("The repository window is unavailable.") }
+                    return try self.controlPane(request)
+                }, readText: { [weak self] request in
+                    guard let self else { throw RegistryQueryError("The repository window is unavailable.") }
+                    return try self.readText(request)
+                }) { [weak self] link in
+                    await self?.receive(link)
                 }
             }
         }

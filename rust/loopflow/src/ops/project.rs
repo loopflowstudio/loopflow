@@ -203,6 +203,47 @@ async fn resolve_project(store: &Store, repo: &Path, selector: &str) -> OpsResul
     Ok(project)
 }
 
+/// Current chapter selection and exact historical lookup are distinct addresses.
+#[derive(Debug, Clone, Copy)]
+pub enum PlanTarget<'a> {
+    Wave(Option<&'a str>),
+    Project(&'a str),
+}
+
+/// Resolve on the operation's store; never ensure a Project or start work.
+async fn resolve_plan(store: &Store, repo: &Path, target: PlanTarget<'_>) -> OpsResult<Project> {
+    let selector = match target {
+        PlanTarget::Project(project) => return resolve_project(store, repo, project).await,
+        PlanTarget::Wave(wave) => wave,
+    };
+    let wave = crate::work::wave::context::resolve_managed_wave(
+        Some(store),
+        Some(repo),
+        selector,
+        std::env::var("LF_WAVE_ID").ok().as_deref(),
+    )
+    .await
+    .map_err(project_error)?;
+    let selected = store
+        .sqlite
+        .selected_project(wave.id())
+        .map_err(project_error)?
+        .ok_or_else(|| project_error(format!("Wave {} has no configured Project", wave.slug())))?;
+    resolve_project(store, repo, selected.id.as_str()).await
+}
+
+fn read_store() -> OpsResult<Store> {
+    #[cfg(test)]
+    if let Ok(store) = super::linear::LINEAR_TEST_CONTEXT
+        .try_with(|ctx| Store::from_sqlite_for_test(ctx.store.sqlite.clone()))
+    {
+        return Ok(store);
+    }
+    crate::store::read_existing_registry()
+        .map_err(project_error)?
+        .ok_or_else(|| project_error("Planning unavailable: local registry is absent"))
+}
+
 pub async fn workflow_catalog(
     repo: &Path,
     selector: Option<&str>,
@@ -210,11 +251,18 @@ pub async fn workflow_catalog(
     let Some(selector) = selector else {
         return crate::workflow::workflow_catalog(repo).map_err(project_error);
     };
-    let store = super::planning_sync::planning_store().await?;
-    let project = resolve_project(&store, repo, selector).await?;
+    let store = read_store()?;
+    let wave = crate::work::wave::context::resolve_managed_wave(
+        Some(&store),
+        Some(repo),
+        Some(selector),
+        None,
+    )
+    .await
+    .map_err(project_error)?;
     let stored: BTreeMap<_, _> = store
         .sqlite
-        .wave_workflows(&project.wave_id)
+        .wave_workflows(wave.id())
         .map_err(project_error)?
         .into_iter()
         .collect();
@@ -249,27 +297,27 @@ pub async fn workflow_catalog(
         .collect()
 }
 
-pub async fn workflow_source(repo: &Path, selector: &str, name: &str) -> OpsResult<String> {
-    let store = super::planning_sync::planning_store().await?;
-    let project = resolve_project(&store, repo, selector).await?;
+pub async fn workflow_source(repo: &Path, target: PlanTarget<'_>, name: &str) -> OpsResult<String> {
+    let store = read_store()?;
+    let project = resolve_plan(&store, repo, target).await?;
     read_workflow_source(&store, &project.wave_id, name)?
         .ok_or_else(|| project_error(format!("Workflow {name:?} is unavailable")))
 }
 
 pub async fn edit(
     repo: &Path,
-    selector: &str,
+    target: PlanTarget<'_>,
     name: Option<&str>,
     summary: Option<&str>,
     description: Option<&str>,
 ) -> OpsResult<(Project, PlanningSyncStatus)> {
     if name.is_none() && summary.is_none() && description.is_none() {
         return Err(project_error(
-            "project edit requires --name, --summary or --description",
+            "wave edit-plan requires --name, --summary or --description",
         ));
     }
     let store = super::planning_sync::planning_store().await?;
-    let project = resolve_project(&store, repo, selector).await?;
+    let project = resolve_plan(&store, repo, target).await?;
     let wave = store
         .get_wave(&project.wave_id)
         .await
@@ -287,32 +335,39 @@ pub async fn edit(
 
 pub async fn workflow(
     repo: &Path,
-    selector: &str,
-    selection: Option<&str>,
+    target: PlanTarget<'_>,
+) -> OpsResult<(Project, PlanningSyncStatus)> {
+    let store = read_store()?;
+    let project = resolve_plan(&store, repo, target).await?;
+    read_saved(&store, &project.id)
+}
+
+pub async fn set_workflow(
+    repo: &Path,
+    target: PlanTarget<'_>,
+    name: &str,
     file: Option<&Path>,
 ) -> OpsResult<(Project, PlanningSyncStatus)> {
     let store = super::planning_sync::planning_store().await?;
-    let project = resolve_project(&store, repo, selector).await?;
-    if let Some(name) = selection {
-        let definition = match file {
-            Some(path) => std::fs::read_to_string(path).map_err(project_error)?,
-            None => read_workflow_source(&store, &project.wave_id, name)?
-                .ok_or_else(|| project_error(format!("Workflow {name:?} not found")))?,
-        };
-        crate::workflow::parse_workflow(name, &definition, repo).map_err(project_error)?;
-        let wave = store
-            .get_wave(&project.wave_id)
-            .await
-            .map_err(project_error)?
-            .ok_or_else(|| project_error("Project Wave is unavailable"))?;
-        let _acquisition = super::planning_sync::lock_wave_planning(&wave).await?;
-        store
-            .sqlite
-            .select_project_workflow(&project.id, name, &definition)
-            .map_err(project_error)?;
-        drop(_acquisition);
-        super::planning_sync::sync_after_save(&store, wave.repo()).await;
-    }
+    let project = resolve_plan(&store, repo, target).await?;
+    let definition = match file {
+        Some(path) => std::fs::read_to_string(path).map_err(project_error)?,
+        None => read_workflow_source(&store, &project.wave_id, name)?
+            .ok_or_else(|| project_error(format!("Workflow {name:?} not found")))?,
+    };
+    crate::workflow::parse_workflow(name, &definition, repo).map_err(project_error)?;
+    let wave = store
+        .get_wave(&project.wave_id)
+        .await
+        .map_err(project_error)?
+        .ok_or_else(|| project_error("Project Wave is unavailable"))?;
+    let _acquisition = super::planning_sync::lock_wave_planning(&wave).await?;
+    store
+        .sqlite
+        .select_project_workflow(&project.id, name, &definition)
+        .map_err(project_error)?;
+    drop(_acquisition);
+    super::planning_sync::sync_after_save(&store, wave.repo()).await;
     read_saved(&store, &project.id)
 }
 

@@ -208,8 +208,6 @@ pub struct PromptComponents {
     /// Semantic attribution for generated intent carried in `message`.
     /// Ordinary CLI speech leaves this absent and is attributed to the user.
     pub message_context: Option<(crate::trace::ContextAssetKind, crate::trace::ContextScope)>,
-    /// Steers rendered into `message`, when the launch knows them.
-    pub steers: Vec<crate::durable::Steer>,
     /// How diff context was tiered
     pub diff_tier: DiffTier,
     /// Number of files changed on branch (for display)
@@ -416,7 +414,6 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
             .or_else(|| opts.wave.clone().map(WorkContext::Wave)),
         message: opts.message.clone(),
         message_context: None,
-        steers: Vec::new(),
         diff_tier,
         diff_file_count,
     })

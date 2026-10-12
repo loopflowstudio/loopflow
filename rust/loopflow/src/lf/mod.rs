@@ -1,5 +1,3 @@
-/// Saved Task identity and pushed-code requirements for one SSH invocation.
-pub const TASK_SOURCE_ENV: &str = "LF_TASK_SOURCE";
 /// Explicit Work declaration inherited by descendants; checkout inference never writes it.
 pub const WORK_DECLARATION_ENV: &str = "LF_AS";
 
@@ -34,6 +32,18 @@ pub enum DiffContext {
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Commands>,
+
+    /// Preview assembled agent input without launching or changing Work
+    #[arg(long)]
+    pub context: bool,
+
+    /// Explain this invocation's Work selection without executing it
+    #[arg(long)]
+    pub explain: bool,
+
+    /// Emit invocation previews as JSON
+    #[arg(long)]
+    pub json: bool,
 
     /// Docs paths, globs, or directories to include in context
     #[arg(long = "docs", value_delimiter = ',')]
@@ -118,13 +128,17 @@ pub struct Cli {
     #[arg(long, value_enum)]
     pub diff: Option<DiffContext>,
 
-    /// Maximum agent turns for this invocation
-    #[arg(long = "max-turns")]
-    pub max_turns: Option<u32>,
-
     /// Run the command on this saved machine in its repository
     #[arg(long, value_name = "LABEL_OR_ID")]
     pub machine: Option<String>,
+
+    /// Select a repository by name under repo_root (default ~/src), or by explicit path
+    #[arg(long, value_name = "NAME_OR_PATH", conflicts_with = "repository")]
+    pub repo: Option<String>,
+
+    /// Select a registered repository plan on this Machine, not a clone name
+    #[arg(long, value_name = "ID")]
+    pub repository: Option<crate::durable::RepositoryId>,
 
     /// Forward the SSH agent to the selected machine
     #[arg(long, requires = "machine")]
@@ -138,10 +152,6 @@ pub struct Cli {
     #[arg(long, value_name = "TASK", conflicts_with = "wt")]
     pub task: Option<String>,
 
-    /// Give the agent only Task direction newer than this steer
-    #[arg(long = "steers-after", value_name = "STEER")]
-    pub steers_after: Option<i64>,
-
     /// Execute in an existing worktree by name or branch
     #[arg(long, value_name = "NAME", conflicts_with = "task")]
     pub wt: Option<String>,
@@ -149,10 +159,6 @@ pub struct Cli {
     /// Keep a Work-bound internal launch in this exact checkout.
     #[arg(long = "__cwd", value_name = "PATH", hide = true)]
     pub bound_cwd: Option<PathBuf>,
-
-    /// Exclude loopflow operating guidance
-    #[arg(long = "no-loopflow")]
-    pub no_loopflow: bool,
 
     /// The conversation `lf -b session resume ID MESSAGE` continues.
     #[arg(skip)]
@@ -163,11 +169,13 @@ impl Cli {
     pub fn may_launch_agent(&self) -> bool {
         match &self.command {
             None
-            | Some(Commands::External(_) | Commands::Run { .. } | Commands::Inline { .. })
-            | Some(Commands::Skill { .. } | Commands::Replay { .. } | Commands::Discord { .. }) => {
-                true
-            }
+            | Some(Commands::External(_) | Commands::Inline { .. })
+            | Some(Commands::Skill { .. } | Commands::Discord { .. }) => true,
             Some(Commands::Flow { cmd }) => matches!(cmd, FlowCommand::External(_)),
+            Some(Commands::History {
+                cmd: Some(commands::history::HistoryCommand::Replay { .. }),
+                ..
+            }) => true,
             Some(Commands::Task { cmd }) => matches!(cmd, TaskCommand::Run { .. }),
             Some(Commands::Session { cmd }) => matches!(
                 cmd,
@@ -211,6 +219,10 @@ impl Cli {
     /// Reject argument combinations the derive cannot express, as the usage
     /// errors they are, before anything runs.
     pub fn checked(self) -> Result<Self, clap::Error> {
+        if self.json && !self.context && !self.explain {
+            return Err(clap::Error::raw(clap::error::ErrorKind::ArgumentConflict,
+                "root --json requires --context or --explain; use the command's own --json when available\n"));
+        }
         if let Some(Commands::Account {
             cmd,
             provider,
@@ -241,7 +253,6 @@ impl Cli {
             ("--interactive", self.interactive),
             ("--clipboard", self.clipboard),
             ("--yolo", self.yolo),
-            ("--no-loopflow", self.no_loopflow),
             ("--isolate", self.isolate),
             ("--shared", self.shared),
             ("--verbose", self.verbose),
@@ -282,12 +293,6 @@ impl Cli {
         if let Some(schema) = &self.output_schema {
             args.extend(["--output-schema".to_string(), schema.to_string()]);
         }
-        if let Some(turns) = self.max_turns {
-            args.extend(["--max-turns".to_string(), turns.to_string()]);
-        }
-        if let Some(steer) = self.steers_after {
-            args.extend(["--steers-after".to_string(), steer.to_string()]);
-        }
         args
     }
 
@@ -296,6 +301,9 @@ impl Cli {
             cron_receipt: self.cron_receipt.clone(),
             cron_lock_fd: self.cron_lock_fd,
             command: None,
+            context: self.context,
+            explain: self.explain,
+            json: self.json,
             docs: self.docs.clone(),
             clipboard: self.clipboard,
             agent: self.agent.clone(),
@@ -312,15 +320,14 @@ impl Cli {
             verbose: self.verbose,
             chrome: self.chrome,
             diff: self.diff,
-            max_turns: self.max_turns,
             machine: self.machine.clone(),
+            repository: self.repository.clone(),
+            repo: self.repo.clone(),
             forward_agent: self.forward_agent,
             wave: self.wave.clone(),
             task: self.task.clone(),
-            steers_after: self.steers_after,
             wt: self.wt.clone(),
             bound_cwd: self.bound_cwd.clone(),
-            no_loopflow: self.no_loopflow,
             resume: self.resume.clone(),
         }
     }
@@ -414,6 +421,12 @@ pub enum Commands {
         #[arg(long, value_enum)]
         moment: crate::context_block::ContextMoment,
     },
+    /// Internal end-of-turn planning acquisition and pending delivery.
+    #[command(name = "__planning-check", hide = true)]
+    PlanningCheck {
+        #[arg(long)]
+        delivery: std::path::PathBuf,
+    },
     /// Native provider naming callback.
     #[command(name = "__session-title", hide = true)]
     SessionTitle {
@@ -457,8 +470,11 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: ConfigCommand,
     },
-    /// Open or focus Loopflow.app
-    Open,
+    /// Open, inspect and control Loopflow Desktop (macOS only)
+    Desktop {
+        #[command(subcommand)]
+        cmd: DesktopCommand,
+    },
     /// Name and connect to machines
     Machine {
         #[command(subcommand)]
@@ -473,11 +489,6 @@ pub enum Commands {
     Wave {
         #[command(subcommand)]
         cmd: WaveCommand,
-    },
-    /// Project-owned planning configuration
-    Project {
-        #[command(subcommand)]
-        cmd: ProjectCommand,
     },
     /// Concrete work and Task lifecycle
     Task {
@@ -513,35 +524,17 @@ pub enum Commands {
         path: Vec<String>,
         #[arg(long)]
         all: bool,
-    },
-    /// Show the current repository's roadmap: every open Task across the repo's
-    /// Waves, joined to live evidence and bucketed into Now / Waiting /
-    /// Available / Later. `--wave` scopes it; `--all` spans every repository on
-    /// this machine. Local-only, deterministic.
-    Roadmap {
-        /// Scope to one Wave (default: every Wave in the current repository)
-        #[arg(long)]
-        wave: Option<String>,
-        /// Find an exact issue identifier, including retained historical Tasks.
-        #[arg(long)]
-        task: Option<String>,
-        /// Emit the roadmap snapshot as JSON
+        /// Describe installed command arguments and available result schemas
         #[arg(long)]
         json: bool,
-        /// Span every repository on this machine, not just the current one.
-        #[arg(long)]
-        all: bool,
     },
-    /// Launch the immutable provider request retained for a captured input.
-    Replay {
-        /// Captured input identity or an unambiguous displayed prefix
-        run: String,
-    },
-    /// Run a definition, preferring a flow over a same-named skill
-    Run {
-        name: String,
-        #[arg(trailing_var_arg = true)]
-        args: Vec<String>,
+    /// Read durable Work history, recorded commands and provider usage
+    #[command(args_conflicts_with_subcommands = true)]
+    History {
+        #[command(flatten)]
+        feed: commands::history::HistoryFeed,
+        #[command(subcommand)]
+        cmd: Option<commands::history::HistoryCommand>,
     },
     /// Run or inspect authored flows
     Flow {
@@ -559,53 +552,191 @@ pub enum Commands {
 }
 
 #[derive(Subcommand, Debug)]
+pub enum DesktopCommand {
+    /// Open resolved Work in its retained repository window
+    Open {
+        /// Open this Task-associated Session without taking over another client
+        #[arg(long)]
+        session: Option<String>,
+        /// Show the Task's Changes browser beside its conversation
+        #[arg(long)]
+        diff: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Insert literal text at an exact surface's cursor; never submits or clears a draft
+    Text {
+        #[arg(long)]
+        pane: Option<String>,
+        /// Unicode text without control characters (use key for Enter/Tab)
+        text: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Send one explicit key to an exact retained surface, without following focus
+    Key {
+        #[arg(long)]
+        pane: Option<String>,
+        #[arg(value_enum)]
+        key: commands::desktop::DesktopKey,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Read bounded text from an exact retained surface, without following focus
+    Read {
+        #[arg(long)]
+        pane: Option<String>,
+        #[arg(long, value_enum)]
+        region: commands::desktop::DesktopTextRegion,
+        #[arg(long, default_value_t = 65536)]
+        max_bytes: usize,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Hide an exact retained pane without closing its Session or process
+    Hide {
+        /// Pane ID; defaults to this terminal when verified, otherwise one eligible pane
+        #[arg(long)]
+        pane: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Restore an exact hidden pane without selecting Work or acquiring a client
+    Restore {
+        #[arg(long)]
+        pane: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Focus an exact pane in its retained workspace (does not select Work)
+    Focus {
+        #[arg(long)]
+        pane: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Add a shell on the recorded Machine beside a pane without changing selection
+    Shell {
+        #[arg(long)]
+        pane: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show the recorded Task's files beside an exact pane, retaining drafts
+    Files {
+        #[arg(long)]
+        pane: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show the recorded Task's Flow processes beside an exact pane
+    FlowLog {
+        #[arg(long)]
+        pane: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Add a shell split beside an exact pane, retaining selection and clients
+    Split {
+        #[arg(long)]
+        pane: Option<String>,
+        #[arg(long, value_enum)]
+        axis: commands::desktop::DesktopSplitAxis,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Move a retained pane after another pane in the same workspace
+    Move {
+        #[arg(long)]
+        pane: Option<String>,
+        #[arg(long)]
+        destination: String,
+        #[arg(long, value_enum)]
+        axis: commands::desktop::DesktopSplitAxis,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Resize the divider between two exact panes; ratio is the target side's share
+    Resize {
+        #[arg(long)]
+        pane: Option<String>,
+        #[arg(long)]
+        toward: String,
+        #[arg(long)]
+        ratio: f64,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Zoom an exact retained pane without changing selection; --off unzooms it
+    Zoom {
+        #[arg(long)]
+        pane: Option<String>,
+        #[arg(long)]
+        off: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Read actual windows and panes without launching, focusing, or acquiring clients
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
 pub enum SkillCommand {
     #[command(external_subcommand)]
     External(Vec<String>),
 }
 
-#[derive(Subcommand, Debug)]
-pub enum ProjectCommand {
-    /// Update a Project's name, summary or prose
-    Edit {
-        project: String,
-        #[arg(long)]
-        name: Option<String>,
-        #[arg(long)]
-        summary: Option<String>,
-        /// Authored prose; managed Workflow, KRs and targets stay unchanged
-        #[arg(long)]
-        description: Option<String>,
-    },
-    /// Select and inspect reusable Workflows
-    Workflow {
-        #[command(subcommand)]
-        cmd: ProjectWorkflowCommand,
-    },
+/// Select a Wave's current chapter, or an exact retained historical Project.
+#[derive(Args, Debug)]
+pub struct WavePlanTarget {
+    /// Wave name or ID (default: the ambient Wave)
+    #[arg(conflicts_with = "project")]
+    pub wave: Option<String>,
+    /// Exact retained Project ID, provider ID or unique name instead of current selection
+    #[arg(long)]
+    pub project: Option<String>,
+}
+
+impl WavePlanTarget {
+    pub fn as_plan_target(&self) -> crate::ops::project::PlanTarget<'_> {
+        match self.project.as_deref() {
+            Some(project) => crate::ops::project::PlanTarget::Project(project),
+            None => crate::ops::project::PlanTarget::Wave(self.wave.as_deref()),
+        }
+    }
 }
 
 #[derive(Subcommand, Debug)]
-pub enum ProjectWorkflowCommand {
+pub enum WaveWorkflowCommand {
     /// Read the authored definition without creating a repository file
-    Source { project: String, name: String },
+    Source {
+        name: String,
+        #[command(flatten)]
+        target: WavePlanTarget,
+    },
     /// List Workflow definitions, including unavailable local files
     List {
         /// Include this Project's stored Wave Workflow definitions
         #[arg(long)]
-        project: Option<String>,
+        wave: Option<String>,
         #[arg(long)]
         json: bool,
     },
-    /// Show the Project's selected Workflow
+    /// Show the selected chapter's Workflow
     Show {
-        project: String,
+        #[command(flatten)]
+        target: WavePlanTarget,
         #[arg(long)]
         json: bool,
     },
     /// Select the Workflow future Tasks take up; captured Tasks stay unchanged
     Set {
-        project: String,
         name: String,
+        #[command(flatten)]
+        target: WavePlanTarget,
         /// Store this definition in the Wave
         #[arg(long)]
         file: Option<std::path::PathBuf>,
@@ -669,6 +800,23 @@ impl SessionMode {
 
 #[derive(Subcommand, Debug)]
 pub enum SessionCommand {
+    /// Save a steer for this Session without starting a turn
+    Steer { id: String, message: String },
+    /// Inspect steer delivery or retry delivery
+    Steers {
+        id: String,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        retry: Option<String>,
+        #[arg(long, default_value_t = 0)]
+        after: i64,
+        #[arg(long, default_value_t = 32)]
+        limit: usize,
+        /// Read the complete steer
+        #[arg(long)]
+        source: Option<String>,
+    },
     /// Observe validated Program Status snapshots from an active local terminal
     ObserveStatus {
         id: String,
@@ -799,6 +947,43 @@ pub enum SessionCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum WaveCommand {
+    /// Read chapter plans and Tasks without starting work; an explicit Wave includes history
+    Show {
+        wave: Option<String>,
+        /// Find an exact Task, including historical planning
+        #[arg(long)]
+        task: Option<String>,
+        #[arg(long)]
+        json: bool,
+        /// Read every repository on this Machine
+        #[arg(long)]
+        all: bool,
+    },
+    /// Select and inspect the chapter Workflow
+    Workflow {
+        #[command(subcommand)]
+        cmd: WaveWorkflowCommand,
+    },
+    /// Edit the selected chapter's name or summary
+    EditPlan {
+        #[command(flatten)]
+        target: WavePlanTarget,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        summary: Option<String>,
+        /// Authored chapter prose
+        #[arg(long)]
+        description: Option<String>,
+    },
+
+    /// Save a steer for associated Sessions without starting a turn
+    Comment {
+        wave: String,
+        message: String,
+        #[arg(long, required = true)]
+        steer: bool,
+    },
     /// Rotate this Wave using its exact destination in a retained chapter plan
     NewChapter {
         wave: String,
@@ -933,7 +1118,7 @@ pub enum TaskCommand {
     Repair { incident: String, launcher: String },
     /// Ensure tracked Task Work and its worktree without launching a Flow
     Checkout {
-        issue: String,
+        issue: Option<String>,
         #[arg(long)]
         name: Option<String>,
         /// Fork this Task's worktree from another Task's active PR
@@ -947,9 +1132,9 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Place a Task's worktree, then run a Flow there like `lf --task ISSUE run FLOW`
+    /// Place a Task's worktree, then run a Flow there like `lf --task ISSUE flow FLOW`
     Run {
-        issue: String,
+        issue: Option<String>,
         /// The edge's Flow, or a workflow to take up; the Task's only edge or its
         /// Project's workflow when omitted
         flow: Option<String>,
@@ -999,6 +1184,43 @@ pub enum TaskCommand {
         notes: Option<String>,
         #[arg(long)]
         json: bool,
+    },
+    /// Inspect or reserve the Task's permanent first execution owner
+    Admission {
+        issue: String,
+        /// Request first execution on this Machine; an existing owner wins
+        #[arg(long)]
+        claim: Option<crate::durable::MachineId>,
+        /// Correlate a coordinator reply with this request
+        #[arg(long)]
+        request: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Read recorded execution location without preparing or transferring Work
+    Location {
+        issue: String,
+        /// Observe added Machines as well as this one; never reserve first start
+        #[arg(long)]
+        peers: bool,
+        #[arg(long, hide = true)]
+        request: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Open a shell in an existing Task checkout, without preparing work
+    Shell {
+        issue: String,
+        #[arg(long)]
+        checkout: std::path::PathBuf,
+    },
+    /// Stream invalidations from an existing Task checkout (JSON lines)
+    WatchFiles {
+        issue: String,
+        #[arg(long)]
+        checkout: std::path::PathBuf,
+        #[arg(long)]
+        request: String,
     },
     /// Show durable Task facts and its recorded work
     Status {
@@ -1100,7 +1322,7 @@ pub enum TaskCommand {
     Comment {
         issue: String,
         message: Option<String>,
-        /// Deliver new direction even when publishing from an agent Session
+        /// Save a steer even when commenting from an agent Session
         #[arg(long, requires = "message")]
         steer: bool,
         #[arg(short = 'w', long)]
@@ -1139,10 +1361,52 @@ impl TaskCommand {
                     TaskWorkflowCommand::Show { issue, .. } | TaskWorkflowCommand::Restart { issue },
             } => Some(issue),
             Self::Automate { issue, .. } => Some(issue),
-            Self::Status { issue, .. } | Self::Abandon { issue, .. } => issue.as_deref(),
-            Self::Checkout { issue, .. }
-            | Self::Sync { issue, .. }
+            Self::Status { issue, .. }
+            | Self::Abandon { issue, .. }
             | Self::Run { issue, .. }
+            | Self::Checkout { issue, .. } => issue.as_deref(),
+            Self::Shell { issue, .. }
+            | Self::WatchFiles { issue, .. }
+            | Self::Location { issue, .. }
+            | Self::Admission { issue, .. }
+            | Self::Sync { issue, .. }
+            | Self::Move { issue, .. }
+            | Self::Complete { issue, .. }
+            | Self::Reopen { issue, .. }
+            | Self::Diff { issue, .. }
+            | Self::Files { issue, .. }
+            | Self::File { issue, .. }
+            | Self::Save { issue, .. }
+            | Self::Delete { issue }
+            | Self::Edit { issue, .. }
+            | Self::Refile { issue, .. }
+            | Self::Comment { issue, .. }
+            | Self::Interrupt { issue, .. }
+            | Self::Wait { issue, .. } => Some(issue),
+        }
+    }
+
+    pub fn selector_mut(&mut self) -> Option<&mut String> {
+        match self {
+            Self::Create { .. }
+            | Self::Sweep { .. }
+            | Self::Reconcile { .. }
+            | Self::Repair { .. }
+            | Self::Automation { .. } => None,
+            Self::Workflow {
+                cmd:
+                    TaskWorkflowCommand::Show { issue, .. } | TaskWorkflowCommand::Restart { issue },
+            } => Some(issue),
+            Self::Automate { issue, .. } => Some(issue),
+            Self::Status { issue, .. }
+            | Self::Abandon { issue, .. }
+            | Self::Run { issue, .. }
+            | Self::Checkout { issue, .. } => issue.as_mut(),
+            Self::Shell { issue, .. }
+            | Self::WatchFiles { issue, .. }
+            | Self::Location { issue, .. }
+            | Self::Admission { issue, .. }
+            | Self::Sync { issue, .. }
             | Self::Move { issue, .. }
             | Self::Complete { issue, .. }
             | Self::Reopen { issue, .. }
@@ -1480,6 +1744,20 @@ pub enum PlanningCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum RepoCommand {
+    /// Establish or print this repository's selected planning identity
+    Identity {
+        /// Associate this checkout with a repository identity, retaining prior IDs
+        #[arg(long)]
+        bind: Option<crate::durable::RepositoryId>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Save a steer for associated Sessions without starting a turn
+    Comment {
+        message: String,
+        #[arg(long, required = true)]
+        steer: bool,
+    },
     /// Inspect planning synchronization and personal identity
     Planning {
         #[command(subcommand)]
@@ -2371,7 +2649,7 @@ mod tests {
         else {
             panic!("expected task checkout command");
         };
-        assert_eq!(issue, "INF-123");
+        assert_eq!(issue.as_deref(), Some("INF-123"));
         assert_eq!(name.as_deref(), Some("runtime-research"));
         assert_eq!(stack_on.as_deref(), Some("INF-122"));
         assert_eq!(directive.as_deref(), Some("collect both reports"));
@@ -2418,7 +2696,7 @@ mod tests {
             cli.command,
             Some(Commands::Task {
                 cmd: TaskCommand::Run { issue, flow: Some(flow), .. }
-            }) if issue == "INF-123" && flow == "proof"
+            }) if issue.as_deref() == Some("INF-123") && flow == "proof"
         ));
     }
 
@@ -2764,3 +3042,6 @@ pub enum DiscordCommand {
     /// Poll a configured channel and post each Session's final answer
     Serve { wave: String },
 }
+
+/// Pushed code requirements for one remote Task invocation.
+pub const TASK_SOURCE_ENV: &str = "LF_TASK_SOURCE";

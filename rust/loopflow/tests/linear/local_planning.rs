@@ -375,7 +375,7 @@ fn public_local_plan_matches_desktop() {
         &time::format_description::well_known::Rfc3339
     )
     .is_ok());
-    let roadmap = lf(repo.path(), home.path(), &["roadmap", "--json"]);
+    let roadmap = lf(repo.path(), home.path(), &["wave", "show", "--json"]);
     let mut task = roadmap["waves"][0]["tasks"]["items"][0].clone();
     assert_eq!(task["task"]["id"], id);
     assert!(task["reference"]["workspace"].is_null());
@@ -462,8 +462,9 @@ fn stored_fields_preserve_order_assignment_and_project_summary() {
         repo.path(),
         home.path(),
         &[
-            "project",
-            "edit",
+            "wave",
+            "edit-plan",
+            "--project",
             project,
             "--name",
             "Current",
@@ -780,9 +781,19 @@ fn public_local_planning_survives_restart_with_generated_identity() {
     let project = lf(
         repo.path(),
         home.path(),
-        &["project", "workflow", "show", project_id, "--json"],
+        &[
+            "wave",
+            "workflow",
+            "show",
+            "--project",
+            project_id,
+            "--json",
+        ],
     );
-    assert_eq!(project["krs"][0]["text"], "Quoted input survives");
+    assert_eq!(
+        project["project"]["krs"][0]["text"],
+        "Quoted input survives"
+    );
     let read_comments = lf(
         repo.path(),
         home.path(),
@@ -901,9 +912,10 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
         repo.path(),
         home.path(),
         &[
-            "project",
+            "wave",
             "workflow",
             "set",
+            "--project",
             project_id,
             "proof",
             "--file",
@@ -914,11 +926,11 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
         repo.path(),
         home.path(),
         &[
-            "project",
+            "wave",
             "workflow",
             "list",
-            "--project",
-            project_id,
+            "--wave",
+            status["execution"]["wave"].as_str().unwrap(),
             "--json",
         ],
     );
@@ -933,7 +945,14 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
     let source = lf(
         repo.path(),
         home.path(),
-        &["project", "workflow", "source", project_id, "proof"],
+        &[
+            "wave",
+            "workflow",
+            "source",
+            "--project",
+            project_id,
+            "proof",
+        ],
     );
     assert_eq!(
         source.as_str().unwrap().trim(),
@@ -1092,8 +1111,9 @@ fn project_creation_binding_and_activation_save_offline() {
             repo.path(),
             home.path(),
             &[
-                "project",
-                "edit",
+                "wave",
+                "edit-plan",
+                "--project",
                 id.as_str(),
                 "--name",
                 "Authored name",
@@ -1325,8 +1345,9 @@ fn project_reads_keep_canonical_identity_and_authored_order_after_edits() {
                     repo.path(),
                     home.path(),
                     &[
-                        "project",
-                        "edit",
+                        "wave",
+                        "edit-plan",
+                        "--project",
                         projects[1].id.as_str(),
                         "--name",
                         "Edited",
@@ -1355,15 +1376,8 @@ fn project_reads_keep_canonical_identity_and_authored_order_after_edits() {
                 home.path(),
                 &["wave", "status", "product", "--json"],
             );
-            let roadmap = lf(
-                repo.path(),
-                home.path(),
-                &["roadmap", "--wave", "product", "--json"],
-            );
-            for rows in [
-                &status["tasks"]["items"],
-                &roadmap["waves"][0]["tasks"]["items"],
-            ] {
+            {
+                let rows = &status["tasks"]["items"];
                 let rows = rows.as_array().unwrap();
                 assert_eq!(rows.len(), 1);
                 let task = &rows[0]["task"];
@@ -1391,10 +1405,8 @@ fn project_reads_keep_canonical_identity_and_authored_order_after_edits() {
             assert_eq!(retained.branch, saved.branch);
             assert_eq!(retained.base_commit, saved.base_commit);
             assert_eq!(retained.pm_snapshot_synced_at, saved.pm_snapshot_synced_at);
-            for rows in [
-                &status["projects"]["items"],
-                &roadmap["waves"][0]["projects"]["items"],
-            ] {
+            {
+                let rows = &status["projects"]["items"];
                 let rows = rows.as_array().unwrap();
                 assert_eq!(rows.len(), 2);
                 for (row, project) in rows.iter().zip(&projects) {
@@ -1498,8 +1510,9 @@ fn project_edits_save_offline_in_both_connection_modes() {
             repo.path(),
             home.path(),
             &[
-                "project",
-                "edit",
+                "wave",
+                "edit-plan",
+                "--project",
                 id.as_str(),
                 "--name",
                 "Saved",
@@ -1513,9 +1526,10 @@ fn project_edits_save_offline_in_both_connection_modes() {
             repo.path(),
             home.path(),
             &[
-                "project",
+                "wave",
                 "workflow",
                 "set",
+                "--project",
                 id.as_str(),
                 "review",
                 "--file",
@@ -1544,23 +1558,30 @@ fn project_edits_save_offline_in_both_connection_modes() {
         let saved = lf(
             repo.path(),
             home.path(),
-            &["project", "workflow", "show", id.as_str(), "--json"],
+            &[
+                "wave",
+                "workflow",
+                "show",
+                "--project",
+                id.as_str(),
+                "--json",
+            ],
         );
         drop(writer);
-        assert_eq!(saved["id"], id.as_str());
+        assert_eq!(saved["project"]["id"], id.as_str());
         assert_eq!(
-            saved["linear_id"],
+            saved["project"]["linear_id"],
             if mapped {
                 serde_json::json!(project.id)
             } else {
                 Value::Null
             }
         );
-        assert_eq!(saved["description"], authored.description.trim());
-        assert_eq!(saved["name"], "Saved");
-        assert_eq!(saved["summary"], "");
-        assert_eq!(saved["workflow"], "review");
-        assert_eq!(saved["krs"][0]["text"], "Retain the proof");
+        assert_eq!(saved["project"]["description"], authored.description.trim());
+        assert_eq!(saved["project"]["name"], "Saved");
+        assert_eq!(saved["project"]["summary"], "");
+        assert_eq!(saved["project"]["workflow"], "review");
+        assert_eq!(saved["project"]["krs"][0]["text"], "Retain the proof");
         assert_eq!(saved["sync"]["connected"], connected);
         assert_eq!(
             saved["sync"]["changes"].as_array().unwrap().is_empty(),
@@ -1571,7 +1592,14 @@ fn project_edits_save_offline_in_both_connection_modes() {
                 lf(
                     repo.path(),
                     home.path(),
-                    &["project", "workflow", "show", &project.id, "--json"]
+                    &[
+                        "wave",
+                        "workflow",
+                        "show",
+                        "--project",
+                        &project.id,
+                        "--json"
+                    ]
                 ),
                 saved
             );
@@ -1583,8 +1611,9 @@ fn project_edits_save_offline_in_both_connection_modes() {
             repo.path(),
             home.path(),
             &[
-                "project",
-                "edit",
+                "wave",
+                "edit-plan",
+                "--project",
                 id.as_str(),
                 "--name",
                 "Saved",
@@ -1616,12 +1645,19 @@ fn project_edits_save_offline_in_both_connection_modes() {
             let read = lf(
                 repo.path(),
                 home.path(),
-                &["project", "workflow", "show", id.as_str(), "--json"],
+                &[
+                    "wave",
+                    "workflow",
+                    "show",
+                    "--project",
+                    id.as_str(),
+                    "--json",
+                ],
             );
-            assert_eq!(read["name"], "Remote name");
-            assert_eq!(read["workflow"], "research");
-            assert_eq!(read["krs"][0]["holds"], true);
-            assert_eq!(read["pm_snapshot_synced_at"], 18);
+            assert_eq!(read["project"]["name"], "Remote name");
+            assert_eq!(read["project"]["workflow"], "research");
+            assert_eq!(read["project"]["krs"][0]["holds"], true);
+            assert_eq!(read["project"]["pm_snapshot_synced_at"], 18);
             let revision: String = rusqlite::Connection::open(home.path().join("loopflow.db"))
                 .unwrap()
                 .query_row(
@@ -1657,7 +1693,14 @@ fn project_edits_save_offline_in_both_connection_modes() {
             let read = lf(
                 repo.path(),
                 home.path(),
-                &["project", "workflow", "show", id.as_str(), "--json"],
+                &[
+                    "wave",
+                    "workflow",
+                    "show",
+                    "--project",
+                    id.as_str(),
+                    "--json",
+                ],
             );
             assert_eq!(store.pending_project_changes(&id).unwrap(), pending);
             assert_eq!(read["sync"]["changes"], Value::Array(conflicts.clone()));
@@ -1689,22 +1732,29 @@ fn project_edits_save_offline_in_both_connection_modes() {
         let saved = lf(
             repo.path(),
             home.path(),
-            &["project", "workflow", "show", id.as_str(), "--json"],
+            &[
+                "wave",
+                "workflow",
+                "show",
+                "--project",
+                id.as_str(),
+                "--json",
+            ],
         );
-        assert_eq!(saved["krs"], content["krs"]);
-        assert_eq!(saved["workflow"], content["workflow"]);
-        assert_eq!(saved["id"], id.as_str());
+        assert_eq!(saved["project"]["krs"], content["krs"]);
+        assert_eq!(saved["project"]["workflow"], content["workflow"]);
+        assert_eq!(saved["project"]["id"], id.as_str());
         assert_eq!(
-            saved["linear_id"],
+            saved["project"]["linear_id"],
             if mapped {
                 serde_json::json!(project.id)
             } else {
                 Value::Null
             }
         );
-        assert_eq!(saved["description"], authored.description.trim());
-        assert_eq!(saved["name"], "Saved");
-        assert_eq!(saved["summary"], "");
+        assert_eq!(saved["project"]["description"], authored.description.trim());
+        assert_eq!(saved["project"]["name"], "Saved");
+        assert_eq!(saved["project"]["summary"], "");
         assert_eq!(
             store.pending_project_changes(&id).unwrap().len(),
             if mapped { 3 } else { 5 }
@@ -1713,7 +1763,14 @@ fn project_edits_save_offline_in_both_connection_modes() {
         let repeated = lf(
             repo.path(),
             home.path(),
-            &["project", "workflow", "show", id.as_str(), "--json"],
+            &[
+                "wave",
+                "workflow",
+                "show",
+                "--project",
+                id.as_str(),
+                "--json",
+            ],
         );
         assert_eq!(repeated, saved);
         if mapped {
@@ -1731,9 +1788,19 @@ fn project_edits_save_offline_in_both_connection_modes() {
             let read = lf(
                 repo.path(),
                 home.path(),
-                &["project", "workflow", "show", id.as_str(), "--json"],
+                &[
+                    "wave",
+                    "workflow",
+                    "show",
+                    "--project",
+                    id.as_str(),
+                    "--json",
+                ],
             );
-            assert_eq!(read["krs"][0]["text"], "Keep the concurrent provider plan");
+            assert_eq!(
+                read["project"]["krs"][0]["text"],
+                "Keep the concurrent provider plan"
+            );
             assert!(store
                 .pending_project_changes(&id)
                 .unwrap()
@@ -2113,15 +2180,14 @@ fn place_wave_on_remote(
     store
         .add_machine(&machine, machine.as_str(), machine.as_str(), "/remote/repo")
         .unwrap();
-    db.execute(
-        "INSERT INTO work_placements(wave_id,machine_id,enabled,placed_at) VALUES(?1,?2,1,7)
-         ON CONFLICT(wave_id) DO UPDATE SET machine_id=excluded.machine_id,placed_at=excluded.placed_at",
-        rusqlite::params![wave.as_str(), machine.as_str()],
-    )
-    .unwrap();
-    store
-        .placement(&loopflow::durable::WorkRef::Wave(wave.clone()))
-        .unwrap()
+    let repo = store.get_wave(wave).unwrap().unwrap();
+    let home = Path::new(db.path().unwrap()).parent().unwrap();
+    serde_json::from_value(lf(
+        Path::new(repo.repo()),
+        home,
+        &["wave", "place", wave.as_str(), machine.as_str(), "--json"],
+    ))
+    .unwrap()
 }
 
 #[test]
@@ -2804,7 +2870,7 @@ fn wave_documents_follow_files_while_workflows_remain_stored() {
         lf(
             repo.path(),
             home.path(),
-            &["project", "workflow", "set", project_id, "finish"],
+            &["wave", "workflow", "set", "--project", project_id, "finish"],
         );
         std::fs::write(root.join("parser/MEMORY.md"), "Edited child memory λ.\n").unwrap();
         let context = lf(
@@ -2827,7 +2893,14 @@ fn wave_documents_follow_files_while_workflows_remain_stored() {
         let source = lf(
             repo.path(),
             home.path(),
-            &["project", "workflow", "source", project_id, "finish"],
+            &[
+                "wave",
+                "workflow",
+                "source",
+                "--project",
+                project_id,
+                "finish",
+            ],
         );
         assert!(source.as_str().unwrap().contains("from: start"));
         std::fs::write(repo.path().join(".lf/workflows/unimported.yaml"), workflow).unwrap();
@@ -2840,11 +2913,11 @@ fn wave_documents_follow_files_while_workflows_remain_stored() {
             repo.path(),
             home.path(),
             &[
-                "project",
+                "wave",
                 "workflow",
                 "list",
-                "--project",
-                project_id,
+                "--wave",
+                "tools/parser",
                 "--json",
             ],
         );
@@ -2949,6 +3022,15 @@ fn deletion_saves_offline_and_retains_execution_and_retry_identity() {
 fn task_selectors_use_repository_scope_and_preserve_exact_identity_through_aliases() {
     let first = TestRepo::new();
     let second = TestRepo::new();
+    // Keep exchange from overwriting the synthetic duplicate identifiers below.
+    for repo in [&first, &second] {
+        std::fs::create_dir_all(repo.path().join(".lf")).unwrap();
+        std::fs::write(
+            repo.path().join(".lf/config.yaml"),
+            "planning:\n  provider: git\n  remote: unavailable-fixture-remote\n",
+        )
+        .unwrap();
+    }
     let home = tempfile::tempdir().unwrap();
     let tasks: Vec<_> = [&first, &second]
         .into_iter()
@@ -2981,14 +3063,14 @@ fn task_selectors_use_repository_scope_and_preserve_exact_identity_through_alias
         let status = lf(repo, home.path(), &["task", "status", "DUP-1", "--json"]);
         assert_eq!(status["task"]["id"], task["id"]);
     }
-    // Exact identity still permits inspection across repository scope.
+    // Exact identity remains constrained to the selected repository.
     let foreign = tasks[1]["id"].as_str().unwrap();
     let status = lf(
         first.path(),
         home.path(),
         &["task", "status", foreign, "--json"],
     );
-    assert_eq!(status["task"]["id"], foreign);
+    assert!(status["task"].is_null());
     let rejected = command(
         first.path(),
         home.path(),
@@ -3005,13 +3087,6 @@ fn task_selectors_use_repository_scope_and_preserve_exact_identity_through_alias
     .output()
     .unwrap();
     assert!(!rejected.status.success());
-    assert!(
-        String::from_utf8_lossy(&rejected.stderr)
-            .to_lowercase()
-            .contains("wave"),
-        "{}",
-        String::from_utf8_lossy(&rejected.stderr)
-    );
     lf(
         &alias,
         home.path(),
@@ -3177,9 +3252,13 @@ fn planning_sync_tracks_creation_errors_uncertainty_conflicts_and_settlement() {
         .unwrap()
         .iter()
         .all(|c| (c["state"] == "uncertain" || c["field"] == "comment") && c["error"].is_string()));
+    // Planning reads retry delivery and report the current missing mapping,
+    // while retaining the uncertain creation and attachment attempts.
+    let project_sync = read_project();
+    assert_eq!(project_sync["changes"][0]["state"], "uncertain");
     assert_eq!(
-        read_project()["changes"][0]["error"],
-        "Lost attachment reply"
+        project_sync["changes"][0]["error"],
+        "Wave has no Linear Initiative; export remains pending"
     );
     // Model provider confirmation and an observed losing field receipt; projection is read-only.
     conn.execute(
@@ -3219,6 +3298,221 @@ fn planning_sync_tracks_creation_errors_uncertainty_conflicts_and_settlement() {
             .unwrap()
             .is_empty()
     );
+}
+
+#[test]
+fn wave_planning_reads_current_and_historical_chapters_without_starting_work() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let created = lf(
+        repo.path(),
+        home.path(),
+        &["task", "create", "--title", "Unstarted proof", "--json"],
+    );
+    let task_id = loopflow::durable::TaskId::parse(created["id"].as_str().unwrap()).unwrap();
+    let store =
+        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let task = store.task(&task_id).unwrap().unwrap();
+    let current = store.project(&task.project_id).unwrap().unwrap();
+    let mut historical = current.clone();
+    historical.id = loopflow::durable::ProjectId::new();
+    historical.slug = "earlier".into();
+    historical.name = "Earlier chapter".into();
+    historical.status = loopflow::work::project::ProjectStatus::Completed;
+    historical.workflow = "code".into();
+    historical.krs = vec![loopflow::work::project::ProjectKR {
+        text: "Historical proof remains".into(),
+        holds: true,
+    }];
+    store.insert_project(&historical).unwrap();
+    let wave = store.get_wave(&current.wave_id).unwrap().unwrap();
+    let plans_before = store.list_projects(Some(wave.id())).unwrap();
+    let tasks_before = store.list_tasks(Some(&current.wave_id)).unwrap();
+    let database = home.path().join("loopflow.db");
+    let connection = rusqlite::Connection::open(&database).unwrap();
+    connection
+        .execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
+        .unwrap();
+    let before = std::fs::read(&database).unwrap();
+    let shown = lf(
+        repo.path(),
+        home.path(),
+        &["wave", "show", wave.slug(), "--json"],
+    );
+    let plans = shown["waves"][0]["projects"]["items"].as_array().unwrap();
+    assert_eq!(plans.len(), 2);
+    assert!(plans
+        .iter()
+        .any(|p| p["id"] == current.id.as_str() && p["current"] == true));
+    let old = plans
+        .iter()
+        .find(|p| p["id"] == historical.id.as_str())
+        .unwrap();
+    assert_eq!(old["current"], false);
+    assert_eq!(old["workflow"], "code");
+    assert_eq!(old["krs"][0]["text"], "Historical proof remains");
+    let text = lf(repo.path(), home.path(), &["wave", "show", wave.slug()]);
+    let text = text.as_str().unwrap();
+    assert!(text.contains("Earlier chapter"));
+    assert!(text.contains("Historical proof remains"));
+    assert!(text.contains("Unstarted proof"));
+    let selected = lf(
+        repo.path(),
+        home.path(),
+        &["wave", "workflow", "show", wave.slug(), "--json"],
+    );
+    assert_eq!(selected["project"]["id"], current.id.as_str());
+    let retained = lf(
+        repo.path(),
+        home.path(),
+        &[
+            "wave",
+            "workflow",
+            "show",
+            "--project",
+            historical.id.as_str(),
+            "--json",
+        ],
+    );
+    assert_eq!(retained["project"]["workflow"], "code");
+    let scoped = lf(
+        repo.path(),
+        home.path(),
+        &[
+            "--task",
+            task_id.as_str(),
+            "wave",
+            "workflow",
+            "show",
+            "--json",
+        ],
+    );
+    assert_eq!(scoped["project"]["id"], current.id.as_str());
+    let source = lf(
+        repo.path(),
+        home.path(),
+        &["wave", "workflow", "source", "code", wave.slug()],
+    );
+    let historical_source = lf(
+        repo.path(),
+        home.path(),
+        &[
+            "wave",
+            "workflow",
+            "source",
+            "code",
+            "--project",
+            historical.id.as_str(),
+        ],
+    );
+    assert!(source.as_str().unwrap().contains("nodes:"));
+    assert_eq!(historical_source, source);
+    connection
+        .execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
+        .unwrap();
+    assert_eq!(
+        std::fs::read(&database).unwrap(),
+        before,
+        "planning reads changed the registry"
+    );
+    assert_eq!(store.list_projects(Some(wave.id())).unwrap(), plans_before);
+    assert_eq!(
+        store.list_tasks(Some(&current.wave_id)).unwrap(),
+        tasks_before
+    );
+    assert_eq!(store.task(&task_id).unwrap().unwrap(), task);
+    assert!(!repo.path().join(".lf/workflows").exists());
+    // Wave selection uses the same writer; only future take-up changes.
+    lf(
+        repo.path(),
+        home.path(),
+        &["wave", "workflow", "set", "code", wave.slug()],
+    );
+    let selected = lf(
+        repo.path(),
+        home.path(),
+        &["wave", "workflow", "show", wave.slug(), "--json"],
+    );
+    assert_eq!(selected["project"]["workflow"], "code");
+    assert_eq!(store.task(&task_id).unwrap().unwrap(), task);
+    assert_eq!(store.project(&historical.id).unwrap().unwrap(), historical);
+    lf(
+        repo.path(),
+        home.path(),
+        &[
+            "wave",
+            "edit-plan",
+            wave.slug(),
+            "--name",
+            "Current chapter",
+        ],
+    );
+    lf(
+        repo.path(),
+        home.path(),
+        &[
+            "wave",
+            "edit-plan",
+            "--project",
+            historical.id.as_str(),
+            "--summary",
+            "Retained proof",
+        ],
+    );
+    assert_eq!(
+        store.project(&current.id).unwrap().unwrap().name,
+        "Current chapter"
+    );
+    assert_eq!(
+        store.project(&historical.id).unwrap().unwrap().name,
+        historical.name
+    );
+    assert_eq!(
+        store.project(&historical.id).unwrap().unwrap().summary,
+        "Retained proof"
+    );
+    assert_eq!(store.task(&task_id).unwrap().unwrap(), task);
+}
+
+#[test]
+fn wave_planning_distinguishes_missing_registry_from_unreadable_and_removes_old_roots() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let shown = lf(repo.path(), home.path(), &["wave", "show", "--json"]);
+    assert_eq!(shown["waves"], serde_json::json!([]));
+    assert!(!home.path().join("loopflow.db").exists());
+    let workflow_reads = [
+        vec!["wave", "workflow", "show", "missing", "--json"],
+        vec!["wave", "workflow", "source", "code", "missing"],
+        vec!["wave", "workflow", "list", "--wave", "missing", "--json"],
+    ];
+    for args in &workflow_reads {
+        let output = command(repo.path(), home.path(), args).output().unwrap();
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("registry is absent"));
+        assert!(!home.path().join("loopflow.db").exists());
+    }
+    std::fs::write(home.path().join("loopflow.db"), "not a database").unwrap();
+    for args in &workflow_reads {
+        let output = command(repo.path(), home.path(), args).output().unwrap();
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty());
+        assert_eq!(
+            std::fs::read(home.path().join("loopflow.db")).unwrap(),
+            b"not a database"
+        );
+    }
+    let output = command(repo.path(), home.path(), &["wave", "show", "--json"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    for root in ["roadmap", "project"] {
+        let output = command(repo.path(), home.path(), &[root, "--help"])
+            .output()
+            .unwrap();
+        assert!(!output.status.success(), "retired command {root} survived");
+    }
 }
 
 #[test]
@@ -3284,7 +3578,11 @@ fn wave_files_are_checkout_local_and_edits_reach_status_without_ensure() {
     .output()
     .unwrap();
     assert!(!removed.status.success());
-    assert!(String::from_utf8_lossy(&removed.stderr).contains("unrecognized subcommand 'edit'"));
+    assert!(String::from_utf8_lossy(&removed.stderr).contains("--memory"));
+    assert_eq!(
+        std::fs::read_to_string(memory).unwrap(),
+        "A freshly edited decision."
+    );
 }
 
 #[test]

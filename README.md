@@ -37,7 +37,7 @@ cargo install --git https://github.com/loopflowstudio/loopflow --bin lf
 
 The Mac app — Sessions, the roadmap, every Task's worktree — is
 [`Loopflow-latest.dmg`](https://downloads.loopflow.studio/Loopflow-latest.dmg).
-It bundles `lf`; open it explicitly with `lf open`. Bare `lf` starts the
+It bundles `lf`; open it explicitly with `lf desktop open`. Bare `lf` starts the
 general-purpose terminal conversation. On canonical main, it first carries local
 commits and uncommitted files into an author-scoped sibling worktree so the
 conversation cannot dirty main.
@@ -61,9 +61,16 @@ The harness acts as a User over the same `lf` API. See
 ## Find a command or workflow
 
 ```bash
+lf --repo loopflow list    # use ~/src/loopflow without changing directories
+```
+
+Set `repo_root: ~/projects` in `~/.lf/config.yaml` to change the search root.
+Use `--repo ./path` for an explicit checkout; with `--machine`, lookup happens there.
+
+```bash
 lf list                    # commands, skills, and flows
 lf help debug              # inspect a definition without launching it
-lf run feature             # select a flow, otherwise a skill
+lf flow pursue             # select a flow explicitly
 lf skill release-run       # explicitly select the skill
 lf land --help           # inspect the landing command
 lf pr-review               # build an HTML walkthrough of the important code in this PR
@@ -138,24 +145,34 @@ Delegate durable work — the same verbs whether the caller is you or the wave:
 lf checkout INF-123                               # durable Task Work + worktree, no controller
 lf -b task run INF-123                            # place the Task, then run its Flow here until it ends
 lf task run INF-123 pursue                        # on a workflow: take the edge that runs pursue
-lf comment INF-123 "take the smaller approach"   # post a Linear comment for the Task's running Flow
-lf interrupt INF-123                             # end this turn so fresh direction is read now
+lf comment INF-123 "take the smaller approach"   # save a steer for the Task's Sessions
+lf interrupt INF-123                             # end the active turn
 lf --task INF-123 research "write scratch/runtime.md"    # one independent Task conversation
-lf task run INF-123 --reason "reconcile all scratch first" # publish direction, then run fresh work
+lf task run INF-123 --reason "reconcile all scratch first" # save a steer, then run fresh work
 lf task status INF-123 --json                         # inspect planning, even when sync is unavailable
 lf task complete INF-123                             # complete without moving the Workflow
 lf task reopen INF-123                               # reopen planning; keep the Workflow and PR
-lf task-operate "INF-123"                           # advance through follow-through to completion, or a blocker
+lf task-operate "INF-123"                           # advance to completion, or a blocker
 lf --task INF-123 skill task-session               # ongoing conversation that keeps applying task-operate
 lf arm                                             # request exact-head auto-merge and return
-lf land                                            # request merge; follow-through completes the Task
+lf land                                            # request merge; Task completion stays separate
 lf pr reconcile                                      # check recorded deliveries once and settle merges
 lf ci watch                                          # watch PR checks; start a ci-fix when a landing fails
 ```
 
-Task comments in Linear also reach the Task's running Flow. Steering never starts
-an idle Task or broadcasts to independent conversations. A stopped Flow is
-history: `task run` never continues it, so inspect `lf task status` first.
+Subtree delegation travels with shared planning. Started Tasks retain their recorded
+Machine; new Tasks reserve an exclusive execution owner before checkout.
+Connection settings and execution records remain Machine-local.
+
+Task comments in Linear reach the Task's next useful boundary: before a Flow step,
+after an agent turn, when showing planning, and before a Linear write. Team checks
+share ten-second freshness. Only Desktop and `--watch` keep a slow clock, backing
+off while nothing changes; idle agents do not poll. Teams without live Tasks make
+no acquisition requests. A rate limit pauses requests across repositories in the
+same Home until reset, retaining pending writes. Acquired Task comments become steers for each associated
+Session, with independent delivery at its next supported provider boundary.
+Steering leaves idle Sessions idle. A stopped Flow is history: `task run` never
+continues it, so inspect `lf task status` first.
 
 Turn a reviewed design into work without another planning subsystem:
 
@@ -169,12 +186,16 @@ Watch this repository and the current Machine:
 ```bash
 lf wave list                  # every durable Wave and its Machine/runtime evidence
 lf user           # read config: display name from Git or a personal override
-lf roadmap             # every open Task across this repository's Waves
-lf roadmap --all       # every repository on this machine
+lf wave show             # every open Task across this repository's Waves
+lf wave show --all       # every repository on this machine
 lf wave status designer     # one Wave's current chapter and Tasks
-lf activity            # durable work, delivery and steering history
+lf history             # durable work, delivery and steering history
 lf session list --json # conversations on this Machine
 lf context             # context budgets, configuration sources and current usage
+lf task run LOO-427 --explain --json # intended action and impediments; no launch
+lf task edit LOO-427 --title "Retain drafts" --explain # validate without saving
+lf --machine mini --repo project debug --context # read remote input without launching
+lf flow pursue --context # graph and initial input; future inputs stay unavailable
 lf usage --days 30      # recorded provider usage
 lf usage --task LOO-265 # usage attributed to one Task
 lf usage --task LOO-265 --context # each step's input by source, flagged over budget
@@ -210,7 +231,8 @@ Published installs also add native naming hooks, preserving existing hooks. In
 repositories with `.lf`, plain Claude and Codex use the first request as a short
 name when unnamed. Existing names stay, including instruction-derived titles;
 preservation during concurrent renames remains unproved. Review the installed
-hooks with Codex's `/hooks`.
+hooks with Codex's `/hooks`. Naming uses bounded store reads and process recording;
+if ownership cannot be read promptly, the hook leaves the name unchanged.
 Claude naming also works with `claude -p`. Codex naming requires its shared
 app-server; embedded launches and `codex exec` lack that naming endpoint.
 No resume hooks repair old conversations. Native providers own their terminal output.

@@ -6,7 +6,7 @@ use crate::durable::WorkStatus;
 use crate::ops::task_execution::{TaskExecutionSnapshot, TaskExecutionState};
 use crate::work::task::{CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum TaskAction {
@@ -25,7 +25,7 @@ impl TaskAction {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TaskActionModel {
     pub recommended: Option<TaskAction>,
     pub reason: String,

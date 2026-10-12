@@ -3,6 +3,7 @@ pub mod chapter;
 pub mod checkout;
 pub(crate) mod child;
 mod commit;
+pub mod context;
 pub mod cron;
 mod error;
 mod flow;
@@ -30,9 +31,11 @@ pub mod scratch;
 mod sync;
 pub mod task;
 pub mod task_actions;
+pub mod task_admission;
 pub mod task_execution;
 #[doc(hidden)]
 pub mod task_input;
+pub mod task_location;
 pub mod task_run;
 pub(crate) mod telemetry;
 pub mod trace;
@@ -69,8 +72,8 @@ pub use release::{
 pub(crate) use run::render_task_context;
 #[doc(hidden)]
 pub use run::{
-    resolve_checkout_binding, resolve_execution_binding, resolve_work_binding,
-    resolve_work_selection, WorkBinding, WorkSelection,
+    resolve_execution_binding, resolve_work_binding, resolve_work_selection, WorkBinding,
+    WorkSelection,
 };
 pub(crate) use sync::{abort_sync_after_authorization, continue_sync_after_authorization};
 pub use sync::{

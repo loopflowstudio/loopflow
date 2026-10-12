@@ -13,7 +13,7 @@ enum CaptureTarget {
 
     /// Titles of every window that is not the primary surface, so a capture of
     /// the primary window cannot be won by one that merely opened later.
-    private static let secondaryTitles = ["Portfolio", "Telemetry"]
+    private static let secondaryTitles = ["Portfolio", "Telemetry", "Open Work"]
 
     private static func normalizedTitle(_ title: String) -> String {
         title.lowercased().filter(\.isLetter)

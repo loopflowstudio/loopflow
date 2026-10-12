@@ -1,13 +1,5 @@
-//! End-to-end proof for W2-138 and W2-255 — every Task PR contains only that
-//! Task's work, and ambiguous ancestry refusal is actionable.
-//!
-//! The verdict logic lives in `ops::task::verify_task_pr_range` and is unit
-//! tested there. These tests drive the *real* `submit`/`land` publication path
-//! over a bare-origin fixture to prove the observable acceptance property the
-//! design demands: a contaminated range is refused **before any push or
-//! `gh pr`**, and a stale base heals so GitHub's range, `lf diff --files`, and the recorded `base_commit` agree. W2-255 extends the proof
-//! matrix to divergent ancestry (both sides named), squash-merged parents,
-//! and no-remote refusal.
+//! Publication resolves the current Git range without rewriting branch history.
+//! Bare origins and simulated GitHub keep the command proof disposable.
 
 mod support;
 
@@ -121,69 +113,6 @@ fn git_out(repo: &TestRepo, args: &[&str]) -> String {
         String::from_utf8_lossy(&output.stderr)
     );
     String::from_utf8_lossy(&output.stdout).trim().to_string()
-}
-
-/// The #877/#882 acceptance case: the recorded base carries a foreign,
-/// unpushed canonical-main commit (M < B). `submit` must refuse, name the
-/// foreign commit and the recovery, and touch neither the remote nor `gh pr`.
-#[test]
-fn submit_refuses_a_contaminated_range_before_any_push() {
-    let home = tempfile::TempDir::new().expect("temp home");
-    let repo = TestRepo::new(); // origin/main = P (pushed)
-
-    let log_path = home.path().join("gh.log");
-    let script = gh_open_pr_script(log_path.to_string_lossy().as_ref());
-    let _env = EnvGuard::with_lf_home(
-        &[("gh", script.as_str()), ("open", noop_open_script())],
-        home.path(),
-    );
-
-    // A foreign commit advances local main ahead of origin and is never pushed —
-    // the branch cut from it inherits off-origin ancestry.
-    repo.create_file("foreign.txt", "not this task's work\n");
-    repo.stage_all();
-    repo.commit("foreign canonical-main commit");
-    let contaminated_base = repo.head_sha();
-
-    let branch = "jack/contaminated";
-    repo.create_branch(branch); // cut from the contaminated base
-    repo.create_file("task.txt", "task work\n");
-    repo.stage_all();
-    repo.commit("task commit");
-    // Deliberately NOT pushed: the refusal must precede the first push.
-
-    register_task_with_pr(home.path(), repo.path(), branch, &contaminated_base);
-
-    let err = submit(
-        repo.path(),
-        &land_options(true, "contaminated"),
-        &NullProgress,
-    )
-    .expect_err("contaminated range must refuse");
-    let message = err.to_string();
-    assert!(
-        message.contains("contaminated"),
-        "expected contamination refusal, got: {message}"
-    );
-    assert!(
-        message.contains("foreign canonical-main commit"),
-        "refusal must name the foreign commit, got: {message}"
-    );
-    assert!(
-        message.contains("rebase --onto"),
-        "refusal must print the recovery action, got: {message}"
-    );
-
-    // The proof: no GitHub side effect happened before the refusal.
-    assert!(
-        !remote_branch_exists(&repo, branch),
-        "the branch must never reach the remote when the range is refused"
-    );
-    let log = fs::read_to_string(&log_path).unwrap_or_default();
-    assert!(
-        !log.contains("pr create") && !log.contains("pr edit") && !log.contains("pr ready"),
-        "no gh PR mutation may be issued before refusal, got log:\n{log}"
-    );
 }
 
 /// A Task PR's recorded base sits behind the
@@ -427,10 +356,9 @@ fn sync_onto_main_recovers_a_base_recorded_at_the_prs_own_remote_tip() {
     assert_eq!(files, "local.txt\nremote.txt\ntask.txt");
 }
 
-/// A base carrying another branch's commits was never this PR's own remote
-/// tip, so syncing onto main still refuses it and leaves the record alone.
+/// Sync retains inherited dependencies and measures the complete current range.
 #[test]
-fn sync_onto_main_refuses_a_base_carrying_another_branchs_commits() {
+fn sync_onto_main_preserves_inherited_commits() {
     let home = tempfile::TempDir::new().expect("temp home");
     let repo = TestRepo::new();
     let _env = EnvGuard::with_lf_home(&[], home.path());
@@ -450,7 +378,8 @@ fn sync_onto_main_refuses_a_base_carrying_another_branchs_commits() {
     repo.push_new_branch(branch);
     let task = register_task_with_pr(home.path(), repo.path(), branch, &foreign);
 
-    let error = sync_with_recovery(
+    let head = repo.head_sha();
+    sync_with_recovery(
         repo.path(),
         &SyncOptions {
             onto: "origin/main".to_string(),
@@ -459,13 +388,13 @@ fn sync_onto_main_refuses_a_base_carrying_another_branchs_commits() {
         },
         &NullProgress,
     )
-    .expect_err("a foreign base must refuse");
-    let message = error.to_string();
-    assert!(
-        message.contains("contaminated") && message.contains("sibling commit"),
-        "expected the foreign commit named, got: {message}"
+    .expect("inherited commits remain publishable");
+    assert_eq!(repo.head_sha(), head);
+    assert_eq!(
+        recorded_base(&task),
+        git_out(&repo, &["merge-base", "origin/main", "HEAD"])
     );
-    assert_eq!(recorded_base(&task), foreign);
+    assert!(repo.path().join("sibling.txt").exists());
 }
 
 #[test]
@@ -642,237 +571,6 @@ fn publish_uses_managed_worktree_even_with_unknown_ambient_run() {
     );
 }
 
-/// Divergent ancestry: the branch was cut from a contaminated base, then
-/// rebased onto the current origin without updating the recorded base. The
-/// recorded base and origin diverge from the initial commit — neither is an
-/// ancestor of the other. `submit` must refuse, name the commits and files on
-/// **both sides**, and touch neither the remote nor `gh pr`.
-#[test]
-fn submit_refuses_divergent_ancestry_naming_both_sides() {
-    let home = tempfile::TempDir::new().expect("temp home");
-    let repo = TestRepo::new();
-    let origin_tip = repo.head_sha();
-
-    let log_path = home.path().join("gh.log");
-    let script = gh_open_pr_script(log_path.to_string_lossy().as_ref());
-    let _env = EnvGuard::with_lf_home(
-        &[("gh", script.as_str()), ("open", noop_open_script())],
-        home.path(),
-    );
-
-    // A foreign commit advances local main ahead of origin (not pushed).
-    repo.create_file("foreign.txt", "not this task's work\n");
-    repo.stage_all();
-    repo.commit("foreign canonical-main commit");
-    let contaminated_base = repo.head_sha();
-
-    // Cut the task branch from the contaminated base.
-    let branch = "jack/divergent-proof";
-    repo.create_branch(branch);
-    repo.create_file("task.txt", "task work\n");
-    repo.stage_all();
-    repo.commit("task commit");
-
-    // Undo the foreign commit on main and advance origin with a different
-    // commit so the recorded base and origin diverge from the initial commit.
-    repo.checkout("main");
-    git_out(&repo, &["reset", "--hard", &origin_tip]);
-    repo.create_file("upstream.txt", "landed upstream\n");
-    repo.stage_all();
-    repo.commit("upstream advance");
-    repo.push();
-
-    // Rebase the task branch onto the current origin, simulating a manual
-    // recovery that forgot to update the recorded base.
-    repo.checkout(branch);
-    git_out(
-        &repo,
-        &[
-            "rebase",
-            "--onto",
-            "origin/main",
-            &contaminated_base,
-            branch,
-        ],
-    );
-
-    register_task_with_pr(home.path(), repo.path(), branch, &contaminated_base);
-
-    let err = submit(repo.path(), &land_options(true, "divergent"), &NullProgress)
-        .expect_err("divergent ancestry must refuse");
-    let message = err.to_string();
-    assert!(
-        message.contains("diverged"),
-        "expected divergence refusal, got: {message}"
-    );
-    // Base side (M..B): the foreign commit and its file.
-    assert!(
-        message.contains("foreign canonical-main commit"),
-        "refusal must name the base-side foreign commit, got: {message}"
-    );
-    assert!(
-        message.contains("foreign.txt"),
-        "refusal must name the base-side file, got: {message}"
-    );
-    // Upstream side (B..M): the upstream commit and its file.
-    assert!(
-        message.contains("upstream advance"),
-        "refusal must name the upstream-side commit, got: {message}"
-    );
-    assert!(
-        message.contains("upstream.txt"),
-        "refusal must name the upstream-side file, got: {message}"
-    );
-    assert!(
-        message.contains("rebase --onto"),
-        "refusal must print the recovery action, got: {message}"
-    );
-
-    // No GitHub side effect happened before the refusal.
-    assert!(
-        !remote_branch_exists(&repo, branch),
-        "the branch must never reach the remote when ancestry is refused"
-    );
-    let log = fs::read_to_string(&log_path).unwrap_or_default();
-    assert!(
-        !log.contains("pr create") && !log.contains("pr edit") && !log.contains("pr ready"),
-        "no gh PR mutation may be issued before refusal, got log:\n{log}"
-    );
-}
-
-/// Squash-merged parent: PR1 was squash-merged, so origin/main carries a single
-/// squash commit. PR2 was cut from PR1's original tip (not the squash), so its
-/// recorded base carries commits origin/main doesn't have — the contaminated
-/// case. `submit` must refuse and name the pre-squash commits.
-#[test]
-fn submit_refuses_contaminated_range_after_squash_merged_parent() {
-    let home = tempfile::TempDir::new().expect("temp home");
-    let repo = TestRepo::new();
-
-    let log_path = home.path().join("gh.log");
-    let script = gh_open_pr_script(log_path.to_string_lossy().as_ref());
-    let _env = EnvGuard::with_lf_home(
-        &[("gh", script.as_str()), ("open", noop_open_script())],
-        home.path(),
-    );
-
-    // PR1: two commits cut from the initial origin tip.
-    let first_branch = "jack/pr-one";
-    repo.create_branch(first_branch);
-    repo.create_file("pr1-a.txt", "a\n");
-    repo.stage_all();
-    repo.commit("PR1 first commit");
-    repo.create_file("pr1-b.txt", "b\n");
-    repo.stage_all();
-    repo.commit("PR1 second commit");
-    let pr1_tip = repo.head_sha();
-
-    // Squash-merge PR1 onto main and push.
-    repo.checkout("main");
-    git_out(&repo, &["merge", "--squash", first_branch]);
-    repo.stage_all();
-    repo.commit("squash-merge PR1");
-    repo.push();
-
-    // PR2 cut from PR1's original tip — the real-world mistake.
-    let second_branch = "jack/pr-two";
-    git_out(&repo, &["branch", second_branch, &pr1_tip]);
-    repo.checkout(second_branch);
-    repo.create_file("pr2.txt", "PR2 work\n");
-    repo.stage_all();
-    repo.commit("PR2 commit");
-
-    register_task_with_pr(home.path(), repo.path(), second_branch, &pr1_tip);
-
-    let err = submit(
-        repo.path(),
-        &land_options(true, "squash-merged parent"),
-        &NullProgress,
-    )
-    .expect_err("squash-merged parent contamination must refuse");
-    let message = err.to_string();
-    assert!(
-        message.contains("contaminated"),
-        "expected contamination refusal, got: {message}"
-    );
-    assert!(
-        message.contains("PR1 first commit"),
-        "refusal must name the first pre-squash commit, got: {message}"
-    );
-    assert!(
-        message.contains("PR1 second commit"),
-        "refusal must name the second pre-squash commit, got: {message}"
-    );
-    assert!(
-        message.contains("rebase --onto"),
-        "refusal must print the recovery action, got: {message}"
-    );
-
-    assert!(
-        !remote_branch_exists(&repo, second_branch),
-        "the branch must never reach the remote when the range is refused"
-    );
-}
-
-/// No-remote refusal: a repo with no remote must still catch a contaminated
-/// range. The verification falls back to local main; if the recorded base
-/// carries commits local main doesn't have, `submit` refuses before any push.
-#[test]
-fn submit_refuses_contaminated_range_without_a_remote() {
-    let home = tempfile::TempDir::new().expect("temp home");
-    let repo = TestRepo::new();
-    let base = repo.head_sha();
-
-    let log_path = home.path().join("gh.log");
-    let script = gh_open_pr_script(log_path.to_string_lossy().as_ref());
-    let _env = EnvGuard::with_lf_home(
-        &[("gh", script.as_str()), ("open", noop_open_script())],
-        home.path(),
-    );
-
-    // Drop the remote entirely.
-    git_out(&repo, &["remote", "remove", "origin"]);
-
-    // Advance local main with a foreign commit, cut the branch from it, then
-    // reset main to the original tip — the recorded base is off-local-main.
-    repo.create_file("foreign.txt", "not this task's work\n");
-    repo.stage_all();
-    repo.commit("foreign local-main commit");
-    let contaminated_base = repo.head_sha();
-
-    let branch = "jack/no-remote-contaminated";
-    repo.create_branch(branch);
-    repo.create_file("task.txt", "task work\n");
-    repo.stage_all();
-    repo.commit("task commit");
-
-    repo.checkout("main");
-    git_out(&repo, &["reset", "--hard", &base]);
-    repo.checkout(branch);
-
-    register_task_with_pr(home.path(), repo.path(), branch, &contaminated_base);
-
-    let err = submit(
-        repo.path(),
-        &land_options(true, "no-remote contaminated"),
-        &NullProgress,
-    )
-    .expect_err("no-remote contaminated range must refuse");
-    let message = err.to_string();
-    assert!(
-        message.contains("contaminated"),
-        "expected contamination refusal, got: {message}"
-    );
-    assert!(
-        message.contains("foreign local-main commit"),
-        "refusal must name the foreign commit, got: {message}"
-    );
-    assert!(
-        message.contains("rebase --onto"),
-        "refusal must print the recovery action, got: {message}"
-    );
-}
-
 /// The core hole W2-254 closes: an existing PR (already has a GitHub number)
 /// that is reset or synced empty must refuse before any `gh pr` mutation. The
 /// old `task_pr_has_changes` guard ran only when `pr.github().is_none()`; once
@@ -881,65 +579,70 @@ fn submit_refuses_contaminated_range_without_a_remote() {
 /// branch refuses before any `gh` call.
 #[test]
 fn submit_refuses_an_empty_range_before_any_gh_call() {
-    let home = tempfile::TempDir::new().expect("temp home");
-    let repo = TestRepo::new();
-    let base = repo.head_sha();
+    for empty_commit in [false, true] {
+        let home = tempfile::TempDir::new().expect("temp home");
+        let repo = TestRepo::new();
+        let base = repo.head_sha();
 
-    let log_path = home.path().join("gh.log");
-    let script = gh_open_pr_script(log_path.to_string_lossy().as_ref());
-    let _env = EnvGuard::with_lf_home(
-        &[("gh", script.as_str()), ("open", noop_open_script())],
-        home.path(),
-    );
+        let log_path = home.path().join("gh.log");
+        let script = gh_open_pr_script(log_path.to_string_lossy().as_ref());
+        let _env = EnvGuard::with_lf_home(
+            &[("gh", script.as_str()), ("open", noop_open_script())],
+            home.path(),
+        );
 
-    let branch = "jack/empty-range";
-    repo.create_branch(branch);
-    let task = register_task_with_pr(home.path(), repo.path(), branch, &base);
+        let branch = "jack/empty-range";
+        repo.create_branch(branch);
+        if empty_commit {
+            git_out(&repo, &["commit", "--allow-empty", "-m", "No tree changes"]);
+        }
+        let task = register_task_with_pr(home.path(), repo.path(), branch, &base);
 
-    // Simulate a previously-published PR so the old guard's
-    // `pr.github().is_none()` condition is false — the exact case it skipped.
-    let runtime = tokio::runtime::Runtime::new().expect("update PR runtime");
-    runtime.block_on(async {
-        let mut pr = task
-            .store
-            .active_task_pr(&task.task.id)
-            .await
-            .expect("read active PR")
-            .expect("active PR exists");
-        pr.publication = Some(PrPublication {
-            requested_at: OffsetDateTime::now_utc(),
-            presentation: None,
-            github: Some(GithubPr {
-                number: 925,
-                url: "https://example.com/pr/925".to_string(),
-                head_sha: None,
-            }),
-            merge: None,
+        // Simulate a previously-published PR so the old guard's
+        // `pr.github().is_none()` condition is false — the exact case it skipped.
+        let runtime = tokio::runtime::Runtime::new().expect("update PR runtime");
+        runtime.block_on(async {
+            let mut pr = task
+                .store
+                .active_task_pr(&task.task.id)
+                .await
+                .expect("read active PR")
+                .expect("active PR exists");
+            pr.publication = Some(PrPublication {
+                requested_at: OffsetDateTime::now_utc(),
+                presentation: None,
+                github: Some(GithubPr {
+                    number: 925,
+                    url: "https://example.com/pr/925".to_string(),
+                    head_sha: None,
+                }),
+                merge: None,
+            });
+            pr.updated_at = OffsetDateTime::now_utc();
+            task.store
+                .update_task_pr(&pr)
+                .await
+                .expect("set github number");
         });
-        pr.updated_at = OffsetDateTime::now_utc();
-        task.store
-            .update_task_pr(&pr)
-            .await
-            .expect("set github number");
-    });
 
-    let err = submit(
-        repo.path(),
-        &land_options(true, "empty range"),
-        &NullProgress,
-    )
-    .expect_err("empty range must refuse");
-    assert!(
-        err.to_string().contains("empty"),
-        "expected empty-range refusal, got: {err}"
-    );
+        let err = submit(
+            repo.path(),
+            &land_options(true, "empty range"),
+            &NullProgress,
+        )
+        .expect_err("empty range must refuse");
+        assert!(
+            err.to_string().contains("empty"),
+            "expected empty-range refusal, got: {err}"
+        );
 
-    // No GitHub side effect happened before the refusal.
-    let log = fs::read_to_string(&log_path).unwrap_or_default();
-    assert!(
-        !log.contains("pr create") && !log.contains("pr edit") && !log.contains("pr ready"),
-        "no gh PR mutation may be issued for an empty range, got log:\n{log}"
-    );
+        // No GitHub side effect happened before the refusal.
+        let log = fs::read_to_string(&log_path).unwrap_or_default();
+        assert!(
+            !log.contains("pr create") && !log.contains("pr edit") && !log.contains("pr ready"),
+            "no gh PR mutation may be issued for an empty range, got log:\n{log}"
+        );
+    }
 }
 
 #[test]
@@ -1025,4 +728,300 @@ fn completed_merge_updates_recorded_base_for_publish_submit_and_land() {
             merged
         );
     }
+}
+
+/// The incident's old prototype base can survive a reset/rebase, or upstream
+/// can move while the branch still depends on it. Neither requires rewriting.
+#[test]
+fn pr_open_resolves_stale_bases_without_rewriting_history() {
+    for scenario in [
+        "rebased",
+        "inherited",
+        "rewritten-main",
+        "squashed",
+        "missing",
+    ] {
+        let home = tempfile::tempdir().unwrap();
+        let repo = TestRepo::new();
+        let initial = repo.head_sha();
+        let log = home.path().join("gh.log");
+        let script = if scenario == "rebased" {
+            format!(
+                r#"#!/bin/sh
+echo "$@" >> "{}"
+case "$1 $2" in
+  "pr list") echo '[]' ;;
+  "pr create") echo 'https://example.com/pr/926' ;;
+esac
+"#,
+                log.display()
+            )
+        } else {
+            gh_open_pr_script(log.to_str().unwrap())
+        };
+        let _env = EnvGuard::with_lf_home(
+            &[
+                ("gh", &script),
+                ("open", noop_open_script()),
+                ("xdg-open", noop_open_script()),
+            ],
+            home.path(),
+        );
+        repo.create_branch("prototype");
+        repo.create_file("dependency.txt", "prototype dependency\n");
+        repo.stage_all();
+        repo.commit("prototype dependency");
+        let saved = repo.head_sha();
+        let branch = "jack/stale-base";
+        repo.create_branch(branch);
+        repo.create_file("task.txt", "task work\n");
+        repo.stage_all();
+        repo.commit("task work");
+        if scenario == "rewritten-main" {
+            git_out(&repo, &["push", "origin", "prototype:main"]);
+        }
+        repo.checkout("main");
+        if scenario == "squashed" {
+            git_out(&repo, &["merge", "--squash", "prototype"]);
+            repo.commit("squashed prototype");
+        } else {
+            repo.create_file("upstream.txt", "upstream work\n");
+            repo.stage_all();
+            repo.commit("upstream work");
+        }
+        if scenario == "rewritten-main" {
+            git_out(&repo, &["push", "--force", "origin", "main"]);
+        } else {
+            repo.push();
+        }
+        repo.checkout(branch);
+        if scenario == "rebased" {
+            git_out(&repo, &["rebase", "--onto", "origin/main", &saved]);
+        }
+        let saved = if scenario == "missing" {
+            "0".repeat(40)
+        } else {
+            saved
+        };
+        let task = register_task_with_pr(home.path(), repo.path(), branch, &saved);
+        let head = repo.head_sha();
+        let tree = git_out(&repo, &["rev-parse", "HEAD^{tree}"]);
+        let commits = git_out(&repo, &["rev-list", "HEAD"]);
+        let expected_base = git_out(&repo, &["merge-base", "origin/main", "HEAD"]);
+        let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+            .current_dir(repo.path())
+            .args([
+                "pr",
+                "open",
+                "--title",
+                "Stale base proof",
+                "--body",
+                "Preserve branch history",
+            ])
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        let message = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(output.status.success(), "{scenario}: {message}");
+        assert!(!message.contains("rebase --onto"), "{message}");
+        assert!(message.lines().count() < 30, "{message}");
+        assert_eq!(repo.head_sha(), head, "{scenario}");
+        assert_eq!(git_out(&repo, &["rev-parse", "HEAD^{tree}"]), tree);
+        assert_eq!(git_out(&repo, &["rev-list", "HEAD"]), commits);
+        assert_eq!(
+            git_out(&repo, &["rev-parse", &format!("origin/{branch}")]),
+            head
+        );
+        assert_eq!(recorded_base(&task), expected_base);
+        let log = fs::read_to_string(log).unwrap();
+        assert!(
+            (log.contains("pr edit") || log.contains("pr create")) && log.contains("--base main"),
+            "{log}"
+        );
+        assert!(!log.contains("pr merge"), "{log}");
+        eprintln!("{scenario}: lf pr open succeeded; local/remote HEAD and every commit preserved; comparison matches GitHub");
+        if scenario != "rebased" {
+            assert!(repo.path().join("dependency.txt").exists());
+            assert_eq!(expected_base, initial);
+        }
+    }
+}
+
+#[test]
+fn pr_open_without_shared_history_keeps_work_and_reports_a_short_error() {
+    let home = tempfile::tempdir().unwrap();
+    let repo = TestRepo::new();
+    let base = repo.head_sha();
+    let log = home.path().join("gh.log");
+    let script = gh_open_pr_script(log.to_str().unwrap());
+    let _env = EnvGuard::with_lf_home(&[("gh", &script)], home.path());
+    let branch = "jack/unrelated";
+    git_out(&repo, &["checkout", "--orphan", branch]);
+    repo.create_file("task.txt", "keep unpublished work\n");
+    repo.stage_all();
+    repo.commit("unrelated work");
+    register_task_with_pr(home.path(), repo.path(), branch, &base);
+    let head = repo.head_sha();
+    let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .current_dir(repo.path())
+        .args(["pr", "open", "--title", "Unrelated", "--body", "proof"])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    let message = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success());
+    assert!(
+        message.contains("cannot resolve a PR comparison"),
+        "{message}"
+    );
+    assert!(message.lines().count() < 10, "{message}");
+    assert!(!message.contains("rebase") && !message.contains("reset"));
+    assert_eq!(repo.head_sha(), head);
+    assert!(!remote_branch_exists(&repo, branch));
+    assert!(fs::read_to_string(log).unwrap_or_default().is_empty());
+}
+
+#[test]
+fn publication_refreshes_comparison_without_a_remote() {
+    let home = tempfile::tempdir().unwrap();
+    let repo = TestRepo::new();
+    let base = repo.head_sha();
+    let log = home.path().join("gh.log");
+    let script = gh_open_pr_script(log.to_str().unwrap());
+    let _env = EnvGuard::with_lf_home(&[("gh", &script)], home.path());
+    repo.create_branch("jack/local");
+    repo.create_file("dependency.txt", "dependency\n");
+    repo.stage_all();
+    repo.commit("dependency");
+    let stale = repo.head_sha();
+    repo.create_file("task.txt", "task\n");
+    repo.stage_all();
+    repo.commit("task");
+    git_out(&repo, &["remote", "remove", "origin"]);
+    let task = register_task_with_pr(home.path(), repo.path(), "jack/local", &stale);
+    let head = repo.head_sha();
+    let error = create_or_update_pr(
+        repo.path(),
+        &PrOptions {
+            title: Some("Local proof".into()),
+            body: Some("proof".into()),
+            draft: true,
+            agent: None,
+        },
+        &NullProgress,
+    )
+    .expect_err("publication needs a remote");
+    assert!(!error.to_string().contains("contaminated"));
+    assert_eq!(recorded_base(&task), base);
+    assert_eq!(repo.head_sha(), head);
+}
+
+#[test]
+fn publishing_after_parent_squash_preserves_the_fork_for_sync() {
+    let home = tempfile::tempdir().unwrap();
+    let child_dir = tempfile::tempdir().unwrap();
+    let repo = TestRepo::new();
+    let log = home.path().join("gh.log");
+    let script = gh_open_pr_script(log.to_str().unwrap());
+    let _env = EnvGuard::with_lf_home(&[("gh", &script)], home.path());
+    repo.create_branch("parent");
+    repo.create_file("dependency.txt", "parent dependency\n");
+    repo.stage_all();
+    repo.commit("parent work");
+    let fork = repo.head_sha();
+    let parent = register_task_with_pr(home.path(), repo.path(), "parent", &fork);
+    let child_path = child_dir.path().join("child");
+    git_out(
+        &repo,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "child",
+            child_path.to_str().unwrap(),
+        ],
+    );
+    let child = support::register_sibling_task(&parent, "INF-124", "child", &child_path);
+    // This child has no Linear mapping or provider URL; publication is local-plan work.
+    rusqlite::Connection::open(home.path().join("loopflow.db"))
+        .unwrap()
+        .execute(
+            "UPDATE tasks SET external_issue_id=NULL WHERE id=?1",
+            [child.id.as_str()],
+        )
+        .unwrap();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let mut pr = parent.pr.clone();
+    pr.publication = Some(PrPublication {
+        requested_at: pr.created_at,
+        presentation: None,
+        github: Some(GithubPr {
+            number: 41,
+            url: "https://example.com/pr/41".into(),
+            head_sha: Some(fork.clone()),
+        }),
+        merge: None,
+    });
+    runtime.block_on(parent.store.update_task_pr(&pr)).unwrap();
+    runtime
+        .block_on(parent.store.stack_task_placement(&child, &parent.pr.id))
+        .unwrap();
+    fs::write(child_path.join("child.txt"), "child work\n").unwrap();
+    for args in [vec!["add", "."], vec!["commit", "-m", "child work"]] {
+        assert!(Command::new("git")
+            .current_dir(&child_path)
+            .args(args)
+            .output()
+            .unwrap()
+            .status
+            .success());
+    }
+    repo.checkout("main");
+    git_out(&repo, &["merge", "--squash", "parent"]);
+    repo.commit("squash parent");
+    pr.merge_commit = Some(repo.head_sha());
+    runtime.block_on(parent.store.update_task_pr(&pr)).unwrap();
+    git_out(&repo, &["rm", "dependency.txt"]);
+    repo.commit("remove obsolete dependency after parent merge");
+    repo.push();
+
+    create_or_update_pr(
+        &child_path,
+        &PrOptions {
+            draft: true,
+            title: Some("Child".into()),
+            body: Some("Preserve child work".into()),
+            agent: None,
+        },
+        &NullProgress,
+    )
+    .unwrap();
+    let placed = runtime
+        .block_on(parent.store.get_task(&child.id))
+        .unwrap()
+        .unwrap();
+    assert_eq!(placed.base_commit, fork);
+    assert_eq!(placed.parent_pr_id, Some(parent.pr.id));
+    sync_with_recovery(
+        &child_path,
+        &SyncOptions {
+            onto: "origin/main".into(),
+            push: false,
+            fork_base: Some(placed.base_commit),
+        },
+        &NullProgress,
+    )
+    .unwrap();
+    assert!(
+        !child_path.join("dependency.txt").exists(),
+        "publication must not make sync restore a dependency main removed"
+    );
+    assert_eq!(
+        fs::read_to_string(child_path.join("child.txt")).unwrap(),
+        "child work\n"
+    );
 }

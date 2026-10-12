@@ -46,6 +46,7 @@ pub mod repository;
 pub mod security;
 pub mod session;
 pub(crate) mod session_record;
+pub mod steer;
 pub mod store;
 pub mod subscription;
 pub mod trace;

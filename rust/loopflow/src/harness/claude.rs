@@ -365,7 +365,7 @@ impl ClaudeHarness {
             }
         };
         let (stdin, result) = tokio::task::spawn_blocking(move || {
-            let result = store.with_session_attachment(&session, &attachment, || {
+            let result = store.with_session_dispatch(&session, &attachment, || {
                 super::dispatch::write_fenced(&mut stdin, line.as_bytes())
             });
             (stdin, result)

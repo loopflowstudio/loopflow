@@ -18,7 +18,7 @@ Read current cached planning and Task conditions:
 
 ```bash
 lf wave status <wave> --no-sync --json
-lf roadmap --json
+lf wave show --json
 ```
 
 Inspect historical Project status/content and available issue history through a

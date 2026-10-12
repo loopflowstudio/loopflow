@@ -696,6 +696,12 @@ mod tests {
             rusqlite::params![task.as_str(), project.as_str()],
         )
         .unwrap();
+        let machine = store.local_machine().unwrap().id;
+        sql.execute(
+            "UPDATE tasks SET checkout_machine_id=?1",
+            [machine.as_str()],
+        )
+        .unwrap();
         sql.execute("UPDATE processes SET cwd='/repo/task'", [])
             .unwrap();
 

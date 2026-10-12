@@ -171,6 +171,25 @@ impl SqliteStore {
             WHERE {key}=?1 AND {column}=0 AND export_json IS NOT NULL {deleted}"), params![owner.owner().1,input.to_string(),link])? == 1)
     }
 
+    pub(crate) fn reject_planning_export(
+        &self,
+        owner: PlanningChanges<'_>,
+        link: bool,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let (table, key) = owner.receipt();
+        let column = if link {
+            "export_link_attempted"
+        } else {
+            "export_attempted"
+        };
+        conn.execute(
+            &format!("UPDATE {table} SET {column}=0 WHERE {key}=?1 AND export_json IS NOT NULL"),
+            [owner.owner().1],
+        )?;
+        Ok(())
+    }
+
     pub(crate) fn planning_export_error(
         &self,
         owner: PlanningChanges<'_>,

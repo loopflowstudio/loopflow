@@ -10,8 +10,8 @@ Fix failing CI checks and leave the repaired PR published with auto-merge enable
 
 Start from an up-to-date branch, repair the recorded head's failures, verify the
 repair, and publish it with auto-merge enabled. Later finite checks observe
-GitHub for authoritative merge; the Task/Wave conversation owns remaining
-scope and Task completion.
+GitHub for authoritative merge; the finishing Flow or Task/Wave operator owns
+Task completion.
 
 ## Workflow
 
@@ -55,9 +55,8 @@ scope and Task completion.
    - Commit with `lf commit -m "ci-fix: <what failed and why>"`, then run
      `lf arm`. Arm prepares the exact head, pushes it, enables auto-merge,
      and returns without waiting for CI or merge.
-   - Preserve the recorded Task and PR identity. CI repair does not decide new
-     scope or complete the Task. For an associated Task, record independent accepted later work as ordinary Tasks
-     and linking comments.
+   - Preserve the recorded Task and PR identity. CI repair does not complete
+     the Task; its caller owns completion after merge.
    - Verify the published `headRefOid` matches local `HEAD` and GitHub shows
      auto-merge enabled (or already merged). Local edits or a local commit
      alone do not complete the repair.

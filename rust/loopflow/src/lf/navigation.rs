@@ -49,8 +49,15 @@ pub fn resolve_child(
         return Ok(Some(vec![child.get_name().to_string()]));
     }
     let mut matches = Vec::new();
-    if prefix.is_empty() && name == "resume" && command.find_subcommand("session").is_some() {
-        return Ok(Some(vec!["session".into(), "resume".into()]));
+    if prefix.is_empty() {
+        let owner = match name {
+            "resume" => Some("session"),
+            "comment" => Some("task"),
+            _ => None,
+        };
+        if let Some(owner) = owner.filter(|owner| command.find_subcommand(owner).is_some()) {
+            return Ok(Some(vec![owner.into(), name.into()]));
+        }
     }
     descendants(command, name, &[], &mut matches, false);
     // Exact descendant names win over abbreviations, just as exact owners do.
@@ -189,7 +196,7 @@ pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
             if current.get_name() == "help"
                 && output
                     .last()
-                    .is_some_and(|owner| matches!(owner.as_str(), "run" | "skill" | "flow"))
+                    .is_some_and(|owner| matches!(owner.as_str(), "skill" | "flow"))
             {
                 output.push("--".to_string());
             }
@@ -227,7 +234,6 @@ pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
                 path.extend(expansion);
                 if current.get_subcommands().next().is_none()
                     && !current.is_allow_external_subcommands_set()
-                    && current.get_name() != "run"
                 {
                     boundary = true;
                 }
@@ -285,7 +291,16 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
         let cwd = std::env::current_dir()?;
         let repo = crate::repo::discover_repo_root(&cwd)?.unwrap_or(cwd);
         match command {
-            Commands::Help { path, all } => print!("{}", render_help(path, &repo, *all)?),
+            Commands::Help { path, all, json } => {
+                if *json || cli.json {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&describe_command(path, *all)?)?
+                    );
+                } else {
+                    print!("{}", render_help(path, &repo, *all)?);
+                }
+            }
             Commands::List { path, json } => crate::lf::commands::list::show(path, &repo, *json)?,
             Commands::Flow {
                 cmd: FlowCommand::List { json, inventory },
@@ -336,11 +351,58 @@ pub fn resolve_path<'a>(tree: &'a Command, path: &[String]) -> Result<(&'a Comma
     Ok((current, canonical))
 }
 
+/// Installed syntax only. Runtime support and legal actions remain observations
+/// from Desktop/Work; this read opens neither a store nor a native application.
+pub fn describe_command(path: &[String], recursive: bool) -> Result<serde_json::Value> {
+    fn describe(command: &Command, canonical: &[String], recursive: bool) -> serde_json::Value {
+        let arguments = command.get_arguments().filter(|arg| !arg.is_hide_set()).map(|arg| {
+            let arity = arg.get_num_args().unwrap_or_else(|| clap::builder::ValueRange::new(usize::from(arg.get_action().takes_values())));
+            serde_json::json!({
+                "name": arg.get_id().as_str(),
+                "long": arg.get_long(),
+                "short": arg.get_short().map(|ch| ch.to_string()),
+                "position": arg.get_index(),
+                "required": arg.is_required_set(),
+                "global": arg.is_global_set(),
+                "description": arg.get_help().map(ToString::to_string),
+                "min_values": arity.min_values(),
+                "max_values": (arity.max_values() != usize::MAX).then_some(arity.max_values()),
+                "defaults": arg.get_default_values().iter().map(|value| value.to_string_lossy()).collect::<Vec<_>>(),
+                "values": arg.get_value_parser().possible_values().map(|values| values.filter(|v| !v.is_hide_set()).map(|v| v.get_name().to_string()).collect::<Vec<_>>()),
+                "conflicts": command.get_arg_conflicts_with(arg).iter().map(|a| a.get_id().as_str()).collect::<Vec<_>>(),
+            })
+        }).collect::<Vec<_>>();
+        let children = command.get_subcommands().filter(|child| !child.is_hide_set()).map(|child| {
+            let mut path = canonical.to_vec();
+            path.push(child.get_name().into());
+            if recursive { describe(child, &path, true) } else {
+                serde_json::json!({"command": format!("lf {}", path.join(" ")), "description": child.get_about().map(ToString::to_string)})
+            }
+        }).collect::<Vec<_>>();
+        serde_json::json!({
+            "command": std::iter::once("lf").chain(canonical.iter().map(String::as_str)).collect::<Vec<_>>().join(" "),
+            "description": command.get_about().map(ToString::to_string),
+            "usage": command.clone().render_usage().to_string(),
+            "arguments": arguments,
+            "commands": children,
+            "result_schema": crate::lf::commands::desktop::result_schema(canonical),
+        })
+    }
+    let tree = command_tree();
+    let (command, canonical) = resolve_path(&tree, path)?;
+    Ok(serde_json::json!({
+        "version": env!("CARGO_PKG_VERSION"),
+        "scope": "installed_cli",
+        "definition": describe(command, &canonical, recursive),
+        "root_arguments": describe(&tree, &[], false)["arguments"],
+    }))
+}
+
 pub fn render_help(path: &[String], repo: &Path, all: bool) -> Result<String> {
     let tree = command_tree();
     if path.is_empty() {
         if all {
-            let mut output = String::from("Usage: lf <command> | run <name> [message]\n\n");
+            let mut output = String::from("Usage: lf <command> | <name> [message]\n\n");
             render_tree(&tree, &[], &mut output);
             return Ok(output);
         }
@@ -349,7 +411,7 @@ pub fn render_help(path: &[String], repo: &Path, all: bool) -> Result<String> {
             .filter(|cmd| !cmd.is_hide_set())
             .map(Command::get_name)
             .collect::<Vec<_>>();
-        let mut output = String::from("Usage: lf <name> [message] | <command>\n\nRun\n  lf pursue [message]        build a change through to a published PR\n  lf run <name> [message]    select a flow, otherwise a skill\n  lf skill <name> [message]  select a skill explicitly\n\nDiscover\n  lf list                   commands, skills, and flows\n  lf help <path>             explain a command or definition\n  lf help --all              show the complete command tree\n\nCommands\n");
+        let mut output = String::from("Usage: lf <name> [message] | <command>\n\nRun\n  lf pursue [message]        build a change through to a published PR\n  lf flow <name> [message]   select a flow explicitly\n  lf skill <name> [message]  select a skill explicitly\n\nDiscover\n  lf list                   commands, skills, and flows\n  lf help <path>             explain a command or definition\n  lf help --all              show the complete command tree\n\nCommands\n");
         for row in names.chunks(5) {
             output.push_str(&format!(
                 "  {}\n",
@@ -359,9 +421,8 @@ pub fn render_help(path: &[String], repo: &Path, all: bool) -> Result<String> {
                     .trim_end()
             ));
         }
-        output.push_str("-a, --agent <harness[:model]> applies everywhere; overrides agents in Tasks, Flows, skills and child commands.");
-        output.push_str("\nSelect: --machine <label-or-id>, --task <task>, --wt <name>, --wave <wave>\n--machine runs in the saved remote repository; accepts --forward-agent.\n");
-        output.push_str("\nOmit owners when a command is unique: lf land → lf pr land.\nCommands take precedence; lf run NAME always selects a definition.\n");
+        output.push_str("\nSelect: --repo <name-or-path>, --machine <label-or-id>, --task <task>, --wt <name>, --wave <wave>\n--repo resolves names under repo_root (default ~/src) on the selected Machine.\n--machine otherwise uses its saved remote repository.\nWith --machine: --forward-agent\nAgent selection: -a, --agent <harness[:model]> overrides agents in Tasks, Flows, skills and child commands\n");
+        output.push_str("\nOmit owners when a command is unique: lf land → lf pr land.\nCommands take precedence; lf skill NAME and lf flow NAME select definitions.\n");
         return Ok(output);
     }
     let definition = match path {
@@ -370,13 +431,13 @@ pub fn render_help(path: &[String], repo: &Path, all: bool) -> Result<String> {
         _ => None,
     };
     if let Some((owner, name, escaped)) =
-        definition.filter(|(owner, _, _)| matches!(owner.as_str(), "run" | "skill" | "flow"))
+        definition.filter(|(owner, _, _)| matches!(owner.as_str(), "skill" | "flow"))
     {
         let command = tree
             .find_subcommand(owner)
             .expect("definition collection exists");
-        // Collection verbs win unless explicitly escaped; `run` always selects a definition.
-        if escaped || owner == "run" || resolve_child(command, name, &path[..1])?.is_none() {
+        // Collection verbs win unless explicitly escaped.
+        if escaped || resolve_child(command, name, &path[..1])?.is_none() {
             let kind = match owner.as_str() {
                 "skill" => Some(DefinitionKind::Skill),
                 "flow" => Some(DefinitionKind::Flow),
@@ -516,7 +577,6 @@ fn definition_help(
             output.push_str("\nUntyped lookup selects the same-named flow.\n");
         }
         _ => {
-            output.push_str(&format!("  lf run {name} [message]\n"));
             if matches!(resolve_child(tree, name, &[]), Ok(None)) {
                 output.push_str(&format!("  lf {name} [message]\n"));
             }

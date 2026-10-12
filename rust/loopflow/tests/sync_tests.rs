@@ -774,6 +774,10 @@ fn stacked_sync_refuses_when_base_is_not_an_ancestor() {
         matches!(result, Err(OpsError::UnsafeSyncBase { ref base, .. }) if *base == unrelated),
         "expected an unsafe-base refusal, got {result:?}"
     );
+    let message = result.unwrap_err().to_string();
+    assert!(message.lines().count() < 5, "{message}");
+    assert!(!message.contains("rebase") && !message.contains("reset"));
+    assert!(repo.path().join("child.txt").exists());
 }
 
 #[test]

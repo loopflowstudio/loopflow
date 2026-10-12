@@ -34,8 +34,6 @@ pub struct ProcessPromptInput {
     /// Work was selected or resolved from the current checkout/Session.
     pub work: Option<crate::prompt::WorkContext>,
     pub agent: Option<String>,
-    pub cwd: Option<PathBuf>,
-    pub max_turns: Option<u32>,
     pub yolo_mode: bool,
     pub source_overrides: ContextSourceOverrides,
     pub summary: Option<String>,
@@ -59,6 +57,22 @@ pub fn prepare_process_prompt(
     config: &Config,
     input: ProcessPromptInput,
 ) -> Result<PreparedProcessPrompt, CoreError> {
+    prepare_prompt(config, input, true)
+}
+
+/// Assemble a read-only preview; launch materializes its context references.
+pub(crate) fn preview_process_prompt(
+    config: &Config,
+    input: ProcessPromptInput,
+) -> Result<PreparedProcessPrompt, CoreError> {
+    prepare_prompt(config, input, false)
+}
+
+fn prepare_prompt(
+    config: &Config,
+    input: ProcessPromptInput,
+    persist: bool,
+) -> Result<PreparedProcessPrompt, CoreError> {
     let ProcessPromptInput {
         repo_root,
         skill,
@@ -71,8 +85,6 @@ pub fn prepare_process_prompt(
         no_loopflow,
         work,
         agent,
-        cwd,
-        max_turns,
         yolo_mode,
         source_overrides,
         summary,
@@ -165,7 +177,9 @@ pub fn prepare_process_prompt(
     } else {
         format_first_turn(&components)
     };
-    let conversation_context = Some(crate::context_block::ContextDelivery::prepare(&components)?);
+    let conversation_context = persist
+        .then(|| crate::context_block::ContextDelivery::prepare(&components))
+        .transpose()?;
     let action_style = components
         .skill
         .as_ref()
@@ -179,11 +193,11 @@ pub fn prepare_process_prompt(
         skill_invocation,
         output_schema: None,
         agent: Some(agent),
-        max_turns,
+        max_turns: None,
         resume_token: None,
         provider_account_id: None,
         provider_account_authority_home: None,
-        cwd: Some(cwd.unwrap_or(repo_root)),
+        cwd: Some(repo_root),
         write_scope: crate::agent::AgentWriteScope::Configured,
         execution_boundary: None,
         skip_permissions: yolo_mode,

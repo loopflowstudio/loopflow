@@ -29,8 +29,8 @@ pub(super) async fn sync_order(
     let external = local.linear_id()?.as_str();
     // The caller bounds the entire operation. Each confirmed move is durable;
     // a timeout preserves the exact last attempt for the next foreground pass.
+    let mut issues = client.ordered_items(external).await.map_err(message)?;
     loop {
-        let issues = client.ordered_items(external).await.map_err(message)?;
         let items = issues.iter().map(|i| i.item.clone()).collect::<Vec<_>>();
         if !crate::linear::acceptance::accept_linear_project_order_in(
             &store.sqlite,
@@ -82,10 +82,37 @@ pub(super) async fn sync_order(
         {
             return Ok(());
         }
-        client
+        let response = match client
             .deliver_planning_field(&effect.issue, false, effect.input)
             .await
-            .map_err(message)?;
+        {
+            Ok(response) => response,
+            Err(error) => {
+                if matches!(error, crate::linear::LinearError::RateLimited { .. }) {
+                    store
+                        .sqlite
+                        .reject_project_order(&delivery.id)
+                        .map_err(message)?;
+                }
+                return Err(message(error));
+            }
+        };
+        let crate::linear::PlanningResponse::Task { issue, .. } = response else {
+            return Err(message("Order mutation returned a Project"));
+        };
+        let updated = issues
+            .iter_mut()
+            .find(|candidate| candidate.item.id == issue.item.id)
+            .ok_or_else(|| message("Order mutation returned an unknown issue"))?;
+        *updated = *issue;
+        issues.sort_by(|a, b| {
+            a.priority_sort_order
+                .total_cmp(&b.priority_sort_order)
+                .then(a.sort_order.total_cmp(&b.sort_order))
+        });
+        for (rank, issue) in issues.iter_mut().enumerate() {
+            issue.item.rank = rank as u32;
+        }
     }
 }
 

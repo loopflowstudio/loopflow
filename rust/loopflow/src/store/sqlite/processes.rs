@@ -617,6 +617,16 @@ impl SqliteStore {
     // transaction across provider I/O. Do not unlink lock files: another process
     // may already have the inode open. Process exit releases ownership.
     pub(super) fn lock_session_attachment(&self, session: &str) -> StoreResult<File> {
+        self.lock_session_fence(session, false)
+    }
+
+    /// Independent transport writers may progress together, but neither may
+    /// cross a provider stop, replacement or attachment handoff.
+    pub(super) fn lock_session_dispatch(&self, session: &str) -> StoreResult<File> {
+        self.lock_session_fence(session, true)
+    }
+
+    fn session_fence_file(&self, session: &str) -> StoreResult<File> {
         let database = self
             .conn
             .lock()
@@ -639,11 +649,30 @@ impl SqliteStore {
             .write(true)
             .open(root.join(hex::encode(Sha256::digest(session.as_bytes()))))
             .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+        Ok(file)
+    }
+
+    pub(crate) fn try_lock_session_attachment(&self, session: &str) -> StoreResult<Option<File>> {
+        let file = self.session_fence_file(session)?;
+        match file.try_lock_exclusive() {
+            Ok(()) => Ok(Some(file)),
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => Ok(None),
+            Err(error) => Err(StoreError::InvalidData(error.to_string())),
+        }
+    }
+
+    fn lock_session_fence(&self, session: &str, shared: bool) -> StoreResult<File> {
+        let file = self.session_fence_file(session)?;
         // A synchronous caller must never wait indefinitely on a dispatch whose
         // reactor it might be driving. This bound uses the OS clock, not Tokio.
         let deadline = Instant::now() + Duration::from_secs(15);
         loop {
-            match file.try_lock_exclusive() {
+            let locked = if shared {
+                FileExt::try_lock_shared(&file)
+            } else {
+                file.try_lock_exclusive()
+            };
+            match locked {
                 Ok(()) => return Ok(file),
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                     if Instant::now() >= deadline {
@@ -667,6 +696,23 @@ impl SqliteStore {
         write: impl FnOnce() -> StoreResult<T>,
     ) -> StoreResult<T> {
         let _dispatch = self.lock_session_attachment(session)?;
+        {
+            let conn = self.conn.lock().expect("store mutex poisoned");
+            require_attachment_in(&conn, session, expected)?;
+        }
+        write()
+    }
+
+    /// The transport owns serialization of its writes. Hold shared exclusion
+    /// through the bounded write so synchronous provider hooks can also emit
+    /// before the provider drains its input.
+    pub(crate) fn with_session_dispatch<T>(
+        &self,
+        session: &str,
+        expected: &SessionAttachment,
+        write: impl FnOnce() -> StoreResult<T>,
+    ) -> StoreResult<T> {
+        let _dispatch = self.lock_session_dispatch(session)?;
         {
             let conn = self.conn.lock().expect("store mutex poisoned");
             require_attachment_in(&conn, session, expected)?;
@@ -1465,7 +1511,7 @@ mod discovery_tests {
             .unwrap();
             // A Flow process recorded both Processes as steps in the first Task's checkout.
             conn.execute(
-                "UPDATE tasks SET worktree='/repo.first' WHERE id=?1",
+                "UPDATE tasks SET worktree='/repo.first',checkout_machine_id=(SELECT id FROM machines WHERE route='local') WHERE id=?1",
                 [first.as_str()],
             )
             .unwrap();

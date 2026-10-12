@@ -111,6 +111,10 @@ then run `cargo test -p loopflow --test dto_fixtures composed_lifecycle` and
 Provider fixtures must read the launch's actual context channel. When a final
 sync adds fixtures that inspect a changed transport, run those focused tests
 before arming; the earlier gate did not cover the newly combined behavior.
+Context-hook changes also run `session_cli_tests`: resume callbacks supply the
+native Session identity and event payload, just like startup. Provider fixture
+scripts must fail when a callback fails, rather than report a successful turn
+with missing context evidence.
 Claude stream fixtures must acknowledge the input's UUID before completing its
 result, and stay alive until the harness closes stdin. Include
 `explicit_agent_wins_through_task_nested_flows_and_provider_children` when
@@ -172,7 +176,9 @@ The test runner and CI use `test_network.py` for Python, Rust test executables,
 Swift tests, website tests and smoke tests. Each invocation proves loopback works
 and an external connection is denied; the OS boundary covers descendants too.
 Git transport is file-only. Local bare remotes and loopback protocol fixtures
-remain available. No developer shell or global Git configuration changes.
+remain available. macOS cannot nest Seatbelt profiles: the checkout-observation
+proof skips inside this wrapper and runs separately in gate/macOS CI, installing
+its own read-only, network-denying subprocess policy. No developer shell or global Git configuration changes.
 
 macOS uses `sandbox-exec`; Linux uses passwordless sudo, `unshare --net` and `ip`
 to create a private network namespace, enable loopback and restore the caller's
@@ -621,9 +627,12 @@ accounts or installed data. Ordinary retry, usage, binding and review behavior
 belong in `session_lifecycle_tests`; Chapter convergence belongs in
 `ops::chapter::tests`, including interrupted rotation and second-Machine sync.
 
-`planning_reconnect_tests` runs public work-watch and Flow reconnect against
+`planning_reconnect_tests` runs public work-watch and Flow-boundary recovery against
 synthetic Linear on Linux, with disposable TLS trust. It covers lost replies,
 independent acquisition during failed delivery, local buffering and retained execution.
+The peer implements team deltas with current revision timestamps. Flow acquisition
+waits for a turn/step boundary; only watchers retry on the 30–240-second clock.
+Run these Linux fixtures when changing Linear acquisition, even if macOS checks pass.
 Linear and Git planning run separately; no provider receipt crosses Git.
 `planning_setup_tests` proves configuration selection and personal-key recovery.
 `planning_foreground_tests` exercises disposable custom refs through public CLI and
@@ -947,7 +956,7 @@ When changing harness event mapping, run the recorded-trace conformance tests
 alongside the provider's unit tests. Keep trace expectations aligned with the
 event contract, including durable final-answer receipts and usage checkpoints.
 
-After Session-history or schema changes, run `lf monitor list --json`, `lf usage --json`, and
+After Session-history or schema changes, run `lf history list --json`, `lf usage --json`, and
 `lf doctor --json` against a disposable Machine with inherited `LF_*` and
 `LOOPFLOW_*` authority removed and `LF_BIN` pinned to the compiled source CLI.
 Never use the installed store to prove a draft migration.

@@ -62,13 +62,14 @@ const REPOSITORY_DEFAULT: &[&[&str]] = &[&["session", "ensure"]];
 /// selecting ambient Wave context. These must not inherit `LF_WAVE_ID`.
 /// Typed historical filters may resolve an explicit name to its stored ID.
 const FILTER_ONLY: &[&[&str]] = &[
-    &["monitor", "activity"],
+    &["history"],
     &["repo", "ci"],
     &["wave", "cron", "list"],
     &["wave", "cron", "preflight"],
     &["wave", "cron", "sync"],
-    &["monitor", "list"],
-    &["monitor", "usage"],
+    &["history", "list"],
+    &["history", "usage"],
+    &["wave", "workflow", "list"],
 ];
 
 /// Commands that require a Wave on the command line and therefore never
@@ -94,11 +95,39 @@ const COMMANDS: &[Cmd] = &[
         global_default: false,
     },
     Cmd {
-        id: "roadmap",
-        path: &["roadmap"],
-        base_args: &["roadmap", "--json"],
-        wave_form: WaveForm::Flag,
+        id: "wave show",
+        path: &["wave", "show"],
+        base_args: &["wave", "show", "--json"],
+        wave_form: WaveForm::Positional,
         global_default: true,
+    },
+    Cmd {
+        id: "wave edit-plan",
+        path: &["wave", "edit-plan"],
+        base_args: &["wave", "edit-plan", "--summary", "Fixture"],
+        wave_form: WaveForm::Positional,
+        global_default: false,
+    },
+    Cmd {
+        id: "wave workflow show",
+        path: &["wave", "workflow", "show"],
+        base_args: &["wave", "workflow", "show", "--json"],
+        wave_form: WaveForm::Positional,
+        global_default: false,
+    },
+    Cmd {
+        id: "wave workflow source",
+        path: &["wave", "workflow", "source"],
+        base_args: &["wave", "workflow", "source", "feature"],
+        wave_form: WaveForm::Positional,
+        global_default: false,
+    },
+    Cmd {
+        id: "wave workflow set",
+        path: &["wave", "workflow", "set"],
+        base_args: &["wave", "workflow", "set", "feature"],
+        wave_form: WaveForm::Positional,
+        global_default: false,
     },
     // ── Mutations ────────────────────────────────────────────────────────
     Cmd {

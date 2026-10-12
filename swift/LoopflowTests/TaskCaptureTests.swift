@@ -151,15 +151,15 @@ struct TaskCaptureTests {
         let repoIdentity = WorkspaceIdentity(machineId: machineId, worktree: repo)
         let taskIdentity = WorkspaceIdentity(machineId: machineId, worktree: taskPath)
         let registry = SessionsWorkspaceRegistry(localMachineId: machineId)
-        let repoPanes = registry.workspace(for: repoIdentity).multiplexer
+        model.bindWorkspaces(registry, repository: "fixture-repository")
+        let repoPanes = registry.workspace(for: model.workspaceKey(for: nil, repository: "fixture-repository"), title: "Repository", location: repoIdentity).multiplexer
         repoPanes.newShell(command: ["retained-shell"])
         repoPanes.load(sessionId: "existing-conversation")
         let retained = repoPanes.layout.allPanes
-        let taskPanes = registry.workspace(for: taskIdentity).multiplexer
+        let taskPanes = registry.workspace(for: model.workspaceKey(for: .task(id: task.id), repository: "fixture-repository"), title: task.task.name, location: taskIdentity).multiplexer
         taskPanes.newShell(command: ["task-shell"])
         let taskLayout = taskPanes.layout
-        registry.layout(for: repoIdentity).select(taskIdentity)
-        let view = SessionsView(model: model, repoPath: repo, workspaces: registry,
+        let view = SessionsView(model: model, repoPath: repo, workspaces: registry, repository: "fixture-repository",
             query: RegistryQuery { _, _ in throw RegistryQueryError("Unexpected read") })
         let before = repoPanes.layout
         let content = model.navigation.content
@@ -168,23 +168,17 @@ struct TaskCaptureTests {
         #expect(repoPanes.layout == before)
         #expect(taskPanes.layout == taskLayout)
         #expect(model.navigation.content == content)
-        #expect(!model.navigation.showsRetainedTerminals)
-        #expect(registry.layout(for: repoIdentity).focusedPath == taskIdentity)
 
         let helper = URL(fileURLWithPath: host).appendingPathComponent("lf")
         try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helper.path)
         try view.inspect().find(viewWithAccessibilityIdentifier: "work-create-task").button().tap()
-        #expect(model.selection == .task(id: task.id))
-        #expect(model.navigation.showsRetainedTerminals)
+        #expect(model.selection == nil)
         #expect(model.navigation.content == .terminals)
-        #expect(registry.layout(for: repoIdentity).focusedPath == repoIdentity)
         #expect(taskPanes.layout == taskLayout)
         for pane in retained { #expect(repoPanes.layout.pane(for: pane.id) == pane) }
         #expect(repoPanes.shellCommands[repoPanes.focusedPaneId] ==
             SessionSkillLaunch(repoPath: repo, wave: wave.wave.name, skill: "capture-tasks").arguments(lf: helper.path))
-        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "worktree-chip")
         model.select(.task(id: task.id))
-        #expect(!model.navigation.showsRetainedTerminals)
         try Data().write(to: URL(fileURLWithPath: host).appendingPathComponent("complete"))
     }
 

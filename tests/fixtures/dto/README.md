@@ -39,7 +39,7 @@ missing capture/start membership, stream finality and evidence gaps stay explici
 The optional `task_pr_id` retains the PR captured by the managed Flow;
 `first_provider_attempt_at` differs from capture/import observation time.
 
-`work_activity_snapshot.json` pins `lf activity --json`: durable Work creation,
+`work_activity_snapshot.json` pins `lf history --json`: durable Work creation,
 Session capture/provider history, PR and Steer facts retain their original
 identities. Rust and Swift round-trip this shared history.
 
@@ -64,3 +64,32 @@ submitted input by source, flagged against budgets, with Task totals. One step
 is LOO-298-shaped (384 steers over the goal budget); the other has no retained
 capture, so every source is `null` rather than zero. Rust round-trips it and
 Swift decodes it for the Task's Session history.
+
+`desktop_open_explanations.json` pins proposed opening URLs, impediments and unknown
+native state. Rust and Swift round-trip it; a proposal is not an opening receipt.
+
+`desktop_openings.json` distinguishes request acceptance, usable endpoints and failures;
+`desktop_inspection.json` requires top-level `openings` for failures before window
+registration. Window receipts own Task/Session outcomes. Fixture shape is not native
+readiness proof.
+
+`task_run_explanations.json` covers edge take-up, no-Flow completion, ad-hoc Flow
+selection and unavailable execution evidence. Explanation never grants admission.
+
+`session_connect_explanations.json` preserves connection intent, preparation versus
+takeover, shared legal actions and unavailable evidence without client acquisition.
+
+`repository_identity.json` carries the selected plan and retained Machine-local locators.
+
+`task_move_explanations.json` preserves exact prior Workflow positions, move/restart intent and unperformed completion checks.
+
+`task_planning_explanations.json` preserves creation, edit revision/fields, comment
+append versus provider refresh, effects and explicit refused input.
+
+`task_checkout_explanations.json` retains proposed, reused and restored checkout intent separately from admission and unavailable evidence.
+
+`task_locations.json` covers request-bound Machine observations, retained paths,
+pathless execution, local absence and unavailable peers. Negative readings grant
+no admission; execution locations never enter planning exchange.
+
+`task_files_frames.json` preserves request/Task/Machine/checkout identity and distinguishes filesystem invalidation from heartbeat.

@@ -429,7 +429,7 @@ fn a_task_committed_elsewhere_appears_once_and_bursts_converge() {
     assert!((1..=5).contains(&frames), "{frames} planning frames");
     let last = last.unwrap();
     assert_eq!(identifiers(&last).len(), 21);
-    let fresh = lf(home.path(), &["roadmap", "--all", "--json"])
+    let fresh = lf(home.path(), &["wave", "show", "--all", "--json"])
         .output()
         .unwrap();
     assert!(fresh.status.success());
@@ -580,10 +580,13 @@ fn every_displayed_session_fact_committed_elsewhere_is_shown() {
     for line in 0..50 {
         transcript(&conn, line);
     }
-    assert!(watch
-        .parts(Duration::from_millis(1500))
-        .iter()
-        .all(|frame| !matches!(frame.content, WorkContent::Sessions(_))));
+    let frames = watch.parts(Duration::from_millis(1500));
+    assert!(
+        frames
+            .iter()
+            .all(|frame| !matches!(frame.content, WorkContent::Sessions(_))),
+        "unexpected Session change: {frames:?}"
+    );
 
     // No database write announces this death: the OS clock must find it.
     provider.0.kill().unwrap();
@@ -1028,7 +1031,8 @@ fn peer_planning_receipts_reach_open_desktop_without_refresh() {
         }
     };
     assert!(read(&|statuses| statuses.is_empty()).is_empty());
-    // Non-Git Work folders still display stored status. No remote worker runs.
+    // Non-Git Work folders still display stored status; foreground acquisition
+    // reports the unavailable destination without discarding local planning.
     let destination = PlanningDestination::new(
         home.path().join("offline.git").to_str().unwrap(),
         "refs/loopflow/planning/shared/team",
@@ -1051,10 +1055,17 @@ fn peer_planning_receipts_reach_open_desktop_without_refresh() {
             [&id],
         )
         .unwrap();
-    let statuses =
-        read(&|statuses| statuses[0].publication_state.as_deref() == Some("unconfirmed"));
+    let statuses = read(&|statuses| {
+        statuses[0].publication_state.as_deref() == Some("unconfirmed")
+            && statuses[0].fetched_revision.as_deref() == Some("fetched")
+    });
     assert_eq!(statuses[0].fetched_revision.as_deref(), Some("fetched"));
-    assert_eq!(statuses[0].publication_error.as_deref(), Some("reply lost"));
+    // The active foreground connection can already have recorded a newer
+    // publication failure. Both readings retain the unconfirmed receipt.
+    assert!(matches!(
+        statuses[0].publication_error.as_deref(),
+        Some("reply lost" | "Git publication pending; local planning retained")
+    ));
     assert_eq!(statuses[0].imported_revision, None);
     assert!(statuses[0].pending_local);
     let config_dir = Path::new(repo).join(".lf");

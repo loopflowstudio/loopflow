@@ -79,7 +79,7 @@ fn task_row(roadmap: &Value) -> Value {
 
 fn capture(binary: &Path, repo: &Path, home: &Path) -> Value {
     let status = read(binary, repo, home, &["task", "status", "FIX-1", "--json"]);
-    let roadmap = read(binary, repo, home, &["roadmap", "--all", "--json"]);
+    let roadmap = read(binary, repo, home, &["wave", "show", "--all", "--json"]);
     let row = task_row(&roadmap);
     let mut monitor = Running {
         release: None,

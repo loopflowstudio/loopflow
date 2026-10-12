@@ -917,6 +917,11 @@ pub fn refresh_status(wave: Option<&str>) -> Result<String> {
 
 pub fn run_repo(cmd: &RepoCommand) -> Result<()> {
     match cmd {
+        RepoCommand::Identity { bind, json } => {
+            crate::lf::commands::work_route::identity(bind.as_ref(), *json)
+        }
+
+        RepoCommand::Comment { message, .. } => crate::lf::commands::waves::comment(None, message),
         RepoCommand::Planning { cmd } => crate::lf::commands::planning::run(cmd),
         RepoCommand::Connect {
             wave,
@@ -2552,7 +2557,6 @@ fn process_skill_agent(
             resolved_skill: Some(skill),
             surface: Surface::Headless,
             message,
-            cwd: Some(repo_root.to_path_buf()),
             yolo_mode: config.yolo,
             source_overrides: ContextSourceOverrides {
                 // Sync conflicts already name the affected paths in `context`.

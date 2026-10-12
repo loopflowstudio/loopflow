@@ -287,7 +287,7 @@ mod tests {
 
         for name in ["wave/operate", "wave-report"] {
             let skill = get_builtin_skill(name).expect("multi-Task output skill");
-            assert!(skill.contains("lf roadmap"));
+            assert!(skill.contains("lf wave show"));
             assert!(skill.contains("lf wave status"));
             assert!(skill.contains("task.identifier"));
             assert!(skill.contains("reference.issue_url"));

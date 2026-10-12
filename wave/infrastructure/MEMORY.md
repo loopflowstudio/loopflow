@@ -390,8 +390,7 @@ Session lacks exact process evidence; lf success proves no provider exit.
 
 ## Storage footprint (LOO-390, 2026-10-07)
 
-Jack Heart authorized autonomous investigation, cleanup and delivery. Evidence
-and proposals: [storage footprint review](../../docs/reviews/storage-footprint.md).
+Jack Heart authorized investigation, cleanup and delivery. Evidence: [storage footprint review](../../docs/reviews/storage-footprint.md).
 `session_events` was 92% of a 2.6 GiB store: each streamed token was two rows,
 also kept in `runs/*/events.jsonl`. PR #1474 (v0.13.9, installed October 7 and
 measured): new captures keep 28% of rows and 72% of bytes, preflight validates
@@ -474,8 +473,15 @@ Cleanup independently reacquires its lease: terminal receipts can precede
 descriptor closure. This proves neither the loss cause nor recovered evidence.
 Release owns re-entry leases, transfer deadlines and pending-version lessons.
 
-#1459's exact-reflog PR-base repair shipped in v0.13.5; #1456 merged October 6.
-Absent evidence and foreign ancestry refuse. Evidence: `cad03fe6d:wave/infrastructure/MEMORY.md`, this heading and its references.
+#1459's exact-reflog repair shipped in v0.13.5; history:
+`cad03fe6d:wave/infrastructure/MEMORY.md`. October 11 lf-cb9012a supersedes
+its ancestry veto in source. Jack Heart subsequently authorized landing #1533
+after resolving main conflicts (`7689d642`); this gate does not establish delivery.
+The [durable review](../../docs/reviews/stale-pr-bases.md) preserves the 5 Whys
+and refusal inventory. Current Git ancestry owns PR comparison; saved placement cannot
+classify commits as foreign. Preserve every commit. Stack forks still own squash-parent sync;
+refreshing them during publication can restore files main deleted. Disposable
+CLI proofs pass; installed Etude and hosted acceptance remain unproved.
 
 ## Scheduled release accounting (LOO-285, source reconciliation October 2)
 
@@ -523,8 +529,7 @@ regression proves Recovery cannot replace natural Scheduled evidence. No install
 pass or accepted Intelligence handoff is established; reproduce current failure
 before commissioning duplicate analytics repair. Required headless Desktop/public proof and
 actual automatic settlement observations remain outstanding. LOO-357 retired
-the UI-host prerequisite; PR #1441 removed its scheduled validator requirement. The working plan
-owns remaining implementation; no production release, install, schedule change,
+the UI-host prerequisite; PR #1441 removed its scheduled validator requirement. The plan owns implementation; no release, install, schedule change,
 Home transfer or review completion is authorized by local reconciliation.
 
 
@@ -963,18 +968,12 @@ completion and target-first resolution. Distinguish non-Git folders from Git err
 never invent repositories/routes. Setup and receipt redesign remain unselected;
 a phase alone proves no advancement.
 
-October 11: installation job 114410351377 failed pulling from ECR Public with
-`toomanyrequests: Rate exceeded`; exact quota unknown. `243ed91a36` adds local image
-reuse and bounded throttling retries, preserving Release's separate download/startup
-deadlines. Mutable local tags require explicit refresh. Six simulated tests and
-both local disposable installation paths pass with cached Rust 1.99.0; hosted
-throttling recovery remains unproved. Gate's Python suite had 394 passes, 19 skips
-and one nested-sandbox refusal; that test passed through its own macOS sandbox.
-Persistent throttling fails as infrastructure, never skips verification.
-Jack Heart subsequently approved
-PR #1529 for landing (`ff9c03dd-7587-4c14-afd8-447d99252aaf`).
-[Release memory](release/MEMORY.md) retains cold-download
-and operation-entry evidence; successful reporting alone proves no operation success.
+October 11: Jack Heart approved #1529 for landing (`ff9c03dd`). ECR throttling
+failed job 114410351377. `243ed91a36` adds local reuse/bounded retries with
+separate release deadlines. Cached disposable paths pass; hosted recovery is
+unproved. Checks/limits: `6016eca305:wave/infrastructure/MEMORY.md`, this heading.
+Persistent throttling fails as infrastructure. [Release memory](release/MEMORY.md)
+retains cold-download/operation-entry evidence; reporting proves no operation success.
 
 ## Shipped history
 

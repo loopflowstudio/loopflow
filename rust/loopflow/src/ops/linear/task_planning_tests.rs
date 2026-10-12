@@ -1565,8 +1565,6 @@ fn native_runner_is_quiet_until_its_turn_ends() {
                         crate::ops::task_input::TaskSeed {
                             task: task.clone(),
                             message: String::new(),
-                            steers: Vec::new(),
-                            steer: 0,
                             interrupt: 0,
                         },
                     )

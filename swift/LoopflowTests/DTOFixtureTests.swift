@@ -7,6 +7,13 @@ import Testing
 /// the Mac app.
 @Suite("DTO Fixtures")
 struct DTOFixtureTests {
+    @Test("Direction preserves named and historical authors")
+    func workAuthors() throws {
+        let authors = try JSONDecoder().decode([WorkAuthor].self, from: loadFixtureData("work_authors.json"))
+        #expect(authors == [.user, .named(id: "Fixture author"), .captured(id: 3), .imported(id: "historical")])
+        #expect(try JSONDecoder().decode([WorkAuthor].self, from: JSONEncoder().encode(authors)) == authors)
+    }
+
     @Test("Activity retains unknown record identity without a PID")
     func activityFixture() throws {
         let snapshot = try JSONDecoder().decode(ActivitySnapshot.self, from: loadFixtureData("activity_snapshot.json"))

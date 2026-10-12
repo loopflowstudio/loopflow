@@ -275,6 +275,43 @@ approving landing with quieter output. Fenced native answers, replay/schema and
 fake-Flow proofs pass, not configured Task-to-publication or installation.
 Harness errors retain failed-result text for retries. CI owns the full matrix.
 
+## Session steers (lf-9c03797, 2026-10-11)
+
+Jack Heart accepted Session-only delivery, repository/Work wrappers, downward
+propagation, independent receipts, bounded launch seeding and idle staying idle;
+he renewed pursuit after the provider gaps. Replace old paths together in one PR.
+Jack Heart then selected the vocabulary “steer” and “delivery” and authorized
+the naming update followed by landing PR #1535. `Steer`/`SteerId` replace the
+duplicate message projections; JSON uses `steer`, and the single draft stores
+`steers` with `steer_id` references. Released migration history remains unchanged.
+Source-level delivery inspection and agent acknowledgement were review proposals,
+not selected work. Keep explicit retry and honest unconfirmed delivery; no new
+acknowledgement lifecycle or follow-up Task is implied by vocabulary reduction.
+Provider-bound capability survives Codex handoff; OpenCode uses local invocation
+IDs, never fabricated provider request IDs. Child callbacks and replaced providers
+retain no authority; emission is not confirmation.
+
+Claude 2.1.296's exclusive startup-hook/input cycle wrote only 512 of 131,133
+bytes in two seconds. Shared dispatch plus exclusive takeover resolves it.
+`0d04805ab3` preserves oversized launch/resume, handoff, replacement/child rejection
+and OpenCode retry protocol proofs, not configured model acceptance. Old injection
+paths are deleted; the withdrawn-cut feedback no longer describes current source.
+`27ce387bdc` removes unread subscription state. `cd2c38184f` reconciles membership
+on Session reads/callbacks, removing publication-time scans; cancelled mixed batches
+retain unaffected pending direction. `f96a7d2378` labels capabilities reserved,
+not installed. Release's operation-entry lesson applies: store proofs cannot
+replace public launch proofs; protocol stand-ins cannot prove model acceptance.
+The shared-dispatch counterexample and protocol limits remain in
+`0d04805ab35f2ba0ee4d72dec3cc9caa1d1aa051:scratch/session-steer-subscriptions.md`.
+Configured-provider acceptance remains unproved; current semantics and limitations
+live in `docs/architecture-reference.md` under Durable communication.
+Gate found missing planning revision triggers for saved steers; the same draft now
+adds them. Explicit delivery diagnostics do not drive workspace refreshes.
+The launch fixtures select hooks by moment and supply the native Session identity;
+the account fixture isolates native Claude state. Focused repairs, receipt/migration
+proofs, CLI/integration checks and 28 headless Swift DTO tests pass. The broader
+library run had 1,718 passes and 9 ignores; both failures passed focused repairs.
+
 ## Process-owned liveness (LOO-451, 2026-10-10)
 
 Jack Heart removed client-file compatibility (`5228ab69`); launches record an
@@ -435,19 +472,36 @@ linked receipts. They preserve due ownership, candidate, uncertain publication,
 caller edits and child-held leases; simulated passes establish neither public
 container/macOS acceptance nor configured automatic settlement.
 
-October 6 telemetry repair passed 35 rows and twelve tests, not automatic
-settlement. Jack Heart authorized publication; recovery follows LOO-382.
-All 36 September 24 failures remain counterevidence. Current scorecard consumes
-SessionHistory; reproduce present failure before duplicate analytics work.
-LOO-357/#1441 retired scheduled UI-host validation. Headless Desktop/public proof,
-Intelligence handoff and qualifying automatic settlements remain unproved.
-Jack waived demo and authorized #1419 landing October 4; this grants no production
-install, schedule change or Home transfer. Original receipts, September 28's false
-green incident, October 5's three unresolved opportunities, unchanged schedules
-and exact release references remain at
-`7afd34e7b830d0a82ee3c65bd6a372390ae3ca11:wave/infrastructure/MEMORY.md`,
-“Scheduled release accounting,” and [release memory](release/MEMORY.md).
-Successful reporting, manual publication and schedule repair prove no automatic settlement.
+Telemetry repair/publication authorization: `85490d96ec:wave/infrastructure/MEMORY.md`.
+Isolated passes prove no automatic settlement; receipts retain repair ownership.
+
+Release's operation-entry lesson and v0.12.24 activation history remain at
+`ff1dc403c4:wave/infrastructure/MEMORY.md`, this heading, and in
+[release memory](release/MEMORY.md). Successful reporting proves no operation
+success; activation proves neither accounting installation nor qualifying settlement.
+October 5 child evidence records repaired installed jobs using the machine gate
+at unchanged 09:00/10:00 schedules. Ownership remains Infrastructure; the child
+is not registered. History exposed three unresolved opportunities with unknown
+timezone provenance, zero executions and no qualifying pair. Schedule repair
+cannot backfill that evidence or count as an unattended settlement.
+
+All 36 telemetry failures, including the original 35, remain dated counterevidence
+from September 24. The missing `agent_turns` diagnosis is historical: integrated
+scorecard source consumes SessionHistory. The isolated doctor/scorecard Flow
+regression proves Recovery cannot replace natural Scheduled evidence. No installed
+pass or accepted Intelligence handoff is established; reproduce current failure
+before commissioning duplicate analytics repair. Required headless Desktop/public proof and
+actual automatic settlement observations remain outstanding. LOO-357 retired
+the UI-host prerequisite; PR #1441 removed its scheduled validator requirement. The working plan
+owns remaining implementation; no production release, install, schedule change,
+Home transfer or review completion is authorized by local reconciliation.
+
+
+On October 4, Jack Heart waived the interactive demo and authorized landing
+PR #1419. This supersedes the earlier review requirement for this delivery;
+installed acceptance and the two automatic settlement observations remain
+unproved. The branch’s prior memory curation remains in Git history at
+`e2eccdd257f0f3e2cf34db7583f7309eb0084394:wave/infrastructure/MEMORY.md`.
 
 ## Operator acceptance and account direction (2026-10-04)
 

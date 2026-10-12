@@ -140,6 +140,67 @@ mod tests {
     const UNBUFFERED: usize = 8 << 20;
 
     #[test]
+    fn startup_output_and_input_progress_while_takeover_waits_for_both() {
+        let home = tempfile::tempdir().unwrap();
+        let (store, attachment) = fenced_session(&home);
+        let (input_entered, input_ready) = mpsc::channel();
+        let (finish_input, input_finished) = mpsc::channel();
+        let input_store = store.clone();
+        let input_claim = attachment.clone();
+        let input = std::thread::spawn(move || {
+            input_store
+                .with_session_dispatch("conversation", &input_claim, || {
+                    input_entered.send(()).unwrap();
+                    input_finished.recv_timeout(Duration::from_secs(5)).unwrap();
+                    Ok(())
+                })
+                .unwrap();
+        });
+        input_ready.recv_timeout(Duration::from_secs(5)).unwrap();
+
+        let (hook_entered, hook_ready) = mpsc::channel();
+        let (finish_hook, hook_finished) = mpsc::channel();
+        let hook_store = store.clone();
+        let hook_claim = attachment.clone();
+        let hook = std::thread::spawn(move || {
+            hook_store
+                .with_session_dispatch("conversation", &hook_claim, || {
+                    hook_entered.send(()).unwrap();
+                    hook_finished.recv_timeout(Duration::from_secs(5)).unwrap();
+                    Ok(())
+                })
+                .unwrap();
+        });
+        hook_ready
+            .recv_timeout(Duration::from_secs(1))
+            .expect("startup hook must finish before the provider drains input");
+
+        let transfer_store = store.clone();
+        let former = attachment.clone();
+        let (transferred, transfer) = mpsc::channel();
+        let takeover = std::thread::spawn(move || {
+            let next = transfer_store
+                .claim_session_attachment("conversation", Some(&former), &LfProcessId::new(), false)
+                .unwrap();
+            transferred.send(next).unwrap();
+        });
+        assert!(transfer.recv_timeout(Duration::from_millis(50)).is_err());
+        finish_input.send(()).unwrap();
+        input.join().unwrap();
+        assert!(transfer.recv_timeout(Duration::from_millis(50)).is_err());
+        finish_hook.send(()).unwrap();
+        hook.join().unwrap();
+        let next = transfer.recv_timeout(Duration::from_secs(2)).unwrap();
+        takeover.join().unwrap();
+        assert_ne!(next.token, attachment.token);
+        assert!(store
+            .with_session_dispatch::<()>("conversation", &attachment, || {
+                panic!("stale input wrote after takeover")
+            })
+            .is_err());
+    }
+
+    #[test]
     fn reader_waiting_for_the_fence_leaves_the_runtime_running() {
         let home = tempfile::tempdir().unwrap();
         let (store, attachment) = fenced_session(&home);

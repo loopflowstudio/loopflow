@@ -59,6 +59,9 @@ mod tests {
     const NEVER_DISPLAYED: &[&str] = &[
         "access_profiles",
         "pm_project_name_cutover",
+        "planning_user",
+        "planning_peer_changes",
+        "planning_peer_observed",
         "project_binding_imports",
         "auth_browser_bindings",
         "blob_tokens",
@@ -70,6 +73,11 @@ mod tests {
         "provider_session_accounts",
         "provider_tokens",
         "schema_migrations",
+        // Delivery diagnostics are explicit CLI reads, not workspace projections.
+        "session_steers",
+        "steer_adapters",
+        "steer_batches",
+        "steer_deliveries",
         "store_revisions",
         "task_linear_ingested_comments",
         "tool_responses",
@@ -132,6 +140,19 @@ mod tests {
         for table in NEVER_DISPLAYED {
             assert!(tables.iter().any(|name| name == table), "{table} is gone");
         }
+    }
+
+    #[test]
+    fn saving_a_steer_invalidates_planning_without_changing_session_state() {
+        let (_dir, store) = store();
+        session(&store, "conversation");
+        let before = store.revisions().unwrap();
+        store
+            .save_session_steer("conversation", "Fixture author", "Keep the public name")
+            .unwrap();
+        let after = store.revisions().unwrap();
+        assert_eq!(after.planning, before.planning + 1);
+        assert_eq!(after.sessions, before.sessions);
     }
 
     /// The tables the Task conversation work adds, each with the one domain

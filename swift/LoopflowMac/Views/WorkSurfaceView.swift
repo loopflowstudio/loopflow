@@ -279,10 +279,13 @@ struct WorkSurfaceView: View {
                     }
                     .tint(palette.accentInk)
                     .foregroundStyle(palette.accentInk)
-                    TaskDeliveryView(task: task)
-                    if let sync = task.task.sync {
-                        PlanningSyncView(sync: sync)
+                    TaskDueDateView(task: task)
+                    if task.task.acquisition.state != .available {
+                        Text("Planning evidence: \(task.task.acquisition.state.rawValue)")
+                            .font(Typography.caption())
+                            .foregroundStyle(.secondary)
                     }
+                    PlanningSyncView(sync: task.task.sync)
                 }
                 if let unavailable = found.wave.unavailableTasks.first(where: { $0.taskId == task.id }) {
                     evidenceBanner(title: "Retained Task · planning unavailable", detail: unavailable.reason)

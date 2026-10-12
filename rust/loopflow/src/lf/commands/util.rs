@@ -218,9 +218,14 @@ pub(crate) fn resume_session_with_env(
     remote: Option<NativeConnection>,
     attachment: Option<(String, crate::process::SessionAttachment)>,
 ) -> Result<()> {
+    let selected_model = crate::config::resume_model(harness, model)?;
     let user_name = crate::config::participant_name()?;
-    let mut command =
-        build_resume_session_command(harness, model, worktree, &provider_session.agent_session)?;
+    let mut command = build_resume_session_command(
+        harness,
+        selected_model.as_deref(),
+        worktree,
+        &provider_session.agent_session,
+    )?;
     command.attachment = attachment;
     command.remote = remote;
     if let Some(remote) = &command.remote {
@@ -318,7 +323,7 @@ pub(crate) fn require_provider_session_process(dir: &Path) -> Result<()> {
     if store.task_deleted(&task)? {
         bail!(
             "Task {} was deleted and cannot resume execution",
-            task.plan.identifier
+            task.identifier
         );
     }
     Ok(())
@@ -391,6 +396,8 @@ fn spawn_session_command_with_env(
     exact_account_id: Option<&crate::store::ProviderAccountId>,
     launch_lock: Option<File>,
 ) -> Result<()> {
+    let _planning_sync =
+        crate::ops::planning_sync::PlanningSync::start_for_directory(&command.cwd)?;
     let outcome = session_command_status_with_env(
         command,
         environment,

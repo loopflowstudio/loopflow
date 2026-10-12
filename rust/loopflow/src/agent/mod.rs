@@ -160,7 +160,8 @@ pub(crate) fn checkout_execution_boundary(
     Ok(AgentExecutionBoundary { writable_roots })
 }
 
-pub(crate) const EXECUTION_IDENTITY_ENV: [&str; 6] = [
+pub(crate) const EXECUTION_IDENTITY_ENV: [&str; 7] = [
+    crate::steer::PROVIDER_CONTEXT_ENV,
     crate::process::AGENT_CALLER_ENV,
     crate::journal::LF_TRACE_ID_ENV,
     crate::journal::LF_PROCESS_ID_ENV,
@@ -217,6 +218,14 @@ pub struct AgentConfig {
 }
 
 impl AgentConfig {
+    pub(crate) fn apply_agent_override(&mut self) {
+        if let Some(agent) = crate::config::agent_override() {
+            self.agent = Some(agent.clone());
+            self.env
+                .insert(crate::config::AGENT_OVERRIDE_ENV.into(), agent);
+        }
+    }
+
     /// Return the selected agent or Loopflow's compiled default.
     pub fn agent(&self) -> &str {
         match self.agent.as_deref() {
@@ -1145,6 +1154,7 @@ fn run_admitted_agent(
     capabilities: &AgentCapabilities,
 ) -> Result<AgentProcessResult, CoreError> {
     let mut launch = launch.clone();
+    launch.apply_agent_override();
     launch.chrome = capabilities.chrome;
     if launch.resume_token.is_none() {
         if let Some(capture) = &process.capture {
@@ -1186,14 +1196,14 @@ fn run_admitted_agent(
         launch.env.extend(capture.0.environment());
         capture.0.mark_spawn_requested();
     }
-    let _planning_sync = process
-        .task_input
-        .as_ref()
-        .map(crate::ops::task_input::TaskInput::start_planning_sync)
-        .transpose()
+    let directory = match &launch.cwd {
+        Some(cwd) => cwd.clone(),
+        None => std::env::current_dir()?,
+    };
+    let _planning_sync = crate::ops::planning_sync::PlanningSync::start_for_directory(&directory)
         .map_err(|error| {
-            CoreError::ExecutionFailed(format!("cannot start planning sync: {error}"))
-        })?;
+        CoreError::ExecutionFailed(format!("cannot start planning sync: {error}"))
+    })?;
     let result = _run_with_transient_retries(
         &launch,
         &process,
@@ -1569,9 +1579,6 @@ fn _run_harness_once(
                 .send_input(&prompt)
                 .await
                 .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
-            if let (Some(input), Some(capture)) = (&process.task_input, capture) {
-                input.record_seed(capture).await;
-            }
             let mut stdout = String::new();
             let mut stderr = String::new();
             let mut exit_code = None;
@@ -1583,7 +1590,7 @@ fn _run_harness_once(
                 tokio::select! {
                     _ = input_tick.tick(), if process.task_input.is_some() => {
                         process.task_input.as_ref().expect("Task input is enabled")
-                            .poll(harness.as_mut(), capture).await
+                            .poll(harness.as_mut()).await
                             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
                     }
                     _ = activity_tick.tick(), if capture.is_some() => {

@@ -1,15 +1,15 @@
 //! A reorder is one Project intention. Its individual provider effects retain
 //! before/after lists so acquisition can recognize our own partial progress.
 
+use super::planning_write;
+use crate::work::edit::WorkValue as Edit;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::durable::{ProjectId, TaskId};
-use crate::pm::PmItem;
 use crate::store::StoreResult;
 
-use super::planning_changes::PlanningChanges;
 use super::SqliteStore;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,6 +30,14 @@ pub(crate) struct OrderDelivery {
 }
 
 impl SqliteStore {
+    pub(crate) fn project_order_error(&self, project: &ProjectId, error: &str) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute("UPDATE project_changes SET error=?2 WHERE project_id=?1 AND field='task_order'
+            AND acknowledged=0 AND conflict_json IS NULL AND error IS NOT ?2
+            AND seq=(SELECT max(seq) FROM project_changes WHERE project_id=?1 AND field='task_order')",params![project.as_str(),error])?;
+        Ok(())
+    }
+
     pub(crate) fn project_order_delivery(
         &self,
         project: &ProjectId,
@@ -88,12 +96,17 @@ pub(super) fn reorder_in(
     let mut desired = previous.clone();
     desired.retain(|id| id != task.as_str());
     desired.insert((rank as usize).min(desired.len()), task.to_string());
-    if PlanningChanges::Project(project).record(
-        conn,
-        "task_order",
-        json!(previous),
-        json!(desired),
-    )? {
+    if previous != desired {
+        let base = observed_order(conn, project)?.map(|value| json!({"value":value}));
+        conn.execute(
+            "INSERT INTO project_changes(id,project_id,value_json,base_json) VALUES(?1,?2,?3,?4)",
+            params![
+                uuid::Uuid::new_v4().to_string(),
+                project.as_str(),
+                serde_json::to_string(&desired)?,
+                base.map(|value| value.to_string())
+            ],
+        )?;
         apply_order(conn, project, &desired)?;
     }
     Ok(())
@@ -157,42 +170,14 @@ pub(crate) fn include_members(desired: &[String], observed: &[String]) -> Vec<St
     result
 }
 
-pub(super) fn observe_in(
+pub(crate) fn observe_in(
     conn: &Connection,
     repo: &str,
-    provider: &str,
     external: &str,
-    items: &[PmItem],
+    project: &ProjectId,
+    observed: Vec<String>,
 ) -> StoreResult<bool> {
-    if provider != "linear" {
-        return Ok(false);
-    }
-    let project: Option<String> = conn.query_row("SELECT p.id FROM projects p JOIN waves w ON w.id=p.wave_id WHERE p.external_project_id=?1 AND w.repo=?2", params![external,repo], |row| row.get(0)).optional()?;
-    let Some(project) = project.map(ProjectId::from_raw) else {
-        return Ok(false);
-    };
-    let mut items = items.iter().collect::<Vec<_>>();
-    items.sort_by_key(|i| i.rank);
-    let mut observed = Vec::new();
-    for item in items {
-        // An older list must not order a mixture of old and retained newer facts.
-        let retained: Option<(String, String)> = conn.query_row(
-            "SELECT t.id,i.body FROM pm_items i JOIN tasks t ON t.external_issue_id=i.id
-             WHERE i.repo=?1 AND i.provider=?2 AND i.id=?3 AND i.needs_refresh=0 AND t.project_id=?4 AND t.planning_deleted_at IS NULL",
-            params![repo,provider,item.id,project.as_str()], |row| Ok((row.get(0)?,row.get(1)?))).optional()?;
-        let Some((id, body)) = retained else {
-            return Ok(false);
-        };
-        let retained: PmItem = serde_json::from_str(&body)?;
-        if retained.revision != item.revision
-            || retained.rank != item.rank
-            || retained.project_id != item.project_id
-        {
-            return Ok(false);
-        }
-        observed.push(id);
-    }
-    if let Some(previous) = observed_order(conn, &project)? {
+    if let Some(previous) = observed_order(conn, project)? {
         // List omission proves neither deletion nor a completed membership move.
         for id in previous.iter().filter(|id| !observed.contains(id)) {
             let retained: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND project_id=?2 AND planning_deleted_at IS NULL)", params![id,project.as_str()], |row| row.get(0))?;
@@ -203,10 +188,10 @@ pub(super) fn observe_in(
     }
     conn.execute(
         "UPDATE pm_projects SET task_order_json=?4 WHERE repo=?1 AND provider=?2 AND id=?3",
-        params![repo, provider, external, serde_json::to_string(&observed)?],
+        params![repo, "linear", external, serde_json::to_string(&observed)?],
     )?;
     let observation = json!({"value":observed}).to_string();
-    let mut pending = deliveries(conn, &project)?;
+    let mut pending = deliveries(conn, project)?;
     let mut remaining = pending.as_mut_slice();
     while let Some((delivery, later)) = remaining.split_first_mut() {
         remaining = later;
@@ -267,23 +252,28 @@ pub(super) fn observe_in(
     }
     // Only the latest pending intention projects locally; older attempts retain
     // delivery evidence without reviving a superseded local order.
-    let pending = PlanningChanges::Project(&project)
-        .pending(conn)?
-        .into_iter()
-        .find(|c| c.field == "task_order");
+    let pending: Option<String> = conn
+        .query_row(
+            "SELECT value_json FROM project_changes WHERE project_id=?1
+        AND field='task_order' AND acknowledged=0 AND conflict_json IS NULL
+        AND seq=(SELECT max(seq) FROM project_changes WHERE project_id=?1 AND field='task_order')",
+            [project.as_str()],
+            |row| row.get(0),
+        )
+        .optional()?;
     let order = if let Some(change) = pending {
         include_members(
             &current_members(
                 conn,
-                &project,
-                &serde_json::from_value::<Vec<String>>(change.value)?,
+                project,
+                &serde_json::from_str::<Vec<String>>(&change)?,
             )?,
             &observed,
         )
     } else {
         observed
     };
-    apply_order(conn, &project, &order)?;
+    apply_order(conn, project, &order)?;
     Ok(true)
 }
 
@@ -311,11 +301,13 @@ fn current_members(
 
 fn apply_order(conn: &Connection, project: &ProjectId, order: &[String]) -> StoreResult<()> {
     for (rank, id) in order.iter().enumerate() {
-        conn.execute(
-            "UPDATE tasks SET planning_rank=?2,planning_revision=planning_revision+1
-            WHERE id=?1 AND project_id=?3 AND planning_rank!=?2 AND planning_deleted_at IS NULL",
-            params![id, rank as u32, project.as_str()],
-        )?;
+        let member:bool=conn.query_row("SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND project_id=?2 AND planning_deleted_at IS NULL)",params![id,project.as_str()],|r|r.get(0))?;
+        if member {
+            planning_write::local(
+                conn,
+                &crate::work::edit::WorkEdit::for_target(id, &[Edit::TaskRank(rank as u32)]),
+            )?;
+        }
     }
     Ok(())
 }

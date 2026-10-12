@@ -318,7 +318,7 @@ fi
         native
     );
     let status = fixture.json(&["task", "status", task_id, "--json"]);
-    let project = status["planning"]["project"]["id"].as_str().unwrap();
+    let project = status["project"]["id"].as_str().unwrap();
     let selected = fixture.run(&["project", "workflow", "set", project, "proof"]);
     assert!(selected.status.success(), "{selected:?}");
     // Managed skill execution needs an agent account, independently of planning.
@@ -666,7 +666,7 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
         "--search",
         "local-112",
         "--task",
-        &task.task.plan.identifier,
+        &task.task.identifier,
     ]);
     assert_eq!(filtered.as_array().unwrap().len(), 1);
     assert_eq!(filtered[0]["id"], "inventory-112");
@@ -718,13 +718,7 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
             [],
         )
         .unwrap();
-    let list = [
-        "session",
-        "list",
-        "--task",
-        &task.task.plan.identifier,
-        "--json",
-    ];
+    let list = ["session", "list", "--task", &task.task.identifier, "--json"];
     for _ in 0..2 {
         let current = fixture.json(&list);
         assert_eq!(current.as_array().unwrap().len(), 1);
@@ -734,7 +728,7 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
         "session",
         "list",
         "--task",
-        &task.task.plan.identifier,
+        &task.task.identifier,
         "--interactive",
         "all",
         "--history",
@@ -1277,8 +1271,10 @@ fn declared_agent_can_start_another_tasks_flow() {
     .unwrap();
     let store = loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
         .unwrap();
-    // Y needs a harness that supports the checkout boundary. Its mechanical
-    // Flow never starts a provider; X's interactive OpenCode only issues the command.
+    // Saved Task defaults stay local to each Task. An explicit --agent would
+    // override Y too, selecting OpenCode without a managed checkout boundary.
+    // Y's mechanical Flow never starts a provider; X's OpenCode issues the command.
+    store.set_task_agent(&caller.id, "opencode").unwrap();
     store.set_task_agent(&target.task.id, "claude").unwrap();
     store
         .select_project_workflow(
@@ -1308,9 +1304,7 @@ fn declared_agent_can_start_another_tasks_flow() {
     )
     .unwrap();
     let output = fixture
-        .command(&[
-            "--task", "INF-124", "-i", "--agent", "opencode", ":", "Start Y",
-        ])
+        .command(&["--task", "INF-124", "-i", ":", "Start Y"])
         .env("LF_BIN", bin.join("lf"))
         .output()
         .unwrap();

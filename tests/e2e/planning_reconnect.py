@@ -330,8 +330,8 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
                 ).fetchone()
                 == (1,)
                 and db.execute(
-                    "SELECT json_extract(body,'$.completed') FROM pm_items WHERE id=?",
-                    (state["issues"][2]["id"],),
+                    "SELECT planning_completed FROM tasks WHERE id=?",
+                    (remote_id,),
                 ).fetchone()
                 == (1,)
             )
@@ -343,7 +343,7 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
             None,
         )
         assert db.execute(
-            "SELECT count(*) FROM task_changes WHERE task_id=? AND field='name' "
+            "SELECT count(*) FROM task_changes WHERE task_id=? AND field='task_title' "
             "AND conflict_json IS NULL AND acknowledged=0",
             (fixture["task"],),
         ).fetchone() == (1,)
@@ -371,13 +371,16 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
             )
             watch.close()
             watch = None
-            # No active connection: a local save remains local. A reopened repository
-            # connection delivers it and acquires changes made during the gap.
+            # A short command attempts delivery itself. An outage leaves the save
+            # pending; reopening the repository delivers it after connectivity returns.
+            with server.lock:
+                state["offline"] = True
             gap = json.loads(
                 run("task", "comment", "INF-124", "Saved with Desktop closed", "--json")
             )["pending_sync"][0]
             with server.lock:
                 assert not any(c["id"] == gap for c in state["comments"])
+                state["offline"] = False
             watch = Watch(fixture, env)
             watch.scope(str(repo), wave=fixture["wave"])
             _await(
@@ -391,9 +394,13 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
                 "reopened Wave view did not deliver",
             )
             watch.scope(None)  # Connection remains open, but no repository is selected.
+            with server.lock:
+                state["offline"] = True
             detached = json.loads(
                 run("task", "comment", "INF-124", "No repository selected", "--json")
             )["pending_sync"][0]
+            with server.lock:
+                state["offline"] = False
             time.sleep(2)
             assert db.execute(
                 "SELECT acknowledged FROM task_comment_deliveries WHERE comment_id=?", (detached,)

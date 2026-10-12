@@ -120,13 +120,17 @@ exit 23
                 .map(|capture| serde_json::from_str(&capture[1]).unwrap())
                 .collect()
         };
-        let invoke = |index: usize| {
+        let invoke = |moment: &str| {
+            let callback = callbacks
+                .iter()
+                .find(|callback| callback.ends_with(&format!(" {moment}")))
+                .unwrap();
             let output = Command::new("/bin/sh")
                 .env_clear()
                 .env("PATH", "/usr/bin:/bin")
                 .env("HOME", home.path())
                 .current_dir(repo.path())
-                .args(["-c", &callbacks[index]])
+                .args(["-c", callback])
                 .output()
                 .unwrap();
             assert!(
@@ -140,7 +144,7 @@ exit 23
                 .unwrap()
                 .to_string()
         };
-        let first = invoke(0);
+        let first = invoke("start");
         assert!(first.contains("CURRENT_SCRATCH"));
         assert!(first.contains("CURRENT_WAVE_MEMORY"));
         assert!(!first.contains("Saved active skill.\n"));
@@ -149,7 +153,7 @@ exit 23
         assert!(!first.contains(&large));
         repo.create_file("scratch/small.md", "FRESH_SCRATCH");
         repo.create_file("wave/fixture/MEMORY.md", "FRESH_WAVE_MEMORY");
-        let compact = invoke(1);
+        let compact = invoke("compact");
         assert!(compact.contains("FRESH_WAVE_MEMORY"));
         assert!(!compact.contains("CURRENT_WAVE_MEMORY"));
         assert!(compact.contains("FRESH_SCRATCH"));

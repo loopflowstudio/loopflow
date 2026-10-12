@@ -262,7 +262,7 @@ impl CodexConnection {
         // Keep the attachment comparison and bounded socket dispatch under the
         // Session lock. History and other Sessions can still use the database.
         tokio::task::spawn_blocking(move || {
-            let outcome = store.with_session_attachment(&session, &attachment, || {
+            let outcome = store.with_session_dispatch(&session, &attachment, || {
                 super::dispatch::send_fenced(&mut upstream, message)
             });
             (upstream, outcome)

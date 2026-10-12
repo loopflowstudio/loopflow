@@ -592,7 +592,7 @@ fn process_ci_fix(
         .map(|task_id| format!("\nTask context: {task_id}"))
         .unwrap_or_default();
     let mut prompt = format!(
-        "{skill}\n\nRepair the exact recorded landing incident below. Start with `lf sync`. Repair and verify, then run `lf arm` to publish and enable auto-merge. Do not invoke `lf pr land` or wait for merge; a later finite check observes the merge; Task follow-through remains with its finishing Flow or operator.\n\nRepository: {}\nPull request: #{}\nBranch: {}\nFailed head: {}\nFailing checks:\n{}{}",
+        "{skill}\n\nRepair the exact recorded landing incident below. Start with `lf sync`. Repair and verify, then run `lf arm` to publish and enable auto-merge. Do not invoke `lf pr land` or wait for merge; a later finite check observes the merge; Task completion remains with its Workflow or conversation.\n\nRepository: {}\nPull request: #{}\nBranch: {}\nFailed head: {}\nFailing checks:\n{}{}",
         incident.repo,
         incident.pr_number,
         landing.branch,
@@ -1238,7 +1238,7 @@ async fn cleanup_landed_pr(store: &SharedStore, landing: &PrLanding) -> OpsResul
         {
             return crate::ops::task::cleanup_completed_task(store, &task).await;
         }
-        eprintln!("Task {} has merged; retained its checkout for follow-through. Inspect remaining work with `lf task status {}`.", task.plan.identifier, task.plan.identifier);
+        eprintln!("Task {} has merged; retained its checkout until completion. Inspect remaining work with `lf task status {}`.", task.identifier, task.identifier);
         return Ok(());
     }
     // Only a Flow still being driven needs the checkout; a stopped one is history.
@@ -1454,7 +1454,7 @@ async fn wait_for_landing(
                 PrLandingState::Merged => return Ok(()),
                 PrLandingState::Closed => {
                     return Err(OpsError::DeliveryHeld(
-                        "Pull request closed without merging; follow-through has not run".into(),
+                        "Pull request closed without merging; Task completion is pending".into(),
                     ))
                 }
                 PrLandingState::Blocked => {
@@ -1560,11 +1560,11 @@ async fn reconcile_repository_async(
         .await
         {
             Ok(Ok(())) => {}
-            Ok(Err(error)) => errors.push(format!("{}: {error}", task.plan.identifier)),
+            Ok(Err(error)) => errors.push(format!("{}: {error}", task.identifier)),
             Err(_) => {
                 errors.push(format!(
                     "{}: delivery observation deadline exceeded",
-                    task.plan.identifier
+                    task.identifier
                 ));
                 break;
             }

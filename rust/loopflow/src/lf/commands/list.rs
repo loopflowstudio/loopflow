@@ -46,7 +46,7 @@ pub fn list_children(path: &[String], repo: &Path) -> Result<Vec<Entry>> {
 fn collect_entries(tree: &Command, path: &[String], repo: &Path) -> Result<Vec<Entry>> {
     let mut entries = Vec::new();
     if path.is_empty() || path == ["wave"] {
-        for name in crate::ops::pm::list_local_waves(repo)? {
+        for name in crate::ops::linear::list_local_waves(repo)? {
             let summary = crate::work::wave::config::read_wave_summary(repo, &name)?;
             entries.push(Entry {
                 source: format!("wave/{name}/GOAL.md"),

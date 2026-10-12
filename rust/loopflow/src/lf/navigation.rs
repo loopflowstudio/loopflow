@@ -49,8 +49,15 @@ pub fn resolve_child(
         return Ok(Some(vec![child.get_name().to_string()]));
     }
     let mut matches = Vec::new();
-    if prefix.is_empty() && name == "resume" && command.find_subcommand("session").is_some() {
-        return Ok(Some(vec!["session".into(), "resume".into()]));
+    if prefix.is_empty() {
+        let owner = match name {
+            "resume" => Some("session"),
+            "comment" => Some("task"),
+            _ => None,
+        };
+        if let Some(owner) = owner.filter(|owner| command.find_subcommand(owner).is_some()) {
+            return Ok(Some(vec![owner.into(), name.into()]));
+        }
     }
     descendants(command, name, &[], &mut matches, false);
     // Exact descendant names win over abbreviations, just as exact owners do.
@@ -359,6 +366,7 @@ pub fn render_help(path: &[String], repo: &Path, all: bool) -> Result<String> {
                     .trim_end()
             ));
         }
+        output.push_str("-a, --agent <harness[:model]> applies everywhere; overrides agents in Tasks, Flows, skills and child commands.");
         output.push_str("\nSelect: --machine <label-or-id>, --task <task>, --wt <name>, --wave <wave>\n--machine runs the command in the saved remote repository.\nWith --machine: --forward-agent\n");
         output.push_str("\nOmit owners when a command is unique: lf land → lf pr land.\nCommands take precedence; lf run NAME always selects a definition.\n");
         return Ok(output);

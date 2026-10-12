@@ -263,7 +263,7 @@ pub(crate) fn normalize_task_pr_copy(
     let pr_lifecycle: String = match lifecycle {
         TaskPrCopyLifecycle::Draft => "The pull request is a draft; no Task settlement is requested.".into(),
         TaskPrCopyLifecycle::Published => "The pull request is published for review; no Task settlement is requested.".into(),
-        TaskPrCopyLifecycle::Completes => "Merge delivers the code. File accepted follow-ups or record none needed, then complete the Task.".into(),
+        TaskPrCopyLifecycle::Completes => "Merge delivers the code. Record independent later work as Tasks and comments; complete the delivered outcome.".into(),
     };
     let managed = format!(
         "{TASK_PR_CONTEXT_START}\n> [!NOTE]\n> **Task:** {task_link}\n> **PR lifecycle:** {pr_lifecycle}\n{TASK_PR_CONTEXT_END}"
@@ -2517,7 +2517,7 @@ esac
 <!-- loopflow:task-pr-context:start -->\n\
 > [!NOTE]\n\
 > **Task:** [Make Task PR copy explain intent and lifecycle · LOO-249](https://linear.app/loopflow/issue/LOO-249/task-pr-copy)\n\
-> **PR lifecycle:** Merge delivers the code. File accepted follow-ups or record none needed, then complete the Task.\n\
+> **PR lifecycle:** Merge delivers the code. Record independent later work as Tasks and comments; complete the delivered outcome.\n\
 <!-- loopflow:task-pr-context:end -->\n\n\
 ## Evaluate\n\nRecorded proof."
         );
@@ -2570,7 +2570,10 @@ esac
                 TaskPrCopyLifecycle::Published,
                 "no Task settlement is requested.",
             ),
-            (TaskPrCopyLifecycle::Completes, "then complete the Task."),
+            (
+                TaskPrCopyLifecycle::Completes,
+                "complete the delivered outcome.",
+            ),
         ] {
             copy = normalize_task_pr_copy(copy, Some(&context), &lifecycle).unwrap();
             assert!(copy

@@ -50,9 +50,9 @@ pub fn wave(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
                         .get_wave(&wave_id)
                         .await?
                         .ok_or_else(|| anyhow!("Wave {wave_id} not found"))?;
-                    crate::ops::pm::pm_rename(
+                    crate::ops::linear::rename(
                         repo,
-                        &crate::ops::pm::PmRenameOptions {
+                        &crate::ops::linear::LinearRenameOptions {
                             wave: Some(selected.slug().to_string()),
                             title: title.clone(),
                         },

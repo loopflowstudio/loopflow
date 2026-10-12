@@ -1,9 +1,10 @@
+use crate::steer::Steer;
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use time::OffsetDateTime;
 
 use crate::child::ChildRef;
 use crate::durable::{
-    AbandonReceipt, Author, Machine, MachineId, Placement, ProjectId, Steer, SteerComment, TaskId,
+    AbandonReceipt, Author, Machine, MachineId, Placement, ProjectId, SteerComment, TaskId,
     TaskState, ToolResponseId, ToolResponseReceipt, ToolResponseWrite, WorkRef, WorkStatus,
 };
 use crate::id::WaveId;
@@ -132,6 +133,11 @@ impl SqliteStore {
         Ok(())
     }
 
+    pub fn find_placement(&self, work: &WorkRef) -> StoreResult<Option<Placement>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        find_placement_in(&conn, work)
+    }
+
     pub fn placement(&self, work: &WorkRef) -> StoreResult<Placement> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         placement_in(&conn, work)
@@ -237,112 +243,76 @@ impl SqliteStore {
 
     pub fn task_steers(&self, task_id: &TaskId) -> StoreResult<Vec<Steer>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(super::children::task_events_after_in(&conn, task_id, 0)?
-            .into_iter()
-            .filter_map(|event| match event.kind {
-                TaskEventKind::Steer { author, text } => Some(Steer {
-                    id: event.id,
-                    author,
-                    text,
-                }),
-                _ => None,
-            })
-            .collect())
+        let mut query = conn.prepare(&format!(
+            "SELECT {} FROM steers p WHERE task_id=?1 ORDER BY seq",
+            super::steers::COLUMNS
+        ))?;
+        let steers = query
+            .query_map([task_id.as_str()], super::steers::read_steer)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(steers)
     }
 
-    /// Steer comments across every Work, issued at or after `since` (unix
-    /// seconds) — the cross-Work `lf activity` timeline. Scans the Task and
-    /// Project event streams for the `Steer` comment; there is no steers table.
     pub fn steers_since(&self, since: i64) -> StoreResult<Vec<SteerComment>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut comments = Vec::new();
-        let mut task_statement = conn.prepare(
-            "SELECT task_id, id, kind_json, created_at FROM task_events
-             WHERE json_extract(kind_json, '$.kind')='steer' AND created_at >= ?1
-             ORDER BY created_at, id",
-        )?;
-        let task_rows = task_statement.query_map([since], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, i64>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, i64>(3)?,
-            ))
-        })?;
-        for row in task_rows {
-            let (task_id, id, kind_json, created_at) = row?;
-            let kind: TaskEventKind = serde_json::from_str(&kind_json)?;
-            if let TaskEventKind::Steer { author, text } = kind {
-                comments.push(SteerComment {
-                    work: WorkRef::Task(TaskId::parse(&task_id).map_err(invalid_durable)?),
-                    steer: Steer { id, author, text },
-                    issued_at: crate::store::rows::unix_to_datetime(created_at),
-                });
-            }
-        }
-        let mut project_statement = conn.prepare(
-            "SELECT project_id, id, kind_json, created_at FROM project_events
-             WHERE json_extract(kind_json, '$.kind')='steer' AND created_at >= ?1
-             ORDER BY created_at, id",
-        )?;
-        let project_rows = project_statement.query_map([since], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, i64>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, i64>(3)?,
-            ))
-        })?;
-        for row in project_rows {
-            let (project_id, id, kind_json, created_at) = row?;
-            let kind: ProjectEventKind = serde_json::from_str(&kind_json)?;
-            if let ProjectEventKind::Steer { author, text } = kind {
-                comments.push(SteerComment {
-                    work: WorkRef::Project(ProjectId::parse(&project_id).map_err(invalid_durable)?),
-                    steer: Steer { id, author, text },
-                    issued_at: crate::store::rows::unix_to_datetime(created_at),
-                });
-            }
-        }
-        Ok(comments)
+        let mut query = conn.prepare(&format!("SELECT {},task_id,project_id,created_at FROM steers p
+            WHERE created_at>=?1 AND (task_id IS NOT NULL OR project_id IS NOT NULL) ORDER BY created_at,seq", super::steers::COLUMNS))?;
+        let result = query
+            .query_map([since], |row| {
+                let task: Option<String> = row.get(6)?;
+                let work = match task {
+                    Some(task) => WorkRef::Task(TaskId::from_raw(task)),
+                    None => WorkRef::Project(ProjectId::from_raw(row.get::<_, String>(7)?)),
+                };
+                Ok(SteerComment {
+                    work,
+                    steer: super::steers::read_steer(row)?,
+                    issued_at: crate::store::rows::unix_to_datetime(row.get(8)?),
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(result)
     }
 
     #[cfg(test)]
-    pub fn append_steer(&self, work: &WorkRef, author: &Author, text: &str) -> StoreResult<Steer> {
-        let WorkRef::Task(task_id) = work else {
-            return Err(StoreError::InvalidData("only Tasks take steering".into()));
+    pub fn save_steer(&self, work: &WorkRef, author: &Author, text: &str) -> StoreResult<Steer> {
+        let WorkRef::Task(task) = work else {
+            return Err(StoreError::InvalidData(
+                "only Tasks take test steers".into(),
+            ));
         };
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let steer = Self::append_task_steer_in(&tx, task_id, author, text)?;
+        let tx = conn.transaction()?;
+        let steer = Self::save_task_steer_in(
+            &tx,
+            task,
+            author,
+            text,
+            &uuid::Uuid::new_v4().to_string(),
+            "1",
+        )?;
         tx.commit()?;
         Ok(steer)
     }
 
-    /// Local delivery projection. Authored input is published to Linear first.
-    pub(crate) fn append_task_steer_in(
+    pub(crate) fn save_task_steer_in(
         tx: &Transaction<'_>,
-        task_id: &TaskId,
+        task: &TaskId,
         author: &Author,
         text: &str,
+        source: &str,
+        revision: &str,
     ) -> StoreResult<Steer> {
-        let text = text.trim();
-        if text.is_empty() {
-            return Err(StoreError::InvalidData("Steer text cannot be empty".into()));
-        }
-        let event = super::children::insert_task_event_in(
+        let steer =
+            super::steers::save_in(tx, ("task", task.as_str()), source, revision, author, text)?;
+        super::children::insert_task_event_in(
             tx,
-            task_id,
+            task,
             &TaskEventKind::Steer {
-                author: author.clone(),
-                text: text.to_string(),
+                steer_id: steer.id.clone(),
             },
         )?;
-        Ok(Steer {
-            id: event.id,
-            author: author.clone(),
-            text: text.to_string(),
-        })
+        Ok(steer)
     }
 
     /// Record an interrupt request as a durable comment on the Work's event
@@ -567,8 +537,15 @@ fn inherit_placement(
     if find_placement_in(tx, work)?.is_some() {
         return Ok(());
     }
-    let machine_id = match parent {
-        Some(parent) => placement_in(tx, parent)?.machine_id,
+    // Imported planning has no execution placement. The operation creating a
+    // local placement uses this machine when its parent has never been placed;
+    // neither import nor this operation rewrites an existing placement.
+    let inherited = parent
+        .map(|parent| find_placement_in(tx, parent))
+        .transpose()?
+        .flatten();
+    let machine_id = match inherited {
+        Some(placement) => placement.machine_id,
         None => map_local_machine(tx)?.id,
     };
     write_placement(tx, work, &machine_id, placed_at)
@@ -791,12 +768,12 @@ mod durable_store_tests {
     use crate::durable::{ProjectId, TaskId};
 
     use crate::id::WaveId;
-    use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
+    use crate::linear::{LinearIssueId, LinearProjectId};
     use crate::session::{LfSession, TitleSource, WorkSource};
     use crate::store::sqlite::SqliteStore;
 
     use crate::work::project::Project;
-    use crate::work::task::{PmWritebackState, Task, TaskEventKind, TaskPr, TaskPrId};
+    use crate::work::task::{LinearWritebackState, Task, TaskEventKind, TaskPr, TaskPrId};
 
     fn unpublished_conversation(
         task_id: Option<TaskId>,
@@ -856,20 +833,19 @@ mod durable_store_tests {
         }
         let project = Project {
             id: project_id.clone(),
-            plan: ProjectPlan {
-                summary: String::new(),
-                workflow: "feature".into(),
-                status: crate::pm::ProjectStatus::Started,
-                linear_id: Some(
-                    LinearProjectId::new("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3").unwrap(),
-                ),
-                slug: "probe".to_string(),
-                name: "Probe".to_string(),
-                prompt_context: "Probe Task execution".to_string(),
-                pm_snapshot_synced_at: Some(now.unix_timestamp()),
-            },
+
+            summary: String::new(),
+            workflow: "feature".into(),
+            status: crate::work::project::ProjectStatus::Started,
+            linear_id: Some(LinearProjectId::new("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3").unwrap()),
+            slug: "probe".to_string(),
+            name: "Probe".to_string(),
+            description: "Probe Task execution".to_string(),
+            krs: Vec::new(),
+            metric_targets: Vec::new(),
+            pm_snapshot_synced_at: Some(now.unix_timestamp()),
+
             wave_id: wave_id.clone(),
-            iteration: 0,
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -879,21 +855,21 @@ mod durable_store_tests {
             &store,
             &wave_id,
             None,
-            project.plan.linear_id.as_ref().unwrap().as_str(),
+            project.linear_id.as_ref().unwrap().as_str(),
             &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
         )
         .unwrap();
         let task = Task {
             id: task_id.clone(),
-            plan: TaskPlan {
-                revision: 0,
-                linear_id: Some(LinearIssueId::new("task-uuid").unwrap()),
-                identifier: "PROBE-1".to_string(),
-                title: "Probe Task execution".to_string(),
-                description: "Exercise the Task Flow store".to_string(),
-                pm_snapshot_synced_at: Some(now.unix_timestamp()),
-            },
-            pm_writeback: PmWritebackState::Current,
+
+            revision: 0,
+            linear_id: Some(LinearIssueId::new("task-uuid").unwrap()),
+            identifier: "PROBE-1".to_string(),
+            title: "Probe Task execution".to_string(),
+            description: "Exercise the Task Flow store".to_string(),
+            pm_snapshot_synced_at: Some(now.unix_timestamp()),
+
+            pm_writeback: LinearWritebackState::Current,
             wave_id,
             project_id,
             worktree: Some(PathBuf::from("/repo.probe")),
@@ -905,6 +881,12 @@ mod durable_store_tests {
             abandon_intent: None,
             created_at: now,
             updated_at: now,
+            rank: 0,
+            assignee: None,
+            due_date: None,
+            state: None,
+            completed: false,
+            completed_at: None,
             observation: crate::work::task::Observation::NotRequired,
         };
         let pr = TaskPr {
@@ -936,9 +918,9 @@ mod durable_store_tests {
         let task = store.task(&task_id).unwrap().unwrap();
         let mut other = store.project(&task.project_id).unwrap().unwrap();
         other.id = ProjectId::new();
-        other.plan.linear_id =
+        other.linear_id =
             Some(LinearProjectId::new("218967b6-a760-4b7c-9a46-11d9d61a42c2").unwrap());
-        other.plan.name = "An unrelated ordinary plan".into();
+        other.name = "An unrelated ordinary plan".into();
         store.insert_project(&other).unwrap();
         // Another Started Project does not compete with the configured identity.
         let (new_task, pr) = unregistered_task(&store, &task_id, dir.path().join("new"));
@@ -954,14 +936,14 @@ mod durable_store_tests {
             &store,
             &task.wave_id,
             Some("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3"),
-            other.plan.linear_id.as_ref().unwrap().as_str(),
+            other.linear_id.as_ref().unwrap().as_str(),
             &guard,
         )
         .unwrap();
         let (mut rejected, mut rejected_pr) =
             unregistered_task(&store, &task_id, dir.path().join("rejected"));
-        rejected.plan.linear_id = Some(LinearIssueId::new("third-issue").unwrap());
-        rejected.plan.identifier = "PROBE-3".into();
+        rejected.linear_id = Some(LinearIssueId::new("third-issue").unwrap());
+        rejected.identifier = "PROBE-3".into();
         rejected.workspace_slug = "rejected".into();
         rejected_pr.slug = "rejected".into();
         rejected_pr.branch = "rejected".into();
@@ -1268,8 +1250,8 @@ mod durable_store_tests {
         let mut task = store.task(existing).unwrap().unwrap();
         let mut pr = store.task_prs(existing).unwrap().remove(0);
         task.id = TaskId::new();
-        task.plan.linear_id = Some(LinearIssueId::new("later-issue").unwrap());
-        task.plan.identifier = "PROBE-2".into();
+        task.linear_id = Some(LinearIssueId::new("later-issue").unwrap());
+        task.identifier = "PROBE-2".into();
         task.worktree = Some(checkout);
         task.workspace_slug = "later-checkout".into();
         pr.id = TaskPrId::new();

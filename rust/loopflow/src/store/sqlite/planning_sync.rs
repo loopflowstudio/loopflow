@@ -4,7 +4,7 @@ use serde_json::Value;
 
 use super::SqliteStore;
 use crate::durable::{ProjectId, TaskId};
-use crate::planning::{PlanningSyncChange, PlanningSyncState, PlanningSyncStatus};
+use crate::store::planning_sync::{PlanningSyncChange, PlanningSyncState, PlanningSyncStatus};
 use crate::store::StoreResult;
 
 impl SqliteStore {
@@ -75,8 +75,9 @@ fn fields(
         ""
     };
     append(conn, &mut changes, &format!(
-        "SELECT c.id,c.field,c.value_json,c.attempted,c.error,
-            CASE WHEN c.conflict_json IS NOT NULL THEN json_quote(json_extract(c.conflict_json,'$.value')) END
+        "SELECT c.id,c.field,
+            CASE WHEN c.field IN ('deleted','task_order') THEN c.value_json ELSE json_quote(json_extract(c.value_json,'$.value')) END,c.attempted,c.error,
+            CASE WHEN c.conflict_json IS NOT NULL THEN CASE WHEN c.field IN ('deleted','task_order') THEN json_quote(json_extract(c.conflict_json,'$.value')) ELSE json_quote(json_extract(c.conflict_json,'$.value.value')) END END
          FROM {owner}_changes c WHERE c.{owner}_id=?1 {filter} AND
          (c.conflict_json IS NOT NULL OR (?2 AND c.acknowledged=0 AND
             (c.attempted=1 OR c.seq=(SELECT max(seq) FROM {owner}_changes WHERE {owner}_id=?1 AND field=c.field))))

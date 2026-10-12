@@ -1,1 +1,0 @@
-Adapt repository Git and delivery behavior; move Waves into .lf/wave

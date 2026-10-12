@@ -37,35 +37,15 @@ Next demo must center the populated Loopflow repo and compare its displayed
 Wave/Task inventory with shared planning, not substitute an empty portfolio demo.
 Keep live history and execution intact; no cleanup or client takeover is authorized.
 
-Populated-demo preparation: copied the live SQLite database using its read-only
-backup API to `/private/tmp/loo462-native.FgtDmE/populated-home/loopflow.db`.
-The branch's packaged CLI refuses the copy: development schema does not match this
-experiment. `repo identity --json` fails; `wave list --json` misleadingly returns
-an empty list alongside the same incompatibility warning. That empty list is not
-an inventory. No populated app launch or live migration followed. The earlier
-installed-app launch opened obsolete Concerto; Jack Heart rejected it as the wrong
-build. The requested demo remains this diff with real populated planning, not that
-release or the empty clone. Remaining blocker is preparing a compatible isolated
-planning dataset without changing the live store or losing the relevant inventory.
+Initial populated-copy incompatibility and the rejected installed Concerto
+launch remain at `6f9bd12f85:scratch/work-first-demo.md`, this heading. The empty
+result was an unavailable reader, not an empty inventory; no live migration followed.
 
-Populated branch demo launched (October 11): the disposable copy was prepared
-using the existing `apply_project_content_cut` test helper and validated with
-`validate_experimental_sqlite`; the temporary ignored test was removed afterward.
-Preparation passed, including project-content conversion and journal seeding
-(`/tmp/loo462-populated-prepare.log`). Exact before/after IDs match: 55 Waves,
-52 Projects, 546 Tasks across the snapshot. Packaged repo identity and Wave reads
-now succeed. Loopflow's snapshot contains ready growth/infrastructure/intelligence/
-product/spend and abandoned engbot/list; raw inventory is not the displayed filter.
-
-Launched the repaired branch bundle directly under `populated-demo.sb`, using
-`populated-home`, against `/Users/jack/src/loopflow`. Sandbox blocks network,
-live-file writes, provider execution and signals to outside processes; copied
-planning is for layout/navigation review, not running agents. PID 33874 and a
-1280×800 on-screen window were observed. This is not the obsolete installed
-Concerto app. Native rendering and correct displayed Task membership still need
-Jack Heart's review; no screenshot or conversation-continuity proof is claimed.
-Main-view source comparison removes the generic New Session controls and adds
-the previously requested collapsed Overview disclosure; it is not zero new chrome.
+The October 11 snapshot preparation and sandboxed launch are archived at
+`6f9bd12f85:scratch/work-first-demo.md`, this heading: exact 55 Wave/52 Project/
+546 Task IDs survived preparation. Window existence did not prove rendering,
+conversation continuation or minimal chrome; Jack Heart's screenshot failed
+repository validation. Subsequent inspection follows.
 
 Direct inspection correction: Jack Heart's screenshot showed repository validation
 failure, not a populated view. The demo sandbox allowed `/usr/bin/git` but denied
@@ -284,3 +264,24 @@ into the sidebar. Recorded Started plus shared unresolved execution now owns
 membership; retained Sessions and Wave plans remain intact. Review confirmed
 this removes a second inference of Started without mutating historical records.
 Check: `scripts/test_desktop.sh --filter WorkNavigationTests -Xswiftc -gnone --no-parallel` — PASS, 37 tests; diff check PASS. Repackaged/launched the correction; native view still loads. Installed reader remains the dependency. Requested permission to rehearse a compatible CLI installation before any live change; no permission received yet.
+
+Release alignment: a fresh SQLite backup in `compatibility-home` first refused
+unknown 0.13.12 migrations. `lf sync --manual` then merged current main locally
+(`6f9bd12f85`); the sole conflict preserves collapsed Overview and main's
+TaskDueDateView replacement. Explicit-target sync first refused the stacked Task;
+the supported automatic-parent sync succeeded. Check: TaskFlow/WorkNavigation
+focused suites PASS (45); validation-only Rust build PASS. No push/install.
+
+The synced build still refused the copy's missing `linear_team_checks` draft.
+Applying that exact CREATE TABLE to the disposable copy preserved every existing
+table's row count; branch identity and Work snapshot then succeeded (21.66 s).
+This is fixture schema preparation, not a supported live promotion receipt.
+Evidence: demo directory `compatibility-{check,after-sync,with-draft}.log`,
+`compatibility-fixture-counts.json`, `compatibility-work.json`.
+Snapshot membership is 11 Tasks (correcting the conversational count of 12): Growth 312; Infrastructure 367 and lf-9c03797;
+Product 462/427/382/380/378/371/330; Spend 389; Intelligence none. Missing checkout,
+merged-but-uncompleted, retained dirty files and unsettled commits explain those
+inclusions. That explains the rule, not Jack Heart's approval of every remaining
+Task. Native clicks and installation remain unproved; no live schema change.
+Stopped only the owned orphan reader from the closed demo and redundant one-shot;
+the current app reader remains live. Task automation disabled; app CI watcher active.

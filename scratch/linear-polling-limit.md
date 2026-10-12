@@ -20,12 +20,14 @@ Compression removes the intermediate delta vector and per-occurrence observation
 
 ## Remaining
 
-Implementation integrates #1491 at `b0788f4efb`; preservation and sync evidence remains in `scratch/questions.md` and `fe286293fb`. Gate and delivery remain.
+Implementation integrates #1491 and main through merge `dc0e4aedb0`; preservation and sync evidence remains in `scratch/questions.md` and `fe286293fb`. No implementation work remains identified. Gate and delivery remain.
 
-Gate owns independent-process contention, native turn-hook execution, watcher backoff and migration from the released frontier. Fixtures cover pagination/comment-only changes, receipt uncertainty, shared freshness and idle-agent request counts. Live before/after measurement and rejected-request quota accounting remain unproved; no usable Doppler access token was found in the preceding implementation.
+Commits `8dd77452ab` and `c3de7d06ee` close the missing headless coverage: four concurrent Claude/Codex Stop-hook processes plus a later process share one request; skill and command Flow steps acquire before spawning; watcher delays back off to 240 seconds and reset after changes; the migration preserves seeded Work from the preceding frontier. Hook fixtures execute generated commands through a test-binary CLI adapter, not installed providers. Existing fixtures retain pagination/comment-only changes, receipt uncertainty, shared freshness and idle-agent request counts.
+
+Gate owns affected-suite verification. Live before/after measurement and rejected-request quota accounting remain unproved. Jack Heart's steer `6d169dc1-0674-4f92-917d-a94a134e715c` explicitly permits publication without live measurement while Linear is paused; the first installed check after restoring the team setting owns that measurement. No usable Doppler access token was found in the preceding implementation.
 
 ## Rollout
 
 After installing a build with this fix, restore the paused Linear team setting (formerly `pm.linear_team`, now `linear.team` with `planning.provider: linear`) by hand in the main checkouts of loopflow, etude, kata and fantasia. Jack reports it is commented out and uncommitted. Include this instruction in the PR description; do not alter those checkouts here.
 
-Checks: `cargo test -p loopflow --lib` with filters `linear::team_changes`, `linear_on_demand`, and `task_comments_read_and_publish_without_starting_work` passed (7 tests; inherited `LF_*` cleared, stdin closed); `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` passed. Prior integration checks remain at `fe286293fb:scratch/linear-polling-limit.md`; gate/CI own broader acceptance and installed validation.
+Checks: post-merge `dc0e4aedb0` — `cargo test -p loopflow --lib linear_on_demand` passed (10 tests; inherited `LF_*` cleared, stdin closed), reused for this prose-only reconciliation; earlier focused, fmt and Clippy evidence remains at `b5025717ae:scratch/linear-polling-limit.md`; gate/CI own broader verification and installed validation.

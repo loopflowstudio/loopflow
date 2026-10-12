@@ -1,6 +1,6 @@
 # Loopflow PR CI failure history
 
-Jack Heart requested a read-only investigation of CI failures from 2026-09-12 through 2026-10-12, with test value judged independently of runtime. This report extends, and does not modify, `scratch/testing-audit.md`. No builds, tests, provider calls, Git mutations, or implementation changes were made for this investigation.
+Jack Heart requested a read-only investigation of CI failures from 2026-09-12 through 2026-10-12, with test value judged independently of runtime. This report extends, and does not modify, `docs/reviews/ci-test-coverage.md`. No builds, tests, provider calls, Git mutations, or implementation changes were made for this investigation.
 
 **The strongest reduction opportunity is duplicated and stale proof, not deletion of frequently failing behavioral tests.** The architecture checker failed in two jobs on exactly the same 31 candidates. Several leading Rust failures occurred before their behavioral assertions. Installation acquisition failed repeatedly without running tests. Conversely, a migration failure exposed a real transaction bug, and a successful installation job silently selected zero tests for one proof.
 
@@ -210,7 +210,7 @@ The three unresolved installation job IDs are `113392985283`, `111632486201`, an
 
 The classification is deliberately sampled rather than a manufactured all-failures pie chart. All failed logs were parsed; assertions and fixes were investigated most deeply for the recurring entries above. Golden changes, several old cutover failures, lint causes and remaining named tests lack full causal classification. A later passing candidate can include many edits or an updated base; a nearby fix diff is stronger than a commit title but still not an isolated experiment. No broad suite was rerun to claim causality.
 
-Source line references describe the supplied checkout during investigation (HEAD observed `f52728b4bc68a92f5142cf93c446a4666d4c7712`) unless a historical SHA is named. Parent changes continued independently. Historical CI commands were taken from logs/commit source, not inferred from the current workflow. Existing cost measurements remain in `docs/reviews/ci-under-five-minutes.md` and `scratch/ci-baseline`; this report does not turn failure counts into runtime savings, runner pricing, or a five-minute acceptance claim.
+Source line references describe the supplied checkout during investigation (HEAD observed `f52728b4bc68a92f5142cf93c446a4666d4c7712`) unless a historical SHA is named. Parent changes continued independently. Historical CI commands were taken from logs/commit source, not inferred from the current workflow. Existing cost measurements remain in `docs/reviews/ci-under-five-minutes.md` and `/tmp/loopflow-ci-baseline-lf12be237`; this report does not turn failure counts into runtime savings, runner pricing, or a five-minute acceptance claim.
 
 ## Most decision-useful findings
 

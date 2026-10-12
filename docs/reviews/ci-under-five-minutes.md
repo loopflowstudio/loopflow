@@ -277,3 +277,38 @@ Cost comparison must use net charges, not gross metered usage before discounts. 
 `build.rs` reads `LOOPFLOW_BUILD_PROVENANCE` and `LOOPFLOW_MIGRATION_AUTHORITY`, then originally exported their defaults with `cargo:rustc-env` under those same names. Cargo supplies those values to running tests. Nested Cargo therefore observes different inputs from the parent that omitted them, and invalidates the build. A dependency-free reproduction and the real Loopflow fingerprint trace both identify `EnvVarChanged`.
 
 On this macOS checkout, unchanged-source warm CLI builds measured 0.27s with the exported inputs and 42.57s when returning to the original omitted inputs. The repair gives compiled outputs distinct names while preserving external build inputs. After the initial source-change rebuild, equivalent nested/outer builds measured 0.16s/0.13s. This is a local mechanism demonstration, not a hosted CI speedup estimate. Distinct development/published builds still intentionally differ; this repair does not combine their authority.
+
+## First measurement candidate
+
+CI supplies its already-built candidate CLI through `LOOPFLOW_TEST_LF`, avoiding
+per-process Cargo invocations in nextest fixtures. Disposable installation
+preparation compiles selected targets together and uses the same candidate. A
+library-only selection still explicitly builds the CLI; published title-hook
+installation retains a separate published build. Ordinary focused Cargo tests
+retain artifact discovery, including custom target directories. No test or job
+is deleted or demoted, and no runner platform or recurring cost changes.
+
+Local validation: default and explicit release/published build-info tests pass;
+full disposable installation passes all nine cases in 84.37s, library-only
+selection and its two migration cases pass in 104.75s, and published title-hook
+proof passes in 41.83s. These include cached local container preparation, not
+matched hosted measurements. Installation-runner Python tests, formatting and
+Clippy pass. Hosted CI owns the materialized full matrix and performance result.
+The prepared-CLI nextest path also passes all 29 Flow cases with four test
+threads: 44.953s execution, 94.34s including test compilation on this macOS
+checkout. That is a focused compatibility check, not a Linux CI comparison.
+
+[Behavior-to-test audit](ci-test-coverage.md) and
+[PR failure history](ci-failure-history.md) retain the independent research.
+Jack Heart values removing unnecessary test code even when timing savings are
+small, while preserving useful regression detection. Duplicate architecture
+execution and brittle prose assertions are concrete separate cleanup candidates;
+failure frequency alone does not justify deletion. The historical zero-test
+installation selector also motivates rejecting empty proof selections.
+
+The target remains under five minutes for required checks over ten consecutive
+real typical-code PR runs, with merge queue and push-to-merged time reported
+separately. One candidate run cannot satisfy it. Use its per-job/step result to
+choose the next reduction; macOS compilation and remaining Rust fixture work
+are still open. Independently deliverable further changes belong in separate
+Tasks/PRs, retaining this Task's aggregate measurement obligation.

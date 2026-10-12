@@ -382,5 +382,34 @@ errors can count as resolved. This optimization does not establish stronger
 resolution coverage than the original test.
 
 Raw measurements: `/tmp/ci-matrix-baseline.log` and
-`/tmp/ci-matrix-snapshot.log`. Final focused checks and Clippy are recorded with
-the working plan before checkpointing.
+`/tmp/ci-matrix-snapshot.log`. The final three-test module passed in 12.64s;
+formatting, Clippy with warnings denied, and diff checks passed.
+
+## Remaining measurement priorities
+
+Profiling the matrix's one fresh store measured 468ms initialization: 445ms
+executing 72 canonical migrations, 460ms including their bookkeeping. Draft,
+foreign-key and JSON validation added less than 1ms in this empty fixture.
+Raw trace: `/tmp/ci-migration-profile.log`. Temporary instrumentation was
+removed. This supports reuse of initialized fixtures; it does not justify
+skipping real migration tests or changing immutable released SQL.
+
+An installation-cache prototype bound Cargo target and registry directories
+from the Mac host into Docker. Cold preparation took 166s, then a subsequent
+command unexpectedly recompiled for 124s before one migration proof passed.
+The next command rebuilt again; the experiment was stopped. An unchanged tiny
+Cargo project reproduced an immediate rebuild on the bind mount, while native
+Docker storage reused its output. The exact invalidation cause remains open.
+The unused prototype was removed; Linux-native cold/warm measurement is still
+needed before adopting caching. Raw logs are `/tmp/loopflow-installation-cache-cold.log`
+and `/tmp/loopflow-{bind,native}-fingerprint*.log`.
+
+Next candidates remain shared Rust compilation with archived test partitions,
+moving both existing reconnect proofs to the existing smoke job, and Linux
+installation dependency caching. At the first candidate's measured costs,
+eight four-slot partitions still have a 304s optimistic floor including
+compilation when the 156s watcher remains on that path. Separately owning
+that target lowers the bound to 268s before artifact transfer and scheduling.
+These are bounds, not predictions or a selected permanent runner count.
+Measure total runner occupancy alongside elapsed time; no premium hardware
+or reduced behavioral observation window is selected.

@@ -72,9 +72,6 @@ def main() -> None:
     parser.add_argument("--image", default="public.ecr.aws/docker/library/rust:trixie")
     parser.add_argument("--test", nargs="+", choices=PROOFS, help="run selected named proofs")
     parser.add_argument(
-        "--cache-dir", type=Path, help="reuse target and registry directories outside Docker"
-    )
-    parser.add_argument(
         "--native-titles", action="store_true", help="prove published title hook installation"
     )
     args = parser.parse_args()
@@ -87,28 +84,14 @@ def main() -> None:
             "Docker did not respond within 10 seconds; no proof container was created."
         ) from None
     _prepare_image(args.image)
-    mounts = [
-        "type=volume,source=loopflow-task-proof-target,target=/source/target",
-        "type=volume,source=loopflow-task-proof-registry,target=/usr/local/cargo/registry",
-    ]
-    if args.cache_dir:
-        cache = args.cache_dir.resolve()
-        mounts = []
-        for name, destination in (
-            ("target", "/source/target"),
-            ("registry", "/usr/local/cargo/registry"),
-        ):
-            source = cache / name
-            source.mkdir(parents=True, exist_ok=True)
-            mounts.append(f"type=bind,source={source},target={destination}")
     container = subprocess.check_output(
         [
             "docker",
             "create",
             "--mount",
-            mounts[0],
+            "type=volume,source=loopflow-task-proof-target,target=/source/target",
             "--mount",
-            mounts[1],
+            "type=volume,source=loopflow-task-proof-registry,target=/usr/local/cargo/registry",
             args.image,
             "sleep",
             "infinity",

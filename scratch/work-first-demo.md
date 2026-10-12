@@ -273,3 +273,7 @@ starts elsewhere and needs Move here; light-mode placeholders are nearly invisib
 on the dark terminal background. Failed pane exits obscure launch errors. These
 are reachable product failures, not old database debris. No Task completion,
 Workflow start, real Session takeover, installation or demo approval is inferred.
+
+Native follow-up: typed an unsent “retained demo draft”, selected the Wave, then
+clicked the sidebar Task. The same provider conversation and exact draft returned
+without New shell or another launch. Left this isolated demo open for Jack.

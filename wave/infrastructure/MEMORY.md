@@ -125,6 +125,14 @@ and clearing inherited account selection. Website's 75 tests, formatting and Cli
 pass. One scheduled-release child signal did not recur; its cause remains unknown.
 CI still owns the full candidate matrix.
 
+October 12 gate after main sync repaired a Project-edit fixture that treated a
+refreshed Task acquisition timestamp as a planning mutation. A deliberately stale
+stamp now proves refresh while preserving every other Task field, Workflow and
+Process outcome. Materialized acquisition/boundary checks passed 192 cases before
+that failure; the repaired case and 31 CLI/context/watch cases then passed.
+Formatting, Clippy and architecture checks pass. Linux HTTPS reconnect remains
+with CI; no live or installed acceptance is claimed.
+
 Jack authorized landing after checks. His `6d169dc1` permits publication before live
 measurement while Linear is paused. Live request counts, rejected-request quota
 accounting and installed pending-write recovery remain unproved. After installing,

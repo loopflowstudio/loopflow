@@ -1,1 +1,0 @@
-`cargo test -p loopflow --test task_pr_range_tests pr_open_resolves_stale_bases_without_rewriting_history -- --exact` (inherited LF_* unset, stdin closed): passed, 1 test; broader checks remain with gate/CI.

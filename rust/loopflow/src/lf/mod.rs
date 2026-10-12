@@ -1829,7 +1829,7 @@ pub enum ReleaseCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum WtCommand {
-    /// Create a low-level sibling worktree
+    /// Create a low-level worktree following the repository's existing layout
     Create {
         /// Worktree name
         name: String,

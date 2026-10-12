@@ -197,7 +197,7 @@ Worktree operations
 
 ## lf wt create
 
-Create a low-level sibling worktree
+Create a low-level worktree following the repository's existing layout
 
 | Argument | What it does |
 |---|---|

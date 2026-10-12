@@ -27,10 +27,6 @@ alone did not establish rendered usability or normal Quit.
 Next demo must compare populated Loopflow navigation with shared planning;
 client takeover remains explicit.
 
-Initial populated-copy incompatibility and the rejected installed Concerto
-launch remain at `6f9bd12f85:scratch/work-first-demo.md`, this heading. The empty
-result was an unavailable reader, not an empty inventory; no live migration followed.
-
 The October 11 snapshot preparation and sandboxed launch are archived at
 `6f9bd12f85:scratch/work-first-demo.md`, this heading: exact 55 Wave/52 Project/
 546 Task IDs survived preparation. Window existence did not prove rendering,

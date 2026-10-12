@@ -1,7 +1,9 @@
 # Session title hook timeout
 
 Jack Heart requested an autonomous repair on 2026-10-10, through publication
-for review; no landing. No prior design was present in this checkout.
+for review. His later comment `d6ad11df-fd8b-4b4a-861b-ac7ab785cb26`
+requests landing PR #1530 after synchronizing and resolving conflicts in place.
+No prior design was present in this checkout.
 
 ## Implemented design (implementation decision, 2026-10-11)
 
@@ -81,8 +83,23 @@ hook returning inside the unchanged five-second deadline under concurrent Flows;
 four simultaneous callbacks against held locks are the existing headless proof,
 not an observation of that configured workload. Installation acceptance belongs
 to a capable gate/release environment, without promoting a branch binary into
-the live store. Publication belongs to the caller's delivery step; Jack Heart's
-review remains required before landing. No new product decision is needed for
+the live store. Delivery belongs to the caller's delivery step under Jack Heart's
+later landing request. No new product decision is needed for
 this bounded repair; correlation of the records-read report remains unknown.
 
-Checks: post-integration builds and network-isolated `session_cli_tests` (20), `journal::tests` (18), and `harness::native_titles::tests` (2) passed with inherited `LF_*` cleared; the Kata report's consecutive-prompt/separate-directory change passed all four `native_title_callback` tests; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` passed; installed concurrent-Flow acceptance remains with gate/release.
+Gate review retained the pending fixture correction: each callback's deadline
+starts at spawn, including callbacks collected later in a concurrent batch.
+The production path preserves one observer and one ownership query; README
+describes the bounded fallback. No further production changes were needed.
+
+The earlier interrupted materialized gate log at
+`.lf/tmp/gate/run-52817/rust/rust.log` contains two failures and no completion.
+The account test `claude_cached_identity_requires_current_verified_credentials`
+still fails in isolation at `account_status.rs:677` (Unavailable, expected
+Accepted). That file is unchanged from the checkout base; the cause is unresolved
+and outside this title-hook design. `task_comments_read_and_publish_without_starting_work`
+passes in isolation; that does not establish a fix for its earlier timeout.
+The full gate remains unproved; CI must resolve the account failure and complete
+the materialized matrix before delivery can claim a green gate.
+
+Checks: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `uv run python scripts/check_architecture.py`, and `git diff --check` passed; network-isolated `cargo test -p loopflow --test session_cli_tests --test global_commands --test documented_commands` passed 30 tests (2 disposable-OS installation tests ignored), `--lib journal::tests` passed 18, `--lib harness::native_titles::tests` passed 2, and `--lib task_comments_read_and_publish_without_starting_work` passed 1; `--lib claude_cached_identity_requires_current_verified_credentials` failed; full materialized verification belongs to CI and installed concurrent-Flow acceptance remains with release.

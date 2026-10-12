@@ -109,8 +109,9 @@ the endpoint. Live cmux workspace/tab rename passed with a stand-in
 and symlinks; rendered host/shim/herdr and Jack's installation remain unproved.
 Plan: `scratch/every-lf-session-in-cmux.md`.
 
-October 11 hook repair: Jack Heart requested autonomous publication for review,
-not landing. A held WAL writer reproduced a callback exceeding six seconds
+October 11 hook repair: Jack Heart initially requested publication for review;
+his later comment `d6ad11df-fd8b-4b4a-861b-ac7ab785cb26` requests landing
+PR #1530 after sync and conflict resolution. A held WAL writer reproduced a callback exceeding six seconds
 before naming; ordinary Process admission permits a 15-second receipt wait.
 Optional prompt hooks need bounded observation as well as bounded ownership
 reads: lock waits and history scans are separate costs. Preserve best-effort

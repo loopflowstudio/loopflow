@@ -512,10 +512,14 @@ fn native_title_callback_does_not_initialize_a_store() {
     assert!(!home.path().join("loopflow.db").exists());
 }
 
-fn spawn_title_callback(home: &std::path::Path, thread: &str) -> std::process::Child {
+fn spawn_title_callback(
+    home: &std::path::Path,
+    thread: &str,
+) -> (std::process::Child, std::time::Instant) {
     use std::io::Write;
     use std::process::Stdio;
 
+    let started = std::time::Instant::now();
     let mut child = command(home, &["__session-title", "claude"])
         .current_dir(home)
         .env("HOME", home)
@@ -533,13 +537,13 @@ fn spawn_title_callback(home: &std::path::Path, thread: &str) -> std::process::C
         })
     )
     .unwrap();
-    child
+    (child, started)
 }
 
-fn finish_title_callback(mut child: std::process::Child) -> Output {
-    use std::time::{Duration, Instant};
+fn finish_title_callback(callback: (std::process::Child, std::time::Instant)) -> Output {
+    use std::time::Duration;
 
-    let started = Instant::now();
+    let (mut child, started) = callback;
     while child.try_wait().unwrap().is_none() {
         if started.elapsed() > Duration::from_secs(4) {
             child.kill().unwrap();

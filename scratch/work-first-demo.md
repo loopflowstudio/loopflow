@@ -6,12 +6,8 @@ Portfolio. Initial installed-CLI mismatch, failed launch and stacking history:
 unaccepted; no live installation or landing is authorized. Current design:
 [get-me-using-lf.md](get-me-using-lf.md), PR #1531.
 
-## Isolated branch demo — October 11
-
-Initial empty-clone packaging, sandbox and launch evidence remains at
-`53c4c156e3:scratch/work-first-demo.md`, this heading. Jack Heart rejected that
-empty portfolio demonstration in favor of populated Loopflow Work. Neither
-launch success nor fixture input proves the real repository experience.
+Empty-clone launch evidence: `53c4c156e3:scratch/work-first-demo.md`,
+**Isolated branch demo**. Jack Heart rejected it for populated Loopflow Work.
 
 ## Review priority — October 11
 
@@ -28,9 +24,8 @@ The earlier redraw freeze, main-thread sample, failed screenshot attempts and
 `2a56c9937d:scratch/work-first-demo.md`, **Review priority**. The repaired launch
 alone did not establish rendered usability or normal Quit.
 
-Next demo must center the populated Loopflow repo and compare its displayed
-Wave/Task inventory with shared planning, not substitute an empty portfolio demo.
-Keep live history and execution intact; no cleanup or client takeover is authorized.
+Next demo must compare populated Loopflow navigation with shared planning;
+client takeover remains explicit.
 
 Initial populated-copy incompatibility and the rejected installed Concerto
 launch remain at `6f9bd12f85:scratch/work-first-demo.md`, this heading. The empty

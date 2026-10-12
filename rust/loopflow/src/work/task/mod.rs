@@ -708,12 +708,9 @@ pub enum TaskEventKind {
         flow: String,
         summary: String,
     },
-    /// A durable steer: direction handed to the Task. Folded into the run's
-    /// seed and injected into a live turn; not a report out, so it never
-    /// crosses to the parent Project.
+    /// Historical authored direction; the immutable publication owns its text.
     Steer {
-        author: crate::durable::Author,
-        text: String,
+        steer_id: crate::id::SteerId,
     },
     /// A request to end the Task's current turn so the next one re-reads its
     /// direction immediately. A live run acts on interrupts issued after it

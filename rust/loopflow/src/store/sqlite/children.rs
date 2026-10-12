@@ -680,6 +680,7 @@ impl SqliteStore {
                 &transaction,
                 task_id.as_str(),
                 &comment_id,
+                comment.author_name.as_deref(),
                 &text,
                 observed_at,
             )? {
@@ -729,7 +730,14 @@ impl SqliteStore {
                  Title: {}\n\n{}",
                 observation.title, observation.description,
             );
-            Self::append_task_steer_in(&transaction, task_id, &Author::User, &text)?;
+            Self::save_task_steer_in(
+                &transaction,
+                task_id,
+                &Author::User,
+                &text,
+                &format!("task-definition:{task_id}"),
+                &observation.revision,
+            )?;
         }
 
         transaction.execute(
@@ -1301,6 +1309,7 @@ fn ingest_linear_comment(
     conn: &rusqlite::Transaction<'_>,
     task_id: &str,
     comment_id: &str,
+    author_name: Option<&str>,
     text: &str,
     observed_at: i64,
 ) -> StoreResult<Option<i64>> {
@@ -1327,13 +1336,19 @@ fn ingest_linear_comment(
         params![id, task_id], |row| row.get(0),
     )?;
     if inserted == 1 && !own_echo {
-        let steer = SqliteStore::append_task_steer_in(
+        let steer = SqliteStore::save_task_steer_in(
             conn,
             &TaskId::from_raw(task_id),
-            &Author::User,
+            &author_name
+                .map(|name| Author::Named(name.into()))
+                .unwrap_or(Author::User),
             text,
+            &format!("comment:{id}"),
+            comment_id
+                .split_once('@')
+                .map_or("local", |(_, revision)| revision),
         )?;
-        Ok(Some(steer.id))
+        Ok(Some(steer.sequence))
     } else {
         Ok(None)
     }

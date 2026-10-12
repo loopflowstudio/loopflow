@@ -152,10 +152,6 @@ pub struct Cli {
     #[arg(long, value_name = "TASK", conflicts_with = "wt")]
     pub task: Option<String>,
 
-    /// Give the agent only Task direction newer than this steer
-    #[arg(long = "steers-after", value_name = "STEER")]
-    pub steers_after: Option<i64>,
-
     /// Execute in an existing worktree by name or branch
     #[arg(long, value_name = "NAME", conflicts_with = "task")]
     pub wt: Option<String>,
@@ -297,9 +293,6 @@ impl Cli {
         if let Some(schema) = &self.output_schema {
             args.extend(["--output-schema".to_string(), schema.to_string()]);
         }
-        if let Some(steer) = self.steers_after {
-            args.extend(["--steers-after".to_string(), steer.to_string()]);
-        }
         args
     }
 
@@ -333,7 +326,6 @@ impl Cli {
             forward_agent: self.forward_agent,
             wave: self.wave.clone(),
             task: self.task.clone(),
-            steers_after: self.steers_after,
             wt: self.wt.clone(),
             bound_cwd: self.bound_cwd.clone(),
             resume: self.resume.clone(),
@@ -791,6 +783,23 @@ impl SessionMode {
 
 #[derive(Subcommand, Debug)]
 pub enum SessionCommand {
+    /// Save a steer for this Session without starting a turn
+    Steer { id: String, message: String },
+    /// Inspect steer delivery or retry delivery
+    Steers {
+        id: String,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        retry: Option<String>,
+        #[arg(long, default_value_t = 0)]
+        after: i64,
+        #[arg(long, default_value_t = 32)]
+        limit: usize,
+        /// Read the complete steer
+        #[arg(long)]
+        source: Option<String>,
+    },
     /// Observe validated Program Status snapshots from an active local terminal
     ObserveStatus {
         id: String,
@@ -951,6 +960,13 @@ pub enum WaveCommand {
         description: Option<String>,
     },
 
+    /// Save a steer for associated Sessions without starting a turn
+    Comment {
+        wave: String,
+        message: String,
+        #[arg(long, required = true)]
+        steer: bool,
+    },
     /// Rotate this Wave using its exact destination in a retained chapter plan
     NewChapter {
         wave: String,
@@ -1289,7 +1305,7 @@ pub enum TaskCommand {
     Comment {
         issue: String,
         message: Option<String>,
-        /// Deliver new direction even when publishing from an agent Session
+        /// Save a steer even when commenting from an agent Session
         #[arg(long, requires = "message")]
         steer: bool,
         #[arg(short = 'w', long)]
@@ -1718,6 +1734,12 @@ pub enum RepoCommand {
         bind: Option<crate::durable::RepositoryId>,
         #[arg(long)]
         json: bool,
+    },
+    /// Save a steer for associated Sessions without starting a turn
+    Comment {
+        message: String,
+        #[arg(long, required = true)]
+        steer: bool,
     },
     /// Inspect planning synchronization and personal identity
     Planning {

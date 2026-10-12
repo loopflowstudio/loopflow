@@ -920,6 +920,8 @@ pub fn run_repo(cmd: &RepoCommand) -> Result<()> {
         RepoCommand::Identity { bind, json } => {
             crate::lf::commands::work_route::identity(bind.as_ref(), *json)
         }
+
+        RepoCommand::Comment { message, .. } => crate::lf::commands::waves::comment(None, message),
         RepoCommand::Planning { cmd } => crate::lf::commands::planning::run(cmd),
         RepoCommand::Connect {
             wave,

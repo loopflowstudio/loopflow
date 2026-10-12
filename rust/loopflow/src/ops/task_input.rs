@@ -1,6 +1,6 @@
 //! Task context and live input for the ordinary skill command.
 use crate::child::ChildRef;
-use crate::durable::{Steer, WorkRef};
+use crate::durable::WorkRef;
 use crate::harness::Harness;
 use crate::store::SharedStore;
 use crate::work::project::Project;
@@ -14,24 +14,11 @@ use std::time::{Duration, Instant};
 pub(crate) struct TaskSeed {
     pub task: Task,
     pub message: String,
-    pub steers: Vec<Steer>,
-    pub steer: i64,
     pub interrupt: i64,
 }
 
 /// Read a Task snapshot without refreshing providers or advancing a control cursor.
-pub(crate) async fn read_seed(
-    store: &SharedStore,
-    task: &Task,
-    wave: &str,
-    consumed: i64,
-) -> Result<TaskSeed> {
-    let steers: Vec<_> = store
-        .task_steers(&task.id)
-        .await?
-        .into_iter()
-        .filter(|steer| steer.id > consumed)
-        .collect();
+pub(crate) async fn read_seed(store: &SharedStore, task: &Task, wave: &str) -> Result<TaskSeed> {
     let interrupt = store
         .latest_interrupt_id(&WorkRef::Task(task.id.clone()))
         .await?;
@@ -42,14 +29,12 @@ pub(crate) async fn read_seed(
         .ok_or_else(|| anyhow!("Task Project is missing"))?;
     let message = format!(
         "{}\n\n{}",
-        task_seed(task, &project, pr.as_ref(), wave, &steers),
+        task_seed(task, &project, pr.as_ref(), wave),
         crate::ops::task::task_workspace_context(task)?
     );
     Ok(TaskSeed {
         task: task.clone(),
         message,
-        steer: steers.last().map_or(consumed, |steer| steer.id),
-        steers,
         interrupt,
     })
 }
@@ -69,10 +54,9 @@ impl std::fmt::Debug for TaskInput {
 }
 
 struct Controls {
-    steer: i64,
     interrupt: i64,
     receiver: Option<tokio::sync::mpsc::UnboundedReceiver<String>>,
-    next_steer: Instant,
+    next_interrupt: Instant,
 }
 
 impl TaskInput {
@@ -81,34 +65,21 @@ impl TaskInput {
             store,
             task: seed.task,
             controls: Arc::new(tokio::sync::Mutex::new(Controls {
-                steer: seed.steer,
                 interrupt: seed.interrupt,
                 receiver: None,
-                next_steer: Instant::now(),
+                next_interrupt: Instant::now(),
             })),
         }
     }
 
-    pub(crate) async fn record_seed(&self, capture: &crate::session_record::CaptureHandle) {
-        capture.record_input(
-            "steer_seed_through",
-            &self.controls.lock().await.steer.to_string(),
-        );
-    }
-
-    pub(crate) async fn poll(
-        &self,
-        harness: &mut dyn Harness,
-        capture: Option<&crate::session_record::CaptureHandle>,
-    ) -> Result<()> {
+    pub(crate) async fn poll(&self, harness: &mut dyn Harness) -> Result<()> {
         let mut controls = self.controls.lock().await;
         let store = &self.store;
         let task = &self.task;
         let Controls {
-            steer,
             interrupt,
             receiver,
-            next_steer,
+            next_interrupt,
         } = &mut *controls;
         let receiver = receiver.get_or_insert_with(|| {
             let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
@@ -129,17 +100,7 @@ impl TaskInput {
         while let Ok(line) = receiver.try_recv() {
             handle_attachment(store, task, harness, line).await?;
         }
-        if Instant::now() >= *next_steer {
-            for delivered in
-                crate::ops::child::inject_live_steers(store, &task.id, harness, steer).await
-            {
-                if let Some(capture) = capture {
-                    capture.record_input(
-                        &format!("steer_transport_accepted:{}", delivered.id),
-                        &delivered.text,
-                    );
-                }
-            }
+        if Instant::now() >= *next_interrupt {
             crate::ops::child::observe_interrupt(
                 store,
                 &WorkRef::Task(task.id.clone()),
@@ -147,7 +108,7 @@ impl TaskInput {
                 interrupt,
             )
             .await;
-            *next_steer = Instant::now() + Duration::from_secs(5);
+            *next_interrupt = Instant::now() + Duration::from_secs(5);
         }
         Ok(())
     }
@@ -191,9 +152,8 @@ pub(crate) fn task_seed(
     project: &Project,
     pr: Option<&crate::work::task::TaskPr>,
     wave_name: &str,
-    steers: &[Steer],
 ) -> String {
-    let context = crate::ops::render_task_context(task, project, pr, wave_name, steers);
+    let context = crate::ops::render_task_context(task, project, pr, wave_name);
     format!(
         "{context}\n\nA Task has zero or one pull request. Merge leaves the Task open until completion. Optional later work uses ordinary Task creation; no follow-up disposition is required. Dependent pull requests belong to separate stacked Tasks."
     )

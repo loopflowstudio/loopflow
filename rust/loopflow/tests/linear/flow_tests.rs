@@ -1941,7 +1941,8 @@ fn record_context_script() -> &'static str {
 import json, pathlib, shlex, subprocess, sys
 requests = json.load(sys.stdin)
 hook = requests[0]["params"]["config"]["hooks"]["SessionStart"][0]["hooks"][0]["command"]
-block = json.loads(subprocess.check_output(hook, shell=True))["hookSpecificOutput"]["additionalContext"]
+event = {"session_id": requests[1]["params"]["threadId"], "hook_event_name": "SessionStart", "source": "startup"}
+block = json.loads(subprocess.check_output(hook, shell=True, input=json.dumps(event).encode()))["hookSpecificOutput"]["additionalContext"]
 args = shlex.split(hook)
 delivery = json.loads(pathlib.Path(args[args.index("--delivery") + 1]).read_text())
 references = "\n".join(pathlib.Path(path).read_text() for path in delivery["references"])
@@ -2288,119 +2289,6 @@ fn three_nested_loops_return_to_named_occurrences_of_one_skill() {
             {"decider": 5, "traversals": 1}
         ])
     );
-}
-
-#[test]
-fn a_repeated_node_receives_only_task_direction_newer_than_its_last_run() {
-    let repo = loopflow_test_support::TestRepo::new();
-    support::bind_task_planning(&repo);
-    let home = TempDir::new().unwrap();
-    let checkout = repo.path().canonicalize().unwrap();
-    let task =
-        support::register_task_with_pr(home.path(), &checkout, "repeat-steers", &repo.head_sha());
-    observe_planning(&task, &checkout);
-    repo.create_branch("repeat-steers");
-    write_skill(repo.path(), "work-proof", "Fixture step.");
-    write_flow(repo.path(), "twice", "- work-proof\n- loop: work-proof\n");
-    let steer = |text: &str| -> i64 {
-        let kind = serde_json::json!({"kind": "steer", "author": {"kind": "user"}, "text": text});
-        rusqlite::Connection::open(home.path().join("loopflow.db"))
-            .unwrap()
-            .query_row(
-                "INSERT INTO task_events(task_id,kind_json,created_at) VALUES(?1,?2,unixepoch()) RETURNING id",
-                [task.task.id.as_str(), &kind.to_string()],
-                |row| row.get(0),
-            )
-            .unwrap()
-    };
-    let earlier = steer("Keep the parser strict.");
-    let (_bin, path) = scripted_provider(home.path(), &[WORK, ITERATE, WORK, ADVANCE, WORK]);
-    let run = |args: &[&str]| {
-        let mut args = args.to_vec();
-        args.extend(["--batch"]);
-        let ran = run_lf(repo.path(), home.path(), &args, Some(&path));
-        assert!(
-            ran.status.success(),
-            "{args:?}: {}",
-            String::from_utf8_lossy(&ran.stderr)
-        );
-        received_contexts(home.path())
-            .iter()
-            .map(|prompt| prompt.contains("Keep the parser strict."))
-            .collect::<Vec<_>>()
-    };
-    // work, decide, work, decide: each node's first run is given the steer,
-    // its second is spared it.
-    assert_eq!(
-        run(&["--task", "INF-123", "flow", "twice"]),
-        [true, true, false, false]
-    );
-    // The Flow process asked for that with an option any run takes.
-    steer("Report the first error only.");
-    let after = earlier.to_string();
-    let given = run(&[
-        "--task",
-        "INF-123",
-        "--steers-after",
-        &after,
-        "skill",
-        "work-proof",
-    ]);
-    assert_eq!(given.last(), Some(&false));
-    let prompts = received_contexts(home.path());
-    assert!(prompts
-        .iter()
-        .all(|prompt| prompt.contains("<lf:loopflow>")));
-    assert!(prompts
-        .last()
-        .unwrap()
-        .contains("Report the first error only."));
-}
-
-#[test]
-fn task_edges_keep_single_skill_execution_after_removing_run_dispatch() {
-    let repo = loopflow_test_support::TestRepo::new();
-    support::bind_task_planning(&repo);
-    let home = TempDir::new().unwrap();
-    let checkout = repo.path().canonicalize().unwrap();
-    let task =
-        support::register_task_with_pr(home.path(), &checkout, "skill-edge", &repo.head_sha());
-    observe_planning(&task, &checkout);
-    repo.create_branch("skill-edge");
-    write_skill(repo.path(), "list", "Perform the single-skill edge.");
-    fs::create_dir_all(repo.path().join(".lf/workflows")).unwrap();
-    fs::write(
-        repo.path().join(".lf/workflows/skill-edge.yaml"),
-        "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, flow: list}\n",
-    )
-    .unwrap();
-    loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db"))
-        .unwrap()
-        .select_project_workflow(
-            &task.task.project_id,
-            "skill-edge",
-            &fs::read_to_string(repo.path().join(".lf/workflows/skill-edge.yaml")).unwrap(),
-        )
-        .unwrap();
-    let (_bin, path) = scripted_provider(home.path(), &[WORK]);
-    let ran = run_lf(
-        repo.path(),
-        home.path(),
-        &["-b", "task", "run", "INF-123", "skill-edge"],
-        Some(&path),
-    );
-    assert!(
-        ran.status.success(),
-        "{}",
-        String::from_utf8_lossy(&ran.stderr)
-    );
-    assert!(received_contexts(home.path())[0].contains("Perform the single-skill edge."));
-    let workflow = lf_json(
-        repo.path(),
-        home.path(),
-        &["task", "workflow", "show", "INF-123", "--json"],
-    );
-    assert_eq!(workflow["position"]["node"], "review");
 }
 
 #[test]

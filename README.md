@@ -127,10 +127,10 @@ Delegate durable work — the same verbs whether the caller is you or the wave:
 lf checkout INF-123                               # durable Task Work + worktree, no controller
 lf -b task run INF-123                            # place the Task, then run its Flow here until it ends
 lf task run INF-123 pursue                        # on a workflow: take the edge that runs pursue
-lf comment INF-123 "take the smaller approach"   # post a Linear comment for the Task's running Flow
-lf interrupt INF-123                             # end this turn so fresh direction is read now
+lf comment INF-123 "take the smaller approach"   # save a steer for the Task's Sessions
+lf interrupt INF-123                             # end the active turn
 lf --task INF-123 research "write scratch/runtime.md"    # one independent Task conversation
-lf task run INF-123 --reason "reconcile all scratch first" # publish direction, then run fresh work
+lf task run INF-123 --reason "reconcile all scratch first" # save a steer, then run fresh work
 lf task status INF-123 --json                         # inspect planning, even when sync is unavailable
 lf task complete INF-123                             # complete without moving the Workflow
 lf task reopen INF-123                               # reopen planning; keep the Workflow and PR
@@ -142,14 +142,14 @@ lf pr reconcile                                      # check recorded deliveries
 lf ci watch                                          # watch PR checks; start a ci-fix when a landing fails
 ```
 
-Wave and narrower assignments travel through selected Git planning destinations,
-including offline edits. Existing Tasks keep their recorded checkout Machine;
-shared first starts remain unavailable until exclusive admission is implemented.
-Connection settings and execution records never travel with planning.
+Subtree delegation travels with shared planning. Started Tasks retain their recorded
+Machine; new Tasks reserve an exclusive execution owner before checkout.
+Connection settings and execution records remain Machine-local.
 
-Task comments in Linear also reach the Task's running Flow. Steering never starts
-an idle Task or broadcasts to independent conversations. A stopped Flow is
-history: `task run` never continues it, so inspect `lf task status` first.
+Acquired Task comments from Linear also become steers for each associated
+Session, with independent delivery at its next supported provider boundary.
+Steering leaves idle Sessions idle. A stopped Flow is history: `task run` never
+continues it, so inspect `lf task status` first.
 
 Turn a reviewed design into work without another planning subsystem:
 

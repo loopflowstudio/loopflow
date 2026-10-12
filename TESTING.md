@@ -111,6 +111,10 @@ then run `cargo test -p loopflow --test dto_fixtures composed_lifecycle` and
 Provider fixtures must read the launch's actual context channel. When a final
 sync adds fixtures that inspect a changed transport, run those focused tests
 before arming; the earlier gate did not cover the newly combined behavior.
+Context-hook changes also run `session_cli_tests`: resume callbacks supply the
+native Session identity and event payload, just like startup. Provider fixture
+scripts must fail when a callback fails, rather than report a successful turn
+with missing context evidence.
 Claude stream fixtures must acknowledge the input's UUID before completing its
 result, and stay alive until the harness closes stdin. Include
 `explicit_agent_wins_through_task_nested_flows_and_provider_children` when

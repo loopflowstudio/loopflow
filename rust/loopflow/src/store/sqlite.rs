@@ -46,6 +46,8 @@ mod revisions;
 mod session_events;
 pub(crate) mod sessions;
 pub(crate) mod task_admission;
+
+mod steers;
 mod task_comments;
 mod task_content;
 pub(crate) mod task_history;

@@ -21,6 +21,7 @@ const HOOK_CONTEXT_BYTES: usize = 10_000;
 pub enum ContextMoment {
     Start,
     Compact,
+    Tool,
 }
 
 /// Captured source identities, not frozen context. Hooks reread scratch and Wave
@@ -113,6 +114,34 @@ impl ContextDelivery {
         )
     }
 
+    pub(crate) fn block_with_prefix(
+        &self,
+        moment: ContextMoment,
+        prefix: &str,
+    ) -> Result<String, CoreError> {
+        if matches!(moment, ContextMoment::Tool) {
+            return Ok(prefix.to_owned());
+        }
+        let block = self.block(moment)?;
+        if prefix.len() + block.text.len() <= HOOK_CONTEXT_BYTES {
+            return Ok(format!("{prefix}{}", block.text));
+        }
+        let pointer = block
+            .manifest_path
+            .strip_prefix(&self.repo)
+            .unwrap_or(&block.manifest_path);
+        let text = format!(
+            "{prefix}\nRead the current reference context and saved active skill from {}.\n",
+            serde_json::to_string(pointer).expect("context path serializes")
+        );
+        if text.len() > HOOK_CONTEXT_BYTES {
+            return Err(CoreError::ExecutionFailed(
+                "Steer notice and context pointer exceed the hook budget".into(),
+            ));
+        }
+        Ok(text)
+    }
+
     /// Saved settings are private and outlive the launching driver. Native
     /// resumes do not need the original environment or replay the first turn.
     pub fn hook_settings(&self) -> anyhow::Result<serde_json::Value> {
@@ -130,7 +159,10 @@ impl ContextDelivery {
             quote(&executable),
             quote(&path)
         );
-        Ok(serde_json::json!({"SessionStart": [
+        Ok(serde_json::json!({
+            "PostToolUse": [{"hooks": [{"type":"command", "command": format!("{command} tool"), "timeout":30}]}],
+            "UserPromptSubmit": [{"hooks": [{"type":"command", "command": format!("{command} tool"), "timeout":30}]}],
+            "SessionStart": [
             {"matcher": "startup|resume", "hooks": [{"type":"command", "command": format!("{command} start"), "timeout": 30}]},
             {"matcher": "compact", "hooks": [{"type":"command", "command": format!("{command} compact"), "timeout": 30}]}
         ]}))

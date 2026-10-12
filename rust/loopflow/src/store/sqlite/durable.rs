@@ -1,9 +1,10 @@
+use crate::steer::Steer;
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use time::OffsetDateTime;
 
 use crate::child::ChildRef;
 use crate::durable::{
-    AbandonReceipt, Author, Machine, MachineId, Placement, PlacementProvenance, ProjectId, Steer,
+    AbandonReceipt, Author, Machine, MachineId, Placement, PlacementProvenance, ProjectId,
     SteerComment, TaskId, TaskState, ToolResponseId, ToolResponseReceipt, ToolResponseWrite,
     WorkRef, WorkStatus,
 };
@@ -261,112 +262,76 @@ impl SqliteStore {
 
     pub fn task_steers(&self, task_id: &TaskId) -> StoreResult<Vec<Steer>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(super::children::task_events_after_in(&conn, task_id, 0)?
-            .into_iter()
-            .filter_map(|event| match event.kind {
-                TaskEventKind::Steer { author, text } => Some(Steer {
-                    id: event.id,
-                    author,
-                    text,
-                }),
-                _ => None,
-            })
-            .collect())
+        let mut query = conn.prepare(&format!(
+            "SELECT {} FROM steers p WHERE task_id=?1 ORDER BY seq",
+            super::steers::COLUMNS
+        ))?;
+        let steers = query
+            .query_map([task_id.as_str()], super::steers::read_steer)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(steers)
     }
 
-    /// Steer comments across every Work, issued at or after `since` (unix
-    /// seconds) — the cross-Work `lf history` timeline. Scans the Task and
-    /// Project event streams for the `Steer` comment; there is no steers table.
     pub fn steers_since(&self, since: i64) -> StoreResult<Vec<SteerComment>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut comments = Vec::new();
-        let mut task_statement = conn.prepare(
-            "SELECT task_id, id, kind_json, created_at FROM task_events
-             WHERE json_extract(kind_json, '$.kind')='steer' AND created_at >= ?1
-             ORDER BY created_at, id",
-        )?;
-        let task_rows = task_statement.query_map([since], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, i64>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, i64>(3)?,
-            ))
-        })?;
-        for row in task_rows {
-            let (task_id, id, kind_json, created_at) = row?;
-            let kind: TaskEventKind = serde_json::from_str(&kind_json)?;
-            if let TaskEventKind::Steer { author, text } = kind {
-                comments.push(SteerComment {
-                    work: WorkRef::Task(TaskId::parse(&task_id).map_err(invalid_durable)?),
-                    steer: Steer { id, author, text },
-                    issued_at: crate::store::rows::unix_to_datetime(created_at),
-                });
-            }
-        }
-        let mut project_statement = conn.prepare(
-            "SELECT project_id, id, kind_json, created_at FROM project_events
-             WHERE json_extract(kind_json, '$.kind')='steer' AND created_at >= ?1
-             ORDER BY created_at, id",
-        )?;
-        let project_rows = project_statement.query_map([since], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, i64>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, i64>(3)?,
-            ))
-        })?;
-        for row in project_rows {
-            let (project_id, id, kind_json, created_at) = row?;
-            let kind: ProjectEventKind = serde_json::from_str(&kind_json)?;
-            if let ProjectEventKind::Steer { author, text } = kind {
-                comments.push(SteerComment {
-                    work: WorkRef::Project(ProjectId::parse(&project_id).map_err(invalid_durable)?),
-                    steer: Steer { id, author, text },
-                    issued_at: crate::store::rows::unix_to_datetime(created_at),
-                });
-            }
-        }
-        Ok(comments)
+        let mut query = conn.prepare(&format!("SELECT {},task_id,project_id,created_at FROM steers p
+            WHERE created_at>=?1 AND (task_id IS NOT NULL OR project_id IS NOT NULL) ORDER BY created_at,seq", super::steers::COLUMNS))?;
+        let result = query
+            .query_map([since], |row| {
+                let task: Option<String> = row.get(6)?;
+                let work = match task {
+                    Some(task) => WorkRef::Task(TaskId::from_raw(task)),
+                    None => WorkRef::Project(ProjectId::from_raw(row.get::<_, String>(7)?)),
+                };
+                Ok(SteerComment {
+                    work,
+                    steer: super::steers::read_steer(row)?,
+                    issued_at: crate::store::rows::unix_to_datetime(row.get(8)?),
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(result)
     }
 
     #[cfg(test)]
-    pub fn append_steer(&self, work: &WorkRef, author: &Author, text: &str) -> StoreResult<Steer> {
-        let WorkRef::Task(task_id) = work else {
-            return Err(StoreError::InvalidData("only Tasks take steering".into()));
+    pub fn save_steer(&self, work: &WorkRef, author: &Author, text: &str) -> StoreResult<Steer> {
+        let WorkRef::Task(task) = work else {
+            return Err(StoreError::InvalidData(
+                "only Tasks take test steers".into(),
+            ));
         };
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let steer = Self::append_task_steer_in(&tx, task_id, author, text)?;
+        let tx = conn.transaction()?;
+        let steer = Self::save_task_steer_in(
+            &tx,
+            task,
+            author,
+            text,
+            &uuid::Uuid::new_v4().to_string(),
+            "1",
+        )?;
         tx.commit()?;
         Ok(steer)
     }
 
-    /// Local delivery projection. Authored input is published to Linear first.
-    pub(crate) fn append_task_steer_in(
+    pub(crate) fn save_task_steer_in(
         tx: &Transaction<'_>,
-        task_id: &TaskId,
+        task: &TaskId,
         author: &Author,
         text: &str,
+        source: &str,
+        revision: &str,
     ) -> StoreResult<Steer> {
-        let text = text.trim();
-        if text.is_empty() {
-            return Err(StoreError::InvalidData("Steer text cannot be empty".into()));
-        }
-        let event = super::children::insert_task_event_in(
+        let steer =
+            super::steers::save_in(tx, ("task", task.as_str()), source, revision, author, text)?;
+        super::children::insert_task_event_in(
             tx,
-            task_id,
+            task,
             &TaskEventKind::Steer {
-                author: author.clone(),
-                text: text.to_string(),
+                steer_id: steer.id.clone(),
             },
         )?;
-        Ok(Steer {
-            id: event.id,
-            author: author.clone(),
-            text: text.to_string(),
-        })
+        Ok(steer)
     }
 
     /// Record an interrupt request as a durable comment on the Work's event

@@ -24,6 +24,57 @@ pub fn run(command: &SessionCommand) -> anyhow::Result<()> {
 
 async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
     match command {
+        SessionCommand::Steer { id, message } => {
+            let store = open_shared_store().await?;
+            let session = crate::ops::human_session::session_by_id(&store, id)
+                .await?
+                .context("Session not found")?;
+            let author = crate::config::participant_name()?
+                .unwrap_or_else(|| "attribution unresolved".into());
+            let steer = store
+                .sqlite
+                .save_session_steer(&session.id, &author, message)?;
+            println!("Saved {}", steer.id);
+            Ok(())
+        }
+        SessionCommand::Steers {
+            id,
+            json,
+            retry,
+            after,
+            limit,
+            source,
+        } => {
+            let store = open_shared_store().await?;
+            let session = crate::ops::human_session::session_by_id(&store, id)
+                .await?
+                .context("Session not found")?;
+            if let Some(steer) = retry {
+                store
+                    .sqlite
+                    .retry_session_steer(&session.id, &crate::id::SteerId::parse(steer)?)?;
+            }
+            if let Some(source) = source {
+                let steer = store
+                    .sqlite
+                    .session_steer_source(&session.id, &crate::id::SteerId::parse(source)?)?;
+                println!("{}", serde_json::to_string_pretty(&steer)?);
+                return Ok(());
+            }
+            let status = store.sqlite.session_steers(&session.id, *after, *limit)?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&status)?);
+            } else {
+                println!("{}; {} pending", status.capability, status.pending);
+                if let Some(after) = status.next_after {
+                    println!("Next page: --after {after}");
+                }
+                for row in status.items {
+                    println!("{} {}", row.steer.id, row.evidence);
+                }
+            }
+            Ok(())
+        }
         SessionCommand::ObserveStatus {
             id,
             terminal,

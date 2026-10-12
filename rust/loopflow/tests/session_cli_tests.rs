@@ -622,6 +622,7 @@ fn headless_resume_reads_the_saved_workspace_and_retains_process_provenance() {
     std::fs::write(
         &provider,
         r#"#!/bin/sh
+set -eu
 if [ "${1:-}" = --version ]; then exit 0; fi
 pwd -P > "$LF_TEST_RESUME_PROOF.cwd"
 printf '%s\n' "$@" > "$LF_TEST_RESUME_PROOF.args"
@@ -631,7 +632,8 @@ import json, os, pathlib, subprocess, sys
 args = sys.argv[1:]
 settings = json.loads(pathlib.Path(args[args.index("--settings") + 1]).read_text())
 hook = settings["hooks"]["SessionStart"][0]["hooks"][0]["command"]
-block = json.loads(subprocess.check_output(hook, shell=True))["hookSpecificOutput"]["additionalContext"]
+event = {"session_id": args[args.index("--resume") + 1], "hook_event_name": "SessionStart", "source": "resume"}
+block = json.loads(subprocess.check_output(hook, shell=True, input=json.dumps(event).encode()))["hookSpecificOutput"]["additionalContext"]
 pathlib.Path(os.environ["LF_TEST_RESUME_PROOF"] + ".context").write_text(block)
 PYTHON
 python3 -c '

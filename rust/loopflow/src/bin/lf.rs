@@ -816,6 +816,9 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
             })
         }
 
+        WaveCommand::Comment { wave, message, .. } => {
+            loopflow::lf::commands::waves::comment(Some(wave), message)
+        }
         WaveCommand::NewChapter {
             wave,
             name,
@@ -1380,6 +1383,24 @@ fn init_tracing(verbose: bool) {
         .init();
 }
 
+fn validate_desktop_platform(cli: &Cli) -> anyhow::Result<()> {
+    // Opening previews report the platform impediment without attempting control.
+    // Actual Desktop commands still refuse before repository lookup or preparation.
+    let opening_preview = cli.explain
+        && matches!(
+            cli.command,
+            Some(Commands::Desktop {
+                cmd: loopflow::lf::DesktopCommand::Open { .. }
+            })
+        );
+    if matches!(cli.command, Some(Commands::Desktop { .. })) && !opening_preview && !cli.context {
+        loopflow::lf::commands::desktop::require_supported().inspect_err(|_| {
+            journal::mark_effect_free_read();
+        })?;
+    }
+    Ok(())
+}
+
 fn run() -> anyhow::Result<()> {
     loopflow::installation::dispatch_entry_gate(&loopflow::installation::ArtifactRole::Cli)?;
     // Validate addressed commands once, before help, repository lookup, or admission.
@@ -1405,6 +1426,7 @@ fn run() -> anyhow::Result<()> {
     {
         let args = reorder_args(std::iter::once("lf".to_string()).chain(command).collect());
         let cli = loopflow::lf::commands::ssh::parse_remote_command(&args[1..])?;
+        validate_desktop_platform(&cli)?;
         let preview = cli.context
             || cli.explain
             || matches!(
@@ -1487,20 +1509,7 @@ fn run() -> anyhow::Result<()> {
         journal::mark_effect_free_read();
     }
     init_tracing(cli.verbose);
-    // Opening previews report the platform impediment without attempting control.
-    // Actual Desktop commands still refuse before repository lookup or preparation.
-    let opening_preview = cli.explain
-        && matches!(
-            cli.command,
-            Some(Commands::Desktop {
-                cmd: loopflow::lf::DesktopCommand::Open { .. }
-            })
-        );
-    if matches!(cli.command, Some(Commands::Desktop { .. })) && !opening_preview && !cli.context {
-        loopflow::lf::commands::desktop::require_supported().inspect_err(|_| {
-            journal::mark_effect_free_read();
-        })?;
-    }
+    validate_desktop_platform(&cli)?;
     let _selected_repo_cwd = cli
         .repo
         .as_deref()

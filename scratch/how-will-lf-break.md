@@ -245,3 +245,16 @@ Gate found that explicit Wave document paths still met the old blanket `.lf`
 exclusion. Authored `.lf/wave` documents now participate in explicit context and
 source deduplication; other `.lf` state remains excluded. Existing context-delivery
 tests exercise distinct memory scopes and one copy of the Wave goal.
+Wave ownership fixtures now track `.lf/wave` instead of ignoring the whole `.lf`
+directory. The broad gate also exposed an existing wall-clock assertion: a
+planning refresh may advance `updated_at` across a second boundary. The fixture
+now checks monotonic time and preserves its identity/state comparisons; no
+production clock behavior changed and no retry was added.
+
+Check: `uv run python scripts/test_network.py cargo test --offline -p loopflow --lib` — 1,947 passed, 8 findings repaired (local GitHub merge fields, explicit Wave context, Wave fixture ignores, refresh timestamp assertion), all 8 passed in focused reruns (`stored_task_publishes_and_completes_after_verified_merge`, `context_delivery`, `wave_repository_ownership`, `cold_detail_refreshes_confirmed_work_and_retains_identity`), 10 opt-in tests ignored; affected integration targets `worktree_tests commit_tests land_tests scratch_tests sync_tests pr_review_tests wt_ci_logs_tests task_pr_authority_tests task_initialization_tests context_launch_tests context_tests context_block_tests cli_discovery dto_fixtures documented_commands` — 236 passed; golden/remote fixtures — 3 passed; post-context repair context/golden integration — 25 passed; Python suite — 410 passed/3 findings, architecture+checkout rerun 40 passed (all 3 repaired), 1 skip; website `uv run python dev.py test` — 75 passed; `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, architecture, Swift boundaries, 9-file Swift syntax, four-layout CLI demo and diff checks passed; Desktop build/tests deferred to CI (ViewInspector fetch and missing GhosttyKit). Logs: `/tmp/lf-break-*.log`. No broad rerun needed without new code or failures.
+
+Gate is complete for this local change. Jack Heart authorized the authored ship
+flow and all local commits; its remaining delivery command is
+`land --wait-and-fix`. The cached PR title/body cover repository adaptation,
+scratch preservation and canonical Wave migration. Further scope remains the
+limits already recorded above, not a blocker to this authorized delivery.

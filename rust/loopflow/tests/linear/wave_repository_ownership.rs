@@ -22,7 +22,7 @@ fn repository(path: &Path) {
     git(path, &["init", "-b", "main"]);
     git(path, &["config", "user.email", "test@example.com"]);
     git(path, &["config", "user.name", "Test User"]);
-    std::fs::write(path.join(".gitignore"), ".lf/\n").unwrap();
+    std::fs::write(path.join(".gitignore"), ".lf/*\n!.lf/wave/\n").unwrap();
     commit(path, "initial");
 }
 

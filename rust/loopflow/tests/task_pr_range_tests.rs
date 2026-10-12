@@ -760,7 +760,11 @@ esac
             gh_open_pr_script(log.to_str().unwrap())
         };
         let _env = EnvGuard::with_lf_home(
-            &[("gh", &script), ("open", noop_open_script())],
+            &[
+                ("gh", &script),
+                ("open", noop_open_script()),
+                ("xdg-open", noop_open_script()),
+            ],
             home.path(),
         );
         repo.create_branch("prototype");

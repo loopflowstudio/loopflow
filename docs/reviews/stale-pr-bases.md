@@ -136,3 +136,17 @@ checks pass 74 tests and fail the unchanged homepage's 1,440 px overflow check
 (actual width 1,475 px), also previously recorded in Infrastructure memory.
 Neither suite is reported as fully passing. The full materialized Rust matrix
 remains CI-owned; installed Etude recovery and hosted delivery remain unproved.
+
+The subsequent hosted run [38207213151](https://github.com/loopflowstudio/loopflow/actions/runs/38207213151)
+passed 2,426 Rust tests and failed the stale-base CLI demo after successfully
+creating its simulated PR. Main's checked review opener exposed a fixture gap:
+the test stubbed macOS `open` but invoked Linux's real `xdg-open`, which exited 3
+without a browser. The fixture now stubs both platform openers; history and range
+assertions remain unchanged. No production error handling was weakened.
+Gate synced current main `092ab7ba5b` without conflicts before this repair.
+
+The repaired tree passes all 86 affected landing, sync, PR-authority and PR-range
+tests on macOS under network isolation, plus the five-scenario demo, formatting,
+Clippy, Ruff and architecture checks. Review found no further production change
+needed. Linux execution of the repaired fixture and the full materialized matrix
+remain CI-owned; this local result does not establish hosted delivery.

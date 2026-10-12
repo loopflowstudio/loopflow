@@ -133,6 +133,19 @@ that failure; the repaired case and 31 CLI/context/watch cases then passed.
 Formatting, Clippy and architecture checks pass. Linux HTTPS reconnect remains
 with CI; no live or installed acceptance is claimed.
 
+Hosted run 38216116717 exposed five fixture failures. Three seeded 350 finished
+Tasks through the five-second foreground refresh deadline; bulk setup now uses
+inventory acquisition directly, preserving production deadlines. Both Linux
+reconnect failures reproduced under `scripts/test_network.py`. The peer now serves
+team deltas with current revisions; Flow recovery uses turn/step boundaries,
+watchers follow the slow clock, and late comments target live Tasks. Seventeen
+focused tests pass in a disposable Linux container with materialized migrations,
+including concurrent hooks, 60 seconds without idle-agent requests, watcher
+backoff, lost replies and rate-limit recovery. Formatting, Clippy, Python lint and
+architecture checks pass. The repaired candidate still needs hosted CI; these
+proofs do not establish live or installed acceptance. TESTING.md names the Linux
+reconnect obligation so macOS-only gates cannot silently skip it.
+
 Jack authorized landing after checks. His `6d169dc1` permits publication before live
 measurement while Linear is paused. Live request counts, rejected-request quota
 accounting and installed pending-write recovery remain unproved. After installing,

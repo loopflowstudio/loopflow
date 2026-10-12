@@ -3974,7 +3974,12 @@ async fn seed_finished_tasks(
             provider.issues.push(issue);
         }
     }
-    super::refresh_wave(repo, "product").await.unwrap();
+    // Bulk fixture setup is not an opportunistic foreground refresh. Its disk
+    // writes must finish before measuring on-demand requests on slower CI hosts.
+    let (context, initiative) = super::resolve_context(repo, "product").await.unwrap();
+    super::refresh_inventory(repo, "product", &context, &initiative)
+        .await
+        .unwrap();
     rusqlite::Connection::open(&fixture.database)
         .unwrap()
         .execute(

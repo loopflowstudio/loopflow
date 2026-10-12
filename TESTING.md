@@ -627,9 +627,12 @@ accounts or installed data. Ordinary retry, usage, binding and review behavior
 belong in `session_lifecycle_tests`; Chapter convergence belongs in
 `ops::chapter::tests`, including interrupted rotation and second-Machine sync.
 
-`planning_reconnect_tests` runs public work-watch and Flow reconnect against
+`planning_reconnect_tests` runs public work-watch and Flow-boundary recovery against
 synthetic Linear on Linux, with disposable TLS trust. It covers lost replies,
 independent acquisition during failed delivery, local buffering and retained execution.
+The peer implements team deltas with current revision timestamps. Flow acquisition
+waits for a turn/step boundary; only watchers retry on the 30–240-second clock.
+Run these Linux fixtures when changing Linear acquisition, even if macOS checks pass.
 Linear and Git planning run separately; no provider receipt crosses Git.
 `planning_setup_tests` proves configuration selection and personal-key recovery.
 `planning_foreground_tests` exercises disposable custom refs through public CLI and

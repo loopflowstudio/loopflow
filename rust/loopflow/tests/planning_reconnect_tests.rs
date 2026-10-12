@@ -14,7 +14,7 @@ fn work_watch_reconnects_repository_planning() {
 }
 
 #[test]
-fn public_flow_reconnects_planning_without_another_turn() {
+fn public_flow_reconnects_planning_at_turn_and_step_boundaries() {
     planning_reconnect_fixture("flow");
 }
 

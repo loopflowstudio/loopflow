@@ -7,10 +7,11 @@ use std::time::Duration;
 use serde_json::{json, Value};
 
 use crate::durable::WorkRef;
-use crate::planning::PlanningChange;
-use crate::pm::linear::LinearClient;
+use crate::linear::LinearClient;
+use crate::store::planning_sync::{PlanningChange, TaskDeletion};
 use crate::store::sqlite::planning_changes::PlanningChanges;
-use crate::store::{PmTaskRecord, Store};
+use crate::store::Store;
+use crate::work::edit::WorkValue;
 
 use super::{OpsError, OpsResult};
 
@@ -50,20 +51,24 @@ pub(crate) async fn sync_fields(store: &Store, repo: &Path, work: &WorkRef) -> O
         return Ok(());
     };
     let changes = pending(store, owner)?;
+    let deletion = match owner {
+        PlanningChanges::Task(id) => store.sqlite.pending_task_deletion(id).map_err(message)?,
+        _ => None,
+    };
     let attempt = async {
-        let client = super::pm::linear_client(repo).await?;
-        if let Some(change) = changes.iter().find(|change| change.field == "deleted") {
+        let client = super::linear::linear_client(repo).await?;
+        if let Some(change) = &deletion {
             return sync_deletion(store, repo, owner, &client, change).await;
         }
         // Also reconcile an older attempted receipt whose successor is no longer pending.
         let mut observation = observe(store, repo, owner, &client).await?;
-        for change in changes.iter().filter(|c| c.field != "task_order") {
+        for change in &changes {
             if let Err(error) =
                 sync_field(store, repo, owner, &client, change, &mut observation).await
             {
                 store
                     .sqlite
-                    .planning_field_error(owner, change, &error.to_string())
+                    .planning_field_error(owner, &change.id, &error.to_string())
                     .map_err(message)?;
             }
         }
@@ -84,10 +89,22 @@ pub(crate) async fn sync_fields(store: &Store, repo: &Path, work: &WorkRef) -> O
         .map_err(|_| message("Field delivery timed out; attempted receipts remain uncertain"))
         .and_then(|result| result);
     if let Err(error) = &result {
+        if let PlanningChanges::Project(id) = owner {
+            store
+                .sqlite
+                .project_order_error(id, &error.to_string())
+                .map_err(message)?;
+        }
+        if let Some(change) = &deletion {
+            store
+                .sqlite
+                .planning_field_error(owner, &change.id, &error.to_string())
+                .map_err(message)?;
+        }
         for change in &changes {
             store
                 .sqlite
-                .planning_field_error(owner, change, &error.to_string())
+                .planning_field_error(owner, &change.id, &error.to_string())
                 .map_err(message)?;
         }
     }
@@ -99,7 +116,7 @@ async fn sync_deletion(
     repo: &Path,
     owner: PlanningChanges<'_>,
     client: &LinearClient,
-    change: &PlanningChange,
+    change: &TaskDeletion,
 ) -> OpsResult<()> {
     let PlanningChanges::Task(id) = owner else {
         return Err(message("Only Task removal has a deletion receipt"));
@@ -109,7 +126,7 @@ async fn sync_deletion(
         .await
         .map_err(message)?
         .ok_or_else(|| message("Task is missing"))?;
-    let external = task.plan.linear_id()?.as_str();
+    let external = task.linear_id()?.as_str();
     let (trashed, trash_revision) = client
         .issue_trash(external)
         .await
@@ -139,13 +156,15 @@ async fn sync_deletion(
         .sqlite
         .observe_task_deletion(id, &trash_revision)
         .map_err(message)?;
-    if !pending(store, owner)?.iter().any(|c| c.id == change.id) {
+    if store
+        .sqlite
+        .pending_task_deletion(id)
+        .map_err(message)?
+        .is_none_or(|c| c.id != change.id)
+    {
         return Ok(());
     }
-    let baseline = change
-        .base
-        .as_ref()
-        .and_then(|base| base["revision"].as_str());
+    let baseline = change.base_revision.as_deref();
     if baseline.is_none() {
         return Err(message(
             "Deletion has no provider baseline; saved removal retained",
@@ -153,7 +172,7 @@ async fn sync_deletion(
     }
     if !store
         .sqlite
-        .attempt_planning_field(owner, change, Some(&trash_revision))
+        .attempt_task_deletion(id, change, &trash_revision)
         .map_err(message)?
     {
         return Err(message(
@@ -161,10 +180,10 @@ async fn sync_deletion(
         ));
     }
     if let Err(error) = client.delete_issue(external).await {
-        if matches!(error, crate::pm::PmError::RateLimited { .. }) {
+        if matches!(error, crate::linear::LinearError::RateLimited { .. }) {
             store
                 .sqlite
-                .reject_planning_field(owner, change)
+                .reject_planning_field(owner, &change.id)
                 .map_err(message)?;
         }
         return Err(message(error));
@@ -222,7 +241,7 @@ async fn sync_field(
     let input = match owner {
         PlanningChanges::Task(_) => task_input(store, &current)?,
         PlanningChanges::Project(_) => client
-            .project_field_input(&current.field, &current.value, &observation.content)
+            .project_field_input(&current.value, &observation.content)
             .await
             .map_err(message)?,
     };
@@ -243,20 +262,20 @@ async fn sync_field(
     {
         Ok(response) => response,
         Err(error) => {
-            if matches!(error, crate::pm::PmError::RateLimited { .. }) {
+            if matches!(error, crate::linear::LinearError::RateLimited { .. }) {
                 store
                     .sqlite
-                    .reject_planning_field(owner, &current)
+                    .reject_planning_field(owner, &current.id)
                     .map_err(message)?;
             }
             return Err(message(error));
         }
     };
     match &response {
-        crate::pm::linear::PlanningResponse::Task { record, .. } => {
-            observation.revision = record.item.revision.clone()
+        crate::linear::PlanningResponse::Task { issue, .. } => {
+            observation.revision = issue.revision.clone()
         }
-        crate::pm::linear::PlanningResponse::Project { project, content } => {
+        crate::linear::PlanningResponse::Project { project, content } => {
             observation.revision = project.revision.clone();
             observation.content = content.clone();
         }
@@ -272,13 +291,20 @@ pub(super) async fn apply_response(
     store: &Store,
     repo: &Path,
     owner: PlanningChanges<'_>,
-    response: crate::pm::linear::PlanningResponse,
+    response: crate::linear::PlanningResponse,
 ) -> OpsResult<()> {
     match response {
-        crate::pm::linear::PlanningResponse::Task { record, .. } => {
-            ingest_task(store, repo, &record).await
+        crate::linear::PlanningResponse::Task { issue, project, .. } => {
+            ingest_task(
+                store,
+                repo,
+                &issue,
+                project.as_deref(),
+                time::OffsetDateTime::now_utc().unix_timestamp(),
+            )
+            .await
         }
-        crate::pm::linear::PlanningResponse::Project {
+        crate::linear::PlanningResponse::Project {
             project: observed, ..
         } => {
             let PlanningChanges::Project(id) = owner else {
@@ -294,18 +320,16 @@ pub(super) async fn apply_response(
                 .await
                 .map_err(message)?
                 .ok_or_else(|| message("Wave is missing"))?;
-            let initiative = super::pm::read_initiative(repo, wave.slug())
+            let initiative = super::linear::read_initiative(repo, wave.slug())
                 .ok_or_else(|| message("Wave has no Linear Initiative"))?;
-            store
-                .sqlite
-                .put_pm_project(
-                    &project.wave_id,
-                    "linear",
-                    &initiative,
-                    &observed,
-                    time::OffsetDateTime::now_utc().unix_timestamp(),
-                )
-                .map_err(message)?;
+            crate::linear::acceptance::accept_linear_project_in(
+                &store.sqlite,
+                &project.wave_id,
+                &initiative,
+                &observed,
+                time::OffsetDateTime::now_utc().unix_timestamp(),
+            )
+            .map_err(message)?;
             Ok(())
         }
     }
@@ -338,7 +362,7 @@ async fn observe(
                 .await
                 .map_err(message)?
                 .ok_or_else(|| message("Task is missing"))?;
-            let external = task.plan.linear_id()?.as_str().to_owned();
+            let external = task.linear_id()?.as_str().to_owned();
             let (item, project) = client
                 .issue_ownership(&external)
                 .await
@@ -348,20 +372,16 @@ async fn observe(
             ingest_task(
                 store,
                 repo,
-                &PmTaskRecord {
-                    item,
-                    project,
-                    observed_at: time::OffsetDateTime::now_utc().unix_timestamp(),
-                },
+                &item,
+                project.as_ref(),
+                time::OffsetDateTime::now_utc().unix_timestamp(),
             )
             .await?;
-            let accepted = store
+            if !store
                 .sqlite
-                .planning_task(id)
+                .accepted_task_revision(id, &external, revision.as_deref())
                 .map_err(message)?
-                .record
-                .ok_or_else(|| message("Task planning is unavailable"))?;
-            if accepted.item.revision != revision {
+            {
                 return Err(message(
                     "Newer or unresolved Linear planning retained; field delivery deferred",
                 ));
@@ -378,7 +398,7 @@ async fn observe(
                 .await
                 .map_err(message)?
                 .ok_or_else(|| message("Project is missing"))?;
-            let external = project.plan.linear_id()?.as_str().to_owned();
+            let external = project.linear_id()?.as_str().to_owned();
             let (observed, content) = client
                 .project_content_observation(&external)
                 .await
@@ -388,21 +408,23 @@ async fn observe(
                 .await
                 .map_err(message)?
                 .ok_or_else(|| message("Project Wave is missing"))?;
-            let initiative = super::pm::read_initiative(repo, wave.slug())
+            let initiative = super::linear::read_initiative(repo, wave.slug())
                 .ok_or_else(|| message("Wave has no Linear Initiative"))?;
-            let accepted = store
+            crate::linear::acceptance::accept_linear_project_in(
+                &store.sqlite,
+                &project.wave_id,
+                &initiative,
+                &observed,
+                time::OffsetDateTime::now_utc().unix_timestamp(),
+            )
+            .map_err(message)?;
+            if !store
                 .sqlite
-                .put_pm_project(
-                    &project.wave_id,
-                    "linear",
-                    &initiative,
-                    &observed,
-                    time::OffsetDateTime::now_utc().unix_timestamp(),
-                )
-                .map_err(message)?;
-            if accepted.revision != observed.revision {
+                .accepted_project_revision(id, &external, observed.revision.as_deref())
+                .map_err(message)?
+            {
                 return Err(message(
-                    "Newer Linear Project observation retained; field delivery deferred",
+                    "Newer or unresolved Linear Project planning retained; field delivery deferred",
                 ));
             }
             Ok(FieldObservation {
@@ -415,28 +437,22 @@ async fn observe(
 }
 
 fn task_input(store: &Store, change: &PlanningChange) -> OpsResult<Value> {
-    match change.field.as_str() {
-        "name" => Ok(json!({"title": change.value})),
-        "description" => Ok(json!({"description": change.value})),
-        "assignee" => Ok(json!({"assigneeId": change.value})),
-        "project_id" => {
-            let id = crate::durable::ProjectId::parse(
-                change
-                    .value
-                    .as_str()
-                    .ok_or_else(|| message("missing destination Project"))?,
-            )
-            .map_err(message)?;
+    match &change.value {
+        WorkValue::TaskTitle(value) => Ok(json!({"title": value})),
+        WorkValue::TaskDescription(value) => Ok(json!({"description": value})),
+        WorkValue::TaskAssignee(value) => Ok(json!({"assigneeId": value})),
+        WorkValue::TaskProject(value) => {
+            let id = crate::durable::ProjectId::parse(value).map_err(message)?;
             let project = store
                 .sqlite
                 .project(&id)
                 .map_err(message)?
                 .ok_or_else(|| message("destination Project is missing"))?;
-            Ok(json!({"projectId":project.plan.linear_id()?.as_str()}))
+            Ok(json!({"projectId":project.linear_id()?.as_str()}))
         }
         _ => Err(message(format!(
             "unsupported Task planning field: {}",
-            change.field
+            change.value.field()
         ))),
     }
 }
@@ -446,17 +462,18 @@ fn task_input(store: &Store, change: &PlanningChange) -> OpsResult<Value> {
 pub(super) async fn ingest_task(
     store: &Store,
     repo: &Path,
-    record: &PmTaskRecord,
+    issue: &crate::linear::LinearIssue,
+    project: Option<&crate::linear::LinearProject>,
+    observed_at: i64,
 ) -> OpsResult<()> {
     let mut confirmed = None;
-    if let Some(project) = &record.project {
+    if let Some(project) = project {
         if let Some(local) = store
             .get_project_by_project(&project.id)
             .await
             .map_err(message)?
             .filter(|p| {
-                p.plan
-                    .linear_id
+                p.linear_id
                     .as_ref()
                     .is_some_and(|id| id.as_str() == project.id)
             })
@@ -466,19 +483,19 @@ pub(super) async fn ingest_task(
                 .await
                 .map_err(message)?
                 .ok_or_else(|| message("Project Wave is missing"))?;
-            if let Some(initiative) = super::pm::read_initiative(repo, wave.slug()) {
+            if let Some(initiative) = super::linear::read_initiative(repo, wave.slug()) {
                 confirmed = Some((local.wave_id, initiative));
             }
         }
     }
     if confirmed.is_none() {
-        if let Some(project) = &record.project {
+        if let Some(project) = project {
             for wave in store
                 .list_waves(Some(&repo.to_string_lossy()))
                 .await
                 .map_err(message)?
             {
-                if let Some(initiative) = super::pm::read_initiative(repo, wave.slug()) {
+                if let Some(initiative) = super::linear::read_initiative(repo, wave.slug()) {
                     if project.initiative_ids.contains(&initiative) {
                         if confirmed.is_some() {
                             return Err(message("Project matches multiple Wave Initiatives"));
@@ -489,15 +506,15 @@ pub(super) async fn ingest_task(
             }
         }
     }
-    store
-        .sqlite
-        .put_pm_task(
-            &repo.to_string_lossy(),
-            "linear",
-            record,
-            confirmed
-                .as_ref()
-                .map(|(wave, initiative)| (wave, initiative.as_str())),
-        )
-        .map_err(message)
+    crate::linear::acceptance::accept_linear_issue_in(
+        &store.sqlite,
+        &repo.to_string_lossy(),
+        issue,
+        project,
+        observed_at,
+        confirmed
+            .as_ref()
+            .map(|(wave, initiative)| (wave, initiative.as_str())),
+    )
+    .map_err(message)
 }

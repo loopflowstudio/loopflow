@@ -92,6 +92,22 @@ lf --task EXP-12 run incident # run a Flow without moving the Task
 lf task run EXP-12 --reason "take the smaller approach"
 ```
 
+```bash
+lf --machine mini --task EXP-12 skill implement # use the Task's pushed branch
+```
+
+The target needs the same saved planning identity before launch. SSH carries only
+that identity, its identifier, branch and required commit—not a copied planning
+record. Push source work first: missing branches, unpushed commits and uncommitted
+changes are reported without changing them. Repeated launches reuse the checkout;
+a target behind the required commit needs `lf sync` there. Existing IDs and local
+execution history remain unchanged.
+
+[Select Git planning](#select-git-planning) to exchange planning before dispatch
+and cold Task resolution. If acquisition cannot find the Task, launch reports
+missing synchronization instead of bootstrapping a copy. Imported planning never
+moves local Workflows.
+
 `--task` and `--wt` select a location. `--wave` supplies context and identity;
 it cannot override a Task's owning Wave. `task run` places the Task's
 worktree, defaults to its Project's Flow, then starts
@@ -180,10 +196,15 @@ add digits to select one. Full IDs and exact Linear ticket aliases still work.
 Displayed local selectors start at seven digits and extend when needed; retain
 full IDs in automation.
 
+Task status, edits and comments resolve ticket aliases within the current repository,
+including its worktrees and path aliases. An explicit full Task ID selects its
+recorded repository; outside a repository, ticket aliases must be globally unique.
+
 ```bash
 lf task edit <id> --rank 0 --assignee <person-id>
 lf task edit <id> --unassign
 lf project edit <project-id> --name "Parser" --summary "Retain quoted input"
+lf project edit <project-id> --description "Preserve quoted text across machines."
 lf project workflow set <project-id> review --file /tmp/review.yaml
 lf project workflow list --project <project-id> --json
 lf project workflow source <project-id> review
@@ -193,7 +214,9 @@ lf wave update-plan --wave parser --plan /tmp/plan.json
 Project names, summaries, Workflow selections and complete plan replacements save
 locally, including during a Linear outage. Connected repositories report pending sync;
 `lf project workflow show <project-id> --json` includes `sync`: pending changes,
-uncertain attempts, errors and retained losing values. Task edits and status use
+uncertain attempts, errors and retained losing values. Project reads keep the local
+`id` in both transports, with an optional `linear_id` binding; adding or removing
+that binding does not change identity. Task edits and status use
 the same receipt-backed presentation as Desktop.
 Inbound refreshes preserve saves against unchanged baselines and adopt conflicting
 Linear edits, retaining losing intentions in delivery history. An active Task Session
@@ -213,10 +236,61 @@ remain independent of goal and memory files.
 
 Placement, native Sessions, workflow skills and GitHub delivery use the same Task
 identity. `lf land` requests merge; `lf pr reconcile` observes delivery. After
-merge, follow-through files accepted obligations or records none, then
+merge, record independently accepted later work as ordinary Tasks and comments, then
 `lf task complete <task-id>` completes the source. A repository without a code
 remote supports local work and refuses hosted landing. Local planning does not
 require Linear at any of these boundaries.
+
+## Choose planning synchronization
+
+Planning defaults to your Git ref on `origin`. Select a shared ref or Linear in
+`.lf/config.yaml`, or set a personal default in `~/.lf/config.yaml`:
+
+```yaml
+planning:
+  provider: git
+  remote: origin
+  shared: team
+```
+
+```yaml
+planning:
+  provider: linear
+linear:
+  team: <team-id>
+```
+
+Repository `planning` replaces the personal selection as a whole. Omit `shared`
+for `refs/loopflow/planning/users/<user-key>`; shared names use
+`refs/loopflow/planning/shared/<name>`. Existing `linear.team` selects Linear
+when `planning` is omitted. Every machine uses the selected transport independently.
+Linear unavailability leaves saves buffered locally; it never switches to Git.
+`lf repo connect <wave>` saves the repository Team and selects Linear, overriding
+a personal Git preference.
+
+```bash
+lf planning status --json
+lf planning key                    # show this machine's personal planning key
+lf planning key --recover <uuid>   # reuse it on a fresh second machine
+```
+
+The first personal Git connection creates the key. Recover the same key before
+starting personal synchronization on another machine. Shared refs require no key.
+Ref separation is not access control; choose a remote appropriate for the plan.
+Configuration selects the repository's entire plan, including retained history.
+Changing configuration retains old receipts and history; it does not undo earlier
+publication or transfer uncertain provider attempts to another machine.
+
+Commands save locally, then attempt synchronization. Interactive and headless
+Sessions and Desktop's Work connection keep planning current while connected.
+Cold Task lookup acquires planning before placement. There is no resident or
+automatic turn retry. Status separates fetched revisions, retained imports and
+pending, unconfirmed or confirmed publication. Retained alternatives can be copied
+into ordinary edits. Endpoint URLs are omitted because they may contain credentials.
+
+Only planning travels: Tasks, Project content, comments and planning disposition.
+Workflows, Sessions, Processes, checkouts and machine control stay local. A completed
+plan does not move another machine's Workflow or clean its checkout.
 
 ## Connect planning and create work
 
@@ -237,6 +311,8 @@ before connection. Planning setup is separate from direct local execution.
 
 Task creation and edits save locally, including during a Linear outage. Creation
 generates the Task ID; later edits, Project rotation and synchronization preserve it.
+`lf task create --json` returns the saved Task, with its local `id`, `project_id`,
+`title`, `description` and optional `linear_id` binding, not a Linear issue.
 Connected repositories report pending sync. Field receipts retain titles, notes, assignment and ordering
 with their provider baselines; observed conflicts adopt Linear and retire the losing
 intention. An active Task connection delivers mapped titles, notes, assignment,
@@ -349,33 +425,23 @@ Ambiguous provider evidence remains unresolved. `lf ci watch` repairs actionable
 CI failures while it runs.
 
 ```bash
-lf task follow-up EXP-12 --title 'Verify the installed command' --notes 'Follow-up to EXP-12: after the release is installed, run the accepted scenario and record its version and result; investigate a failure.' --due 2026-10-09
-lf task follow-up EXP-12 --finish 'The installed check has its own Task'
+lf task comment EXP-12 'Installed verification continues in EXP-13.'
 lf task complete EXP-12
 ```
 
-After verified merge, file accepted remaining obligations as linked follow-up
-Tasks, or record `lf task follow-up EXP-12 --none 'No accepted work remains'`.
-Use `--existing ISSUE` to link work already filed and `--wave WAVE` to choose its
-owner. Give each additional obligation a distinct `--key` before `--finish`;
-reusing a key (default: `follow-up`) retries the original filing, even if its
-title changes. Retries retain the child identity and Project after chapter
-rotation. Inspect receipts and retry identical input after an uncertain response.
-The source completes after filing,
-without waiting for those children to finish. Preserve accepted later checks in
-PR copy before landing clears scratch.
+Record independently accepted later work as ordinary Tasks and linking comments.
+A saved Task survives a failed comment; retry only the comment against that Task.
+Complete the delivered source outcome without waiting for its follow-ups. Preserve
+accepted later checks in PR copy before landing clears scratch.
 
-Filing and completion work locally without Linear. In a connected repository,
-foreground planning sync exports saved Tasks and then their related-issue links,
-including links from already completed Tasks. Closing that connection leaves
-unsent or uncertain effects for the next connection; filing starts no watcher.
-Displayed follow-up names and due dates use the current saved Task, while retry
-receipts keep their original identity and input.
+Task and comment saves work locally. The configured transport delivers them while
+connected; an outage leaves local changes pending. Historical uncertain filings
+retain their original creation and relation IDs until confirmed. They do not
+require a separate disposition or control Task completion.
 
-`ship` runs gate, waited landing, then follow-through. A bare delivery, manual
-GitHub merge or stopped finishing Flow leaves **Merged · Follow-through pending**.
-The next Task/Wave operation checks for live work, then runs `finish-delivery`
-if needed. It does not rerun gate or re-arm the merged PR.
+`ship` runs gate and waited landing. Its caller or Workflow arrival owns completion.
+After a manual merge or stopped Flow, inspect live work and repeat only unfinished
+operations. Do not rerun gate or re-arm an already merged PR.
 
 Due follow-ups return on the owning Wave's next operation, even if unstarted.
 Their briefs carry release prerequisites, expected evidence and any timezone.
@@ -386,8 +452,7 @@ without an installed Wave schedule, there is no automatic check between passes.
 `lf task complete EXP-12` completes without moving the Workflow. Moving or
 arriving at `end` records the movement, then requests completion. A failed
 request shows **Completion pending**; retry `lf task complete EXP-12`, without
-replaying the Flow. Completion requires merge and a durable none/filed
-disposition when the Task has a PR. Linear completion and reopening change
+replaying the Flow. Completion requires merge when the Task has a PR. Linear completion and reopening change
 status without moving the Workflow or stopping Processes; reopening supersedes
 an older completion request. `lf task reopen EXP-12` does the same locally,
 including offline: it returns planning to unstarted and keeps the PR, checkout,
@@ -408,6 +473,30 @@ A published parent PR, including a draft, is enough to start and publish the
 child. Prepare a child-specific design; checkout transfers it without overwriting
 newer child work. `lf sync` follows parent updates and its squash merge while
 preserving the child's identity, PR, Session and design.
+
+## Schedule ordinary commands
+
+```yaml
+# .lf/config.yaml
+crons:
+  - name: daily-review
+    command: [--wave, product, --batch, skill, wave/operate]
+    schedule: 0 0 9 * * *
+```
+
+```bash
+lf cron preflight                  # validate configuration and Machine placement
+lf cron sync                       # explicitly install the configured list
+lf cron list --wave product         # filter by the command's Work selector
+lf cron list --task EXP-12
+lf cron add daily-review --schedule daily -- --wave product --batch skill wave/operate
+```
+
+Commands use ordinary `lf` arguments, including `--wave` and `--task`.
+Reading or cloning the repository installs nothing. An explicit `crons: []`
+removes the repository's jobs when synced; an absent list leaves them alone.
+Scope-filtered sync only changes matching jobs. Existing job names and Wave
+selectors retain installed identities and receipt history.
 
 ## Check authorized deliveries in the background
 

@@ -38,6 +38,49 @@ private final class Feed {
 @Suite("Desktop without a display")
 @MainActor
 struct DesktopHeadlessTests {
+    @Test("Git planning shows retained mutations and read failures without claiming convergence")
+    func peerPlanningStatus() throws {
+        let data = try Data(contentsOf: fixtures.appendingPathComponent("peer_planning_status.json"))
+        let statuses = try JSONDecoder().decode([PeerPlanningStatus].self, from: data)
+        let view = PeerPlanningView(reading: .unavailable(lastGood: statuses, reason: "reader exited"))
+        for text in ["Showing the last sync status", "Local changes pending",
+                     "Configured for this repository", "Held retained-task: retained projection conflict",
+                     "Publication: unconfirmed (attempted-publication)", "Fetched: newer-fetch",
+                     "Retained import: retained-import", "Sync status unavailable: reader exited",
+                     "Retained alternative", "\"Retained title\"",
+                     "Candidate, not confirmed", "\"Maya\"",
+                     "Mutation: comment-head"] {
+            #expect(try view.inspect().find(text: text).string() == text)
+        }
+        let local = PeerPlanningView(reading: .available([]))
+        #expect(try local.inspect().find(text: "No active Git planning destination").string() == "No active Git planning destination")
+        let unknown = PeerPlanningView(reading: .unavailable(lastGood: nil, reason: "store unavailable"))
+        #expect(try unknown.inspect().findAll(ViewType.Text.self).allSatisfy {
+            try $0.string() != "No active Git planning destination"
+        })
+    }
+
+    @Test("The repository roadmap reads Git planning through the ordinary query")
+    func roadmapPeerPlanning() async throws {
+        let data = try Data(contentsOf: fixtures.appendingPathComponent("peer_planning_status.json"))
+        let status = String(decoding: data, as: UTF8.self)
+        let roadmap = String(decoding: try Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")), as: UTF8.self)
+        let model = WorkModel(query: RegistryQuery { args, cwd in
+            if args == ["planning", "status", "--json"], cwd == "/src/loopflow" {
+                return "{\"destinations\":\(status)}"
+            }
+            if args.first == "roadmap" { return roadmap }
+            if args.first == "wave" { return "[]" }
+            if args.first == "session" { return #"{"entries":[],"next":null}"# }
+            throw RegistryQueryError("Unexpected command: \(args)")
+        }, repoPath: "/src/loopflow")
+        await model.refresh()
+        #expect(model.peerPlanning.value?.count == 2)
+        let view = RoadmapView(model: model, onOpenWave: { _ in })
+        let statusView = try view.inspect().find(PeerPlanningView.self)
+        #expect(try statusView.find(text: "Local changes pending").string() == "Local changes pending")
+    }
+
     @Test("Planning sync shows saves, uncertainty and retained losing edits, then clears settled work")
     func planningSync() throws {
         let data = try Data(contentsOf: fixtures.appendingPathComponent("planning_sync.json"))

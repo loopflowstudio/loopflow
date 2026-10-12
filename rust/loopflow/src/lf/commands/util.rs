@@ -323,7 +323,7 @@ pub(crate) fn require_provider_session_process(dir: &Path) -> Result<()> {
     if store.task_deleted(&task)? {
         bail!(
             "Task {} was deleted and cannot resume execution",
-            task.plan.identifier
+            task.identifier
         );
     }
     Ok(())
@@ -396,6 +396,8 @@ fn spawn_session_command_with_env(
     exact_account_id: Option<&crate::store::ProviderAccountId>,
     launch_lock: Option<File>,
 ) -> Result<()> {
+    let _planning_sync =
+        crate::ops::planning_sync::PlanningSync::start_for_directory(&command.cwd)?;
     let outcome = session_command_status_with_env(
         command,
         environment,

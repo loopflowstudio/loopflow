@@ -73,14 +73,12 @@ and due follow-ups have been checked for selection or authorized execution.
   `lf task complete <issue>`, never `task run` or gate. Completion, Workflow
   position and Process liveness are independent. A newer reopening supersedes
   old intent; end alone cannot re-complete it.
-- **Finish merged delivery.** A verified merge is not Task completion. Inspect
-  all associated Flows and unfinished Processes first; leave a live ship Flow
-  to finish. With no live Flow process, a durable none/filed disposition needs
-  `lf task complete <issue>` and a status reread. Otherwise run
-  `lf --task <issue> run finish-delivery` to file accepted follow-ups or record
-  none, then complete. This applies to manual GitHub merges too. Do not replay
-  gate, re-arm, resume a stopped Flow or wait for the filed children to finish.
-  Missing scope judgment or uncertain provider writes remain visible blockers.
+- **Finish merged delivery.** Inspect associated Flows and unfinished Processes;
+  leave authorized live work to finish. Preserve independently accepted later work
+  as ordinary Tasks and linking comments. Complete the source when its outcome is
+  delivered, then reread status. A failed linking comment retries only the comment.
+  Do not replay gate, re-arm a merged PR or resume a stopped Flow to finish it.
+  Missing scope judgment and uncertain provider writes remain visible.
 - **Reviews stay in the Task conversation.** Surface the Session from
   `lf session list --waiting --json`. Discuss feedback and preserve agreed
   direction there; closing a Session supplies no navigation authority.

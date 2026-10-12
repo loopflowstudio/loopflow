@@ -24,7 +24,7 @@ public enum MetricStage: String, Decodable, Sendable, Hashable {
     case installed, graduated
 }
 
-public enum MetricTarget: Decodable, Sendable, Hashable {
+public enum Threshold: Decodable, Sendable, Hashable {
     case atLeast(Double)
     case atMost(Double)
 
@@ -210,7 +210,7 @@ public struct MetricReading: Decodable, Sendable, Hashable, Identifiable {
     public let instrumented: Bool
     public let instrument: String
     public let unit: String
-    public let target: MetricTarget?
+    public let target: Threshold?
     public let window: String
     public let freshnessPolicy: String
     public let freshness: MetricFreshness
@@ -285,10 +285,10 @@ public enum MetricContractIssue: Decodable, Sendable, Hashable {
     }
 }
 
-public struct ChapterMetricTarget: Decodable, Sendable, Hashable, Identifiable {
+public struct MetricTarget: Decodable, Sendable, Hashable, Identifiable {
     public var id: String { metricId }
     public let metricId: String
-    public let target: MetricTarget
+    public let target: Threshold
     enum CodingKeys: String, CodingKey {
         case metricId = "metric_id"
         case target

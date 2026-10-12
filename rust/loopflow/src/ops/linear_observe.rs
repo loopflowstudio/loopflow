@@ -16,10 +16,12 @@ use crate::store::{SharedStore, Store};
 use crate::work::task::Task;
 
 pub(crate) fn connected(repo: &str) -> bool {
-    crate::config::load_config_or_default(Some(std::path::Path::new(repo)))
-        .pm
-        .and_then(|pm| pm.linear_team)
-        .is_some()
+    crate::config::load_config(Some(std::path::Path::new(repo))).is_ok_and(|config| {
+        matches!(
+            config.unwrap_or_default().planning_transport(),
+            crate::config::PlanningConfig::Linear {}
+        )
+    })
 }
 
 /// Explicit steering carries its marker, whichever account published it.
@@ -50,7 +52,7 @@ pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> O
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?
         .ok_or_else(|| OpsError::Message(format!("Task {} is missing", task.id)))?;
-    let Some(issue) = &task.plan.linear_id else {
+    let Some(issue) = &task.linear_id else {
         return Ok(());
     };
     let wave = store
@@ -61,7 +63,9 @@ pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> O
     if !connected(wave.repo()) {
         return Ok(());
     }
-    let client = super::pm::issue_client(std::path::Path::new(wave.repo())).await?;
+    let client = super::linear::issue_client()
+        .await?
+        .for_repository(std::path::Path::new(wave.repo()));
     let observation = client
         .observe_issue(issue.as_str())
         .await
@@ -78,7 +82,7 @@ fn message(error: impl std::fmt::Display) -> OpsError {
 }
 
 pub(crate) async fn check_before_write(repo: &std::path::Path) -> OpsResult<()> {
-    let store = super::pm::pm_store().await?;
+    let store = super::planning_sync::planning_store().await?;
     tokio::time::timeout(
         Duration::from_secs(5),
         check_repository(&store, &repo.to_string_lossy()),
@@ -95,12 +99,12 @@ pub(crate) async fn check_repository(store: &Store, repository: &str) -> OpsResu
         return Ok(false);
     }
     let repo = std::path::Path::new(repository);
-    let team = super::pm::repository_team_id(repo)?;
+    let team = super::linear::repository_team_id(repo)?;
     let mut live = Vec::new();
     let mut finished = Vec::new();
     let waves = store.list_waves(None).await.map_err(message)?;
     for wave in &waves {
-        if super::pm::repository_team_id(std::path::Path::new(wave.repo()))
+        if super::linear::repository_team_id(std::path::Path::new(wave.repo()))
             .ok()
             .as_ref()
             != Some(&team)
@@ -108,7 +112,7 @@ pub(crate) async fn check_repository(store: &Store, repository: &str) -> OpsResu
             continue;
         }
         for task in store.list_tasks(Some(wave.id())).await.map_err(message)? {
-            let Some(issue) = task.plan.linear_id else {
+            let Some(issue) = task.linear_id else {
                 continue;
             };
             if store
@@ -147,19 +151,16 @@ pub(crate) async fn check_repository(store: &Store, repository: &str) -> OpsResu
     let through = now
         .format(&time::format_description::well_known::Rfc3339)
         .map_err(message)?;
-    let client = super::pm::unchecked_issue_client(repo).await?;
+    let client = super::linear::issue_client().await?;
     let changes = client
         .team_changes(&team, since.as_deref(), &through, &live, &finished)
         .await
         .map_err(message)?;
     let changed = !changes.is_empty();
-    for (record, observation) in changes {
+    for (issue, project, observation) in changes {
         // Provider filters limit traffic; the current local decision still wins
         // when completion races the request.
-        let existing = store
-            .get_task_by_issue(&record.item.id)
-            .await
-            .map_err(message)?;
+        let existing = store.get_task_by_issue(&issue.id).await.map_err(message)?;
         if let Some(task) = &existing {
             if store
                 .task_state(&task.id)
@@ -181,17 +182,16 @@ pub(crate) async fn check_repository(store: &Store, repository: &str) -> OpsResu
             waves
                 .iter()
                 .find(|wave| {
-                    super::pm::repository_team_id(std::path::Path::new(wave.repo()))
+                    super::linear::repository_team_id(std::path::Path::new(wave.repo()))
                         .ok()
                         .as_ref()
                         == Some(&team)
-                        && super::pm::read_initiative(
+                        && super::linear::read_initiative(
                             std::path::Path::new(wave.repo()),
                             wave.slug(),
                         )
                         .is_some_and(|initiative| {
-                            record
-                                .project
+                            project
                                 .as_ref()
                                 .is_some_and(|project| project.initiative_ids.contains(&initiative))
                         })
@@ -199,12 +199,15 @@ pub(crate) async fn check_repository(store: &Store, repository: &str) -> OpsResu
                 .map(|wave| wave.repo().to_owned())
         };
         let Some(owner) = owner else { continue };
-        super::planning_delivery::ingest_task(store, std::path::Path::new(&owner), &record).await?;
-        if let Some(task) = store
-            .get_task_by_issue(&record.item.id)
-            .await
-            .map_err(message)?
-        {
+        super::planning_delivery::ingest_task(
+            store,
+            std::path::Path::new(&owner),
+            &issue,
+            project.as_ref(),
+            now.unix_timestamp(),
+        )
+        .await?;
+        if let Some(task) = store.get_task_by_issue(&issue.id).await.map_err(message)? {
             store
                 .apply_linear_observation(&task.id, observation, now)
                 .await
@@ -229,40 +232,54 @@ pub(crate) async fn sync_repository(store: &Store, repository: &str) -> bool {
             false
         }
     };
-    for result in futures_util::future::join_all([
-        sync_repository_deliveries(store, repository, false),
-        sync_repository_deliveries(store, repository, true),
-    ])
-    .await
-    {
-        if let Err(error) = result {
-            tracing::debug!(%error, "planning delivery pending");
+    if tokio::time::timeout(Duration::from_secs(5), async {
+        for result in futures_util::future::join_all([
+            sync_repository_deliveries(store, repository, false),
+            sync_repository_deliveries(store, repository, true),
+        ])
+        .await
+        {
+            if let Err(error) = result {
+                tracing::debug!(%error, "planning delivery pending");
+            }
         }
-    }
-    if let Err(error) = super::planning_export::sync_repository_exports(store, repository).await {
-        tracing::debug!(%error, "planning export pending");
-    }
-    if let Err(error) = super::planning_delivery::sync_repository_fields(store, repository).await {
-        tracing::debug!(%error, "planning field delivery pending");
+        if let Err(error) = super::planning_export::sync_repository_exports(store, repository).await
+        {
+            tracing::debug!(%error, "planning export pending");
+        }
+        if let Err(error) =
+            super::planning_delivery::sync_repository_fields(store, repository).await
+        {
+            tracing::debug!(%error, "planning field delivery pending");
+        }
+    })
+    .await
+    .is_err()
+    {
+        tracing::debug!("Linear delivery deadline elapsed; pending receipts retained");
     }
     changed
 }
 
-/// Only an attached watcher owns a clock. Idle agents own no timer.
+/// Only an attached watcher owns a Linear clock. Idle agents own no Linear timer.
 #[derive(Debug)]
 pub(crate) struct PlanningWatch {
+    _git: super::planning_sync::PlanningSync,
     stop: Option<tokio::sync::oneshot::Sender<()>>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
 impl PlanningWatch {
-    pub(crate) fn start(store: SharedStore, repo: String) -> std::io::Result<Self> {
+    pub(crate) fn start(store: SharedStore, repo: String) -> OpsResult<Self> {
+        let git = super::planning_sync::PlanningSync::start(store.clone(), repo.clone())?;
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()?;
         let (stop, stopped) = tokio::sync::oneshot::channel();
         #[cfg(test)]
-        let context = super::pm::PM_TEST_CONTEXT.try_with(Clone::clone).ok();
+        let context = super::linear::LINEAR_TEST_CONTEXT
+            .try_with(Clone::clone)
+            .ok();
         let thread = std::thread::Builder::new()
             .name("planning-watch".into())
             .spawn(move || {
@@ -281,12 +298,13 @@ impl PlanningWatch {
                 };
                 #[cfg(test)]
                 if let Some(context) = context {
-                    runtime.block_on(super::pm::PM_TEST_CONTEXT.scope(context, drive));
+                    runtime.block_on(super::linear::LINEAR_TEST_CONTEXT.scope(context, drive));
                     return;
                 }
                 runtime.block_on(drive);
             })?;
         Ok(Self {
+            _git: git,
             stop: Some(stop),
             thread: Some(thread),
         })
@@ -304,7 +322,11 @@ impl Drop for PlanningWatch {
     }
 }
 
-async fn sync_repository_deliveries(store: &Store, repository: &str, state: bool) -> OpsResult<()> {
+pub(super) async fn sync_repository_deliveries(
+    store: &Store,
+    repository: &str,
+    state: bool,
+) -> OpsResult<()> {
     if !connected(repository) {
         return Ok(());
     }
@@ -352,7 +374,7 @@ pub(crate) async fn sync_task_state(store: &Store, task: &Task) -> OpsResult<()>
             .await
             .map_err(|e| message(&e))?
             .ok_or_else(|| OpsError::Message("Task is missing".into()))?;
-        let Some(issue) = &task.plan.linear_id else {
+        let Some(issue) = &task.linear_id else {
             return Ok(());
         };
         let project = store
@@ -368,13 +390,15 @@ pub(crate) async fn sync_task_state(store: &Store, task: &Task) -> OpsResult<()>
         if !connected(wave.repo()) {
             return Ok(());
         }
-        let client = super::pm::issue_client(std::path::Path::new(wave.repo())).await?;
+        let client = super::linear::issue_client()
+            .await?
+            .for_repository(std::path::Path::new(wave.repo()));
         let (observed, _) = client
             .issue_ownership(issue.as_str())
             .await
             .map_err(|e| message(&e))?
             .ok_or_else(|| OpsError::Message("Linked Linear issue is unavailable".into()))?;
-        if observed.project_id.as_deref() != project.plan.linear_id.as_ref().map(|id| id.as_str()) {
+        if observed.project_id.as_deref() != project.linear_id.as_ref().map(|id| id.as_str()) {
             return Err(OpsError::Message(
                 "Task membership changed in Linear; retained local decision".into(),
             ));
@@ -384,9 +408,7 @@ pub(crate) async fn sync_task_state(store: &Store, task: &Task) -> OpsResult<()>
                 "Linear state is unknown; saved decision retained".into(),
             ));
         }
-        if !store
-            .sqlite
-            .observe_task_state(&delivery, &observed)
+        if !crate::linear::acceptance::observe_task_state(&store.sqlite, &delivery, &observed)
             .map_err(|e| message(&e))?
         {
             return Ok(());
@@ -413,7 +435,7 @@ pub(crate) async fn sync_task_state(store: &Store, task: &Task) -> OpsResult<()>
         let confirmed = match client.set_item_state(issue.as_str(), &state_id).await {
             Ok(confirmed) => confirmed,
             Err(error) => {
-                if matches!(error, crate::pm::PmError::RateLimited { .. }) {
+                if matches!(error, crate::linear::LinearError::RateLimited { .. }) {
                     store
                         .sqlite
                         .reject_task_state(&delivery)
@@ -422,9 +444,7 @@ pub(crate) async fn sync_task_state(store: &Store, task: &Task) -> OpsResult<()>
                 return Err(message(&error));
             }
         };
-        if store
-            .sqlite
-            .observe_task_state(&delivery, &confirmed)
+        if crate::linear::acceptance::observe_task_state(&store.sqlite, &delivery, &confirmed)
             .map_err(|e| message(&e))?
         {
             return Err(OpsError::Message(
@@ -454,7 +474,7 @@ pub(crate) async fn sync_task_comments(store: &Store, task: &Task) -> OpsResult<
         .await
         .map_err(|error| message(&error))?
         .ok_or_else(|| OpsError::Message("Task is missing".into()))?;
-    let Some(issue) = &task.plan.linear_id else {
+    let Some(issue) = &task.linear_id else {
         return Ok(());
     };
     let comments = store
@@ -472,7 +492,9 @@ pub(crate) async fn sync_task_comments(store: &Store, task: &Task) -> OpsResult<
     if !connected(wave.repo()) {
         return Ok(());
     }
-    let client = super::pm::issue_client(std::path::Path::new(wave.repo())).await?;
+    let client = super::linear::issue_client()
+        .await?
+        .for_repository(std::path::Path::new(wave.repo()));
     for comment in comments {
         let result = tokio::time::timeout(
             std::time::Duration::from_secs(5),

@@ -1,9 +1,6 @@
 ---
-crons:
-- flow: telemetry-daily
-  schedule: 0 0 9 * * *
-pm:
-  linear_initiative: 218967b6-a760-4b7c-9a46-11d9d61a42c2
+linear:
+  initiative: 218967b6-a760-4b7c-9a46-11d9d61a42c2
 id: 6155f18a-1b7f-418c-9af3-8d6fa5ce4989
 ---
 
@@ -19,7 +16,8 @@ and truth source for each responsibility.
 ## Projects
 
 Jack Heart selected locally owned Projects and Tasks with optional repository-wide
-Linear synchronization. LOO-406 owns the unfinished writer cutover.
+Linear synchronization. LOO-406's common writer is integrated on main (#1503);
+installed acceptance and LOO-412's peer composition remain separate.
 Projects do not own memory, cadence, or child projects.
 
 ## Bounds
@@ -33,7 +31,7 @@ Projects do not own memory, cadence, or child projects.
   CI, release cadence, spend, and host health; turn the first red or flaky
   signal into focused work.
 
-Release owns the `release-run` schedule in [its goal](release/GOAL.md).
+Release owns `release-run`; both schedules are declared in [repository configuration](../../.lf/config.yaml).
 
 ## Process
 

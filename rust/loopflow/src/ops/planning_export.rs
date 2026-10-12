@@ -5,10 +5,10 @@ use std::time::Duration;
 use serde_json::json;
 
 use crate::durable::WorkRef;
-use crate::pm::linear::LinearClient;
+use crate::linear::LinearClient;
 use crate::store::sqlite::planning_changes::PlanningChanges;
 use crate::store::sqlite::planning_export::PlanningExport;
-use crate::store::{PmTaskRecord, Store};
+use crate::store::Store;
 
 use super::{OpsError, OpsResult};
 
@@ -20,13 +20,14 @@ pub(crate) async fn sync_repository_exports(store: &Store, repo: &str) -> OpsRes
     if !super::linear_observe::connected(repo) {
         return Ok(());
     }
+    store.sqlite.recover_task_filings(repo).map_err(message)?;
     // Projects precede Tasks; each failure is bounded and leaves other exports eligible.
     for work in store.sqlite.planning_export_owners(repo).map_err(message)? {
         if let Err(error) = sync_export(store, Path::new(repo), &work).await {
             tracing::debug!(%error, "planning export pending");
         }
     }
-    sync_follow_through_relations(store, Path::new(repo)).await?;
+    sync_retained_relations(store, Path::new(repo)).await?;
     Ok(())
 }
 
@@ -50,7 +51,7 @@ pub(crate) async fn sync_export(store: &Store, repo: &Path, work: &WorkRef) -> O
                     .await
                     .map_err(message)?
                     .ok_or_else(|| message("Task is missing"))?;
-                (task.wave_id, task.plan.linear_id.is_some())
+                (task.wave_id, task.linear_id.is_some())
             }
             PlanningChanges::Project(id) => {
                 let project = store
@@ -58,7 +59,7 @@ pub(crate) async fn sync_export(store: &Store, repo: &Path, work: &WorkRef) -> O
                     .await
                     .map_err(message)?
                     .ok_or_else(|| message("Project is missing"))?;
-                (project.wave_id, project.plan.linear_id.is_some())
+                (project.wave_id, project.linear_id.is_some())
             }
         };
         if mapped {
@@ -69,14 +70,14 @@ pub(crate) async fn sync_export(store: &Store, repo: &Path, work: &WorkRef) -> O
             .await
             .map_err(message)?
             .ok_or_else(|| message("Wave is missing"))?;
-        let initiative = super::pm::read_initiative(repo, wave.slug())
+        let initiative = super::linear::read_initiative(repo, wave.slug())
             .ok_or_else(|| message("Wave has no Linear Initiative; export remains pending"))?;
-        let team = super::pm::repository_team_id(repo)?;
+        let team = super::linear::repository_team_id(repo)?;
         let export = store
             .sqlite
             .prepare_planning_export(owner, &team, &initiative)
             .map_err(message)?;
-        let client = super::pm::linear_client(repo).await?;
+        let client = super::linear::linear_client(repo).await?;
         if observe(store, repo, owner, &client, &export, &wave_id).await? {
             return Ok(());
         }
@@ -93,7 +94,12 @@ pub(crate) async fn sync_export(store: &Store, repo: &Path, work: &WorkRef) -> O
         let project = matches!(owner, PlanningChanges::Project(_));
         if project {
             input["statusId"] = client
-                .project_field_input("status", &export.model["status"], "")
+                .project_field_input(
+                    &crate::work::edit::WorkValue::ProjectStatus(
+                        export.project_status().map_err(message)?,
+                    ),
+                    "",
+                )
                 .await
                 .map_err(message)?["statusId"]
                 .clone();
@@ -103,7 +109,7 @@ pub(crate) async fn sync_export(store: &Store, repo: &Path, work: &WorkRef) -> O
                     input["teamId"]
                         .as_str()
                         .ok_or_else(|| message("creation Team is missing"))?,
-                    export.model["state"].as_str().unwrap_or("unstarted")
+                    export.task_state.as_deref().unwrap_or("unstarted")
                 )
                 .await
                 .map_err(message)?);
@@ -118,7 +124,7 @@ pub(crate) async fn sync_export(store: &Store, repo: &Path, work: &WorkRef) -> O
         let response = match client.deliver_planning_creation(project, input).await {
             Ok(response) => response,
             Err(error) => {
-                if matches!(error, crate::pm::PmError::RateLimited { .. }) {
+                if matches!(error, crate::linear::LinearError::RateLimited { .. }) {
                     store
                         .sqlite
                         .reject_planning_export(owner, false)
@@ -128,7 +134,7 @@ pub(crate) async fn sync_export(store: &Store, repo: &Path, work: &WorkRef) -> O
             }
         };
         match response {
-            crate::pm::linear::PlanningResponse::Project { project, .. } => {
+            crate::linear::PlanningResponse::Project { project, .. } => {
                 attach_project(store, owner, &client, &export, &wave_id, *project).await?;
             }
             response => {
@@ -188,11 +194,9 @@ async fn observe(
             super::planning_delivery::ingest_task(
                 store,
                 repo,
-                &PmTaskRecord {
-                    item,
-                    project,
-                    observed_at: time::OffsetDateTime::now_utc().unix_timestamp(),
-                },
+                &item,
+                project.as_ref(),
+                time::OffsetDateTime::now_utc().unix_timestamp(),
             )
             .await?;
         }
@@ -206,7 +210,7 @@ async fn attach_project(
     client: &LinearClient,
     export: &PlanningExport,
     wave: &crate::id::WaveId,
-    mut project: crate::pm::PmProject,
+    mut project: crate::linear::LinearProject,
 ) -> OpsResult<()> {
     if project.initiative_ids.is_empty() {
         let (_, attempted) = store
@@ -231,7 +235,7 @@ async fn attach_project(
         {
             Ok(project) => project,
             Err(error) => {
-                if matches!(error, crate::pm::PmError::RateLimited { .. }) {
+                if matches!(error, crate::linear::LinearError::RateLimited { .. }) {
                     store
                         .sqlite
                         .reject_planning_export(owner, true)
@@ -247,25 +251,23 @@ async fn attach_project(
             "Created Project has conflicting Initiative membership; receipt retained",
         ));
     }
-    store
-        .sqlite
-        .put_pm_project(
-            wave,
-            "linear",
-            &export.initiative,
-            &project,
-            time::OffsetDateTime::now_utc().unix_timestamp(),
-        )
-        .map_err(message)?;
+    crate::linear::acceptance::accept_linear_project_in(
+        &store.sqlite,
+        wave,
+        &export.initiative,
+        &project,
+        time::OffsetDateTime::now_utc().unix_timestamp(),
+    )
+    .map_err(message)?;
     Ok(())
 }
 
 // Local filing settles independently. Exporting either endpoint makes its retained
 // relation eligible, including after the source Task has already completed.
-async fn sync_follow_through_relations(store: &Store, repo: &Path) -> OpsResult<()> {
+async fn sync_retained_relations(store: &Store, repo: &Path) -> OpsResult<()> {
     for relation in store
         .sqlite
-        .pending_follow_through_relations(&repo.to_string_lossy())
+        .pending_retained_relations(&repo.to_string_lossy())
         .map_err(message)?
     {
         let path = store
@@ -278,8 +280,9 @@ async fn sync_follow_through_relations(store: &Store, repo: &Path) -> OpsResult<
             continue;
         };
         let attempt = async {
-            super::pm::issue_client(repo)
+            super::linear::issue_client()
                 .await?
+                .for_repository(repo)
                 .ensure_follow_up_relation(
                     &relation.source_issue_id,
                     &relation.target_issue_id,
@@ -289,7 +292,7 @@ async fn sync_follow_through_relations(store: &Store, repo: &Path) -> OpsResult<
                 .map_err(message)?;
             store
                 .sqlite
-                .confirm_follow_through_relation(&relation)
+                .confirm_retained_relation(&relation)
                 .map_err(message)
         };
         match tokio::time::timeout(Duration::from_secs(5), attempt).await {

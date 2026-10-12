@@ -41,6 +41,9 @@ Creation preserves authored IDs and bytes and writes missing GOAL.md/MEMORY.md
 files. Reads never provision. Registry relocation changes addresses without moving authored files.
 Workflow definitions remain separately stored: provisioning and the draft migration
 import `.lf/workflows/`, and Project workflow selection updates the stored definition.
+Imported Waves remain readable without execution placement: Wave list, status
+and roadmap emit `machine: null` and display “unplaced,” not a fabricated local
+Machine. Desktop consumes the same optional placement.
 
 Task deletion atomically records local removal and a stable pending field receipt.
 It preserves Workflow, Session, Process, PR and checkout state, including completed
@@ -51,13 +54,51 @@ issues and lost replies retain uncertainty without replaying the mutation. A new
 explicitly active Linear revision retires removal and restores planning visibility,
 retaining the losing receipt. This grants no execution or cleanup authority.
 
-Task and Project rows own identity for both paths. Random UUIDs are minted before
-placement; provider UUIDs and ticket aliases remain optional mappings. Accepted
-owned Linear issues become durable, unplaced Tasks in the ingestion transaction.
-Repeated import and ticket changes retain identity. Unowned observations stay in
-the provider evidence tables; orphan deletion identities remain recovery evidence.
-The released-frontier migration preserves existing identities, serialized provider
-observations, PRs, workflows and Session links.
+Task content is read directly from `Task` (identifier, title and description),
+with its local write revision, optional Linear binding and observation age retained.
+`Project` likewise owns its fields directly; neither has a separate Plan wrapper.
+Project prose, workflow, KRs and metric targets are separate stored fields. Local
+reads and the shared typed writer never parse or regenerate Markdown. Conversion
+reads the released Markdown once inside the migration transaction, preserves saved
+workflow selection and observation age, and seeds Git history only after conversion.
+Prompt assembly and Linear delivery render at their boundaries; malformed legacy
+content refuses the migration rather than discarding criteria. Extraction and Linear
+edits recognize fenced examples as prose and replace only owned field ranges;
+unrecognized paragraphs survive even inside managed sections.
+Project prose saves, Linear delivery and acquisition use the same typed writer.
+Partial observations retain the prose baseline's own revision and age rather than
+refreshing it with unrelated fields. Summary maps to Linear `description`; authored
+prose belongs to Linear `content`. Managed fields and fenced examples survive replacement.
+
+`ProjectKR` is an explicit judgment. `MetricTarget` names a metric and a numeric
+`Threshold`, independently of the Wave's observations. Project iteration is no longer
+live state; its stored values and historical judgment events remain readable evidence.
+The typed field writer—not either complete domain struct—defines portable content;
+flattening records does not make checkout or execution fields synchronizable.
+
+`linear/` owns provider responses and acceptance; there is no generic PM facade.
+`ops/planning_sync.rs` owns foreground exchange, store access and Wave locks for
+both transports. Ordinary Task lookup and comments belong to `ops/task.rs`.
+A Git lookup miss stays a Git lookup miss; it cannot fall through to Linear.
+Unmapped local Projects remain local during Linear refresh until their export links them.
+
+`work::task::comment::TaskComment` owns shared discussion. `TaskComments` joins
+the thread with local delivery status. Linear comment IDs, author IDs and revisions
+stay in adapter-internal observations and retained receipts; one adapter conversion
+provides domain authorship. Local saves and acquisition share the typed comment writer.
+
+Task and Project rows own identity for both paths. Locally authored Tasks mint a
+UUID before placement and retain it through provider creation. New Linear acquisitions
+derive the Task ID from the issue UUID; existing mapped Tasks keep their IDs.
+Ticket aliases remain optional mappings. Repeated imports and ticket changes retain
+identity. Unowned observations stay in provider evidence tables. Released-frontier
+migration preserves existing identities, provider observations, PRs, Workflows and
+Session links. Provider content is retained as individual observation fields;
+ordinary readers and ingestion never reconstruct a stored Project or issue object.
+The membership index and provider claim remain separate when historical evidence
+contradicts itself. Confirming refreshes compare the claim; receipt baselines retain
+omitted versus explicitly null membership. Conversion refuses scalar type changes that SQLite would otherwise coerce,
+retaining the original schema and input on failure.
 
 `lf task create` generates the durable ID, saves the Task and returns that ID.
 Each explicit invocation creates a distinct Task, including identical titles.
@@ -72,6 +113,10 @@ ambiguous references return candidates instead of selecting a Task.
 Saved Tasks use the same checkout preparation and placement transaction with or
 without Linear. Checkout reads retained planning and branch metadata; it does not
 refresh Linear. An unknown provider alias still needs initial acquisition.
+Acquisition returns the saved Task. Its freshness and ownership lookup reads only
+retained Linear identity, revision, membership, invalidation, removal and age;
+it never reconstructs provider content. A delayed absent response invalidates only
+the exact issue revision and observation age it queried.
 Preparation uses the saved Task identity and title directly. New branch names retain
 the full Task UUID; default checkout names use up to four title words and an ID
 suffix. Retained provider branch names take precedence.
@@ -107,44 +152,75 @@ destination changes neither the revision nor receipt. Pending refiling allows in
 observations from another Wave to adopt conflicting Linear membership, retain both
 values and advance unrelated fields. It never grants execution or provider-write authority.
 
-Task and Project field receipts share `sqlite/planning_changes.rs`, with separate
-foreign keys. Each receipt retains a stable mutation identity, baseline and first
-conflicting provider value. An observed conflict adopts Linear and retires that
-intention; an unchanged baseline preserves the pending save. `sqlite/task_content.rs`
-owns Task fields; `sqlite/project_content.rs` owns Project fields, content and Workflow
-selection. `sqlite/planning_order.rs` saves one Project `task_order` receipt and the
-neighboring Tasks' ranks in the same transaction. Edits and receipts commit together before provider mapping or I/O.
-No-op saves preserve revisions and receipts without notifying readers. Accepted
-inbound changes advance the local optimistic-write revision; unrelated fields keep
-advancing during pending delivery. Matching readback acknowledges only an attempted
-receipt. Before conflict reconciliation, its observation advances subsequent saves'
-unchanged baselines without acknowledging them. Attempts recheck the stored provider
-revision and local deletion. Lost replies retain attempt/error evidence and use
-observation before any further effect; an unresolved attempt is never blindly replayed.
+One typed writer, `sqlite/planning_write.rs`, owns planning field persistence and
+Git mutation capture. Local writes and journal mutations carry `WorkEdit`: a target
+identity and a typed `WorkValue`. The value determines its scope and conflict field;
+Git and the local journal retain the same typed mutation, including its causal
+parents. SQLite derives target, field and clock indexes from that value; its table
+routing stays private to the writer. Import uses those values
+directly, with the same record construction as local writes. The caller's transaction includes admission, planning,
+local delivery receipts and mutation identity. Execution columns are absent from
+this writer. Local creation attaches machine-specific metadata afterward in the
+same transaction. Import never creates execution placement or provider attempts.
 
-`ops/planning_delivery.rs` consumes mapped Task titles, descriptions, nullable
-assignees and membership, and Project names, summaries, statuses and structured
-content. Content patches retain unrelated provider prose. The foreground lifetime
-runs this independently of comment/state delivery and acquisition. Project order
-delivery reads the complete list and moves individual issues using Linear's
-`prioritySortOrder` and `sortOrder` intervals. Each attempted move retains its input
-and before/after lists in the Project receipt. Complete-list acquisition recognizes
-partial progress, advances later saves' baselines and preserves their desired order.
-Lost replies require matching list readback; an unchanged list after an attempt stays
-uncertain without replay. Observed competing order adopts Linear and retains the
-losing list. New members survive; omission alone cannot retire a retained Task.
-Detail reads never change rank. Project scalar fields continue during uncertain
-ordering. These observations do not provide an atomic provider snapshot or write fence.
+Repository configuration selects Linear, personal Git (the default) or shared Git.
+Repository `planning` overrides the personal setting as one value. Linear-connected
+machines acquire and deliver independently through their existing local receipts.
+An outage buffers changes locally; Git cannot take over. Git transports code in
+both modes. Its planning document contains no Linear observations, attempt receipts,
+creation recovery or receipt-settlement protocol. No designated publisher exists.
 
-Workflow selection reads KRs and targets inside its definition-write transaction.
-`wave update-plan` uses the same content writer; inspection takes no Wave mutation
-lock. Comments use `sqlite/task_comments.rs`. Registered Task status and Wave/Desktop
-planning use `sqlite/plan_read.rs`, preserving state, completion time, ordering,
-assignee, metadata and observation age separately from Workflow position.
-Missing provider inventory cannot erase saved planning or Project selection;
-retained archival, invalidation and membership conflicts still affect availability.
-Malformed observations retain fields and diagnostics. Ingestion and migration
-preserve editable KRs and targets.
+Git imports retain immutable mutations before projection. Field causality precedes
+logical clocks and stable mutation-ID ties. All losing values remain inspectable.
+`planning_peer_observed` records only successfully applied heads: a rejected import
+cannot become the causal parent of a later local save. Projection uses per-object
+savepoints so a conflicting parent preserves that object's history while independent
+objects advance. Wave selection follows Project projection. Invalid documents,
+reused mutation IDs and foreign repository ownership roll back the import. Repeated
+imports create no echo edits. Fetch, import and publication have distinct receipts;
+a lost push reply requires readback before publication is reported confirmed.
+
+Current Work ownership selects new Git exports. Each exported or imported mutation
+retains its repository and destination in `planning_peer_routes`, independently of
+live Work rows. Switching refs, moving Work or deleting a row cannot erase earlier
+routing or rejected imports. Status derives the active destination from configuration;
+there is no stored selection or per-Work membership inventory. These routes are
+exchange evidence and grant no Machine placement or first-start authority.
+
+Task and Project Linear field receipts share `sqlite/planning_changes.rs`, with
+separate foreign keys. They retain stable mutation identity, provider baseline and
+conflicting values. An unchanged baseline preserves pending local edits; an observed
+conflict adopts Linear and retains the losing intention. `planning_order.rs` saves
+one Project order receipt and neighboring Task ranks in the same transaction.
+Complete-list evidence owns ordering; detail reads never reorder Tasks. Uncertain
+writes remain attempted and require provider readback before another effect.
+
+Creation captures a stable provider UUID and exact input before network I/O.
+Task creation reads canonical Work and retains only shared creation-field baselines,
+not a provider-shaped Task copy or local execution data. Existing receipts keep their
+original input and baseline bytes through retries.
+Acquisition attaches the provider mapping to the original local row. Unknown creation
+or attachment outcomes retain their receipts; a matching title proves nothing.
+Comments retain identity and authorship. Incoming planning completion changes only
+the planning disposition: it neither advances a local Workflow nor authorizes cleanup.
+Session/Process records and checkout paths never enter the Git document.
+
+`PlanningSyncStatus` presents local Linear delivery evidence; `peer_planning` Work
+frames and `lf planning status` present Git acquisition/publication and retained
+alternatives directly from the retained mutation journal. Ranked candidate IDs are
+not applied or published evidence; rejected projections retain their failure reasons.
+Journal read failures fail the status read; Desktop keeps its last reading with the
+error, rather than inventing an empty plan. Foreground CLI, headless Session and Desktop connections own Git exchange
+for their lifetimes; Linear checks run at the boundaries described below. A short save attempts exchange before returning. No resident,
+whole-store callback, scheduler or implicit turn/Flow replay is involved.
+
+`--machine` sends portable pushed-code requirements and a Task selector, then the
+target resolves its own configured planning. Linear mappings resolve independently
+retained legacy IDs. Git imports preserve local planning IDs. A source Task awaiting
+Linear creation is unavailable remotely until publication succeeds. Fetch precedes
+code decisions, including branches without PRs. Repeated dispatch reuses the existing
+Task and checkout; unpushed source work and a target missing the requested commit
+produce actionable errors without committing, resetting or replacing local work.
 
 The personal namespace and provider-first planning writers are deleted. Connected
 CLI and Desktop project creation, field/order edits, state and comments through
@@ -163,7 +239,7 @@ Failed checks keep the prior watermark and local planning.
 Teams without live Tasks are not checked. Locally finished/abandoned identities
 are excluded from acquisition. Explicit detail reads remain available. Desktop and
 `--watch` alone own a clock: 30–60 seconds initially, backing off to four minutes
-while unchanged. Closing the watcher stops it; idle agents own no sync thread.
+while unchanged. Closing the watcher stops it; idle agents own no Linear timer. Git exchange retains its foreground lifetime.
 Projection functions remain local; command boundaries acquire before projecting.
 
 Linear HTTP 400 rate-limit errors, 429 and exhausted request/endpoint/complexity
@@ -198,6 +274,11 @@ work require that exact Project to be In Progress; another In Progress Project
 does not compete with the binding. Already-started Tasks retain continuation in
 predecessor Projects.
 
+Wave and roadmap Task summaries read saved Work directly: `id` is the local Task
+identity, `linear_id` is its optional provider binding, and `sync` is required
+read-only evidence. Missing provider inventory does not erase saved prose, due
+dates or assignments. Workflow, execution and checkout evidence remain separate.
+
 `ensure` activates the configured Backlog or Planned Project in SQLite and records
 its status change for delivery. Without a binding, creation, original name,
 selection and the local transition receipt commit together. Retry reuses that
@@ -209,7 +290,7 @@ an already saved Project; it does not fetch a missing Project. Legacy YAML impor
 retains the original bytes and requires that exact Project's saved record.
 Project export uses the original transition receipt on the foreground connection.
 Creation and Initiative attachment retain separate attempted effects and exact
-readback; a missing response never permits another create or attachment.
+mutation acknowledgements; a missing response never permits another create or attachment.
 Mapped status receipts use foreground delivery;
 a locally active Project alone is not proof of Linear activation. Ensure never searches for candidates or rotates
 Projects; status and roadmap never call it. Desktop
@@ -240,8 +321,12 @@ lf repo new-chapter 2026-10 --plan scratch/chapter.json --json
 lf wave new-chapter product 2026-10 --plan scratch/chapter.json --json
 ```
 
+Rotation previews and results return canonical Tasks with local IDs and explicit
+Linear bindings. Classification reads their saved disposition and independent local
+start evidence; it does not reconstruct provider records or resolve the Task twice.
+
 Retain one JSON input with `name` and `waves`. Each entry supplies `wave_id`,
-`successor_id`, `create`, `project_name` and `content`:
+`successor_id`, `create`, `project_name`, `workflow`, `metric_targets` and `krs`:
 
 ```json
 {
@@ -251,11 +336,9 @@ Retain one JSON input with `name` and `waves`. Each entry supplies `wave_id`,
     "successor_id": "<new-or-existing-project-uuid>",
     "create": true,
     "project_name": "Autumn customer work",
-    "content": {
-      "workflow": "",
-      "metric_targets": [],
-      "krs": [{"text": "Customers can resume unfinished work", "holds": false}]
-    }
+    "workflow": "",
+    "metric_targets": [],
+    "krs": [{"text": "Customers can resume unfinished work", "holds": false}]
   }]
 }
 ```
@@ -291,11 +374,14 @@ failure there does not undo the selected Projects or their KRs.
 lf task status INF-124 --json
 ```
 
-Status returns `planning`, `planning_state`, `planning_error`, `planning_stale`,
-and optional `execution`. An issue
-without a Project stays inspectable; operations requiring ownership report the
-missing relationship. Status may refresh planning and observe a PR, but never
-completes a Task. Reading an issue allocates no Task execution or worktree.
+Status returns canonical `task` and `project` records, `planning_state`,
+`observed_at`, `planning_error`, `planning_stale`, delivery `sync` and optional
+`execution`. Local IDs and explicit Linear bindings stay distinct. A foreign or
+Project-less observation returns acquisition evidence without fabricating owned
+Work; its concrete record remains retained internally. Status may acquire planning
+but never completes a Task, allocates a checkout or moves a captured Workflow.
+Wave, roadmap and Work frames expose the same acquisition state and age separately
+from saved content and outbound delivery.
 
 Exact lookups and Wave views share normalized SQLite entities scoped to a
 repository and provider. An empty cache fetches the requested issue before
@@ -311,13 +397,13 @@ Status preserves dated facts even after hard-stale or forced acquisition fails.
 evidence, confirmed `removed` planning, and an `absent` detail response. A null
 provider response observes absence for that acquisition; the stored record stays
 invalid until complete detail repairs it. This creates no deletion receipt.
-`planning.observed_at` remains the last successful acquisition. An unresolved
+`observed_at` remains the last successful acquisition. An unresolved
 selector returns an unavailable envelope even without execution.
 
-Invalid and removed facts remain inspectable through status. Task execution
-requires available planning: a fresh cached observation suffices, but a failed
-due refresh stops the launch. Wave `synced_at` dates its last successful list
-acquisition; joined entities may have newer detail observations.
+Invalid and removed facts remain inspectable and withdraw new-launch availability,
+without settling or stopping existing execution. Saved Work supports offline
+admission; observation age and missing inventory alone do not erase it. Wave
+`synced_at` dates its last successful list; entities may have newer detail evidence.
 
 Task facts carry Linear's `updatedAt` as `revision`. Detail, list and confirmed
 mutation refreshes share one writer: older provider revisions cannot overwrite
@@ -332,8 +418,11 @@ carry `revision`; a newer Project observation updates independently of the issue
 revision. Older observations cannot overwrite it. Project responses must include
 nullable content fields and relationship sets.
 
-Snapshot and detail ingestion project accepted entities into durable Project and
-Task rows in the same SQLite transaction. Projection uses each stored entity's
+Private Linear inventory/detail acquisition commits retained observations and
+Projects/Tasks in the same SQLite transaction. Public Store APIs expose canonical
+Work and narrow acquisition evidence, never fetched response models. Ordering
+receipts receive accepted local Task IDs; new disposition conflict receipts retain
+revision/state/completion evidence. Historical receipts keep their original bytes. Projection uses each stored entity's
 acquisition time, never the Wave's aggregate sync time. A projection failure rolls
 back observation acceptance. It preserves execution fields and retained identity;
 an unknown destination does not authorize a Task transfer. Restart changes
@@ -443,8 +532,7 @@ Task completion, Workflow position and Process liveness are independent.
 `task complete` changes status without moving or creating a Workflow. Moving or
 arriving at end atomically records the move and a completion request, then
 attempts settlement. Failed settlement retains end and its reason; retry only
-`task complete`, never the successful edge. PR delivery requires verified merge
-and confirmed follow-through; PR-less completion retains useful artifacts.
+`task complete`, never the successful edge. PR delivery requires verified merge; PR-less completion retains useful artifacts.
 Accepted Linear completion or reopening updates status without moving Workflow
 or terminating Processes. Reopening supersedes old requests. Ordinary reads do
 not execute completion. Unfinished readiness remains not ready with no Workflow,

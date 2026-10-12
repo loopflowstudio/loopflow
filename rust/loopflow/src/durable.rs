@@ -72,6 +72,16 @@ impl ProjectId {
 }
 
 impl TaskId {
+    /// Linear UUIDs are also the creation UUID used by locally authored Tasks.
+    pub(crate) fn from_issue(id: &str) -> Self {
+        let uuid = uuid::Uuid::parse_str(id).unwrap_or_else(|_| {
+            uuid::Uuid::new_v5(
+                &uuid::Uuid::NAMESPACE_URL,
+                format!("https://linear.app/issue/{id}").as_bytes(),
+            )
+        });
+        Self(format!("task_{}", uuid.simple()))
+    }
     pub(crate) fn from_raw(value: impl Into<String>) -> Self {
         Self(value.into())
     }

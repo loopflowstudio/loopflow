@@ -1195,6 +1195,14 @@ fn run_admitted_agent(
         launch.env.extend(capture.0.environment());
         capture.0.mark_spawn_requested();
     }
+    let directory = match &launch.cwd {
+        Some(cwd) => cwd.clone(),
+        None => std::env::current_dir()?,
+    };
+    let _planning_sync = crate::ops::planning_sync::PlanningSync::start_for_directory(&directory)
+        .map_err(|error| {
+        CoreError::ExecutionFailed(format!("cannot start planning sync: {error}"))
+    })?;
     let result = _run_with_transient_retries(
         &launch,
         &process,
@@ -1202,10 +1210,8 @@ fn run_admitted_agent(
         |attempt, retry| _run_agent_once(attempt, &process, capabilities, retry),
         thread::sleep,
     );
-    if let Some(input) = &process.task_input {
-        if let Err(error) = input.check_planning() {
-            tracing::debug!(%error, "end-of-turn planning check pending");
-        }
+    if let Err(error) = crate::ops::planning_sync::check_directory(&directory) {
+        tracing::debug!(%error, "end-of-turn planning check pending");
     }
     if let Some(capture) = implicit_capture {
         let outcome = match &result {

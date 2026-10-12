@@ -49,35 +49,21 @@ struct DTOFixtureTests {
             let row = try #require(plan.roadmap.waves.flatMap { $0.tasks.items }
                 .first { $0.task.identifier == "FIX-1" })
             #expect(row.runtime?.status == capture.row.runtime?.status)
-            #expect(row.followThrough == capture.row.followThrough)
             #expect(row.pr?.id == merged.row.pr?.id)
         }
-        #expect(completed.row.followThrough.links.count == 1)
-        #expect(completed.row.followThrough.links[0].identifier.hasPrefix("lf-"))
-        #expect(completed.row.followThrough.links[0].due == "2026-10-09")
-        #expect(arrived.row.followThrough == completed.row.followThrough)
     }
 
-    @Test("Follow-through remains pending until confirmed, with dated unstarted follow-ups")
+    @Test("Task completion preserves execution and dated unstarted Tasks")
     func taskDeliveryFixture() throws {
         let rows = try JSONDecoder().decode([String: RoadmapTask].self, from: loadFixtureData("task_delivery_rows.json"))
         let pending = try #require(rows["pending"])
-        #expect(!pending.followThrough.resolved)
         #expect(pending.runtime?.completionPending?.contains("lf task complete") == true)
         #expect(rows["completed_running"]?.runtime?.status == .done)
         #expect(rows["completed_running"]?.execution == pending.execution)
-        #expect(pending.followThrough.deliveryLabel(merged: true, done: false) == "Merged · Follow-through pending")
-        let done = try #require(rows["done"])
-        #expect(done.followThrough.resolved)
-        #expect(done.followThrough.deliveryLabel(merged: true, done: true) == "Done · Follow-up W2-FOLLOW")
-        #expect(done.followThrough.links.first?.url?.absoluteString == "https://linear.app/loopflow/issue/W2-FOLLOW")
-        #expect(rows["none"]?.followThrough.resolved == true)
         let due = try #require(rows["due"])
         #expect(due.runtime == nil)
         #expect(due.task.dueDate == "2026-10-08")
         #expect(!due.task.completed)
-        #expect(rows["unrelated"]?.task.followUpSources.isEmpty == true)
-        #expect(due.task.followUpLabel == "Follow-up to W2-SOURCE · Due 2026-10-08")
     }
 
     @Test("Planning delivery retains uncertainty, errors and both conflict values")
@@ -87,6 +73,8 @@ struct DTOFixtureTests {
         #expect(sync.changes[0].state == .pending)
         #expect(sync.changes[1].state == .uncertain)
         #expect(sync.changes[1].error == "Reply lost; awaiting readback")
+        #expect(sync.changes[2].field == "task_title")
+        #expect(sync.changes[3].field == "task_assignee")
         #expect(sync.changes[2].localValue == .string("Local title"))
         #expect(sync.changes[2].linearValue == .string("Linear title"))
         #expect(sync.changes[3].text.contains("Linear: null"))
@@ -321,6 +309,15 @@ struct DTOFixtureTests {
         #expect(snapshot.items[4].fact == .workCreated)
     }
 
+    @Test("unplaced Wave fixture retains planning without a Machine")
+    func unplacedWaveFixture() throws {
+        let wave = try JSONDecoder().decode(WaveSnapshot.self, from: loadFixtureData("unplaced_wave.json"))
+        #expect(wave.machine == nil)
+        #expect(wave.toWave().id == wave.id)
+        #expect(wave.toWave().name == "shared")
+        #expect(wave.activeTasks == 1)
+    }
+
     @Test("wave detail fixture preserves Project and Task identity")
     func waveDetailFixturePreservesHierarchy() throws {
         let data = try loadFixtureData("wave_detail.json")
@@ -329,22 +326,24 @@ struct DTOFixtureTests {
         #expect(detail.projectReadiness.state == .ready)
         #expect(detail.projectReadiness.projectId == detail.currentProject?.id)
         #expect(detail.projectReadiness.activation == nil)
-        #expect(detail.wave.machine.id == "home_00000000000000000000000000000001")
-        #expect(detail.wave.machine.route == "ssh://jack@mini-heart")
-        #expect(detail.wave.machine.label == "mini")
-        #expect(detail.wave.machine.repo == "src/project")
+        #expect(detail.wave.machine?.id == "home_00000000000000000000000000000001")
+        #expect(detail.wave.machine?.route == "ssh://jack@mini-heart")
+        #expect(detail.wave.machine?.label == "mini")
+        #expect(detail.wave.machine?.repo == "src/project")
 
         // The Machine runtime evidence carries the state and the one contextual action.
 
 
         #expect(detail.currentProject?.workflow == "task-design")
-        #expect(detail.currentProject?.sync?.changes[1].field == "task_order")
+        #expect(detail.currentProject?.sync.changes[1].field == "task_order")
         #expect(detail.unavailableTasks[0].taskIdentifier == "W2-127")
         #expect(detail.unavailableTasks[0].status == .ready)
         #expect(detail.unavailableTasks[0].owner == .wave)
         #expect(detail.tasks.items.map(\.task.identifier) == ["INF-123", "INF-124"])
         #expect(detail.tasks.items[0].task.state == "unstarted")
-        #expect(detail.tasks.items[0].task.sync?.changes[0].field == "creation")
+        #expect(detail.tasks.items[0].task.sync.changes[0].field == "creation")
+        #expect(detail.tasks.items[0].task.id == detail.tasks.items[0].runtime?.workId)
+        #expect(detail.tasks.items[0].task.linearId == "issue-1")
         #expect(detail.tasks.items[0].task.completedAt == nil)
         #expect(detail.tasks.items[0].pr?.publication?.github?.number == 912)
         #expect(detail.tasks.items[0].pr?.id == "pr_33333333333333333333333333333333")
@@ -376,17 +375,6 @@ struct DTOFixtureTests {
             sourceWindowStart: "2026-08-13T18:00:00Z",
             sourceWindowEnd: "2026-08-20T18:00:00Z"
         ))
-
-        var missingMachine = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        var wave = try #require(missingMachine["wave"] as? [String: Any])
-        wave.removeValue(forKey: "machine")
-        missingMachine["wave"] = wave
-        let missingMachineData = try JSONSerialization.data(withJSONObject: missingMachine)
-        #expect(throws: DecodingError.self) {
-            try JSONDecoder().decode(WaveDetailSnapshot.self, from: missingMachineData)
-        }
-
-
     }
 
     @Test("roadmap fixture preserves sections and durable Task references")
@@ -588,14 +576,49 @@ struct DTOFixtureTests {
         #expect(decoded == session)
     }
 
+    @Test("Peer planning retains journal values and independent receipts")
+    func peerPlanningStatus() throws {
+        let data = try loadFixtureData("peer_planning_status.json")
+        let statuses = try JSONDecoder().decode([PeerPlanningStatus].self, from: data)
+        #expect(statuses[0].pendingLocal)
+        #expect(statuses[0].publicationState == "unconfirmed")
+        #expect(statuses[0].importedRevision == "retained-import")
+        #expect(statuses[0].fetchedRevision == "newer-fetch")
+        #expect(statuses[0].conflicts[0].target == "retained-task")
+        #expect(statuses[1].pendingLocal == true)
+        #expect(statuses[1].active)
+        #expect(statuses[1].changes["title-loser"]?.edit.change.value == .string("Retained title"))
+        #expect(!statuses[1].candidates.contains("title-loser"))
+        #expect(statuses[1].changes["title-head"]?.parents == ["title-loser"])
+        #expect(statuses[1].changes["comment-head"]?.clock == 4)
+        guard case .object(let content) = statuses[1].changes["comment-head"]?.edit.change.value else {
+            Issue.record("expected typed comment content")
+            return
+        }
+        #expect(content["author"] == .object(["kind": .string("person"), "name": .string("Maya")]))
+        for field in ["conflicts", "changes", "candidates", "pending_local"] {
+            var object = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])[1]
+            object.removeValue(forKey: field)
+            #expect(throws: (any Error).self) {
+                try JSONDecoder().decode(PeerPlanningStatus.self, from: JSONSerialization.data(withJSONObject: object))
+            }
+        }
+    }
+
     @Test("Work frames decode every part and keep the wire text a saved workspace needs")
     func workspaceFramesDecode() throws {
         let data = try loadFixtureData("work_frame.json")
         let lines = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
         let frames = try lines.map { try WorkFrame.decode(line: JSONSerialization.data(withJSONObject: $0)) }
 
-        #expect(frames.map(\.content.part) == ["planning", "sessions", "task", "work_activity", "activity", "heartbeat", "task"])
-        #expect(frames.map(\.sequence) == [1, 2, 3, 4, 5, 6, 7])
+        #expect(frames.map(\.content.part) == ["planning", "sessions", "task", "work_activity", "activity", "heartbeat", "task", "peer_planning"])
+        #expect(frames.map(\.sequence) == [1, 2, 3, 4, 5, 6, 7, 8])
+        guard case .peerPlanning(let peers?) = frames[7].content else {
+            Issue.record("peer planning frame missing")
+            return
+        }
+        #expect(peers.repo == "/src/loopflow")
+        #expect(peers.destinations.isEmpty)
         #expect(frames[0].answers == nil)
         #expect(frames[1].answers == 7)
         #expect(frames[0].revisions?.planning == 911)
@@ -648,6 +671,26 @@ struct DTOFixtureTests {
         let encoded = try JSONEncoder().encode(statuses)
         let decoded = try JSONDecoder().decode([WorkStatus].self, from: encoded)
         #expect(decoded == statuses)
+    }
+
+    @Test("Task acquisition evidence is required independently of delivery")
+    func taskAcquisitionEvidence() throws {
+        let root = try loadFixture("local_task.json")
+        let detail = try #require(root["task"] as? [String: Any])
+        var task = try #require(detail["task"] as? [String: Any])
+        for state in ["available", "invalid", "removed", "unavailable"] {
+            task["acquisition"] = ["state": state, "observed_at": 17]
+            let decoded = try JSONDecoder().decode(TaskPlanningSnapshot.self,
+                from: JSONSerialization.data(withJSONObject: task))
+            #expect(decoded.acquisition.state.rawValue == state)
+            #expect(decoded.acquisition.observedAt == 17)
+            #expect(decoded.id == task["id"] as? String)
+        }
+        task.removeValue(forKey: "acquisition")
+        #expect(throws: (any Error).self) {
+            try JSONDecoder().decode(TaskPlanningSnapshot.self,
+                from: JSONSerialization.data(withJSONObject: task))
+        }
     }
 
     private func loadFixture(_ name: String, sourceFile: String = #filePath) throws -> [String: Any] {

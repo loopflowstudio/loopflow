@@ -36,9 +36,7 @@ pub(super) fn read_design(caller: &Path, path: &Path) -> OpsResult<DesignHandoff
         task_for_checkout(&store, caller).await
     })?;
     Ok(DesignHandoff {
-        source_issue: source_task
-            .as_ref()
-            .map(|task| task.plan.identifier.clone()),
+        source_issue: source_task.as_ref().map(|task| task.identifier.clone()),
         source_task: source_task.map(|task| task.id),
         source_path,
         source_commit: rev_parse(caller, "HEAD")?,

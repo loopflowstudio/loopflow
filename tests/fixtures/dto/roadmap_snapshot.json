@@ -73,8 +73,15 @@
               "state": "unstarted",
               "completed_at": null,
               "due_date": null,
-              "follow_up_sources": [],
-              "sync": null
+              "sync": {
+                "connected": false,
+                "changes": []
+              },
+              "linear_id": null,
+              "acquisition": {
+                "state": "available",
+                "observed_at": null
+              }
             },
             "reference": {
               "issue_url": "https://linear.app/loopflow/issue/W2-144/make-lf-roadmap-the-machine-wide-view",
@@ -427,14 +434,7 @@
             "run_control": {
               "unavailable": null
             },
-            "pr": null,
-            "follow_through": {
-              "intents": [],
-              "links": [],
-              "reason": null,
-              "needs_conversion": false,
-              "scope_notes": []
-            }
+            "pr": null
           },
           {
             "task": {
@@ -448,8 +448,15 @@
               "state": "unstarted",
               "completed_at": null,
               "due_date": null,
-              "follow_up_sources": [],
-              "sync": null
+              "sync": {
+                "connected": false,
+                "changes": []
+              },
+              "linear_id": null,
+              "acquisition": {
+                "state": "available",
+                "observed_at": null
+              }
             },
             "reference": {
               "issue_url": "https://linear.app/loopflow/issue/W2-131/show-the-all-wave-roadmap",
@@ -831,13 +838,6 @@
               },
               "merge_commit": null,
               "abandoned_at": null
-            },
-            "follow_through": {
-              "intents": [],
-              "links": [],
-              "reason": null,
-              "needs_conversion": false,
-              "scope_notes": []
             }
           },
           {
@@ -852,8 +852,15 @@
               "state": "unstarted",
               "completed_at": null,
               "due_date": null,
-              "follow_up_sources": [],
-              "sync": null
+              "sync": {
+                "connected": false,
+                "changes": []
+              },
+              "linear_id": null,
+              "acquisition": {
+                "state": "available",
+                "observed_at": null
+              }
             },
             "reference": {
               "issue_url": null,
@@ -895,14 +902,7 @@
             "run_control": {
               "unavailable": null
             },
-            "pr": null,
-            "follow_through": {
-              "intents": [],
-              "links": [],
-              "reason": null,
-              "needs_conversion": false,
-              "scope_notes": []
-            }
+            "pr": null
           },
           {
             "task": {
@@ -916,8 +916,15 @@
               "state": "completed",
               "completed_at": null,
               "due_date": null,
-              "follow_up_sources": [],
-              "sync": null
+              "sync": {
+                "connected": false,
+                "changes": []
+              },
+              "linear_id": null,
+              "acquisition": {
+                "state": "available",
+                "observed_at": null
+              }
             },
             "reference": {
               "issue_url": "https://linear.app/loopflow/issue/W2-141/now-available-work-views-research",
@@ -974,14 +981,7 @@
             "run_control": {
               "unavailable": null
             },
-            "pr": null,
-            "follow_through": {
-              "intents": [],
-              "links": [],
-              "reason": null,
-              "needs_conversion": false,
-              "scope_notes": []
-            }
+            "pr": null
           }
         ],
         "truncated": false
@@ -1001,8 +1001,7 @@
         "state": "ok",
         "items": [
           {
-            "id": "project-1",
-            "work_id": "proj-chapter-current",
+            "id": "proj-chapter-current",
             "slug": "loopflow-api",
             "name": "current",
             "workflow": "feature",
@@ -1023,14 +1022,18 @@
                 "holds": false
               }
             ],
-            "sync": null
+            "sync": {
+              "connected": false,
+              "changes": []
+            },
+            "linear_id": "project-1"
           }
         ],
         "truncated": false
       },
       "project_readiness": {
         "state": "ready",
-        "project_id": "project-1",
+        "project_id": "proj-chapter-current",
         "observed_at": null,
         "pending_successor": null,
         "activation": null

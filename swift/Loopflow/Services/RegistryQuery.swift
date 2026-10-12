@@ -201,7 +201,7 @@ public struct RegistryQuery: Sendable {
     }
 
     public func userName() async throws -> String? {
-        let stdout = try await run(["machine", "user", "--json"], nil)
+        let stdout = try await run(["config", "user", "--json"], nil)
         return try Self.decode(String?.self, from: stdout)
     }
 

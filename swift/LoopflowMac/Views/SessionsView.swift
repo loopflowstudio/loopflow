@@ -1657,6 +1657,7 @@ private struct SessionPaneView: View {
                     _terminal(item: item, surface: surface)
                 } else {
                     _sessionPlaceholder(item)
+                        .environment(\.colorScheme, .dark)
                 }
             } else {
                 emptyWorkspace

@@ -230,20 +230,17 @@ Loopflow's Task inventory. Raising that window was the wrong demonstration.
 The configured-provider fixture proves input/retention only; the target remains
 the populated Loopflow repo with correct Task-to-conversation opening.
 
-Installed lf is now 0.13.12: actual repository identity succeeds, but
-`lf portfolio --json` still fails at root argument parsing. A separate copy of
-this diff's app, `Loopflow Work Demo.app` / `com.loopflow.mac.demo.loo462work`,
-was launched against `/Users/jack/src/loopflow` with ordinary installed dispatch,
-not copied data or a schema bypass. Native inspection still showed loading and
-the Portfolio command error. Reader sampling locates time in `flows_of_task`
-SQLite reads; no successful inventory or Task opening is claimed yet. Evidence:
-`/tmp/loo462-real-work-reader.sample.txt`, demo directory `real-work-app.log`.
+Jack Heart confirmed installed lf 0.13.12; `lf --version` agrees. An upgrade
+is not an established prerequisite. The previous mixed-runtime launch and its
+slow-reader evidence remain at `e276eee8a2:scratch/work-first-demo.md`; the live app failed wire decoding, not repository identity. A source CLI
+with ordinary Home dispatches to installed lf by design. Private copied data
+runs branch code, but its copied execution records grant no live-client authority.
 
 Removed the reachable Session-presence shortcut that admitted unstarted Tasks
 into the sidebar. Recorded Started plus shared unresolved execution now owns
 membership; retained Sessions and Wave plans remain intact. Review confirmed
 this removes a second inference of Started without mutating historical records.
-Check: `scripts/test_desktop.sh --filter WorkNavigationTests -Xswiftc -gnone --no-parallel` — PASS, 37 tests; diff check PASS. Repackaged/launched the correction; native view still loads. Installed reader remains the dependency. Requested permission to rehearse a compatible CLI installation before any live change; no permission received yet.
+Check: `scripts/test_desktop.sh --filter WorkNavigationTests -Xswiftc -gnone --no-parallel` — PASS, 37 tests; diff check PASS. Native correction initially still loaded; later copied-data rendering below supersedes it. No live installation authorized.
 
 Release alignment: a fresh SQLite backup in `compatibility-home` first refused
 unknown 0.13.12 migrations. `lf sync --manual` then merged current main locally
@@ -283,3 +280,9 @@ allowlist. Check: binary reorder_args tests and portfolio_cli_tests PASS;
 `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, diff check PASS.
 Repackaged: native inspection shows the 11-row sidebar with the Portfolio error
 gone; direct packaged `portfolio --json` exits 0. No live install or provider proof.
+
+LOO-312 fails with “no checkout to hold a conversation.” The copied record has no primary or directly bound Sessions;
+this is not a wrong-conversation fallback. Keep it unresolved rather than inventing
+history or hiding the Task. Corrected the participant read to `config user --json`
+and confined dark appearance to the Session placeholder on its dark terminal panel.
+Check: RegistryQuery/WorkDestination suites PASS (68); configured participant read and diff check PASS. Native contrast unverified.

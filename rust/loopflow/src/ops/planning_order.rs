@@ -97,22 +97,14 @@ pub(super) async fn sync_order(
                 return Err(message(error));
             }
         };
-        let crate::linear::PlanningResponse::Task {
-            issue,
-            project: _,
-            priority_sort_order,
-            sort_order,
-        } = response
-        else {
+        let crate::linear::PlanningResponse::Task { issue, .. } = response else {
             return Err(message("Order mutation returned a Project"));
         };
         let updated = issues
             .iter_mut()
-            .find(|candidate| candidate.item.id == issue.id)
+            .find(|candidate| candidate.item.id == issue.item.id)
             .ok_or_else(|| message("Order mutation returned an unknown issue"))?;
-        updated.item = *issue;
-        updated.priority_sort_order = priority_sort_order;
-        updated.sort_order = sort_order;
+        *updated = *issue;
         issues.sort_by(|a, b| {
             a.priority_sort_order
                 .total_cmp(&b.priority_sort_order)

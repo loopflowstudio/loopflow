@@ -532,6 +532,7 @@ const ISSUE_RESPONSE_FIELDS: &str = r#"    id
       id
       name
       updatedAt
+      archivedAt
       description
       content
       status { type }
@@ -1651,7 +1652,7 @@ impl LinearClient {
             .graphql(&query, json!({"id":item_id,"stateId":state_id}))
             .await?;
         match planning_response(&response["issueUpdate"], false, item_id)? {
-            PlanningResponse::Task { issue, .. } => Ok(*issue),
+            PlanningResponse::Task { issue, .. } => Ok(issue.item),
             PlanningResponse::Project { .. } => unreachable!("issue mutation returns an issue"),
         }
     }
@@ -1878,10 +1879,8 @@ impl LinearClient {
 #[derive(Debug)]
 pub(crate) enum PlanningResponse {
     Task {
-        issue: Box<LinearIssue>,
+        issue: Box<OrderedIssue>,
         project: Option<Box<LinearProject>>,
-        priority_sort_order: f64,
-        sort_order: f64,
     },
     Project {
         project: Box<LinearProject>,
@@ -1911,10 +1910,12 @@ fn planning_response(payload: &Value, project: bool, id: &str) -> LinearResult<P
         let sort_order = node.fields.sort_order;
         let (item, project) = node.into_ownership()?;
         Ok(PlanningResponse::Task {
-            issue: Box::new(item),
+            issue: Box::new(OrderedIssue {
+                item,
+                priority_sort_order,
+                sort_order,
+            }),
             project: project.map(Box::new),
-            priority_sort_order,
-            sort_order,
         })
     }
 }
@@ -2072,6 +2073,28 @@ struct CommentNode {
     user: Option<CommentUser>,
 }
 
+impl From<CommentNode> for LinearComment {
+    fn from(node: CommentNode) -> Self {
+        Self {
+            id: node.id,
+            created_at: node.created_at,
+            revision: node.updated_at,
+            body: node.body,
+            author_name: node.user.as_ref().and_then(|user| {
+                user.display_name
+                    .as_deref()
+                    .and_then(crate::config::normalize_user_name)
+                    .or_else(|| {
+                        user.name
+                            .as_deref()
+                            .and_then(crate::config::normalize_user_name)
+                    })
+            }),
+            author_id: node.user.map(|user| user.id),
+        }
+    }
+}
+
 #[derive(Deserialize)]
 struct CommentUser {
     id: String,
@@ -2089,8 +2112,6 @@ struct IssueNode<P = IdNode> {
     project: Option<P>,
 }
 
-// List and detail observations require the same complete issue fields.
-// Nullable fields must be present; omission is not a value to store.
 #[derive(Debug)]
 pub(crate) struct OrderedIssue {
     pub item: LinearIssue,
@@ -2098,6 +2119,8 @@ pub(crate) struct OrderedIssue {
     pub sort_order: f64,
 }
 
+// List and detail observations require the same complete issue fields.
+// Nullable fields must be present; omission is not a value to store.
 #[derive(Deserialize)]
 struct IssueFields {
     #[serde(rename = "completedAt", deserialize_with = "Option::deserialize")]

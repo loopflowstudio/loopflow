@@ -4,7 +4,7 @@ use std::collections::{btree_map::Entry, BTreeMap};
 use serde::Deserialize;
 use serde_json::json;
 
-use super::{CommentNode, IssueNode, LinearClient, PageInfo, ProjectNode};
+use super::{CommentNode, IssueNode, LinearClient, PageInfo, ProjectNode, ISSUE_RESPONSE_FIELDS};
 use super::{LinearIssue, LinearProject};
 use crate::linear::{LinearComment, LinearError, LinearIssueObservation, LinearResult};
 
@@ -16,15 +16,6 @@ const QUERY: &str = r#"query TeamChanges($issues: IssueFilter!, $comments: Comme
   comments(filter: $comments, first: 100, after: $commentsAfter, orderBy: updatedAt) @include(if: $readComments) {
     nodes { id body createdAt updatedAt user { id displayName name } issue { ...ChangedIssue } }
     pageInfo { hasNextPage endCursor }
-  }
-}
-fragment ChangedIssue on Issue {
-  id identifier branchName completedAt dueDate updatedAt url title description
-  prioritySortOrder sortOrder assignee { id } state { type } team { id }
-  project {
-    id name updatedAt archivedAt description content status { type }
-    initiatives(first: 50) { nodes { id } }
-    teams(first: 50) { nodes { id } }
   }
 }"#;
 
@@ -53,28 +44,6 @@ struct ChangedComment {
     #[serde(flatten)]
     comment: CommentNode,
     issue: Option<IssueNode<ProjectNode>>,
-}
-
-impl From<CommentNode> for LinearComment {
-    fn from(node: CommentNode) -> Self {
-        Self {
-            id: node.id,
-            created_at: node.created_at,
-            revision: node.updated_at,
-            body: node.body,
-            author_name: node.user.as_ref().and_then(|user| {
-                user.display_name
-                    .as_deref()
-                    .and_then(crate::config::normalize_user_name)
-                    .or_else(|| {
-                        user.name
-                            .as_deref()
-                            .and_then(crate::config::normalize_user_name)
-                    })
-            }),
-            author_id: node.user.map(|user| user.id),
-        }
-    }
 }
 
 impl LinearClient {
@@ -118,10 +87,12 @@ impl LinearClient {
             }
             Ok::<(), LinearError>(())
         };
+        let query =
+            format!("{QUERY}\nfragment ChangedIssue on Issue {{ {ISSUE_RESPONSE_FIELDS} }}");
         while read_issues || read_comments {
             let page: Changes = self
                 .graphql(
-                    QUERY,
+                    &query,
                     json!({
                         "issues":eligible,"comments":comment_filter,
                         "issuesAfter":issues_after,"commentsAfter":comments_after,

@@ -273,7 +273,7 @@ async fn sync_field(
     };
     match &response {
         crate::linear::PlanningResponse::Task { issue, .. } => {
-            observation.revision = issue.revision.clone()
+            observation.revision = issue.item.revision.clone()
         }
         crate::linear::PlanningResponse::Project { project, content } => {
             observation.revision = project.revision.clone();
@@ -298,7 +298,7 @@ pub(super) async fn apply_response(
             ingest_task(
                 store,
                 repo,
-                &issue,
+                &issue.item,
                 project.as_deref(),
                 time::OffsetDateTime::now_utc().unix_timestamp(),
             )

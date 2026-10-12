@@ -7,7 +7,7 @@ use std::process::Command;
 use fs2::FileExt;
 
 use crate::git::{
-    absolute_git_dir, current_branch, fetch, find_worktree_for_branch, get_default_branch,
+    absolute_git_dir, current_branch, find_worktree_for_branch, get_default_branch,
     intervention_state, is_ancestor, rev_parse,
 };
 use crate::ops::git_operation::begin_sync_operation;
@@ -175,14 +175,17 @@ pub fn refresh_main(repo: &Path, progress: &impl Progress) -> OpsResult<String> 
     // independent. Wait for the other refresh, then fetch again for this call.
     let _lock = lock_shared(repo, "lf-main-refresh.lock")?;
     let branch = get_default_branch(repo)?;
-    let target = format!("origin/{branch}");
+    let target = crate::git::integration_base(repo)?;
+    if target == branch {
+        return Ok(branch);
+    }
     let checkout = if current_branch(repo)?.as_deref() == Some(&branch) {
         Some(repo.to_path_buf())
     } else {
         find_worktree_for_branch(repo, &branch)?
     };
     let Some(checkout) = checkout else {
-        fetch(repo, "origin", &branch)?;
+        crate::git::fetch_tracking_ref(repo, &target)?;
         let upstream = rev_parse(repo, &target)?;
         let local = rev_parse(repo, &branch)?;
         if is_ancestor(repo, &upstream, &local)? {
@@ -220,7 +223,7 @@ pub fn refresh_main(repo: &Path, progress: &impl Progress) -> OpsResult<String> 
         return Ok(branch);
     };
     let mut operation = begin_sync_operation(&checkout, &target)?;
-    fetch(&checkout, "origin", &branch)?;
+    crate::git::fetch_tracking_ref(&checkout, &target)?;
     let upstream = rev_parse(&checkout, &target)?;
     operation.pin_target(upstream.clone())?;
     if is_ancestor(&checkout, &upstream, "HEAD")? {

@@ -1398,3 +1398,116 @@ fn persistent_memory_conflict_keeps_private_scratch_and_recovery() {
         "private\n"
     );
 }
+
+#[test]
+fn refresh_and_sync_follow_the_default_branch_upstream_in_a_fork() {
+    let _env = EnvGuard::new(&[]);
+    let repo = TestRepo::new();
+    let upstream = tempfile::tempdir().unwrap();
+    git(
+        repo.path(),
+        &[
+            "clone",
+            repo.bare_path().to_str().unwrap(),
+            upstream.path().to_str().unwrap(),
+        ],
+    );
+    git(
+        upstream.path(),
+        &["config", "user.name", "Upstream Fixture"],
+    );
+    git(
+        upstream.path(),
+        &["config", "user.email", "fixture@example.invalid"],
+    );
+    // A non-bare local upstream is sufficient for fetch-only integration.
+    git(
+        repo.path(),
+        &[
+            "remote",
+            "add",
+            "upstream",
+            upstream.path().to_str().unwrap(),
+        ],
+    );
+    git(repo.path(), &["fetch", "upstream"]);
+    git(
+        repo.path(),
+        &["branch", "--set-upstream-to=upstream/main", "main"],
+    );
+    let origin_head = git(repo.path(), &["rev-parse", "origin/main"]);
+    std::fs::write(upstream.path().join("upstream.txt"), "upstream work").unwrap();
+    git(upstream.path(), &["add", "upstream.txt"]);
+    git(upstream.path(), &["commit", "-m", "upstream work"]);
+    let upstream_head = git(upstream.path(), &["rev-parse", "HEAD"]);
+    repo.create_branch("feature");
+    repo.create_file("feature.txt", "local work");
+    repo.stage_all();
+    repo.commit("feature work");
+    loopflow::ops::checkout::refresh_main(repo.path(), &NullProgress).unwrap();
+    assert_eq!(git(repo.path(), &["rev-parse", "main"]), upstream_head);
+    assert_eq!(git(repo.path(), &["rev-parse", "origin/main"]), origin_head);
+    let plan = plan_sync(repo.path(), None, None).unwrap();
+    assert_eq!(plan.base_ref, "upstream/main");
+    sync_with_recovery(
+        repo.path(),
+        &SyncOptions {
+            onto: plan.base_ref,
+            push: false,
+            fork_base: None,
+        },
+        &NullProgress,
+    )
+    .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("upstream.txt")).unwrap(),
+        "upstream work"
+    );
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("feature.txt")).unwrap(),
+        "local work"
+    );
+}
+
+#[test]
+fn cli_sync_to_explicit_local_branch_needs_no_remote_access() {
+    let _env = EnvGuard::new(&[]);
+    let repo = TestRepo::new();
+    repo.create_branch("feature");
+    repo.create_file("feature.txt", "local feature");
+    repo.stage_all();
+    repo.commit("feature work");
+    repo.checkout("main");
+    repo.create_file("base.txt", "local base");
+    repo.stage_all();
+    repo.commit("base work");
+    repo.checkout("feature");
+    git(
+        repo.path(),
+        &[
+            "remote",
+            "set-url",
+            "origin",
+            "/nonexistent/lf-demo-remote.git",
+        ],
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .args(["sync", "--manual", "main"])
+        .current_dir(repo.path())
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("base.txt")).unwrap(),
+        "local base"
+    );
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("feature.txt")).unwrap(),
+        "local feature"
+    );
+}

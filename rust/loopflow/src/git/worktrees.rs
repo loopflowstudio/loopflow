@@ -1,9 +1,9 @@
 use crate::error::GitError;
 use crate::git::worktree_name::WorktreeName;
 use crate::git::{
-    current_branch, delete_local_branch, fetch, get_default_branch, has_commits_beyond, has_origin,
-    is_clean, rev_parse, stash_including_untracked, stash_pop, worktree_add,
-    worktree_add_inheriting, worktree_remove, WorktreeBranch,
+    current_branch, delete_local_branch, get_default_branch, has_commits_beyond, is_clean,
+    rev_parse, stash_including_untracked, stash_pop, worktree_add, worktree_add_inheriting,
+    worktree_remove, WorktreeBranch,
 };
 use crate::naming::git_user;
 use serde::{Deserialize, Serialize};
@@ -1709,16 +1709,11 @@ fn create_agent_worktree(
 }
 
 fn agent_base_ref(main_repo: &Path) -> Result<String, GitError> {
-    let default_branch = get_default_branch(main_repo)?;
-    if !has_origin(main_repo)? {
-        return Ok(default_branch);
-    }
-    match fetch(main_repo, "origin", &default_branch) {
-        Ok(()) => Ok(format!("origin/{default_branch}")),
-        Err(_) if rev_parse(main_repo, &format!("origin/{default_branch}")).is_ok() => {
-            Ok(format!("origin/{default_branch}"))
-        }
-        Err(_) => Ok(default_branch),
+    let base = crate::git::integration_base(main_repo)?;
+    match crate::git::fetch_tracking_ref(main_repo, &base) {
+        Ok(()) => Ok(base),
+        Err(_) if rev_parse(main_repo, &base).is_ok() => Ok(base),
+        Err(_) => get_default_branch(main_repo),
     }
 }
 

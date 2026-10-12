@@ -1,0 +1,50 @@
+[
+  {
+    "layout": "Conductor",
+    "expected": "$FIXTURE/conductor/conductor/workspaces/app/next",
+    "plan": "branch: placement-demo/next\nbase: main\nworktree: $FIXTURE/conductor/conductor/workspaces/app/next\nstrategy: create",
+    "create": "Created worktree: $FIXTURE/conductor/conductor/workspaces/app/next\nBranch: placement-demo/next\ncd $FIXTURE/conductor/conductor/workspaces/app/next\nTip: source scripts/dev-lf to apply auto-cd in this shell",
+    "reuse_plan": "branch: placement-demo/next\nbase: main\nworktree: $FIXTURE/conductor/conductor/workspaces/app/next\nstrategy: use_existing_worktree",
+    "reuse": "Using existing worktree: $FIXTURE/conductor/conductor/workspaces/app/next\nBranch: placement-demo/next\ncd $FIXTURE/conductor/conductor/workspaces/app/next\nTip: source scripts/dev-lf to apply auto-cd in this shell",
+    "select_existing_branch": "cd $FIXTURE/conductor/conductor/workspaces/app/warsaw",
+    "registrations": 4,
+    "uncommitted_files_preserved": true,
+    "config_required": false
+  },
+  {
+    "layout": "Herdr",
+    "expected": "$FIXTURE/herdr/.herdr/worktrees/app/next",
+    "plan": "branch: placement-demo/next\nbase: main\nworktree: $FIXTURE/herdr/.herdr/worktrees/app/next\nstrategy: create",
+    "create": "Created worktree: $FIXTURE/herdr/.herdr/worktrees/app/next\nBranch: placement-demo/next\ncd $FIXTURE/herdr/.herdr/worktrees/app/next\nTip: source scripts/dev-lf to apply auto-cd in this shell",
+    "reuse_plan": "branch: placement-demo/next\nbase: main\nworktree: $FIXTURE/herdr/.herdr/worktrees/app/next\nstrategy: use_existing_worktree",
+    "reuse": "Using existing worktree: $FIXTURE/herdr/.herdr/worktrees/app/next\nBranch: placement-demo/next\ncd $FIXTURE/herdr/.herdr/worktrees/app/next\nTip: source scripts/dev-lf to apply auto-cd in this shell",
+    "select_existing_branch": "cd $FIXTURE/herdr/.herdr/worktrees/app/feature-login",
+    "registrations": 4,
+    "uncommitted_files_preserved": true,
+    "config_required": false
+  },
+  {
+    "layout": "Worktrunk",
+    "expected": "$FIXTURE/worktrunk/app.next",
+    "plan": "branch: placement-demo/next\nbase: main\nworktree: $FIXTURE/worktrunk/app.next\nstrategy: create",
+    "create": "Created worktree: $FIXTURE/worktrunk/app.next\nBranch: placement-demo/next\ncd $FIXTURE/worktrunk/app.next\nTip: source scripts/dev-lf to apply auto-cd in this shell",
+    "reuse_plan": "branch: placement-demo/next\nbase: main\nworktree: $FIXTURE/worktrunk/app.next\nstrategy: use_existing_worktree",
+    "reuse": "Using existing worktree: $FIXTURE/worktrunk/app.next\nBranch: placement-demo/next\ncd $FIXTURE/worktrunk/app.next\nTip: source scripts/dev-lf to apply auto-cd in this shell",
+    "select_existing_branch": "cd $FIXTURE/worktrunk/app.feature-login",
+    "registrations": 4,
+    "uncommitted_files_preserved": true,
+    "config_required": false
+  },
+  {
+    "layout": "Claude",
+    "expected": "$FIXTURE/claude/app/.claude/worktrees/next",
+    "plan": "branch: placement-demo/next\nbase: main\nworktree: $FIXTURE/claude/app/.claude/worktrees/next\nstrategy: create",
+    "create": "Created worktree: $FIXTURE/claude/app/.claude/worktrees/next\nBranch: placement-demo/next\ncd $FIXTURE/claude/app/.claude/worktrees/next\nTip: source scripts/dev-lf to apply auto-cd in this shell",
+    "reuse_plan": "branch: placement-demo/next\nbase: main\nworktree: $FIXTURE/claude/app/.claude/worktrees/next\nstrategy: use_existing_worktree",
+    "reuse": "Using existing worktree: $FIXTURE/claude/app/.claude/worktrees/next\nBranch: placement-demo/next\ncd $FIXTURE/claude/app/.claude/worktrees/next\nTip: source scripts/dev-lf to apply auto-cd in this shell",
+    "select_existing_branch": "cd $FIXTURE/claude/app/.claude/worktrees/login",
+    "registrations": 4,
+    "uncommitted_files_preserved": true,
+    "config_required": false
+  }
+]

@@ -379,7 +379,7 @@ fn prepare_land(
 
 fn sync_land(repo_root: &Path, main_repo: &Path, progress: &impl Progress) -> OpsResult<String> {
     let main_branch = get_default_branch(main_repo)?;
-    let onto = format!("origin/{main_branch}");
+    let onto = crate::git::integration_base(main_repo)?;
     // Use the recorded parent base when integrating a squash-landed stack.
     let stacked = crate::ops::task::stack_for_landing(repo_root)?;
     let verification = crate::ops::sync::sync_for_delivery(

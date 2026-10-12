@@ -391,9 +391,9 @@ pub(crate) fn run_sync_in(
     }
     let started = Instant::now();
     let default = get_default_branch(repo_root)?;
-    let upstream = format!("origin/{default}");
+    let upstream = crate::git::integration_base(repo_root)?;
     let on_main = current_branch(repo_root)?.as_deref() == Some(&default);
-    if !plan_only {
+    if !plan_only && onto.is_none() {
         crate::ops::checkout::refresh_main(repo_root, progress)?;
         if on_main && onto.is_none_or(|target| target == upstream) {
             progress.status("Main is current; unpublished commits and edits remain local.");
@@ -1908,11 +1908,11 @@ fn wt_create(name: &str, dry_run: bool) -> Result<()> {
     let main_repo = main_repo_root(&repo_root)?;
     let segment = WorktreeSegment::parse(name)?;
 
-    if !dry_run {
+    let mut placement = plan_placement(&main_repo, segment.clone())?;
+    if !dry_run && placement.strategy != PlacementStrategy::UseExistingWorktree {
         crate::ops::checkout::refresh_main(&main_repo, &CliProgress)?;
+        placement = plan_placement(&main_repo, segment)?;
     }
-
-    let placement = plan_placement(&main_repo, segment)?;
 
     if dry_run {
         print_placement_plan(&placement);

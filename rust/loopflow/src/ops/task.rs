@@ -2111,17 +2111,15 @@ pub(crate) fn fetch_task_refs(repo: &Path) -> OpsResult<()> {
     Ok(())
 }
 
-/// Resolve `(base_ref, base_commit)` for a new Task PR. With a remote, fetch and
-/// anchor on `origin/<default>`; without one, fall back explicitly to local
-/// `<default>`. The `base_ref` prefix (`origin/` vs `refs/heads/`) tells callers
-/// which case applied.
+/// Resolve a new Task's base through the default branch's existing Git tracking.
 fn resolve_upstream_base(repo: &Path, default_branch: &str) -> OpsResult<(String, String)> {
-    let base_ref = if has_remote(repo)? {
-        fetch(repo, "origin", default_branch)
-            .map_err(|error| task_error(format!("failed to fetch task base: {error}")))?;
-        format!("origin/{default_branch}")
-    } else {
+    let base = crate::git::integration_base(repo)?;
+    crate::git::fetch_tracking_ref(repo, &base)
+        .map_err(|error| task_error(format!("failed to fetch task base: {error}")))?;
+    let base_ref = if base == default_branch {
         format!("refs/heads/{default_branch}")
+    } else {
+        base
     };
     let base_commit = rev_parse(repo, &base_ref)
         .map_err(|error| task_error(format!("failed to resolve task base {base_ref}: {error}")))?;

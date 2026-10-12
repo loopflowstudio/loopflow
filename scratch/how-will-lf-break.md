@@ -14,7 +14,9 @@ not evidence of Jack's acceptance of the resulting behavior.
 
 ## Placement
 
-Wave unresolved; none supplied. Companion `levels-of-lf` owns instruction tiers:
+Wave: [product](../wave/product/GOAL.md), confirmed by Jack Heart on 2026-10-12.
+This fits Product's ownership of external usefulness and the shared user contract.
+Companion `levels-of-lf` owns instruction tiers:
 launcher-only use remains useful without adopting Tasks or a planning service.
 This branch owns compatibility of the native operations those instructions use.
 
@@ -118,16 +120,16 @@ for every separate-directory layout.
 
 ## Internal slices and remaining increments
 
-**This slice:** native preservation and placement repairs, explicit teammate review
+**Completed keystone:** native preservation and placement repairs, explicit teammate review
 requests/reads, repository merge method selection, pending/required CI semantics,
 and matching documentation. Focused verification is complete; the draft remains
 open for Jack's feedback.
 
 Later increments, not filed or launched:
 
-- **Remote roles (10):** separate integration remote/base from publication remote
-  across refresh, sync, push, PR targeting and reconciliation. Origin assumptions
-  still span these operations; changing one call is not fork support.
+- **Remote roles (10):** finish publication, stacked-Task branches, PR targeting
+  and reconciliation against the actual push/host destination. The adaptive Git
+  increment below handles default-base integration, not full fork support.
 - **Checkout completeness (14/17):** prove sparse patterns, initialized submodules,
   LFS filters and repo setup through a useful build. Hook failure truthfulness
   does not supply dependencies or initialize missing content.
@@ -159,4 +161,36 @@ model. Removing self-assignment fixes the misleading handoff; leaving queue
 strategy unset preserves host authority. The remaining hardcoded CI check and
 remote-role assumptions are explicit follow-ups rather than compatibility claims.
 
-Check: isolated focused Cargo suites and selected library/recovery/documentation tests — 134 distinct tests passed (corrected merge fixture rerun); `cargo fmt --check`, `cargo clippy --offline --all-targets -- -D warnings`, and `git diff --check` passed; complete platform/release matrix remains with CI.
+Check: isolated `cargo test --offline -p loopflow` worktree/sync/Task-range suites and `--lib git::tests` — 102 passed; `uv run python scratch/demo-worktree-placement.py` — 4/4 layouts passed; `cargo fmt --check`, `cargo clippy --offline --all-targets -- -D warnings`, and `git diff --check` passed; complete platform/release matrix remains with CI.
+
+## Adaptive Git increment — 2026-10-12
+
+Jack Heart authorized further adaptation without new subsystems. The narrower
+variants of dismissed concerns 09 and 11 belong with existing Git compatibility:
+use the actual base and require remote access only for an operation that needs it.
+The [autonomous worktree demo](worktree-demo.md) passed all four host-shaped layouts;
+Jack does not need to repeat these mechanical fixture steps.
+
+**This slice:** replace unconditional `origin/<default>` base selection with the
+default branch's configured Git upstream. A repository without tracking uses its
+available remote default or local branch. Advertised remote HEADs outrank local
+fallback conventions; existing `master` and custom primary branches no longer
+silently become `main`. Refresh, sync, landing preparation, agent placement and
+new Task base selection share this rule. Explicit local sync targets skip unrelated
+main refresh; existing worktree reuse skips refresh entirely. No settings, provider
+framework, ownership registry or background service is added.
+
+Delete the fixed-origin selection in these paths and the unconditional refresh
+before reuse. Retain explicit network errors when an operation does need to fetch,
+Git's existing tracking configuration, branch identity and preserved edits. Native
+publication, stacked-Task remotes and GitHub identity still contain origin assumptions;
+this increment does not claim complete fork publication support.
+
+Headless acceptance: local-only `master` creation, named `team/trunk` refresh and
+creation, fork integration from `upstream/main` with unchanged origin, reuse while
+origin is unavailable, and explicit local sync while origin is unavailable. Existing
+worktree/sync tests and affected Task-base checks must remain green. The same CLI
+layout demo passed again against the completed binary. Review finding: preserving
+Git tracking as the owner avoids a second remote policy; local targets and existing
+checkouts need no remote refresh. Remaining origin assumptions are explicitly
+limited above rather than represented as full fork compatibility.

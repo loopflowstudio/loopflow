@@ -946,3 +946,125 @@ fn bare_repository_placement_uses_a_working_checkout_not_metadata_parent() {
     assert!(created.path.join(".git").is_file());
     assert_ne!(created.path.parent(), repo.bare_path().parent());
 }
+
+#[test]
+fn cli_creates_from_local_master_without_a_remote_or_lf_config() {
+    let repo = TestRepo::new();
+    git_stdout(repo.path(), &["remote", "remove", "origin"]);
+    git_stdout(repo.path(), &["branch", "-m", "master"]);
+    let home = tempfile::tempdir().unwrap();
+    let plan = lf_command(home.path())
+        .current_dir(repo.path())
+        .args(["wt", "create", "local", "--plan"])
+        .output()
+        .unwrap();
+    assert!(
+        plan.status.success(),
+        "{}",
+        String::from_utf8_lossy(&plan.stderr)
+    );
+    let plan = String::from_utf8(plan.stdout).unwrap();
+    assert!(plan.contains("base: master"), "{plan}");
+    let path = PathBuf::from(
+        plan.lines()
+            .find_map(|line| line.strip_prefix("worktree: "))
+            .unwrap(),
+    );
+    let created = lf_command(home.path())
+        .current_dir(repo.path())
+        .args(["wt", "create", "local"])
+        .output()
+        .unwrap();
+    assert!(
+        created.status.success(),
+        "{}",
+        String::from_utf8_lossy(&created.stderr)
+    );
+    assert_eq!(git_stdout(&path, &["rev-parse", "HEAD"]), repo.head_sha());
+    assert!(!repo.path().join(".lf/config.yaml").exists());
+}
+
+#[test]
+fn cli_reuses_dirty_worktree_when_origin_is_unavailable() {
+    let repo = TestRepo::new();
+    let created = create_named_worktree(repo.path(), "existing", None, &|_| {}).unwrap();
+    fs::write(created.path.join("unfinished.txt"), "keep my work").unwrap();
+    git_stdout(
+        repo.path(),
+        &[
+            "remote",
+            "set-url",
+            "origin",
+            "/nonexistent/lf-demo-remote.git",
+        ],
+    );
+    let home = tempfile::tempdir().unwrap();
+    let result = lf_command(home.path())
+        .current_dir(repo.path())
+        .args(["wt", "create", "existing"])
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(String::from_utf8_lossy(&result.stdout).contains("Using existing worktree:"));
+    assert_eq!(
+        fs::read_to_string(created.path.join("unfinished.txt")).unwrap(),
+        "keep my work"
+    );
+    assert_eq!(list_worktrees(repo.path()).unwrap().len(), 2);
+}
+
+#[test]
+fn cli_creation_follows_named_remote_default_and_its_tracking_branch() {
+    let repo = TestRepo::new();
+    git_stdout(repo.path(), &["remote", "rename", "origin", "team"]);
+    git_stdout(repo.path(), &["branch", "-m", "trunk"]);
+    git_stdout(repo.path(), &["push", "-u", "team", "trunk"]);
+    git_stdout(repo.path(), &["remote", "set-head", "team", "trunk"]);
+    let remote_writer = tempfile::tempdir().unwrap();
+    git_stdout(
+        repo.path(),
+        &[
+            "clone",
+            "--branch",
+            "trunk",
+            repo.bare_path().to_str().unwrap(),
+            remote_writer.path().to_str().unwrap(),
+        ],
+    );
+    git_stdout(remote_writer.path(), &["config", "user.name", "Fixture"]);
+    git_stdout(
+        remote_writer.path(),
+        &["config", "user.email", "fixture@example.invalid"],
+    );
+    fs::write(remote_writer.path().join("remote.txt"), "new upstream work").unwrap();
+    git_stdout(remote_writer.path(), &["add", "remote.txt"]);
+    git_stdout(remote_writer.path(), &["commit", "-m", "remote work"]);
+    git_stdout(remote_writer.path(), &["push", "origin", "trunk"]);
+    let expected = git_stdout(remote_writer.path(), &["rev-parse", "HEAD"]);
+    let home = tempfile::tempdir().unwrap();
+    let result = lf_command(home.path())
+        .current_dir(repo.path())
+        .args(["wt", "create", "next"])
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert_eq!(repo.head_sha(), expected, "refresh must follow team/trunk");
+    let states = list_worktrees(repo.path()).unwrap();
+    let next = states
+        .iter()
+        .find(|wt| {
+            wt.branch
+                .as_deref()
+                .is_some_and(|branch| branch.ends_with("/next"))
+        })
+        .unwrap();
+    assert_eq!(git_stdout(&next.path, &["rev-parse", "HEAD"]), expected);
+}

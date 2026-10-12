@@ -103,6 +103,18 @@ Matching a host's worktree directory does not register a workspace in that host
 or run its setup scripts. Git checkout-hook failures retain the checkout and
 report the setup error instead of reporting success.
 
+Reusing an existing worktree stays local, even when its remote is unavailable.
+For new work, lf refreshes the default branch from its configured Git upstream;
+a repository without a remote uses its local base. Advertised remote defaults,
+existing local branch conventions and the primary checkout supply the default
+branch without requiring `main` or lf configuration. In a fork, configure the
+base branch to track the integration remote using ordinary Git tracking.
+Publication and stacked PR remotes still have GitHub/origin assumptions.
+
+`lf sync --manual main` integrates an explicit local branch without fetching an
+unrelated remote. An explicitly selected remote-tracking target fetches that
+remote; a fetch failure remains an error.
+
 ### Context flags
 
 | Flag | What it adds |

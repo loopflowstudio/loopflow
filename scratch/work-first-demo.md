@@ -266,9 +266,7 @@ inspection. Closing that failed terminal exposed the contrast defect. No takeove
 
 ## Live-reader diagnosis — October 12
 
-Comparing v0.13.12 with this branch found identical WorkFrame and shared wire
-models (Portfolio is new). A generic decode failure therefore does not establish
-version incompatibility. LocalLineObservation now retains the decoder's field/path
+v0.13.12 and this branch share WorkFrame and wire models; Portfolio is new. LocalLineObservation now retains the decoder's field/path
 error instead of Foundation's opaque localized message; its wrong-type regression
 identifies `sequence`. Check: WorkObservationTransportTests PASS (8); diff check PASS.
 Installed read `/tmp/loo462-live-wire/` finished in 690 s: both live frames decode
@@ -282,5 +280,4 @@ Live output selects 17 Loopflow Tasks under the current Swift predicate; the bra
 snapshot selects 11. Six extra completed Tasks have only old blocked Flow evidence:
 LOO-440/412, lf-b978097/df7e403/cb9012a/6f396c0. `c229a29648` fixes that shared
 Rust projection; Desktop decoding compatibility does not deliver this unreleased
-behavior. Do not delete failed history or duplicate the fix in Swift. Screen remains
-locked on recheck; staged build and existing clients are unchanged.
+behavior. Do not delete failed history or duplicate the fix in Swift. Screen still locked; clients unchanged.

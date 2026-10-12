@@ -515,7 +515,9 @@ pub fn get_default_branch(repo: &Path) -> Result<String, GitError> {
     {
         return Ok((*branch).to_string());
     }
-    for candidate in ["main", "master"] {
+    let configured = run_git(repo, &["config", "--get", "init.defaultBranch"])?;
+    let configured = String::from_utf8_lossy(&configured.stdout);
+    for candidate in [configured.trim(), "main", "master"] {
         let reference = format!("refs/heads/{candidate} ");
         if defaults.lines().any(|line| line == reference) {
             return Ok(candidate.to_string());
@@ -1647,6 +1649,15 @@ mod tests {
         let repo = init_repo();
         let branch = get_default_branch(repo.path()).expect("default branch");
         assert_eq!(branch, "main");
+    }
+
+    #[test]
+    fn git_get_default_branch_prefers_existing_configured_branch() {
+        let repo = init_repo();
+        commit_file(repo.path(), "README.md", "hello");
+        git_stdout(repo.path(), &["branch", "trunk"]).unwrap();
+        git_stdout(repo.path(), &["config", "init.defaultBranch", "trunk"]).unwrap();
+        assert_eq!(get_default_branch(repo.path()).unwrap(), "trunk");
     }
 
     #[test]

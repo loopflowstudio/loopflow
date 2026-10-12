@@ -206,9 +206,9 @@ instruction reasons; reuse existing captured decisions and rendering machinery.
 
 ## Remaining work and evidence limits
 
-- The queue's gate still owns affected-suite verification against the integrated
-  implementation, including the acceptance commands above. Existing results are
-  reusable only where their content and command plan remain applicable.
+- Gate completed affected-suite verification and repaired its findings. The
+  initial broad run is retained as failed evidence; focused reruns verified the
+  repairs without repeating unaffected suites. Landing remains with the caller.
 - Hosted CI retains its empty-scratch policy. All three current scratch notes
   are additions relative to main, so delivery cleanup can remove them without
   weakening that policy or deleting pre-existing repository content.
@@ -220,3 +220,17 @@ instruction reasons; reuse existing captured decisions and rendering machinery.
   accepted implementation; publication and landing remain with the caller.
 
 Check (2026-10-12): `git diff --check` passed; `lf context` reports scratch within both targets, with one existing audit-table wording warning; no code changed and gate owns remaining verification.
+
+
+## Gate review, 2026-10-12
+
+Review found that limiting rename detection to `scratch/` could delete an existing
+document moved there. Detection now spans the tree before selecting scratch
+additions; the regression covers moves both into and within scratch. CI's empty
+scratch policy is unchanged. The launcher/Work split remains intact: alignment
+checks now load the shared Work contract instead of requiring universal Work
+prose. Removed stale public opt-out instructions, replaced ambiguous Flow
+examples, registered the scratch API in the architecture map, and reconciled the
+post-sync golden prompt. No new Task, configuration or policy was introduced.
+
+Check (2026-10-12): `uv run python scripts/test.py --reuse-passing` initially found architecture/alignment failures (Python: 426 passed, 3 failed, 1 skipped) and stale command/golden references (Rust: 2,550 passed, 2 failed, 18 skipped); all repaired: architecture checker passed, focused Python checks passed (76, plus the standalone checkout-observation check), materialized `cargo nextest run -p loopflow --test documented_commands --test golden_prompt --test context_tests --test context_block_tests --test context_launch_tests --no-fail-fast --build-jobs 4 --test-threads 4` passed (29), final fmt/Clippy passed, website passed (75), architecture HTML/diff checks passed, nine evaluation inputs rendered; live model evaluation remains unperformed and platform/installation skips remain CI-owned.

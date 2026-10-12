@@ -27,13 +27,12 @@ pub(crate) fn added(repo: &Path, base: &str, tree: &str) -> Result<Vec<String>, 
             "-z",
             base,
             tree,
-            "--",
-            "scratch",
         ],
     )?;
     Ok(paths
         .split('\0')
-        .filter(|path| !path.is_empty() && *path != "scratch/.gitkeep")
+        // Detect renames across the whole tree before selecting scratch paths.
+        .filter(|path| path.starts_with("scratch/") && *path != "scratch/.gitkeep")
         .map(str::to_owned)
         .collect())
 }

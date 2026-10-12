@@ -103,7 +103,7 @@ Flow exports yield to existing skills with the same name. See
 
 ```bash
 lf : "fix the failing test"  # launcher; no Task or Linear required
-lf run pursue               # run a Flow in this checkout
+lf flow pursue               # run a Flow in this checkout
 lf help skill work          # read the Task/Wave API contract
 lf --task INF-123 design     # continue an existing Task with work guidance
 ```
@@ -114,8 +114,8 @@ already associated with the checkout or resumed Session. Load it explicitly
 with `lf skill work`, or read `lf help skill work` in an existing conversation.
 
 Desktop and custom clients share the same work APIs. Choose operator skills
-when you want Loopflow to keep managed work moving. `--no-loopflow` omits both
-automatic instruction tiers.
+when you want Loopflow to keep managed work moving. Standalone native skills
+retain their own guidance.
 
 ## Keep work moving
 

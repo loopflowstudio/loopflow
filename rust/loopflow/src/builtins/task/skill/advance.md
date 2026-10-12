@@ -32,7 +32,7 @@ alone is not a request to run it again.
 ## An approved design has no Task
 
 Continue in the owning checkout. Implement directly or run the selected Flow,
-such as `lf run pursue`, using the accepted design. No Task, Wave, Linear setup,
+such as `lf flow pursue`, using the accepted design. No Task, Wave, Linear setup,
 or Workflow enrollment is required. Preserve an explicit choice to perform
 implement → compress → refresh in this conversation.
 

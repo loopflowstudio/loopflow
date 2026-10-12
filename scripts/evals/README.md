@@ -7,7 +7,7 @@ uv run python scripts/evals/instruction_levels.py render --output /tmp/lf-level-
 uv run python scripts/evals/instruction_levels.py score --responses /tmp/lf-level-responses
 ```
 
-Each input contains production-rendered instructions, hypothetical session context,
+Each input contains production-rendered instructions, hypothetical conversation context,
 the request, and the same action catalog. Expected actions stay in the case file;
 do not send that file to the evaluated agent. Treat `instructions` as its system
 guidance and the other input fields as the evaluation request. Use a fresh

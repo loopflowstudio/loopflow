@@ -32,7 +32,7 @@ For launcher, Skill, Flow, worktree or PR use, check `lf --version`, installed
 agent availability, and only the accounts needed for the requested operation.
 Preserve existing configuration; defaults need no `.lf/config.yaml`. Prove the
 selected capability with its read-only help/status and offer one next command,
-such as `lf : "fix the failing test"` or `lf run pursue`. Do not launch a coding
+such as `lf : "fix the failing test"` or `lf flow pursue`. Do not launch a coding
 job as a setup probe. Stop here: no Task creation, Linear connection or Wave lookup.
 
 For existing or explicitly requested managed work, read `lf help skill work` and

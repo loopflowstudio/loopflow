@@ -16,6 +16,10 @@ Matrix fixture reuse retains all 70 independent cases: local execution fell
 each command. Final three-test module pass: 12.64s. Hosted benefit remains
 unmeasured; the existing broad error classifier is still a coverage limitation.
 
+Validation: network-isolated `cargo test -p loopflow --lib wave_resolution_matrix`
+passed 3 tests; `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings`
+and `git diff --check` passed. Hosted CI owns the Linux timing comparison.
+
 Jack Heart's target remains required CI under five minutes across ten consecutive
 real typical-code PR runs. PR #1543 passes but does not meet that target. Its
 first build-reuse improvement awaits Jack's merge decision; no arming is implied.

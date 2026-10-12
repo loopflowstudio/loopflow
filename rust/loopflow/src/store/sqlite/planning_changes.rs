@@ -117,11 +117,11 @@ impl SqliteStore {
     pub(crate) fn reject_planning_field(
         &self,
         owner: PlanningChanges<'_>,
-        change: &PlanningChange,
+        change_id: &str,
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let (kind, id) = owner.owner();
-        conn.execute(&format!("UPDATE {kind}_changes SET attempted=0 WHERE id=?1 AND {kind}_id=?2 AND acknowledged=0 AND conflict_json IS NULL"), params![change.id, id])?;
+        conn.execute(&format!("UPDATE {kind}_changes SET attempted=0 WHERE id=?1 AND {kind}_id=?2 AND acknowledged=0 AND conflict_json IS NULL"), params![change_id, id])?;
         Ok(())
     }
 

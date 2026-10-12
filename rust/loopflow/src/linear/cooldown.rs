@@ -8,7 +8,7 @@ use std::time::Duration;
 use reqwest::{header::HeaderMap, StatusCode};
 use sha2::{Digest, Sha256};
 
-use crate::pm::{PmError, PmResult};
+use crate::linear::{LinearError, LinearResult};
 
 #[derive(Debug)]
 pub(super) struct Cooldown {
@@ -33,7 +33,7 @@ impl Cooldown {
         }
     }
 
-    async fn lock(&self) -> PmResult<File> {
+    async fn lock(&self) -> LinearResult<File> {
         std::fs::create_dir_all(self.path.parent().expect("cooldown has a parent"))
             .map_err(io_error)?;
         let file = OpenOptions::new()
@@ -54,7 +54,7 @@ impl Cooldown {
         }
     }
 
-    pub(super) async fn check(&self) -> PmResult<()> {
+    pub(super) async fn check(&self) -> LinearResult<()> {
         let mut file = self.lock().await?;
         let until = read_deadline(&mut file)?;
         if until > now_ms() {
@@ -68,7 +68,7 @@ impl Cooldown {
         status: StatusCode,
         headers: &HeaderMap,
         body: &[u8],
-    ) -> PmResult<()> {
+    ) -> LinearResult<()> {
         let now = now_ms();
         let parsed = serde_json::from_slice::<serde_json::Value>(body).ok();
         let limited = status == StatusCode::TOO_MANY_REQUESTS
@@ -117,15 +117,15 @@ fn now_ms() -> i64 {
     (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64
 }
 
-fn io_error(error: std::io::Error) -> PmError {
-    PmError::Message(format!("Linear cooldown could not be saved/read: {error}"))
+fn io_error(error: std::io::Error) -> LinearError {
+    LinearError::Message(format!("Linear cooldown could not be saved/read: {error}"))
 }
 
-fn paused(until: i64) -> PmError {
-    PmError::RateLimited { reset_at_ms: until }
+fn paused(until: i64) -> LinearError {
+    LinearError::RateLimited { reset_at_ms: until }
 }
 
-fn read_deadline(file: &mut File) -> PmResult<i64> {
+fn read_deadline(file: &mut File) -> LinearResult<i64> {
     let mut value = String::new();
     file.read_to_string(&mut value).map_err(io_error)?;
     if value.is_empty() {
@@ -133,7 +133,7 @@ fn read_deadline(file: &mut File) -> PmResult<i64> {
     }
     value
         .parse()
-        .map_err(|_| PmError::Message("Invalid saved Linear cooldown deadline".into()))
+        .map_err(|_| LinearError::Message("Invalid saved Linear cooldown deadline".into()))
 }
 
 fn reset_at(headers: &HeaderMap, limited: bool, now: i64) -> Option<i64> {

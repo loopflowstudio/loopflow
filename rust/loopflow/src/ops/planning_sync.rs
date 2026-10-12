@@ -1,4 +1,4 @@
-//! Foreground planning exchange for the repository's selected transport.
+//! Foreground Git exchange and local-save delivery for the selected transport.
 //! Acquisition and delivery run independently; the common writer alone changes Work.
 //! Blocking workers retain their locks through cancellation, commit and readback.
 
@@ -316,7 +316,25 @@ fn publish_destination(
         .map_err(message)
 }
 
-/// A foreground connection's independent planning acquisition and delivery.
+/// Provider exit is also a useful boundary for Taskless conversations.
+pub(crate) fn check_directory(directory: &Path) -> OpsResult<()> {
+    let repo = crate::repository::CanonicalRepo::discover(directory)
+        .map_err(message)?
+        .to_string();
+    if !super::linear_observe::connected(&repo) {
+        return Ok(());
+    }
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?
+        .block_on(async {
+            let store = planning_store().await?;
+            super::linear_observe::sync_repository(&store, &repo).await;
+            Ok(())
+        })
+}
+
+/// A foreground connection's independent Git acquisition and publication.
 /// Dropping the connection cancels requests; durable identities survive cancellation.
 #[derive(Debug)]
 pub(crate) struct PlanningSync {
@@ -346,6 +364,12 @@ impl PlanningSync {
         repo: String,
         open: impl Future<Output = OpsResult<SharedStore>> + Send + 'static,
     ) -> OpsResult<Self> {
+        if super::linear_observe::connected(&repo) {
+            return Ok(Self {
+                stop: None,
+                thread: None,
+            });
+        }
         let (ready, started) = std::sync::mpsc::sync_channel(1);
         let (stop, stopped) = tokio::sync::oneshot::channel();
         #[cfg(test)]
@@ -356,7 +380,9 @@ impl PlanningSync {
             .name("planning-sync".into())
             .spawn(move || {
                 let runtime = match tokio::runtime::Builder::new_current_thread()
-                    .enable_all().build() {
+                    .enable_all()
+                    .build()
+                {
                     Ok(runtime) => runtime,
                     Err(error) => {
                         let _ = ready.send(Err(message(error)));
@@ -381,25 +407,6 @@ impl PlanningSync {
                         }) => {},
                         _ = repeat_sync("Git planning publication", Duration::from_secs(1), || {
                             publish_repository(&store, &repo)
-                        }) => {},
-                        _ = repeat_sync("comment acquisition", Duration::from_secs(15), || {
-                            super::linear_observe::refresh_repository_comments(&store, &repo)
-                        }) => {},
-                        _ = repeat_sync("planning acquisition", Duration::from_secs(15), || async {
-                            tokio::time::timeout(Duration::from_secs(5), super::linear_observe::refresh_repository_planning(&store, &repo))
-                                .await.map_err(|error| OpsError::Message(error.to_string()))?
-                        }) => {},
-                        _ = repeat_sync("comment delivery", Duration::from_secs(1), || {
-                            super::linear_observe::sync_repository_deliveries(&store, &repo, false)
-                        }) => {},
-                        _ = repeat_sync("planning export", Duration::from_secs(1), || {
-                            super::planning_export::sync_repository_exports(&store, &repo)
-                        }) => {},
-                        _ = repeat_sync("field delivery", Duration::from_secs(1), || {
-                            super::planning_delivery::sync_repository_fields(&store, &repo)
-                        }) => {},
-                        _ = repeat_sync("Task state delivery", Duration::from_secs(1), || {
-                            super::linear_observe::sync_repository_deliveries(&store, &repo, true)
                         }) => {},
                     }
                 };

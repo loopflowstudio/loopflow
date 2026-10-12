@@ -3,8 +3,8 @@ use serde::Deserialize;
 use serde_json::json;
 
 use super::{CommentNode, IssueNode, LinearClient, PageInfo, ProjectNode};
-use crate::pm::{IssueComment, IssueObservation, PmError, PmResult};
-use crate::store::PmTaskRecord;
+use super::{LinearIssue, LinearProject};
+use crate::linear::{LinearComment, LinearError, LinearIssueObservation, LinearResult};
 
 const QUERY: &str = r#"query TeamChanges($issues: IssueFilter!, $comments: CommentFilter!, $issuesAfter: String, $commentsAfter: String, $readIssues: Boolean!, $readComments: Boolean!) {
   issues(filter: $issues, first: 100, after: $issuesAfter, orderBy: updatedAt) @include(if: $readIssues) {
@@ -53,7 +53,7 @@ struct ChangedComment {
     issue: Option<IssueNode<ProjectNode>>,
 }
 
-impl From<CommentNode> for IssueComment {
+impl From<CommentNode> for LinearComment {
     fn from(node: CommentNode) -> Self {
         Self {
             id: node.id,
@@ -83,7 +83,7 @@ impl LinearClient {
         through: &str,
         live: &[String],
         finished: &[String],
-    ) -> PmResult<Vec<(PmTaskRecord, IssueObservation)>> {
+    ) -> LinearResult<Vec<(LinearIssue, Option<LinearProject>, LinearIssueObservation)>> {
         let mut eligible = json!({"team":{"id":{"eq":team}}, "id":{"nin":finished},
             "or":[{"id":{"in":live}}, {"state":{"type":{"nin":["completed","canceled"]}}}]});
         let mut revision = json!({"lte":through});
@@ -111,7 +111,7 @@ impl LinearClient {
             if read_issues {
                 let page = page
                     .issues
-                    .ok_or_else(|| PmError::Message("Linear issue delta is missing".into()))?;
+                    .ok_or_else(|| LinearError::Message("Linear issue delta is missing".into()))?;
                 for issue in page.nodes {
                     changes.push(observation(issue, Vec::new())?);
                 }
@@ -119,9 +119,9 @@ impl LinearClient {
                 issues_after = continuation(page.page_info)?;
             }
             if read_comments {
-                let page = page
-                    .comments
-                    .ok_or_else(|| PmError::Message("Linear comment delta is missing".into()))?;
+                let page = page.comments.ok_or_else(|| {
+                    LinearError::Message("Linear comment delta is missing".into())
+                })?;
                 for comment in page.nodes {
                     if let Some(issue) = comment.issue {
                         changes.push(observation(issue, vec![comment.comment.into()])?);
@@ -134,22 +134,25 @@ impl LinearClient {
         // One issue can occur on several comment pages or complete in the same
         // batch. Apply its final fields and all comments together, before local
         // completion makes it ineligible for the next check.
-        let mut by_issue =
-            std::collections::BTreeMap::<String, (PmTaskRecord, IssueObservation)>::new();
-        for (record, mut observation) in changes {
-            if let Some((saved, previous)) = by_issue.get_mut(&record.item.id) {
+        let mut by_issue = std::collections::BTreeMap::<
+            String,
+            (LinearIssue, Option<LinearProject>, LinearIssueObservation),
+        >::new();
+        for (issue, project, mut observation) in changes {
+            if let Some((saved, saved_project, previous)) = by_issue.get_mut(&issue.id) {
                 if observation.revision >= previous.revision {
-                    *saved = record;
+                    *saved = issue;
+                    *saved_project = project;
                     previous.revision = observation.revision;
                     previous.title = observation.title;
                     previous.description = observation.description;
                 }
                 previous.comments.append(&mut observation.comments);
             } else {
-                by_issue.insert(record.item.id.clone(), (record, observation));
+                by_issue.insert(issue.id.clone(), (issue, project, observation));
             }
         }
-        for (_, observation) in by_issue.values_mut() {
+        for (_, _, observation) in by_issue.values_mut() {
             observation
                 .comments
                 .sort_by(|a, b| a.revision.cmp(&b.revision).then(a.id.cmp(&b.id)));
@@ -158,9 +161,9 @@ impl LinearClient {
     }
 }
 
-fn continuation(page: PageInfo) -> PmResult<Option<String>> {
+fn continuation(page: PageInfo) -> LinearResult<Option<String>> {
     if page.has_next_page && page.end_cursor.is_none() {
-        return Err(PmError::Message(
+        return Err(LinearError::Message(
             "Linear delta page is missing its continuation cursor".into(),
         ));
     }
@@ -169,29 +172,22 @@ fn continuation(page: PageInfo) -> PmResult<Option<String>> {
 
 fn observation(
     issue: IssueNode<ProjectNode>,
-    comments: Vec<IssueComment>,
-) -> PmResult<(PmTaskRecord, IssueObservation)> {
+    comments: Vec<LinearComment>,
+) -> LinearResult<(LinearIssue, Option<LinearProject>, LinearIssueObservation)> {
     let (item, project) = issue.into_ownership()?;
-    let observation = IssueObservation {
+    let observation = LinearIssueObservation {
         revision: item.revision.clone().expect("Linear issue has a revision"),
         title: item.name.clone(),
         description: item.description.clone(),
         comments,
     };
-    Ok((
-        PmTaskRecord {
-            item,
-            project,
-            observed_at: time::OffsetDateTime::now_utc().unix_timestamp(),
-        },
-        observation,
-    ))
+    Ok((item, project, observation))
 }
 
 #[cfg(test)]
 mod tests {
     use super::LinearClient;
-    use crate::pm::test_server::{self, json_response};
+    use crate::linear::test_server::{self, json_response};
     use reqwest::StatusCode;
     use serde_json::json;
 
@@ -226,8 +222,8 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(changes.len(), 1);
-        assert!(changes[0].0.item.completed);
-        let comments = &changes[0].1.comments;
+        assert!(changes[0].0.completed);
+        let comments = &changes[0].2.comments;
         assert_eq!(
             comments
                 .iter()

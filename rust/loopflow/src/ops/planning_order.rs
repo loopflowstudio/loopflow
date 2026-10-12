@@ -88,7 +88,7 @@ pub(super) async fn sync_order(
         {
             Ok(response) => response,
             Err(error) => {
-                if matches!(error, crate::pm::PmError::RateLimited { .. }) {
+                if matches!(error, crate::linear::LinearError::RateLimited { .. }) {
                     store
                         .sqlite
                         .reject_project_order(&delivery.id)
@@ -97,8 +97,9 @@ pub(super) async fn sync_order(
                 return Err(message(error));
             }
         };
-        let crate::pm::linear::PlanningResponse::Task {
-            record,
+        let crate::linear::PlanningResponse::Task {
+            issue,
+            project: _,
             priority_sort_order,
             sort_order,
         } = response
@@ -107,9 +108,9 @@ pub(super) async fn sync_order(
         };
         let updated = issues
             .iter_mut()
-            .find(|issue| issue.item.id == record.item.id)
+            .find(|candidate| candidate.item.id == issue.id)
             .ok_or_else(|| message("Order mutation returned an unknown issue"))?;
-        updated.item = record.item;
+        updated.item = *issue;
         updated.priority_sort_order = priority_sort_order;
         updated.sort_order = sort_order;
         issues.sort_by(|a, b| {

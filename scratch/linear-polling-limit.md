@@ -12,19 +12,18 @@ Successful mutation responses settle their captured receipt directly; delete suc
 
 ## Delete — do not maintain
 
-No remaining predecessor paths to delete. Removed:
+The original cut (`f1ab389a961417718f06f81615a47cec7e4bb0df`) removed per-agent Linear acquisition/delivery loops, repository comment fan-out, inventory timers, per-client 429 retries, and successful mutation readbacks. Integration with #1491 preserves its repository Git transport and typed `linear::{acceptance,observations}` owners. `PlanningSync` now runs only Git acquisition/publication; watchers hold that Git connection plus the slow Linear clock. Task-bound and Taskless provider exits share an on-demand check.
 
-- `PlanningSync`, `repeat_sync`, `acquire_poll`, repository comment fan-out and background inventory refresh; their timer-only tests move to on-demand/watch behavior.
-- `TaskInput::start_planning_sync` and the agent-owned synchronization thread.
-- Successful state/field/create/attachment/order write readbacks. Reconcile mutation payloads through existing receipt owners; retain uncertain outcomes.
-- Per-client 429 retry loops (already removed).
+Deleted `pm` modules stay deleted. Delta ingestion and mutation responses use `LinearIssue`/`LinearProject` through typed acceptance, without `PmTaskRecord` or duplicate receipt storage. Existing creation identity, concurrent-save, revision-admission, conflict, prose and uncertain-response tests stay on the surviving owner. The incoming Project-adoption readback also uses its mutation payload; unchanged adoption uses its initial observation. Timer-only agent tests, including the embedded comment-runner polling scenario, are replaced by boundary request-count coverage. Comment reconnect/conflict/author coverage remains on explicit acquisition and local-save delivery.
 
 ## Remaining
 
-Implementation and deletion cuts are complete. Gate owns remaining acceptance: independent-process contention, native turn-hook execution, watcher backoff and migration from the released frontier. Focused fixtures cover pagination/comment-only changes, receipt uncertainty, shared freshness and idle-agent request counts. Live before/after measurement and rejected-request quota accounting remain unproved; no usable Doppler access token was found in the preceding implementation.
+October 11 implementation reconciles #1491 in place and preserves both committed changes. `lf sync --continue` recorded merge `7b2eaac166` but retained its operation because the additional integration edits still needed a checkpoint. Implementation is complete; gate and delivery remain.
+
+Gate owns independent-process contention, native turn-hook execution, watcher backoff and migration from the released frontier. Fixtures cover pagination/comment-only changes, receipt uncertainty, shared freshness and idle-agent request counts. Live before/after measurement and rejected-request quota accounting remain unproved; no usable Doppler access token was found in the preceding implementation.
 
 ## Rollout
 
-After installing a build with this fix, restore `pm.linear_team` by hand in the main checkouts of loopflow, etude, kata and fantasia. Jack reports it is commented out and uncommitted. Include this instruction in the PR description; do not alter those checkouts here.
+After installing a build with this fix, restore the paused Linear team setting (formerly `pm.linear_team`, now `linear.team` with `planning.provider: linear`) by hand in the main checkouts of loopflow, etude, kata and fantasia. Jack reports it is commented out and uncommitted. Include this instruction in the PR description; do not alter those checkouts here.
 
-Checks: `cargo test -p loopflow --lib --no-run`, network-isolated planning (56), Linear (30), context (67), `cargo fmt --check`, and `cargo clippy --all-targets -- -D warnings` passed; final scale fixtures passed (350 terminal Tasks: zero idle requests over 60 seconds, one query at turn end; four concurrent checks: one query). Gate owns remaining acceptance above; CI owns the full matrix.
+Checks: `cargo check -p loopflow --lib`, focused planning tests (64), new-issue adoption, comment delivery, rate-limit/pagination, Project adoption (8 passed; OS-install fixture skipped), both Git foreground fixtures, `cargo fmt --check`, and `cargo clippy --all-targets -- -D warnings` passed; gate/CI own broader acceptance and installed validation.

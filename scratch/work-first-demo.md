@@ -184,3 +184,41 @@ current reading. The transient main config error cleared without edits here. Thi
 supersedes the failed refreshed-view observation above, not the recorded failure.
 The latest stopped-failure projection correction has focused Rust and Clippy passes;
 it has not yet been packaged into that captured app.
+
+## October 11 native navigation and cleanup rehearsal
+
+Repackaged `c229a29648` into the same private app and launched PID 53987. Native
+Computer Use inspected the actual populated window and clicked Product, then
+LOO-462. The sidebar has no conversation tallies; completed LOO-440 is absent.
+Product opens in a retained Work tab and LOO-462 opens its conversation pane with
+collapsed Overview. The provider launcher is refused by the intentional account-free
+sandbox; this is not successful conversation continuation. Wave workflow discovery
+also encounters the sandbox's denied user skill directories. The demo policy needs
+read-only skill access, not provider credentials or a product-code workaround.
+Product capture: `/tmp/loopflow-20261011-214224.png`.
+
+The Product plan displays old Tasks, including LOO-149. Read-only comparison proves
+LOO-149 has the same `abandoned_at=1790172305`, null planning state and old Project
+in live and copied databases. The copy did not create that mismatch. The shared
+reader deliberately includes other Projects' backlog; do not hide every historical
+Project or delete its Tasks to repair a terminal/planning mismatch. Determine whether
+normal present-day abandonment still creates this combination before choosing code
+versus one-time data repair.
+
+LOO-376's current brief explicitly records Jack Heart's earlier closure request
+and retirement of numeric acceptance. Rehearsal backup:
+`/private/tmp/loo462-native.FgtDmE/before-376-cleanup.db` (SQLite backup, mode 0600).
+The first sandboxed `task complete` saved a request then failed obtaining the real
+checkout's PR mutation lock. Retry policy permits only that exact advisory-lock
+file; all real repository/data writes and networking remain denied. The retry has
+committed completion in the private database; live LOO-376 remains unstarted.
+Native sidebar refresh removed LOO-376 without restart, preserving adjacent paused
+LOO-378 and unfinished LOO-371. Cleanup subprocess 81008 remains live while checking
+retained execution, so its final cleanup result is not yet established. Logs:
+`376-cleanup-{rehearsal,retry}.log` in the demo directory. Do not apply the private
+full-database snapshot over the live database; ongoing unrelated writes must survive.
+
+Rehearsal finished with exit 0: LOO-376 completed locally and its checkout was
+retained because execution observations were unresolved. No history was deleted;
+this does not establish live process state from a snapshot. The earlier live-process
+note above is superseded by this terminal receipt. The real database is unchanged.

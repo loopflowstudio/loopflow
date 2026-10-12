@@ -65,6 +65,8 @@ mod tests {
         "project_binding_imports",
         "auth_browser_bindings",
         "blob_tokens",
+        // Acquisition attempts and watermarks do not change displayed Work.
+        "linear_team_checks",
         "machines",
         "provider_account_limits",
         "provider_account_switches",

@@ -182,6 +182,13 @@ impl SqliteStore {
         )? == 1)
     }
 
+    /// Positive rate-limit rejection is not an uncertain provider effect.
+    pub(crate) fn reject_task_state(&self, delivery: &TaskStateDelivery) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute("UPDATE task_state_deliveries SET attempted=0 WHERE id=?1 AND settled=0 AND conflict_json IS NULL", [&delivery.id])?;
+        Ok(())
+    }
+
     /// Failed delivery retains its receipt; only provider observation settles state.
     pub(crate) fn task_state_error(
         &self,

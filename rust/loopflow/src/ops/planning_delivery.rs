@@ -61,9 +61,11 @@ pub(crate) async fn sync_fields(store: &Store, repo: &Path, work: &WorkRef) -> O
             return sync_deletion(store, repo, owner, &client, change).await;
         }
         // Also reconcile an older attempted receipt whose successor is no longer pending.
-        observe(store, repo, owner, &client).await?;
+        let mut observation = observe(store, repo, owner, &client).await?;
         for change in &changes {
-            if let Err(error) = sync_field(store, repo, owner, &client, change).await {
+            if let Err(error) =
+                sync_field(store, repo, owner, &client, change, &mut observation).await
+            {
                 store
                     .sqlite
                     .planning_field_error(owner, &change.id, &error.to_string())
@@ -144,7 +146,7 @@ async fn sync_deletion(
     }
     // Complete active-issue ingestion adopts conflicting Linear edits through
     // the common writer before attempting the saved removal.
-    let (_, _, revision) = observe(store, repo, owner, client).await?;
+    let revision = observe(store, repo, owner, client).await?.revision;
     if revision.as_deref() != Some(trash_revision.as_str()) {
         return Err(message(
             "Linear deletion observations disagree; saved removal retained",
@@ -177,7 +179,15 @@ async fn sync_deletion(
             "Deletion remains uncertain; no repeated mutation issued",
         ));
     }
-    client.delete_issue(external).await.map_err(message)?;
+    if let Err(error) = client.delete_issue(external).await {
+        if matches!(error, crate::linear::LinearError::RateLimited { .. }) {
+            store
+                .sqlite
+                .reject_planning_field(owner, &change.id)
+                .map_err(message)?;
+        }
+        return Err(message(error));
+    }
     store
         .sqlite
         .acknowledge_task_deletion(id, change, None)
@@ -220,8 +230,8 @@ async fn sync_field(
     owner: PlanningChanges<'_>,
     client: &LinearClient,
     change: &PlanningChange,
+    observation: &mut FieldObservation,
 ) -> OpsResult<()> {
-    let (external, content, revision) = observe(store, repo, owner, client).await?;
     let Some(current) = pending(store, owner)?
         .into_iter()
         .find(|c| c.id == change.id)
@@ -231,30 +241,98 @@ async fn sync_field(
     let input = match owner {
         PlanningChanges::Task(_) => task_input(store, &current)?,
         PlanningChanges::Project(_) => client
-            .project_field_input(&current.value, &content)
+            .project_field_input(&current.value, &observation.content)
             .await
             .map_err(message)?,
     };
     if !store
         .sqlite
-        .attempt_planning_field(owner, &current, revision.as_deref())
+        .attempt_planning_field(owner, &current, observation.revision.as_deref())
         .map_err(message)?
     {
         return Ok(());
     }
-    client
+    let response = match client
         .deliver_planning_field(
-            &external,
+            &observation.external,
             matches!(owner, PlanningChanges::Project(_)),
             input,
         )
         .await
-        .map_err(message)?;
-    observe(store, repo, owner, client).await?;
+    {
+        Ok(response) => response,
+        Err(error) => {
+            if matches!(error, crate::linear::LinearError::RateLimited { .. }) {
+                store
+                    .sqlite
+                    .reject_planning_field(owner, &current.id)
+                    .map_err(message)?;
+            }
+            return Err(message(error));
+        }
+    };
+    match &response {
+        crate::linear::PlanningResponse::Task { issue, .. } => {
+            observation.revision = issue.item.revision.clone()
+        }
+        crate::linear::PlanningResponse::Project { project, content } => {
+            observation.revision = project.revision.clone();
+            observation.content = content.clone();
+        }
+    }
+    apply_response(store, repo, owner, response).await?;
     if pending(store, owner)?.iter().any(|c| c.id == change.id) {
         return Err(message("Field write remains uncertain; receipt retained"));
     }
     Ok(())
+}
+
+pub(super) async fn apply_response(
+    store: &Store,
+    repo: &Path,
+    owner: PlanningChanges<'_>,
+    response: crate::linear::PlanningResponse,
+) -> OpsResult<()> {
+    match response {
+        crate::linear::PlanningResponse::Task { issue, project, .. } => {
+            ingest_task(
+                store,
+                repo,
+                &issue.item,
+                project.as_deref(),
+                time::OffsetDateTime::now_utc().unix_timestamp(),
+            )
+            .await
+        }
+        crate::linear::PlanningResponse::Project {
+            project: observed, ..
+        } => {
+            let PlanningChanges::Project(id) = owner else {
+                return Err(message("Project response for a Task"));
+            };
+            let project = store
+                .get_project(id)
+                .await
+                .map_err(message)?
+                .ok_or_else(|| message("Project is missing"))?;
+            let wave = store
+                .get_wave(&project.wave_id)
+                .await
+                .map_err(message)?
+                .ok_or_else(|| message("Wave is missing"))?;
+            let initiative = super::linear::read_initiative(repo, wave.slug())
+                .ok_or_else(|| message("Wave has no Linear Initiative"))?;
+            crate::linear::acceptance::accept_linear_project_in(
+                &store.sqlite,
+                &project.wave_id,
+                &initiative,
+                &observed,
+                time::OffsetDateTime::now_utc().unix_timestamp(),
+            )
+            .map_err(message)?;
+            Ok(())
+        }
+    }
 }
 
 fn pending(store: &Store, owner: PlanningChanges<'_>) -> OpsResult<Vec<PlanningChange>> {
@@ -265,12 +343,18 @@ fn pending(store: &Store, owner: PlanningChanges<'_>) -> OpsResult<Vec<PlanningC
     .map_err(message)
 }
 
+struct FieldObservation {
+    external: String,
+    content: String,
+    revision: Option<String>,
+}
+
 async fn observe(
     store: &Store,
     repo: &Path,
     owner: PlanningChanges<'_>,
     client: &LinearClient,
-) -> OpsResult<(String, String, Option<String>)> {
+) -> OpsResult<FieldObservation> {
     match owner {
         PlanningChanges::Task(id) => {
             let task = store
@@ -302,7 +386,11 @@ async fn observe(
                     "Newer or unresolved Linear planning retained; field delivery deferred",
                 ));
             }
-            Ok((external, String::new(), revision))
+            Ok(FieldObservation {
+                external,
+                content: String::new(),
+                revision,
+            })
         }
         PlanningChanges::Project(id) => {
             let project = store
@@ -339,7 +427,11 @@ async fn observe(
                     "Newer or unresolved Linear Project planning retained; field delivery deferred",
                 ));
             }
-            Ok((external, content, observed.revision))
+            Ok(FieldObservation {
+                external,
+                content,
+                revision: observed.revision,
+            })
         }
     }
 }
@@ -393,6 +485,24 @@ pub(super) async fn ingest_task(
                 .ok_or_else(|| message("Project Wave is missing"))?;
             if let Some(initiative) = super::linear::read_initiative(repo, wave.slug()) {
                 confirmed = Some((local.wave_id, initiative));
+            }
+        }
+    }
+    if confirmed.is_none() {
+        if let Some(project) = project {
+            for wave in store
+                .list_waves(Some(&repo.to_string_lossy()))
+                .await
+                .map_err(message)?
+            {
+                if let Some(initiative) = super::linear::read_initiative(repo, wave.slug()) {
+                    if project.initiative_ids.contains(&initiative) {
+                        if confirmed.is_some() {
+                            return Err(message("Project matches multiple Wave Initiatives"));
+                        }
+                        confirmed = Some((wave.id().clone(), initiative));
+                    }
+                }
             }
         }
     }

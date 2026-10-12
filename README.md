@@ -146,7 +146,12 @@ Subtree delegation travels with shared planning. Started Tasks retain their reco
 Machine; new Tasks reserve an exclusive execution owner before checkout.
 Connection settings and execution records remain Machine-local.
 
-Acquired Task comments from Linear also become steers for each associated
+Task comments in Linear reach the Task's next useful boundary: before a Flow step,
+after an agent turn, when showing planning, and before a Linear write. Team checks
+share ten-second freshness. Only Desktop and `--watch` keep a slow clock, backing
+off while nothing changes; idle agents do not poll. Teams without live Tasks make
+no acquisition requests. A rate limit pauses requests across repositories in the
+same Home until reset, retaining pending writes. Acquired Task comments become steers for each associated
 Session, with independent delivery at its next supported provider boundary.
 Steering leaves idle Sessions idle. A stopped Flow is history: `task run` never
 continues it, so inspect `lf task status` first.

@@ -27,6 +27,8 @@ mod durable;
 mod flow_inventory;
 #[cfg(test)]
 mod linear_migration_tests;
+
+mod linear_team_checks;
 mod metrics;
 pub(crate) mod planning_changes;
 pub(crate) mod planning_export;

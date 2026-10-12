@@ -213,7 +213,9 @@ fn repository_id(repo: &Path) -> OpsResult<RepoId> {
 async fn resolve_repository_context(repo: &Path) -> OpsResult<LinearRepository> {
     let team_id = repository_team_id(repo)?;
     let repo_id = repository_id(repo)?;
-    let client = build_client(Some(team_id.clone())).await?;
+    let client = build_client(Some(team_id.clone()))
+        .await?
+        .for_repository(repo);
     client
         .validate_team_claim(&team_id, repo_id.as_str())
         .await
@@ -411,7 +413,7 @@ tokio::task_local! {
 pub(super) mod test_fixture;
 
 #[cfg(test)]
-mod task_planning_tests;
+pub(crate) mod task_planning_tests;
 
 #[cfg(test)]
 mod planning_lookup_tests;
@@ -1029,7 +1031,9 @@ async fn resolve_reteam_context(repo: &Path) -> OpsResult<ResolvedReteamContext>
         )
     })?;
     let repo_id = repository_id(repo)?;
-    let client = build_client(Some(team_id.clone())).await?;
+    let client = build_client(Some(team_id.clone()))
+        .await?
+        .for_repository(repo);
     let binding = client
         .validate_team_claim(&team_id, repo_id.as_str())
         .await

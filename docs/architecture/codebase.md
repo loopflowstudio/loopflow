@@ -62,6 +62,7 @@ subprocess edge to one concept.
 lf                         foreground command and Skill/Flow launches
 lf-prompt                  prompt-oriented executable surface
 lf __context-block         provider hook that refreshes saved conversation context sources
+lf __planning-check        provider turn hook for shared Linear acquisition and pending delivery
 lf __provider-session      provider hook that binds native conversation identity to an LfSession
 Loopflow.app               pure client over CLI/HTTP DTOs
 ```

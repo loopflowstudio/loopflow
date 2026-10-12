@@ -159,7 +159,14 @@ impl ContextDelivery {
             quote(&executable),
             quote(&path)
         );
+        let check = format!(
+            "env LF_HOME={} {} __planning-check --delivery {}",
+            quote(&self.home),
+            quote(&executable),
+            quote(&path)
+        );
         Ok(serde_json::json!({
+            "Stop": [{"hooks":[{"type":"command","command":check,"timeout":10}]}],
             "PostToolUse": [{"hooks": [{"type":"command", "command": format!("{command} tool"), "timeout":30}]}],
             "UserPromptSubmit": [{"hooks": [{"type":"command", "command": format!("{command} tool"), "timeout":30}]}],
             "SessionStart": [

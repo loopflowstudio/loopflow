@@ -3,7 +3,6 @@
 use crate::work::task::comment::TaskCommentAuthor;
 
 use clap::Parser;
-use std::os::unix::fs::PermissionsExt;
 use std::sync::Arc;
 
 use axum::{extract::State, routing::post, Json, Router};
@@ -56,7 +55,8 @@ async fn graphql(
     let data = if query.contains("query ListTeams") {
         json!({"teams": {"nodes": [{"id":"team-1","name":"Fixture","key":"FIX",
             "description":"<!-- loopflow-repository: loopflowstudio/fixture -->"}]}})
-    } else if query.contains("query ListInitiativeProjects") {
+    } else if query.contains("query ListInitiativeProjects") || query.contains("query TeamChanges")
+    {
         // Comment delivery remains independent of unavailable repository inventory.
         return Json(json!({"errors":[{"message":"inventory unavailable"}]}));
     } else if query.contains("query IssueOwnership") {
@@ -321,81 +321,7 @@ async fn task_comments_read_and_publish_without_starting_work() {
             provider.lock().await.posted.push(comment("incoming-after-reconnect",
                 Some("2026-09-27T00:00:01Z"), Some("Keep inbound independent"),
                 json!({"id":"person-1","displayName":"Maya","name":null})));
-            // Exercise the ordinary runner, including the native branch and
-            // Claude's stream-input harness.
-            let _homes = crate::test_ambient::EnvGuard::clear(&["HOME", "LF_HOME", "LF_BIN", "PATH", "CODEX_HOME", "CLAUDE_CONFIG_DIR"]);
-            let home = directory.path().join("home");
-            std::fs::create_dir_all(&home).unwrap();
-            std::env::set_var("HOME", &home);
-            // Foreground sync opens the Machine store independently of TaskInput.
-            std::env::set_var("LF_HOME", directory.path());
-            let bin = directory.path().join("bin");
-            std::fs::create_dir(&bin).unwrap();
-            std::env::set_var("PATH", format!("{}:/usr/bin:/bin", bin.display()));
-            std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
-            let script = include_str!("../../../tests/support/holding_provider.py");
-            for name in ["claude", "codex"] {
-                let executable = bin.join(name);
-                std::fs::write(&executable, script).unwrap();
-                std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
-            }
-            for (agent, auto) in [("codex", false), ("claude", false), ("claude", true)] {
-                let marker = format!("{agent}-{auto}");
-                let incoming = format!("incoming-{marker}");
-                provider.lock().await.posted.push(comment(&incoming,
-                    Some("2026-09-27T00:00:02Z"), Some(&marker),
-                    json!({"id":"person-1","displayName":"Maya","name":null})));
-                let started = home.join(format!("{marker}.started"));
-                let stop = home.join(format!("{marker}.stop"));
-                let seed = crate::ops::task_input::TaskSeed {
-                    task: task.clone(), message: String::new(),
-                    interrupt: 0,
-                };
-                let process = crate::agent::ProcessConfig {
-                    auto,
-                    task_input: Some(crate::ops::task_input::TaskInput::new(store.clone(), seed)),
-                    ..Default::default()
-                };
-                let launch = crate::agent::AgentConfig {
-                    agent: Some(agent.into()), cwd: Some(repo.clone()),
-                    env: std::collections::BTreeMap::from([
-                        ("PATH".into(), format!("{}:/usr/bin:/bin", bin.display())),
-                        ("FIXTURE_STARTED".into(), started.display().to_string()),
-                        ("FIXTURE_STOP".into(), stop.display().to_string()),
-                    ]),
-                    ..Default::default()
-                };
-                let context = LINEAR_TEST_CONTEXT.with(Clone::clone);
-                // The blocking invocation and its capture share this fixture's store.
-                let ledger = crate::store::database_path_from_env().unwrap();
-                let running = tokio::task::spawn_blocking(move || {
-                    crate::journal::with_test_ledger(ledger, || {
-                        LINEAR_TEST_CONTEXT.sync_scope(context, || crate::agent::run_agent(
-                            &launch, &process, &crate::agent::AgentCapabilities::default()))
-                    })
-                });
-                let running_check = tokio::time::timeout(std::time::Duration::from_secs(7), async {
-                    loop {
-                        if started.exists() { break; }
-                        if running.is_finished() { return false; }
-                        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-                    }
-                    let saved = task_comment_async(&repo, None, "FIX-7", Some(&marker), true).await.unwrap();
-                    // The foreground save may deliver before returning its thread.
-                    assert!(saved.comments.iter().any(|comment|
-                        comment.id != incoming && comment.body.lines().next() == Some(marker.as_str())));
-                    loop {
-                        if store.sqlite.pending_task_comments(&task.id).unwrap().is_empty()
-                            && store.sqlite.task_comments(&task.id).unwrap().comments.iter()
-                                .any(|c| c.id == incoming) { return true; }
-                        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-                    }
-                }).await;
-                std::fs::write(&stop, "stop").unwrap();
-                let result = running.await.unwrap().unwrap();
-                assert_eq!(result.exit_code, 0);
-                assert!(running_check.unwrap(), "{marker} exited before synchronization");
-            }
+            crate::ops::linear_observe::refresh_task_comments(&store, &task).await.unwrap();
             // Keep this create pending deliberately; connected saves may deliver immediately.
             provider.lock().await.thread = Thread::Failing;
             let saved = task_comment_async(&repo, None, "FIX-7", Some("Local value survives"), true)

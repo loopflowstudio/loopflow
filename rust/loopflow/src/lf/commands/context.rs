@@ -354,6 +354,32 @@ pub fn emit_block(
     Ok(())
 }
 
+/// Native turn hooks consume the same team freshness as CLI and watcher reads.
+pub fn check_planning(path: &std::path::Path) -> Result<()> {
+    let delivery: crate::context_block::ContextDelivery =
+        serde_json::from_slice(&std::fs::read(path)?)?;
+    let database = delivery.home.join("loopflow.db");
+    if !database.exists() {
+        return Ok(());
+    }
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?
+        .block_on(async {
+            let store =
+                crate::store::open_store(&crate::store::StorageConfig::sqlite(database)).await?;
+            let _ = tokio::time::timeout(
+                std::time::Duration::from_secs(8),
+                crate::ops::linear_observe::sync_repository(
+                    &store,
+                    &delivery.repo.to_string_lossy(),
+                ),
+            )
+            .await;
+            Ok(())
+        })
+}
+
 fn excerpt(text: &str, bytes: usize) -> &str {
     let mut end = text.len().min(bytes);
     while !text.is_char_boundary(end) {

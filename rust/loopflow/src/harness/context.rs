@@ -44,6 +44,7 @@ pub(crate) fn codex_config(context: Option<&ContextDelivery>, capture: bool) -> 
     let mut states = serde_json::Map::new();
     for (event, event_name) in [
         ("SessionStart", "session_start"),
+        ("Stop", "stop"),
         ("PostToolUse", "post_tool_use"),
         ("UserPromptSubmit", "user_prompt_submit"),
     ] {

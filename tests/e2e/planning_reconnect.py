@@ -1,4 +1,4 @@
-"""Public work-watch and Flow reconnect against a disposable Linear HTTPS peer."""
+"""Watcher and Flow-boundary recovery against a disposable Linear HTTPS peer."""
 
 import copy
 import hashlib
@@ -11,6 +11,7 @@ import sys
 import threading
 import time
 import uuid
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -21,13 +22,17 @@ def _page(nodes: list) -> dict:
     return {"nodes": nodes, "pageInfo": {"hasNextPage": False, "endCursor": None}}
 
 
+def _revision() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
 def _comment(body: str, issue: str, identity: str | None = None) -> dict:
     return {
         "id": identity or str(uuid.uuid4()),
         "body": body,
         "issue": {"id": issue},
-        "createdAt": "2026-10-08T12:00:00Z",
-        "updatedAt": "2026-10-08T12:00:00Z",
+        "createdAt": _revision(),
+        "updatedAt": _revision(),
         "user": {"id": "fixture-person", "name": "Maya", "displayName": "Maya"},
     }
 
@@ -57,11 +62,46 @@ class Handler(BaseHTTPRequestHandler):
 
     def _respond(self, query: str, variables: dict) -> dict:
         state = self.server.state
+        state["requests"] += 1
         if state["offline"]:
             return {"errors": [{"message": "fixture offline"}]}
         issue = next((i for i in state["issues"] if i["id"] == variables.get("id")), None)
         project = state["project"]
-        if "query ListTeams" in query:
+        if "query TeamChanges" in query:
+
+            def eligible(item: dict) -> bool:
+                selected = variables["issues"]
+                return (
+                    item["team"]["id"] == selected["team"]["id"]["eq"]
+                    and item["id"] not in selected["id"]["nin"]
+                    and (
+                        item["id"] in selected["or"][0]["id"]["in"]
+                        or item["state"]["type"] not in ("completed", "canceled")
+                    )
+                )
+
+            def recent(item: dict, selected: dict) -> bool:
+                return selected.get("gte", "") <= item["updatedAt"] <= selected["lte"]
+
+            issues = {item["id"]: item for item in state["issues"] if eligible(item)}
+            data = {
+                "issues": _page(
+                    [
+                        item
+                        for item in issues.values()
+                        if recent(item, variables["issues"]["updatedAt"])
+                    ]
+                ),
+                "comments": _page(
+                    [
+                        {**comment, "issue": issues[comment["issue"]["id"]]}
+                        for comment in state["comments"]
+                        if comment["issue"]["id"] in issues
+                        and recent(comment, variables["comments"]["updatedAt"])
+                    ]
+                ),
+            }
+        elif "query ListTeams" in query:
             data = {
                 "teams": _page(
                     [
@@ -123,7 +163,7 @@ class Handler(BaseHTTPRequestHandler):
             data = {"workflowStates": _page([{"id": variables["type"], "position": 0}])}
         elif "mutation SetIssueState" in query:
             issue["state"] = {"type": variables["stateId"]}
-            issue["updatedAt"] = "2026-10-08T12:00:02Z"
+            issue["updatedAt"] = _revision()
             issue["completedAt"] = (
                 issue["updatedAt"] if variables["stateId"] == "completed" else None
             )
@@ -266,7 +306,7 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
             db.commit()
             (repo / ".lf/flows").mkdir(exist_ok=True)
             (repo / ".lf/skills").mkdir(exist_ok=True)
-            (repo / ".lf/flows/reconnect.yaml").write_text("- reconnect-proof\n")
+            (repo / ".lf/flows/reconnect.yaml").write_text("- reconnect-proof\n- cmd: context\n")
             (repo / ".lf/skills/reconnect-proof.md").write_text(
                 "---\nagent: claude\n---\nWait for the fixture.\n"
             )
@@ -302,10 +342,11 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
             state = server.state
             state["offline"] = False
             state["issues"][2]["state"] = {"type": "completed"}
-            state["issues"][2]["completedAt"] = "2026-10-08T12:00:01Z"
-            state["issues"][2]["updatedAt"] = "2026-10-08T12:00:01Z"
+            state["issues"][2]["completedAt"] = _revision()
+            state["issues"][2]["updatedAt"] = _revision()
             added = copy.deepcopy(state["issues"][0])
             added.update(id=str(uuid.uuid4()), identifier="INF-126", title="Added while offline")
+            added["updatedAt"] = _revision()
             state["issues"].append(added)
             incoming = _comment("Incoming without Task selection", state["issues"][2]["id"])
             state["comments"].append(incoming)
@@ -336,7 +377,23 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
                 == (1,)
             )
 
-        _await(caught_up, "active connection did not catch up without a turn or refresh")
+        if flow:
+            # Agents have no Linear timer. End this turn, then let the next Flow
+            # step resolve the lost write replies using their retained identities.
+            with server.lock:
+                requests = server.state["requests"]
+            attempted = db.execute("SELECT max(attempted_at) FROM linear_team_checks").fetchone()[0]
+            _await(lambda: time.time() >= attempted + 11, "team freshness never expired")
+            with server.lock:
+                assert server.state["requests"] == requests, "idle agent polled Linear"
+            assert not caught_up()
+            (root / "provider-stop").touch()
+            assert flow.wait(timeout=30) == 0, (root / "flow.log").read_text()
+            assert caught_up(), "Flow boundaries did not acquire and settle pending planning"
+        else:
+            # The watcher's idle cadence can reach 240 seconds; acquisition and
+            # uncertain-write settlement may need separate checks.
+            _await(caught_up, "watcher did not catch up after reconnect", seconds=300)
         assert db.execute("SELECT * FROM task_workflows ORDER BY task_id").fetchall() == workflow
         assert db.execute("SELECT id,task_id,branch,base_commit FROM task_prs").fetchall() == prs
         assert db.execute("SELECT worktree FROM tasks WHERE id=?", (remote_id,)).fetchone() == (
@@ -357,7 +414,7 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
             watch.scope(str(repo), task="INF-125")
             watch.frame(lambda f: f["part"] == "task" and incoming["id"] in json.dumps(f))
             watch.scope(str(repo), wave=fixture["wave"])
-            later = _comment("After leaving Task", state["issues"][2]["id"])
+            later = _comment("After leaving Task", added["id"])
             with server.lock:
                 state["comments"].append(later)
             _await(
@@ -368,6 +425,7 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
                     == (1,)
                 ),
                 "leaving Task stopped acquisition",
+                seconds=300,
             )
             watch.close()
             watch = None
@@ -392,6 +450,7 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
                     == (1,)
                 ),
                 "reopened Wave view did not deliver",
+                seconds=300,
             )
             watch.scope(None)  # Connection remains open, but no repository is selected.
             with server.lock:
@@ -415,12 +474,10 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
                     == (1,)
                 ),
                 "repository reselection did not deliver",
+                seconds=300,
             )
         else:
-            assert flow.poll() is None
-            (root / "provider-stop").touch()
-            assert flow.wait(timeout=20) == 0, (root / "flow.log").read_text()
-            assert db.execute("SELECT count(*) FROM flow_process_steps").fetchone()[0] == 1
+            assert db.execute("SELECT count(*) FROM flow_process_steps").fetchone()[0] == 2
     finally:
         (root / "provider-stop").touch()
         if watch:
@@ -541,6 +598,7 @@ for line in sys.stdin:
             comments=[],
             offline=False,
             state_writes=0,
+            requests=0,
             unexpected=[],
         )
         env["HTTPS_PROXY"] = f"http://127.0.0.1:{server.server_port}"

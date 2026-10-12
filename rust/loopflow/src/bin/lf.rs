@@ -2310,6 +2310,9 @@ fn execute_command(
         Some(Commands::ContextBlock { delivery, moment }) => {
             loopflow::lf::commands::context::emit_block(delivery, *moment)
         }
+        Some(Commands::PlanningCheck { delivery }) => {
+            loopflow::lf::commands::context::check_planning(delivery)
+        }
         Some(Commands::SessionTitle { .. }) => {
             unreachable!("title callbacks dispatch before command admission")
         }

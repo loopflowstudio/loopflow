@@ -1,4 +1,4 @@
-//! Foreground planning exchange for the repository's selected transport.
+//! Foreground Git exchange and local-save delivery for the selected transport.
 //! Acquisition and delivery run independently; the common writer alone changes Work.
 //! Blocking workers retain their locks through cancellation, commit and readback.
 
@@ -65,14 +65,12 @@ pub(crate) async fn sync_after_save(store: &Store, repo: &str) {
             crate::config::PlanningConfig::Linear {} => {
                 tokio::time::timeout(std::time::Duration::from_secs(5), async {
                     super::planning_export::sync_repository_exports(store, repo).await?;
-                    let (fields, comments, state) = tokio::join!(
+                    let (fields, deliveries) = tokio::join!(
                         super::planning_delivery::sync_repository_fields(store, repo),
-                        super::linear_observe::sync_repository_deliveries(store, repo, false),
-                        super::linear_observe::sync_repository_deliveries(store, repo, true)
+                        super::linear_observe::sync_repository_deliveries(store, repo)
                     );
                     fields?;
-                    comments?;
-                    state?;
+                    deliveries?;
                     Ok(())
                 })
                 .await
@@ -316,7 +314,25 @@ fn publish_destination(
         .map_err(message)
 }
 
-/// A foreground connection's independent planning acquisition and delivery.
+/// Provider exit is also a useful boundary for Taskless conversations.
+pub(crate) fn check_directory(directory: &Path) -> OpsResult<()> {
+    let repo = crate::repository::CanonicalRepo::discover(directory)
+        .map_err(message)?
+        .to_string();
+    if !super::linear_observe::connected(&repo) {
+        return Ok(());
+    }
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?
+        .block_on(async {
+            let store = planning_store().await?;
+            super::linear_observe::sync_repository(&store, &repo).await;
+            Ok(())
+        })
+}
+
+/// Foreground Git exchange, or on-demand Linear checks while watching.
 /// Dropping the connection cancels requests; durable identities survive cancellation.
 #[derive(Debug)]
 pub(crate) struct PlanningSync {
@@ -331,21 +347,30 @@ impl PlanningSync {
             .map_err(message)?
             .to_string();
         let config = storage_config_from_env()?;
-        Self::connect(repo, async move {
+        Self::connect(repo, false, async move {
             open_planning_store(&config).await.map(Arc::new)
         })
     }
 
-    pub(crate) fn start(store: SharedStore, repo: String) -> OpsResult<Self> {
-        Self::connect(repo, async move { Ok(store) })
+    /// Watchers keep the selected transport active; providers only keep Git active.
+    pub(crate) fn start_watch(store: SharedStore, repo: String) -> OpsResult<Self> {
+        Self::connect(repo, true, async move { Ok(store) })
     }
 
     // One thread owns initialization and exchange. Callers may already be inside
     // an async runtime; startup errors still return before the provider launches.
     fn connect(
         repo: String,
+        watching: bool,
         open: impl Future<Output = OpsResult<SharedStore>> + Send + 'static,
     ) -> OpsResult<Self> {
+        let linear = super::linear_observe::connected(&repo);
+        if linear && !watching {
+            return Ok(Self {
+                stop: None,
+                thread: None,
+            });
+        }
         let (ready, started) = std::sync::mpsc::sync_channel(1);
         let (stop, stopped) = tokio::sync::oneshot::channel();
         #[cfg(test)]
@@ -356,7 +381,9 @@ impl PlanningSync {
             .name("planning-sync".into())
             .spawn(move || {
                 let runtime = match tokio::runtime::Builder::new_current_thread()
-                    .enable_all().build() {
+                    .enable_all()
+                    .build()
+                {
                     Ok(runtime) => runtime,
                     Err(error) => {
                         let _ = ready.send(Err(message(error)));
@@ -376,31 +403,13 @@ impl PlanningSync {
                     }
                     tokio::select! {
                         _ = stopped => {},
+                        _ = super::linear_observe::watch_repository(&store, &repo), if linear => {},
                         _ = repeat_sync("Git planning acquisition", Duration::from_secs(5), || {
                             acquire_repository(&store, &repo)
-                        }) => {},
+                        }), if !linear => {},
                         _ = repeat_sync("Git planning publication", Duration::from_secs(1), || {
                             publish_repository(&store, &repo)
-                        }) => {},
-                        _ = repeat_sync("comment acquisition", Duration::from_secs(15), || {
-                            super::linear_observe::refresh_repository_comments(&store, &repo)
-                        }) => {},
-                        _ = repeat_sync("planning acquisition", Duration::from_secs(15), || async {
-                            tokio::time::timeout(Duration::from_secs(5), super::linear_observe::refresh_repository_planning(&store, &repo))
-                                .await.map_err(|error| OpsError::Message(error.to_string()))?
-                        }) => {},
-                        _ = repeat_sync("comment delivery", Duration::from_secs(1), || {
-                            super::linear_observe::sync_repository_deliveries(&store, &repo, false)
-                        }) => {},
-                        _ = repeat_sync("planning export", Duration::from_secs(1), || {
-                            super::planning_export::sync_repository_exports(&store, &repo)
-                        }) => {},
-                        _ = repeat_sync("field delivery", Duration::from_secs(1), || {
-                            super::planning_delivery::sync_repository_fields(&store, &repo)
-                        }) => {},
-                        _ = repeat_sync("Task state delivery", Duration::from_secs(1), || {
-                            super::linear_observe::sync_repository_deliveries(&store, &repo, true)
-                        }) => {},
+                        }), if !linear => {},
                     }
                 };
                 #[cfg(test)]

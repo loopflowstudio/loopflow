@@ -35,6 +35,11 @@ async fn lost_relation_response_is_reconciled_without_duplicate_linkage() {
     let endpoint = format!("http://{}", listener.local_addr().unwrap());
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let client = LinearClient::with_base_url("fixture-token".into(), Some("team".into()), endpoint);
+    assert!(client
+        .ensure_follow_up_relation("source", "target", "relation")
+        .await
+        .is_err());
+    // A later boundary resolves the uncertain outcome before proposing a write.
     for _ in 0..2 {
         client
             .ensure_follow_up_relation("source", "target", "relation")

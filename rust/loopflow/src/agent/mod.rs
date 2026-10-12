@@ -1211,6 +1211,9 @@ fn run_admitted_agent(
         |attempt, retry| _run_agent_once(attempt, &process, capabilities, retry),
         thread::sleep,
     );
+    if let Err(error) = crate::ops::planning_sync::check_directory(&directory) {
+        tracing::debug!(%error, "end-of-turn planning check pending");
+    }
     if let Some(capture) = implicit_capture {
         let outcome = match &result {
             Ok(result) if result.exit_code == 0 => "completed",

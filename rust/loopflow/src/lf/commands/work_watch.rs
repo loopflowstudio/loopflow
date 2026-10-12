@@ -429,7 +429,7 @@ impl Reader {
             let store = Arc::new(
                 crate::store::open_store(&StorageConfig::sqlite(self.database.clone())).await?,
             );
-            crate::ops::planning_sync::PlanningSync::start(store, repo.clone())
+            crate::ops::planning_sync::PlanningSync::start_watch(store, repo.clone())
                 .map_err(anyhow::Error::from)
         });
         match result {

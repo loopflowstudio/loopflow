@@ -399,16 +399,13 @@ fn prepare_task_input(
             .await?
             .ok_or_else(|| anyhow!("Task Wave is missing"))?;
         if !cli.context {
-            if let Err(error) = crate::ops::linear_observe::refresh_task_comments(&store, &task).await {
-                tracing::warn!(%error, "Linear comment refresh failed; retaining confirmed Task direction");
-            }
+            crate::ops::linear_observe::sync_repository(&store, wave.repo()).await;
         }
-        let seed = crate::ops::task_input::read_seed(
-            &store,
-            &task,
-            wave.slug(),
-        )
-        .await?;
+        let task = store
+            .get_task(&task.id)
+            .await?
+            .ok_or_else(|| anyhow!("Task is missing"))?;
+        let seed = crate::ops::task_input::read_seed(&store, &task, wave.slug()).await?;
         Ok(Some((store, seed)))
     })
 }

@@ -86,6 +86,7 @@ else:
         );
         let prompt = fs::read_to_string(temp.path().join("received-context")).unwrap();
         assert!(prompt.contains("<lf:skill:default>"), "{prompt}");
+        assert!(!prompt.contains("<lf:work-guidance>"), "{prompt}");
         assert!(!prompt.contains("<lf:skill:repo/operate>"), "{prompt}");
         assert!(!prompt.contains("lf session list --json"), "{prompt}");
     }

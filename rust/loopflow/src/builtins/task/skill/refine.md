@@ -14,8 +14,9 @@ The launch prompt identifies the reviewer for this exercise.
   options internally, and select the strongest version using the source text,
   stated audience, and repository voice as evidence. Do not wait for a
   preference or fabricate one. Preserve unresolved tradeoffs in a short note
-  and send the selected revision to the Task through the review protocol. Verify
-  its reply rather than editing the Task's worktree yourself.
+  and return the selected revision through the supplied review protocol. When
+  reviewing for a Task, verify its reply rather than editing its checkout.
+  Without a parent review protocol, return the refined text in this conversation.
 
 ## Voice
 

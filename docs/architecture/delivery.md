@@ -72,10 +72,8 @@ PR branch. Prepare a self-contained child-specific design and transfer it with
 `--design`; its receipt retains source Task, commit and content hash. Identical
 retries do not reset the child; changed content at an occupied destination is a
 handoff conflict, with both versions retained.
-Its first commit, `Clear inherited scratch`, removes the parent's notes. Parent
-updates keep the child's entire `scratch/` tree, including deleted files; the
-parent's notes remain on the parent branch. Even a child with only this cleanup
-commit merges updates instead of resetting onto the parent's scratch.
+The child inherits existing scratch files. Parent updates merge normally;
+creating a child does not delete inherited files or add a cleanup commit.
 After the parent merges, `lf sync` merges current main using the recorded fork
 as the comparison base. Child edits and original commit identities survive squash
 landing without replay.
@@ -106,7 +104,8 @@ still cannot form a PR. Root Tasks save the resolved base; stacked Tasks retain
 their integration fork until explicit sync so squash-parent comparison preserves
 child edits.
 
-`arm` and `land` merge current main, clear merge-time scratch state, verify once,
+`submit`, `arm` and `land` clear added scratch files during preparation,
+merge current main, verify once,
 and push the exact head. Branch commits and merge resolutions retain their identities.
 GitHub squash-merges the final PR tree into one commit on main. `arm` and `land` request
 GitHub auto-merge, record the landing, and return. Success means handoff;

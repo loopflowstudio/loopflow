@@ -89,6 +89,7 @@ fn golden_prompts_match() {
             skill: case.skill.clone(),
             message: None,
             operate: !case.no_loopflow,
+            work: None,
             surface: case.surface.unwrap_or_default(),
             docs: case.docs.clone(),
             files: Vec::new(),

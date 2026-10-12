@@ -7,7 +7,7 @@ Help the User dream big, detail the idea, then shape one exact design artifact.
 
 ## Task and design
 
-Treat the Task as the user's problem and desired experience. Explore possible
+Treat the request as the user's problem and desired experience. A Task is optional. Explore possible
 solutions before choosing one; distinguish observations, proposed mechanisms,
 real constraints, and accepted decisions. The design owns architecture,
 implementation sequencing, and acceptance checks. A Task need not arrive with an
@@ -69,12 +69,12 @@ A design beyond roughly 1,000 words or an implementation beyond roughly 1,000 li
 
 ### 4. Place
 
-Choose exactly one Wave by matching its objective and bounds. The current chapter resolves automatically. If no Wave fits, record unresolved placement instead of inventing ownership. If a state lookup fails, report the dated command and failure in evidence notes; keep ambient Machine state out of the design.
+For existing or explicitly requested managed work, choose exactly one Wave by matching its objective and bounds. The current chapter resolves automatically. If no Wave fits, record unresolved placement instead of inventing ownership. Standalone designs need no Wave, Task or placement lookup. If a state lookup fails, report the dated command and failure in evidence notes; keep ambient Machine state out of the design.
 
 Tighten the artifact to:
 
 - **What to build** — one sentence describing the new end state.
-- **Placement** — Wave, or the recorded unresolved placement.
+- **Placement** — only for managed work: Wave, or the recorded unresolved placement.
 - **The demo** — the real action and observable result.
 - **Data structures** — core domain values.
 - **Key functions** — signatures and intent.

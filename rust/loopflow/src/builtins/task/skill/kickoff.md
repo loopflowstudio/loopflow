@@ -14,7 +14,7 @@ participant. Keep an already sufficient plan rather than forcing a rewrite.
 
 ## Task and design
 
-Treat the Task as the user's problem and desired experience. Explore possible
+Treat the request as the user's problem and desired experience. A Task is optional. Explore possible
 solutions before choosing one; distinguish observations, proposed mechanisms,
 real constraints, and accepted decisions. The design owns architecture,
 implementation sequencing, and acceptance checks. A Task need not arrive with an

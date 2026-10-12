@@ -87,6 +87,22 @@ pub struct GatherSpec {
     pub related_repos: Vec<RelatedRepoContext>,
 }
 
+/// The existing Work association that selects its API guidance.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WorkContext {
+    Task(String),
+    Wave(String),
+}
+
+impl WorkContext {
+    pub fn reason(&self) -> String {
+        match self {
+            Self::Task(task) => format!("Task association: {task}"),
+            Self::Wave(wave) => format!("Wave association: {wave}"),
+        }
+    }
+}
+
 /// Options for gathering context.
 #[derive(Debug, Clone, Default)]
 pub struct GatherContextOpts {
@@ -96,6 +112,8 @@ pub struct GatherContextOpts {
     pub message: Option<String>,
     /// Include loopflow operating guidance.
     pub operate: bool,
+    /// Include work API guidance for a selected or existing Work association.
+    pub work: Option<WorkContext>,
     pub surface: Surface,
     /// Explicit docs paths, globs, or directories to include in context.
     pub docs: Vec<String>,
@@ -183,6 +201,8 @@ pub struct PromptComponents {
     pub wave: Option<String>,
     /// Include loopflow operating guidance.
     pub operate: bool,
+    /// Include work API guidance for a selected or existing Work association.
+    pub work: Option<WorkContext>,
     /// User message (positional args after skill/flow name)
     pub message: Option<String>,
     /// Semantic attribution for generated intent carried in `message`.
@@ -388,6 +408,10 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
         summaries,
         wave: opts.wave.clone(),
         operate: opts.operate,
+        work: opts
+            .work
+            .clone()
+            .or_else(|| opts.wave.clone().map(WorkContext::Wave)),
         message: opts.message.clone(),
         message_context: None,
         diff_tier,
@@ -1504,6 +1528,14 @@ pub fn format_system_sections(components: &PromptComponents) -> Vec<String> {
 
     if components.operate {
         parts.push(loopflow_section());
+        if components.work.is_some()
+            && !components
+                .skill
+                .as_ref()
+                .is_some_and(|skill| skill.name == "work")
+        {
+            parts.push(work_section());
+        }
     }
 
     let user = render_user_context(components.user_name.as_deref());
@@ -1519,15 +1551,19 @@ pub fn format_system_sections(components: &PromptComponents) -> Vec<String> {
     parts
 }
 
-/// The one loopflow operating document (including the Speak vocabulary) as a
-/// prompt section. Emitted exactly once per prompt: assembled prompts get it
-/// from [`format_system_sections`]; the wave loop's seed bypasses assembly
-/// and appends the same section itself.
+/// The launcher contract, independent of Work association.
 pub fn loopflow_section() -> String {
     format!(
         "<lf:loopflow>\n{}\n</lf:loopflow>",
         crate::builtins::LOOPFLOW_DOC
     )
+}
+
+/// The work API contract is also available as the `work` skill.
+pub fn work_section() -> String {
+    let source = crate::builtins::get_builtin_skill("work").expect("bundled work skill");
+    let body = crate::flow::split_frontmatter(source).map_or(source, |(_, body)| body);
+    format!("<lf:work-guidance>\n{body}\n</lf:work-guidance>")
 }
 
 /// Name context is display data, not authorship for historical or external requests.
@@ -1904,11 +1940,7 @@ mod tests {
             .expect("assemble customer skill in a neutral repository");
             let prompt = render_full_prompt(components);
             assert_eq!(prompt.matches("<lf:loopflow>").count(), 1);
-            assert!(prompt.contains("Execute Here First"));
-            assert!(prompt.contains("Checks and Flow boundaries"));
-            assert!(prompt.contains("Gate owns\nverification once"));
-            assert!(prompt.contains("Checks must run headless"));
-            assert!(prompt.contains("lf land"));
+            assert!(!prompt.contains("<lf:work-guidance>"));
             assert!(!prompt.contains("scripts/dev-lf"));
             assert!(!prompt.contains("LOO-267"));
 
@@ -2096,7 +2128,7 @@ mod tests {
         let components = PromptComponents::default();
         let prompt = render_full_prompt(components);
         assert!(prompt.contains("Run mode is headless"));
-        assert!(prompt.contains("launch an ordinary contribution explicitly"));
+        assert!(!prompt.contains("lf --task"));
         assert!(prompt.contains("explain the failure in ordinary output and stop"));
         assert!(prompt.contains("For reversible ambiguity"));
     }

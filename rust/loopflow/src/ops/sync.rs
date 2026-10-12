@@ -97,13 +97,12 @@ pub fn plan_sync(
     changed_files.sort();
 
     let protected = changed_files.iter().any(|path| is_protected_path(path));
-    let scratch_only = !changed_files.is_empty()
-        && changed_files
-            .iter()
-            .all(|path| path.starts_with(Path::new("scratch")));
+    let tree = git(repo, &["write-tree"])?;
+    let added_scratch = crate::git::scratch::added(repo, comparison_base, tree.trim())?;
     let has_non_scratch_changes = changed_files
         .iter()
-        .any(|path| !path.starts_with(Path::new("scratch")));
+        .any(|path| !added_scratch.iter().any(|added| Path::new(added) == path));
+    let scratch_only = !changed_files.is_empty() && !has_non_scratch_changes;
 
     let (class, strategy) = if branch == default_branch {
         let strategy = if crate::git::is_ancestor(repo, &base_ref, "HEAD")? {
@@ -125,8 +124,7 @@ pub fn plan_sync(
     } else {
         (SyncClass::CleanAuthored, SyncStrategy::MergeTarget)
     };
-    // A stacked child's scratch deletion is intentional history. Resetting to
-    // the parent would discard it and copy the parent's notes back into the child.
+    // Stacked children retain their history when integrating the parent.
     let persistent = crate::git::worktrees::is_persistent_worktree(repo)?;
     let strategy = if fork_base.is_some() || persistent {
         if crate::git::is_ancestor(repo, &base_ref, "HEAD")? {
@@ -143,7 +141,8 @@ pub fn plan_sync(
         strategy
     };
 
-    let scratch_stashed = !persistent
+    let scratch_stashed = !added_scratch.is_empty()
+        && !persistent
         && matches!(strategy, SyncStrategy::ResetToBase)
         && repo.join("scratch").exists();
 
@@ -651,67 +650,31 @@ pub(crate) fn restart_landed_persistent(repo: &Path) -> OpsResult<bool> {
 }
 
 fn reset_to_base(repo: &Path, plan: &SyncPlan, progress: &impl Progress) -> OpsResult<()> {
-    if !plan.scratch_stashed && crate::git::worktrees::is_persistent_worktree(repo)? {
-        progress.status(&format!(
-            "{} has landed; restarting it from {}...",
-            plan.branch, plan.base_ref
-        ));
-        // --keep moves the branch without touching uncommitted edits, and
-        // refuses rather than overwriting one the base also changed.
-        git(repo, &["reset", "--keep", &plan.base_ref])?;
-        return Ok(());
-    }
-    let stash_path = if repo.join("scratch").exists() {
-        let path = scratch_stash_path(repo, &plan.branch);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        if path.exists() {
-            std::fs::remove_dir_all(&path)?;
-        }
-        copy_dir(&repo.join("scratch"), &path)?;
-        Some(path)
-    } else {
-        None
-    };
-
+    let base = crate::git::merge_base(repo, "HEAD", &plan.base_ref)?;
+    let added = crate::git::scratch::added(repo, &base, "HEAD")?;
+    let notes = added
+        .iter()
+        .filter_map(|path| {
+            let file = repo.join(path);
+            match std::fs::read(&file) {
+                Ok(bytes) => Some(Ok((file, bytes))),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                Err(error) => Some(Err(error)),
+            }
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     progress.status(&format!(
-        "Resetting {} to {}...",
+        "Resetting {} to {} while preserving local edits...",
         plan.branch, plan.base_ref
     ));
-    git(repo, &["reset", "--hard", &plan.base_ref])?;
-
-    if let Some(path) = stash_path {
-        let scratch = repo.join("scratch");
-        if scratch.exists() {
-            std::fs::remove_dir_all(&scratch)?;
-        }
-        copy_dir(&path, &scratch)?;
-        progress.status(&format!("Restored scratch from {}", path.display()));
-    }
-
-    Ok(())
-}
-
-fn scratch_stash_path(repo: &Path, branch: &str) -> PathBuf {
-    let ts = chrono::Utc::now().format("%Y%m%dT%H%M%SZ");
-    let safe_branch = branch.replace(['/', '.'], "-");
-    repo.join(".lf")
-        .join("tmp")
-        .join("scratch-stash")
-        .join(format!("{safe_branch}-{ts}"))
-}
-
-fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(to)?;
-    for entry in std::fs::read_dir(from)? {
-        let entry = entry?;
-        let source = entry.path();
-        let target = to.join(entry.file_name());
-        if entry.file_type()?.is_dir() {
-            copy_dir(&source, &target)?;
-        } else {
-            std::fs::copy(&source, &target)?;
+    git(repo, &["reset", "--keep", &plan.base_ref])?;
+    for (file, bytes) in notes {
+        // Do not overwrite content introduced by the target branch.
+        if !file.exists() {
+            if let Some(parent) = file.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(file, bytes)?;
         }
     }
     Ok(())
@@ -816,7 +779,7 @@ pub fn sync_strategy_name(strategy: &SyncStrategy) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{restart_landed_persistent, scratch_stash_path};
+    use super::restart_landed_persistent;
     use std::path::Path;
 
     fn git(repo: &Path, args: &[&str]) -> String {
@@ -1024,20 +987,5 @@ mod tests {
                 "followup\n"
             );
         }
-    }
-
-    #[test]
-    fn scratch_stash_lands_under_the_ignored_tmp_prefix() {
-        let path = scratch_stash_path(Path::new("/repo"), "jack/reconcile-out-of-band-merges");
-        // .lf/tmp/ is gitignored; a sibling like .lf/scratch-stash/ would dirty
-        // the worktree and block the Task from reaching `end`.
-        assert!(
-            path.starts_with("/repo/.lf/tmp/scratch-stash"),
-            "stash must sit under the ignored .lf/tmp prefix, got {}",
-            path.display()
-        );
-        // Slashes and dots in the branch are flattened so the dir name is safe.
-        let leaf = path.file_name().unwrap().to_string_lossy();
-        assert!(leaf.starts_with("jack-reconcile-out-of-band-merges-"));
     }
 }

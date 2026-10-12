@@ -99,6 +99,24 @@ its generated checklist: headless commands, conversational reviews, and loops.
 Flow exports yield to existing skills with the same name. See
 [chat Flows](docs/authoring.md#flows-in-chat) for boundaries.
 
+## Use only what you need
+
+```bash
+lf : "fix the failing test"  # launcher; no Task or Linear required
+lf flow pursue               # run a Flow in this checkout
+lf help skill work          # read the Task/Wave API contract
+lf --task INF-123 design     # continue an existing Task with work guidance
+```
+
+Every launch receives a small `LOOPFLOW.md` contract. Work-associated launches
+also preload the `work` skill's guidance, including when continuing a Task
+already associated with the checkout or resumed Session. Load it explicitly
+with `lf skill work`, or read `lf help skill work` in an existing conversation.
+
+Desktop and custom clients share the same work APIs. Choose operator skills
+when you want Loopflow to keep managed work moving. Standalone native skills
+retain their own guidance.
+
 ## Keep work moving
 
 Author a Wave in the repo and open its conversation:

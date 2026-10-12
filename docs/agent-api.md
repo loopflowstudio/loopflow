@@ -3,8 +3,26 @@
 `lf` is the API agents call to launch, steer, and observe other agents. There
 is no SDK. The verbs are the same binary you use; every read surface takes
 `--json`; and every launched agent receives the
-operating contract (`LOOPFLOW.md`) in its context, so it already knows these
-verbs when it starts.
+launcher contract (`LOOPFLOW.md`) in its context. Work-associated launches also
+receive the `work` skill body. Read `lf help skill work` before using Task, Wave or
+Project APIs in an existing conversation. Choose the commands and Skills that
+fit the requested work. Work context does not select a Flow or authorize Wave
+memory maintenance; the selected Loopflow Flow owns that procedure.
+
+## Inspect instruction selection
+
+```bash
+lf history show SESSION --instructions
+lf history show SESSION --instructions --json
+```
+
+The retained input records why launcher guidance, Work guidance and selected
+skills were supplied. It also records automatic opt-out, missing Work association,
+and deduplication when `work` was selected as a skill. Use `--input INPUT` to
+inspect an earlier input belonging to that Session. These are recorded decisions,
+not a reconstruction from the repository's current state. Old captures may have
+less detailed reasons; missing captures report unavailable evidence. Native
+provider instructions not attributed in the input remain outside this view.
 
 ## Install the external skill
 
@@ -25,7 +43,7 @@ kind as the Mac app. It may inspect status and start a Session when the person
 asks it to converse with a Wave.
 
 A Loopflow-launched Wave or Task agent is an internal participant.
-It receives `LOOPFLOW.md`; typed Work observations carry durable coordination,
+It receives `LOOPFLOW.md` and work guidance; typed Work observations carry durable coordination,
 and headless failures remain visible in ordinary output and recorded outcomes.
 
 A Wave directing a task is the internal case:
@@ -75,9 +93,8 @@ completion — resolve that inline. The current process and worktree are the
 default execution surface.
 
 `--stack-on` forks the child's worktree from the parent Task's active PR, records
-the fork commit, and adds a `Clear inherited scratch` commit before execution.
-Parent syncs keep the child's scratch, including its deletions. The parent retains
-its own notes. The child's PR targets the parent's branch until
+the fork commit, and inherits the parent's files. Scratch follows the same Git
+merge behavior as other content, including edits to existing notes. The child's PR targets the parent's branch until
 merge, then `lf sync` merges main using the recorded fork as the comparison base.
 Child edits survive the parent's squash landing without replay.
 
@@ -140,9 +157,10 @@ skills. Edit their definition or goal when the guidance should persist.
 
 ## Memory
 
-`wave/<name>/MEMORY.md` is the Wave's durable memory. Read or edit it through
-the ordinary repository workflow; the file is truth, running Wave or not, and
-there is no separate CLI or server surface for it.
+`wave/<name>/MEMORY.md` is the Wave's durable memory. Read it for context;
+a selected Loopflow Flow maintains it through ordinary file edits. Standalone
+Work use keeps proposed changes in scratch. The file remains the source of
+truth; there is no separate memory CLI or server surface.
 
 Remove registered or planning-only Tasks with `lf task delete ISSUE`. Repeat the same command
 after an incomplete operation, even after planning refresh or chapter replacement.
@@ -200,20 +218,12 @@ built on exactly these calls — it keeps no second database.
 
 ## The contract
 
-Every launched agent gets `LOOPFLOW.md` — the operating contract — in context
-(opt out with `--no-loopflow`). Its spine:
+Loopflow launches receive a small launcher contract: work in the supplied
+checkout, follow the requested tools and repository conventions, and answer in
+the current Session. Standalone native skills retain their own guidance.
 
-- Route git, worktrees, and PRs through `lf`; never raw `git worktree`.
-- Execute here first; delegation must make the problem smaller.
-- Checkpoint and proceed: don't ask permission for reversible work.
-- Answer the user in the current conversation; use typed Work observations for durable
-  coordination and ordinary `lf --task` conversations for another agent perspective.
-  Missing required input stops headless work; its existing logs supply the evidence.
-- Keep repeatable instructions with their skill, repository rules in its agent guide,
-  and durable Wave learning in its existing memory.
-
-Source: `rust/loopflow/src/builtins/LOOPFLOW.md`.
-
-## Next
-
-[Conducting →](conducting.md) · [Waves →](waves.md) · [`lf` reference](lf.md)
+Task- and Wave-associated launches also receive Work guidance. Read
+`lf help skill work` when entering Work APIs from an existing conversation.
+Association supplies context and ownership; the selected skill or Flow supplies
+the procedure. Keep repeatable instructions with that skill and repository rules
+in its agent guide.

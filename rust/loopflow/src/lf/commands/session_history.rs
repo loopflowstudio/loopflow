@@ -127,6 +127,7 @@ pub fn inspect(
     events: bool,
     final_answer: bool,
     context: bool,
+    instructions: bool,
     json: bool,
 ) -> Result<()> {
     let home = crate::store::lf_home_dir();
@@ -166,6 +167,16 @@ pub fn inspect(
                 snapshot.status()
             )),
         };
+    }
+    if instructions {
+        let decisions = crate::context_usage::read_instructions(&dir)
+            .map_err(|error| anyhow!("Instruction evidence unavailable: {error}"))?;
+        if json {
+            println!("{}", serde_json::to_string(&decisions)?);
+        } else {
+            println!("{}", crate::context_usage::render_instructions(&decisions));
+        }
+        return Ok(());
     }
     if context {
         let step = crate::context_usage::step_context(&home, &snapshot);

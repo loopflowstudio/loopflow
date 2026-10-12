@@ -70,12 +70,29 @@ config files.
 | Include branch files | `--diff files` | `diff_files: true` |
 | Include raw diff | `--diff patch` | `diff: true` |
 | Include clipboard | `-c, --clipboard` | — |
-| Disable Loopflow guidance | `--no-loopflow` | — |
 | Context files | — | `context: [FILE]` |
 | Chrome automation | `--chrome` | `chrome: true` |
 | Yolo mode (skip permissions) | — | `yolo: true` |
 | Account's own provider home | `--isolate` / `--shared` | `isolate: true` |
 | Review FlowStep terminal | — | global-only `session.terminal: Ghostty` |
+
+## Scratch lifecycle
+
+```bash
+lf scratch clear   # remove checkpointed scratch additions; retain existing files and edits
+```
+
+Skills write plans and notes to `scratch/` without setup, and recursive Markdown
+there enters agent context automatically. Scratch follows ordinary Git behavior
+in every checkout. No scratch setting is required.
+
+`lf pr submit` and `lf pr land` invoke this cleanup during preparation, so default
+Flows need no extra step. It is also available on its own. Publishing a draft or
+ready PR does not run general scratch cleanup; PR-copy handoff artifacts retain
+their existing lifecycle. Cleanup uses the existing Task diff base
+or the branch's merge base with main; it removes only added files, preserving
+existing files, edits, detected renames and `.gitkeep`. Untracked files outside
+the checkpoint remain. Repeating cleanup makes no empty commit.
 
 ## Context budgets
 
@@ -125,7 +142,7 @@ in a provider request. The harness loads its repo guide natively.
 
 | Content | Delivery | Selection |
 |---------|----------|-----------|
-| Operating and surface instructions, participant, reply guidance | Fixed added-instructions slot | `--no-loopflow` omits the operating guide |
+| Operating and surface instructions, participant, reply guidance | Fixed added-instructions slot | Standalone native skills retain their own guidance |
 | Skill and request | First turn | Selected skill and launch message |
 | Scratch and checkout Wave/ancestor documents | Refreshed conversation block; whole files, marked start excerpts and a complete listing | Current checkout and selected Wave |
 | Explicit docs | File paths in the listing | `docs:` or `--docs` |
@@ -247,14 +264,11 @@ previous target tag.
 
 ### Loopflow Guidance
 
-Ambient operating guidance for inline execution and mechanical git/PR operations. Injected by default; tier skills add scoped delegation.
-
-| | |
-|---|---|
-| **CLI** | `--no-loopflow` |
-| **Default** | included |
-
-Use `--no-loopflow` when you want a leaner prompt without loopflow-specific process guidance.
+Launches receive the small `LOOPFLOW.md` contract. Task- and Wave-associated
+launches also preload Work guidance. Read `lf help skill work` when entering
+Work APIs from an existing conversation. Standalone native skills retain their
+own guidance. Association selects context; a requested skill or Flow selects
+the procedure.
 
 ### Docs
 
@@ -515,8 +529,9 @@ and tool-name instructions, retain declarations and identify the original asset
 directory. Codex custom prompts expand one-based positions and `NAME=value`
 arguments. A warning names declarations the launch does not enforce.
 
-Third-party and builtin launches use the same fixed additions and conversation
-context. `--no-loopflow` explicitly omits the operating guide. Memory and scratch
+Standalone native skills use their own instructions with gathered conversation
+context; builtin launches receive the launcher contract and associated Work
+guidance. Memory and scratch
 budgets are authoring targets, not launch gates. LF builtins remain inline in
 the first turn. Captured Flow definitions survive
 source-file changes or removal: Claude uses a captured native definition, while

@@ -78,7 +78,7 @@ Make the change easy to review.
    Compare the checks above with the accepted outcome. Record meaningful
    before/after numbers and any CI deferral; leave judgment to demo/review.
    Do not start a second verification pass. For substantial UI work, identify
-   its production performance signal or propose one for the Wave.
+   its production performance signal; propose one for the Wave when associated.
 
 2. **Prepare delivery context**
 
@@ -89,7 +89,7 @@ Make the change easy to review.
    current change. Optional cached copy lives in `scratch/pr-title.txt`,
    `scratch/pr-body.md` and `scratch/.pr-copy-ref` (current HEAD SHA).
    Publication consumes these files before its first commit or push. Preserve
-   consequential evidence at its lasting owner before delivery clears scratch.
+   consequential evidence at its lasting owner before cleanup of added scratch files.
 
 3. **Update README and docs**
    - If user-facing behavior changed, docs must reflect it

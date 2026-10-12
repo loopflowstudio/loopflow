@@ -44,6 +44,10 @@ struct Args {
     #[arg(long, default_value = "false", action = clap::ArgAction::Set)]
     clipboard: bool,
 
+    /// Task association for prompt fixtures; does not resolve or create Work
+    #[arg(long)]
+    work_task: Option<String>,
+
     /// Wave name
     #[arg(long)]
     wave: Option<String>,
@@ -60,6 +64,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         skill: args.skill,
         message: None,
         operate: !args.no_loopflow,
+        work: args.work_task.map(loopflow::prompt::WorkContext::Task),
         surface: args.surface.unwrap_or_default(),
         docs: args.docs,
         files: Vec::new(),

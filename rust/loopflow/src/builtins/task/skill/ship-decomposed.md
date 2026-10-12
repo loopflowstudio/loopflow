@@ -60,7 +60,10 @@ as one PR; one large honest PR beats an artificially staged series.
 
 1. Order the slices foundation-first and name each one—the branch name
    becomes the PR title prefix.
-2. Give every independently deliverable PR its own Task. A Task has zero or
+2. Keep taskless delivery taskless: use `lf wt create` for the selected branches
+   and publish each PR without creating Tasks. Use the Task path below only
+   when splitting an existing Task or the user explicitly requests managed work.
+   For managed work, give every independently deliverable PR its own Task. A Task has zero or
    one PR, never a serial chain. Reuse existing Tasks for matching scope;
    preserve the original Task's intended outcome when assigning its slice.
    Independent Tasks start from main; dependent Tasks stack on their parent.
@@ -71,7 +74,8 @@ as one PR; one large honest PR beats an artificially staged series.
    each slice without rewriting it or losing mixed hunks. Keep the source
    available until every intended change is accounted for.
 4. Prepare each child's self-contained design excerpt: its own brief, accepted
-   scope, dependencies and done-when. Transfer it before launching with
+   scope, dependencies and done-when. For taskless work, transfer the excerpt
+   into its selected worktree. For managed work, transfer it before launching with
    `lf checkout <child> --stack-on <parent> --design <path>`. The command records
    source identity and content and preserves newer child work. Retry identical
    input; a changed handoff at an occupied destination is a conflict to reconcile,

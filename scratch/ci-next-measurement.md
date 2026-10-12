@@ -1,5 +1,11 @@
 # Next CI measurement
 
+Jack Heart requested a historical timing audit: last full code CI under five
+minutes, largest sustained increases (with responsible PRs where traceable), and
+test-count growth versus compilation, per-test cost and workflow changes.
+An independent read-only contribution is researching this into
+`docs/reviews/ci-timing-history.md`; it does not own implementation.
+
 Jack Heart's target remains required CI under five minutes across ten consecutive
 real typical-code PR runs. PR #1543 passes but does not meet that target. Its
 first build-reuse improvement awaits Jack's merge decision; no arming is implied.
@@ -53,3 +59,20 @@ Local archive evidence: 392 MiB, 0.75s packaging, 3.24s extraction, one isolated
 Flow proof passes from the extracted CLI. Linux transfer and cross-machine path
 compatibility remain unproved. Nextest supports [archive reuse](https://nexte.st/docs/ci-features/archiving/)
 and [test priorities](https://nexte.st/docs/configuration/test-priorities/).
+
+## Installation cache experiment
+
+The local `--cache-dir` prototype binds only Cargo target and registry directories;
+source and installation authority remain disposable. Six existing harness tests
+pass. It is not wired into CI or published.
+
+The empty Mac-host bind directory compiled in 166s, then unexpectedly rebuilt for
+124s before the first migration proof passed (2.32s). The next proof began another
+rebuild; the experiment was deliberately stopped, not passed. An unchanged tiny
+Cargo project also rebuilt immediately on this bind mount, while the same project
+on Docker's native filesystem reported Fresh on its immediate second build.
+This implicates bind-mount behavior but does not establish the exact invalidation
+cause or Linux behavior. Do not use these timings to predict GitHub cache savings.
+Next validation needs Linux-native cache storage and separate cold/warm measurements.
+Raw evidence: `/tmp/loopflow-installation-cache-cold.log`,
+`/tmp/loopflow-bind-fingerprint*.log`, `/tmp/loopflow-native-fingerprint.log`.

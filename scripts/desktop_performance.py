@@ -877,7 +877,7 @@ def _repository_configs(database: Path) -> list[dict]:
             {
                 str(path.resolve())
                 for repo, wave in db.execute("SELECT repo,name FROM waves")
-                for path in [Path(repo) / ".lf/config.yaml", Path(repo) / "wave" / wave / "GOAL.md"]
+                for path in [Path(repo) / ".lf/config.yaml", Path(repo) / ".lf/wave" / wave / "GOAL.md"]
             }
         )
     return [

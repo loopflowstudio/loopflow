@@ -60,7 +60,7 @@ required for ordinary PR delivery.
 Read the supplied brief, accepted design and relevant Wave memory. Keep working
 plans in scratch. Wave context is read-only unless the selected Loopflow Flow
 calls for maintaining it. Task/Wave association and use of Work APIs alone do
-not authorize writes to `wave/`. Keep proposed memory updates in local notes
+not authorize writes to `.lf/wave/`. Keep proposed memory updates in local notes
 outside that procedure; never start a Flow merely to obtain write authority.
 Never guess a Wave merely to complete a template.
 

@@ -93,7 +93,7 @@ impl ContextBudgets {
                         BudgetLimit {
                             value,
                             source: repo
-                                .join(format!("wave/{wave}/GOAL.md"))
+                                .join(format!(".lf/wave/{wave}/GOAL.md"))
                                 .display()
                                 .to_string(),
                         },

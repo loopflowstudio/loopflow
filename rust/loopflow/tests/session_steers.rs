@@ -1,5 +1,5 @@
 //! Public launch proofs for the Session delivery cutover.
-mod support;
+use crate::support;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::process::{Command, Stdio};

@@ -1078,9 +1078,9 @@ async fn cold_detail_resolves_configured_wave_before_projecting() {
             refreshed["initiatives"]["nodes"][0]["id"] = "elsewhere".into();
         }
         if ownership == "foreign" {
-            std::fs::create_dir_all(repo.join("wave/other")).unwrap();
+            std::fs::create_dir_all(repo.join(".lf/wave/other")).unwrap();
             std::fs::write(
-                repo.join("wave/other/GOAL.md"),
+                repo.join(".lf/wave/other/GOAL.md"),
                 "---\nlinear:\n  initiative: elsewhere\n---\nOther work.\n",
             )
             .unwrap();

@@ -148,3 +148,11 @@ or Machine HTTP service is required. Use `lf --machine` for remote operation.
 Repository instructions, skills, plugins, MCP servers, browser connections,
 hooks, and installers can all extend what an agent can reach. Review their
 source and configuration before adding them to a high-authority environment.
+
+## Automatic context
+
+Recursive Markdown under `scratch/` and repository `MEMORY.md` are agent input,
+including local working notes. Keep private material outside these context
+sources. Automatic scratch traversal and repository memory do not follow
+symlinks; explicit document requests are separate. This is not a secret scanner
+or a restriction on what the provider can read using its own tools.

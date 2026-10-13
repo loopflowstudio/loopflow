@@ -205,9 +205,11 @@ fn emit_build_provenance(manifest_dir: &Path, out_dir: &Path) {
     if dirty {
         source_revision.push_str("-dirty");
     }
-    println!("cargo:rustc-env=LOOPFLOW_BUILD_PROVENANCE={provenance}");
+    // Cargo exports rustc-env values to test processes. Keep compiled outputs
+    // separate from build inputs so fixture Cargo calls do not change them.
+    println!("cargo:rustc-env=LOOPFLOW_COMPILED_PROVENANCE={provenance}");
     println!("cargo:rustc-env=LOOPFLOW_BUILD_SOURCE_ROOT={}", source_root);
-    println!("cargo:rustc-env=LOOPFLOW_MIGRATION_AUTHORITY={migration_authority}");
+    println!("cargo:rustc-env=LOOPFLOW_COMPILED_MIGRATION_AUTHORITY={migration_authority}");
     println!("cargo:rustc-env=LOOPFLOW_BUILD_SOURCE_REVISION={source_revision}");
     println!("cargo:rustc-env=LOOPFLOW_BUILD_VERSION={build_version}");
     println!("cargo:rerun-if-env-changed=LOOPFLOW_BUILD_PROVENANCE");

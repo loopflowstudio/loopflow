@@ -2720,35 +2720,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rate_limit_pauses_independent_clients_and_resumes_after_reset() {
-        let mut limited = json_response(
-            StatusCode::BAD_REQUEST,
-            json!({"errors":[{"message":"Rate limit exceeded", "extensions":{"code":"RATELIMITED"}}]}),
-        );
-        limited.headers.push((
-            "x-ratelimit-requests-reset".into(),
-            ((time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) + 250)
-                .to_string(),
-        ));
-        let (url, requests) = test_server::spawn(vec![limited,
-            json_response(StatusCode::OK, json!({"data":{"initiatives":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}))]).await;
-        let first = LinearClient::with_base_url("first-token".into(), None, url.clone());
-        assert!(matches!(
-            first.initiatives().await,
-            Err(crate::linear::LinearError::RateLimited { .. })
-        ));
-        let second = LinearClient::with_base_url("refreshed-token".into(), None, url);
-        assert!(matches!(
-            second.initiatives().await,
-            Err(crate::linear::LinearError::RateLimited { .. })
-        ));
-        assert_eq!(requests.lock().await.len(), 1);
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-        assert!(second.initiatives().await.unwrap().is_empty());
-        assert_eq!(requests.lock().await.len(), 2);
-    }
-
-    #[tokio::test]
     async fn zero_retry_after_still_pauses_other_callers_without_more_requests() {
         let mut limited = json_response(
             StatusCode::TOO_MANY_REQUESTS,

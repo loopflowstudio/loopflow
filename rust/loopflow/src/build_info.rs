@@ -131,7 +131,7 @@ impl std::fmt::Display for BuildProvenance {
 }
 
 pub fn provenance() -> BuildProvenance {
-    parse_provenance(env!("LOOPFLOW_BUILD_PROVENANCE"))
+    parse_provenance(env!("LOOPFLOW_COMPILED_PROVENANCE"))
         .expect("build script embeds a validated Loopflow provenance")
 }
 
@@ -153,7 +153,7 @@ pub fn source_revision() -> &'static str {
 pub const BUILD_VERSION: &str = env!("LOOPFLOW_BUILD_VERSION");
 
 pub fn migration_authority() -> MigrationAuthority {
-    match env!("LOOPFLOW_MIGRATION_AUTHORITY") {
+    match env!("LOOPFLOW_COMPILED_MIGRATION_AUTHORITY") {
         "published" => MigrationAuthority::Published,
         "validation_only" => MigrationAuthority::ValidationOnly,
         _ => unreachable!("build script validates migration authority"),

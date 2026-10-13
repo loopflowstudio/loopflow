@@ -8,7 +8,7 @@ public enum WavePlanParser {
         guard !normalizedName.isEmpty else { return nil }
 
         let goalURL = repoRoot
-            .appendingPathComponent("wave", isDirectory: true)
+            .appendingPathComponent(".lf/wave", isDirectory: true)
             .appendingPathComponent(normalizedName, isDirectory: true)
             .appendingPathComponent("GOAL.md", isDirectory: false)
         guard let text = try? String(contentsOf: goalURL, encoding: .utf8) else {

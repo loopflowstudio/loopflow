@@ -173,7 +173,7 @@ fn git_checkout_miss_does_not_fall_back_to_retained_linear_bindings() {
         "planning:\n  provider: git\n  shared: fixture\nlinear:\n  team: retained-team\n",
     );
     repo.create_file(
-        "wave/product/GOAL.md",
+        ".lf/wave/product/GOAL.md",
         "---\nlinear:\n  initiative: retained-initiative\n---\nRetain work.\n",
     );
     let output = invoke_lf(repo.path(), home.path(), &["checkout", "MISSING-1"]);

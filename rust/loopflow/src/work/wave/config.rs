@@ -158,7 +158,7 @@ fn split_frontmatter(content: &str) -> Option<(String, String)> {
 }
 
 fn goal_path(repo: &Path, name: &str) -> std::path::PathBuf {
-    repo.join("wave").join(name).join("GOAL.md")
+    repo.join(".lf/wave").join(name).join("GOAL.md")
 }
 
 fn markdown_section(content: &str, heading: &str) -> String {
@@ -245,22 +245,58 @@ mod tests {
     impl ConfigRepo {
         fn new() -> Self {
             let repo = tempfile::tempdir().unwrap();
-            std::fs::create_dir_all(repo.path().join("wave/scan")).unwrap();
+            std::fs::create_dir_all(repo.path().join(".lf/wave/scan")).unwrap();
             Self { repo }
         }
         fn path(&self) -> &Path {
             self.repo.path()
         }
         fn write(&self, content: &str) -> std::io::Result<()> {
-            std::fs::write(self.path().join("wave/scan/GOAL.md"), content)
+            std::fs::write(self.path().join(".lf/wave/scan/GOAL.md"), content)
         }
+    }
+
+    #[test]
+    fn authored_waves_use_only_the_lf_directory() {
+        let repo = ConfigRepo::new();
+        let unrelated = repo.path().join("wave/scan");
+        std::fs::create_dir_all(&unrelated).unwrap();
+        let original = "---\nagent: unrelated\n---\nRepository content\n";
+        std::fs::write(unrelated.join("GOAL.md"), original).unwrap();
+        assert!(read_wave_config(repo.path(), "scan").is_none());
+
+        repo.write("---\nagent: codex\n---\nWave objective\n")
+            .unwrap();
+        assert_eq!(
+            read_wave_config(repo.path(), "scan")
+                .unwrap()
+                .agent
+                .as_deref(),
+            Some("codex")
+        );
+        update_wave_goal_config(repo.path(), "scan", |map| {
+            map.insert("agent".into(), "claude".into());
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(
+            read_wave_config(repo.path(), "scan")
+                .unwrap()
+                .agent
+                .as_deref(),
+            Some("claude")
+        );
+        assert_eq!(
+            std::fs::read_to_string(unrelated.join("GOAL.md")).unwrap(),
+            original
+        );
     }
 
     #[test]
     fn frontmatter_edits_do_not_create_missing_goals() {
         let repo = ConfigRepo::new();
         assert!(update_wave_goal_config(repo.path(), "scan", |_| Ok(())).is_err());
-        assert!(!repo.path().join("wave/scan/GOAL.md").exists());
+        assert!(!repo.path().join(".lf/wave/scan/GOAL.md").exists());
     }
 
     #[test]
@@ -375,7 +411,7 @@ mod tests {
             Ok(())
         })
         .unwrap();
-        let content = std::fs::read_to_string(repo.path().join("wave/scan/GOAL.md")).unwrap();
+        let content = std::fs::read_to_string(repo.path().join(".lf/wave/scan/GOAL.md")).unwrap();
         assert!(content.ends_with(body));
         let config = read_wave_config(repo.path(), "scan").unwrap();
         assert_eq!(config.agent.as_deref(), Some("codex"));

@@ -1525,121 +1525,133 @@ fn task_completion_late_acknowledgement_preserves_explicit_reopening() {
 }
 
 #[test]
-fn native_runner_is_quiet_until_its_turn_ends() {
-    for (agent, auto, task_bound) in [
-        ("codex", false, true),
-        ("claude", false, true),
-        ("claude", true, true),
-        ("claude", true, false),
-    ] {
-        with_planning_task(|runtime, fixture, repo, task, state| {
-            let _environment = crate::test_ambient::EnvGuard::clear(&[
-                "HOME",
-                "LF_HOME",
-                "LF_BIN",
-                "PATH",
-                "CODEX_HOME",
-                "CLAUDE_CONFIG_DIR",
-            ]);
-            let home = fixture.directory.path().join("provider-home");
-            let bin = fixture.directory.path().join("bin");
-            std::fs::create_dir_all(&home).unwrap();
-            std::fs::create_dir_all(&bin).unwrap();
-            std::env::set_var("HOME", &home);
-            std::env::set_var("LF_HOME", fixture.directory.path());
-            std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
-            let path = format!("{}:/usr/bin:/bin", bin.display());
-            std::env::set_var("PATH", &path);
-            let started = home.join("started");
-            let stop = home.join("stop");
-            let executable = bin.join(agent);
-            std::fs::write(
-                &executable,
-                include_str!("../../../tests/support/holding_provider.py"),
-            )
-            .unwrap();
-            std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
-            runtime.block_on(async {
-                seed_finished_tasks(fixture, repo, &state).await;
-                state.lock().await.requests = 0;
-            });
-            let process = crate::agent::ProcessConfig {
-                auto,
-                task_input: task_bound.then(|| {
-                    crate::ops::task_input::TaskInput::new(
-                        fixture.store.clone(),
-                        crate::ops::task_input::TaskSeed {
-                            task: task.clone(),
-                            message: String::new(),
-                            interrupt: 0,
-                        },
-                    )
-                }),
-                ..Default::default()
-            };
-            let launch = crate::agent::AgentConfig {
-                agent: Some(agent.into()),
-                cwd: Some(repo.to_path_buf()),
-                env: std::collections::BTreeMap::from([
-                    ("PATH".into(), path),
-                    ("FIXTURE_STARTED".into(), started.display().to_string()),
-                    ("FIXTURE_STOP".into(), stop.display().to_string()),
-                ]),
-                ..Default::default()
-            };
-            let context = LINEAR_TEST_CONTEXT.with(Clone::clone);
-            let database = fixture.database.clone();
-            runtime.block_on(async {
-                let running = tokio::task::spawn_blocking(move || {
-                    crate::journal::with_test_ledger(database, || {
-                        LINEAR_TEST_CONTEXT.sync_scope(context, || {
-                            crate::agent::run_agent(
-                                &launch,
-                                &process,
-                                &crate::agent::AgentCapabilities::default(),
-                            )
-                        })
-                    })
-                });
-                let observed = tokio::time::timeout(std::time::Duration::from_secs(70), async {
-                    while !started.exists() {
-                        assert!(
-                            !running.is_finished(),
-                            "fixture provider exited before readiness"
-                        );
-                        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-                    }
-                    // Native agent stays open without a watcher. Only the turn
-                    // boundary may acquire the change made while it was idle.
-                    tokio::time::sleep(std::time::Duration::from_secs(if agent == "codex" {
-                        60
-                    } else {
-                        1
-                    }))
-                    .await;
-                    assert_eq!(state.lock().await.requests, 0);
-                    let mut provider = state.lock().await;
-                    provider.issues[0]["title"] = json!("Changed during the turn");
-                    mark_issue_updated(&mut provider.issues[0]);
-                })
-                .await;
-                std::fs::write(&stop, "stop").unwrap();
-                assert_eq!(running.await.unwrap().unwrap().exit_code, 0);
-                observed.unwrap();
-                assert_eq!(state.lock().await.requests, 1);
-                assert_eq!(
-                    fixture
-                        .store
-                        .get_task(&task.id)
-                        .await
-                        .unwrap()
-                        .unwrap()
-                        .title,
-                    "Changed during the turn"
-                );
-            });
+fn native_runner_is_quiet_until_its_turn_ends_codex_foreground() {
+    assert_native_runner_is_quiet_until_its_turn_ends("codex", false, true);
+}
+
+#[test]
+fn native_runner_is_quiet_until_its_turn_ends_claude_foreground() {
+    assert_native_runner_is_quiet_until_its_turn_ends("claude", false, true);
+}
+
+#[test]
+fn native_runner_is_quiet_until_its_turn_ends_claude_task_headless() {
+    assert_native_runner_is_quiet_until_its_turn_ends("claude", true, true);
+}
+
+#[test]
+fn native_runner_is_quiet_until_its_turn_ends_claude_taskless_headless() {
+    assert_native_runner_is_quiet_until_its_turn_ends("claude", true, false);
+}
+
+fn assert_native_runner_is_quiet_until_its_turn_ends(agent: &str, auto: bool, task_bound: bool) {
+    with_planning_task(|runtime, fixture, repo, task, state| {
+        let _environment = crate::test_ambient::EnvGuard::clear(&[
+            "HOME",
+            "LF_HOME",
+            "LF_BIN",
+            "PATH",
+            "CODEX_HOME",
+            "CLAUDE_CONFIG_DIR",
+        ]);
+        let home = fixture.directory.path().join("provider-home");
+        let bin = fixture.directory.path().join("bin");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(&bin).unwrap();
+        std::env::set_var("HOME", &home);
+        std::env::set_var("LF_HOME", fixture.directory.path());
+        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
+        let path = format!("{}:/usr/bin:/bin", bin.display());
+        std::env::set_var("PATH", &path);
+        let started = home.join("started");
+        let stop = home.join("stop");
+        let executable = bin.join(agent);
+        std::fs::write(
+            &executable,
+            include_str!("../../../tests/support/holding_provider.py"),
+        )
+        .unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+        runtime.block_on(async {
+            seed_finished_tasks(fixture, repo, &state).await;
+            state.lock().await.requests = 0;
         });
-    }
+        let process = crate::agent::ProcessConfig {
+            auto,
+            task_input: task_bound.then(|| {
+                crate::ops::task_input::TaskInput::new(
+                    fixture.store.clone(),
+                    crate::ops::task_input::TaskSeed {
+                        task: task.clone(),
+                        message: String::new(),
+                        interrupt: 0,
+                    },
+                )
+            }),
+            ..Default::default()
+        };
+        let launch = crate::agent::AgentConfig {
+            agent: Some(agent.into()),
+            cwd: Some(repo.to_path_buf()),
+            env: std::collections::BTreeMap::from([
+                ("PATH".into(), path),
+                ("FIXTURE_STARTED".into(), started.display().to_string()),
+                ("FIXTURE_STOP".into(), stop.display().to_string()),
+            ]),
+            ..Default::default()
+        };
+        let context = LINEAR_TEST_CONTEXT.with(Clone::clone);
+        let database = fixture.database.clone();
+        runtime.block_on(async {
+            let running = tokio::task::spawn_blocking(move || {
+                crate::journal::with_test_ledger(database, || {
+                    LINEAR_TEST_CONTEXT.sync_scope(context, || {
+                        crate::agent::run_agent(
+                            &launch,
+                            &process,
+                            &crate::agent::AgentCapabilities::default(),
+                        )
+                    })
+                })
+            });
+            let observed = tokio::time::timeout(std::time::Duration::from_secs(70), async {
+                while !started.exists() {
+                    assert!(
+                        !running.is_finished(),
+                        "fixture provider exited before readiness"
+                    );
+                    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+                }
+                // Native agent stays open without a watcher. Only the turn
+                // boundary may acquire the change made while it was idle.
+                tokio::time::sleep(std::time::Duration::from_secs(if agent == "codex" {
+                    60
+                } else {
+                    1
+                }))
+                .await;
+                assert_eq!(state.lock().await.requests, 0);
+                let mut provider = state.lock().await;
+                provider.issues[0]["title"] = json!("Changed during the turn");
+                mark_issue_updated(&mut provider.issues[0]);
+            })
+            .await;
+            std::fs::write(&stop, "stop").unwrap();
+            assert_eq!(running.await.unwrap().unwrap().exit_code, 0);
+            observed.unwrap();
+            assert_eq!(state.lock().await.requests, 1);
+            assert_eq!(
+                fixture
+                    .store
+                    .get_task(&task.id)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .title,
+                "Changed during the turn"
+            );
+        });
+    });
 }
 
 #[test]
@@ -3775,7 +3787,7 @@ fn wave_summary_sync_reads_committed_default_branch() {
             checkout.to_str().unwrap(),
         ],
     );
-    let goal = repo.join("wave/product/GOAL.md");
+    let goal = repo.join(".lf/wave/product/GOAL.md");
     let write = |text: &str| {
         std::fs::write(
             &goal,
@@ -3790,7 +3802,7 @@ fn wave_summary_sync_reads_committed_default_branch() {
             crate::lf::commands::ops::sync_planning(&checkout, Some("product"), false, plan, false)
         };
         std::fs::write(
-            checkout.join("wave/product/GOAL.md"),
+            checkout.join(".lf/wave/product/GOAL.md"),
             "---\nlinear:\n  initiative: initiative-1\n---\n\n## Objective\n\nEdited directly.\n",
         )
         .unwrap();
@@ -3857,7 +3869,7 @@ fn wave_summary_sync_reads_committed_default_branch() {
             ""
         );
         assert!(
-            std::fs::read_to_string(checkout.join("wave/product/GOAL.md"))
+            std::fs::read_to_string(checkout.join(".lf/wave/product/GOAL.md"))
                 .unwrap()
                 .contains("Edited directly.")
         );

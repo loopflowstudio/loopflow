@@ -1,4 +1,4 @@
-mod support;
+use crate::support;
 
 use std::fs;
 use std::os::fd::AsRawFd;
@@ -719,7 +719,7 @@ fn surviving_release_git_mutation_retains_target_and_checkout() {
     let real_git = Command::new("which").arg("git").output().unwrap();
     let real_git = String::from_utf8(real_git.stdout).unwrap();
     let real_git = real_git.trim();
-    for phase in ["add", "commit", "upstream", "push", "force"] {
+    for phase in ["add", "commit", "upstream", "push"] {
         for kill_controller in [true, false] {
             eprintln!("Git mutation {phase}, killed controller: {kill_controller}");
             let state = tempfile::tempdir().unwrap();
@@ -774,10 +774,8 @@ if [ "$1" = -C ] && [ -f '{state}/notes-written' ]; then
     *' add -A '*) operation=add;;
     *' commit -m '*) operation=commit;;
     *' push -u '*) operation=upstream;;
-    *' push --force-with-lease '*) operation=force;;
     *' push '*) operation=push;;
   esac
-  if [ "$operation" = push ] && [ '{phase}' = force ]; then exit 1; fi
   if [ "$operation" = '{phase}' ]; then
     [ ! -f '{state}/launched' ] || exit 1
     : > '{state}/launched'
@@ -802,7 +800,7 @@ cat > RELEASE_NOTES.md <<'EOF'
 
 Fixture release.
 EOF
-if [ '{phase}' = push ] || [ '{phase}' = force ]; then
+if [ '{phase}' = push ]; then
   '{real_git}' push -u origin HEAD || exit $?
 fi
 : > '{state}/notes-written'
@@ -857,7 +855,7 @@ fi
                 "HEAD:RELEASE_NOTES.md"
             };
             assert!(git_read(&["show", subject]).contains("Fixture release."));
-            if matches!(phase, "upstream" | "push" | "force") {
+            if matches!(phase, "upstream" | "push") {
                 let branch = git_read(&["branch", "--show-current"]);
                 let remote = Command::new(real_git)
                     .arg("--git-dir")
@@ -1340,7 +1338,7 @@ case "$1 $2" in
         else echo '[]'; fi;;
       *) echo '[]';;
     esac;;
-  'api graphql') echo '{{"data":{{"repository":{{"pullRequest":{{"id":"PR_fixture","number":1176,"url":"https://example.com/pr/1176","state":"OPEN","isDraft":false,"headRefName":"release","headRefOid":"observed","mergedAt":null,"mergeCommit":null,"mergeStateStatus":"DIRTY","isMergeQueueEnabled":false,"autoMergeRequest":null,"mergeQueueEntry":null}}}}}}}}';;
+  'api graphql') echo '{{"data":{{"repository":{{"mergeCommitAllowed":true,"squashMergeAllowed":true,"rebaseMergeAllowed":true,"pullRequest":{{"id":"PR_fixture","number":1176,"url":"https://example.com/pr/1176","state":"OPEN","isDraft":false,"headRefName":"release","headRefOid":"observed","mergedAt":null,"mergeCommit":null,"mergeStateStatus":"DIRTY","isMergeQueueEnabled":false,"autoMergeRequest":null,"mergeQueueEntry":null}}}}}}}}';;
   *) exit 91;;
 esac
 "#,
@@ -1562,7 +1560,7 @@ exit 1
     }
     assert!(!parent.child.wait().unwrap().success());
     let log = fs::read_to_string(state.path().join("controller.log")).unwrap();
-    assert!(log.contains("expected"), "{log}");
+    assert!(log.contains("Git checkout/setup failed"), "{log}");
     assert!(
         checkout.exists(),
         "mismatch cleanup removed live hook checkout: {log}"

@@ -1526,6 +1526,26 @@ pub enum PrCommand {
         watch: bool,
         #[arg(short = 'l', long = "logs")]
         logs: bool,
+        /// Show only checks required by repository protection.
+        #[arg(long)]
+        required: bool,
+    },
+
+    /// Request or re-request a teammate's review of an existing PR.
+    RequestReview {
+        /// PR number, URL or branch; defaults to the current branch's PR.
+        pr: Option<String>,
+        /// GitHub login or org/team. Repeat to request several reviewers.
+        #[arg(short = 'r', long, required = true)]
+        reviewer: Vec<String>,
+    },
+    /// Read requested reviews and review submissions from GitHub.
+    Reviews {
+        /// PR number, URL or branch; defaults to the current branch's PR.
+        pr: Option<String>,
+        /// Emit GitHub CLI JSON, including each review's commit and body.
+        #[arg(long)]
+        json: bool,
     },
 
     /// Publish a ready PR headlessly: push, create or refresh, print state + URL.
@@ -1544,8 +1564,8 @@ pub enum PrCommand {
         #[arg(long = "body")]
         body: Option<String>,
     },
-    /// Prepare a PR to land: sync, clear added scratch files, mark ready, and assign it
-    /// to you. Nothing merges until you click merge on GitHub.
+    /// Prepare a PR to land: sync, clear committed scratch additions and mark ready.
+    /// Leave it for manual merge without changing reviewers or assignees.
     Submit {
         #[arg(long)]
         strict: bool,
@@ -1781,7 +1801,7 @@ pub enum RepoCommand {
     Connect {
         /// Wave name (auto-detected if omitted)
         wave: Option<String>,
-        /// Recursively initialize every Wave under wave/
+        /// Recursively initialize every Wave under .lf/wave/
         #[arg(long, conflicts_with = "wave")]
         all: bool,
         /// Repository Team key = Task prefix (e.g. LOO). Defaults from the repository name.
@@ -2132,7 +2152,7 @@ pub enum ReleaseCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum WtCommand {
-    /// Create a low-level sibling worktree
+    /// Create a low-level worktree following the repository's existing layout
     Create {
         /// Worktree name
         name: String,
@@ -2263,9 +2283,15 @@ mod tests {
         ] {
             assert!(Cli::try_parse_from(args.clone()).is_ok(), "{args:?}");
         }
-        for verb in [
-            "recover", "enable", "disable", "prepare", "resume", "advance",
-        ] {
+        assert!(matches!(
+            Cli::try_parse_from(["lf", "task", "pause", "LOO-1"]).unwrap().command,
+            Some(Commands::Task { cmd: TaskCommand::Pause { issue } }) if issue == "LOO-1"
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["lf", "task", "resume", "LOO-1"]).unwrap().command,
+            Some(Commands::Task { cmd: TaskCommand::Resume { issue } }) if issue == "LOO-1"
+        ));
+        for verb in ["recover", "enable", "disable", "prepare", "advance"] {
             assert!(Cli::try_parse_from(["lf", "task", verb, "LOO-1"]).is_err());
         }
         assert!(Cli::try_parse_from(["lf", "wave", "status", "--no-sync"]).is_err());

@@ -583,7 +583,7 @@ pub(crate) fn task_state_sql(t: &str) -> String {
 
 /// SQL: Task row `t` is neither done nor abandoned.
 pub(crate) fn task_open_sql(t: &str) -> String {
-    format!("({}) NOT IN ('done','abandoned')", task_state_sql(t))
+    format!("({t}.abandoned_at IS NULL AND {t}.planning_completed IS NOT 1)")
 }
 
 pub(crate) fn task_state_in(conn: &Connection, task: &TaskId) -> StoreResult<TaskState> {

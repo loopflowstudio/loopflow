@@ -98,6 +98,27 @@ Show CI status for current branch
 |---|---|
 | `--watch / -w` | watch Default: false. |
 | `--logs / -l` | logs Default: false. |
+| `--required` | Show only checks required by repository protection Default: false. |
+| `--help / -h` | Print help |
+
+## lf pr request-review
+
+Request or re-request a teammate's review of an existing PR
+
+| Argument | What it does |
+|---|---|
+| `<pr>` | PR number, URL or branch; defaults to the current branch's PR |
+| `--reviewer / -r` | GitHub login or org/team. Repeat to request several reviewers |
+| `--help / -h` | Print help |
+
+## lf pr reviews
+
+Read requested reviews and review submissions from GitHub
+
+| Argument | What it does |
+|---|---|
+| `<pr>` | PR number, URL or branch; defaults to the current branch's PR |
+| `--json` | Emit GitHub CLI JSON, including each review's commit and body Default: false. |
 | `--help / -h` | Print help |
 
 ## lf pr publish
@@ -122,7 +143,7 @@ Push and create or update a draft PR, then open its GitHub page. Existing ready 
 
 ## lf pr submit
 
-Prepare a PR to land: sync, clear added scratch files, mark ready, and assign it to you. Nothing merges until you click merge on GitHub
+Prepare a PR to land: sync, clear committed scratch additions and mark ready. Leave it for manual merge without changing reviewers or assignees
 
 | Argument | What it does |
 |---|---|
@@ -183,7 +204,7 @@ Worktree operations
 
 ## lf wt create
 
-Create a low-level sibling worktree
+Create a low-level worktree following the repository's existing layout
 
 | Argument | What it does |
 |---|---|
@@ -653,7 +674,7 @@ Connect a Wave to its Initiative and the repository's Team (Task prefix)
 | Argument | What it does |
 |---|---|
 | `<wave>` | Wave name (auto-detected if omitted) |
-| `--all` | Recursively initialize every Wave under wave/ Default: false. |
+| `--all` | Recursively initialize every Wave under .lf/wave/ Default: false. |
 | `--team-key` | Repository Team key = Task prefix (e.g. LOO). Defaults from the repository name |
 | `--team-name` | Repository Team display name. Defaults to the repository name |
 | `--help / -h` | Print help |
@@ -1938,3 +1959,7 @@ Run a skill explicitly
 | Argument | What it does |
 |---|---|
 | `--help / -h` | Print help |
+
+## lf scratch clear
+
+Remove committed scratch additions relative to the Task or branch base. Existing files, edits and renames remain. Checkpoint intended notes before clearing.

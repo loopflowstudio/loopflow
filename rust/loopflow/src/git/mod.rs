@@ -486,44 +486,118 @@ pub fn worktree_root(repo: &Path) -> Result<PathBuf, GitError> {
     }
 }
 
-/// Return default branch name from origin/HEAD. Falls back to "main".
+/// Prefer advertised remote defaults, then existing local branch conventions.
 pub fn get_default_branch(repo: &Path) -> Result<String, GitError> {
-    let output = run_git(
+    let defaults = git_stdout(
         repo,
         &[
-            "symbolic-ref",
-            "--quiet",
-            "--short",
-            "refs/remotes/origin/HEAD",
+            "for-each-ref",
+            "--format=%(refname) %(symref)",
+            "refs/remotes",
+            "refs/heads",
         ],
     )?;
-    if !output.status.success() {
-        // A standalone checkout may have only its current branch. Do not ask
-        // Git to fork a conversation from a nonexistent main in that case.
-        if git_stdout(repo, &["remote"])?.trim().is_empty()
-            && !run_git(
-                repo,
-                &["show-ref", "--verify", "--quiet", "refs/heads/main"],
-            )?
-            .status
-            .success()
-        {
-            if let Some(branch) = current_branch(repo)? {
-                return Ok(branch);
-            }
+    let heads: Vec<_> = defaults
+        .lines()
+        .filter_map(|line| {
+            let (name, target) = line.split_once(' ')?;
+            let remote = name.strip_prefix("refs/remotes/")?.strip_suffix("/HEAD")?;
+            let branch = target.strip_prefix(&format!("refs/remotes/{remote}/"))?;
+            Some((remote, branch))
+        })
+        .collect();
+    if let Some((_, branch)) = heads.iter().find(|(remote, _)| *remote == "origin") {
+        return Ok((*branch).to_string());
+    }
+    if let Some((_, branch)) = heads
+        .first()
+        .filter(|(_, branch)| heads.iter().all(|(_, other)| other == branch))
+    {
+        return Ok((*branch).to_string());
+    }
+    let configured = run_git(repo, &["config", "--get", "init.defaultBranch"])?;
+    let configured = String::from_utf8_lossy(&configured.stdout);
+    for candidate in [configured.trim(), "main", "master"] {
+        let reference = format!("refs/heads/{candidate} ");
+        if defaults.lines().any(|line| line == reference) {
+            return Ok(candidate.to_string());
         }
-        return Ok("main".to_string());
     }
-    let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if raw.is_empty() {
-        return Ok("main".to_string());
+    // Without an advertised default or conventional branch, the primary
+    // checkout is the repository's existing starting point, even when unborn.
+    let worktrees = git_stdout(repo, &["worktree", "list", "--porcelain"])?;
+    if let Some(branch) = worktrees.split("\n\n").next().and_then(|entry| {
+        entry
+            .lines()
+            .find_map(|line| line.strip_prefix("branch refs/heads/"))
+    }) {
+        return Ok(branch.to_string());
     }
-    if let Some((_, branch)) = raw.split_once('/') {
-        if !branch.trim().is_empty() {
-            return Ok(branch.trim().to_string());
+    Ok("main".to_string())
+}
+
+/// The default branch's Git upstream, or the local branch when none is configured.
+pub(crate) fn integration_base(repo: &Path) -> Result<String, GitError> {
+    let branch = get_default_branch(repo)?;
+    let local_ref = format!("refs/heads/{branch}");
+    let upstream = git_stdout(
+        repo,
+        &[
+            "for-each-ref",
+            "--format=%(refname) %(upstream)",
+            &local_ref,
+        ],
+    )?;
+    let upstream = upstream
+        .lines()
+        .find_map(|line| {
+            let (reference, target) = line.split_once(' ')?;
+            (reference == local_ref).then_some(target)
+        })
+        .unwrap_or_default();
+    if !upstream.is_empty() {
+        return Ok(upstream
+            .strip_prefix("refs/remotes/")
+            .unwrap_or(upstream)
+            .to_string());
+    }
+    // A fetched default can exist before a local tracking branch is created.
+    let origin = format!("origin/{branch}");
+    if rev_parse(repo, &format!("refs/remotes/{origin}")).is_ok() {
+        return Ok(origin);
+    }
+    let remotes = git_stdout(repo, &["remote"])?;
+    let candidates: Vec<_> = remotes
+        .lines()
+        .map(|remote| format!("{remote}/{branch}"))
+        .filter(|reference| rev_parse(repo, &format!("refs/remotes/{reference}")).is_ok())
+        .collect();
+    if candidates.len() == 1 {
+        return Ok(candidates[0].clone());
+    }
+    Ok(branch)
+}
+
+/// Refresh a remote-tracking ref; local branch and commit targets need no network.
+pub(crate) fn fetch_tracking_ref(repo: &Path, reference: &str) -> Result<(), GitError> {
+    let resolved = run_git(repo, &["rev-parse", "--symbolic-full-name", reference])?;
+    if resolved.status.success()
+        && String::from_utf8_lossy(&resolved.stdout)
+            .trim()
+            .starts_with("refs/heads/")
+    {
+        return Ok(());
+    }
+    let reference = reference.strip_prefix("refs/remotes/").unwrap_or(reference);
+    let remotes = git_stdout(repo, &["remote"])?;
+    let mut remotes: Vec<_> = remotes.lines().collect();
+    remotes.sort_by_key(|remote| std::cmp::Reverse(remote.len()));
+    for remote in remotes {
+        if let Some(branch) = reference.strip_prefix(&format!("{remote}/")) {
+            return fetch(repo, remote, branch);
         }
     }
-    Ok(raw)
+    Ok(())
 }
 
 /// Return true if working tree is clean.
@@ -950,14 +1024,18 @@ pub(crate) fn worktree_add_inheriting(
     };
     let output = run_git_inheriting(repo, &args, inherit)?;
     if !output.status.success() {
-        // A failing post-checkout hook causes git to exit non-zero even when
-        // the worktree was created successfully. Verify before reporting failure.
-        if path.join(".git").exists() {
-            return Ok(());
-        }
         return Err(GitError::CommandFailed {
             command: format!("git {}", args.join(" ")),
-            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+            stderr: format!(
+                "{}{}{}",
+                if path.join(".git").exists() {
+                    format!("Checkout retained at {}; Git checkout/setup failed. Repair the reported failure before continuing.\n", path.display())
+                } else {
+                    String::new()
+                },
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr),
+            ),
         });
     }
     Ok(())
@@ -1581,6 +1659,15 @@ mod tests {
         assert_eq!(get_default_branch(repo.path()).unwrap(), "demo");
         git_stdout(repo.path(), &["branch", "main"]).unwrap();
         assert_eq!(get_default_branch(repo.path()).unwrap(), "main");
+    }
+
+    #[test]
+    fn git_get_default_branch_prefers_existing_configured_branch() {
+        let repo = init_repo();
+        commit_file(repo.path(), "README.md", "hello");
+        git_stdout(repo.path(), &["branch", "trunk"]).unwrap();
+        git_stdout(repo.path(), &["config", "init.defaultBranch", "trunk"]).unwrap();
+        assert_eq!(get_default_branch(repo.path()).unwrap(), "trunk");
     }
 
     #[test]

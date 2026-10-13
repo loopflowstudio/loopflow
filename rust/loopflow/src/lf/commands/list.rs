@@ -49,7 +49,7 @@ fn collect_entries(tree: &Command, path: &[String], repo: &Path) -> Result<Vec<E
         for name in crate::ops::linear::list_local_waves(repo)? {
             let summary = crate::work::wave::config::read_wave_summary(repo, &name)?;
             entries.push(Entry {
-                source: format!("wave/{name}/GOAL.md"),
+                source: format!(".lf/wave/{name}/GOAL.md"),
                 invocation: format!("lf repo connect {name}"),
                 name,
                 kind: "wave".to_string(),

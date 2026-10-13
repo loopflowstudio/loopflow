@@ -110,7 +110,7 @@ context_budgets:
   scratch_tokens: 8000
 ```
 
-Override individual fields for a Wave in `wave/<name>/GOAL.md` frontmatter:
+Override individual fields for a Wave in `.lf/wave/<name>/GOAL.md` frontmatter:
 
 ```yaml
 ---
@@ -284,7 +284,7 @@ Each entry is a file (`README.md`), a glob (`'*.md'`), or a directory (`swift/`
 gathers `*.md` under it). Resolved paths appear in the context listing; file
 bodies are not inlined. This doesn't restrict which files the agent can edit.
 Scratch and the selected Wave's checkout Markdown are gathered automatically.
-Wave context reads `wave/<name>/` and each path-segment ancestor, excluding siblings
+Wave context reads `.lf/wave/<name>/` and each path-segment ancestor, excluding siblings
 and children; listings point to those files, not database snapshots.
 
 ### Branch Files (diff_files)
@@ -567,3 +567,34 @@ rewritten. Third-party files and bundles are preserved. Sync prunes only generat
 exports after replacements are writable; desired nested Codex exports survive.
 Original native declarations and resource paths remain attached to each source;
 cross-harness exports do not claim to enforce or translate native controls.
+
+## Scratch cleanup during delivery
+
+Delivery clears committed scratch additions relative to the Task's base (or the
+branch's integration base). Existing files, edits and renames remain repository
+content. `scratch/.gitkeep` is preserved. Use `lf scratch clear` for the same
+explicit cleanup; checkpoint intended notes first. Uncommitted files are preserved
+by this command. Delivery checkpoints the intended change before cleanup.
+
+## Merge policy
+
+```yaml
+# .lf/config.yaml — only needed to prefer a particular allowed method
+merge_method: merge  # merge, squash, or rebase
+```
+
+`arm` and `land` read the repository's allowed GitHub merge methods. Without a
+preference, choose squash, then merge, then rebase from the allowed methods.
+A repository preference disabled by GitHub returns an actionable error before
+replacing an existing auto-merge request. A merge queue owns its method, so lf
+sends no method or commit-message override for queued merging. Personal config
+cannot override this repository policy. Every request retains the observed head
+commit check and GitHub's protection requirements.
+
+Keep procedure in repository instructions and Flows: who should review, when to
+run checks, and whether to stop at `publish`, `submit`, or auto-merge. Do not
+replace whole lifecycle commands with scripts whose successful exit could mean
+something different. Release targets already expose `verify`, `prepare`,
+`workflow`, `publisher`, and `completion`; use those boundaries for repository
+build and packaging tools. Current PR and release observation supports GitHub;
+other hosts need publication, identity and completion support together.

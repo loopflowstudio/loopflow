@@ -1,5 +1,6 @@
 [package]
 name = "loopflow"
+autotests = false
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -18,6 +19,67 @@ path = "src/bin/lf.rs"
 [[bin]]
 name = "lf-prompt"
 path = "src/bin/lf-prompt.rs"
+
+# Keep dedicated proof entrypoints and process-global environment fixtures separate.
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
+
+[[test]]
+name = "agent_tests"
+path = "tests/agent_tests.rs"
+
+[[test]]
+name = "codex_live_smoke"
+path = "tests/codex_live_smoke.rs"
+
+[[test]]
+name = "global_commands"
+path = "tests/global_commands.rs"
+
+[[test]]
+name = "one_machine_tests"
+path = "tests/one_machine_tests.rs"
+
+[[test]]
+name = "planning_reconnect_tests"
+path = "tests/planning_reconnect_tests.rs"
+
+[[test]]
+name = "process_ownership_tests"
+path = "tests/process_ownership_tests.rs"
+
+[[test]]
+name = "session_lifecycle_tests"
+path = "tests/session_lifecycle_tests.rs"
+
+[[test]]
+name = "discovery_tests"
+path = "tests/discovery_tests.rs"
+
+[[test]]
+name = "golden_prompt"
+path = "tests/golden_prompt.rs"
+
+[[test]]
+name = "release_tests"
+path = "tests/release_tests.rs"
+
+[[test]]
+name = "task_pr_authority_tests"
+path = "tests/task_pr_authority_tests.rs"
+
+[[test]]
+name = "task_pr_range_tests"
+path = "tests/task_pr_range_tests.rs"
+
+[[test]]
+name = "task_remote_tests"
+path = "tests/task_remote_tests.rs"
+
+[[test]]
+name = "test_environment_tests"
+path = "tests/test_environment_tests.rs"
 
 # --- Core dependencies ---
 [dependencies]

@@ -36,7 +36,7 @@ LOO-389 comments failed: unbound Initiative.
   `4cde15a0d3` removes Task inventory hashes/reads, not capture receipts.
   Installed input exceeds budget; rendering proves no adoption.
 
-[LOO-427's comparison](../../docs/reviews/terminal-command-comparison.md) records
+[LOO-427's comparison](../../../docs/reviews/terminal-command-comparison.md) records
 command dispositions. Jack folded LOO-430/431/432 into LOO-427: identity, window
 control and terminal I/O in one diff. October 8: design approved; implementation
 authorized through demo review. Owned cmux probe cleaned up.
@@ -156,7 +156,7 @@ syntax and Desktop result schemas from Clap/Rust DTOs; installed support and cur
 Work eligibility stay separate. Native proof remains. LOO-397 is unstarted.
 Jack authorized Product follow-ups LOO-452 (shortcut customization, beyond LOO-403)
 and LOO-453 (readiness/events); research:
-[the comparison](../../docs/reviews/terminal-command-comparison.md#rex-composition-and-discoverability-2026-10-10).
+[the comparison](../../../docs/reviews/terminal-command-comparison.md#rex-composition-and-discoverability-2026-10-10).
 
 Jack Heart (October 10) accepted Work-named repository/Wave/Task tabs; close hides.
 `39698225f3` keys registry/targets by Work with shared conversation state;
@@ -225,7 +225,7 @@ Native resume repeated the operating guide once; first-content naming is only
 a hypothesis. Preserve native hooks/titles. No host integration or external
 progress is established. Failed attempts, release revision and limits:
 `ddc009d780:wave/product/MEMORY.md`, this heading, and
-[findings](../../docs/reviews/terminal-host-trial.md).
+[findings](../../../docs/reviews/terminal-host-trial.md).
 
 ## Live Home reconciliation
 
@@ -350,7 +350,7 @@ disabled-cron observation: `6448e3c9e:wave/product/MEMORY.md`, this heading.
 An operator once reported `next_move.owner: wave` as someone else's handoff:
 name the reader's own responsibility explicitly. Nothing re-invokes a
 conversation. Inspect every Flow/unfinished Exec against `lf ps --json` before
-launching again. The [review](../../docs/reviews/session-operate-prompts.md) has
+launching again. The [review](../../../docs/reviews/session-operate-prompts.md) has
 simulations and two read-only model runs, not installed proof. Open conversations
 keep old instructions until `lf session replace`.
 
@@ -415,7 +415,7 @@ not establish status in cmux or herdr.
 ## Current Tasks and completion history (2026-10-02)
 
 LOO-371 measurements, failed attempts and limits: `5044add03:wave/product/MEMORY.md`,
-this heading, and [evidence](../../scripts/benchmarks/desktop-performance/20261005-task-open/README.md).
+this heading, and [evidence](../../../scripts/benchmarks/desktop-performance/20261005-task-open/README.md).
 OCR split an ID: verify the observer. Own benchmark process groups; overlaps prove
 nothing. October 7 retired performance acceptance; LOO-408 owns installed settlement.
 
@@ -452,7 +452,7 @@ queue gate and native visual/focus review remain separate. Jack's Growth screens
 shows six current Tasks without the seven duplicates. The isolated offline capture
 has no successful completions or Sessions, so it cannot prove recency or native
 Session continuation. Live refresh and retained-Session review remain unproven.
-See [the review evidence](../../docs/reviews/task-history.md). These observations
+See [the review evidence](../../../docs/reviews/task-history.md). These observations
 provide no sustained-use KR or external-progress credit.
 
 ## Ask removal decision (2026-10-01)
@@ -529,8 +529,8 @@ Primary Sessions runtime moved to LOO-364.
 Jack also accepted ordinary Projects independent of optional chapter coordination
 (LOO-366), and a Task admission/completion audit (LOO-367). Task supplies purpose and
 continuity to Flows, not separate execution semantics. See
-[the dated review and retained design references](../../docs/reviews/task-workspace.md)
-and [research](../../docs/reviews/independent-operations.md). These decisions do not
+[the dated review and retained design references](../../../docs/reviews/task-workspace.md)
+and [research](../../../docs/reviews/independent-operations.md). These decisions do not
 authorize an automatic Project reset, Task cancellation or claims of measured gains.
 
 ## CI repair and waited landing (2026-10-01, reconciled 2026-10-08)
@@ -674,7 +674,7 @@ merge, Task completion or individual scenario coverage. The
 [design and evidence ledger](https://github.com/loopflowstudio/loopflow/blob/611ed031a031e6798652a15b5d250ba0f132a4e8/scratch/file-browser.md)
 and [demo feedback](https://github.com/loopflowstudio/loopflow/blob/611ed031a031e6798652a15b5d250ba0f132a4e8/scratch/file-browser-demo-feedback.md)
 preserve the failed attempts and superseded proposals. Current usage lives in
-[the Mac README](../../swift/README.md) and [CLI reference](../../docs/lf.md).
+[the Mac README](../../../swift/README.md) and [CLI reference](../../../docs/lf.md).
 
 - **Task placement owns both surfaces.** The September 30 internal cut expands
   the original `scratch/` and `diff` navigator to paged immediate directories,
@@ -829,7 +829,7 @@ rewrite the chapter's authored KRs or claim native/provider acceptance.
 Keep hierarchy navigation and Task-workspace interaction as separate observations,
 with exact identities, source/build/population, rendered endpoint, retained input
 and failed attempts. The opt-in desktop-performance runner and hash-verified
-[baseline](../../scripts/benchmarks/desktop-performance/20260924-capture-input/README.md)
+[baseline](../../../scripts/benchmarks/desktop-performance/20260924-capture-input/README.md)
 remain useful instruments: synthetic Work, three owned cat PTYs, forced bitmap/text
 capture and PTY replies. They establish neither compositor hitches nor provider
 continuation. Its Monitor scenarios no longer compare because that pane was deleted.
@@ -854,7 +854,7 @@ no new store-cleanup or installation authority.
 ## Chapter decisions and review lessons (2026-09-23)
 
 The accepted start, not the summer draft, is frozen at
-[the chapter start](../../.lf/chapters/20260923T000959Z-502f011b/start.md)
+[the chapter start](../../../.lf/chapters/20260923T000959Z-502f011b/start.md)
 (23 September–21 October). Gate 2 accepted planning, not publication. The later
 September 24 hierarchy decisions govern. Historical KR counts and dated review
 mechanics remain at `b1e3f623a:wave/product/MEMORY.md`, this heading.
@@ -1125,4 +1125,4 @@ proof; LOO-282 client provenance; LOO-283 the shared-viewing comparison.
   must clear them or `cargo test -p loopflow` fails only under agent runs.
 - **Released migrations are immutable.** The Product/Intelligence `061` collision
   left existing databases missing a column. Test upgrades from the released frontier;
-  AGENTS.md owns one draft per Task. [Incident history](../../.lf/chapters/20260923T000959Z-502f011b/sources/wave/product/MEMORY.md).
+  AGENTS.md owns one draft per Task. [Incident history](../../../.lf/chapters/20260923T000959Z-502f011b/sources/wave/product/MEMORY.md).

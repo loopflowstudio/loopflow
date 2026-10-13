@@ -2251,14 +2251,21 @@ pub(crate) fn fetch_task_refs(repo: &Path) -> OpsResult<()> {
     Ok(())
 }
 
-/// Fetch the upstream branch when a remote exists; otherwise use its local ref.
-fn resolve_upstream_base(repo: &Path, branch: &str) -> OpsResult<(String, String)> {
-    let base_ref = if has_remote(repo)? {
-        fetch(repo, "origin", branch)
-            .map_err(|error| task_error(format!("failed to fetch task base: {error}")))?;
-        format!("origin/{branch}")
+/// Resolve a new Task's base through the default branch's existing Git tracking.
+fn resolve_upstream_base(repo: &Path, default_branch: &str) -> OpsResult<(String, String)> {
+    let base = if default_branch == get_default_branch(repo)? {
+        crate::git::integration_base(repo)?
+    } else if has_remote(repo)? {
+        format!("origin/{default_branch}")
     } else {
-        format!("refs/heads/{branch}")
+        default_branch.to_string()
+    };
+    crate::git::fetch_tracking_ref(repo, &base)
+        .map_err(|error| task_error(format!("failed to fetch task base: {error}")))?;
+    let base_ref = if base == default_branch {
+        format!("refs/heads/{default_branch}")
+    } else {
+        base
     };
     let base_commit = rev_parse(repo, &base_ref)
         .map_err(|error| task_error(format!("failed to resolve task base {base_ref}: {error}")))?;
@@ -3402,10 +3409,19 @@ async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsResult<TaskSn
         .await
         .map_err(task_error)?;
     let work_set = store.sqlite.task_work(&task.id).map_err(task_error)?;
+    let status = store.task_state(&task.id).await.map_err(task_error)?;
     let actions = if store.sqlite.task_deleted(&task).map_err(task_error)? {
         TaskActionModel {
             recommended: Some(crate::ops::task_actions::TaskAction::NoAction),
             reason: "Task was deleted; retained history is read-only".into(),
+        }
+    } else if status == crate::durable::TaskState::Paused {
+        TaskActionModel {
+            recommended: Some(crate::ops::task_actions::TaskAction::NoAction),
+            reason: format!(
+                "Task is paused; `lf task resume {}` clears the hold without starting execution",
+                task.identifier
+            ),
         }
     } else {
         let predecessor_phase = match task.parent_pr_id.as_ref() {
@@ -3481,7 +3497,7 @@ async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsResult<TaskSn
         pm_writeback: task.pm_writeback,
         wave: wave.slug().to_string(),
         project_id: task.project_id.to_string(),
-        status: store.task_state(&task.id).await.map_err(task_error)?,
+        status,
         completion_pending,
         execution,
         work: work_set,
@@ -4414,6 +4430,28 @@ mod tests {
     }
 
     #[test]
+    fn paused_snapshot_never_recommends_running_work() {
+        let _ledger = crate::journal::TestLedgerGuard::new();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let repo = loopflow_test_support::TestRepo::new();
+        let fixture = runtime.block_on(task_fixture_at("PAUSE-1", repo.path().into()));
+        fixture
+            .store
+            .sqlite
+            .set_task_paused(&fixture.task.id, true)
+            .unwrap();
+        let snapshot = runtime
+            .block_on(super::read_task_snapshot(&fixture.store, fixture.task))
+            .unwrap();
+        assert_eq!(snapshot.status, crate::durable::TaskState::Paused);
+        assert_eq!(
+            snapshot.actions.recommended,
+            Some(crate::ops::task_actions::TaskAction::NoAction)
+        );
+        assert!(snapshot.actions.reason.contains("lf task resume PAUSE-1"));
+    }
+
+    #[test]
     fn task_decision_preserves_unknown_history_and_live_process_protection() {
         let ledger = crate::journal::TestLedgerGuard::new();
         let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -4575,9 +4613,9 @@ mod tests {
             let repo = loopflow_test_support::TestRepo::new();
             let fixture = runtime.block_on(task_fixture_at("EXISTING", repo.path().to_path_buf()));
             std::env::set_var("LF_HOME", fixture._database.path());
-            std::fs::create_dir_all(repo.path().join("wave/task-recovery")).unwrap();
+            std::fs::create_dir_all(repo.path().join(".lf/wave/task-recovery")).unwrap();
             std::fs::write(
-                repo.path().join("wave/task-recovery/GOAL.md"),
+                repo.path().join(".lf/wave/task-recovery/GOAL.md"),
                 "Recover work.",
             )
             .unwrap();

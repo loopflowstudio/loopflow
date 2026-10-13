@@ -9,10 +9,13 @@ pub fn env_lock() -> &'static std::sync::Mutex<()> {
     LOCK.get_or_init(|| std::sync::Mutex::new(()))
 }
 
-/// Build the current CLI and use Cargo's artifact path, including custom target directories.
+/// Use the runner's prepared CLI, or build it with Cargo's target-directory selection.
 pub fn lf_binary() -> &'static str {
     static BINARY: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     BINARY.get_or_init(|| {
+        if let Ok(binary) = std::env::var("LOOPFLOW_TEST_LF") {
+            return binary;
+        }
         let mut command = Command::new(env!("CARGO"));
         command
             .args([
@@ -163,6 +166,9 @@ fn create_initial_commit(dir: &Path) {
 
 fn init_bare_remote(dir: &Path) {
     run_git(dir, &["init", "--bare", "-b", "main"]);
+    // Detached receiver maintenance can retain a publisher's inherited lock
+    // after push returns. Disposable fixture remotes need no housekeeping.
+    run_git(dir, &["config", "receive.autogc", "false"]);
 }
 
 fn add_remote(work: &Path, bare: &Path) {

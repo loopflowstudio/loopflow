@@ -107,7 +107,7 @@ child edits.
 `submit`, `arm` and `land` clear added scratch files during preparation,
 merge current main, verify once,
 and push the exact head. Branch commits and merge resolutions retain their identities.
-GitHub squash-merges the final PR tree into one commit on main. `arm` and `land` request
+GitHub applies the repository’s allowed merge method or merge queue policy. `arm` and `land` request
 GitHub auto-merge, record the landing, and return. Success means handoff;
 `lf task reconcile` checks recorded repository landings once;
 `lf pr reconcile` uses its delivery-only path. `lf cron sync --repo` installs the

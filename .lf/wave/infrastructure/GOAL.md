@@ -31,7 +31,7 @@ Projects do not own memory, cadence, or child projects.
   CI, release cadence, spend, and host health; turn the first red or flaky
   signal into focused work.
 
-Release owns `release-run`; both schedules are declared in [repository configuration](../../.lf/config.yaml).
+Release owns `release-run`; both schedules are declared in [repository configuration](../../../.lf/config.yaml).
 
 ## Process
 

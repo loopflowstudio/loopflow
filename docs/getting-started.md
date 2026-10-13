@@ -17,7 +17,7 @@ Default install location is `~/.local/bin`. Override with `LF_INSTALL_DIR=/path`
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex), or [OpenCode](https://github.com/anomalyco/opencode), signed in | Every run. Loopflow uses the one you have; these have their own cost |
 | `git`, and a project in a git repository | Every run |
 | [GitHub CLI](https://cli.github.com) (`gh`), signed in | Pull requests |
-| A [Linear](https://linear.app) workspace | Tasks and Waves |
+| A [Linear](https://linear.app) workspace | Optional Linear-backed planning; planning defaults to Git |
 
 A single prompt (`lf debug -c`, `lf : "..."`) needs only the first three.
 
@@ -26,7 +26,7 @@ A single prompt (`lf debug -c`, `lf : "..."`) needs only the first three.
 | I want to... | Start here |
 |---|---|
 | Try loopflow from terminal | `lf init` |
-| Run autonomous waves | Author `wave/<name>/GOAL.md`, open it in Loopflow (macOS) |
+| Run autonomous waves | Author `.lf/wave/<name>/GOAL.md`, open it in Loopflow (macOS) |
 | Steer and inspect from terminal | `lf --wave <name> wave-operate` → `lf wave status` |
 | Run on another machine | `lf --machine <machine-id> --wave <name> wave-operate` ([Go Remote](#go-remote)) |
 
@@ -82,6 +82,39 @@ lf operate                 # review and operate the repository’s open work
 lf : "fix the typo in README"
 lf : "add type hints to utils.py"
 ```
+
+### Worktree placement
+
+```bash
+lf wt create fix-login
+lf wt switch fix-login
+```
+
+If at least two live, branch-bearing worktrees share a parent directory, lf
+creates new worktrees there. Directory names can differ from branch names, as
+with city-named workspaces or branches renamed after checkout creation. No lf
+configuration is needed. New branches remain `<author>/fix-login`; lf uses
+`fix-login` as the directory name. Existing repo-prefixed siblings keep their
+`<repo>.fix-login` naming.
+
+With fewer examples or conflicting parent directories, lf uses its default
+sibling path, `../<repo>.fix-login`. Detached and missing checkouts do not
+establish a layout. Existing branch checkouts are reused wherever they live.
+Matching a host's worktree directory does not register a workspace in that host
+or run its setup scripts. Git checkout-hook failures retain the checkout and
+report the setup error instead of reporting success.
+
+Reusing an existing worktree stays local, even when its remote is unavailable.
+For new work, lf refreshes the default branch from its configured Git upstream;
+a repository without a remote uses its local base. Advertised remote defaults,
+existing local branch conventions and the primary checkout supply the default
+branch without requiring `main` or lf configuration. In a fork, configure the
+base branch to track the integration remote using ordinary Git tracking.
+Publication and stacked PR remotes still have GitHub/origin assumptions.
+
+`lf sync --manual main` integrates an explicit local branch without fetching an
+unrelated remote. An explicitly selected remote-tracking target fetches that
+remote; a fetch failure remains an error.
 
 ### Context flags
 
@@ -196,7 +229,7 @@ lf wave status shipper
 lf ps --json
 ```
 
-Author `wave/shipper/GOAL.md` with an objective and operating guidance. Optional
+Author `.lf/wave/shipper/GOAL.md` with an objective and operating guidance. Optional
 `crons:` schedules recurring commands; `pm:` connects shared planning. Each
 `wave-operate` invocation reviews the plan and keeps every started Task moving.
 Tasks own implementation in stable worktrees; `lf land` hands off delivery and

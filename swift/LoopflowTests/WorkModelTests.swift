@@ -206,7 +206,7 @@ struct WorkModelTests {
         defer { try? FileManager.default.removeItem(at: repo) }
         for name in ["infrastructure", "intelligence", "product"] {
             let wave = repo
-                .appendingPathComponent("wave", isDirectory: true)
+                .appendingPathComponent(".lf/wave", isDirectory: true)
                 .appendingPathComponent(name, isDirectory: true)
             try FileManager.default.createDirectory(at: wave, withIntermediateDirectories: true)
             try Data("# \(name)\n".utf8).write(to: wave.appendingPathComponent("GOAL.md"))

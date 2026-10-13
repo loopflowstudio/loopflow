@@ -1033,7 +1033,7 @@ if [ -f "$state/merged-$number" ]; then
 fi
 result=$(printf '{{"id":"PR_release","isMergeQueueEnabled":false,"autoMergeRequest":null,"mergeQueueEntry":null,"mergedAt":null,"number":%s,"state":"%s","isDraft":false,"mergeStateStatus":"CLEAN","mergeCommit":%s,"headRefOid":"%s","headRefName":"%s","baseRefName":"main","url":"https://example.com/pr/%s","title":"Release","body":"Release notes","statusCheckRollup":[]}}' "$number" "$status" "$merge" "$head" "$branch" "$number")
 if [ "$2" = list ]; then printf '[%s]\n' "$result";
-elif [ "$1 $2" = "api graphql" ]; then printf '{{"data":{{"repository":{{"pullRequest":%s}}}}}}\n' "$result";
+elif [ "$1 $2" = "api graphql" ]; then printf '{{"data":{{"repository":{{"mergeCommitAllowed":true,"squashMergeAllowed":true,"rebaseMergeAllowed":true,"pullRequest":%s}}}}}}\n' "$result";
 else printf '%s\n' "$result"; fi
 "#,
         state = state.display()
@@ -2153,6 +2153,7 @@ fn release_run_reintegrates_a_dirty_existing_pr() {
     git(&repo, &["add", "RELEASE_NOTES.md"]);
     git(&repo, &["commit", "-m", "release: v0.9.2"]);
     git(&repo, &["push", "-u", "origin", release_branch]);
+    let published_head = git_output(&repo, &["rev-parse", "HEAD"]);
     git(&repo, &["checkout", &main_branch]);
     git(&repo, &["branch", "-D", release_branch]);
     git(
@@ -2216,6 +2217,11 @@ fn release_run_reintegrates_a_dirty_existing_pr() {
     );
     let integrated_parent = git_output_bare(&repo, &["rev-parse", &format!("{integrated_head}^")]);
     assert_eq!(receipt.commit, integrated_head);
+    assert_eq!(
+        git_output_bare(&repo, &["merge-base", &published_head, &integrated_head]),
+        published_head,
+        "release retries must retain published history"
+    );
     assert_eq!(
         fs::read_to_string(&prepare_runs)
             .expect("read preparation runs")

@@ -13,7 +13,7 @@ This is the canonical long-form guide for two authors:
 
 - **Loopflow maintainers** writing builtin skills, goals, operating
   guidance, and prompt assembly.
-- **Loopflow customers** writing repo-local `.lf/skills/*.md` and `wave/<name>/GOAL.md` files.
+- **Loopflow customers** writing repo-local `.lf/skills/*.md` and `.lf/wave/<name>/GOAL.md` files.
 
 Agents executing ordinary work do not need this whole document. `PROMPTS.md` is
 not auto-injected into normal runs and should not be added to repo-wide
@@ -402,7 +402,7 @@ remains, record the blocker instead of inventing work.
 
 ### Two kinds of goals
 
-**Action goals** (adapt, wave-plan, ship): What mode to operate in. These can reference loopflow-specific process—reading `wave/`, updating frontmatter status, choosing between modes. They're about *using the system*.
+**Action goals** (adapt, wave-plan, ship): What mode to operate in. These can reference loopflow-specific process—reading `.lf/wave/`, updating frontmatter status, choosing between modes. They're about *using the system*.
 
 **Perspective goals** (ux, infra, craft, ceo): How to think. These should be broad and transferable—they'd make sense at any company. Focus on judgment, values, and trade-offs. Minimal process.
 
@@ -416,7 +416,7 @@ Action goals can include light process for system navigation. Perspective goals 
 
 ### Abstraction level
 
-**Loopflow system concepts are fine:** `wave/`, `scratch/`, frontmatter, areas, flows—these are part of how loopflow works and belong in goals.
+**Loopflow system concepts are fine:** `.lf/wave/`, `scratch/`, frontmatter, areas, flows—these are part of how loopflow works and belong in goals.
 
 **Product-specific details should be abstracted:** Don't write "use `.monospacedDigit()` for numbers"—write "ensure numeric data is readable." Don't write "44pt tap targets"—write "touch targets big enough for people on mobile and agents using browser tools."
 

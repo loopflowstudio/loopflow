@@ -1,7 +1,7 @@
 //! Real terminal dispatch with providers replaced by argument-limited scripts.
 #![cfg(unix)]
 
-mod support;
+use crate::support;
 
 use std::fs;
 use std::io::Write;
@@ -23,7 +23,7 @@ fn terminal_context_refreshes_without_replacing_instructions_or_losing_failed_se
     repo.create_file("scratch/small.md", "CURRENT_SCRATCH");
     let codex_command = regex::Regex::new(r#""command" = ("(?:[^"\\]|\\.)*")"#).unwrap();
     for harness in ["claude", "codex"] {
-        repo.create_file("wave/fixture/MEMORY.md", "CURRENT_WAVE_MEMORY");
+        repo.create_file(".lf/wave/fixture/MEMORY.md", "CURRENT_WAVE_MEMORY");
         let home = tempfile::tempdir().unwrap();
         let store =
             loopflow::store::sqlite::SqliteStore::new(&home.path().join("machine/loopflow.db"))
@@ -159,7 +159,7 @@ exit 23
         assert!(first.contains("source=\"scratch/large.md\" excerpt=\"start\""));
         assert!(!first.contains(&large));
         repo.create_file("scratch/small.md", "FRESH_SCRATCH");
-        repo.create_file("wave/fixture/MEMORY.md", "FRESH_WAVE_MEMORY");
+        repo.create_file(".lf/wave/fixture/MEMORY.md", "FRESH_WAVE_MEMORY");
         let compact = invoke("compact");
         assert!(compact.contains("FRESH_WAVE_MEMORY"));
         assert!(!compact.contains("CURRENT_WAVE_MEMORY"));

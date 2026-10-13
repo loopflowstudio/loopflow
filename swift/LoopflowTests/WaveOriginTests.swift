@@ -61,7 +61,7 @@ struct WaveOriginTests {
     func subdirectoryDoesNotWalkUp() throws {
         try withTempDir { root in
             let repo = root.appendingPathComponent("repo", isDirectory: true)
-            let subdir = repo.appendingPathComponent("wave", isDirectory: true)
+            let subdir = repo.appendingPathComponent(".lf/wave", isDirectory: true)
             try FileManager.default.createDirectory(at: subdir, withIntermediateDirectories: true)
             try git(["init", "-q"], at: repo)
 

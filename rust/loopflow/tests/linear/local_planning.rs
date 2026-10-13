@@ -337,7 +337,7 @@ fn stored_rotation_commits_all_waves_and_serializes_new_work() {
         assert!(project == destination || project == &predecessors[0]["id"]);
         assert!(status["execution"]["worktree"].is_null());
     }
-    assert!(repo.path().join("wave").exists());
+    assert!(repo.path().join(".lf/wave").exists());
 }
 
 #[test]
@@ -589,7 +589,7 @@ fn nested_waves_create_files_and_store_project_identity() {
         ],
     );
     assert!(by_id["id"].as_str().unwrap().starts_with("task_"));
-    assert!(repo.path().join("wave").exists());
+    assert!(repo.path().join(".lf/wave").exists());
     assert!(!repo.path().join(".lf/config.yaml").exists());
     assert!(!repo.path().join(".lf/workflows").exists());
 }
@@ -739,8 +739,8 @@ fn public_local_planning_survives_restart_with_generated_identity() {
     );
     assert_eq!(wave["tasks"]["items"].as_array().unwrap().len(), 2);
     assert_eq!(wave["project_readiness"]["state"], "ready");
-    let goal = repo.path().join("wave/inbox/GOAL.md");
-    let memory = repo.path().join("wave/inbox/MEMORY.md");
+    let goal = repo.path().join(".lf/wave/inbox/GOAL.md");
+    let memory = repo.path().join(".lf/wave/inbox/MEMORY.md");
     std::fs::write(&goal, "## Objective\n\nKeep private parser work local.\n").unwrap();
     std::fs::write(&memory, "Retain the escaped quote.").unwrap();
     let context = lf(
@@ -752,7 +752,7 @@ fn public_local_planning_survives_restart_with_generated_identity() {
         .as_array()
         .unwrap()
         .iter()
-        .find(|entry| entry["source"] == "wave/inbox/MEMORY.md")
+        .find(|entry| entry["source"] == ".lf/wave/inbox/MEMORY.md")
         .unwrap();
     assert_eq!(memory_usage["bytes"], 25);
     let edited_wave = lf(
@@ -874,7 +874,7 @@ fn public_local_planning_survives_restart_with_generated_identity() {
     .output()
     .unwrap();
     assert!(!rejected.status.success());
-    assert!(repo.path().join("wave").exists());
+    assert!(repo.path().join(".lf/wave").exists());
     assert!(!repo.path().join(".lf/config.yaml").exists());
     assert!(!repo.path().join(".lf/workflows").exists());
     let changed = Command::new("git")
@@ -1258,7 +1258,7 @@ fn project_creation_binding_and_activation_save_offline() {
             )
             .unwrap()
             .is_none());
-        assert!(repo.path().join("wave").exists());
+        assert!(repo.path().join(".lf/wave").exists());
         assert_eq!(store.list_projects(Some(wave.id())).unwrap().len(), 1);
     }
 }
@@ -1814,7 +1814,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
                 .any(|change| change["field"] == "krs" && change["state"] == "adopted_linear"));
         }
         assert!(store.list_tasks(None).unwrap().is_empty());
-        assert!(!repo.path().join("wave").exists());
+        assert!(!repo.path().join(".lf/wave").exists());
         assert!(!repo.path().join(".lf/workflows").exists());
     }
 }
@@ -2168,7 +2168,7 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             .all(|task| task.worktree.is_none()));
         let (sessions,flows): (i64,i64) = conn.query_row("SELECT (SELECT count(*) FROM agent_sessions),(SELECT count(*) FROM task_workflows)",[],|row|Ok((row.get(0)?,row.get(1)?))).unwrap();
         assert_eq!((sessions, flows), (0, 0));
-        assert!(!repo.path().join("wave").exists());
+        assert!(!repo.path().join(".lf/wave").exists());
     }
 }
 
@@ -2309,6 +2309,12 @@ fn rotation_saves_membership_and_pending_effects_offline() {
         let placement = place_wave_on_remote(&store, &db, wave.id());
         let successor = loopflow::durable::ProjectId::new();
         let file = home.path().join("rotation.json");
+        // Backlog may be newer than started work; rotation does not depend on display order.
+        db.execute(
+            "UPDATE tasks SET updated_at=updated_at+60 WHERE id=?1",
+            [backlog.id.as_str()],
+        )
+        .unwrap();
         let plan = serde_json::json!({"name":"Next", "waves":[{"wave_id":wave.id(),"successor_id":successor,"create":true,"project_name":"Next", "workflow":"","metric_targets":[],"krs":[{"text":"Preserve work","holds":false}]}]});
         std::fs::write(&file, serde_json::to_vec(&plan).unwrap()).unwrap();
         let args = [
@@ -2334,9 +2340,15 @@ fn rotation_saves_membership_and_pending_effects_offline() {
                 "--json",
             ],
         );
-        assert_eq!(preview["waves"][0]["tasks"][0]["disposition"], "move");
+        let preview_decision = preview["waves"][0]["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|decision| decision["task"]["id"] == active.id.as_str())
+            .unwrap();
+        assert_eq!(preview_decision["disposition"], "move");
         let expected = store.task(&active.id).unwrap().unwrap();
-        let preview_task = &preview["waves"][0]["tasks"][0]["task"];
+        let preview_task = &preview_decision["task"];
         assert_eq!(preview_task, &serde_json::to_value(&expected).unwrap());
         assert_eq!(preview_task["id"], active.id.as_str());
         assert_eq!(preview_task["due_date"], "2026-12-31");
@@ -2370,8 +2382,14 @@ fn rotation_saves_membership_and_pending_effects_offline() {
         assert_eq!(revision(), before);
         let applied = lf(repo.path(), home.path(), &args);
         let moved = store.task(&active.id).unwrap().unwrap();
+        let applied_decision = applied["waves"][0]["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|decision| decision["task"]["id"] == active.id.as_str())
+            .unwrap();
         assert_eq!(
-            applied["waves"][0]["tasks"][0]["task"],
+            applied_decision["task"],
             serde_json::to_value(&moved).unwrap()
         );
         assert_eq!(moved.project_id, successor);
@@ -2570,7 +2588,7 @@ fn rotation_saves_membership_and_pending_effects_offline() {
             placement
         );
         assert_eq!(retained_execution(), execution);
-        assert!(repo.path().join("wave").exists());
+        assert!(repo.path().join(".lf/wave").exists());
     }
 }
 
@@ -2813,7 +2831,7 @@ fn refiling_saves_membership_offline_and_retains_inbound_changes() {
                 placement
             );
         }
-        assert!(repo.path().join("wave").exists());
+        assert!(repo.path().join(".lf/wave").exists());
     }
 }
 
@@ -2823,7 +2841,7 @@ fn wave_documents_follow_files_while_workflows_remain_stored() {
         let repo = TestRepo::new();
         let home = tempfile::tempdir().unwrap();
         let wave_id = loopflow::id::WaveId::new();
-        let root = repo.path().join("wave/tools");
+        let root = repo.path().join(".lf/wave/tools");
         std::fs::create_dir_all(root.join("parser")).unwrap();
         std::fs::create_dir_all(repo.path().join(".lf/workflows")).unwrap();
         if connected {
@@ -2880,17 +2898,23 @@ fn wave_documents_follow_files_while_workflows_remain_stored() {
             &["context", "--wave", "tools/parser", "--json"],
         );
         let text = context.to_string();
-        assert!(text.contains("wave/tools/MEMORY.md"), "{text}");
-        assert!(text.contains("wave/tools/parser/MEMORY.md"), "{text}");
+        assert!(text.contains(".lf/wave/tools/MEMORY.md"), "{text}");
+        assert!(text.contains(".lf/wave/tools/parser/MEMORY.md"), "{text}");
         assert_eq!(std::fs::read_to_string(root.join("GOAL.md")).unwrap(), goal);
-        std::fs::rename(repo.path().join("wave"), repo.path().join("authored-wave")).unwrap();
+        std::fs::rename(
+            repo.path().join(".lf/wave"),
+            repo.path().join("authored-wave"),
+        )
+        .unwrap();
         std::fs::remove_file(repo.path().join(".lf/workflows/finish.yaml")).unwrap();
         let absent = lf(
             repo.path(),
             home.path(),
             &["context", "--wave", "tools/parser", "--json"],
         );
-        assert!(!absent.to_string().contains("wave/tools/parser/MEMORY.md"));
+        assert!(!absent
+            .to_string()
+            .contains(".lf/wave/tools/parser/MEMORY.md"));
         let source = lf(
             repo.path(),
             home.path(),
@@ -2950,7 +2974,7 @@ fn wave_documents_follow_files_while_workflows_remain_stored() {
         );
         assert_eq!(status["wave"]["goal"], "");
         assert_eq!(status["tasks"]["items"][0]["task"]["id"], task_id);
-        assert!(!repo.path().join("wave").exists());
+        assert!(!repo.path().join(".lf/wave").exists());
         assert_eq!(
             std::fs::read_to_string(repo.path().join("authored-wave/tools/GOAL.md")).unwrap(),
             goal
@@ -3526,12 +3550,12 @@ fn wave_files_are_checkout_local_and_edits_reach_status_without_ensure() {
         home.path(),
         &["wave", "ensure", "local", "--json"],
     );
-    let goal = checkout.join("wave/local/GOAL.md");
-    let memory = checkout.join("wave/local/MEMORY.md");
+    let goal = checkout.join(".lf/wave/local/GOAL.md");
+    let memory = checkout.join(".lf/wave/local/MEMORY.md");
     assert!(goal.is_file());
     assert!(memory.is_file());
     assert!(
-        !repo.path().join("wave/local").exists(),
+        !repo.path().join(".lf/wave/local").exists(),
         "creation must not write main"
     );
     std::fs::write(&goal, "## Objective\n\nThe checkout objective.\n").unwrap();
@@ -3562,7 +3586,7 @@ fn wave_files_are_checkout_local_and_edits_reach_status_without_ensure() {
         .as_array()
         .unwrap()
         .iter()
-        .find(|entry| entry["source"] == "wave/local/MEMORY.md")
+        .find(|entry| entry["source"] == ".lf/wave/local/MEMORY.md")
         .unwrap();
     assert_eq!(usage["bytes"], "A freshly edited decision.".len());
     let removed = command(

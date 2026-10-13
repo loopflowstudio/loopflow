@@ -74,7 +74,7 @@ case "$1 ${2-}" in
         merge_commit=null
         [ "$merged" = false ] || merge_commit="{\"oid\":\"$head\"}"
         cat <<JSON
-{"data":{"repository":{"pullRequest":{"id":"PR_fixture","number":1,"url":"https://github.com/fixture/local/pull/1","state":"$state","isDraft":false,"headRefName":"$branch","headRefOid":"$head","mergedAt":$merged_at,"mergeCommit":$merge_commit,"mergeStateStatus":"CLEAN","isMergeQueueEnabled":false,"autoMergeRequest":$auto,"mergeQueueEntry":null}}}}
+{"data":{"repository":{"mergeCommitAllowed":true,"squashMergeAllowed":true,"rebaseMergeAllowed":true,"pullRequest":{"id":"PR_fixture","number":1,"url":"https://github.com/fixture/local/pull/1","state":"$state","isDraft":false,"headRefName":"$branch","headRefOid":"$head","mergedAt":$merged_at,"mergeCommit":$merge_commit,"mergeStateStatus":"CLEAN","isMergeQueueEnabled":false,"autoMergeRequest":$auto,"mergeQueueEntry":null}}}}
 JSON
         exit 0 ;;
     esac ;;

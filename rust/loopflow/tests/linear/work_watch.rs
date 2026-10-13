@@ -413,22 +413,26 @@ fn a_task_committed_elsewhere_appears_once_and_bursts_converge() {
     );
     eprintln!("write-to-frame: {:?}", committed.elapsed());
 
-    // Twenty transactions of many rows each: few frames, and the last one is
-    // what a fresh read prints.
+    // These transactions may span several debounce windows on a busy machine.
+    // Published states must advance without repeats and converge to a fresh read.
     for count in 2..=21 {
         home.plan(count);
     }
-    let mut frames = 0;
+    let mut last_count = 1;
     let mut last = None;
     for frame in watch.parts(Duration::from_secs(3)) {
         if let WorkContent::Planning(Some(part)) = frame.content {
-            frames += 1;
+            let count = identifiers(&part.roadmap).len();
+            assert!(
+                count > last_count,
+                "repeated or stale planning state: {count} after {last_count}"
+            );
+            last_count = count;
             last = Some(part.roadmap);
         }
     }
-    assert!((1..=5).contains(&frames), "{frames} planning frames");
+    assert_eq!(last_count, 21);
     let last = last.unwrap();
-    assert_eq!(identifiers(&last).len(), 21);
     let fresh = lf(home.path(), &["wave", "show", "--all", "--json"])
         .output()
         .unwrap();

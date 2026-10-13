@@ -258,15 +258,6 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
     format!("{}\n\n[diff truncated]", &text[..end])
 }
 
-fn push_with_fallback(repo: &Path, inherit_git: &impl Fn(&mut Command)) -> OpsResult<()> {
-    if let Err(_err) = push(repo, false, inherit_git) {
-        if let Err(force_err) = push(repo, true, inherit_git) {
-            return Err(OpsError::Git(force_err));
-        }
-    }
-    Ok(())
-}
-
 fn ensure_draft_pr(repo: &Path, progress: &impl Progress) -> OpsResult<()> {
     if !crate::ops::pr::gh_available() {
         return Ok(());
@@ -321,7 +312,7 @@ fn push_with_upstream_if_needed_locked(
         .output()?;
 
     if output.status.success() {
-        push_with_fallback(repo, inherit_git)?;
+        push(repo, false, inherit_git)?;
         return Ok(());
     }
 

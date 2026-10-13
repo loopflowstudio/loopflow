@@ -2,16 +2,10 @@
 use std::path::Path;
 
 use crate::error::GitError;
-use crate::git::{get_default_branch, git_stdout, merge_base, rev_parse};
+use crate::git::{git_stdout, merge_base};
 
 pub(crate) fn base(repo: &Path) -> Result<String, GitError> {
-    let branch = get_default_branch(repo)?;
-    let remote = format!("refs/remotes/origin/{branch}");
-    let target = if rev_parse(repo, &remote).is_ok() {
-        remote
-    } else {
-        format!("refs/heads/{branch}")
-    };
+    let target = crate::git::integration_base(repo)?;
     merge_base(repo, "HEAD", &target)
 }
 

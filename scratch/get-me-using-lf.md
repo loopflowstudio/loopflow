@@ -472,10 +472,8 @@ Preserve Task identity, history, checkout and Workflow. Default active navigatio
 omits paused Tasks; the Wave plan keeps them reachable. Resume clears the hold,
 never launches execution. Pause does not kill an already-running process.
 
-Use the common Work writer for a portable Task pause flag, separate from Linear's
-provider disposition. Derive shared TaskState::Paused; CLI pause/resume and Desktop
-consume that owner. Block subsequent Task Flow/automatic repair launches while
-paused. Keep historical completion and abandonment independently readable.
+The common writer owns portable Paused, independent of Linear disposition.
+CLI/Desktop share it; pause blocks future Flow/automatic repair launches.
 Test pause persistence, retained execution and sidebar filtering before pausing LOO-389.
 October 13 native recheck: CI opens its correct Codex conversation and input prompt;
 LOO-380 retains Claude and its unsent draft. LOO-312/367 still show hook review;

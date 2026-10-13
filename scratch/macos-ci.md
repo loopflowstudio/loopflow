@@ -4,6 +4,14 @@ October 13, 2026 — lf-ddf2d53. Jack Heart authorized continued CI implementati
 and delivery. The shell-overlap prototype is rejected under the accepted matched
 cold/warm criterion; no candidate remains for gate or landing.
 
+October 13 targeted iteration rejected package-only codegen-units=256. Matched
+serial CLI/copy/sign cold pairs totaled 1.836s slower; changed-source warm pairs
+saved 3.660s. Frontend compilation dominates (21.49–26.56s), backend 3.60–4.77s.
+No full Xcode trial qualifies. [Compiler review](../docs/reviews/ci-under-five-minutes.md#october-13-follow-up-control-cli-code-generation-trial-rejected)
+owns reproducible inputs, phase timings, resource accounting and rejection.
+Delete — do not maintain: rejected trial profile override; absent from production.
+Next unresolved candidate: a small frontend work reduction; no mechanism accepted.
+
 Remaining implementation: a small macOS critical-path reduction with a reliable
 matched cold/warm gain; no replacement mechanism is accepted. A qualifying
 candidate still needs both process failures propagated, orphan-free cancellation,
@@ -31,4 +39,4 @@ Prototype: `34c40623b19d7176a3f8e452aa2bac9c8e753013`;
 raw data: `/tmp/macos-ci-*`. Any later preparation must match Xcode's SDK,
 deployment and shell toolchain; process groups alone did not reap its compilers.
 
-Check: `git diff --check` PASS; documentation reconciliation only, no build/test rerun.
+Check: eight matched CLI builds/copy/sign samples PASS, performance FAIL; strict helper signature and `git diff --check` PASS; gate/hosted CI deferred until a qualifying candidate.

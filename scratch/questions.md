@@ -1,6 +1,7 @@
 # Remaining uncertainty
 
-October 13 — Machine contention/shared Xcode service reuse prevent reliable
-attribution of elapsed variation despite similar preparation CPU. The rejected
-overlap does not satisfy cold/warm acceptance. [The current plan](macos-ci.md)
-links preserved evidence; a reliable changed-source reduction remains unresolved.
+October 13 — Package-only codegen-units=256 failed matched cold acceptance
+(1.836s slower overall); warm saved 3.660s. Frontend compilation dominates;
+no small frontend work reduction is selected. Machine contention limits elapsed
+attribution. [The current plan](macos-ci.md) links exact rejection evidence.
+Neither this trial nor rejected shell overlap qualifies for gate or delivery.

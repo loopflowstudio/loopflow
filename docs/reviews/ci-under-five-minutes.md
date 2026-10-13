@@ -1050,3 +1050,87 @@ scripts use `/tmp/macos-ci-*`. The remaining blocker is a reliable macOS margin
 on changed-source builds, without adding unjustified scheduling/cleanup
 complexity. lf-ddf2d53 remains unfinished; lf-12be237 still owns the independent
 ten-real-run, queue and push-to-merged demonstration. Five minutes is not waived.
+
+
+## October 13 follow-up: control CLI code-generation trial rejected
+
+Jack Heart authorized the targeted follow-up after shell overlap failed. This
+iteration measured the existing control CLI rather than repeating overlap. Source
+`38e0b19b6f160de356d2270f0c5c000bff6422a4`, unchanged Cargo.lock, rustup
+rustc 1.99.0 (`b940084d7`, aarch64-apple-darwin), dev/test debug=0,
+nonincremental ordinary dev optimization, development provenance and
+validation-only migration authority. Xcode remains 26.2 (17C52), SDK 26.2;
+this trial measures its serial Rust helper segment, not an Xcode build.
+
+The initial empty compiled target built in **55.66s** with downloaded registry
+sources available. Cargo's stable `--timings` report assigns the library 26.47s:
+22.29s frontend, 4.18s code generation. The build-script run initially took
+8.57s, then 0.62–0.70s in matched trials; its initial elapsed cost is not assumed
+to recur. More backend parallelism therefore has limited headroom.
+
+Trial: package-only `profile.dev.package.loopflow.codegen-units=256`, passed
+through Cargo's `--config`; no tracked profile or production script was changed.
+It retains optimization, assertions, source, target, build-script authority and
+all dependency profiles. The first unmatched candidate library took 24.98s
+(21.22s frontend, 3.76s code generation), which was insufficient for adoption.
+
+| Matched inputs and order | Ordinary CLI + copy/sign, seconds | 256 units + copy/sign, seconds | Saving, seconds |
+|---|---:|---:|---:|
+| Source-cold: baseline then candidate | 30.644 | 32.945 | -2.301 |
+| Source-cold: candidate then baseline | 28.695 | 28.230 | 0.465 |
+| Changed-source warm: candidate then baseline | 31.333 | 29.853 | 1.480 |
+| Changed-source warm: baseline then candidate | 34.438 | 32.258 | 2.180 |
+
+Cold pairs total **1.836s slower**; warm pairs save **3.660s**. Cold improvement
+is neither consistent nor positive overall, so the required cold/warm outcome
+fails. No numeric criterion is waived. The first cold candidate also spent 2.98s
+compiling the build script versus 0.50–0.52s in the other cold samples; the whole
+segment counts, without excluding this contrary sample. Concurrent unrelated
+Rust work and machine load limit attribution. Frontend elapsed varies
+21.49–26.56s and code generation 3.60–4.77s; these are Cargo phase boundaries,
+not an independent compiler CPU profile.
+
+Reproduction: use the same target path and toolchain as the Xcode post-build
+script, `target/dev-app-control`; set `CARGO_PROFILE_DEV_DEBUG=0`,
+`CARGO_PROFILE_TEST_DEBUG=0`, `LOOPFLOW_BUILD_PROVENANCE=development`, and
+`LOOPFLOW_MIGRATION_AUTHORITY=validation_only`. Build with:
+
+```sh
+cargo build --locked --bin lf --target-dir target/dev-app-control --timings
+cargo --config profile.dev.package.loopflow.codegen-units=256 build \
+  --locked --bin lf --target-dir target/dev-app-control --timings
+```
+
+After dependency preparation,
+`cargo clean -p loopflow --target-dir target/dev-app-control` produces a
+source-cold snapshot. Restore that identical
+snapshot with APFS `cp -cRp` at the same path before each cold sample. Capture
+separate complete ordinary/candidate output snapshots for warm samples, then
+restore the corresponding original snapshot before each warm sample. Replace
+`git could not resolve {upstream}` with `CI benchmark: git could not resolve
+{upstream}` in `rust/loopflow/src/build_info.rs`, with identical contents and
+nanosecond timestamps for both variants. This forces real current-source
+library/CLI compilation. Time Cargo, copy the resulting `debug/lf` into a
+disposable bundle, and ad-hoc sign it with `codesign --force --sign -`. Input
+snapshot restoration is experimental setup outside the timer; the candidate
+adds no production preparation or background cleanup. All eight samples built
+and signed successfully; final strict helper signature verification passed.
+Native Cargo `(user+sys)` totals: cold ordinary 78.31s / candidate 77.92s;
+warm ordinary 80.23s / candidate 80.15s. Peak RSS was 3.44–3.45 GB ordinary,
+3.23–3.25 GB candidate. These are local process-tree figures, not hosted cost.
+
+Raw records and the replay script remain at
+`/tmp/macos-ci-codegen-snapshots/results.jsonl`,
+`/tmp/macos-ci-codegen-bench.py`, and `/tmp/macos-ci-codegen-*.log`.
+Temporary Rust source edits were restored; the ordinary output snapshot was
+restored; no compiler from this checkout remained. No installed Home or app was
+modified. No trial profile, wrapper or duplicated production implementation
+remains, and no test was removed.
+
+Review finding: backend parallelism does not establish useful source-cold
+margin, while frontend compilation dominates this segment. Reject before
+changing the Xcode cache namespace or adding configuration. Full Xcode timing,
+app signatures, runtime acceptance, gate, hosted CI and verified delivery were
+not attempted for this rejected candidate. The next mechanism needs a small
+frontend work reduction with reliable matched cold/warm proof. lf-ddf2d53 remains
+unfinished; lf-12be237 retains ten-real-run, queue and push-to-merged acceptance.

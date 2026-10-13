@@ -821,3 +821,32 @@ shared module, four representative context/Session/planning/publication proofs
 passed (14.350s); formatting and all-target Clippy with warnings denied pass.
 Collected names and ignored flags match the original inventory exactly. Hosted
 Linux collection, archive size and full timing remain the next evidence.
+
+### Hosted consolidation result and remaining waits
+
+[Run 38422834854](https://github.com/loopflowstudio/loopflow/actions/runs/38422834854)
+passed at `19544d4047` in **5:21**. Integration archive bytes fell from
+379,860,559 to **196,456,520**, about 48%; the library archive is 75,676,088
+bytes. Total downloads across the unchanged nine jobs fall from approximately
+1.59 GB to **1.04 GB**. Build/archive steps fell from 124 to 110 seconds,
+but job setup, post steps and completion overhead left build completion at 2:46.
+Every integration partition finished by 4:57; the last library partition
+finished at 5:15 and the aggregate at 5:21. Runner occupancy was
+43:36; no coverage was removed.
+
+The last library partition ran 390 cases in 119.174s at 343% CPU utilization
+on the four-CPU runner. The next candidate uses ten rather than six test slots
+on the same runners to fill waiting time; this is a measured scheduling
+experiment, not a claimed gain before CI. The exclusive fleet-receipt override
+continues to reserve all configured slots.
+
+Partition zero spent 74 seconds on quietness, then 31 seconds on checkout
+refresh. The next candidate overlaps these independent, network-isolated
+commands on the same runner. Each retains its command and assertions; the
+shell waits for both, prints checkout output and returns failure if either
+command fails. Four quietness workers and observation windows remain unchanged.
+
+Validation: 45 CI-proof/release-automation tests and actionlint pass. A shell
+check exercised both-success and each/both-failure combinations under errexit;
+only both-success returned zero. Rust sources are unchanged from the full hosted
+pass. The next full run owns concurrency and elapsed-time acceptance.

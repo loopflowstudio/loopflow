@@ -476,7 +476,7 @@ The common writer owns portable Paused, independent of Linear disposition.
 CLI/Desktop share it; pause blocks future Flow/automatic repair launches.
 Verify native pause before applying LOO-389.
 October 13 native recheck: CI opens its correct Codex conversation and input prompt;
-LOO-380 retains Claude and its unsent draft. LOO-312/367 still show hook review;
+LOO-380 retains Claude and its draft. LOO-312/367 initially showed hook review;
 Jack trusted LOO-312 on October 13; native input/tool execution now appears.
 LOO-367 still shows its own trust prompt; no choice submitted there.
 
@@ -484,10 +484,9 @@ Paused is not deployed: main's schema needs supported installation; preserve
 active clients. LOO-427 completed through `lf task complete` after verifying merge
 `9211b47c47bf986348af00b5a546c7cce2048c8c`; native sidebar removed it.
 Checkout/unknown Process `f1482ca7-35a6-4bea-89f8-1f2d5c3de5b2` remain.
-Pause fixture failures and historical journal-seeding repair:
+Earlier failures/repairs:
 `81ae973322:scratch/get-me-using-lf.md`, **Paused**.
 Local checks/limits: `9e79fa4970:scratch/get-me-using-lf.md`, **Paused**.
-Standalone checks pass; native acceptance remains unproved.
 
 Title leak: GUI now scrubs inherited CMUX keys to prevent host renaming;
 eight launcher tests pass (9e79fa4970). Deployment pending.

@@ -486,3 +486,45 @@ local profiles and release/nightly jobs are untouched. This trades source-line
 detail in CI backtraces for smaller binaries. Its archive-size and timing gains
 remain unmeasured, and the changed dependency profile can cause a cold build.
 Raw log: `/tmp/loopflow-ci-baseline-lf12be237/38331887738.log`.
+
+## Debug-symbol reduction: full green run in 5:24
+
+[Run 38341497079](https://github.com/loopflowstudio/loopflow/actions/runs/38341497079)
+passed at head `eb58dc3a59`. Run creation was 03:23:42 UTC on October 13;
+the required aggregate finished at 03:29:06, **5:24** later. This is one
+experimental PR run, not the ten consecutive typical-code runs required for
+acceptance. Merge-queue and push-to-merge results remain unmeasured.
+
+The archive shrank from 2,124,316,446 to **414,562,554 bytes**. Shared build
+occupied **2:12**, including 108s compilation and 4.25s packaging. Partition
+8 extracted it in 5.52s, versus 53.16s on the earlier measured partition.
+Different source/cache/runner conditions prevent assigning the entire wall-time
+improvement to debug symbols, but the artifact reduction is directly observed.
+
+| Remaining path | Job occupancy | Finish after run creation | Measured work |
+|---|---:|---:|---|
+| Installation | 5:10 | **5:20** | Managed compilation 178s; published compilation 63s |
+| Shared Rust build + partition 8 | 2:12 + 2:49 | **5:13** | Partition download 35s, extraction 5.52s, tests 114.918s |
+| macOS process discovery | 4:16 | 4:31 | Check step 232s |
+| Xcode | 4:04 | 4:20 | Below the target in this run |
+| Swift | 3:41 | 3:58 | CLI build 94s, Desktop 61s |
+| Smoke and reconnect | 3:46 | 3:56 | Both reconnect proofs retained |
+
+Summed non-skipped job occupancy was **45:48**, compared with the original
+**46:44** and first candidate's **34:29**. Parallel execution materially reduces
+waiting, but has not demonstrated a comparable reduction in total runner use.
+These are elapsed runner-seconds across Linux and macOS, not CPU-seconds or a
+dollar estimate. Platform mix and changing source/cache state matter.
+
+The next useful measurements concern installation dependency reuse on native
+Linux storage and Rust artifact transfer. The earlier Mac bind-mount rebuild
+does not establish Linux behavior. All eight Rust partitions currently receive
+the full archive. Historical cases split into 1,950 library cases consuming
+2,220 case-seconds and 596 other cases consuming 1,126 case-seconds after
+excluding reconnect; this is insufficient evidence to choose separate archive
+groups without measuring their payload sizes and balancing execution.
+
+No coverage was removed. No broader local test rerun is needed for this evidence
+update. Raw API records: `/tmp/ci-no-debug-{run,jobs}-rest.json`; artifact record:
+`/tmp/ci-no-debug-artifacts.json`; build, installation and partition logs:
+`/tmp/ci-no-debug-{build,installation,shard8}.log`.

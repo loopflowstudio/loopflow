@@ -296,11 +296,6 @@ jobs:
       - name: Test checkout observation's read-only sandbox
         if: needs.merge-proof.outputs.reuse != 'true'
         run: uv run pytest python/tests/test_desktop_performance.py::test_checkout_observation_preserves_read_boundary_and_detects_changes
-      - name: Test macOS installation process discovery
-        if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
-        run: |
-          cargo test -p loopflow --lib app_process_tests --no-run
-          uv run python scripts/test_network.py cargo test --offline -p loopflow --lib app_process_tests
       - name: Build Desktop and run headless model and view tests
         if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true' || steps.swift-cache.outputs.cache-hit != 'true'
         shell: bash
@@ -339,6 +334,28 @@ jobs:
             swift/.build
             ~/Library/Caches/org.swift.swiftpm
           key: ${{ steps.swift-inputs.outputs.key }}
+
+  macos-process-test:
+    needs: [merge-proof, scratch-clear]
+    if: ${{ !cancelled() && needs.scratch-clear.outputs.candidate == 'true' }}
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: astral-sh/setup-uv@v7
+      - name: Fingerprint workspace build profiles
+        id: rust-profiles
+        run: uv run python scripts/rust_profile_cache_key.py >> "$GITHUB_OUTPUT"
+      - uses: Swatinem/rust-cache@v2
+        id: rust-cache
+        with:
+          key: macos-process-${{ steps.rust-profiles.outputs.key }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Test macOS installation process discovery
+        if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
+        run: |
+          /usr/bin/time -l cargo test -p loopflow --lib app_process_tests --no-run
+          uv run python scripts/test_network.py cargo test --offline -p loopflow --lib app_process_tests
 
   loopflow-ui-test:
     needs: [merge-proof, scratch-clear]
@@ -425,6 +442,7 @@ jobs:
       - e2e-smoke
       - task-installation
       - swift-test
+      - macos-process-test
       - loopflow-ui-test
     steps:
       - name: Aggregate test results
@@ -441,6 +459,7 @@ jobs:
           E2E_SMOKE: ${{ needs.e2e-smoke.result }}
           TASK_INSTALLATION: ${{ needs.task-installation.result }}
           SWIFT_TEST: ${{ needs.swift-test.result }}
+          MACOS_PROCESS_TEST: ${{ needs.macos-process-test.result }}
           LOOPFLOW_UI_TEST: ${{ needs.loopflow-ui-test.result }}
         run: |
           failures=0
@@ -481,6 +500,7 @@ jobs:
           check_result "e2e-smoke" "$E2E_SMOKE"
           check_result "task-installation" "$TASK_INSTALLATION"
           check_result "swift-test" "$SWIFT_TEST"
+          check_result "macos-process-test" "$MACOS_PROCESS_TEST"
           check_result "loopflow-ui-test" "$LOOPFLOW_UI_TEST"
 
           exit "$failures"

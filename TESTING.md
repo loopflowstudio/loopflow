@@ -499,6 +499,7 @@ Rust partitions wait for one shared build; the other suites run independently.
 | `e2e-smoke` | ubuntu-latest | both planning-reconnect proofs, then `tests/e2e/test_smoke.sh` |
 | `task-installation` | ubuntu-latest | `uv run python scripts/test_task_installation.py` |
 | `swift-test` | macos-15 | app build, headless model/view tests, boundary check |
+| `macos-process-test` | macos-15 | deleted-executable and exact process-authority regression |
 | `loopflow-ui-test` | macos-15 | xcodegen + app/test-runner compile |
 
 Candidate and merge-group jobs must all pass for `tests-result` to pass. Both CI

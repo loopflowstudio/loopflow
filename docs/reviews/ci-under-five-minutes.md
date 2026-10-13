@@ -438,3 +438,28 @@ creation took 55.84s compilation plus 0.72s packaging on this Mac. Raw evidence:
 `/tmp/ci-shard-*.{json,log}`. Hosted Linux transfer, setup, complete partition
 execution, total runner occupancy and under-five-minute acceptance remain open.
 Eight partitions are an experiment, not a cost-optimality claim.
+
+## Second hosted candidate and macOS split
+
+[Run 38324731529](https://github.com/loopflowstudio/loopflow/actions/runs/38324731529)
+passed at PR head `2fe9c22467`, checking merged source `2168801dc9b4`.
+The matrix fell from 105.311s to **10.085s**. Whole Rust occupancy was **18:26**:
+129s compilation, 923.787s test execution, 2,551 passes and 17 skips. This is
+not an unchanged-source comparison: the newer merged main replaced three old
+test names with six new names, in addition to the fixture change. Runner
+variation and other source changes prevent attributing the whole-job difference
+to this optimization.
+
+Installation passed in **5:17**, Swift in **8:02**, Xcode in **4:07**, and smoke
+in **1:44**. Swift's macOS 15 ARM64 runner spent 147s building the CLI, 167s on
+library-test compilation/execution for process discovery, and 70s on Desktop
+build/tests; setup and cache restoration account for most of the remainder.
+The next candidate moves the unchanged process-discovery command to its own
+ordinary macOS job and requires it in the aggregate. This preserves both
+required binaries and the deleted-executable regression while removing their
+serial dependency. Extra job setup and cold-cache cost must be measured;
+neither this split nor Rust partitions establish under-five-minute CI.
+
+Validation of the added job: all 35 gate tests and actionlint passed. The first
+lint retry met a transient Go proxy DNS failure; running the already-cached
+actionlint module succeeded. Raw hosted log: `/tmp/loopflow-ci-baseline-lf12be237/38324731529.log`.

@@ -212,10 +212,6 @@ fn stale_process_receipt_pids(processes: &[OsProcess], receipts: &[ProcessReceip
     stale_process_receipt_pids
 }
 
-/// Best-effort snapshot of directories currently owned by a live process.
-///
-/// Worktree cleanup uses this independent ownership signal. It intentionally
-/// remains broader than the recorded identities used by the activity view.
 pub(crate) fn load_snapshot() -> Result<ActivitySnapshot> {
     let now = OffsetDateTime::now_utc().unix_timestamp();
     let home = crate::store::lf_home_dir();

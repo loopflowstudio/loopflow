@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant, SystemTime};
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::git::{acquire_worktree_lease, worktrees::is_persistent_worktree};
@@ -47,7 +47,7 @@ pub(crate) struct BuildCleanupPolicy {
 
 fn output(command: &mut Command) -> Result<Vec<u8>> {
     let output = bounded_output(command, Duration::from_secs(5))
-        .map_err(|_| anyhow!("inspection failed or exceeded its five-second deadline"))?;
+        .context("inspection failed or exceeded its five-second deadline")?;
     if !output.status.success() {
         bail!("inspection failed");
     }
@@ -130,9 +130,7 @@ fn inspect_tree(
         if !fs::canonicalize(path)?.starts_with(root) {
             bail!("output contains a symlink escape");
         }
-        return Ok(metadata.blocks() * 512);
-    }
-    if !metadata.is_dir() && !metadata.is_file() {
+    } else if !metadata.is_dir() && !metadata.is_file() {
         bail!("output contains a special file");
     }
     // A real store/history placed under generated output is still durable state.
@@ -214,14 +212,13 @@ fn inspect_candidate(
     let cutoff = SystemTime::now()
         .checked_sub(policy.retention)
         .context("invalid retention period")?;
-    let bytes = inspect_tree(
+    inspect_tree(
         path,
-        &normalize(path),
+        path,
         cutoff,
         Instant::now() + Duration::from_secs(5),
         &mut HashSet::new(),
-    )?;
-    Ok(bytes)
+    )
 }
 
 pub(crate) fn prune_builds(

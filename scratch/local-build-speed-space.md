@@ -176,31 +176,23 @@ when elapsed time improves.
 
 ## Delete — do not maintain
 
-These cuts follow the accepted practical policy; preserve consumers until each cut
-provides its replacement. Do not extend the predecessor to implement reclamation.
+The deletion cut is complete in `1b0fc20c980fda14340d0b35f04f6893b8582eb8`:
 
-- In `scripts/resource_envelope.py`, replace the build branch of recover_resources
-  with Rust receipts; delete _remove_build_artifacts, _build_cache_is_stale and
-  its exclusive _raise_walk_error callback. Keep gate/uv cleanup, inventory,
-  pressure reporting and overall caps. There is no Python build-deletion fallback.
-- Remove cwd-only deletion authority from _running_cwds and
-  `rust/loopflow/src/lf/commands/top.rs::running_workspace_paths`. Keep Python's
-  inventory use; cleanup consumes explicit unknown/error facts and the richer
-  process inspection. Cut over protected_worktree_paths, Rust's sole caller.
-- In `python/tests/test_resource_envelope.py`, replace deletion fixtures based
-  only on synthetic inactive ResourceSource values: test_recovery_removes_only_inactive_allowlisted_builds,
-  test_recovery_root_limit_is_a_hard_bound and test_cleanup_reclaims_stale_builds_before_emergency_reserve.
-  Carry source/history preservation, caps, age and pressure assertions into the
-  Rust-backed path. Adapt mixed gate-capacity, busy-cleaner and busy-uv tests;
-  keep their independent gate/cache guarantees and active-build preservation.
+- Python `_remove_build_artifacts`, `_build_cache_is_stale` and
+  `_raise_walk_error` are gone. Recovery consumes Rust receipts; inventory,
+  gate/uv cleanup and operation caps remain.
+- Rust `running_workspace_paths` and cwd-only deletion authority are gone.
+  Both prune paths use full process paths with explicit inspection failure.
+  Python `_running_cwds` remains inventory-only.
+- Synthetic inactive-build deletion tests moved to Rust operation proofs.
+  Python tests now exercise the shared receipt, mixed recovery budgets and busy
+  caches, without obsolete stale-build setup.
+- The shared source/verification target default and its recovery recipe are gone.
+  Exact-tree copying, direct-test CLI preparation and network isolation remain.
 
-Slice 1 has replaced the source-target default and TESTING.md's shared-target
-warning/recovery recipe. Exact-tree copying, failure cleanup, network isolation,
-app-control output and support-crate direct-test preparation remain intact.
-
-No new lifecycle store, clean-by-absence, incompatible mutable sharing or unlinking
-held locks. Allocation counts are not exclusive APFS physical savings; selecting
-zero tests is not proof.
+No remaining predecessor needs deletion. Do not restore a Python deletion fallback,
+clean-by-absence, incompatible mutable sharing or unlinking held native locks.
+Allocation counts are not exclusive APFS physical savings; zero tests is not proof.
 
 ## Current execution boundary
 
@@ -274,31 +266,19 @@ Disposable reclamation is implemented; final matched acceptance, affected gate,
 full hosted CI and delivery remain. Refresh must sync delivered sibling work while
 preserving the separate dirty Infrastructure memory contribution.
 
-Compression/review removed the shared-target default, stale overlap/recovery docs
-and hand-mirrored LF authority list. It corrected the prepared CLI's graph switch
-and inherited release authority before measurement. Direct-test preparation remains. The reclamation cut now removes the listed
-Python deletion predecessors and Rust's cwd-only deletion authority.
+Review conclusions: target rewriting stops at the harness separator; authority
+filtering has one owner. Prepared-CLI measurements remain applicable and were not
+repeated. Reclamation retains source-symlink aliases, tracked content and unresolved
+execution, rechecks ownership under the lease and counts each inode once. A process
+known to predate boot is dead under the existing execution owner; unresolved
+execution fixtures use a current start. Prior implementation evidence remains at
+`.lf/tmp/local-build-reclamation/{focused-all,receipt,ownership-unknown,clippy}.log`
+and `1b0fc20c980fda14340d0b35f04f6893b8582eb8`.
 
-Compression keeps authority filtering in one environment construction and removes
-test reporting that only rechecked TemporaryDirectory. Target rewriting now stops
-at the harness separator, matching preparation's build-option parsing; harness
-arguments remain verbatim. The real-Cargo probe validates the surviving artifact
-path. Existing matched measurements still apply to the production runner, which
-has no harness target argument; no CLI preparation or benchmark was repeated.
+Compression removes the temporary ownership tuple, the symlink allocation early
+return and orphaned cwd-only documentation. Files and links now share accounting
+and retained-state checks; links are still never traversed. Process launch failures
+retain their underlying cause in the receipt. Recovery-budget tests consume the
+shared Rust receipt while real reclamation remains covered through the CLI.
 
-Implementation review found and repaired source-symlink aliasing, tracked-output
-explanations, repeated inventory after retained-only receipts, and duplicated
-hard-link allocation counts. The shared subprocess deadline now lives in
-os_process; GitHub reads preserve their existing error contract. Fresh ownership
-is tested after selection while a real cooperating writer fails to acquire the
-held worktree lease. A process lacking evidence but known to predate boot is dead
-under the existing execution owner; the unresolved fixture uses a current start.
-
-Implementation check: materialized/network-isolated nextest cleanup + ownership +
-deadline filters — 16 behaviors pass, including final receipt/preview/recovery
-rechecks; `uv run pytest python/tests/test_resource_envelope.py -q` — 15 pass;
-`cargo clippy --all-targets --jobs 4 -- -D warnings`, fmt/Ruff and ordinary
-prune smoke pass. Affected gate,
-matched cold/edit/app measurements, sync of delivered sibling work, full CI and
-landing remain with later Flow steps. Raw evidence:
-`.lf/tmp/local-build-reclamation/{focused-all,receipt,ownership-unknown,clippy}.log`.
+Check: materialized/network-isolated nextest cleanup + released ownership — pass (`.lf/tmp/local-build-reclamation/compress.log`); `uv run pytest python/tests/test_resource_envelope.py -q` — 15 pass; fmt, Ruff and `cargo clippy --all-targets --jobs 4 -- -D warnings` — pass; matched cold/edit/app acceptance and affected suites remain with refresh/gate.

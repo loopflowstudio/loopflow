@@ -196,23 +196,14 @@ pub(crate) fn read_task_worktree_ownership(path: &Path) -> StoreResult<Vec<TaskW
          WHERE t.worktree IS NOT NULL AND t.worktree != ''"
     ))?;
     let rows = statement.query_map([], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get(2)?,
-            row.get(3)?,
-        ))
-    })?;
-    rows.map(|row| {
-        let (id, path, completed, unfinished) = row?;
         Ok(TaskWorktreeOwnership {
-            task: id,
-            path: PathBuf::from(path),
-            completed,
-            unfinished,
+            task: row.get(0)?,
+            path: PathBuf::from(row.get::<_, String>(1)?),
+            completed: row.get(2)?,
+            unfinished: row.get(3)?,
         })
-    })
-    .collect()
+    })?;
+    rows.map(|row| row.map_err(StoreError::from)).collect()
 }
 
 fn migrate_plaintext_provider_tokens(conn: &mut Connection) -> StoreResult<()> {

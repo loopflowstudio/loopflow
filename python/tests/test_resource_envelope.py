@@ -2,7 +2,6 @@
 
 import fcntl
 import importlib.util
-import json
 import os
 import select
 import signal
@@ -93,6 +92,20 @@ def _snapshot(
     )
 
 
+@pytest.fixture
+def build_owner(monkeypatch) -> None:
+    receipt = (ROOT / "tests/fixtures/dto/build_cleanup_report.json").read_text()
+    run = resources.subprocess.run
+
+    def cleanup_or_run(command, *args, **kwargs):
+        if command[0] == "fixture-lf":
+            return SimpleNamespace(returncode=0, stdout=receipt)
+        return run(command, *args, **kwargs)
+
+    monkeypatch.setenv("LF_BIN", "fixture-lf")
+    monkeypatch.setattr(resources.subprocess, "run", cleanup_or_run)
+
+
 def test_snapshot_measures_home_session_captures_and_names_retention(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -131,9 +144,8 @@ def test_snapshot_measures_home_session_captures_and_names_retention(
 
 @pytest.mark.parametrize("old_entry", [None, "file", "empty-directory"])
 def test_recent_gate_roots_leave_recovery_capacity_for_stale_builds(
-    tmp_path: Path, old_entry: str | None, monkeypatch
+    tmp_path: Path, old_entry: str | None, build_owner
 ) -> None:
-    monkeypatch.setattr(resources, "_prune_completed_builds", lambda *_: ())
     policy = _policy(maximum_recovery_roots=1, build_cache_retention_hours=24)
     gates = [tmp_path / f"worker-{index}" for index in range(8)]
     for root in gates:
@@ -149,30 +161,20 @@ def test_recent_gate_roots_leave_recovery_capacity_for_stale_builds(
         old = time.time() - 8 * 24 * 3600
         os.utime(expired, (old, old))
     sources = [_source(root, id=f"gate:{root.name}", kind="gate") for root in gates]
-    if old_entry is None:
-        assert not resources.recover_resources(policy, _snapshot(policy, sources, free=500))
-
-    stale = tmp_path / "stale"
-    (stale / "target").mkdir(parents=True)
-    artifact = stale / "target/artifact"
-    artifact.write_bytes(b"x" * 4096)
-    old = time.time() - 48 * 3600
-    for path in (artifact, stale / "target"):
-        os.utime(path, (old, old))
-    sources.append(_source(stale, id="build:stale"))
-
     actions = resources.recover_resources(policy, _snapshot(policy, sources, free=500))
 
-    assert len(actions) == (0 if old_entry is None else 1)
-    assert artifact.exists()
-    if old_entry is not None:
+    if old_entry is None:
+        assert actions[0].removed_paths == ("/completed/target",)
+        assert sum(action.removed_bytes for action in actions) == 4096
+    else:
+        assert len(actions) == 1
         assert actions[0].source == "gate:worker-0"
     assert all((root / resources.GATE_RELATIVE_PATH / "recent.log").exists() for root in gates)
     if old_entry is not None:
         assert not expired.exists()
 
 
-def test_concurrent_recovery_skips_busy_cleaner_then_can_reclaim(
+def test_concurrent_recovery_skips_busy_cleaner_then_reports_unavailable_build_owner(
     tmp_path: Path, monkeypatch
 ) -> None:
     monkeypatch.setattr(resources, "Path", lambda path: tmp_path if path == "/tmp" else Path(path))
@@ -199,7 +201,6 @@ def test_concurrent_recovery_skips_busy_cleaner_then_can_reclaim(
 
 
 def test_uv_cleanup_preserves_busy_cache_then_prunes_when_idle(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setattr(resources, "_prune_completed_builds", lambda *_: ())
     cache = tmp_path / "uv-cache"
     unused = cache / "archive-v0" / "unused"
     unused.mkdir(parents=True)
@@ -231,16 +232,14 @@ def test_uv_cleanup_preserves_busy_cache_then_prunes_when_idle(tmp_path: Path, m
 
 @pytest.mark.parametrize("busy", [False, True], ids=["unlocked", "busy"])
 def test_disk_pressure_recovers_builds_even_when_uv_cache_is_busy(
-    tmp_path: Path, monkeypatch, busy: bool
+    tmp_path: Path, monkeypatch, busy: bool, build_owner
 ) -> None:
-    monkeypatch.setattr(resources, "_prune_completed_builds", lambda *_: ())
     cache = tmp_path / "uv-cache"
     archive = cache / "archive-v0" / "unused"
     archive.mkdir(parents=True)
     (archive / "module.py").write_bytes(b"x" * 4096)
     project = tmp_path / "project"
-    (project / "target").mkdir(parents=True)
-    (project / "target/artifact").write_bytes(b"x" * 4096)
+    project.mkdir()
     (project / "pyproject.toml").write_text(
         '[project]\nname = "cache-lock-fixture"\nversion = "0.0.0"\n'
     )
@@ -248,13 +247,13 @@ def test_disk_pressure_recovers_builds_even_when_uv_cache_is_busy(
         if key.startswith(("UV_", "_UV_", "LF_", "LOOPFLOW_")) or key == "VIRTUAL_ENV":
             monkeypatch.delenv(key)
     monkeypatch.setenv("UV_CACHE_DIR", str(cache))
+    monkeypatch.setenv("LF_BIN", "fixture-lf")
     monkeypatch.setenv("UV_OFFLINE", "1")
     monkeypatch.setenv("UV_PYTHON_DOWNLOADS", "never")
     monkeypatch.setenv("UV_NO_CONFIG", "1")
     policy = _policy(minimum_free_disk_bytes=1_000)
     sources = [
         _source(cache, id="cache:uv", kind="cache", owner="uv", budget=1_000_000),
-        _source(project, id="build:fixture"),
     ]
     holder = None
     try:
@@ -286,7 +285,8 @@ def test_disk_pressure_recovers_builds_even_when_uv_cache_is_busy(
         assert actions[0].source == "cache:uv"
         assert actions[0].status == ("failed" if busy else "pruned")
         assert archive.exists() is busy
-        assert (project / "target").exists()
+        assert actions[1].removed_paths == ("/completed/target",)
+        assert actions[1].removed_bytes == 4096
         assert (project / "pyproject.toml").exists()
         if busy:
             assert "lock" in actions[0].detail.lower()
@@ -308,7 +308,7 @@ def test_disk_pressure_recovers_builds_even_when_uv_cache_is_busy(
         assert not archive.exists()
 
 
-def test_oversized_active_builds_survive_recovery_and_real_disk_pressure_stops(
+def test_inventory_warns_for_oversized_builds_and_gates_on_disk_pressure(
     tmp_path: Path, monkeypatch, capsys
 ) -> None:
     repo, sibling = tmp_path / "current", tmp_path / "landing"
@@ -348,15 +348,6 @@ def test_oversized_active_builds_survive_recovery_and_real_disk_pressure_stops(
     assert "200.0 GiB" in output
     assert (sibling / "target/artifact").exists()
 
-    # Explicit recovery retains active builds, including the current checkout.
-    (repo / "target/artifact").write_bytes(b"x" * 4096)
-    report = resources.inspect_resources(repo, policy, recover=True)
-    assert report.ok
-    assert all(action.removed_bytes == 0 for action in report.recovery)
-    assert (repo / "target/artifact").exists()
-    assert (repo / "source.rs").exists()
-    assert (sibling / "target/artifact").exists()
-
     disk.free = 50
     monkeypatch.setattr(resources, "_running_cwds", lambda: ({repo}, None))
     report = resources.inspect_resources(repo, policy, recover=False)
@@ -366,20 +357,13 @@ def test_oversized_active_builds_survive_recovery_and_real_disk_pressure_stops(
 
 
 def test_recovery_consumes_rust_receipt_above_pressure_threshold(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, build_owner
 ) -> None:
     target = tmp_path / "target"
     target.mkdir()
     artifact = target / "artifact"
     artifact.write_text("retained by this isolated receipt-consumer test")
     policy = _policy()
-    monkeypatch.setenv("LF_BIN", "fixture-lf")
-    receipt = json.loads((ROOT / "tests/fixtures/dto/build_cleanup_report.json").read_text())
-    monkeypatch.setattr(
-        resources.subprocess,
-        "run",
-        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout=json.dumps(receipt)),
-    )
     actions = resources.recover_resources(policy, _snapshot(policy, []))
     assert sum(action.removed_bytes for action in actions) == 4096
     assert actions[0].removed_paths == ("/completed/target",)

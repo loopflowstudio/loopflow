@@ -2851,6 +2851,25 @@ mod tests {
     }
 
     #[test]
+    fn paused_migration_keeps_existing_tasks_unpaused_and_retains_work() {
+        let conn = open();
+        apply_before_current_draft(&conn, "task_paused");
+        conn.execute_batch("INSERT INTO waves(id,name,repo,created_at) VALUES('w','product','/repo',1);
+            INSERT INTO projects(id,wave_id,created_at) VALUES('p','w',1);
+            INSERT INTO tasks(id,project_id,issue_identifier,issue_title,worktree,created_at) VALUES('t','p','PROOF-1','Retained','/repo/task',1);").unwrap();
+        conn.execute_batch(&current_draft_sql("task_paused"))
+            .unwrap();
+        let task: (bool, String, String) = conn
+            .query_row(
+                "SELECT paused,issue_title,worktree FROM tasks WHERE id='t'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(task, (false, "Retained".into(), "/repo/task".into()));
+    }
+
+    #[test]
     fn task_flow_observations_removes_scheduling_and_worker_control_and_preserves_history() {
         let conn = open();
         apply_before_current_draft(&conn, "task_flow_observations");

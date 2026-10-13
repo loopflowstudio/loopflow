@@ -308,6 +308,8 @@ impl std::fmt::Display for WorkStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskState {
+    /// Explicit hold; history and Workflow are retained.
+    Paused,
     /// The Task has taken up no Workflow.
     NotReady,
     /// At `start`.
@@ -322,6 +324,7 @@ pub enum TaskState {
 impl TaskState {
     pub(crate) fn label(&self) -> &'static str {
         match self {
+            Self::Paused => "paused",
             Self::NotReady => "not_ready",
             Self::Ready => "ready",
             Self::Active => "active",
@@ -332,6 +335,7 @@ impl TaskState {
 
     pub(crate) fn parse(label: &str) -> Option<Self> {
         [
+            Self::Paused,
             Self::NotReady,
             Self::Ready,
             Self::Active,
@@ -349,7 +353,7 @@ impl TaskState {
     /// The Task as Work: open until it is done or abandoned.
     pub(crate) fn work_status(&self) -> WorkStatus {
         match self {
-            Self::NotReady | Self::Ready | Self::Active => WorkStatus::Ready,
+            Self::Paused | Self::NotReady | Self::Ready | Self::Active => WorkStatus::Ready,
             Self::Done => WorkStatus::Done,
             Self::Abandoned => WorkStatus::Abandoned,
         }

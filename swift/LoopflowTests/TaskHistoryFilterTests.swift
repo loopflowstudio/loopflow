@@ -96,6 +96,19 @@ struct TaskHistoryFilterTests {
         #expect(visible(try task("canceled", date: nil, runtime: "ready", missing: true), TaskHistoryFilter()))
     }
 
+    @Test func pausedWorkLeavesSidebarButRemainsInWavePlan() throws {
+        let row = try task("started", date: nil, runtime: "paused", missing: true, review: true)
+        let projection = TaskProjection(id: WorkNodeKey(repo: "/repo", work: .task(id: row.id)), task: row, sessions: [])
+        #expect(!projection.inWorkingSet)
+        let sessions = try JSONDecoder().decode([SessionRecord].self, from: Data(contentsOf: fixtures.appendingPathComponent("sessions.json")))
+        let retained = TaskProjection(id: projection.id, task: row, sessions: [try #require(sessions.first)])
+        #expect(!retained.inWorkingSet)
+        #expect(retained.sessions.first?.id == sessions.first?.id)
+        #expect(visible(row, TaskHistoryFilter()))
+        #expect(row.runtime?.status == .paused)
+        #expect(row.runtime?.status.isTerminal == false)
+    }
+
     @Test func locallySettledWorkLeavesTheSidebarBeforePlanningCatchesUp() throws {
         func sidebar(_ row: RoadmapTask) -> Bool {
             TaskProjection(id: WorkNodeKey(repo: "/repo", work: .task(id: row.id)), task: row, sessions: []).inWorkingSet

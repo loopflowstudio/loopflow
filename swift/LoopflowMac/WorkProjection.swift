@@ -21,6 +21,7 @@ struct TaskProjection: Identifiable {
     /// when its start predates recorded evidence. Locally done or abandoned
     /// Work has left it even while planning has not caught up.
     var inWorkingSet: Bool {
+        if task.runtime?.status == .paused { return false }
         if !sessions.isEmpty { return true }
         return started && task.condition.unresolvedExecution
     }

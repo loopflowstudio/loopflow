@@ -45,6 +45,7 @@ public enum WorkStatus: Codable, Sendable, Hashable {
 
 /// Durable completion and abandonment, with Workflow readiness for unfinished Tasks.
 public enum TaskState: String, Codable, Sendable, Hashable {
+    case paused
     /// The Task has taken up no Workflow.
     case notReady = "not_ready"
     case ready

@@ -7,6 +7,13 @@ import Testing
 /// the Mac app.
 @Suite("DTO Fixtures")
 struct DTOFixtureTests {
+    @Test func pausedTaskStateIsUnfinished() throws {
+        let state = try JSONDecoder().decode(TaskState.self, from: loadFixtureData("task_paused.json"))
+        #expect(state == .paused)
+        #expect(!state.isTerminal)
+        #expect(try JSONDecoder().decode(TaskState.self, from: JSONEncoder().encode(state)) == state)
+    }
+
     @Test func taskFilesFramesKeepInvalidationSeparateFromHeartbeat() throws {
         let data = try loadFixtureData("task_files_frames.json")
         let frames = try JSONDecoder().decode([TaskFilesFrame].self, from: data)

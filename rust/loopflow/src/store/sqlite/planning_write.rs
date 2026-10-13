@@ -46,6 +46,7 @@ pub(crate) fn table(value: &WorkValue) -> &'static str {
         | WorkValue::TaskDescription(_)
         | WorkValue::TaskRank(_)
         | WorkValue::TaskAssignee(_)
+        | WorkValue::TaskPaused(_)
         | WorkValue::TaskDueDate(_)
         | WorkValue::TaskDeletedAt(_)
         | WorkValue::TaskUrl(_)
@@ -82,6 +83,7 @@ fn column(value: &WorkValue) -> &'static str {
         WorkValue::TaskDescription(_) => "issue_description",
         WorkValue::TaskRank(_) => "planning_rank",
         WorkValue::TaskAssignee(_) => "planning_assignee",
+        WorkValue::TaskPaused(_) => "paused",
         WorkValue::TaskDueDate(_) => "planning_due_date",
         WorkValue::TaskDeletedAt(_) => "planning_deleted_at",
         WorkValue::TaskUrl(_) => "planning_url",
@@ -159,6 +161,20 @@ pub(crate) fn read(conn: &Connection, table: &str, id: &str) -> StoreResult<Vec<
         }),
         _ => Err(StoreError::InvalidData("unknown Work table".into())),
     }?;
+    // Historical migrations seed their journal before the pause column exists.
+    if table == "tasks"
+        && conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('tasks') WHERE name='paused')",
+            [],
+            |row| row.get::<_, bool>(0),
+        )?
+    {
+        values.push(WorkValue::TaskPaused(conn.query_row(
+            "SELECT paused FROM tasks WHERE id=?1",
+            [id],
+            |row| row.get(0),
+        )?));
+    }
     // The planning draft seeds before the placement draft; seed again when
     // authored assignment provenance and admission authority are installed.
     if table != "task_comments" && conn.query_row(
@@ -597,6 +613,38 @@ mod tests {
             })
             .unwrap();
         id
+    }
+
+    #[test]
+    fn paused_planning_exchanges_without_starting_or_moving_work() {
+        let left = tempfile::tempdir().unwrap();
+        let right = tempfile::tempdir().unwrap();
+        let a = SqliteStore::open_ephemeral(&left.path().join("db")).unwrap();
+        let b = SqliteStore::open_ephemeral(&right.path().join("db")).unwrap();
+        let task = plan(&a);
+        let route =
+            PlanningDestination::new("/synthetic.git", "refs/loopflow/planning/shared/test")
+                .unwrap();
+        for store in [&a, &b] {
+            store.bind_peer_planning("/repo", &route).unwrap();
+        }
+        for paused in [true, false] {
+            a.set_task_paused(&task, paused).unwrap();
+            let exported = a.export_peer_planning("/repo", &route.id()).unwrap();
+            b.import_peer_planning(
+                "/repo",
+                &route.id(),
+                if paused { "paused" } else { "resumed" },
+                &exported,
+            )
+            .unwrap();
+            assert_eq!(
+                b.task_state(&task).unwrap() == crate::durable::TaskState::Paused,
+                paused
+            );
+            assert!(b.workflow(&task).unwrap().is_none());
+            assert!(b.task(&task).unwrap().unwrap().worktree.is_none());
+        }
     }
 
     #[test]

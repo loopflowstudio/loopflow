@@ -28,7 +28,7 @@ impl SqliteStore {
     pub(crate) fn task_automation(&self, task: &TaskId) -> StoreResult<TaskAutomation> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn.query_row(
-            "SELECT automation_enabled,issue_identifier FROM tasks WHERE id=?1",
+            "SELECT automation_enabled AND paused=0,issue_identifier FROM tasks WHERE id=?1",
             [task.as_str()],
             |row| {
                 Ok(TaskAutomation {
@@ -65,6 +65,13 @@ impl SqliteStore {
     ) -> StoreResult<bool> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        if let Some(task) = &session.task_id {
+            if super::durable::task_state_in(&tx, task)? == crate::durable::TaskState::Paused {
+                return Err(StoreError::InvalidAuthority(
+                    "Task is paused; CI repair is held".into(),
+                ));
+            }
+        }
         let session = match super::sessions::session_in(&tx, &session.id)? {
             Some(mut existing) if retry => {
                 existing.artifact_key = crate::session_record::new_artifact_key();

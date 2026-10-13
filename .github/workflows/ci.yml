@@ -226,8 +226,8 @@ jobs:
       - name: Acquire and fingerprint the installation image
         id: image
         run: |
-          uv run python -c 'from scripts.test_task_installation import _prepare_image; _prepare_image("public.ecr.aws/docker/library/rust:trixie")'
-          docker image inspect --format 'id={{.Id}}' public.ecr.aws/docker/library/rust:trixie >> "$GITHUB_OUTPUT"
+          uv run python -c 'from scripts.test_task_installation import _prepare_image; _prepare_image("docker.io/library/rust:trixie")'
+          docker image inspect --format 'id={{.Id}}' docker.io/library/rust:trixie >> "$GITHUB_OUTPUT"
       - uses: actions/cache@v6
         id: installation-cache
         with:

@@ -89,50 +89,9 @@ include!(concat!(env!("OUT_DIR"), "/builtin_skill_categories.rs"));
 mod tests {
     use super::*;
 
-    const WAVES_DOC: &str = include_str!("../../../docs/waves.md");
-
     #[test]
-    fn wave_model_is_embedded_in_prompts_and_docs() {
-        let design = get_builtin_skill("design").expect("design prompt");
-        let wave = get_builtin_skill("wave/operate").expect("Wave operation");
-
-        // The roadmap lives in Linear, reached via `lf repo refresh` — no local N-*.md files.
-        assert!(design.contains("lf wave status"));
-        assert!(design.contains("GOAL.md"));
-        assert!(!design.contains("1-*.md"));
-        assert!(wave.contains("lf wave status"));
-        assert!(WAVES_DOC.contains("GOAL.md"));
-        assert!(WAVES_DOC.contains("Linear"));
-        assert!(!WAVES_DOC.contains("1-fix-crash-loop.md"));
-
-        // The ingest skill is gone; workers are handed their task at dispatch.
+    fn retired_ingest_skill_is_not_registered() {
         assert!(get_builtin_skill("ingest").is_none());
-    }
-
-    #[test]
-    fn wave_goal_authoring_keeps_live_metrics_wave_owned() {
-        let prompt = get_builtin_skill("prompt").expect("prompt skill");
-
-        assert!(prompt.contains("Wave-owned metrics"));
-        assert!(prompt.contains("never copy them"));
-        assert!(prompt.contains("into the Wave body"));
-        assert!(!prompt.contains("Readable measures"));
-    }
-
-    #[test]
-    fn project_guidance_sponsors_metrics_and_task_workers_propose_them() {
-        let normalize = |prompt: &str| prompt.split_whitespace().collect::<Vec<_>>().join(" ");
-
-        let project = normalize(get_builtin_skill("wave/operate").expect("project operate"));
-        assert!(project.contains("For each sponsored metric that moved"));
-        assert!(project.contains("A Met frontier may keep a worker"));
-        assert!(project.contains("a Met guardrail stays quiet until its alarm"));
-        assert!(project.contains("intent graph, not a control plane"));
-
-        let task = normalize(get_builtin_skill("implement").expect("implementation"));
-        assert!(task.contains("When a Wave is supplied, notice signals"));
-        assert!(task.contains("otherwise leave the proposal for Wave sponsorship"));
-        assert!(task.contains("Metric proposals are discoveries, not a completion quota"));
     }
 
     #[test]

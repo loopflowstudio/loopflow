@@ -69,10 +69,12 @@ def _prepare_image(image: str) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--image", default="public.ecr.aws/docker/library/rust:trixie")
+    parser.add_argument("--image", default="docker.io/library/rust:trixie")
     parser.add_argument("--test", nargs="+", choices=PROOFS, help="run selected named proofs")
     parser.add_argument(
-        "--cache-dir", type=Path, help="persist Cargo target and registry on a native Linux filesystem"
+        "--cache-dir",
+        type=Path,
+        help="persist Cargo target and registry on a native Linux filesystem",
     )
     parser.add_argument(
         "--native-titles", action="store_true", help="prove published title hook installation"
@@ -136,13 +138,7 @@ def main() -> None:
                 raise RuntimeError("copy disposable source snapshot")
         selected = {name: PROOFS[name] for name in args.test} if args.test else PROOFS
         targets = " ".join(
-            sorted(
-                {
-                    f"--test {target}"
-                    for target in selected.values()
-                    if target not in LIB_PROOFS
-                }
-            )
+            sorted({f"--test {target}" for target in selected.values() if target not in LIB_PROOFS})
         )
         checks = "\n".join(
             f"timeout 180 cargo test -p loopflow "

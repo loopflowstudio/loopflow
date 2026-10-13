@@ -120,3 +120,52 @@ Validation: read-only source/assertion/CI-log review completed; only this report
 6. **Website/docs drift is concrete:** mandatory Linear/PR wording contradicts local-Task tests; HTML/YAML command examples bypass the Markdown checker, including `graph pursue`.
 7. **Green fixtures are not installed/provider/Desktop acceptance.** Existing tests often prove strong, narrow boundaries; copy and job labels should say exactly that.
 8. **Cheap deletions will not buy fifteen minutes.** Prose checks and two duplicate migration executions are cleanup candidates; build reuse and fixture design should precede costed sharding or hardware selection.
+
+## Applied excess-test reduction — 2026-10-13
+
+Task lf-6d3ff35 applies Jack Heart’s authorized maintenance cleanup. Historical audit findings above remain evidence, not a timing claim. The reduction changes test code only; no production interfaces or test-only factories are introduced.
+
+| Deleted assertion | Former promise | Retained proof or disposition |
+| --- | --- | --- |
+| Python `test_current_repository_has_no_unexplained_architecture` | Current checkout agrees with the architecture map. | CI `architecture-check` runs `scripts/check_architecture.py` against the repository; all 20 focused fixture cases remain in `python/tests/test_architecture.py`. |
+| `builtins::tests::wave_model_is_embedded_in_prompts_and_docs` prose checks and `WAVES_DOC` | Design/Wave guidance mentions status, GOAL.md and Linear, and omits obsolete numbered roadmap examples. | Editorial tokens do not establish planning behavior; skill/document review owns meaning. The retired-ingest absence assertion survives as `retired_ingest_skill_is_not_registered`. |
+| `wave_goal_authoring_keeps_live_metrics_wave_owned` | Prompt contains three prescribed metric phrases and omits an old label. | Editorial-only promise; exact fragments cannot prove agent metric ownership. Existing skill registration, parsing and safety-contract checks remain. |
+| `project_guidance_sponsors_metrics_and_task_workers_propose_them` | Wave/implement guidance contains seven prescribed phrases. | Editorial-only promise; text matching cannot prove sponsorship or worker judgment. No implementation, catalog or command-resolution coverage is removed. |
+| Portable HTML title and `LfSession history` strings | Generated architecture uses prescribed title/terminology. | Renderer `--check` still requires complete equality with current source rendering. Absolute execution link and absence of a relative stylesheet remain explicit portable-document checks. |
+
+Portable HTML already has one suite freshness owner: `website/tests/test_portable_architecture.py` invokes the renderer without a browser. There was no second suite freshness assertion to delete. Manual renderer commands are entrypoints to that same proof. No renderer/source/HTML update is needed for this reduction.
+
+Prompt goldens are unchanged: their content selection, ordering, omission and escaping coverage has not been shown redundant. Migration/data preservation, recovery, cross-Task ownership, network containment, OS-account isolation and native process-safety proofs are unchanged. Review rejected deleting all prose tests: explicit safety-boundary assertions in builtins still earn their place. Maintenance reduction is measured by the test-code diff; no CI elapsed-time saving or five-minute acceptance is claimed.
+
+Test-code measure: 50 deleted lines and one added line, net 49 fewer lines; 21 assertions removed and three fewer test cases. Focused architecture fixtures (20), portable HTML (1) and Rust builtins (11), repository map, cargo fmt/clippy and Ruff passed. The changed-aware gate could not enter product suites because resource measurement timed out at 60 seconds; broader verification belongs to hosted CI, not a local pass claim.
+
+### Installation acquisition repair — PR #1545
+
+At failed head `71bbdb80d268e5e9eb6a84d5bc11f53c016e7c51`,
+[run 38476809353, installation job 115569439342](https://github.com/loopflowstudio/loopflow/actions/runs/38476809353/job/115569439342)
+exhausted four ECR pulls with `toomanyrequests: Data limit exceeded`, before
+installation proofs ran. Other product jobs passed. A fresh ECR manifest read
+also returned `Rate exceeded`; Jack Heart authorized repairing acquisition
+without rerunning the failed attempt.
+
+The harness default, CI acquisition and image inspection now consistently use
+`docker.io/library/rust:trixie`. Docker's
+[official image catalog](https://github.com/docker-library/official-images/blob/master/library/rust)
+maps trixie to Rust's [stable/trixie source](https://github.com/rust-lang/docker-rust/blob/master/stable/trixie/Dockerfile).
+The observed Linux amd64 manifest digest is
+`sha256:d3ba1ad5d5b5a180ca8428b4fab8543a1b3933b32a8a7ad90a7ebbaf5497203a`.
+ECR parity is unknown; this is an explicit source change, not a claim of identical
+image content. The moving stable tag remains consistent with CI's toolchain policy.
+
+Local acquisition succeeded. The Linux arm64 image reports Rust/Cargo 1.99.0,
+Debian trixie and Git 2.47.3 with `merge-tree --merge-base`; Python, useradd,
+runuser, flock and timeout are available. CI still fingerprints the actual local
+image ID before cache restoration. Disposable OS account/Home, source copying,
+network disconnection, migration proofs, installed CLI authority and published
+native-title assertions are unchanged. No fallback or retry policy was added.
+
+Repair checks: six acquisition fixture tests, Ruff check/format, real Docker Hub
+manifest/pull, harness image preparation and offline toolchain/prerequisite probe
+passed. Full disposable installation and fresh hosted CI remain required on the
+published repair; local acquisition is not installation acceptance. Review found
+no proof suppression or cache-fingerprint mismatch.

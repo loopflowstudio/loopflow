@@ -469,7 +469,7 @@ this grants no broader cleanup authority. Current receipts: work-first-demo.md.
 ## Paused — accepted October 12
 
 Jack Heart selected Paused and authorized pausing LOO-389. October 13: ship the
-independent lf-2086e0a / PR #1544 first; auto-merge requested, not merged.
+independent lf-2086e0a / PR #1544 first. Repair head 9c6f263ebc is armed; CI pending.
 Preserve Task identity, history, checkout and Workflow. Default active navigation
 omits paused Tasks; the Wave plan keeps them reachable. Resume clears the hold,
 never launches execution. Pause does not kill an already-running process.
@@ -481,7 +481,9 @@ paused. Keep historical completion and abandonment independently readable.
 Delete the need for an undocumented sidebar-only parked flag or automatic restart
 on resume. Test persistence, repeat writes, retained Workflow/execution, sidebar
 filtering and API controls before applying LOO-389 to the real store.
-Codex hook trust awaits Jack. Native CI selection and Session identity agree.
+October 13 native recheck: CI opens its correct Codex conversation and input prompt;
+LOO-380 retains Claude and its unsent draft. LOO-312/367 still show hook review;
+Jack was asked whether to continue without trusting. No trust choice submitted.
 
 Paused is not deployed: main's schema needs supported installation; preserve
 active clients. LOO-427 completed through `lf task complete` after verifying merge

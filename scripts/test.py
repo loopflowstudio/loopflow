@@ -250,6 +250,11 @@ def _rust_commands(_changed: list[str]) -> list[Command]:
     runner = ["uv", "run", "--no-sync", "python", str(REPO_ROOT / "scripts/test_network.py")]
     test_argv[1:1] = ["--config", 'target."cfg(all())".runner = ' + json.dumps(runner)]
     return [
+        Command(
+            ["uv", "run", "--no-sync", "python", "scripts/check_rust_test_inventory.py"],
+            REPO_ROOT,
+            "rust-test-inventory",
+        ),
         Command(["cargo", "fmt", "--all", "--", "--check"], REPO_ROOT, "rustfmt"),
         Command(
             [

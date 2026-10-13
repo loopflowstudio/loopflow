@@ -525,6 +525,8 @@ Ordinary integration modules are registered in `rust/loopflow/tests/integration.
 and linked once. Add new modules there; Cargo auto-discovery is disabled. Dedicated
 installation, release, reconnect, live-provider and process-global fixture targets remain declared in
 `rust/loopflow/Cargo.toml`. Nextest runs every case in a separate process.
+CI and the local Rust plan run `scripts/check_rust_test_inventory.py` before
+compilation and reject unregistered top-level test source files.
 Each Rust partition extracts the same revision's library or integration archive into the checkout's
 `target/` directory and materializes matching migration inputs. The reconnect
 target is excluded from that archive and executed in the smoke job. No suite

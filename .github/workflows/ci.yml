@@ -133,6 +133,7 @@ jobs:
         id: archive
         if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
         run: |
+          uv run --no-sync python scripts/check_rust_test_inventory.py
           /usr/bin/time -v cargo nextest archive --workspace \
             -E 'kind(lib)' \
             --archive-file "$RUNNER_TEMP/rust-library.tar.zst"

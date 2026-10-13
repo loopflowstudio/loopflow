@@ -934,3 +934,18 @@ its findings were preserved here. The prior 4:55 full pass consumed **40:19**
 of mixed-platform runner occupancy versus baseline 46:44; this is not a dollar
 cost estimate. The remaining proof is repeated real-run reliability and delivery,
 not ten reruns of a warmed candidate. Merge remains Jack Heart's pending choice.
+
+### Main synchronization preserves new integration coverage
+
+Jack Heart's October 13 “keep going” and “go” authorize delivery of #1543.
+Arming synchronized newer main at `35f3b184df`. Its new `pr_review_tests.rs`
+and `scratch_tests.rs` were outside the consolidated target's module registry.
+The PR was returned to reviewer-owned merge while repairing that gap. Both
+modules now use the shared support module and all five new cases pass under the
+network-isolated runner. Formatting and all-target Clippy pass.
+
+CI archive preparation and the local Rust plan now check the source inventory
+and reject unregistered top-level test files. A temporary omitted test source
+confirmed rejection; the complete current inventory passes. Forty-five
+CI-proof/release-automation checks, actionlint and Python lint pass. This adds
+coverage from main rather than treating a silently omitted suite as a speed win.

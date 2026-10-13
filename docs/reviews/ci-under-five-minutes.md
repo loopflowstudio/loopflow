@@ -737,3 +737,24 @@ premium hardware, paid runner platform or coverage removal was introduced.
 Raw job records: `/tmp/ci-quietness-jobs.json`; logs:
 `/tmp/ci-under-five-{build,quietness,library1}.log`. The implementation remains
 published for review; merge is not armed and Task completion is not requested.
+
+### Confirmation caught an incidental ordering assertion
+
+[Run 38369321555](https://github.com/loopflowstudio/loopflow/actions/runs/38369321555)
+finished in 4:52 but failed
+`local_planning::rotation_saves_membership_and_pending_effects_offline`.
+The test assumed the started Task occupied the first preview row. Task listing
+orders by descending update time; when backlog is newer, its `historical`
+disposition appears first instead of the started Task's `move` disposition.
+This failed run does not count toward consecutive successful acceptance.
+
+Both preview and applied-result assertions now select the started Task by ID.
+The fixture deliberately makes backlog newer, so incidental creation timing
+cannot conceal the assumption again. Existing checks for moved work, retained
+backlog, rollback, pending delivery and execution preservation remain. No test,
+assertion or production behavior is removed, and no retry is introduced.
+
+The focused proof passed all four connected/mapped combinations in 58.352s
+locally with external networking blocked; formatting and Clippy with warnings
+denied pass. Raw evidence:
+`/tmp/ci-confirmation-library1.log`, `/tmp/ci-rotation-order.log`.

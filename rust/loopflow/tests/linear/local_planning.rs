@@ -2308,6 +2308,12 @@ fn rotation_saves_membership_and_pending_effects_offline() {
         let placement = place_wave_on_remote(&store, &db, wave.id());
         let successor = loopflow::durable::ProjectId::new();
         let file = home.path().join("rotation.json");
+        // Backlog may be newer than started work; rotation does not depend on display order.
+        db.execute(
+            "UPDATE tasks SET updated_at=updated_at+60 WHERE id=?1",
+            [backlog.id.as_str()],
+        )
+        .unwrap();
         let plan = serde_json::json!({"name":"Next", "waves":[{"wave_id":wave.id(),"successor_id":successor,"create":true,"project_name":"Next", "workflow":"","metric_targets":[],"krs":[{"text":"Preserve work","holds":false}]}]});
         std::fs::write(&file, serde_json::to_vec(&plan).unwrap()).unwrap();
         let args = [
@@ -2333,9 +2339,15 @@ fn rotation_saves_membership_and_pending_effects_offline() {
                 "--json",
             ],
         );
-        assert_eq!(preview["waves"][0]["tasks"][0]["disposition"], "move");
+        let preview_decision = preview["waves"][0]["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|decision| decision["task"]["id"] == active.id.as_str())
+            .unwrap();
+        assert_eq!(preview_decision["disposition"], "move");
         let expected = store.task(&active.id).unwrap().unwrap();
-        let preview_task = &preview["waves"][0]["tasks"][0]["task"];
+        let preview_task = &preview_decision["task"];
         assert_eq!(preview_task, &serde_json::to_value(&expected).unwrap());
         assert_eq!(preview_task["id"], active.id.as_str());
         assert_eq!(preview_task["due_date"], "2026-12-31");
@@ -2369,8 +2381,14 @@ fn rotation_saves_membership_and_pending_effects_offline() {
         assert_eq!(revision(), before);
         let applied = lf(repo.path(), home.path(), &args);
         let moved = store.task(&active.id).unwrap().unwrap();
+        let applied_decision = applied["waves"][0]["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|decision| decision["task"]["id"] == active.id.as_str())
+            .unwrap();
         assert_eq!(
-            applied["waves"][0]["tasks"][0]["task"],
+            applied_decision["task"],
             serde_json::to_value(&moved).unwrap()
         );
         assert_eq!(moved.project_id, successor);

@@ -949,3 +949,33 @@ and reject unregistered top-level test files. A temporary omitted test source
 confirmed rejection; the complete current inventory passes. Forty-five
 CI-proof/release-automation checks, actionlint and Python lint pass. This adds
 coverage from main rather than treating a silently omitted suite as a speed win.
+
+### Merge queue exposes a disposable-remote maintenance race
+
+The repaired PR head passed [run 38444759381](https://github.com/loopflowstudio/loopflow/actions/runs/38444759381)
+in **4:34**, including the newly registered cases. Its first merge-queue run,
+[38445438182](https://github.com/loopflowstudio/loopflow/actions/runs/38445438182),
+failed `release_tag_is_idempotent_when_remote_tag_matches_head`: the immediate
+second tag observed the first tag's release lock still held.
+
+A disposable Git 2.55 experiment reproduced a push returning while a child
+retained its inherited flock: **3 of 40** samples with receiver maintenance,
+**0 of 40** with `receive.autogc=false`. Git's
+[configuration reference](https://git-scm.com/docs/git-config#Documentation/git-config.txt-receiveautoGc)
+documents automatic receiver maintenance. `TestRepo` now disables it on its
+disposable bare remote. The test still performs real tag/push operations and
+checks the remote commit and immediate idempotency. Production release locking,
+published remotes, observation windows and retries are unchanged.
+
+Validation with Git 2.55: tag idempotency, conflicting-tag refusal and surviving
+publisher-child exclusion all pass (3 cases, 0.347s). Formatting and all-target
+Clippy pass. The full hosted matrix owns remaining fixture effects.
+
+The queue also missed the new Rust dependency caches for both the shared build
+and bundled app CLI; PR-scoped caches were unavailable there. The shared build
+compiled for 174 seconds and finished at 4:02 from run creation. Xcode restored
+its signed DerivedData but spent 256 seconds compiling the CLI, finishing at
+6:25. These are measured cold-cache costs, not a successful sub-five queue proof.
+The first main run must populate the new cache namespaces; subsequent real PR
+and queue observations are still needed. No warmed rerun is substituted for
+that acceptance.

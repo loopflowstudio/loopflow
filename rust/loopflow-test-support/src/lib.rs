@@ -166,6 +166,9 @@ fn create_initial_commit(dir: &Path) {
 
 fn init_bare_remote(dir: &Path) {
     run_git(dir, &["init", "--bare", "-b", "main"]);
+    // Detached receiver maintenance can retain a publisher's inherited lock
+    // after push returns. Disposable fixture remotes need no housekeeping.
+    run_git(dir, &["config", "receive.autogc", "false"]);
 }
 
 fn add_remote(work: &Path, bare: &Path) {

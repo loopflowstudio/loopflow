@@ -581,3 +581,33 @@ wire-contract proof passed from the separate extracted archives with networking
 blocked. Raw grouped listings: `/tmp/ci-group-*.json`; actual
 archives: `/tmp/ci-actual-{library,integration}.tar.zst`; cold hosted installation
 log: `/tmp/ci-install-cache-cold.log`.
+
+## Grouped hosted run: Linux paths below five, Swift remains
+
+[Run 38351066881](https://github.com/loopflowstudio/loopflow/actions/runs/38351066881)
+passed at head `02450d1fdd`, in **6:32** from creation to required aggregate.
+The library archive is **75,729,360 bytes** and integration archive
+**379,860,559 bytes**. Six library downloads plus three integration downloads
+total about 1.59GB, versus 3.73GB for nine prior full archives: **57% less**.
+Shared compilation took 117s; the second archive reused it in 0.10s. Packaging
+took 1.44s plus 3.41s. All Rust execution jobs finished within **4:55** of run
+creation, including quietness and checkout refresh. Individual partition finish
+times were 4:15–4:55.
+
+Installation finished within **4:28**, on a cache miss. Its managed build took
+134s, subsequent Cargo calls 0.10–0.11s, and published build 46.28s. Cache save
+now succeeded, after returning ownership, in the six-second post-action step.
+This proves cache creation, not warm restoration. The difference from the prior
+183s/64s compilations is runner variation, not a cache benefit.
+
+Swift finished at **6:28** and set the critical path: Rust toolchain installation
+81s, Rust cache restoration 23s, Swift cache restoration 25s, CLI build 133.10s
+(148.02 user, 13.55 system), and Desktop build/tests 74.99s (22.85 user,
+9.21 system). Other macOS jobs finished by 4:23. The next investigation is
+macOS toolchain/setup variance and repeated CLI compilation; merely improving
+Linux further will not resolve this observed run. Summed job occupancy was
+**46:38**, still near the original 46:44. Neither five-minute acceptance nor a
+large total-work reduction is demonstrated.
+
+Raw evidence: `/tmp/ci-grouped-{jobs,artifacts}.json`,
+`/tmp/ci-grouped-{build,task-installation,swift-test}.log`.

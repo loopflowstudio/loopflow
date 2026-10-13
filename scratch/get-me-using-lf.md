@@ -490,7 +490,9 @@ Pause fixture failures and historical journal-seeding repair:
 Local checks/limits: `9e79fa4970:scratch/get-me-using-lf.md`, **Paused**.
 Standalone checks pass; native acceptance remains unproved.
 
-Title leak: running demo PID 44545 inherited CMUX workspace/surface/socket keys;
-`terminal_title.rs` uses them to rename the launching host. GUI environment now
-scrubs CMUX alongside other terminal contexts. No identity edits or host rename. Deployment pending.
-Check: LocalWaveAgentLauncherTests — 8 pass; diff check passes.
+Title leak: GUI now scrubs inherited CMUX keys to prevent host renaming;
+eight launcher tests pass (9e79fa4970). Deployment pending.
+October 13: candidate build/signature check PASS at
+/tmp/loo462-next-demo/Loopflow Work Demo.app (50d6451b4, bundled lf).
+Not launched; both live apps and drafts preserved. PR #1544 checks all pass,
+but GitHub reports auto-merge without queue entry; repeated lf arm is a no-op.

@@ -915,3 +915,22 @@ The headless app/unit/UI-runner build passes; strict helper and deep app signatu
 verification pass. Forty-five CI-proof/release-automation tests and actionlint
 pass. Hosted timing, including the changed Xcode cache fingerprint, owns the
 performance result; the local build is correctness evidence only.
+
+
+The experiment is **rejected**. [Run 38430532823](https://github.com/loopflowstudio/loopflow/actions/runs/38430532823)
+at `85c84ec51e` passed but took **5:44 Actions / 5:49 push-to-checks**.
+GitHub PushEvent `23890631726` records 16:26:31 UTC, workflow creation was
+16:26:36 and the aggregate completed at 16:32:20. All Rust partitions finished
+by 4:35; Xcode finished at 5:39. Its changed source key missed the DerivedData
+cache, and the build took 276 seconds. The CLI compile took 152 seconds;
+Swift compiler output followed its completion. Buffered logs limit exact overlap
+attribution, but neither elapsed time nor the log establishes the intended saving.
+The aggregate target and parallel-target flag are removed, restoring the previous
+app build graph. The extra configuration has not earned its place.
+
+Run 38430369254 was a scratch-bearing checkpoint: all product jobs skipped.
+It is excluded from timing acceptance. The retained status note was cleared after
+its findings were preserved here. The prior 4:55 full pass consumed **40:19**
+of mixed-platform runner occupancy versus baseline 46:44; this is not a dollar
+cost estimate. The remaining proof is repeated real-run reliability and delivery,
+not ten reruns of a warmed candidate. Merge remains Jack Heart's pending choice.

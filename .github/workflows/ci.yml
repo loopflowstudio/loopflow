@@ -467,7 +467,6 @@ jobs:
         # `scripts/test.py --ui-host`; see release/UI_HOST_GATE.md.
         run: |
           /usr/bin/time -l xcodebuild build-for-testing \
-            -parallelizeTargets \
             -project LoopflowSwift.xcodeproj \
             -scheme LoopflowMac \
             -destination platform=macOS \

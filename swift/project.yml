@@ -16,20 +16,6 @@ packages:
     url: https://github.com/nalexn/ViewInspector.git
     from: 0.10.0
 
-aggregateTargets:
-  LoopflowControlTools:
-    settings:
-      base:
-        SDKROOT: macosx
-    buildScripts:
-      - name: Build Loopflow control tools
-        script: |
-          set -eu
-          export PATH="$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
-          /usr/bin/python3 "$SRCROOT/../scripts/loopflow-dev.py" bundle-control-tools \
-            --output "$BUILT_PRODUCTS_DIR/LoopflowControlTools"
-        basedOnDependencyAnalysis: false
-
 targets:
   Loopflow:
     type: framework
@@ -60,13 +46,13 @@ targets:
         type: folder
     dependencies:
       - target: Loopflow
-      - target: LoopflowControlTools
     postBuildScripts:
       - name: Bundle Loopflow control tools
         script: |
           set -eu
-          cp "$BUILT_PRODUCTS_DIR/LoopflowControlTools/lf" \
-            "$TARGET_BUILD_DIR/$EXECUTABLE_FOLDER_PATH/lf"
+          export PATH="$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+          /usr/bin/python3 "$SRCROOT/../scripts/loopflow-dev.py" bundle-control-tools \
+            --output "$TARGET_BUILD_DIR/$EXECUTABLE_FOLDER_PATH"
           if [ "${CODE_SIGNING_ALLOWED:-NO}" = "YES" ]; then
             signing_identity="${EXPANDED_CODE_SIGN_IDENTITY:--}"
             for helper in lf; do

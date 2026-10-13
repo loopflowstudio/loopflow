@@ -1180,7 +1180,6 @@ exists; snapshot resets are experimental setup, outside both timers.
 
 | Inputs and execution order | Ordinary CLI + copy/sign, seconds | Boxed future + copy/sign, seconds | Saving, seconds |
 |---|---:|---:|---:|
-
 | cold: baseline then candidate | 27.849 | 28.678 | -0.829 |
 | cold: candidate then baseline | 28.511 | 28.603 | -0.092 |
 | warm: candidate then baseline | 27.330 | 27.167 | 0.163 |

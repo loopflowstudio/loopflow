@@ -1911,13 +1911,18 @@ mod tests {
         select_project(&store, &project);
         let mut task = make_task(&wave, &project);
         task.worktree = Some(directory.path().join("checkout"));
+        task.updated_at -= time::Duration::days(1);
         store.sqlite.seed_unplaced_task(&task);
         let mut before = store.get_task(&task.id).await.unwrap().unwrap();
         store
             .observe_pm_issue_change(task.linear_id.as_ref().unwrap().as_str(), None, true)
             .await
             .unwrap();
+        let removed = store.get_task(&task.id).await.unwrap().unwrap();
+        assert!(removed.updated_at > before.updated_at);
         before.revision += 1; // Removal changes planning, never execution.
+        before.updated_at = removed.updated_at;
+        assert_eq!(removed, before);
         let pr = make_task_pr(&task);
         let result = store
             .place_task(
@@ -1929,7 +1934,7 @@ mod tests {
             )
             .await;
         assert!(result.unwrap_err().to_string().contains("was deleted"));
-        assert_eq!(store.get_task(&task.id).await.unwrap().unwrap(), before);
+        assert_eq!(store.get_task(&task.id).await.unwrap().unwrap(), removed);
         assert!(store.task_prs(&task.id).await.unwrap().is_empty());
         assert!(store
             .task_events_after(&task.id, 0)

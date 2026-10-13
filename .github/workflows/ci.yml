@@ -100,10 +100,17 @@ jobs:
         if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
         run: /usr/bin/time -v cargo clippy --all-targets -- -D warnings
 
-  rust-test:
+  rust-build:
     needs: [merge-proof, scratch-clear]
     if: ${{ !cancelled() && needs.scratch-clear.outputs.candidate == 'true' }}
     runs-on: ubuntu-latest
+    env:
+      # Archive executable code, not gigabytes of duplicated DWARF sections.
+      # Optimization and debug assertions retain the ordinary test profile.
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+    outputs:
+      archive: ${{ steps.archive.outcome == 'success' }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -119,31 +126,125 @@ jobs:
         id: rust-cache
         with:
           key: test-${{ steps.rust-profiles.outputs.key }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.event_name == 'pull_request' }}
       - uses: taiki-e/install-action@nextest
         if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
-      - name: Run Rust tests
+      - name: Build and archive Rust tests
+        id: archive
         if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
         run: |
-          /usr/bin/time -v cargo --config "target.\"cfg(all())\".runner = [\"uv\", \"run\", \"--no-sync\", \"python\", \"$PWD/scripts/test_network.py\"]" nextest run --all --no-fail-fast
-      - name: Prove checkout refresh through the CLI
-        if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
+          uv run --no-sync python scripts/check_rust_test_inventory.py
+          /usr/bin/time -v cargo nextest archive --workspace \
+            -E 'kind(lib)' \
+            --archive-file "$RUNNER_TEMP/rust-library.tar.zst"
+          /usr/bin/time -v cargo nextest archive --workspace \
+            -E 'not kind(lib) & not binary(=planning_reconnect_tests)' \
+            --archive-file "$RUNNER_TEMP/rust-integration.tar.zst"
+      - uses: actions/upload-artifact@v7
+        if: steps.archive.outcome == 'success'
+        with:
+          name: rust-library
+          path: ${{ runner.temp }}/rust-library.tar.zst
+          compression-level: 0
+          retention-days: 1
+      - uses: actions/upload-artifact@v7
+        if: steps.archive.outcome == 'success'
+        with:
+          name: rust-integration
+          path: ${{ runner.temp }}/rust-integration.tar.zst
+          compression-level: 0
+          retention-days: 1
+
+  rust-test:
+    needs: [merge-proof, scratch-clear, rust-build]
+    if: ${{ !cancelled() && needs.scratch-clear.outputs.candidate == 'true' && needs.rust-build.result == 'success' && needs.rust-build.outputs.archive == 'true' }}
+    runs-on: ubuntu-latest
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+    strategy:
+      fail-fast: false
+      matrix:
+        # Keep long observation on partition zero alongside checkout refresh.
+        # Other jobs download only their library or integration executables.
+        include:
+          - { suite: library, shard: 0, partitions: 5 }
+          - { suite: library, shard: 1, partitions: 5 }
+          - { suite: library, shard: 2, partitions: 5 }
+          - { suite: library, shard: 3, partitions: 5 }
+          - { suite: library, shard: 4, partitions: 5 }
+          - { suite: library, shard: 5, partitions: 5 }
+          - { suite: integration, shard: 1, partitions: 3 }
+          - { suite: integration, shard: 2, partitions: 3 }
+          - { suite: integration, shard: 3, partitions: 3 }
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: astral-sh/setup-uv@v7
+      - uses: taiki-e/install-action@nextest
+      - name: Materialize the archived source's migration inputs
         run: |
-          # Integration tests above already build this executable.
+          VERSION=$(uv run python -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')
+          uv run python scripts/canonicalize_migrations.py "$VERSION" --materialize-for-tests
+      - uses: actions/download-artifact@v8
+        with:
+          name: rust-${{ matrix.suite }}
+          path: ${{ runner.temp }}
+      - name: Extract the shared build
+        run: /usr/bin/time -v tar --zstd -xf "$RUNNER_TEMP/rust-${{ matrix.suite }}.tar.zst"
+      - name: Run Rust partition
+        if: matrix.shard != 0
+        run: |
+          LOOPFLOW_TEST_LF="$PWD/target/debug/lf" /usr/bin/time -v cargo --config "target.\"cfg(all())\".runner = [\"uv\", \"run\", \"--no-sync\", \"python\", \"$PWD/scripts/test_network.py\"]" nextest run \
+            --binaries-metadata target/nextest/binaries-metadata.json \
+            --cargo-metadata target/nextest/cargo-metadata.json \
+            -E 'not test(native_runner_is_quiet_until_its_turn_ends)' \
+            --partition hash:${{ matrix.shard }}/${{ matrix.partitions }} --test-threads 6 --no-tests fail --no-fail-fast
+      - name: Prove quietness and checkout refresh concurrently
+        if: matrix.shard == 0
+        run: |
           test -x "$PWD/target/debug/lf"
-          LOOPFLOW_TEST_LF="$PWD/target/debug/lf" /usr/bin/time -v uv run --no-sync python scripts/test_network.py uv run --no-sync pytest python/tests/test_checkout_refresh.py
+          export LOOPFLOW_TEST_LF="$PWD/target/debug/lf"
+          /usr/bin/time -v uv run --no-sync python scripts/test_network.py uv run --no-sync pytest python/tests/test_checkout_refresh.py > "$RUNNER_TEMP/checkout-refresh.log" 2>&1 &
+          checkout_pid=$!
+          status=0
+          /usr/bin/time -v cargo --config "target.\"cfg(all())\".runner = [\"uv\", \"run\", \"--no-sync\", \"python\", \"$PWD/scripts/test_network.py\"]" nextest run \
+            --binaries-metadata target/nextest/binaries-metadata.json \
+            --cargo-metadata target/nextest/cargo-metadata.json \
+            -E 'test(native_runner_is_quiet_until_its_turn_ends)' --test-threads 4 --no-tests fail --no-fail-fast || status=$?
+          wait "$checkout_pid" || status=$?
+          cat "$RUNNER_TEMP/checkout-refresh.log"
+          exit "$status"
 
   task-installation:
     needs: [merge-proof, scratch-clear]
-    if: ${{ !cancelled() && needs.scratch-clear.outputs.candidate == 'true' && needs.merge-proof.outputs.reuse != 'true' }}
+    if: ${{ !cancelled() && needs.scratch-clear.outputs.candidate == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
+      - name: Acquire and fingerprint the installation image
+        id: image
+        run: |
+          uv run python -c 'from scripts.test_task_installation import _prepare_image; _prepare_image("public.ecr.aws/docker/library/rust:trixie")'
+          docker image inspect --format 'id={{.Id}}' public.ecr.aws/docker/library/rust:trixie >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6
+        id: installation-cache
+        with:
+          path: ${{ runner.temp }}/installation-cargo
+          key: installation-${{ runner.os }}-${{ runner.arch }}-${{ steps.image.outputs.id }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'scripts/test_task_installation.py') }}
       - name: Prove managed Tasks in a disposable installation
-        run: uv run python scripts/test_task_installation.py
+        if: needs.merge-proof.outputs.reuse != 'true' || steps.installation-cache.outputs.cache-hit != 'true'
+        run: uv run python scripts/test_task_installation.py --cache-dir "$RUNNER_TEMP/installation-cargo"
       - name: Prove native title hooks through published promotion
-        run: uv run python scripts/test_task_installation.py --native-titles
+        if: needs.merge-proof.outputs.reuse != 'true' || steps.installation-cache.outputs.cache-hit != 'true'
+        run: uv run python scripts/test_task_installation.py --cache-dir "$RUNNER_TEMP/installation-cargo" --native-titles
+      - name: Return Cargo cache ownership to the runner
+        if: always() && steps.installation-cache.outcome == 'success'
+        run: |
+          if [ -d "$RUNNER_TEMP/installation-cargo" ]; then
+            sudo chown -R "$(id -u):$(id -g)" "$RUNNER_TEMP/installation-cargo"
+          fi
 
   # Needs the full history: the check compares every migration against the last
   # release tag, which is how an edited shipped migration is caught before publish.
@@ -193,6 +294,10 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: astral-sh/setup-uv@v7
+      - name: Materialize draft migrations for tests
+        run: |
+          VERSION=$(uv run python -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')
+          uv run python scripts/canonicalize_migrations.py "$VERSION" --materialize-for-tests
       - name: Fingerprint workspace build profiles
         id: rust-profiles
         run: uv run python scripts/rust_profile_cache_key.py >> "$GITHUB_OUTPUT"
@@ -201,16 +306,22 @@ jobs:
         with:
           key: ${{ steps.rust-profiles.outputs.key }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: Run E2E smoke test
+      - uses: taiki-e/install-action@nextest
+        if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
+      - name: Run planning reconnect proofs and E2E smoke test
         if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
         run: |
-          cargo build -p loopflow --bins
+          LOOPFLOW_TEST_LF="$PWD/target/debug/lf" /usr/bin/time -v cargo --config "target.\"cfg(all())\".runner = [\"uv\", \"run\", \"--no-sync\", \"python\", \"$PWD/scripts/test_network.py\"]" nextest run \
+            -p loopflow --test planning_reconnect_tests --test-threads 2 --no-tests fail --no-fail-fast
           /usr/bin/time -v uv run --no-sync python scripts/test_network.py tests/e2e/test_smoke.sh
 
   swift-test:
     needs: [merge-proof, scratch-clear]
     if: ${{ !cancelled() && needs.scratch-clear.outputs.candidate == 'true' }}
     runs-on: macos-15
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
     steps:
       - uses: actions/checkout@v7
         with:
@@ -224,7 +335,7 @@ jobs:
         id: rust-cache
         with:
           key: swift-cli-${{ steps.rust-profiles.outputs.key }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.event_name == 'pull_request' }}
       - name: Fingerprint Swift build inputs
         id: swift-inputs
         run: uv run python scripts/swift_cache.py key >> "$GITHUB_OUTPUT"
@@ -245,11 +356,6 @@ jobs:
       - name: Test checkout observation's read-only sandbox
         if: needs.merge-proof.outputs.reuse != 'true'
         run: uv run pytest python/tests/test_desktop_performance.py::test_checkout_observation_preserves_read_boundary_and_detects_changes
-      - name: Test macOS installation process discovery
-        if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
-        run: |
-          cargo test -p loopflow --lib app_process_tests --no-run
-          uv run python scripts/test_network.py cargo test --offline -p loopflow --lib app_process_tests
       - name: Build Desktop and run headless model and view tests
         if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true' || steps.swift-cache.outputs.cache-hit != 'true'
         shell: bash
@@ -289,10 +395,38 @@ jobs:
             ~/Library/Caches/org.swift.swiftpm
           key: ${{ steps.swift-inputs.outputs.key }}
 
+  macos-process-test:
+    needs: [merge-proof, scratch-clear]
+    if: ${{ !cancelled() && needs.scratch-clear.outputs.candidate == 'true' }}
+    runs-on: macos-15
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: astral-sh/setup-uv@v7
+      - name: Fingerprint workspace build profiles
+        id: rust-profiles
+        run: uv run python scripts/rust_profile_cache_key.py >> "$GITHUB_OUTPUT"
+      - uses: Swatinem/rust-cache@v2
+        id: rust-cache
+        with:
+          key: macos-process-${{ steps.rust-profiles.outputs.key }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.event_name == 'pull_request' }}
+      - name: Test macOS installation process discovery
+        if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
+        run: |
+          /usr/bin/time -l cargo test -p loopflow --lib app_process_tests --no-run
+          uv run python scripts/test_network.py cargo test --offline -p loopflow --lib app_process_tests
+
   loopflow-ui-test:
     needs: [merge-proof, scratch-clear]
     if: ${{ !cancelled() && needs.scratch-clear.outputs.candidate == 'true' }}
     runs-on: macos-15
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -304,7 +438,7 @@ jobs:
         id: rust-cache
         with:
           key: loopflow-ui-test-${{ steps.rust-profiles.outputs.key }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.event_name == 'pull_request' }}
           workspaces: . -> target/dev-app-control
       - name: Install XcodeGen
         run: brew install xcodegen
@@ -366,6 +500,7 @@ jobs:
       - architecture-check
       - scratch-clear
       - rust-lint
+      - rust-build
       - rust-test
       - migration-check
       - python-test
@@ -373,6 +508,7 @@ jobs:
       - e2e-smoke
       - task-installation
       - swift-test
+      - macos-process-test
       - loopflow-ui-test
     steps:
       - name: Aggregate test results
@@ -381,6 +517,7 @@ jobs:
           ARCHITECTURE_CHECK: ${{ needs.architecture-check.result }}
           SCRATCH_CLEAR: ${{ needs.scratch-clear.result }}
           RUST_LINT: ${{ needs.rust-lint.result }}
+          RUST_BUILD: ${{ needs.rust-build.result }}
           RUST_TEST: ${{ needs.rust-test.result }}
           MIGRATION_CHECK: ${{ needs.migration-check.result }}
           PYTHON_TEST: ${{ needs.python-test.result }}
@@ -388,6 +525,7 @@ jobs:
           E2E_SMOKE: ${{ needs.e2e-smoke.result }}
           TASK_INSTALLATION: ${{ needs.task-installation.result }}
           SWIFT_TEST: ${{ needs.swift-test.result }}
+          MACOS_PROCESS_TEST: ${{ needs.macos-process-test.result }}
           LOOPFLOW_UI_TEST: ${{ needs.loopflow-ui-test.result }}
         run: |
           failures=0
@@ -420,6 +558,7 @@ jobs:
           check_result "architecture-check" "$ARCHITECTURE_CHECK"
           check_result "scratch-clear" "$SCRATCH_CLEAR"
           check_result "rust-lint" "$RUST_LINT"
+          check_result "rust-build" "$RUST_BUILD"
           check_result "rust-test" "$RUST_TEST"
           check_result "migration-check" "$MIGRATION_CHECK"
           check_result "python-test" "$PYTHON_TEST"
@@ -427,6 +566,7 @@ jobs:
           check_result "e2e-smoke" "$E2E_SMOKE"
           check_result "task-installation" "$TASK_INSTALLATION"
           check_result "swift-test" "$SWIFT_TEST"
+          check_result "macos-process-test" "$MACOS_PROCESS_TEST"
           check_result "loopflow-ui-test" "$LOOPFLOW_UI_TEST"
 
           exit "$failures"

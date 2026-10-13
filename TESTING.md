@@ -31,27 +31,42 @@ the required merge queue. Successful PR CI explicitly enqueues the unchanged
 Dependabot head when it is not already queued; queue CI still gates merging.
 
 Linear acquisition fixtures live under `rust/loopflow/tests/linear/` and compile
-inside the library, where fetched response types stay private. Each fixture process
-builds the current CLI and takes its path from Cargo’s artifact output:
+inside the library, where fetched response types stay private. Focused Cargo tests
+build the current CLI and take its path from Cargo’s artifact output:
 
 ```sh
 cargo test -p loopflow --lib local_planning
 cargo test -p loopflow --lib linear::acceptance
 ```
 
+CI and the disposable installation runner supply their prepared candidate through
+`LOOPFLOW_TEST_LF`, avoiding Cargo calls in each test process. Only set this to
+the executable built from the current test source and build inputs; never an
+installed CLI. Compiled provenance fields have separate names from build inputs
+so nested Cargo does not invalidate the parent's build.
+
 These fixtures still invoke the built CLI with disposable Homes. Shared execution
 fixtures seed fixed admission evidence; they do not expose acquisition APIs.
 
 CI Rust cache keys include the root workspace's build profiles, which the cache
 action's member-manifest discovery omits. Profile changes get fresh dependency
-caches; version-only releases retain them. Main publishes the shared caches;
-PRs and merge groups restore them without accumulating private copies. Cache
-restoration alone never skips tests. After a merge, main can reuse a
+caches; version-only releases retain them. Main publishes shared caches. The
+shared Rust build and macOS Rust jobs can also seed missing caches during PR
+review; an up-to-date cache is not saved again. Other Rust jobs only save on main.
+Cache restoration alone never skips tests. After a merge, main can reuse a
 successful merge-group CI run for the identical SHA and workflow, linking that
 run in its summary. Missing or unreadable results trigger the full matrix. Main still
 restores the shared caches and runs each job whose cache misses; those jobs
 refresh their caches and must pass. Candidate PRs and merge groups always execute
 every check.
+
+The disposable installation job also caches its Cargo target and registry on
+the Linux runner, keyed by image identity, architecture, lockfile, profiles and
+harness. Successful PR runs can seed this cache within their GitHub cache scope;
+the first run is cold. Source, OS users, Homes and installations are recreated
+for every proof. Both managed and published candidates still pass through Cargo
+and execute their checks after restoration. Locally, omit `--cache-dir` to use
+Docker volumes; Mac-host bind mounts have caused unnecessary Cargo rebuilds.
 
 Swift cache keys include the tracked Swift tree, compiler, and SDK. Successful
 main jobs save the build and source hashes/timestamps. After checkout, CI restores
@@ -81,7 +96,7 @@ The introductions in `README.md` and `docs/index.md` share the same text. When
 editing either introduction, update both and run
 `uv run --project website --extra test pytest website/tests/test_readme_index_sync.py`.
 
-`cargo test -p loopflow --test agent_startup_tests` exercises bare `lf` and
+`cargo test -p loopflow --test integration agent_startup_tests::` exercises bare `lf` and
 Session reconnect to a stand-in provider with an empty environment and no
 credentials. CI's ordinary Rust network isolation covers it. It bounds provider
 and Git launches, SQLite statement/returned-row counts, and time to provider
@@ -113,7 +128,7 @@ then checks its captured CLI and monitor population in Rust
 and Swift. It builds the CLI with Cargo so a unit-test binary cannot accidentally
 launch an installed version. Regenerate its wire capture with
 `LOOPFLOW_UPDATE_LIFECYCLE_FIXTURE=1 cargo test -p loopflow --lib ordinary_task_comments_and_completion_preserve_live_flow_and_arrival`,
-then run `cargo test -p loopflow --test dto_fixtures composed_lifecycle` and
+then run `cargo test -p loopflow --test integration dto_fixtures::composed_lifecycle` and
 `swift test --package-path swift --filter 'composedTaskLifecycle|dueDate'`.
 
 Provider fixtures must read the launch's actual context channel. When a final
@@ -485,25 +500,45 @@ for Task acceptance. See `release/UI_HOST_GATE.md`.
 
 ## What CI Runs
 
-See `.github/workflows/ci.yml`. These check jobs run in parallel and feed the
-aggregate `tests-result` check:
+See `.github/workflows/ci.yml`. Checks feed the aggregate `tests-result` check.
+Rust partitions wait for one shared build; the other suites run independently.
 
 | Job | Runner | Command |
 |-----|--------|---------|
 | `architecture-check` | ubuntu-latest | map every durable owner, public boundary, provider edge, and named shim; reject stale control vocabulary |
 | `scratch-clear` | ubuntu-latest | defer checkpoint PR tests; reject scratch artifacts on queue/main |
 | `rust-lint` | ubuntu-latest | `cargo fmt`, `cargo clippy --all-targets -- -D warnings` |
-| `rust-test` | ubuntu-latest | `cargo nextest run --all --no-fail-fast` |
+| `rust-build` | ubuntu-latest | compile and archive Rust tests once |
+| `rust-test` | ubuntu-latest | five library and three integration partitions; partition zero proves quietness and checkout refresh |
 | `migration-check` | ubuntu-latest | verify migration namespaces/history |
 | `python-test` | ubuntu-latest | `uv run pytest python/tests/` |
 | `website-test` | ubuntu-latest | `cd website && uv run python dev.py test` |
-| `e2e-smoke` | ubuntu-latest | `tests/e2e/test_smoke.sh` |
+| `e2e-smoke` | ubuntu-latest | both planning-reconnect proofs, then `tests/e2e/test_smoke.sh` |
 | `task-installation` | ubuntu-latest | `uv run python scripts/test_task_installation.py` |
 | `swift-test` | macos-15 | app build, headless model/view tests, boundary check |
+| `macos-process-test` | macos-15 | deleted-executable and exact process-authority regression |
 | `loopflow-ui-test` | macos-15 | xcodegen + app/test-runner compile |
 
 Candidate and merge-group jobs must all pass for `tests-result` to pass. Both CI
 and the local runner collect every Rust test failure with `--no-fail-fast`.
+Ordinary integration modules are registered in `rust/loopflow/tests/integration.rs`
+and linked once. Add new modules there; Cargo auto-discovery is disabled. Dedicated
+installation, release, reconnect, live-provider and process-global fixture targets remain declared in
+`rust/loopflow/Cargo.toml`. Nextest runs every case in a separate process.
+CI and the local Rust plan run `scripts/check_rust_test_inventory.py` before
+compilation and reject unregistered top-level test source files.
+Each Rust partition extracts the same revision's library or integration archive into the checkout's
+`target/` directory and materializes matching migration inputs. The reconnect
+target is excluded from that archive and executed in the smoke job. No suite
+is dropped; the aggregate requires the build and every partition to succeed.
+Partitions use six test slots on the ordinary Linux runners. Partition zero
+runs the four native quietness cases in separate processes, preserving each
+observation window while overlapping independent waits and the separate
+checkout-refresh proof. The job waits for both commands and fails if either fails.
+The shared Linux build and macOS Rust builds omit debug symbols to reduce
+compilation and transfer work.
+It retains unoptimized code and debug assertions; CI backtraces have less
+source-line detail. Local Cargo profiles are unchanged.
 `.github/workflows/architecture-drift.yml`
 runs the same architecture command every Monday and retains its JSON report for
 90 days; four consecutive runs are the time-based architecture KR evidence.
@@ -705,7 +740,7 @@ cannot skip a later review.
 Include the CLI/desktop unblock projection when changing builtin Flow composition:
 
 ```bash
-cargo test -p loopflow --test task_initialization_tests task_live_unblock
+cargo test -p loopflow --test integration task_initialization_tests::task_live_unblock
 ```
 
 Fixtures targeting a named boundary should resolve its node ID in the expanded
@@ -744,7 +779,7 @@ Listings keep effective skills and authored flows separate and show their source
 and invocations; `lf flow show` expands a flow's steps.
 
 ```bash
-cargo test -p loopflow --test cli_discovery list_preserves_kinds_overrides_sources_and_reserved_invocations
+cargo test -p loopflow --test integration cli_discovery::list_preserves_kinds_overrides_sources_and_reserved_invocations
 ```
 
 Catalog retirement also affects historical migration tests. Keep their persisted
@@ -787,7 +822,7 @@ alongside the delivery checks; a test-name filter alone misses ancestor coverage
 Rendering gathered documents must include the production deduplication step.
 
 ```bash
-cargo test -p loopflow --test context_tests
+cargo test -p loopflow --test integration context_tests::
 cargo test -p loopflow --lib context_delivery
 cargo test -p loopflow --lib skill_launch
 ```
@@ -829,7 +864,7 @@ For architecture/README documentation changes, run
 Model renames also require this focused website check; generating matching HTML
 does not catch stale vocabulary in the website assertions.
 For Markdown changes under `docs/`, builtins or skills, and changes to README or
-AGENTS, also run `cargo test -p loopflow --test documented_commands`. Its command
+AGENTS, also run `cargo test -p loopflow --test integration documented_commands::`. Its command
 scanner covers prose and headings as well as fenced examples; a focused runtime
 suite does not check those additions.
 Keep README and docs/index openings identical and regenerate docs/architecture.html
@@ -1151,7 +1186,7 @@ as controller tests. Bare interrupts prove local control during GitHub outages;
 steering publishes to Linear and belongs with the mocked Linear boundary tests.
 
 ```bash
-cargo nextest run -p loopflow --test task_github_cache_tests --no-fail-fast
+cargo nextest run -p loopflow --test integration task_github_cache_tests:: --no-fail-fast
 ```
 
 When changing Linear response shapes, run the client tests and PM-operation
@@ -1303,7 +1338,7 @@ suite's environment lock and restores them afterward. Prove isolation from a
 live Session without shell-level scrubbing:
 
 ```bash
-cargo test -p loopflow --test session_cli_tests session_names_are_shared_and_human_names_win
+cargo test -p loopflow --test integration session_cli_tests::session_names_are_shared_and_human_names_win
 ```
 
 Headless provider transport changes also run the research-artifact test

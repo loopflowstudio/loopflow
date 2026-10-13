@@ -453,11 +453,9 @@ a missing checkout and remains unfinished; missing files do not authorize closur
 LOO-367/330/389 retain dirty files or unsettled commits; preserve them pending review.
 No real-data or copied-history deletion/retirement has been performed.
 
-Jack Heart's cleanup distinction is an acceptance boundary: do not add compatibility
-code for proven one-off iteration debris, and do not use a database patch to conceal
-a state ordinary use can reproduce. A candidate needs its originating operation,
-expected present outcome, and exact retained/restored records before repair. The
-unclassified bucket stays explicit; it is not an excuse to mark every old Task done.
+Jack Heart distinguishes iteration debris from reproducible bugs. Repair current-use
+bugs in code; rehearse exact data repairs with restoration before cleanup. Unknown
+or interrupted Sessions never authorize closure.
 
 Check: `cargo test -p loopflow --lib a_finished_task_stays_current_only_while_execution_is_unresolved`, `cargo clippy --all-targets -- -D warnings`, `cargo fmt` — pass; native refresh of the stopped-failure correction remains.
 

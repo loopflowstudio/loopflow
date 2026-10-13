@@ -183,6 +183,7 @@
                   "branch": "work-first",
                   "local_exists": true,
                   "machine_id": "home_3e605971a0c316fdfeafc7e91579940f",
+                  "machine_label": "build-server",
                   "slug": "task-pr-proof",
                   "worktree": "/private/tmp/.tmpRKKNhK"
                 }

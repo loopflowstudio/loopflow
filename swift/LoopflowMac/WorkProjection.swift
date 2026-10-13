@@ -170,6 +170,7 @@ struct WorkOutlineRow: Identifiable {
     let inlineSessions: [SessionRecord]
     let depth: Int
     let ancestors: [WorkOutlineSubject]
+    var task: RoadmapTask? = nil
 
     var id: WorkNodeKey { subject.key }
     var title: String { subject.title }
@@ -190,11 +191,11 @@ extension WorkProjection {
         var rows: [WorkOutlineRow] = []
         func appendWork(_ subject: WorkOutlineSubject, depth: Int,
                         ancestors: [WorkOutlineSubject], hasChildren: Bool,
-                        sessions: [SessionRecord] = []) {
+                        sessions: [SessionRecord] = [], task: RoadmapTask? = nil) {
             rows.append(WorkOutlineRow(
                 subject: subject, hasChildren: hasChildren, inlineSessions: sessions,
                 depth: depth,
-                ancestors: ancestors
+                ancestors: ancestors, task: task
             ))
         }
         for wave in waves {
@@ -220,7 +221,7 @@ extension WorkProjection {
                     guard taskMatches else { continue }
                     // Retain exact conversations for contextual opening, not tallies.
                     appendWork(taskSubject, depth: waveDepth, ancestors: ancestors,
-                               hasChildren: false, sessions: task.sessions)
+                               hasChildren: false, sessions: task.sessions, task: task.task)
                 }
             }
             if !query.isEmpty, !omitWave, rows.count == waveStart + 1, !matches(waveSubject.title) { rows.removeLast() }

@@ -230,6 +230,7 @@ pub struct TaskReferenceSnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskWorktreeSnapshot {
     pub machine_id: Option<crate::durable::MachineId>,
+    pub machine_label: Option<String>,
     pub slug: String,
     pub branch: Option<String>,
     pub base_commit: String,
@@ -803,6 +804,7 @@ async fn roadmap_snapshot(
 #[derive(Debug)]
 struct SharedTaskReads {
     checkouts: Vec<crate::store::sqlite::TaskCheckout>,
+    machines: Vec<crate::durable::Machine>,
     local_machine: crate::durable::MachineId,
 }
 
@@ -813,6 +815,7 @@ impl SharedTaskReads {
         ask_checkouts_ahead(&checkouts, &local_machine);
         Ok(Self {
             checkouts,
+            machines: store.machines().await?,
             local_machine,
         })
     }
@@ -1225,6 +1228,7 @@ async fn snapshot_task_detail(
         store.sqlite.task_issue_url(&task.id)?,
         Some(task),
         machine_id,
+        &shared.machines,
         &shared.local_machine,
     );
     let acquisition = store.sqlite.task_acquisition(&task.id)?;
@@ -1576,6 +1580,7 @@ fn task_reference(
     issue_url: Option<String>,
     task: Option<&Task>,
     machine_id: Option<crate::durable::MachineId>,
+    machines: &[crate::durable::Machine],
     local_machine: &crate::durable::MachineId,
 ) -> TaskReferenceSnapshot {
     let workspace = task.and_then(|task| {
@@ -1592,6 +1597,10 @@ fn task_reference(
             task_worktree.clone()
         };
         Some(TaskWorktreeSnapshot {
+            machine_label: machines
+                .iter()
+                .find(|machine| Some(&machine.id) == machine_id.as_ref())
+                .and_then(|machine| machine.label.clone()),
             machine_id,
             slug: task.workspace_slug.clone(),
             branch,
@@ -2342,6 +2351,78 @@ mod tests {
         MetricReadingDto, MetricStage, MetricUnknownCauseDto, Threshold,
     };
     use crate::work::wave::Wave;
+
+    #[tokio::test]
+    async fn task_reference_names_recorded_checkout_owner_after_delegation_changes() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = directory.path().join("registry.db");
+        let store = Arc::new(
+            crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
+                database.clone(),
+            ))
+            .await
+            .unwrap(),
+        );
+        let wave = Wave::new(
+            crate::id::WaveId::new(),
+            "product".into(),
+            directory.path().display().to_string(),
+        );
+        store.create_wave(&wave).await.unwrap();
+        store
+            .seed_inventory(
+                crate::test_linear_input::InventoryFixture {
+                    wave_id: wave.id().clone(),
+                    provider: "linear".into(),
+                    initiative: "initiative".into(),
+                    synced_at: 1,
+                    snapshot: serde_json::from_str(include_str!(
+                        "../../../../../tests/fixtures/dto/task_history_planning.json"
+                    ))
+                    .unwrap(),
+                },
+                None,
+            )
+            .await
+            .unwrap();
+        let task = store.list_tasks(Some(wave.id())).await.unwrap().remove(0);
+        let owner = crate::durable::MachineId::new();
+        let assigned = crate::durable::MachineId::new();
+        for (id, label) in [(&owner, "build-server"), (&assigned, "new-default")] {
+            store
+                .add_machine(id, &format!("{label}.invalid"), label, "/remote/repo")
+                .await
+                .unwrap();
+        }
+        let db = rusqlite::Connection::open(&database).unwrap();
+        db.execute(
+            "UPDATE tasks SET worktree='/remote/checkout',checkout_machine_id=?2 WHERE id=?1",
+            rusqlite::params![task.id.as_str(), owner.as_str()],
+        )
+        .unwrap();
+        db.execute("INSERT INTO work_placements(wave_id,machine_id,enabled,placed_at,provenance) VALUES(?1,?2,1,1,'explicit')",
+            rusqlite::params![wave.id().as_str(), assigned.as_str()]).unwrap();
+        let task = store.get_task(&task.id).await.unwrap().unwrap();
+        let shared = super::SharedTaskReads::read(&store).await.unwrap();
+        let detail = super::snapshot_task_detail(&store, &task, String::new(), false, &shared)
+            .await
+            .unwrap();
+        let workspace = detail.reference.workspace.unwrap();
+        assert_eq!(workspace.machine_id, Some(owner.clone()));
+        assert_eq!(workspace.machine_label.as_deref(), Some("build-server"));
+        assert_eq!(workspace.local_exists, None);
+        store
+            .rename_machine("build-server", "renamed-server")
+            .await
+            .unwrap();
+        let shared = super::SharedTaskReads::read(&store).await.unwrap();
+        let detail = super::snapshot_task_detail(&store, &task, String::new(), false, &shared)
+            .await
+            .unwrap();
+        let workspace = detail.reference.workspace.unwrap();
+        assert_eq!(workspace.machine_id, Some(owner));
+        assert_eq!(workspace.machine_label.as_deref(), Some("renamed-server"));
+    }
 
     #[tokio::test]
     async fn task_history_preserves_canceled_inventory_without_admitting_execution() {

@@ -659,6 +659,7 @@ struct DTOFixtureTests {
         #expect(tasks.map(\.section) == [.now, .waiting, .available, .later])
         #expect(tasks.map(\.condition.state) == [.clear, .waiting, .clear, .clear])
         #expect(tasks[0].reference.workspace?.slug == "make-lf-work-the-machine")
+        #expect(tasks[0].reference.workspace?.machineLabel == "build-server")
         #expect(tasks[2].reference.workspace == nil)
         #expect(tasks[2].reference.issueUrl == nil)
         #expect(tasks[3].reference.workspace?.branch == "jack-heart/now-available-research")

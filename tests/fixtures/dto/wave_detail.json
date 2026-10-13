@@ -181,6 +181,7 @@
           "issue_url": "https://linear.app/loopflow/issue/INF-123/surface-nightly-failures",
           "workspace": {
             "machine_id": "home_00000000000000000000000000000001",
+            "machine_label": "build-server",
             "slug": "infrastructure-task",
             "branch": "jack/infrastructure.task.20260713_1200",
             "worktree": "/src/loopflow.infrastructure.task",

@@ -183,11 +183,10 @@ struct WorkNavigator: View {
         }
     }
 
-    /// One row component at two levels. A Wave is a sans section head with a
-    /// chevron and nothing else; a Task carries a dot only while it needs eyes
-    /// (running, blocked, waiting on you). Conversations stay in the workspace.
+    /// Waves head the outline; Tasks keep title navigation separate from metadata links.
     private func outlineRow(_ row: WorkOutlineRow) -> some View {
         let isWave = row.id.work.kind == .wave
+        let status = TaskRowProgramStatus(sessions: row.inlineSessions, unavailable: model.sessions.errorMessage)
         return HStack(spacing: 6) {
             if row.hasChildren {
                 let key = row.id
@@ -204,32 +203,37 @@ struct WorkNavigator: View {
                 .accessibilityIdentifier("work-disclose-\(key.work.kind.rawValue)-\(key.work.id)")
             } else {
                 // The slot stays so titles align whether or not a Task has a dot.
-                Circle().fill(taskTone(row)?.ink ?? .clear)
+                Circle().fill(isWave ? .clear : status.tone.ink)
                     .frame(width: 6, height: 6).frame(width: 14)
                     .accessibilityHidden(true)
             }
-            Button {
-                if row.id.work.kind == .task, let onOpenTask {
-                    onOpenTask(row.id.work)
-                } else {
-                    model.select(row.id.work)
+            VStack(alignment: .leading, spacing: 3) {
+                Button {
+                    if row.id.work.kind == .task, let onOpenTask {
+                        onOpenTask(row.id.work)
+                    } else {
+                        model.select(row.id.work)
+                    }
+                } label: {
+                    Text(row.title)
+                        .font(isWave ? Typography.textStrong : Typography.text)
+                        .foregroundStyle(isWave
+                            ? (isSelected(row) ? palette.accentInk : palette.textSecondary)
+                            : palette.text)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
                 }
-            } label: {
-                Text(row.title)
-                    .font(isWave ? Typography.textStrong : Typography.text)
-                    .foregroundStyle(isWave
-                        ? (isSelected(row) ? palette.accentInk : palette.textSecondary)
-                        : palette.text)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
+                .help(row.title)
+                .accessibilityIdentifier("work-\(row.id.work.kind.rawValue)-\(row.id.work.id)")
+                if let task = row.task {
+                    TaskRowMetadata(task: task, status: status, localMachineId: model.observingMachineId)
+                }
             }
-            .help(row.title)
-            .accessibilityIdentifier("work-\(row.id.work.kind.rawValue)-\(row.id.work.id)")
         }
         .padding(.horizontal, 6)
-        .frame(minHeight: 28)
+        .frame(minHeight: isWave ? 28 : 44)
         .background(isSelected(row) ? palette.selectionTint : Color.clear,
                     in: RoundedRectangle(cornerRadius: 6))
         .overlay(alignment: .leading) {
@@ -276,17 +280,6 @@ struct WorkNavigator: View {
             return row.inlineSessions.contains { $0.id == selected }
         }
         return row.id.work == model.selection
-    }
-
-    /// The dot a Task row carries while it needs eyes, from its shared Flow
-    /// projection: running, blocked, or stalled. Stopped and idle rows
-    /// carry nothing.
-    private func taskTone(_ row: WorkOutlineRow) -> WorkTone? {
-        let work = row.id.work
-        guard work.kind == .task, let found = model.task(id: work.id),
-              let execution = found.task.execution else { return nil }
-        let state = execution.state.presentation
-        return state.label == nil ? nil : state.tone
     }
 
     private func warning(_ text: String) -> some View {

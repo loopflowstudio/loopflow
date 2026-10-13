@@ -81,9 +81,11 @@ Both existing apps/drafts remain preserved.
 ## Sidebar metadata — October 13
 
 Jack Heart requested program status, stored Task/PR links and remote Machine names.
-Compact title plus metadata line is a reversible presentation choice, still awaiting
-implementation and native review. No product decision blocks this slice; status
-provenance and recorded ownership must follow the accepted constraints in the plan.
+Compact title plus metadata line is implemented at 44 points; native density remains
+for review. Reports across Sessions use existing severity order, then primary/ID
+ties; source appears in the tooltip. Recorded ownership alone supplies Machine
+labels; unstarted assignments are omitted. These reversible choices add no status
+or placement authority. Native external-link dispatch remains a demo check.
 
 ## Context accounting — October 13
 

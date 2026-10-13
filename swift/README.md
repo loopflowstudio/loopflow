@@ -31,6 +31,13 @@ Each launch records when its first frame, saved workspace and fresh workspace
 arrived, and how long each `lf` read took, under `desktop-cache/timings/` in
 the Machine. Durations and command names only; the files stay on this machine.
 
+Task rows show a title above program status, stored Task/PR links and the recorded
+Machine name for remote checkouts. Click the title to return to the retained
+conversation; links open their destinations separately. Hover status for its Session
+source and full report. Nonreporting clients show **inferred** activity or Waiting;
+missing evidence stays unknown. Program Done/Error does not complete the Task.
+Saved workspace readings wait for fresh program status.
+
 Choose **Background progress** in the repository toolbar to enable minute
 checks, enroll or hold Tasks, and inspect the last check and blockers. Checks
 continue with the app closed on the selected Machine. Disabling stops scheduled

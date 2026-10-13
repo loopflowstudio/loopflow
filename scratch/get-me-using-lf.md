@@ -9,7 +9,7 @@ Product owns this Task. LOO-427 is integrated and completed; historical stacking
 details remain at `0bb13e9261:scratch/get-me-using-lf.md`. Portfolio implementation:
 `d43aa248d3`; shared-reader compression: `50e2cf44d1`. Reconciled October 13
 at `cf67067b0d`, including main `414d4dd27c`, completed chrome/profiling work and
-the failed configured demo. Sidebar metadata remains implementation work.
+the failed configured demo. Sidebar metadata is implemented; native review remains.
 
 ## Problem and accepted direction
 
@@ -155,6 +155,8 @@ one message. No new Session inventory or readiness store replaces them.
 
 The Session inventory controls and top strip are deleted; contextual exact-Session
 links and full membership still serve retained Work. Do not delete those owners.
+The 28-point single-line Task row and Flow-only taskTone dot are removed; the
+surviving metadata reads shared Session evidence without changing Task state.
 Task action feedback now shares one helper across run/move/pause/complete, retaining
 the originating navigation and Task. Profiling has one endpoint decision that returns
 status and elapsed time together; failure cannot leave a usable comparison number.
@@ -211,10 +213,10 @@ Publication check commands (inherited LF_* removed, stdin closed; lifecycle uses
 `TMPDIR=/private/tmp uv run python scripts/test_network.py`):
 - `cargo test -p loopflow --test session_lifecycle_tests` — repo-primary reuse and
   mixed membership pass with isolated, pinned fake providers.
-- `cargo test -p loopflow --test dto_fixtures` — shared capture decodes in agreement.
+- `cargo test -p loopflow --test integration dto_fixtures::` — shared capture decodes in agreement.
 - `scripts/test_desktop.sh --filter 'WorkNavigationTests|WorkNavigationProofTests|WorktreeWorkspaceTests|DTOFixtureTests' -Xswiftc -gnone`
   — app builds and nonempty headless tests pass, including new entry cases.
-- `cargo test -p loopflow --test documented_commands` — changed examples resolve.
+- `cargo test -p loopflow --test integration documented_commands::` — changed examples resolve.
 
 Gate owns the above suites once. Prompt fixtures inspect assembled input and
 assert no mandatory setup or operating pass before the no-work invitation, without requiring a real model.
@@ -298,26 +300,36 @@ proof across distinct Tasks, resume and compaction remains for each provider.
 Workspace/account trust is separate from hook review; no fabricated approval or
 approval of unrelated hooks is part of this work.
 
-### Sidebar metadata — remaining implementation
+### Sidebar metadata — implemented, native review remains
 
-Jack Heart's October 13 steers request slightly taller Task rows, using his cmux
-screenshot for density: compact title plus metadata line, no Session counts or
-branch/path clutter. Show program status through existing validated OSC 7501,
-ProgramStatus and Waiting owners. Compare the current Rex program-status contract
-at https://www.superlogical.com/rex/docs/build/program-status before implementation.
-Prefer actual reports; cheap existing runtime/stream inference may fill nonreporters,
-clearly labeled, with unknown preserved. Never assume Claude/Codex rollout or equate
-program done/error with Task completion, Paused or Workflow position.
+Jack Heart's October 13 steers selected compact title/metadata rows. Task rows now
+use 44-point minimum height, with program status, stored Task/PR links and recorded
+remote Machine labels. Native density remains unaccepted. No Session counts or
+branch/path clutter. Native Link controls are siblings of the title button; only
+the title selects the conversation. Existing workspace and surface owners survive.
 
-Use stored Task/PR destinations for links; clicking them must not open a conversation.
-Show the Machine name only for remote Tasks. Started Tasks use recorded execution/
-checkout ownership, never a changed delegation default. If an unstarted destination
-is shown, distinguish assignment from actual execution. Unknown/unavailable ownership
-stays unknown. Reuse shared location/Machine projections without polling, provider
-calls or another status authority. Preserve cached workspaces. This slice remains
-unimplemented at reconciliation: WorkNavigator still renders a single title at
-28-point minimum height, with a Task-tone dot. Status provenance, link interaction
-and recorded remote-owner coverage remain part of this slice before demo.
+Compared the current [Rex OSC 7501 contract](https://www.superlogical.com/rex/docs/build/program-status)
+on October 13: the existing reducer matches states, record replacement, clear/exit
+lifetimes and source-scoped validation. Sidebar rendering consumes validated shared
+Session reports; it does not parse terminal output. Across Sessions, report severity
+wins, primary then stable Session ID breaks ties, and the tooltip identifies the
+Session. Reports outrank inferred shared Waiting/client activity. Cleared reporters
+stay unknown; failed readings stay unavailable. No Claude/Codex rollout is assumed.
+Done/Error never supplies Task completion, Paused or Workflow position.
+
+Rust adds the optional Machine label to the existing checkout projection, reading
+registered Machines once per planning snapshot and joining the recorded checkout
+owner. Changed delegation defaults cannot relabel started work. Swift omits local
+names; unknown ownership and unnamed remote Machines stay explicit. No assignment
+label, discovery polling, network read or second owner is added. The shared Rust
+and Swift fixtures carry the field. Review found saved Session pages retaining
+old reports/Waiting; cache restoration now strips both with client liveness.
+
+Focused proof covers report/inference/unknown precedence, independent terminal
+record IDs, clear/cache boundaries, stored link destinations outside title actions,
+retained layout/Files draft, remote/local/unknown names and recorded ownership after
+changed delegation and Machine rename. Browser dispatch and density remain native
+demo checks; headless inspection cannot synthesize either.
 
 ### Profiling and optimization
 
@@ -363,8 +375,7 @@ Wave move into `.lf/wave/` and shared Task pause handling; `cf67067b0d` removed
 the duplicate pause method introduced by integration. Its five Rust and 31 Swift
 focused passes are recorded at `cf67067b0d:scratch/get-me-using-lf.md`.
 
-Remaining delivery includes the sidebar slice and its regressions, affected-suite
-gate and publication for review. The unlaunched profiling build in
+Remaining delivery includes affected-suite gate and publication for review. The unlaunched profiling build in
 task-opening-latency.md predates compression, main integration and the sidebar
 slice; the later demo needs a fresh matching bundled-lf app. Jack Heart requested
 relaunch after UX fixes, preserving both existing apps' live panes and unsent
@@ -374,4 +385,4 @@ remain; Portfolio review follows the main experience. No global install, takeove
 live migration, broader cleanup or landing is authorized. No product decision is
 needed for the remaining implementation; visual acceptance stays with demo review.
 
-Check: `git diff --check` PASS (prose-only reconciliation); prior focused results reused, affected-suite gate/CI and native demo remain outstanding.
+Check: `scripts/test_desktop.sh --filter 'TaskRowMetadataTests|WorkCacheTests' -Xswiftc -gnone` PASS (21), ProgramStatusTests + DTOFixtureTests.roadmapFixturePreservesTaskReferences PASS (12); `cargo test -p loopflow --lib task_reference_names_recorded_checkout_owner_after_delegation_changes` and `cargo test -p loopflow --test integration dto_fixtures::status_and_roadmap_require_the_shared_metric_portfolio` PASS; `cargo fmt`, all-target Clippy and diff PASS. Affected suites remain with gate; native timing/trust/link/density proof remains with demo.

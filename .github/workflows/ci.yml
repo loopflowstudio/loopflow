@@ -192,10 +192,19 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
+      - name: Acquire and fingerprint the installation image
+        id: image
+        run: |
+          uv run python -c 'from scripts.test_task_installation import _prepare_image; _prepare_image("public.ecr.aws/docker/library/rust:trixie")'
+          docker image inspect --format 'id={{.Id}}' public.ecr.aws/docker/library/rust:trixie >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/installation-cargo
+          key: installation-${{ runner.os }}-${{ runner.arch }}-${{ steps.image.outputs.id }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'scripts/test_task_installation.py') }}
       - name: Prove managed Tasks in a disposable installation
-        run: uv run python scripts/test_task_installation.py
+        run: uv run python scripts/test_task_installation.py --cache-dir "$RUNNER_TEMP/installation-cargo"
       - name: Prove native title hooks through published promotion
-        run: uv run python scripts/test_task_installation.py --native-titles
+        run: uv run python scripts/test_task_installation.py --cache-dir "$RUNNER_TEMP/installation-cargo" --native-titles
 
   # Needs the full history: the check compares every migration against the last
   # release tag, which is how an edited shipped migration is caught before publish.

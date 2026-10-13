@@ -55,6 +55,14 @@ restores the shared caches and runs each job whose cache misses; those jobs
 refresh their caches and must pass. Candidate PRs and merge groups always execute
 every check.
 
+The disposable installation job also caches its Cargo target and registry on
+the Linux runner, keyed by image identity, architecture, lockfile, profiles and
+harness. Successful PR runs can seed this cache within their GitHub cache scope;
+the first run is cold. Source, OS users, Homes and installations are recreated
+for every proof. Both managed and published candidates still pass through Cargo
+and execute their checks after restoration. Locally, omit `--cache-dir` to use
+Docker volumes; Mac-host bind mounts have caused unnecessary Cargo rebuilds.
+
 Swift cache keys include the tracked Swift tree, compiler, and SDK. Successful
 main jobs save the build and source hashes/timestamps. After checkout, CI restores
 an input's cached timestamp only when its contents still match; changed inputs

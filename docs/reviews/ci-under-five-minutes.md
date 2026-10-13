@@ -528,3 +528,19 @@ No coverage was removed. No broader local test rerun is needed for this evidence
 update. Raw API records: `/tmp/ci-no-debug-{run,jobs}-rest.json`; artifact record:
 `/tmp/ci-no-debug-artifacts.json`; build, installation and partition logs:
 `/tmp/ci-no-debug-{build,installation,shard8}.log`.
+
+### Installation cache experiment
+
+A disposable native-Linux bind-mount probe compiled once in 0.51s and reported
+`Fresh` in 0.00s on the next invocation. This separates native bind behavior
+from the earlier Mac-host filesystem failure; it does not prove full-suite
+reuse. The next hosted candidate exposes only Cargo target and registry through
+`--cache-dir`, with an Actions cache keyed by the actual Docker image identity,
+architecture, lockfile, workspace manifest and harness. The default local path
+retains Docker volumes. Proof source and installation authority remain disposable.
+Successful PR runs can populate their scoped cache, allowing cold/warm measurement
+before landing. Cache hits never skip compilation or proofs. Hosted restoration,
+save cost and net savings remain to be measured.
+
+Validation: 51 installation-harness, CI-proof and release-automation tests passed;
+actionlint passed. Full native-Linux cache execution is assigned to hosted CI.

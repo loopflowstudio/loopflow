@@ -1,12 +1,9 @@
 //! Bounded retries for read-only GitHub operations. Never wrap provider writes.
-use std::io::Read;
-use std::process::{Command, Output, Stdio};
-use std::sync::mpsc;
+use std::process::{Command, Output};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::ops::{OpsError, OpsResult};
-use crate::os_process::ProcessGroupGuard;
 
 pub(super) fn retry_read<T>(
     operation: &str,
@@ -57,79 +54,7 @@ fn transient(stderr: &str) -> bool {
 }
 
 pub(super) fn bounded_output(command: &mut Command, timeout: Duration) -> OpsResult<Output> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
-    }
-    let mut child = command
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
-    let group = ProcessGroupGuard::new(child.id());
-    let deadline = Instant::now() + timeout;
-    let (sender, receiver) = mpsc::channel();
-    let stdout = child.stdout.take().expect("stdout was piped");
-    let stderr = child.stderr.take().expect("stderr was piped");
-    for (index, mut pipe) in [
-        (0, Box::new(stdout) as Box<dyn Read + Send>),
-        (1, Box::new(stderr)),
-    ] {
-        let sender = sender.clone();
-        thread::spawn(move || {
-            let mut bytes = Vec::new();
-            let result = pipe.read_to_end(&mut bytes).map(|_| bytes);
-            let _ = sender.send((index, result));
-        });
-    }
-    drop(sender);
-    let result = (|| {
-        let mut streams = [None, None];
-        let mut status = None;
-        loop {
-            while let Ok((index, bytes)) = receiver.try_recv() {
-                streams[index] = Some(bytes?);
-            }
-            if status.is_none() {
-                status = child.try_wait()?;
-            }
-            if let Some(status) = status {
-                if streams.iter().all(Option::is_some) {
-                    return Ok(Output {
-                        status,
-                        stdout: streams[0].take().expect("stdout completed"),
-                        stderr: streams[1].take().expect("stderr completed"),
-                    });
-                }
-            }
-            if Instant::now() >= deadline {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::TimedOut,
-                    "GitHub read deadline exceeded",
-                ));
-            }
-            thread::sleep(Duration::from_millis(10));
-        }
-    })();
-    // Kill the owned group even if its leader has exited but descendants retain pipes.
-    group.terminate();
-    let cleanup_deadline = Instant::now() + Duration::from_secs(1);
-    while child.try_wait()?.is_none() {
-        if Instant::now() >= cleanup_deadline {
-            // Retain a reaper if the OS cannot settle the killed child promptly.
-            thread::spawn(move || {
-                let _ = child.wait();
-            });
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::TimedOut,
-                "GitHub read child cleanup deadline exceeded",
-            )
-            .into());
-        }
-        thread::sleep(Duration::from_millis(10));
-    }
-    let output = result?;
+    let output = crate::os_process::bounded_output(command, timeout)?;
     if !output.status.success() {
         return Err(OpsError::CommandFailed {
             command: "GitHub read".into(),

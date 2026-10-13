@@ -4,8 +4,11 @@
 
 Jack Heart's lf-8f870b1 asks for measured local speed and safe, bounded build-output
 lifetime. Its independent CLI slice prepares one exact materialized CLI for the
-local Rust runner. Reclamation remains unimplemented after Cargo clean replaced
-a held lock inode; no preservation contract has been narrowed.
+local Rust runner. Build reclamation follows the practical concurrency policy
+Jack Heart accepted on October 13: correct completed ownership and observed-busy
+retention take priority; direct tools newly racing cleanup outside the Loopflow
+lease are unsupported. Cargo's lock-replacement counterexample remains evidence
+against universal native exclusion.
 
 Three matched warm pairs exercised the real local-planning Task/Flow fixture and
 the bare/connect startup fixture, using four compiler/test jobs, closed stdin,
@@ -67,6 +70,62 @@ with scripts/test.py's absolute-path network-runner configuration. The prepared
 variant adds `--prepare-cli` to the materializer; all CLI preparation is included.
 The initial isolated cold fallback total was 148.663s, recorded separately rather
 than compared to a warm candidate. Generic commands remain unprepared by default.
+
+## Completed build output · 2026-10-13
+
+Jack Heart accepted practical cleanup coordination: select positively completed
+local Tasks, retain unfinished associations and detected/uncertain activity, and
+recheck under the existing worktree lease. `lf wt prune --builds` now owns deletion
+of ignored `target`, `.build`, `swift/.build` and `website/node_modules` output.
+Python recovery consumes its receipts and has no build-deletion fallback. The
+24-hour modification grace applies regardless of free disk or root size; defaults
+bound each invocation to eight roots and 64 GiB. There is no independent expiry
+timer. [TESTING.md](../../TESTING.md#bounded-and-honest) owns usage.
+
+A dependency-free Cargo package in a disposable completed Task exercised normal
+Python recovery with source, Cargo.lock, dirty/untracked edits, registration and
+retained native history. Output mtimes were set to 48 hours old to exercise grace
+without waiting two days. The actual offline build used four jobs. No branch
+binary migrated or wrote the installed Home; registry selection and execution
+inspection use read-only connections.
+
+| Disposable operation | Result |
+| --- | ---: |
+| Allocated output before recovery (`du -sk`) | 1,163,264 bytes |
+| Allocated output after recovery | 0 bytes |
+| Rust removal receipt, hard links counted once | 1,163,264 bytes |
+| Allocation reduction | **100%** |
+| Offline compilation, one sample | 0.150s |
+| Python inventory, cleanup and re-inventory, one sample | 6.078s |
+| Concurrent filesystem free-space change | −124,764,160 bytes |
+
+The negative free-space change reflects other active host work, not negative
+reclamation. Allocated-byte reduction is proved for this disposable output; APFS
+sharing and concurrent writes prevent an exclusive physical-savings claim. This
+small package proves the operation, not a large-worktree throughput benchmark.
+Raw probe and exact test names: `.lf/tmp/local-build-reclamation/focused-all.log`.
+The previous warm CLI measurements above remain unchanged; no speed-only outcome
+is delivered on this proof.
+
+Focused proofs cover missing/incompatible ownership reads without store mutation,
+preview without output changes, apply/idempotence, completion
+and abandonment, unfinished aliases, current unresolved execution, recent file
+modification inside an old directory, root/byte caps, running executables whose cwd
+is elsewhere, open files, detected real Cargo, failed process inspection, tracked
+output, symlink escapes, retained stores/history and persistent/primary checkouts.
+A real cooperating writer started after selection cannot acquire the held lease;
+a Task reopened at that boundary retains output. Shared Rust/Python receipt
+fixtures represent unknown allocation as `null`, rather than measured zero.
+
+Cargo 1.98.1 `clean` can unlink an exclusively held `debug/.cargo-lock`; another
+build recreates it while the original descriptor remains locked. That observed
+counterexample is preserved at
+`.lf/tmp/local-build-baseline/cargo-clean-lock-proof.json`. Concurrent direct
+Cargo/npm/Swift operations newly racing cleanup in a completed candidate outside
+the Loopflow lease are unsupported. Detected Cargo retains output and reports that
+Task selection needs inspection. No native lock, mount or cache service claims
+universal exclusion. Full gate, remaining matched cold/edit/app measurements,
+hosted CI and delivery remain separate acceptance work.
 
 ## October 6 inventory and reclamation
 
@@ -319,7 +378,8 @@ the retention decisions below.
 
 ## Producer audit and proposals
 
-No Loopflow producer expires anything except per-minute cron receipts, the
+The October 6 audit predates the completed-build cleanup above. At that time,
+no Loopflow producer expired anything except per-minute cron receipts, the
 Desktop cache and launch journal (both size-capped), dead process receipts
 through `lf monitor prune`, and now migration backups and install artifacts. `lf home doctor` reports no sizes.
 
@@ -357,6 +417,6 @@ Supported cleanup available now:
 
 ```sh
 lf wt prune --dry-run          # worktrees that are terminal or inactive
-cargo clean                    # inside a merged worktree
+lf wt prune --builds --dry-run # old completed output; retains source
 lf monitor prune --dry-run     # dead process receipts
 ```

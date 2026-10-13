@@ -1,7 +1,8 @@
 # Local build research · October 13, 2026
 
 Research for lf-8f870b1, following Jack Heart's autonomous delivery request.
-Production code is unchanged; matched improvement and reclamation remain unproved.
+This records baseline research before implementation; the design and storage
+review own the subsequent matched CLI gain and disposable reclamation evidence.
 
 ## Current owners and boundaries
 
@@ -149,7 +150,9 @@ recheck process activity immediately before `_remove_build_artifacts` deletion.
 The [design](local-build-speed-space.md) owns selected mechanisms, exclusions,
 coordination and acceptance. Earlier kickoff candidates remain at
 `4db478adee7ee0b1c29c7944b6a9acd3657187eb:scratch/local-build-research.md`.
-Native cleanup exclusion is unresolved; these measurements authorize no deletion.
+Jack Heart subsequently accepted practical cooperating-lease coordination on
+October 13. The Cargo lock-replacement receipt remains contrary evidence against
+universal native exclusion; the design owns the accepted cleanup policy.
 
 Research checks: six build-info tests, one startup fixture and one local-planning
 fixture pass under network isolation; Rust, Swift and control cold/warm builds

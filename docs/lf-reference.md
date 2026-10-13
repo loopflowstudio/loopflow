@@ -243,11 +243,16 @@ Report how long `lf wt list` has taken on this machine
 
 ## lf wt prune
 
-Remove clean terminal or inactive worktrees
+Prune worktrees or completed build output
 
 | Argument | What it does |
 |---|---|
 | `--dry-run` | Show what would be pruned without removing anything Default: false. |
+| `--builds` | Reclaim old generated output from completed Tasks; retain checkouts Default: false. |
+| `--json` | Emit cleanup entries and allocated-byte receipts Default: false. |
+| `--retention-hours` | Keep output modified within this many hours Default: 24. |
+| `--maximum-roots` | Maximum generated roots removed per invocation Default: 8. |
+| `--maximum-bytes` | Maximum allocated bytes removed per invocation Default: 68719476736. |
 | `--help / -h` | Print help |
 
 ## lf wt delete

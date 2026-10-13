@@ -1,3 +1,4 @@
+pub(crate) mod build_cleanup;
 pub(crate) mod scratch;
 pub mod worktree_name;
 pub mod worktrees;

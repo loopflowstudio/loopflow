@@ -19,3 +19,10 @@ evidence. The [design](local-build-speed-space.md) owns the October 13 draft pol
 The installed `lf context` omits relocated `.lf/wave/infrastructure/MEMORY.md`.
 Memory is measured separately with cl100k_base against its reported 16,000-token /
 131,072-byte defaults; scratch uses the normal query. No limits were changed.
+
+Implementation uses native modification times for the 24-hour grace and counts
+unique `(device, inode)` allocations per generated root. Native metadata/ownership
+uncertainty retains output. The direct-Cargo probe uses a compiler shim only to
+keep actual Cargo observable; no replaceable Cargo lock grants deletion authority.
+Infrastructure memory remains another contribution, untouched at 15,997 tokens /
+73,615 bytes, within its defaults; the installed context query still omits it.

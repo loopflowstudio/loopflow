@@ -276,11 +276,34 @@ Individual root thresholds are cleanup signals, not gates: an oversized sibling 
 worktree in a warning and does not block a healthy checkout. The 24 GiB build threshold
 identifies cleanup candidates, not a limit on what a worktree may build.
 
-Verification preflight and explicit `--recover` reclaim inactive worktrees'
-allowlisted build roots only when unchanged for at least 24 hours and either
-oversized or needed to restore the cleanup target. They also prune old disposable
-gate output and entries accepted by `uv cache prune`. Cleanup runs before
-verification, not on an independent timer. A busy uv cache is reported immediately
+```sh
+lf wt prune --builds --dry-run       # candidates and retained reasons
+lf wt prune --builds --json          # reclaim output; retain checkouts
+```
+
+Verification preflight and explicit resource `--recover` use the same build-output
+owner. It requires a recorded completed local Task, no unfinished association,
+idle execution and ignored output whose entire tree has gone unchanged for 24 hours.
+It rechecks ownership, execution, cwd, executable mappings and open files under the
+worktree lease before deletion. Unknown inspection, busy leases, running binaries,
+tracked content, symlink escapes and primary/current/persistent checkouts retain
+output. Dirty and untracked source outside generated roots survives.
+
+Eligible output is reclaimed on the next supported invocation regardless of disk
+pressure or individual size. Defaults bound each invocation to eight generated roots
+and 64 GiB; `--retention-hours`, `--maximum-roots` and `--maximum-bytes` select the
+prune policy. Repeated calls drain an eligible backlog. Python inventories capacity
+and consumes Rust cleanup receipts; an unavailable capable `lf` retains builds and
+reports the missing owner. Inventory timeouts grant no deletion authority.
+
+The lease coordinates Loopflow operations. Concurrent direct Cargo/npm/Swift
+build or clean commands newly racing cleanup in a completed candidate are unsupported.
+Cargo can replace a held profile lock during clean; native locks do not provide
+universal exclusion. Detected activity always retains output.
+
+Recovery also prunes old disposable gate output and entries accepted by
+`uv cache prune`. Cleanup runs before verification, not on an independent timer.
+A busy uv cache is reported immediately
 without waiting for its reader locks, including the parent `uv run`. Other cleanup
 and above-reserve verification continue. To reclaim uv entries, run
 `UV_LOCK_TIMEOUT=0 uv cache prune` directly when other uv commands are idle.

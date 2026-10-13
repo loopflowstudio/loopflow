@@ -14,11 +14,11 @@ processes, while completed checkouts retain gigabytes of regenerable output.
 Preserve useful tests, warm builds, debugging information and retained source.
 
 The Rust phase of `scripts/test.py` prepares its exact materialized CLI
-once for CLI-heavy fixtures. Cleanup remains proposed:
+once for CLI-heavy fixtures. Build cleanup now uses the existing worktree lease:
 
 ```sh
-lf wt prune --builds --dry-run  # proposed: eligible output and retained reasons
-lf wt prune --builds            # proposed: reclaim output, retain checkout
+lf wt prune --builds --dry-run  # eligible output and retained reasons
+lf wt prune --builds            # reclaim output, retain checkout
 ```
 
 Old terminal output becomes eligible even above 64 GiB free disk and below 24 GiB
@@ -115,6 +115,10 @@ app-control allocations are counted together. This slice claims no disk reductio
 
 ### One build deletion owner
 
+Implemented on October 13. Rust build pruning and Python recovery use one
+read-only ownership/process selector and the existing worktree lease. Unavailable
+inspection retains output; direct package-manager races remain unsupported.
+
 Extend lf wt prune with --builds, --json and bounded policy arguments for retention
 hours, maximum roots and bytes. Defaults: 24h, eight roots, 64 GiB. Resource recovery
 passes its existing policy and remaining budget; cache and build actions retain
@@ -202,8 +206,8 @@ zero tests is not proof.
 
 The prepared CLI Flow finished successfully as dfc7550eaf. Jack Heart subsequently
 accepted the practical concurrency policy above, unblocking reclamation. No PR
-lands or Task completes on CLI preparation alone. Remaining work is reclamation,
-whole-outcome validation and delivery; research and kickoff need no replay.
+lands or Task completes on CLI preparation alone. Remaining work is final whole-outcome
+validation and delivery; research and kickoff need no replay.
 
 ## Internal slices and Done when
 
@@ -217,12 +221,11 @@ whole-outcome validation and delivery; research and kickoff need no replay.
    startup fixtures without leak warnings; an earlier exploratory trial's warning
    remains unresolved. The measured graph-sharing alternative meets the draft
    20% warm speed target. This slice alone does not meet Done.
-2. Apply the accepted practical concurrency policy above. Preserve the native Cargo
-   counterexample as a documented unsupported race; prove correct selection,
-   observed-busy retention, inspection failure and participating-lease exclusion.
-3. **Unify safe reclamation under the accepted policy.** Implement positive read-only ownership,
-   native/process preservation and bounded build-mode pruning; replace Python
-   deletion in the same cut. Focused disposable-registry tests retain a dirty Done
+2. **Practical coordination implemented.** The native Cargo counterexample remains
+   a documented unsupported race. Focused proofs retain observed activity and
+   inspection failure; a real cooperating writer is excluded after selection.
+3. **Unified reclamation implemented.** Positive read-only ownership, process
+   preservation and bounded build-mode pruning replace Python deletion in one cut. Focused disposable-registry tests retain a dirty Done
    checkout with generated output. Preview changes no content; apply reduces
    allocation while source/untracked bytes, history, stores and registration survive.
    Cover pending/unknown Task facts, incompatible registries, inspection failure,
@@ -232,13 +235,14 @@ whole-outcome validation and delivery; research and kickoff need no replay.
 4. Remaining matched measurements and durable guidance. The warm CLI pairs and
    full retained-output counts are complete; TESTING.md and the storage review
    own operating guidance and results. Matched cold preparation, small edit/test,
-   Swift/control cold/warm and reclamation remain. Hold toolchain/lockfile and four
+   Swift/control cold/warm remain. Disposable reclamation removed 100% of measured
+   allocation; the durable storage review records separate free-space noise. Hold toolchain/lockfile and four
    jobs fixed; include CLI preparation in measured totals.
    Report median/range, raw command references and compiler/setup/execution/cleanup
    separately. Draft technical targets, not Jack Heart's numeric acceptance:
    CLI-heavy warm median at least 20% faster; investigate >10% warm edit/app
    regression; actual disposable-output cleanup removes at least 90%
-   of allocated bytes; native lock scaffolding may remain. Measure filesystem-free
+   of allocated bytes. Measure filesystem-free
    change separately and disclose APFS sharing/noise. If gain misses, revise the
    mechanism in place before delivery; Task outcome is not waived.
 
@@ -266,13 +270,14 @@ before scratch cleanup. Done when normal local Rust verification demonstrates a
 matched fixture speedup, old completed inactive output is reclaimable through
 preview/apply and normal recovery with preservation proofs, affected/full hosted
 checks pass, and the PR is verified merged and Task completion recorded.
-Reclamation, final acceptance, full hosted CI and delivery remain unproved.
+Disposable reclamation is implemented; final matched acceptance, affected gate,
+full hosted CI and delivery remain. Refresh must sync delivered sibling work while
+preserving the separate dirty Infrastructure memory contribution.
 
 Compression/review removed the shared-target default, stale overlap/recovery docs
 and hand-mirrored LF authority list. It corrected the prepared CLI's graph switch
-and inherited release authority before measurement. Direct-test preparation and
-all cleanup predecessors remain with their existing owners; no deletion mechanism
-was extended or certified.
+and inherited release authority before measurement. Direct-test preparation remains. The reclamation cut now removes the listed
+Python deletion predecessors and Rust's cwd-only deletion authority.
 
 Compression keeps authority filtering in one environment construction and removes
 test reporting that only rechecked TemporaryDirectory. Target rewriting now stops
@@ -281,4 +286,19 @@ arguments remain verbatim. The real-Cargo probe validates the surviving artifact
 path. Existing matched measurements still apply to the production runner, which
 has no harness target argument; no CLI preparation or benchmark was repeated.
 
-Implementation check: `uv run pytest python/tests/test_materialize_rust_tests.py python/tests/test_gate_bounded.py -q` — 58 passed; Ruff and diff checks pass; six final measured fixture runs pass; affected/full gate and cleanup proofs remain with later steps.
+Implementation review found and repaired source-symlink aliasing, tracked-output
+explanations, repeated inventory after retained-only receipts, and duplicated
+hard-link allocation counts. The shared subprocess deadline now lives in
+os_process; GitHub reads preserve their existing error contract. Fresh ownership
+is tested after selection while a real cooperating writer fails to acquire the
+held worktree lease. A process lacking evidence but known to predate boot is dead
+under the existing execution owner; the unresolved fixture uses a current start.
+
+Implementation check: materialized/network-isolated nextest cleanup + ownership +
+deadline filters — 16 behaviors pass, including final receipt/preview/recovery
+rechecks; `uv run pytest python/tests/test_resource_envelope.py -q` — 15 pass;
+`cargo clippy --all-targets --jobs 4 -- -D warnings`, fmt/Ruff and ordinary
+prune smoke pass. Affected gate,
+matched cold/edit/app measurements, sync of delivered sibling work, full CI and
+landing remain with later Flow steps. Raw evidence:
+`.lf/tmp/local-build-reclamation/{focused-all,receipt,ownership-unknown,clippy}.log`.

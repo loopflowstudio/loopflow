@@ -2,6 +2,7 @@
 
 import fcntl
 import importlib.util
+import json
 import os
 import select
 import signal
@@ -128,68 +129,11 @@ def test_snapshot_measures_home_session_captures_and_names_retention(
     assert "never auto-deleted" in warning
 
 
-def test_recovery_removes_only_inactive_allowlisted_builds(tmp_path: Path) -> None:
-    active = tmp_path / "active"
-    inactive = tmp_path / "inactive"
-    durable = tmp_path / "home"
-    for root in (active, inactive):
-        (root / "target").mkdir(parents=True)
-        (root / "target/artifact").write_bytes(b"x" * 4096)
-        (root / "source.rs").write_text("fn main() {}\n")
-        (root / ".git").write_text("gitdir: retained\n")
-    run_dir = durable / "runs" / "12" / "run_1234"
-    run_dir.mkdir(parents=True)
-    (run_dir / "events.jsonl").write_text("durable\n")
-    (durable / "loopflow.db").write_bytes(b"sqlite")
-
-    policy = _policy()
-    sources = [
-        _source(active, id="build:active", owner="active", active=True),
-        _source(inactive, id="build:inactive", owner="inactive"),
-        resources.ResourceSource(
-            id="session-captures:home",
-            kind="session-captures",
-            owner="Loopflow Machine",
-            root=durable,
-            paths=(durable / "runs",),
-            bytes=resources._allocated_bytes(durable / "runs"),
-            budget_bytes=1,
-            disposable=False,
-            active=True,
-            action="retain",
-        ),
-    ]
-
-    actions = resources.recover_resources(policy, _snapshot(policy, sources))
-
-    assert [action.source for action in actions] == ["build:inactive"]
-    assert not (inactive / "target").exists()
-    assert (active / "target/artifact").exists()
-    assert (active / "source.rs").exists()
-    assert (inactive / "source.rs").exists()
-    assert (inactive / ".git").exists()
-    assert (run_dir / "events.jsonl").exists()
-    assert (durable / "loopflow.db").exists()
-
-
-def test_recovery_root_limit_is_a_hard_bound(tmp_path: Path) -> None:
-    roots = [tmp_path / "one", tmp_path / "two"]
-    for root in roots:
-        (root / "target").mkdir(parents=True)
-        (root / "target/artifact").write_bytes(b"x" * 4096)
-    policy = _policy(maximum_recovery_roots=1)
-    sources = [_source(root, id=f"build:{root.name}", owner=root.name) for root in roots]
-
-    actions = resources.recover_resources(policy, _snapshot(policy, sources))
-
-    assert len(actions) == 1
-    assert sum((root / "target").exists() for root in roots) == 1
-
-
 @pytest.mark.parametrize("old_entry", [None, "file", "empty-directory"])
 def test_recent_gate_roots_leave_recovery_capacity_for_stale_builds(
-    tmp_path: Path, old_entry: str | None
+    tmp_path: Path, old_entry: str | None, monkeypatch
 ) -> None:
+    monkeypatch.setattr(resources, "_prune_completed_builds", lambda *_: ())
     policy = _policy(maximum_recovery_roots=1, build_cache_retention_hours=24)
     gates = [tmp_path / f"worker-{index}" for index in range(8)]
     for root in gates:
@@ -219,41 +163,13 @@ def test_recent_gate_roots_leave_recovery_capacity_for_stale_builds(
 
     actions = resources.recover_resources(policy, _snapshot(policy, sources, free=500))
 
-    assert len(actions) == 1
-    assert artifact.exists() == (old_entry is not None)
-    assert actions[0].source == ("build:stale" if old_entry is None else "gate:worker-0")
+    assert len(actions) == (0 if old_entry is None else 1)
+    assert artifact.exists()
+    if old_entry is not None:
+        assert actions[0].source == "gate:worker-0"
     assert all((root / resources.GATE_RELATIVE_PATH / "recent.log").exists() for root in gates)
     if old_entry is not None:
         assert not expired.exists()
-
-
-def test_cleanup_reclaims_stale_builds_before_emergency_reserve(tmp_path: Path) -> None:
-    policy = _policy(build_cache_retention_hours=24)
-    roots = [tmp_path / name for name in ("stale", "recent", "active")]
-    old = time.time() - 48 * 3600
-    for root in roots:
-        target = root / "target"
-        target.mkdir(parents=True)
-        artifact = target / "artifact"
-        artifact.write_bytes(b"x" * 4096)
-        os.utime(artifact, (old, old))
-        os.utime(target, (old, old))
-    # Updating an existing file does not update its parent's modification time.
-    (roots[1] / "target/artifact").write_bytes(b"warm")
-    sources = [
-        _source(root, id=f"build:{root.name}", active=root.name == "active", budget=10**6)
-        for root in roots
-    ]
-    assert not resources.recover_resources(policy, _snapshot(policy, sources))
-    snapshot = _snapshot(policy, sources, free=500)
-    assert snapshot.ok  # Above the emergency reserve, below the cleanup target.
-
-    actions = resources.recover_resources(policy, snapshot)
-
-    assert [action.source for action in actions] == ["build:stale"]
-    assert not (roots[0] / "target").exists()
-    assert (roots[1] / "target/artifact").read_bytes() == b"warm"
-    assert (roots[2] / "target/artifact").exists()
 
 
 def test_concurrent_recovery_skips_busy_cleaner_then_can_reclaim(
@@ -266,6 +182,7 @@ def test_concurrent_recovery_skips_busy_cleaner_then_can_reclaim(
     policy = _policy()
     source = _source(tmp_path, id="build:stale")
     monkeypatch.setattr(resources, "collect_snapshot", lambda *_: _snapshot(policy, [source]))
+    monkeypatch.setenv("LF_BIN", str(tmp_path / "missing-lf"))
     lock = resources._lock_recovery()
     assert lock is not None
     try:
@@ -277,11 +194,12 @@ def test_concurrent_recovery_skips_busy_cleaner_then_can_reclaim(
         lock.close()
 
     report = resources.inspect_resources(tmp_path, policy, recover=True)
-    assert report.recovery[0].status == "removed"
-    assert not artifact.exists()
+    assert report.recovery[0].status == "retained"
+    assert artifact.exists()
 
 
 def test_uv_cleanup_preserves_busy_cache_then_prunes_when_idle(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(resources, "_prune_completed_builds", lambda *_: ())
     cache = tmp_path / "uv-cache"
     unused = cache / "archive-v0" / "unused"
     unused.mkdir(parents=True)
@@ -315,6 +233,7 @@ def test_uv_cleanup_preserves_busy_cache_then_prunes_when_idle(tmp_path: Path, m
 def test_disk_pressure_recovers_builds_even_when_uv_cache_is_busy(
     tmp_path: Path, monkeypatch, busy: bool
 ) -> None:
+    monkeypatch.setattr(resources, "_prune_completed_builds", lambda *_: ())
     cache = tmp_path / "uv-cache"
     archive = cache / "archive-v0" / "unused"
     archive.mkdir(parents=True)
@@ -364,10 +283,10 @@ def test_disk_pressure_recovers_builds_even_when_uv_cache_is_busy(
 
         actions = resources.recover_resources(policy, _snapshot(policy, sources, free=100))
 
-        assert [action.source for action in actions] == ["cache:uv", "build:fixture"]
+        assert actions[0].source == "cache:uv"
         assert actions[0].status == ("failed" if busy else "pruned")
         assert archive.exists() is busy
-        assert not (project / "target").exists()
+        assert (project / "target").exists()
         assert (project / "pyproject.toml").exists()
         if busy:
             assert "lock" in actions[0].detail.lower()
@@ -433,7 +352,7 @@ def test_oversized_active_builds_survive_recovery_and_real_disk_pressure_stops(
     (repo / "target/artifact").write_bytes(b"x" * 4096)
     report = resources.inspect_resources(repo, policy, recover=True)
     assert report.ok
-    assert not report.recovery
+    assert all(action.removed_bytes == 0 for action in report.recovery)
     assert (repo / "target/artifact").exists()
     assert (repo / "source.rs").exists()
     assert (sibling / "target/artifact").exists()
@@ -444,3 +363,62 @@ def test_oversized_active_builds_survive_recovery_and_real_disk_pressure_stops(
     assert not report.ok
     issue = next(issue for issue in report.after.issues if issue.code == "disk:free")
     assert f"landing: {sibling}" in issue.action
+
+
+def test_recovery_consumes_rust_receipt_above_pressure_threshold(
+    tmp_path: Path, monkeypatch
+) -> None:
+    target = tmp_path / "target"
+    target.mkdir()
+    artifact = target / "artifact"
+    artifact.write_text("retained by this isolated receipt-consumer test")
+    policy = _policy()
+    monkeypatch.setenv("LF_BIN", "fixture-lf")
+    receipt = json.loads((ROOT / "tests/fixtures/dto/build_cleanup_report.json").read_text())
+    monkeypatch.setattr(
+        resources.subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout=json.dumps(receipt)),
+    )
+    actions = resources.recover_resources(policy, _snapshot(policy, []))
+    assert sum(action.removed_bytes for action in actions) == 4096
+    assert actions[0].removed_paths == ("/completed/target",)
+    assert actions[1].status == "retained"
+    assert artifact.exists()  # Python has no build-deletion path.
+
+
+@pytest.mark.parametrize("failure", ["missing", "old-cli", "timeout", "invalid-json"])
+def test_unavailable_build_owner_retains_output(tmp_path: Path, monkeypatch, failure: str) -> None:
+    target = tmp_path / "target"
+    target.mkdir()
+    (target / "source").write_text("preserve")
+    monkeypatch.setenv("LF_BIN", "fixture-lf")
+
+    def run(*_args, **_kwargs):
+        if failure == "missing":
+            raise FileNotFoundError("missing")
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired("lf", 120)
+        return SimpleNamespace(returncode=1 if failure == "old-cli" else 0, stdout="invalid")
+
+    monkeypatch.setattr(resources.subprocess, "run", run)
+    actions = resources.recover_resources(_policy(), _snapshot(_policy(), []))
+    assert actions[0].status == "retained"
+    assert actions[0].removed_bytes == 0
+    assert (target / "source").read_text() == "preserve"
+
+
+def test_inventory_timeout_is_unknown_and_never_authorizes_build_deletion(
+    tmp_path: Path, monkeypatch
+) -> None:
+    target = tmp_path / "target"
+    target.mkdir()
+    (target / "artifact").write_text("retain")
+    monkeypatch.setattr(
+        resources.subprocess,
+        "run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(subprocess.TimeoutExpired("du", 5)),
+    )
+    with pytest.raises(OSError, match="inventory deadline"):
+        resources._allocated_bytes(target)
+    assert (target / "artifact").exists()

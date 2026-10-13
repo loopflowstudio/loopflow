@@ -4,6 +4,7 @@ mod support;
 mod active_runs_watch;
 mod agent_startup_tests;
 mod auth_tests;
+mod build_cleanup;
 mod cli_discovery;
 mod commit_tests;
 mod config_tests;

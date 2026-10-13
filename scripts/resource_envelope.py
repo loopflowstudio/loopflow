@@ -196,7 +196,7 @@ def collect_snapshot(repo: Path, policy: ResourcePolicy) -> ResourceSnapshot:
                 disposable=True,
                 active=active,
                 action=(
-                    "recovery can clean inactive builds unchanged for "
+                    "recovery can clean completed, idle builds unchanged for "
                     f"{policy.build_cache_retention_hours}h; active and recent builds are retained"
                 ),
                 issues=measurement_issues,
@@ -348,31 +348,15 @@ def recover_resources(
         roots_used += 1
         bytes_used += uv_action.removed_bytes
 
-    needed = max(0, policy.cleanup_target_free_disk_bytes - snapshot.free_disk_bytes - bytes_used)
-    candidates = sorted(
-        (
-            source
-            for source in snapshot.sources
-            if source.kind == "build" and source.disposable and not source.active and source.bytes
-        ),
-        key=lambda source: (source.id not in oversized, -source.bytes),
-    )
-    for source in candidates:
-        if roots_used >= policy.maximum_recovery_roots:
-            break
-        if bytes_used >= policy.maximum_recovery_bytes:
-            break
-        if source.id not in oversized and needed <= 0:
-            break
-        if bytes_used + source.bytes > policy.maximum_recovery_bytes:
-            continue
-        if not _build_cache_is_stale(source, now - policy.build_cache_retention_hours * 3600):
-            continue
-        action = _remove_build_artifacts(source)
-        actions.append(action)
-        roots_used += 1
-        bytes_used += action.removed_bytes
-        needed = max(0, needed - action.removed_bytes)
+    if roots_used < policy.maximum_recovery_roots and bytes_used < policy.maximum_recovery_bytes:
+        actions.extend(
+            _prune_completed_builds(
+                Path(snapshot.filesystem),
+                policy,
+                policy.maximum_recovery_roots - roots_used,
+                policy.maximum_recovery_bytes - bytes_used,
+            )
+        )
 
     return tuple(actions)
 
@@ -383,7 +367,8 @@ def inspect_resources(repo: Path, policy: ResourcePolicy, recover: bool) -> Reso
     try:
         before = collect_snapshot(repo, policy)
         recovery = recover_resources(policy, before) if lock is not None else ()
-        after = collect_snapshot(repo, policy) if recovery else before
+        changed = any(action.status in {"removed", "pruned"} for action in recovery)
+        after = collect_snapshot(repo, policy) if changed else before
         return ResourceReport(str(POLICY_PATH), before, after, recovery)
     finally:
         if lock is not None:
@@ -403,26 +388,77 @@ def _lock_recovery() -> Optional[IO[str]]:
     return handle
 
 
-def _build_cache_is_stale(source: ResourceSource, cutoff: float) -> bool:
+def _prune_completed_builds(
+    repo: Path,
+    policy: ResourcePolicy,
+    maximum_roots: int,
+    maximum_bytes: int,
+) -> tuple[RecoveryAction, ...]:
+    executable = os.environ.get("LF_BIN") or shutil.which("lf")
+    command = [
+        executable or "lf",
+        "wt",
+        "prune",
+        "--builds",
+        "--json",
+        "--retention-hours",
+        str(policy.build_cache_retention_hours),
+        "--maximum-roots",
+        str(maximum_roots),
+        "--maximum-bytes",
+        str(maximum_bytes),
+    ]
+    # Retain the selected Home; inherited work attribution grants no cleanup authority.
+    environment = {key: value for key, value in os.environ.items() if not key.startswith("LF_")}
+    if "LF_HOME" in os.environ:
+        environment["LF_HOME"] = os.environ["LF_HOME"]
     try:
-        for path in source.paths:
-            if not path.exists():
-                continue
-            if path.lstat().st_mtime > cutoff:
-                return False
-            if path.is_symlink():
-                continue
-            for root, directories, files in os.walk(path, onerror=_raise_walk_error):
-                for name in [*directories, *files]:
-                    if (Path(root) / name).lstat().st_mtime > cutoff:
-                        return False
-    except OSError:
-        return False
-    return True
-
-
-def _raise_walk_error(error: OSError) -> None:
-    raise error
+        if executable is None:
+            raise FileNotFoundError("no lf executable available")
+        result = subprocess.run(
+            command,
+            cwd=repo,
+            env=environment,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if result.returncode:
+            raise ValueError(f"lf build cleanup exited {result.returncode}")
+        receipt = json.loads(result.stdout)
+        if receipt["dry_run"] is not False:
+            raise ValueError("unexpected preview receipt")
+        actions = []
+        for entry in receipt["entries"]:
+            status = entry["status"]
+            allocated_bytes = entry["allocated_bytes"]
+            if status not in {"removed", "retained", "failed"}:
+                raise ValueError("unknown build cleanup status")
+            actions.append(
+                RecoveryAction(
+                    f"build:{entry['worktree']}",
+                    entry["worktree"],
+                    allocated_bytes if status == "removed" else 0,
+                    (entry["path"],) if status == "removed" else (),
+                    status,
+                    entry["reason"],
+                )
+            )
+        if sum(action.removed_bytes for action in actions) != receipt["removed_bytes"]:
+            raise ValueError("inconsistent allocated-byte receipt")
+        return tuple(actions)
+    except (OSError, subprocess.TimeoutExpired, ValueError, KeyError, TypeError) as exc:
+        return (
+            RecoveryAction(
+                "build-cleanup",
+                "lf wt prune",
+                0,
+                (),
+                "retained",
+                f"build output retained: {exc}; use a capable `lf wt prune --builds`",
+            ),
+        )
 
 
 def _discover_worktrees(repo: Path) -> tuple[list[Worktree], Optional[str]]:
@@ -472,11 +508,15 @@ def _running_cwds() -> tuple[Optional[set[Path]], Optional[str]]:
             timeout=15,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
-        return None, f"cannot prove inactive worktrees ({exc}); recovery will retain all builds"
+        return None, (
+            f"cannot inventory inactive worktrees ({exc}); "
+            "cleanup independently inspects ownership and activity"
+        )
     if result.returncode != 0:
         return None, (
-            "cannot prove inactive worktrees "
-            f"(lsof exited {result.returncode}); recovery will retain all builds"
+            "cannot inventory inactive worktrees "
+            f"(lsof exited {result.returncode}); "
+            "cleanup independently inspects ownership and activity"
         )
     paths = {
         Path(line[1:]).resolve() for line in result.stdout.splitlines() if line.startswith("n/")
@@ -511,7 +551,15 @@ def _uv_cache_dir() -> Path:
 def _allocated_bytes(path: Path) -> int:
     if not path.exists() and not path.is_symlink():
         return 0
-    result = subprocess.run(["du", "-sk", str(path)], capture_output=True, text=True)
+    try:
+        result = subprocess.run(
+            ["du", "-sk", str(path)],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise OSError(f"cannot measure {path}: five-second inventory deadline exceeded") from exc
     if result.returncode == 0:
         first = result.stdout.split(maxsplit=1)
         if first:
@@ -603,39 +651,6 @@ def _assess_sources(
             )
         )
     return issues
-
-
-def _remove_build_artifacts(source: ResourceSource) -> RecoveryAction:
-    removed_paths = []
-    removed_bytes = 0
-    allowed = {source.root / relative for relative in BUILD_RELATIVE_PATHS}
-    for path in source.paths:
-        if path not in allowed or path == source.root:
-            return RecoveryAction(
-                source.id,
-                source.owner,
-                0,
-                (),
-                "refused",
-                f"{path} is outside the build-artifact allowlist",
-            )
-        if not path.exists() and not path.is_symlink():
-            continue
-        measured = _allocated_bytes(path)
-        if path.is_dir() and not path.is_symlink():
-            shutil.rmtree(path)
-        else:
-            path.unlink()
-        removed_paths.append(str(path))
-        removed_bytes += measured
-    return RecoveryAction(
-        source.id,
-        source.owner,
-        removed_bytes,
-        tuple(removed_paths),
-        "removed",
-        "removed allowlisted build artifacts; worktree and source retained",
-    )
 
 
 def _prune_old_gate_artifacts(

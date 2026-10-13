@@ -476,9 +476,7 @@ Use the common Work writer for a portable Task pause flag, separate from Linear'
 provider disposition. Derive shared TaskState::Paused; CLI pause/resume and Desktop
 consume that owner. Block subsequent Task Flow/automatic repair launches while
 paused. Keep historical completion and abandonment independently readable.
-Delete the need for an undocumented sidebar-only parked flag or automatic restart
-on resume. Test persistence, repeat writes, retained Workflow/execution, sidebar
-filtering and API controls before applying LOO-389 to the real store.
+Test pause persistence, retained execution and sidebar filtering before pausing LOO-389.
 October 13 native recheck: CI opens its correct Codex conversation and input prompt;
 LOO-380 retains Claude and its unsent draft. LOO-312/367 still show hook review;
 Jack was asked whether to continue without trusting. No trust choice submitted.

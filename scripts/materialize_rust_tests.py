@@ -243,17 +243,17 @@ def main(argv: list[str] | None = None) -> int:
             if materialized.returncode != 0:
                 return materialized.returncode
 
-            environment = os.environ.copy()
-            for name in list(environment):
-                if name.startswith("LF_"):
-                    environment.pop(name)
-            test_home = worktree / ".lf-test-home"
-            environment["LF_HOME"] = str(test_home)
+            environment = {
+                name: value for name, value in os.environ.items() if not name.startswith("LF_")
+            }
+            environment["LF_HOME"] = str(worktree / ".lf-test-home")
             environment["CARGO_TARGET_DIR"] = _verification_target(
                 environment.get("CARGO_TARGET_DIR", "target")
             )
             # Cargo's command-line target overrides its environment selection.
             for index, argument in enumerate(args.command):
+                if argument == "--":
+                    break
                 if argument == "--target-dir":
                     args.command[index + 1] = _verification_target(args.command[index + 1])
                 elif argument.startswith("--target-dir="):

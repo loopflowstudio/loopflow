@@ -1,7 +1,6 @@
 """Local Rust tests use CI's schema without changing the active checkout."""
 
 import ast
-import json
 import os
 import shutil
 import subprocess
@@ -169,7 +168,9 @@ if mode == "unavailable":
     return tools
 
 
-@pytest.mark.parametrize("target", [None, "target", "custom-target", "command-target"])
+@pytest.mark.parametrize(
+    "target", [None, "target", "custom-target", "command-target", "harness-target"]
+)
 def test_prepared_cli_uses_exact_tree_and_artifact_with_isolated_homes(
     repo: Path, cargo_probe: Path, target: str | None
 ) -> None:
@@ -181,21 +182,21 @@ def test_prepared_cli_uses_exact_tree_and_artifact_with_isolated_homes(
     environment["LOOPFLOW_MIGRATION_AUTHORITY"] = "published"
     environment["LOOPFLOW_RELEASE_TAG"] = "v0.12.3"
     environment.pop("CARGO_TARGET_DIR", None)
-    if target is not None and target != "command-target":
+    if target in {"target", "custom-target"}:
         environment["CARGO_TARGET_DIR"] = target
-    report = repo / "homes.json"
-    probe = """import json, os, subprocess, sys, tempfile
+    probe = """import os, subprocess, sys, tempfile
 from pathlib import Path
 assert subprocess.check_output([os.environ["LOOPFLOW_TEST_LF"]], text=True) == "dirty/new/ready\\n"
 assert not any(name.startswith("LF_") and name != "LF_HOME" for name in os.environ)
 assert sys.stdin.read() == ""
+if len(sys.argv) > 1 and sys.argv[1] == "--":
+    assert sys.argv[2:] == ["--target-dir=custom-target"]
 with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
     for home in (a, b):
         env = dict(os.environ, LF_HOME=home)
         subprocess.run([os.environ["LOOPFLOW_TEST_LF"]], env=env, check=True, capture_output=True)
         assert Path(home, "fixture").read_text() == "dirty/new/ready\\n"
-    Path(REPORT).write_text(json.dumps([a, b]))
-""".replace("REPORT", repr(str(report)))
+"""
     result = subprocess.run(
         [
             sys.executable,
@@ -206,6 +207,7 @@ with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
             "-c",
             probe,
             *(["--target-dir=custom-target"] if target == "command-target" else []),
+            *(["--", "--target-dir=custom-target"] if target == "harness-target" else []),
         ],
         cwd=repo,
         env=environment,
@@ -213,9 +215,6 @@ with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
         text=True,
     )
     assert result.returncode == 0, result.stderr
-    homes = json.loads(report.read_text())
-    assert homes[0] != homes[1]
-    assert all(not Path(home).exists() for home in homes)
     expected = (
         repo
         / ("custom-target" if target in {"custom-target", "command-target"} else "target")

@@ -303,4 +303,11 @@ and inherited release authority before measurement. Direct-test preparation and
 all cleanup predecessors remain with their existing owners; no deletion mechanism
 was extended or certified.
 
-Implementation check: `uv run pytest python/tests/test_materialize_rust_tests.py python/tests/test_gate_bounded.py -q` — 57 passed; Ruff and diff checks pass; six final measured fixture runs pass; affected/full gate and cleanup proofs remain with later steps.
+Compression keeps authority filtering in one environment construction and removes
+test reporting that only rechecked TemporaryDirectory. Target rewriting now stops
+at the harness separator, matching preparation's build-option parsing; harness
+arguments remain verbatim. The real-Cargo probe validates the surviving artifact
+path. Existing matched measurements still apply to the production runner, which
+has no harness target argument; no CLI preparation or benchmark was repeated.
+
+Implementation check: `uv run pytest python/tests/test_materialize_rust_tests.py python/tests/test_gate_bounded.py -q` — 58 passed; Ruff and diff checks pass; six final measured fixture runs pass; affected/full gate and cleanup proofs remain with later steps.

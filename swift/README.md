@@ -461,6 +461,13 @@ The generated app target builds a validation-only `lf` helper from
 the same checkout into `Loopflow.app/Contents/MacOS`. A runnable app never
 borrows a different `lf` from PATH.
 
+CI uses `uv run python scripts/build_xcode_ci.py` from the repository root.
+On a DerivedData cache miss, it prepares that same helper while Xcode compiles
+the app; the post-build phase still verifies freshness, copies and signs it.
+`XCODE_CACHE_HIT=true` runs ordinary Xcode without background preparation.
+Both builds must succeed; cancellation stops their compilers without stopping
+Xcode's shared build service or compilers writing to other output directories.
+
 Keep `Package.swift` and `project.yml` in sync.
 
 ## Shared-library boundary

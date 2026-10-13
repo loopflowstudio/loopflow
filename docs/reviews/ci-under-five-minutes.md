@@ -1223,3 +1223,99 @@ hits. The selected variant remains unimplemented and needs actual hit/miss-path
 measurements, bounded failure cleanup, signed Xcode proof and full hosted CI/queue.
 lf-ddf2d53 remains unfinished. lf-12be237 retains ten-real-run, queue and
 push-to-merged acceptance; the supplied latest real queue remains 6:24.
+
+## October 13 follow-up: exact-cache-miss overlap
+
+Jack Heart's supplied Task brief selected overlap on exact-source DerivedData
+misses, preserving ordinary Xcode on hits. The implementation now takes the
+existing `xcode-cache` result; cache keys, job conditions and signed Xcode
+arguments are unchanged. Preparation and the post-build copy share
+`_build_control_tools` in `scripts/loopflow-dev.py`, using `target/dev-app-control`.
+The post-build phase still asks Cargo to verify freshness and copies/signs the
+result. The command-specific runner cancels its process groups and, on failure,
+compilers emitting into its DerivedData; it never stops the shared Xcode service.
+
+Local comparison: source baseline `39651041f8f8d082d6a492f712aeedfe3c97d108`
+plus this implementation, unchanged Cargo.lock, rustup rustc 1.99.0 (`b940084d7`,
+aarch64-apple-darwin), Xcode 26.2 (17C52), SDK 26.2, deployment 15.0, dev/test
+debug=0. Preparation reads Xcode's effective SDK/deployment and uses the app
+shell's Cargo search path. Both builds retain development provenance and
+validation-only migration authority.
+
+| Inputs and execution order | Ordinary Xcode, seconds | Selected path, seconds | Saving, seconds |
+|---|---:|---:|---:|
+| Source-cold miss: ordinary then selected | 58.028 | 59.946 | -1.918 |
+| Source-cold miss: selected then ordinary | 72.551 | 65.839 | 6.712 |
+| Changed-source warm miss: selected then ordinary | 45.307 | 33.283 | 12.024 |
+| Changed-source warm miss: ordinary then selected | 40.166 | 33.615 | 6.551 |
+| Exact-source hit: ordinary then selected | 3.930 | 4.026 | -0.096 |
+| Exact-source hit: selected then ordinary | 3.787 | 3.755 | 0.032 |
+
+Cold pairs save **4.794s combined**, with opposite signs; changed-source warm
+pairs save **18.575s combined**, improving in both orders. Exact hits take
+**0.064s longer combined** and launch no preparation/settings query. These are
+local selector-path measurements, not hosted cache downloads or typical-code
+PR runs. Useful warm margin and the absence of material warm regression support
+proceeding to gate and hosted evaluation. The modest, order-sensitive cold gain
+is contrary evidence against repeating the earlier 13–40s saving as a forecast.
+Concurrent unrelated Rust/Swift builds and shared Xcode services limit causal
+attribution. No numeric acceptance or five-minute goal is waived.
+
+All samples restore matching APFS snapshots at identical Cargo/DerivedData paths.
+Source-cold keeps compiled Cargo dependencies and downloaded Swift package
+sources, removing workspace and Xcode compiled outputs. Warm samples restore one
+common complete snapshot before the same AppearanceMode Light-label and Rust
+`build_info.rs` error-message edits, with matching contents/timestamps. They use
+the **miss** selector; changed-source warm output is not an exact-source hit.
+Hit samples restore the original sources and complete snapshot, then use the
+**hit** selector. Initial preparation took 62.451s; preparation of experimental
+snapshots and their restoration are outside each timer. The selected command's
+`uv`/Python launch, settings query, helper preparation, Xcode build, wait and
+cleanup are all inside the measured interval. Temporary source edits and ordinary
+output snapshots were restored afterwards.
+
+Every cold/warm sample compiled `loopflow` once. Each overlap sample's post-build
+Cargo invocation reported `Fresh loopflow`; exact hits compiled it zero times.
+Process snapshots observed concurrent rustc/swift-frontend work in all four
+miss candidates (45/49 cold and 2/2 warm sampled intervals), versus zero in
+ordinary samples. No duplicated compilation was observed. Native preparation
+real/user/sys seconds were `37.57/40.56/1.29`, `48.39/57.55/1.87` cold and
+`31.14/37.61/1.32`, `31.61/36.77/1.08` warm. Xcode client CPU/RSS excludes its
+shared service and compiler children; these figures establish neither total
+runner cost nor hosted savings.
+
+All 12 ordinary signed app/test-runner builds and strict helper/deep app signature
+checks passed. Ten focused process tests passed with external egress denied,
+covering either build failing, launch failure, SIGINT/SIGTERM, unrelated outputs,
+pre-existing compilers, and exact-hit success/failure. A real simultaneous
+Rust/Swift cancellation returned 143 in 5.123s including preparation and cleanup,
+with no remaining compiler from this checkout. The ordinary warm output snapshot
+was restored after cancellation.
+
+Source/bundle `doctor --json` checks inside the network boundary and a disposable
+`LF_HOME` agreed on development/validation-only authority and current source
+revision/root. No installation preflight, promotion or installed Home mutation
+was performed. A first comparison after signature removal failed: codesign left
+different `__LINKEDIT` virtual sizes. Both binaries have the same Mach-O UUID;
+removing then reapplying identical ad-hoc signatures to disposable copies produced
+identical bytes (SHA256 `2c753e61779b3044744d7af9ac11278bb5d324359b8adc498b5dda981eb47757`).
+Re-signing without removal also retained different padding and was insufficient.
+The corrected proof changes no production artifact or signing behavior.
+
+Review findings: preserve scoped cleanup despite its cost, since process groups
+alone previously left real Xcode compilers alive; keep it specific to this pair
+of builds. Cache hits bypass all preparation. Fixture PID readiness now uses an
+atomic rename, removing a cancellation race. One Xcode command and one control
+build implementation serve both paths. The implementation adds no scheduler,
+test deletion, cache relaxation, paid runner or retry.
+
+Replay/raw evidence: `/tmp/macos-ci-selected-bench.py`,
+`/tmp/macos-ci-selected-measure.py`,
+`/tmp/macos-ci-selected-snapshots/results.jsonl`, and
+`/tmp/macos-ci-selected-*.log` / `*-processes.jsonl`. Cancellation and authority
+scripts are `/tmp/macos-ci-selected-cancel-real.py` and
+`/tmp/macos-ci-selected-runtime.py`. Gate once, full Swift execution, installation
+coverage and hosted CI/queue remain later Flow obligations before verified delivery.
+The measured follow-up is not complete. lf-12be237 independently retains the ten
+real typical-code runs and separate queue/push-to-merged proof; latest supplied
+real queue remains 6:24.

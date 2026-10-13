@@ -46,9 +46,10 @@ fixtures seed fixed admission evidence; they do not expose acquisition APIs.
 
 CI Rust cache keys include the root workspace's build profiles, which the cache
 action's member-manifest discovery omits. Profile changes get fresh dependency
-caches; version-only releases retain them. Main publishes the shared caches;
-PRs and merge groups restore them without accumulating private copies. Cache
-restoration alone never skips tests. After a merge, main can reuse a
+caches; version-only releases retain them. Main publishes shared caches. The
+shared Rust build and macOS Rust jobs can also seed missing caches during PR
+review; an up-to-date cache is not saved again. Other Rust jobs only save on main.
+Cache restoration alone never skips tests. After a merge, main can reuse a
 successful merge-group CI run for the identical SHA and workflow, linking that
 run in its summary. Missing or unreadable results trigger the full matrix. Main still
 restores the shared caches and runs each job whose cache misses; those jobs

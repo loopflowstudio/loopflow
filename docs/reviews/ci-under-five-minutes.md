@@ -625,3 +625,23 @@ The same run can measure restoration of the now-populated installation cache.
 
 Validation: 45 CI-proof/release-automation tests and actionlint pass; hosted macOS
 compilation and timing are the remaining verification.
+
+The following run, `38352209666`, verified installation-cache restoration:
+539,558,615 bytes restored, three crates compiled across both candidates,
+managed compilation 65s and published compilation 42.80s. Installation finished
+3:21 after creation. Its ordinary proof invocations reused builds in 0.10–0.11s.
+In contrast, the shared archive job again compiled 256 crates, taking 159s
+before packaging. Its 3:21 finish plus the unchanged 120s observation floor
+already excludes five-minute completion on that runner.
+
+The next candidate lets the shared Rust build and both macOS Rust jobs save
+missing dependency caches during PR review, rather than requiring a main run
+first. Main remains the shared source for other branches. Existing up-to-date
+caches are not saved again; the action retains its normal workspace-output
+cleanup. No execution is skipped on a PR cache hit. This targets repeated
+dependency compilation and allows a controlled cold/warm comparison before
+landing. The first seeding run can still be cold and pay upload overhead.
+
+Validation: 45 CI-proof/release-automation tests and actionlint pass for the
+cache policy change. Raw build/installation logs:
+`/tmp/ci-macos-{rust-build,task-installation}.log`.

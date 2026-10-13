@@ -126,7 +126,7 @@ jobs:
         id: rust-cache
         with:
           key: test-${{ steps.rust-profiles.outputs.key }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.event_name == 'pull_request' }}
       - uses: taiki-e/install-action@nextest
         if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
       - name: Build and archive Rust tests
@@ -331,7 +331,7 @@ jobs:
         id: rust-cache
         with:
           key: swift-cli-${{ steps.rust-profiles.outputs.key }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.event_name == 'pull_request' }}
       - name: Fingerprint Swift build inputs
         id: swift-inputs
         run: uv run python scripts/swift_cache.py key >> "$GITHUB_OUTPUT"
@@ -409,7 +409,7 @@ jobs:
         id: rust-cache
         with:
           key: macos-process-${{ steps.rust-profiles.outputs.key }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.event_name == 'pull_request' }}
       - name: Test macOS installation process discovery
         if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
         run: |

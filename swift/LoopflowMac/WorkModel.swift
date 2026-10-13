@@ -209,6 +209,7 @@ final class WorkModel {
                 showsTaskLink = true
             }
         } catch {
+            Perf.agentInput("opening_failed", task: expectedTaskID ?? "")
             failTaskLink(error, url: url, generation: generation)
         }
     }
@@ -303,7 +304,9 @@ final class WorkModel {
         } else {
             // Reuse the primary-Session owner rather than creating another
             // conversation or replaying a retained terminal's launch command.
+            Perf.agentInput("primary_begin", task: task.id)
             let record = try await executionQuery.ensureTaskSession(issue: executionTask, cwd: wave.wave.repo)
+            Perf.agentInput("primary_returned", task: task.id, session: record.id, detail: "provider=\(record.provider ?? "unknown")")
             guard !Task.isCancelled, destinationGeneration == generation else { return }
             sessionID = record.id
             ensuredRecord = record
@@ -496,6 +499,7 @@ final class WorkModel {
         } ?? false
         if !retainedConversation, taskOpening?.status == .opening,
            taskLinkExpectedID == found.task.id, taskLinkConversation { return }
+        Perf.agentInput("workspace_selected", task: id, detail: "retained=\(retainedConversation)")
         openTaskDestination(wave: found.wave, task: found.task)
         navigation.content = .terminals
         if !retainedConversation {

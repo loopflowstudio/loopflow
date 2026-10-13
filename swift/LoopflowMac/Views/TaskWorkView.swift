@@ -66,6 +66,12 @@ struct TaskWorkflowHeader: View {
                 }
                 if acting { ProgressView().controlSize(.small) }
             }
+            if work.value != nil, let error = work.errorMessage {
+                Text("Workflow refresh failed: \(error)")
+                    .foregroundStyle(WorkTone.blocked.ink)
+                    .textSelection(.enabled)
+                    .accessibilityIdentifier("task-workflow-refresh-error")
+            }
             DisclosureGroup("Overview", isExpanded: Binding(
                 get: { expandedTasks.contains(task.id) },
                 set: { if $0 { expandedTasks.insert(task.id) } else { expandedTasks.remove(task.id) } }

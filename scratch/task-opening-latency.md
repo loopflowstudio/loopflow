@@ -1,8 +1,8 @@
 # Task opening latency — October 13
 
 Jack Heart requested Task-click → rendered, responsive native coding-agent input
-in LOO-462. No paired baseline/after endpoint timings are available. This run is
-headless; neither demo app nor any retained terminal was touched. No native probe,
+in LOO-462. No paired baseline/after endpoint timings are available. Native facilities are
+unavailable; neither demo app nor any retained terminal was touched. No native probe,
 trust approval, conversation input, live-store mutation or installation occurred.
 
 ## Observed path and repair
@@ -50,4 +50,39 @@ Review fixed stale-inventory overwrite during preparation and preserved existing
 inventory errors. Regressions cover both, foreign membership, missing Task,
 planning failure, cancellation and retained workspace reuse.
 
-Check: `scripts/test_desktop.sh --filter 'WorkDestinationTests|SessionsStoreTests' -Xswiftc -gnone` PASS (63 tests); `git diff --check` PASS. No Rust changed; fmt/Clippy not applicable. Changes left uncommitted for the main contribution.
+Check: `scripts/test_desktop.sh --filter 'WorkDestinationTests|SessionsStoreTests' -Xswiftc -gnone` PASS (63 tests); `git diff --check` PASS. No Rust changed; fmt/Clippy not applicable. Lookup changes checkpointed in `0bb13e9261`.
+
+## October 13 profiling implementation
+
+Jack Heart requested separate Codex/Claude cached/resume/fresh input trials.
+`agent_input.py` records the existing Desktop signposts and opt-in lf wall
+milestones, process ancestry/CPU snapshots and all-process Time Profiler stacks.
+The report correlates actual Task click, preparation/connect, launch lock,
+fresh/resume selection, spawn, surface, key and draw with native observer captures.
+Flamegraphs use real exported samples; missing exports/symbols remain unknown.
+Exact-Session input plus ordered captures are required; first draw cannot produce
+an endpoint. Provider/case/condition mismatches refuse before/after comparison.
+Reproducible commands, provenance fields and observer limits are in
+scripts/benchmarks/desktop-performance/agent-input.md.
+
+No paired native receipts or further measured optimization is claimed. The lookup
+repair above removes a known redundant serial read. Full six-case timing, CPU/wall
+wait attribution, comparable before/after, native hook proof and review remain.
+Neither existing app, pane nor draft was touched. No provider input/takeover,
+installation or live migration was performed.
+
+Review removed false CPU accounting: only Running time-profile samples enter the
+flamegraph, and process CPU deltas exclude preexisting CPU. A real 1-second
+headless export produced 6,452 samples and a valid SVG; this validates the parser,
+not any provider endpoint. Its first premature export failed before trace saving;
+completed export passed. Rendering exposed a quadratic tree walk, replaced by
+one parent/child index (final real-export render/parse 0.38 s).
+
+Matching unlaunched debug app: `/tmp/loo462-oct13-profile/Loopflow Work Demo.app`;
+validation-only bundled lf, signature verified, private build receipt `build.json`.
+Initial signing rejected root SwiftPM resources; moved them under Contents/Resources.
+SwiftPM resolves its existing retained-checkout build-path fallback; this private
+artifact is not portable without that build directory.
+Native relaunch remains for demo; neither existing app or its drafts was changed.
+Check: 38 WorkNavigation tests plus two final chrome/Workflow regressions PASS; seven profiling Python tests and one Rust timing test PASS; real xctrace export/SVG, cargo fmt/all-target Clippy, Ruff/diff PASS. Native six-case timing/trust proof remains with demo; affected-suite gate remains with gate. Review kept each Rust append in one
+serialized buffer so concurrent lf processes cannot interleave formatting writes.

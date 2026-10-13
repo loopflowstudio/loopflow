@@ -147,12 +147,14 @@ identifiers, not Session titles. Click the repository name to return to its reta
 configured conversation. An empty repository opens that conversation directly:
 begin with what to work on, without creating a Wave or Task first.
 Unscoped Sessions remain available through `lf session list --orphan`, not a
-sidebar group or search inventory. Missing planning never deletes retained tabs.
+sidebar group or search inventory. Missing planning never deletes retained workspaces.
 **Task details** opens the description, comments and Run history.
 
 Opening a Task enters its conversation and retained panes. First opening reuses
 or prepares its primary conversation through `lf`; it never starts the Workflow
-or takes over another client. Returning preserves the workspace. Explicit bare
+or takes over another client. The sidebar switches retained Work; no top tab strip
+is needed. Returning preserves panes, drafts and focus, including deliberately
+opened historical conversations. Explicit bare
 CLI Task links still support inspection without conversation acquisition.
 The workspace keeps its Workflow in the header and a multiplexer below.
 The header draws the Workflow as a graph scaled to the window:
@@ -165,7 +167,8 @@ node. **Move to** changes Workflow position; `end` requests completion.
 **Complete** changes Task status independently. **Retry completion** retries a
 failed request without replaying the Flow.
 Linear completion leaves the displayed Workflow and live Processes intact.
-A Task with no Workflow offers **Start**, which runs `lf -b task run ISSUE`.
+Loading or unavailable Workflow readings remain explicit; a failed refresh keeps
+the last recorded graph. A Task with no captured Workflow offers **Start**, which runs `lf -b task run ISSUE`.
 
 The toolbar's **+** changes what the multiplexer shows: **New shell**,
 **Files** or **Flow processes**. The Flow process log lists every Flow process in the
@@ -193,12 +196,12 @@ start a provider or resolve a Session.
 
 The toolbar above the workspace is its only chrome. On the left it drills
 Wave → Task → Session: Wave and Task crumbs return to their details; the Task's
-issue ID links to Linear. With several Sessions, the final crumb chooses among
-them by name. The pencil renames the Session in place through `lf session
+issue ID links to Linear. The Task crumb keeps the exact conversation name
+without a sibling picker. Repository/Wave crumbs can choose among their Sessions. The pencil renames the Session in place through `lf session
 rename`; the shown name is the shared readback, and a rejected name stays in the
 field with its error. A remote Flow Session's name lives on its Machine and is not
-renamed here. Beside the name, the Session shows its Flow step and iteration as
-quiet mono text, **Independent**, or why membership is unknown. On the right sit
+renamed here. Outside Task navigation, the Session shows its Flow membership
+beside the name. Task navigation keeps that provenance in inspection. On the right sit
 the Task's read-only worktree location and the Activity glyph.
 
 A single pane has no header. With two or more, each pane carries a 24pt strip:

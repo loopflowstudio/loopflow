@@ -67,3 +67,11 @@ switches conversations. Retain all cached workspaces, native surfaces, panes,
 drafts and selection; this removes presentation only, not retention or history.
 Jack also requested Task-click-to-responsive-agent-input measurements and a
 scoped optimization contribution, now running independently of hook repairs.
+
+## Profiling evidence — October 13
+
+Reversible choice: native endpoint evidence is captured and marked by the observer,
+with exact-Session key/draw checks; no provider prompt heuristic or synthetic
+readiness state. Marker times include observer delay. Time Profiler exports and
+closed provider waits need native validation; fixture parser tests establish no
+native endpoint or speedup. Both running apps/drafts remain untouched.

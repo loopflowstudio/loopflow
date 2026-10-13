@@ -1,4 +1,5 @@
 pub mod agent;
+mod agent_input_timing;
 pub mod build_info;
 pub mod builtins;
 pub mod chat;

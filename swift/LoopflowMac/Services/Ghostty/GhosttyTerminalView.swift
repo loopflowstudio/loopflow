@@ -605,6 +605,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         ghostty_surface_draw(surface)
         if let keyToDraw {
             self.keyToDraw = nil
+            if case .session(let id, _) = terminal { Perf.agentInput("key_draw", session: id) }
             Perf.signposter.endInterval(Perf.terminalKeyToDraw, keyToDraw)
         }
         let now = CACurrentMediaTime()
@@ -887,6 +888,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
             return
         }
         programStatus.receive(.interaction, incarnation: programStatus.incarnation)
+        if case .session(let id, _) = terminal { Perf.agentInput("key_received", session: id) }
         if keyToDraw == nil {
             keyToDraw = Perf.signposter.beginInterval(Perf.terminalKeyToDraw, id: Perf.signposter.makeSignpostID())
         }

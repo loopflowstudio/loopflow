@@ -990,6 +990,39 @@ struct WorkNavigationTests {
         #expect(workspace.multiplexer.focusedPaneId == pane)
     }
 
+    @Test("Workflow loading, unavailable and absent readings remain distinct")
+    func workflowReadingStates() async throws {
+        let model = try model()
+        await model.refresh()
+        let found = try #require(model.task(id: "issue-review"))
+        let empty = try JSONDecoder().decode(TaskWork.self, from: Data(#"{"sessions":[],"flow_processes":[],"processes":[],"workflow":null}"#.utf8))
+        let loading = TaskWorkflowHeader(model: model, task: found.task, wave: found.wave.wave, work: .loading)
+        #expect(try loading.inspect().find(text: "Reading workflow…").string() == "Reading workflow…")
+        #expect(throws: (any Error).self) { try loading.inspect().find(text: "No workflow yet") }
+        let missing = TaskWorkflowHeader(model: model, task: found.task, wave: found.wave.wave, work: .unavailable(lastGood: nil, reason: "Offline"))
+        #expect(try missing.inspect().find(text: "Workflow could not be read: Offline").string() == "Workflow could not be read: Offline")
+        let absent = TaskWorkflowHeader(model: model, task: found.task, wave: found.wave.wave, work: .available(empty))
+        #expect(try absent.inspect().find(text: "No workflow yet").string() == "No workflow yet")
+        let stale = TaskWorkflowHeader(model: model, task: found.task, wave: found.wave.wave, work: .unavailable(lastGood: empty, reason: "Offline"))
+        #expect(try stale.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-refresh-error").text().string() == "Workflow refresh failed: Offline")
+    }
+
+    @Test("Task conversations keep their exact title without sibling picker or Flow chrome")
+    func taskConversationChrome() async throws {
+        let model = try model()
+        await model.refresh()
+        model.select(.task(id: "issue-review"))
+        let records = try [session("first", work: .task(id: "ts_review00000000000000000000000000")),
+                           session("second", work: .task(id: "ts_review00000000000000000000000000"))]
+        let projection = WorkProjection(roadmaps: try roadmap().waves, sessions: records)
+        let crumb = try #require(projection.breadcrumb(selection: model.selection, sessionId: "first"))
+        #expect(crumb.siblings.count == 2)
+        let bar = WorkBreadcrumbBar(model: model, crumb: crumb, onOpenSession: { _ in })
+        #expect(try bar.inspect().find(viewWithAccessibilityIdentifier: "breadcrumb-session").text().string() == records[0].title)
+        #expect(throws: (any Error).self) { try bar.inspect().find(ViewType.Menu.self) }
+        #expect(throws: (any Error).self) { try bar.inspect().find(viewWithAccessibilityIdentifier: "session-flow-membership") }
+    }
+
     @Test("Unbound Sessions do not acquire ancestry from display text or checkout")
     func unboundSessionHasNoAncestry() throws {
         let record = try session("unbound", work: nil)

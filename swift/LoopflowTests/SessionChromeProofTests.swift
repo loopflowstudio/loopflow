@@ -82,15 +82,13 @@ struct SessionChromeProofTests {
         let draft = "chrome-draft"
         draft.withCString { ghostty_surface_text(surfaces[0], $0, UInt(draft.utf8.count)) }
 
-        // The toolbar carries the location, the worktree, membership as text and Complete.
+        // The Task toolbar carries the conversation and worktree, without Flow provenance.
         #expect(throws: Never.self, "session crumb") {
             let name = try view.inspect().find(viewWithAccessibilityIdentifier: "breadcrumb-session").text().string()
             #expect(name == "Release outcomes")
         }
-        #expect(throws: Never.self, "membership text") {
-            let label = try view.inspect().find(viewWithAccessibilityIdentifier: "session-flow-membership").button()
-                .labelView().text().string()
-            #expect(label.contains("feature / realign"))
+        #expect(throws: (any Error).self) {
+            try view.inspect().find(viewWithAccessibilityIdentifier: "session-flow-membership")
         }
         #expect(throws: (any Error).self) {
             _ = try view.inspect().find(viewWithAccessibilityIdentifier: "session-action-complete")

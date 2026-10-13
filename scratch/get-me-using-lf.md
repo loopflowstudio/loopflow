@@ -5,8 +5,8 @@ selecting conversation-first Tasks, repository-name conversation access and
 repo/session ownership. Pursue runs through publication for demo review, not landing.
 Remaining reversible UI details may be resolved during implementation; live data
 cleanup remains separate and requires a reviewed, restorable plan.
-Product owns this Task. Latest LOO-427 base `7bcff15648` is integrated at
-`7eedf5b060`; parent landing remains a delivery dependency. Portfolio implementation:
+Product owns this Task. LOO-427 is integrated and completed; historical stacking
+details remain at `0bb13e9261:scratch/get-me-using-lf.md`. Portfolio implementation:
 `d43aa248d3`; shared-reader compression: `50e2cf44d1`. Reconciled October 11
 against those changes, parent integration and the failed configured demo.
 
@@ -146,76 +146,26 @@ toggle with its exclusive state/tests. CLI launching, explicit Session links,
 Run inspection, pane-owned new conversations, membership and missing-Work evidence
 remain. There is no replacement Session index or second primary/layout owner.
 
-No deletion targets remain in this navigation cut. The launcher now reuses
+October 13 removes the SessionsContentView Work-tab strip (already checkpointed),
+Task sibling Menu and ordinary Task Flow-membership chip. Their exclusive chrome
+expectations are removed; full Session membership, explicit links, retained panes,
+rename/binding and non-Task chrome survive. Duplicate opening labels collapse into
+one message. No new Session inventory or readiness store replaces them.
+
+No earlier deletion targets remain in this navigation cut. The launcher now reuses
 `cmd_install` for build/install in both launch modes, leaving their presentation
 separate. Task entry uses the pane's existing `sessionId` projection to detect a
 retained conversation instead of repeating its content switch.
 
 ## Implementation and remaining work
 
-October 11 continuation after parent integration `c040d9fa03` preserves the
-completed Work-first cut. The configured demo failed with an unrecognized
-`repo identity` command despite successful bundled help. The launcher repair
-removes its misleading runtime claim: `run`/`run-debug` now check
-the actual `repo identity --json` operation through the bundled helper before
-opening the app. This is ordinary repository registration, not an effect-free
-capability query. October 12 bundled selection supersedes installed forwarding;
-migration authority and data selection stay unchanged. No identity fallback,
-global installed-CLI replacement or private-Machine substitution is added.
-October 12: Jack Heart authorized bundled-runtime work for real-data demo;
-see work-first-demo.md **Bundled runtime**. The installed-release-only hold is
-superseded; schema and process-control boundaries remain.
-[The failed demo](work-first-demo.md) records the observed runtime mismatch; no
-new configured demo has succeeded. [Portfolio discovery](portfolio-discovery.md) records the prior-art investigation.
-Jack Heart added portfolio management to LOO-462 on October 11. The shared
-CLI/Desktop implementation is present; affected gate coverage and native review
-remain. It belongs to this Task and the existing Portfolio surface.
-
-The consumer cut removes the generic composer, skill picker/storage/launch DTO,
-Debug Session inventory, orphan projection and Session-title search, including
-palette Session destinations. Scoped pane-owned conversations and full underlying
-inventory remain. WorkPalette was an additional predecessor not named initially.
-Repository-name opening uses the existing primary owner; first-use acquisition is
-one-shot per retained repository entry. Current empty planning is only a candidate:
-a full historical Wave list must also be empty. A late history check cannot start
-entry after navigation; a late ensure populates only its originating retained Work.
-
-Task rows and palette entry reuse primary preparation and existing linked opening
-with no Changes companion. Bare CLI links retain passive inspection. Returning to
-a retained conversation skips preparation. Flow-log inspection remains passive.
-The existing Workflow header adds a collapsed Overview description. Repo/session
-invites ideas without setup when no Work exists.
-
-The shared `tests/fixtures/dto/work_first_entry.json` now comes from the real Rust
-CLI against an isolated Home with a pinned stand-in provider. It retains empty
-planning, repeated primary admission, mixed Session history and populated Work.
-The lifecycle test checks configured provider/model, exact primary reuse, no Flow
-creation and the assembled repo/session invitation. Swift consumes that capture
-through the actual repository-entry callback, outline and retained Work owners:
-loading/error entry, hide-all, reopen, collapsed Overview and unsaved Files state.
-No mounted provider or native usability is inferred.
-
-Remaining acceptance work:
-- Earlier gate suites passed on `8efc1234a1`; parent conflict checks and the
-  launcher/Task-entry compression checks below cover subsequent changes. These
-  are distinct revisions, not a claim that a full gate ran at `df40c477ef`.
-- Native usability/demo review remains separate from the headless build.
-- Cleanup remains a proposal only. No exact iteration-owned candidates are known
-  or approved. Remaining investigation needs a private candidate/artifact inventory,
-  consistent backup and isolated restore with fake providers before exact deletions
-  can be reviewed.
-  Unknown/interrupted records remain untouched. No live cleanup occurred.
-
-Review found and fixed two concrete hazards: current-only Wave readings could
-misclassify historical repositories as empty; making Task opening asynchronous
-could redirect the Flow-log companion into the previously selected workspace.
-Earlier focused attempts failed on deleted navigation expectations, a wrong Layout
-member and an accessibility-prefix collision. The composed fixture initially used
-a private Rust DTO import and an invalid provider model; Swift first ran before
-the capture existed. Those fixture failures are repaired, not native evidence.
-Review kept the unrelated Session in a separate checkout so Rust's real Task
-association cannot silently turn that case into a Task member.
-
+The Work-first entry/navigation cut, isolated persisted fixture, configured-runtime
+failure and repaired launcher/Task entry are preserved at
+`0bb13e9261:scratch/get-me-using-lf.md`, this heading. Current owners remain:
+Rust primary admission, WorkProjection navigation, WorkModel opening and the
+retained SessionsWorkspaceRegistry. No native usability follows from fixtures.
+Current pursuit and remaining native proof are below; failed real-repository
+attempts and exact restoration boundaries stay in work-first-demo.md.
 
 ## Portfolio — implemented, second review priority
 
@@ -259,35 +209,13 @@ provider acceptance, installation, or three-day adoption credit. Chapter KRs rem
 historically readable; October 7 retired numeric/soak acceptance, not retention or
 usefulness. No external-product progress credit follows from Loopflow UI work alone.
 
-Earlier navigation, launcher, parent-integration and gate evidence is preserved in
-`20298cddcb:scratch/get-me-using-lf.md` (the portfolio-scope checkpoint before this cut).
-The failed configured demo remains in `work-first-demo.md`. Earlier isolated
-provider and headless passes do not establish native usability or installed
-runtime support.
-
-The portfolio pass also regenerated `work_first_entry.json` through its isolated
-Rust lifecycle producer: the parent had added Task acquisition metadata absent
-from the older capture. Swift round-trip assertions compare shared readings;
-Foundation's `/var` spelling differs from Rust's canonical `/private/var` path.
-The retained-Work test removes a nonempty membership while preserving the exact
-conversation, pane layout and unsaved document.
-WorkModel fences asynchronous authored-Wave discovery; PortfolioService serializes
-shared reads and mutations so a delayed read cannot overwrite a later removal.
-
-Earlier Rust portfolio, formatting/lint and fixture-generation checks remain at
-`d43aa248d3:scratch/get-me-using-lf.md`; compression evidence is retained at
-`50e2cf44d1:scratch/get-me-using-lf.md`. Parent integration at `7eedf5b060` also
-removes mandatory follow-through APIs and Task-header delivery controls; the
-conversation-first opening and portfolio owners remain. No gate on this combined
-revision is inferred from the earlier passes. Publication/demo remains the limit
-of LOO-462 authorization; the parent’s changed completion contract adds no landing
-authority here.
-Review preserved successful-read gating at startup and authored-Wave refresh on
-activation while removing duplicate membership reads.
-
-Check (October 11 realign): `git diff --check` and `lf context` — pass, both context budgets fit; prose-only reconciliation reuses prior focused evidence, integrated suites belong to gate and native review awaits a compatible installed release.
-
-Check (October 11 publication, `73d2861c1e`): network-isolated `cargo test -p loopflow --test session_lifecycle_tests --test dto_fixtures --test documented_commands --test portfolio_cli_tests` — 65 passed, one Linux-only ignored; `cargo test -p loopflow --lib portfolio::tests` — 3 passed; `LOOPFLOW_PORTFOLIO_TEST_BIN="$PWD/target/debug/lf" scripts/test_desktop.sh --filter 'WorkNavigationTests|WorkNavigationProofTests|WorktreeWorkspaceTests|DTOFixtureTests|PortfolioServiceTests|PortfolioRepoStateTests|WorkDestinationTests|WorkCacheTests|WorkModelTests|SessionControlsTests|SessionChromeProofTests' -Xswiftc -gnone` — successful 193-test run including CLI readback, display diagnostics skipped; `uv run pytest python/tests/test_loopflow_dev.py -q` — 8 passed; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, Ruff and diff whitespace — pass; native review still requires compatible installed identity/portfolio commands.
+Earlier gate and composition evidence: `0bb13e9261:scratch/get-me-using-lf.md`,
+**Done when / unattended gate**. October 11 publication at `73d2861c1e` passed
+65 Rust acceptance tests (one Linux-only ignored), three portfolio tests, 193
+Desktop tests, eight launcher tests and static checks; those revisions are not a
+new gate pass. Display diagnostics were skipped and installed runtime/native
+proof remained unresolved. Later bundled-runtime authority supersedes the
+installed-only hold, never authorizing landing or live migration.
 
 ## Current review order — October 11
 
@@ -440,7 +368,7 @@ scratch/task-opening-latency.md; historical read durations are not endpoint timi
 
 ### Delivery and demo
 
-Preserve the completed hook contribution and uncommitted sidebar/lookup changes;
+Hook fix `185c0b3c2e` and sidebar/lookup checkpoint `0bb13e9261` are preserved;
 focused checks already pass (46 retention/navigation, 63 destination/Session tests).
 Finish focused regression coverage, compress, reconcile and publish through pursue.
 Build this diff's app with its matching bundled lf for every operation and embedded
@@ -449,4 +377,4 @@ inspect its live panes/drafts and use a non-destructive replacement window/build
 quitting would destroy input. No global install, client takeover, live migration,
 cleanup or full-Task landing follows from this pursuit. Demonstrate the real
 Loopflow repo, truthful Workflow and correct primary conversation; keep unresolved
-native timing/trust proof in this conversation rather than claiming completion.
+native timing/trust proof with the work; no completion follows from headless checks.

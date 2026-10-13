@@ -1,5 +1,8 @@
 # Desktop performance
 
+[Profile native Codex/Claude input](agent-input.md): one Task click through a
+rendered unsent draft response, with wall phases and local CPU flamegraphs.
+
 ```sh
 # Every real launch on this machine, already recorded: samples, median, p95, failures, by app version.
 uv run python scripts/benchmarks/desktop-performance/timings.py

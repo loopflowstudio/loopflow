@@ -5,8 +5,8 @@ import SwiftUI
 /// left, the surface's controls on the right. It sits in the sidebar tone and
 /// its bottom hairline continues the sidebar's right hairline, so frame and
 /// navigation read as one inverted L. Ancestors navigate upward; the final
-/// crumb names the exact Session, chooses among its siblings, and renames it
-/// in place through the shared Session authority.
+/// crumb names the exact Session and renames it through the shared authority.
+/// Task navigation stays on its conversation; explicit historical links survive.
 struct WorkBreadcrumbBar<Trailing: View>: View {
     @Bindable var model: WorkModel
     let crumb: WorkBreadcrumb?
@@ -102,7 +102,7 @@ struct WorkBreadcrumbBar<Trailing: View>: View {
             }
             if let session = crumb.session {
                 if crumb.waveWork != nil || crumb.taskWork != nil { separator }
-                sessionCrumb(session, siblings: crumb.siblings.filter(model.isSessionVisible))
+                sessionCrumb(session, siblings: crumb.siblings.filter(model.isSessionVisible), isTask: crumb.taskWork != nil)
             }
         }
         .lineLimit(1)
@@ -113,7 +113,7 @@ struct WorkBreadcrumbBar<Trailing: View>: View {
     }
 
     @ViewBuilder
-    private func sessionCrumb(_ session: SessionRecord, siblings: [SessionRecord]) -> some View {
+    private func sessionCrumb(_ session: SessionRecord, siblings: [SessionRecord], isTask: Bool) -> some View {
         if let draft = model.navigation.renaming, draft.sessionId == session.id {
             TextField("Session name", text: Binding(
                 get: { model.navigation.renaming?.text ?? draft.text },
@@ -137,7 +137,7 @@ struct WorkBreadcrumbBar<Trailing: View>: View {
                     .accessibilityIdentifier("session-rename-error")
             }
         } else {
-            if siblings.count > 1 {
+            if !isTask, siblings.count > 1 {
                 Menu(session.title) {
                     ForEach(siblings) { record in
                         Button(record.title) { onOpenSession(record) }
@@ -175,9 +175,11 @@ struct WorkBreadcrumbBar<Trailing: View>: View {
                         set: { if !$0 { model.cancelSessionBinding() } }
                     )) { bindingForm }
             }
-            membershipChip(session)
-                .help(membershipHelp(session.flowMembership))
-                .accessibilityIdentifier("session-flow-membership")
+            if !isTask {
+                membershipChip(session)
+                    .help(membershipHelp(session.flowMembership))
+                    .accessibilityIdentifier("session-flow-membership")
+            }
         }
     }
 

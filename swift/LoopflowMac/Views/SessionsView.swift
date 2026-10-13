@@ -562,11 +562,13 @@ final class SessionsStore {
                     throw RegistryQueryError("The recorded execution location changed; reopen the Task before connecting.")
                 }
             }
+            Perf.agentInput("connect_prepare_begin", session: id)
             let surface = try await executionQuery.openSession(
                 id: id,
                 replacing: replacing,
                 cwd: repoPath
             )
+            Perf.agentInput("connect_prepare_returned", session: id)
             guard let latest = _index(id) else { return }
             if case .opening = sessions[latest].state {
                 sessions[latest].record = surface
@@ -842,7 +844,9 @@ struct SessionsContentView: View {
                                 }
                             if taskPath != nil { missingCheckout }
                         }
-                        if workspace.openingConversation { ProgressView("Opening conversation…").padding(8) }
+                        if workspace.openingConversation, !multiplexer.layout.allPanes.contains(where: { $0.sessionId != nil }) {
+                            ProgressView("Opening conversation…").padding(8)
+                        }
                         if let error = workspace.conversationError {
                             HStack {
                                 Text(error).textSelection(.enabled)
@@ -1041,7 +1045,11 @@ struct SessionsContentView: View {
         switch destination {
         case .wave(let id): model.select(.wave(id: id))
         case .task(let id):
-            Task { await model.openPaletteTask(id) }
+            let trace = UUID().uuidString
+            Perf.$inputTrace.withValue(trace) {
+                Perf.agentInput("task_click", task: id, detail: "source=palette")
+                Task { await model.openPaletteTask(id) }
+            }
             return
         case .flow(let name): navigation.palette = .flow(name)
         case .workflow(let name): navigation.palette = .workflow(name)
@@ -1120,7 +1128,11 @@ struct SessionsContentView: View {
     }
 
     private func openTask(_ work: WorkReference) {
-        Task { await model.openTaskConversation(work.id) }
+        let trace = UUID().uuidString
+        Perf.$inputTrace.withValue(trace) {
+            Perf.agentInput("task_click", task: work.id)
+            Task { await model.openTaskConversation(work.id) }
+        }
     }
 
     private func retryConversation() {
@@ -1713,7 +1725,7 @@ private struct SessionPaneView: View {
         case .elsewhere:
             _elsewherePlaceholder(item)
         case .opening, .prepared:
-            ProgressView("Opening session…")
+            ProgressView("Opening conversation…")
                 .foregroundStyle(TerminalPalette.foreground)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .ended(let output):
@@ -1822,6 +1834,7 @@ private struct SessionPaneView: View {
                 surfacePool: sessions.surfaces,
                 isFocused: isFocused,
                 onSurfaceCreated: {
+                    Perf.agentInput("surface_created", session: item.id)
                     sessions.recordPaneLive(item.id)
                 },
                 onSurfaceFailed: { reason in sessions.recordPaneFailure(item.id, reason: reason) },

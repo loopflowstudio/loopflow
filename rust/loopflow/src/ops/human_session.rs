@@ -609,6 +609,7 @@ pub(crate) async fn open(
     mode: OpenMode,
     resume: bool,
 ) -> Result<SessionRecord> {
+    crate::agent_input_timing::record("connect_begin", session_id);
     let target = match find_session(store, session_id, true).await? {
         Some(target) => target,
         // Connecting is what brings a provider-started conversation in.
@@ -746,6 +747,7 @@ async fn connect_live_codex(
     session: &LfSession,
     provider: &crate::session_record::ProviderSessionRef,
 ) -> Result<bool> {
+    crate::agent_input_timing::record("live_relay_begin", &session.id);
     let expected = store.sqlite.session_attachment(&session.id)?;
     let Some((endpoint, thread)) = store.sqlite.session_connection(&session.id)? else {
         return Ok(false);
@@ -853,8 +855,10 @@ async fn connect_live_codex(
 /// Open a conversation: resume its native history, else
 /// launch its prepared input, else append another attempt to the Session.
 async fn open_waiting(store: &SharedStore, id: &str) -> Result<()> {
+    crate::agent_input_timing::record("launch_lock_begin", id);
     let lock_id = id.to_string();
     let launch_lock = tokio::task::spawn_blocking(move || lock_session_process(&lock_id)).await??;
+    crate::agent_input_timing::record("launch_lock_acquired", id);
     // Resolve the current input under the launch lock, including completion
     // or replacement that happened while this opener waited.
     let session = store
@@ -867,6 +871,7 @@ async fn open_waiting(store: &SharedStore, id: &str) -> Result<()> {
     if resume_native_session(store, &session.artifact_key, &token, &mut launch_lock)? {
         return Ok(());
     }
+    crate::agent_input_timing::record("fresh_launch_selected", id);
     // A consumed launch without native history gets another attempt under
     // the same Session; its title and feedback never leave the row.
     let session = if capture_is_prepared(&session.artifact_key)? {
@@ -1191,6 +1196,7 @@ pub(crate) fn resume_native_session(
     crate::harness::agent_process::stop_session_agent(&store.sqlite, &session.id)?;
     let environment =
         BTreeMap::from([(HUMAN_SESSION_ENV.to_string(), serde_json::to_string(token)?)]);
+    crate::agent_input_timing::record("native_resume_selected", &session.id);
     crate::lf::commands::util::resume_session_with_env(
         native.provider,
         session.model.as_deref(),

@@ -138,3 +138,34 @@ Portable HTML already has one suite freshness owner: `website/tests/test_portabl
 Prompt goldens are unchanged: their content selection, ordering, omission and escaping coverage has not been shown redundant. Migration/data preservation, recovery, cross-Task ownership, network containment, OS-account isolation and native process-safety proofs are unchanged. Review rejected deleting all prose tests: explicit safety-boundary assertions in builtins still earn their place. Maintenance reduction is measured by the test-code diff; no CI elapsed-time saving or five-minute acceptance is claimed.
 
 Test-code measure: 50 deleted lines and one added line, net 49 fewer lines; 21 assertions removed and three fewer test cases. Focused architecture fixtures (20), portable HTML (1) and Rust builtins (11), repository map, cargo fmt/clippy and Ruff passed. The changed-aware gate could not enter product suites because resource measurement timed out at 60 seconds; broader verification belongs to hosted CI, not a local pass claim.
+
+### Installation acquisition repair — PR #1545
+
+At failed head `71bbdb80d268e5e9eb6a84d5bc11f53c016e7c51`,
+[run 38476809353, installation job 115569439342](https://github.com/loopflowstudio/loopflow/actions/runs/38476809353/job/115569439342)
+exhausted four ECR pulls with `toomanyrequests: Data limit exceeded`, before
+installation proofs ran. Other product jobs passed. A fresh ECR manifest read
+also returned `Rate exceeded`; Jack Heart authorized repairing acquisition
+without rerunning the failed attempt.
+
+The harness default, CI acquisition and image inspection now consistently use
+`docker.io/library/rust:trixie`. Docker's
+[official image catalog](https://github.com/docker-library/official-images/blob/master/library/rust)
+maps trixie to Rust's [stable/trixie source](https://github.com/rust-lang/docker-rust/blob/master/stable/trixie/Dockerfile).
+The observed Linux amd64 manifest digest is
+`sha256:d3ba1ad5d5b5a180ca8428b4fab8543a1b3933b32a8a7ad90a7ebbaf5497203a`.
+ECR parity is unknown; this is an explicit source change, not a claim of identical
+image content. The moving stable tag remains consistent with CI's toolchain policy.
+
+Local acquisition succeeded. The Linux arm64 image reports Rust/Cargo 1.99.0,
+Debian trixie and Git 2.47.3 with `merge-tree --merge-base`; Python, useradd,
+runuser, flock and timeout are available. CI still fingerprints the actual local
+image ID before cache restoration. Disposable OS account/Home, source copying,
+network disconnection, migration proofs, installed CLI authority and published
+native-title assertions are unchanged. No fallback or retry policy was added.
+
+Repair checks: six acquisition fixture tests, Ruff check/format, real Docker Hub
+manifest/pull, harness image preparation and offline toolchain/prerequisite probe
+passed. Full disposable installation and fresh hosted CI remain required on the
+published repair; local acquisition is not installation acceptance. Review found
+no proof suppression or cache-fingerprint mismatch.

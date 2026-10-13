@@ -925,7 +925,7 @@ fn task_section(task: &TaskDetailSnapshot) -> RoadmapSection {
     let withdrawn = matches!(runtime.status, TaskState::NotReady | TaskState::Ready)
         && crate::linear::terminal_reason(task.task.state.as_deref(), task.task.completed)
             .is_some();
-    if runtime.status.is_terminal() || withdrawn {
+    if runtime.status.is_terminal() || runtime.status == TaskState::Paused || withdrawn {
         return RoadmapSection::Later;
     }
     match task.next_move.owner {
@@ -1229,7 +1229,9 @@ async fn snapshot_task_detail(
     );
     let acquisition = store.sqlite.task_acquisition(&task.id)?;
     let worktree_blocker = crate::ops::task::task_worktree_blocker(store, task).await?;
-    let launch_refusal = if worktree_blocker.is_none() {
+    let launch_refusal = if runtime.status == TaskState::Paused {
+        Some("Task is paused; resume it before running a Flow".to_string())
+    } else if worktree_blocker.is_none() {
         crate::ops::task::task_process_refusal(store, task)
             .await?
             .or_else(|| {
@@ -1245,8 +1247,12 @@ async fn snapshot_task_detail(
     } else {
         None
     };
-    let next_move = if execution.state != TaskExecutionState::Idle && !runtime.status.is_terminal()
-    {
+    let next_move = if runtime.status == TaskState::Paused {
+        NextMove {
+            owner: NextMoveOwner::User,
+            reason: "Paused; resume explicitly when wanted".into(),
+        }
+    } else if execution.state != TaskExecutionState::Idle && !runtime.status.is_terminal() {
         NextMove {
             owner: match execution.state {
                 TaskExecutionState::Blocked | TaskExecutionState::Unknown => NextMoveOwner::Wave,

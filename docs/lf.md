@@ -991,3 +991,15 @@ Interactive add offers to install a missing `lf`; an existing installation stays
 untouched. Status reports connection failures and recovery commands without prompting.
 Connections are reused for 60 idle seconds through Loopflow's private SSH socket.
 See [machine connections](architecture/machines.md) for repository paths and version checks.
+
+### Pause a Task without discarding work
+
+```sh
+lf task pause LOO-389
+lf task resume LOO-389
+```
+
+Paused Tasks stay in the Wave plan but leave the default active sidebar. Their
+checkout, conversations and Workflow remain. Pause holds future Task runs and CI
+repair; it does not stop an already-running process. Resume starts nothing.
+In Desktop, use the Task header's context menu to pause or resume.

@@ -574,7 +574,7 @@ fn find_placement_in(conn: &Connection, work: &WorkRef) -> StoreResult<Option<Pl
 /// Completion and abandonment are durable; unfinished readiness follows the Workflow.
 pub(crate) fn task_state_sql(t: &str) -> String {
     format!(
-        "CASE WHEN {t}.abandoned_at IS NOT NULL THEN 'abandoned' WHEN {t}.planning_completed=1 THEN 'done' ELSE COALESCE((
+        "CASE WHEN {t}.abandoned_at IS NOT NULL THEN 'abandoned' WHEN {t}.planning_completed=1 THEN 'done' WHEN {t}.paused=1 THEN 'paused' ELSE COALESCE((
             SELECT CASE WHEN wf.edge IS NOT NULL THEN 'active' WHEN wf.node='start' THEN 'ready'
                 ELSE 'active' END
             FROM task_workflows wf WHERE wf.task_id={t}.id),'not_ready') END"
@@ -583,7 +583,7 @@ pub(crate) fn task_state_sql(t: &str) -> String {
 
 /// SQL: Task row `t` is neither done nor abandoned.
 pub(crate) fn task_open_sql(t: &str) -> String {
-    format!("({}) NOT IN ('done','abandoned')", task_state_sql(t))
+    format!("({t}.abandoned_at IS NULL AND {t}.planning_completed IS NOT 1)")
 }
 
 pub(crate) fn task_state_in(conn: &Connection, task: &TaskId) -> StoreResult<TaskState> {

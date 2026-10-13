@@ -1086,6 +1086,10 @@ pub struct SyncArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum TaskCommand {
+    /// Pause future Task execution without stopping live processes
+    Pause { issue: String },
+    /// Clear a Task pause without starting execution
+    Resume { issue: String },
     /// Synchronize a Task; observed planning conflicts adopt Linear
     Sync { issue: String },
     /// Inspect or reset this Task's captured Workflow
@@ -1368,6 +1372,8 @@ impl TaskCommand {
             | Self::Sync { issue, .. }
             | Self::Move { issue, .. }
             | Self::Complete { issue, .. }
+            | Self::Pause { issue }
+            | Self::Resume { issue }
             | Self::Reopen { issue, .. }
             | Self::Diff { issue, .. }
             | Self::Files { issue, .. }
@@ -1405,6 +1411,8 @@ impl TaskCommand {
             | Self::Sync { issue, .. }
             | Self::Move { issue, .. }
             | Self::Complete { issue, .. }
+            | Self::Pause { issue }
+            | Self::Resume { issue }
             | Self::Reopen { issue, .. }
             | Self::Diff { issue, .. }
             | Self::Files { issue, .. }
@@ -2265,9 +2273,15 @@ mod tests {
         ] {
             assert!(Cli::try_parse_from(args.clone()).is_ok(), "{args:?}");
         }
-        for verb in [
-            "recover", "enable", "disable", "prepare", "resume", "advance",
-        ] {
+        assert!(matches!(
+            Cli::try_parse_from(["lf", "task", "pause", "LOO-1"]).unwrap().command,
+            Some(Commands::Task { cmd: TaskCommand::Pause { issue } }) if issue == "LOO-1"
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["lf", "task", "resume", "LOO-1"]).unwrap().command,
+            Some(Commands::Task { cmd: TaskCommand::Resume { issue } }) if issue == "LOO-1"
+        ));
+        for verb in ["recover", "enable", "disable", "prepare", "advance"] {
             assert!(Cli::try_parse_from(["lf", "task", verb, "LOO-1"]).is_err());
         }
         assert!(Cli::try_parse_from(["lf", "wave", "status", "--no-sync"]).is_err());

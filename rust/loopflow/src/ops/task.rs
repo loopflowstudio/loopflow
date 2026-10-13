@@ -526,6 +526,12 @@ pub(crate) fn select_task_run(
     checkout: &Path,
     requested: Option<&str>,
 ) -> OpsResult<TaskRunSelection> {
+    if store.sqlite.task_state(&task.id).map_err(task_error)? == crate::durable::TaskState::Paused {
+        return Err(task_error(format!(
+            "Task is paused; use `lf task resume {}` before running a Flow",
+            task.identifier
+        )));
+    }
     let current = store.sqlite.workflow(&task.id).map_err(task_error)?;
     // A name that leaves the current node is that edge, whatever else
     // shares its name.
@@ -3030,6 +3036,24 @@ pub fn task_complete(repo: &Path, issue: &str, note: Option<&str>) -> OpsResult<
     })
 }
 
+pub fn task_pause(issue: &str, paused: bool) -> OpsResult<()> {
+    block_on_task(async {
+        let store = task_store().await?;
+        let task = store
+            .get_task_by_issue(issue)
+            .await
+            .map_err(task_error)?
+            .ok_or_else(|| task_error(format!("Task {issue} is unavailable")))?;
+        store
+            .sqlite
+            .set_task_paused(&task.id, paused)
+            .map_err(task_error)?;
+        let wave = owning_wave(&store, &task).await?;
+        super::planning_sync::sync_after_save(&store, wave.repo()).await;
+        Ok(())
+    })
+}
+
 pub fn task_reopen(issue: &str, note: Option<&str>) -> OpsResult<Task> {
     block_on_task(async {
         let store = task_store().await?;
@@ -3286,6 +3310,9 @@ pub(crate) async fn reconcile_task_completion(
     store: &SharedStore,
     task: &mut Task,
 ) -> OpsResult<()> {
+    if store.sqlite.task_state(&task.id).map_err(task_error)? == crate::durable::TaskState::Paused {
+        return Ok(());
+    }
     match task_work_status(store, task).await? {
         WorkStatus::Done => {
             return Ok(());
@@ -3336,10 +3363,19 @@ async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsResult<TaskSn
         .await
         .map_err(task_error)?;
     let work_set = store.sqlite.task_work(&task.id).map_err(task_error)?;
+    let status = store.task_state(&task.id).await.map_err(task_error)?;
     let actions = if store.sqlite.task_deleted(&task).map_err(task_error)? {
         TaskActionModel {
             recommended: Some(crate::ops::task_actions::TaskAction::NoAction),
             reason: "Task was deleted; retained history is read-only".into(),
+        }
+    } else if status == crate::durable::TaskState::Paused {
+        TaskActionModel {
+            recommended: Some(crate::ops::task_actions::TaskAction::NoAction),
+            reason: format!(
+                "Task is paused; `lf task resume {}` clears the hold without starting execution",
+                task.identifier
+            ),
         }
     } else {
         let predecessor_phase = match task.parent_pr_id.as_ref() {
@@ -3415,7 +3451,7 @@ async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsResult<TaskSn
         pm_writeback: task.pm_writeback,
         wave: wave.slug().to_string(),
         project_id: task.project_id.to_string(),
-        status: store.task_state(&task.id).await.map_err(task_error)?,
+        status,
         completion_pending,
         execution,
         work: work_set,
@@ -4345,6 +4381,28 @@ mod tests {
             std::fs::canonicalize(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
                 .unwrap();
         task_fixture_at(identifier, repository).await
+    }
+
+    #[test]
+    fn paused_snapshot_never_recommends_running_work() {
+        let _ledger = crate::journal::TestLedgerGuard::new();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let repo = loopflow_test_support::TestRepo::new();
+        let fixture = runtime.block_on(task_fixture_at("PAUSE-1", repo.path().into()));
+        fixture
+            .store
+            .sqlite
+            .set_task_paused(&fixture.task.id, true)
+            .unwrap();
+        let snapshot = runtime
+            .block_on(super::read_task_snapshot(&fixture.store, fixture.task))
+            .unwrap();
+        assert_eq!(snapshot.status, crate::durable::TaskState::Paused);
+        assert_eq!(
+            snapshot.actions.recommended,
+            Some(crate::ops::task_actions::TaskAction::NoAction)
+        );
+        assert!(snapshot.actions.reason.contains("lf task resume PAUSE-1"));
     }
 
     #[test]

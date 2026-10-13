@@ -337,6 +337,28 @@ impl SqliteStore {
         Ok(true)
     }
 
+    /// Change the explicit planning hold, never execution or Workflow position.
+    pub(crate) fn set_task_paused(&self, id: &TaskId, paused: bool) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let task = task_on(&tx, id)?.ok_or(StoreError::NotFound)?;
+        require_task_not_deleted(&tx, &task)?;
+        if super::durable::task_state_in(&tx, id)?.is_terminal() {
+            return Err(StoreError::InvalidAuthority(
+                "Reopen the Task before changing its pause state".into(),
+            ));
+        }
+        super::planning_write::local(
+            &tx,
+            &crate::work::edit::WorkEdit::for_target(
+                id.as_str(),
+                &[crate::work::edit::WorkValue::TaskPaused(paused)],
+            ),
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
     /// Reopen planning without touching Workflow, placement, PR or Process history.
     pub(crate) fn reopen_task(&self, id: &TaskId, note: Option<&str>) -> StoreResult<Task> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
@@ -1075,8 +1097,8 @@ pub(super) fn require_task_planning(conn: &Connection, task: &Task) -> StoreResu
         [task.id.as_str()],
         |row| Ok((row.get(0)?, row.get(1)?)),
     )?;
-    if super::durable::task_state_in(conn, &task.id)? != crate::durable::TaskState::Active
-        && crate::linear::terminal_reason(state.as_deref(), completed).is_some()
+    if crate::linear::terminal_reason(state.as_deref(), completed).is_some()
+        && super::durable::task_state_in(conn, &task.id)? != crate::durable::TaskState::Active
     {
         return Err(StoreError::InvalidAuthority(
             "terminal planning state cannot start work; its execution history is preserved".into(),

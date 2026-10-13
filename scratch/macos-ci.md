@@ -172,3 +172,38 @@ Flow. Task execution authorization does not turn these pending checks into passe
 
 Check: disposable concurrent `cargo build --offline -vv` probe PASS (2.60s,
 lock wait then Fresh); XcodeGen/settings PASS; real overlap/performance pending.
+
+October 13 implementation evidence: the first real environment probe selected
+Homebrew rustc 1.98.1 outside Xcode versus rustup rustc 1.99.0 inside its shell
+phase. Different rustc fingerprints caused dependency rebuilds; the sample is
+excluded. Preparation now matches the phase's existing toolchain search path.
+Cancelling that real paired build returned 143 at 85.763s; process inspection
+found no surviving Cargo/rustc/Swift compiler for this checkout. Initial ordinary
+build with empty outputs passed in 130.787s (CLI 83s); matched comparisons pending.
+
+October 13 design revision: real cancellation during simultaneous Rust/Swift
+compilation returned 143 but left a running (`R`, not zombie) `swift-frontend`
+emitting Darwin.pcm into this build's DerivedData. Xcode reported BUILD
+INTERRUPTED; its shared service owns that compiler outside both process groups.
+Process-group-only cleanup is rejected. The small wrapper additionally captures
+pre-existing compiler PIDs, then after failure/cancellation waits for newly
+started compiler processes whose output arguments name this exact DerivedData
+path. After bounded native cancellation, terminate/kill only those compilers
+and verify exit; never target the shared service or another output directory.
+This replaces the cleanup assumption before further performance measurements.
+Delete — do not maintain now also includes process-group-only cancellation as a
+claimed complete proof. Required behavior remains both statuses and no compiler
+surviving the wrapper. If scoped cleanup cannot prove ownership/exit, reject the
+candidate; do not publish it.
+
+Local matched samples so far (elapsed includes settings, preparation and cleanup):
+source-cold baseline 85.311s / overlap 45.643s; changed-source warm overlap
+30.868s / baseline 33.841s. Same APFS snapshots restored at original absolute
+paths, debug levels zero, selected SDK26.2/deployment15.0 and rustup1.99.0.
+The warm edit changes AppearanceMode's Light label and a Rust error message;
+it is temporary measurement input, not a product change or a typical-PR sample.
+Actual process sampling observed intersecting rustc/swift-frontend intervals.
+The post-build Cargo invocation waits on the lock then reports Fresh loopflow;
+no second workspace compile. Reverse-order cold comparison remains pending.
+A concurrently run process fixture interrupted one candidate with status65:
+that sample is excluded; fixtures now use disposable source/output roots.

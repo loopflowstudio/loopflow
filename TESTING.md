@@ -494,6 +494,12 @@ checkouts; changed inputs start fresh, including signed entitlement state.
 Only main saves caches. PRs and merge groups still run the compile command and
 build the current Rust control tools.
 
+CI uses `uv run python scripts/build_xcode_ci.py` to overlap that exact control
+CLI preparation with the ordinary Xcode command above. The app's post-build
+phase still verifies, copies and signs the current development/validation-only
+CLI. Either build failure fails the step; cancellation reaps owned groups and
+compiler processes writing this job's DerivedData, preserving other builds.
+
 **Optional hosted diagnostic** (`--ui-host`). Runs `LoopflowUITests` on a
 permissioned display host. It is excluded from `--all` and is never required
 for Task acceptance. See `release/UI_HOST_GATE.md`.

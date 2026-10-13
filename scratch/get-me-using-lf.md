@@ -474,10 +474,11 @@ never launches execution. Pause does not kill an already-running process.
 
 The common writer owns portable Paused, independent of Linear disposition.
 CLI/Desktop share it; pause blocks future Flow/automatic repair launches.
-Test pause persistence, retained execution and sidebar filtering before pausing LOO-389.
+Verify native pause before applying LOO-389.
 October 13 native recheck: CI opens its correct Codex conversation and input prompt;
 LOO-380 retains Claude and its unsent draft. LOO-312/367 still show hook review;
-Jack was asked whether to continue without trusting. No trust choice submitted.
+Jack trusted LOO-312 on October 13; native input/tool execution now appears.
+LOO-367 still shows its own trust prompt; no choice submitted there.
 
 Paused is not deployed: main's schema needs supported installation; preserve
 active clients. LOO-427 completed through `lf task complete` after verifying merge
@@ -492,5 +493,5 @@ Title leak: GUI now scrubs inherited CMUX keys to prevent host renaming;
 eight launcher tests pass (9e79fa4970). Deployment pending.
 October 13: candidate build/signature check PASS at
 /tmp/loo462-next-demo/Loopflow Work Demo.app (50d6451b4, bundled lf).
-Not launched; both live apps and drafts preserved. PR #1544 checks all pass,
-but GitHub reports auto-merge without queue entry; repeated lf arm is a no-op.
+Not launched; both live apps/drafts preserved. Jack queued PR #1544 October 13;
+position 1, AWAITING_CHECKS, run 38452715134. Earlier auto-merge did not enqueue.

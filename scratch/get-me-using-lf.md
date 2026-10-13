@@ -375,9 +375,13 @@ Wave move into `.lf/wave/` and shared Task pause handling; `cf67067b0d` removed
 the duplicate pause method introduced by integration. Its five Rust and 31 Swift
 focused passes are recorded at `cf67067b0d:scratch/get-me-using-lf.md`.
 
-Remaining delivery includes affected-suite gate and publication for review. The unlaunched profiling build in
-task-opening-latency.md predates compression, main integration and the sidebar
-slice; the later demo needs a fresh matching bundled-lf app. Jack Heart requested
+Remaining delivery includes affected-suite gate and publication for review.
+Prepared unlaunched app: `/tmp/loo462-oct13-sidebar/Loopflow Work Demo.app`,
+built from `88d91e53ca` with its matching validation-only bundled lf; signature
+verified. `build.json` beside it records source/signed hashes and revision.
+SwiftPM resource lookup still relies on the retained checkout build directory;
+this private review artifact is not portable. Earlier profiling/demo apps remain.
+Jack Heart requested
 relaunch after UX fixes, preserving both existing apps' live panes and unsent
 drafts. A replacement must not destroy that input. Real Loopflow repo/Task review,
 six provider/case timing trials, measured-cause optimization and stable-hook proof

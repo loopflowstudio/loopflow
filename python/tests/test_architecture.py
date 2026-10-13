@@ -118,12 +118,6 @@ def test_clean_fixture_has_no_unexplained_architecture(repo: Path) -> None:
     assert report.ok, "\n".join(report.errors)
 
 
-def test_current_repository_has_no_unexplained_architecture() -> None:
-    report = architecture.check_repository(ROOT)
-
-    assert report.ok, "\n".join(report.errors)
-
-
 def test_new_durable_table_must_join_the_map(repo: Path) -> None:
     _write(
         repo,

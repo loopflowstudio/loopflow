@@ -1,5 +1,20 @@
 # infrastructure wave memory
 
+## Test maintenance reduction (lf-6d3ff35, 2026-10-13)
+
+Jack Heart authorized selective test cleanup and delivery, without retries or a
+five-minute CI claim. One CI repository architecture scan plus checker fixtures
+and one portable HTML renderer freshness check retain their distinct proof.
+Editorial metric/roadmap/title fragments cannot prove agent judgment; catalog,
+command resolution, safety contracts and unresolved prompt goldens remain.
+[Assertion mapping](../../../docs/reviews/ci-test-coverage.md#applied-excess-test-reduction--2026-10-13)
+records the net 49-line reduction. CLI/disk and macOS overlap remain separate.
+Installation image acquisition failed before tests on #1545;
+other product jobs passed. Acquisition failure supplies no installation acceptance,
+and source completion establishes no delivery. Release's cold-image and
+operation-entry lessons apply; earlier retry recovery grants no
+exception to Jack's current no-retries boundary.
+
 ## Global agent override (LOO-440, curated 2026-10-11)
 
 Jack Heart selected global `-a`/`--agent` over Task, Flow, step, skill and child
@@ -817,10 +832,6 @@ The September 30 model/cutover decisions above supersede Run, Ask, Project-curso
 and private-store mechanisms there. Archiving detail does not establish remaining
 acceptance or authorize deleting execution history.
 
-- LOO-295's October 4 operator acceptance above supersedes this section's
-  unresolved continuation claim. LOO-296 retains broader restoration; historical
-  manual Flow/native-Home corrections and ambient-account/lease gaps remain in
-  the pre-curation memory, not proof of automatic recovery.
 - Capture all alternatives and human boundaries before execution; recover from
   saved definitions after sources disappear. Invocation identity fences late
   results independently of reusable versions/generations. Consume actual
@@ -861,25 +872,14 @@ acceptance or authorize deleting execution history.
   LOO-278's integration did not transfer its registered checkout/PR ownership.
   Historical archives remain outside live architecture discovery.
 
-LOO-286/LOO-287's broader configured continuity obligations are retained where
-not superseded by the accepted cutover: concurrent starts, real provider death
-and same-cursor replacement, late-result rejection, helper non-authority, and
-exact Desktop close/reopen continuity. Their seeded stores, missing executables,
-sleeping children and isolated tests did not prove those outcomes. Old migration
-counterexamples dropped controller-only Task/Project positions; the newer
-current-state cutover's explicitly accepted scope governs disposition, not a
-retroactive claim that those proofs passed. Finite Project Runs and generic
-Wave/Project execution symmetry are superseded, not future implementation mandates.
-
-The deleted lease/liveness stacks (a7044e2b5, 5f7f66833) and repeated prompt-fallback
-add/delete/restore cycle show why failure must be repaired in the operation.
-The full operational cause of run_liveness removal remains unknown. UI projects
-shared evidence and triggers operations; it is not another scheduler or synthetic
-controller. Historical automatic-trigger/default-wait proposals need current
-selection, not automatic resurrection. Current delivery mechanics live in
-[delivery documentation](../../../docs/architecture/delivery.md); TESTING.md owns
-populated migration and clean-PATH proofs. Refresh exported skills after changes;
-Wave learning stays with its identified owner, never miscellaneous .lf notes.
+LOO-296's restoration and unsuperseded LOO-286/287 configured continuity remain
+unproved. Exact obligations, deleted-stack counterexamples and unknown liveness
+removal cause: `71bbdb80d268e5e9eb6a84d5bc11f53c016e7c51:.lf/wave/infrastructure/MEMORY.md`,
+this heading. Current model/acceptance above supersedes old controllers without
+retroactive proof. Repair operation entry; UI observation is no scheduler.
+Historical trigger/default-wait proposals need current selection. Current
+[delivery mechanics](../../../docs/architecture/delivery.md) and TESTING.md own
+their guidance; Wave learning stays with its identified owner.
 
 ## Prompt reduction boundary (2026-09-24)
 

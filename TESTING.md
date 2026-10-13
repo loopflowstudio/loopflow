@@ -571,8 +571,10 @@ cargo +stable fmt --all -- --check
 cargo +stable clippy --all-targets -- -D warnings
 ```
 
-The installation harness pulls `public.ecr.aws/docker/library/rust:trixie`
-from Docker's ECR Public mirror to avoid Docker Hub's shared-runner pull limits.
+The installation harness pulls `docker.io/library/rust:trixie`
+from the official Rust Docker Hub repository. CI fingerprints the acquired local
+image ID before restoring its Cargo cache; acquisition failure is infrastructure
+failure, not an installation-test result.
 It follows stable alongside CI's Rust jobs and logs its compiler version. Trixie also supplies
 Git with `merge-tree --merge-base`; Bookworm's Git 2.39 cannot run stacked replay
 checks. After adopting a newer
@@ -926,7 +928,7 @@ pass does not verify the container build. Use `--image` to reproduce an older
 toolchain explicitly.
 
 Locally available images are reused, including between the two CI proof steps;
-run `docker pull public.ecr.aws/docker/library/rust:trixie` to refresh the default
+run `docker pull docker.io/library/rust:trixie` to refresh the default
 on a development machine. Cold pulls retry registry throttling with bounded
 backoff within a five-minute download budget. Exhausted acquisition reports an
 infrastructure failure before any installation tests run.

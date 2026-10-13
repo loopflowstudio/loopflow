@@ -463,3 +463,26 @@ neither this split nor Rust partitions establish under-five-minute CI.
 Validation of the added job: all 35 gate tests and actionlint passed. The first
 lint retry met a transient Go proxy DNS failure; running the already-cached
 actionlint module succeeded. Raw hosted log: `/tmp/loopflow-ci-baseline-lf12be237/38324731529.log`.
+
+## First parallel run: transfer dominates
+
+[Run 38331887738](https://github.com/loopflowstudio/loopflow/actions/runs/38331887738)
+at head `3329a99020` failed only the Python migration-order assertion and the
+aggregate. That assertion still looked for preparation in `rust-test`; it now
+checks that materialization precedes compilation in `rust-build`. All Rust
+partitions, checkout refresh, both reconnect proofs, and macOS jobs passed.
+All 45 CI gate/release-automation tests pass after the correction.
+
+Workflow elapsed was approximately 9:30. Build occupied 4:18; compilation took
+206s, packaging 24.39s, and the uploaded archive was **2,124,316,446 bytes**.
+Partition 1 spent 53.16s extracting before 95.101s executing tests; its total
+job was 4:56. Installation took 4:05, smoke/reconnect 4:14, Swift 4:24,
+macOS process discovery 4:31, and Xcode 4:09. Parallelization helped elapsed
+time, but repeated transfer of a two-gigabyte archive is excessive work.
+
+The next measurement sets the shared Rust build and partitions' dev/test
+debug-info levels to zero. Optimization and debug assertions stay unchanged;
+local profiles and release/nightly jobs are untouched. This trades source-line
+detail in CI backtraces for smaller binaries. Its archive-size and timing gains
+remain unmeasured, and the changed dependency profile can cause a cold build.
+Raw log: `/tmp/loopflow-ci-baseline-lf12be237/38331887738.log`.

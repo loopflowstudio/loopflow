@@ -508,6 +508,9 @@ Each Rust partition extracts the same revision's archive into the checkout's
 `target/` directory and materializes matching migration inputs. The reconnect
 target is excluded from that archive and executed in the smoke job. No suite
 is dropped; the aggregate requires the build and every partition to succeed.
+The shared Linux build omits debug symbols to keep archive transfer small.
+It retains unoptimized code and debug assertions; CI backtraces have less
+source-line detail. Local Cargo profiles are unchanged.
 `.github/workflows/architecture-drift.yml`
 runs the same architecture command every Monday and retains its JSON report for
 90 days; four consecutive runs are the time-based architecture KR evidence.

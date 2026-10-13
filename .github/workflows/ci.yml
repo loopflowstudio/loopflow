@@ -104,6 +104,11 @@ jobs:
     needs: [merge-proof, scratch-clear]
     if: ${{ !cancelled() && needs.scratch-clear.outputs.candidate == 'true' }}
     runs-on: ubuntu-latest
+    env:
+      # Archive executable code, not gigabytes of duplicated DWARF sections.
+      # Optimization and debug assertions retain the ordinary test profile.
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
     outputs:
       archive: ${{ steps.archive.outcome == 'success' }}
     steps:
@@ -143,6 +148,9 @@ jobs:
     needs: [merge-proof, scratch-clear, rust-build]
     if: ${{ !cancelled() && needs.scratch-clear.outputs.candidate == 'true' && needs.rust-build.result == 'success' && needs.rust-build.outputs.archive == 'true' }}
     runs-on: ubuntu-latest
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
     strategy:
       fail-fast: false
       matrix:

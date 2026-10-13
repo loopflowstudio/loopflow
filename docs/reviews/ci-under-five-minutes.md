@@ -544,3 +544,40 @@ save cost and net savings remain to be measured.
 
 Validation: 51 installation-harness, CI-proof and release-automation tests passed;
 actionlint passed. Full native-Linux cache execution is assigned to hosted CI.
+
+[Cold run 38350155158](https://github.com/loopflowstudio/loopflow/actions/runs/38350155158)
+passed in **5:44**, at head `58a2ce5a02`. Installation occupied 5:27:
+managed compilation 183s, subsequent Cargo commands 0.15–0.16s, and published
+compilation 64s. Native Linux bind storage therefore reused the build within
+the job. Cache save nevertheless failed: registry source files owned by the
+container user denied the runner's tar read. The next candidate returns ownership
+of this disposable cache to the runner before upload. No warm-cache saving has
+been demonstrated. It also lets main populate a missing cache despite exact
+merge-proof reuse, matching the existing Rust cache-warming behavior.
+
+### Smaller archives with the same nine execution jobs
+
+Local recompression at Zstandard level 6 saved 7% (411MB to 383MB) but added
+about five seconds over level 3; it was not selected. Instead, library and
+integration binaries can travel separately. Actual nextest archives contain
+**87,365,298 bytes** for libraries and **374,203,128 bytes** for integration
+targets, each with its CLI and supporting files. Compilation ran once; the
+second archive command reused it in 0.68s. Packaging took 1.29s and 3.12s.
+These are local Mac payloads, not hosted Linux timing predictions.
+
+The next matrix uses five library and three integration partitions. Partition
+zero runs the unchanged long quietness proof and checkout refresh against the
+library archive. This avoids a heavy fifth library partition while retaining
+the same nine execution jobs. Local enumeration assigns all **2,546 runnable
+cases exactly once**, with no missing or extra cases and exactly one quietness
+proof. Archive metadata contains only its selected binary kinds and both
+archives include the CLI. The superseded quietness scheduling priority is removed.
+Expected downloaded bytes fall from nine full archives to six library and three
+integration archives; actual hosted balance and transfer remain to be measured.
+
+Validation: all 45 CI-proof/release-automation tests and actionlint pass after
+regrouping and cache-warming changes. One library metadata proof and one Flow
+wire-contract proof passed from the separate extracted archives with networking
+blocked. Raw grouped listings: `/tmp/ci-group-*.json`; actual
+archives: `/tmp/ci-actual-{library,integration}.tar.zst`; cold hosted installation
+log: `/tmp/ci-install-cache-cold.log`.

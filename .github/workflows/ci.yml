@@ -134,13 +134,23 @@ jobs:
         if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
         run: |
           /usr/bin/time -v cargo nextest archive --workspace \
-            -E 'not binary(=planning_reconnect_tests)' \
-            --archive-file "$RUNNER_TEMP/rust-tests.tar.zst"
+            -E 'kind(lib)' \
+            --archive-file "$RUNNER_TEMP/rust-library.tar.zst"
+          /usr/bin/time -v cargo nextest archive --workspace \
+            -E 'not kind(lib) & not binary(=planning_reconnect_tests)' \
+            --archive-file "$RUNNER_TEMP/rust-integration.tar.zst"
       - uses: actions/upload-artifact@v7
         if: steps.archive.outcome == 'success'
         with:
-          name: rust-tests
-          path: ${{ runner.temp }}/rust-tests.tar.zst
+          name: rust-library
+          path: ${{ runner.temp }}/rust-library.tar.zst
+          compression-level: 0
+          retention-days: 1
+      - uses: actions/upload-artifact@v7
+        if: steps.archive.outcome == 'success'
+        with:
+          name: rust-integration
+          path: ${{ runner.temp }}/rust-integration.tar.zst
           compression-level: 0
           retention-days: 1
 
@@ -154,31 +164,48 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Partition zero uses the same CLI for Python's checkout-refresh proof.
-        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8]
+        # Keep long observation on partition zero alongside checkout refresh.
+        # Other jobs download only their library or integration executables.
+        include:
+          - { suite: library, shard: 0, partitions: 5 }
+          - { suite: library, shard: 1, partitions: 5 }
+          - { suite: library, shard: 2, partitions: 5 }
+          - { suite: library, shard: 3, partitions: 5 }
+          - { suite: library, shard: 4, partitions: 5 }
+          - { suite: library, shard: 5, partitions: 5 }
+          - { suite: integration, shard: 1, partitions: 3 }
+          - { suite: integration, shard: 2, partitions: 3 }
+          - { suite: integration, shard: 3, partitions: 3 }
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: astral-sh/setup-uv@v7
       - uses: taiki-e/install-action@nextest
-        if: matrix.shard != 0
       - name: Materialize the archived source's migration inputs
         run: |
           VERSION=$(uv run python -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')
           uv run python scripts/canonicalize_migrations.py "$VERSION" --materialize-for-tests
       - uses: actions/download-artifact@v8
         with:
-          name: rust-tests
+          name: rust-${{ matrix.suite }}
           path: ${{ runner.temp }}
       - name: Extract the shared build
-        run: /usr/bin/time -v tar --zstd -xf "$RUNNER_TEMP/rust-tests.tar.zst"
+        run: /usr/bin/time -v tar --zstd -xf "$RUNNER_TEMP/rust-${{ matrix.suite }}.tar.zst"
       - name: Run Rust partition
         if: matrix.shard != 0
         run: |
           LOOPFLOW_TEST_LF="$PWD/target/debug/lf" /usr/bin/time -v cargo --config "target.\"cfg(all())\".runner = [\"uv\", \"run\", \"--no-sync\", \"python\", \"$PWD/scripts/test_network.py\"]" nextest run \
             --binaries-metadata target/nextest/binaries-metadata.json \
             --cargo-metadata target/nextest/cargo-metadata.json \
-            --partition hash:${{ matrix.shard }}/8 --test-threads 4 --no-tests fail --no-fail-fast
+            -E 'not test(native_runner_is_quiet_until_its_turn_ends)' \
+            --partition hash:${{ matrix.shard }}/${{ matrix.partitions }} --test-threads 4 --no-tests fail --no-fail-fast
+      - name: Prove native runner quietness
+        if: matrix.shard == 0
+        run: |
+          LOOPFLOW_TEST_LF="$PWD/target/debug/lf" /usr/bin/time -v cargo --config "target.\"cfg(all())\".runner = [\"uv\", \"run\", \"--no-sync\", \"python\", \"$PWD/scripts/test_network.py\"]" nextest run \
+            --binaries-metadata target/nextest/binaries-metadata.json \
+            --cargo-metadata target/nextest/cargo-metadata.json \
+            -E 'test(native_runner_is_quiet_until_its_turn_ends)' --test-threads 1 --no-tests fail --no-fail-fast
       - name: Prove checkout refresh through the CLI
         if: matrix.shard == 0
         run: |
@@ -187,7 +214,7 @@ jobs:
 
   task-installation:
     needs: [merge-proof, scratch-clear]
-    if: ${{ !cancelled() && needs.scratch-clear.outputs.candidate == 'true' && needs.merge-proof.outputs.reuse != 'true' }}
+    if: ${{ !cancelled() && needs.scratch-clear.outputs.candidate == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -198,13 +225,22 @@ jobs:
           uv run python -c 'from scripts.test_task_installation import _prepare_image; _prepare_image("public.ecr.aws/docker/library/rust:trixie")'
           docker image inspect --format 'id={{.Id}}' public.ecr.aws/docker/library/rust:trixie >> "$GITHUB_OUTPUT"
       - uses: actions/cache@v6
+        id: installation-cache
         with:
           path: ${{ runner.temp }}/installation-cargo
           key: installation-${{ runner.os }}-${{ runner.arch }}-${{ steps.image.outputs.id }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'scripts/test_task_installation.py') }}
       - name: Prove managed Tasks in a disposable installation
+        if: needs.merge-proof.outputs.reuse != 'true' || steps.installation-cache.outputs.cache-hit != 'true'
         run: uv run python scripts/test_task_installation.py --cache-dir "$RUNNER_TEMP/installation-cargo"
       - name: Prove native title hooks through published promotion
+        if: needs.merge-proof.outputs.reuse != 'true' || steps.installation-cache.outputs.cache-hit != 'true'
         run: uv run python scripts/test_task_installation.py --cache-dir "$RUNNER_TEMP/installation-cargo" --native-titles
+      - name: Return Cargo cache ownership to the runner
+        if: always() && steps.installation-cache.outcome == 'success'
+        run: |
+          if [ -d "$RUNNER_TEMP/installation-cargo" ]; then
+            sudo chown -R "$(id -u):$(id -g)" "$RUNNER_TEMP/installation-cargo"
+          fi
 
   # Needs the full history: the check compares every migration against the last
   # release tag, which is how an edited shipped migration is caught before publish.

@@ -500,7 +500,7 @@ Rust partitions wait for one shared build; the other suites run independently.
 | `scratch-clear` | ubuntu-latest | defer checkpoint PR tests; reject scratch artifacts on queue/main |
 | `rust-lint` | ubuntu-latest | `cargo fmt`, `cargo clippy --all-targets -- -D warnings` |
 | `rust-build` | ubuntu-latest | compile and archive Rust tests once |
-| `rust-test` | ubuntu-latest | eight nextest hash partitions; partition zero proves checkout refresh with the archived CLI |
+| `rust-test` | ubuntu-latest | five library and three integration partitions; partition zero proves quietness and checkout refresh |
 | `migration-check` | ubuntu-latest | verify migration namespaces/history |
 | `python-test` | ubuntu-latest | `uv run pytest python/tests/` |
 | `website-test` | ubuntu-latest | `cd website && uv run python dev.py test` |
@@ -512,7 +512,7 @@ Rust partitions wait for one shared build; the other suites run independently.
 
 Candidate and merge-group jobs must all pass for `tests-result` to pass. Both CI
 and the local runner collect every Rust test failure with `--no-fail-fast`.
-Each Rust partition extracts the same revision's archive into the checkout's
+Each Rust partition extracts the same revision's library or integration archive into the checkout's
 `target/` directory and materializes matching migration inputs. The reconnect
 target is excluded from that archive and executed in the smoke job. No suite
 is dropped; the aggregate requires the build and every partition to succeed.

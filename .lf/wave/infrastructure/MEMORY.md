@@ -1082,15 +1082,17 @@ real typical-code PRs, owned by lf-12be237; queue/push-to-merged stay separate.
 #1543 merged; queue 38452715134 took 6:24 (6:25 updatedAt) despite exact
 dependency hits. Other Tasks' numeric retirement waives nothing here.
 
-Useful critical-path gain allows neutral warm samples. Removed overlap saved 13.453–39.668s cold;
-warm totaled 0.417s slower, weak regression evidence. Cleanup complexity and
-hosted benefit remain unresolved.
+Overlap saved 13.453–39.668s cold; warm totaled 0.417s slower, weak regression
+evidence. The supplied Task brief selects overlap on DerivedData misses only;
+ordinary cache hits remain. Unimplemented; performance unproved.
+Changed-source warm snapshots are not exact-source cache hits.
+Cleanup cost and hosted benefit remain unproved; neutral warm samples are allowed.
 
-Package-only codegen-units=256 failed: cold 1.836s slower, warm 3.660s faster.
-Frontend dominated (21.49–26.56s, backend 3.60–4.77s), proving no source cause
-or Xcode gain. Shared services/contention limit attribution; Xcode client time
-omits compiler CPU/RSS. Match toolchain, SDK, deployment, source/target.
-Process groups alone left a Swift compiler alive after cancellation.
+Codegen-units=256 and boxed planning futures remain rejected. Frontend dominated
+backend; boxing reduced caller queries without improving ordinary builds.
+Query attribution proves no elapsed gain. Shared services/contention limit timings;
+Xcode client CPU/RSS omits compilers. Match toolchain, SDK, deployment, source/target.
+Process groups alone left a Swift compiler alive; scoped cleanup passed.
 
 Preserve signed Xcode proof, full Swift tests, copy/sign, development provenance,
 validation-only migrations and disposable Home/network boundaries. No paid

@@ -1209,10 +1209,17 @@ source variants and restores temporary edits in `finally`; profile outputs use
 `summary.txt` and `chrome_profiler.json`. Benchmark logs have the prefix
 `/tmp/macos-ci-frontend-`.
 
-Remaining blocker: frontend cost is distributed across the large library; the
+At this trial's conclusion, frontend cost was distributed across the large library; the
 largest specifically attributed small source boundary did not improve the
-ordinary build. There is no measured mechanism within the current small-change
-scope to advance. A further candidate needs new evidence of work that can be
-removed; another unchanged overlap, backend or boxing trial is not justified.
+ordinary build. This supplies no qualifying small frontend reduction; another
+unchanged backend or boxing trial is not justified.
+
+October 13 reconciliation: the supplied Task brief selects overlap only on
+exact-source DerivedData cache misses, with ordinary Xcode on cache hits. This
+changes the earlier always-overlap proposal and supersedes frontend reduction
+as a prerequisite. The two cold gains justify controlled evaluation; they do not
+prove hosted benefit. Changed-source warm snapshots are not exact-source cache
+hits. The selected variant remains unimplemented and needs actual hit/miss-path
+measurements, bounded failure cleanup, signed Xcode proof and full hosted CI/queue.
 lf-ddf2d53 remains unfinished. lf-12be237 retains ten-real-run, queue and
 push-to-merged acceptance; the supplied latest real queue remains 6:24.

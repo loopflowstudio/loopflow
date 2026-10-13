@@ -850,3 +850,42 @@ Validation: 45 CI-proof/release-automation tests and actionlint pass. A shell
 check exercised both-success and each/both-failure combinations under errexit;
 only both-success returned zero. Rust sources are unchanged from the full hosted
 pass. The next full run owns concurrency and elapsed-time acceptance.
+
+### Reject ten slots; remove machine-speed assumptions from two proofs
+
+[Run 38424417775](https://github.com/loopflowstudio/loopflow/actions/runs/38424417775)
+finished in **4:39 but failed**, so it provides no successful acceptance run.
+The limiting library partition changed only from 119.174s at six workers to
+117.204s at ten (343% to 360% CPU). Ten slots did not establish a worthwhile
+benefit and are reverted to six. Quietness plus checkout refresh passed while
+overlapping; that scheduling change is retained. Shared-build completion was
+2:13 rather than 2:46, so the entire elapsed improvement cannot be attributed
+to worker count or overlap.
+
+Two timing assumptions failed:
+
+- `rate_limit_pauses_independent_clients_and_resumes_after_reset` gave server
+  startup and two HTTP calls a 250 ms deadline. Correct expiration could let
+  the second call succeed. The fixture now installs a future reset, verifies
+  shared pause and the stored deadline, then writes an expired nonzero deadline
+  and verifies resumption. It moves beside the cooldown owner to access its
+  private fixture path; no production API, retry or longer sleep is added.
+- `a_task_committed_elsewhere_appears_once_and_bursts_converge` received six
+  planning frames instead of at most five. Twenty transactions can legitimately
+  span more debounce windows on a busy runner. **The incidental five-frame cap
+  is removed**, replaced with strictly advancing Task counts (no repeated or
+  stale snapshots), final count 21, and the retained full comparison to a fresh
+  public read. This no longer claims a fixed frame count for an unbounded write
+  duration; it preserves convergence and strengthens duplicate-state detection.
+
+GitHub public PushEvents also supplied dispatch evidence: `02eeedce51` was
+pushed at 07:23:23 UTC and its successful required checks finished at 07:28:23,
+so the earlier **4:56 Actions run was 5:00 from push**. `19544d4047` was pushed
+at 15:31:36; its run began at 15:31:42, six seconds later. Future acceptance
+reports must retain both clocks rather than spending that dispatch margin.
+
+Validation: both network-isolated focused proofs pass; the final expired-nonzero
+deadline case was rechecked after refinement and passed in 0.165s. Formatting
+and all-target Clippy with warnings denied pass. The watcher check also passed
+its full fresh-read comparison; its local 156.683s included rebuilding the CLI
+fixture, not a longer observation window. No retry was introduced.

@@ -198,7 +198,7 @@ jobs:
             --binaries-metadata target/nextest/binaries-metadata.json \
             --cargo-metadata target/nextest/cargo-metadata.json \
             -E 'not test(native_runner_is_quiet_until_its_turn_ends)' \
-            --partition hash:${{ matrix.shard }}/${{ matrix.partitions }} --test-threads 10 --no-tests fail --no-fail-fast
+            --partition hash:${{ matrix.shard }}/${{ matrix.partitions }} --test-threads 6 --no-tests fail --no-fail-fast
       - name: Prove quietness and checkout refresh concurrently
         if: matrix.shard == 0
         run: |

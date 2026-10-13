@@ -177,8 +177,47 @@ fn reset_at(headers: &HeaderMap, limited: bool, now: i64) -> Option<i64> {
 
 #[cfg(test)]
 mod tests {
-    use super::reset_at;
-    use reqwest::header::HeaderMap;
+    use super::{reset_at, Cooldown};
+    use crate::linear::test_server::{self, json_response};
+    use crate::linear::LinearClient;
+    use reqwest::{header::HeaderMap, StatusCode};
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn rate_limit_pauses_independent_clients_and_resumes_after_reset() {
+        let reset =
+            (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) + 3_600_000;
+        let mut limited = json_response(
+            StatusCode::BAD_REQUEST,
+            json!({"errors":[{"message":"Rate limit exceeded", "extensions":{"code":"RATELIMITED"}}]}),
+        );
+        limited
+            .headers
+            .push(("x-ratelimit-requests-reset".into(), reset.to_string()));
+        let (url, requests) = test_server::spawn(vec![limited,
+            json_response(StatusCode::OK, json!({"data":{"initiatives":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}))]).await;
+        let first = LinearClient::with_base_url("first-token".into(), None, url.clone());
+        assert!(matches!(
+            first.initiatives().await,
+            Err(crate::linear::LinearError::RateLimited { .. })
+        ));
+        let second = LinearClient::with_base_url("refreshed-token".into(), None, url.clone());
+        assert!(matches!(
+            second.initiatives().await,
+            Err(crate::linear::LinearError::RateLimited { .. })
+        ));
+        assert_eq!(requests.lock().await.len(), 1);
+        let cooldown = Cooldown::for_endpoint(&url);
+        assert_eq!(
+            std::fs::read_to_string(&cooldown.path).unwrap(),
+            reset.to_string()
+        );
+        // Exercise expiration without requiring both requests to finish in 250 ms.
+        let expired = (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) - 60_000;
+        std::fs::write(&cooldown.path, expired.to_string()).unwrap();
+        assert!(second.initiatives().await.unwrap().is_empty());
+        assert_eq!(requests.lock().await.len(), 2);
+    }
 
     #[test]
     fn cooldown_uses_reset_milliseconds_retry_after_and_safe_missing_reset() {

@@ -1,3 +1,8 @@
 [[profile.default.overrides]]
 filter = 'test(every_receipt_at_fleet_fanout_is_recorded_exactly_once)'
 threads-required = "num-test-threads"
+
+[[profile.default.overrides]]
+# Start the long observation proof before short cases fill the remaining slots.
+filter = 'test(native_runner_is_quiet_until_its_turn_ends)'
+priority = 100

@@ -483,25 +483,30 @@ for Task acceptance. See `release/UI_HOST_GATE.md`.
 
 ## What CI Runs
 
-See `.github/workflows/ci.yml`. These check jobs run in parallel and feed the
-aggregate `tests-result` check:
+See `.github/workflows/ci.yml`. Checks feed the aggregate `tests-result` check.
+Rust partitions wait for one shared build; the other suites run independently.
 
 | Job | Runner | Command |
 |-----|--------|---------|
 | `architecture-check` | ubuntu-latest | map every durable owner, public boundary, provider edge, and named shim; reject stale control vocabulary |
 | `scratch-clear` | ubuntu-latest | defer checkpoint PR tests; reject scratch artifacts on queue/main |
 | `rust-lint` | ubuntu-latest | `cargo fmt`, `cargo clippy --all-targets -- -D warnings` |
-| `rust-test` | ubuntu-latest | `cargo nextest run --all --no-fail-fast` |
+| `rust-build` | ubuntu-latest | compile and archive Rust tests once |
+| `rust-test` | ubuntu-latest | eight nextest hash partitions; partition zero proves checkout refresh with the archived CLI |
 | `migration-check` | ubuntu-latest | verify migration namespaces/history |
 | `python-test` | ubuntu-latest | `uv run pytest python/tests/` |
 | `website-test` | ubuntu-latest | `cd website && uv run python dev.py test` |
-| `e2e-smoke` | ubuntu-latest | `tests/e2e/test_smoke.sh` |
+| `e2e-smoke` | ubuntu-latest | both planning-reconnect proofs, then `tests/e2e/test_smoke.sh` |
 | `task-installation` | ubuntu-latest | `uv run python scripts/test_task_installation.py` |
 | `swift-test` | macos-15 | app build, headless model/view tests, boundary check |
 | `loopflow-ui-test` | macos-15 | xcodegen + app/test-runner compile |
 
 Candidate and merge-group jobs must all pass for `tests-result` to pass. Both CI
 and the local runner collect every Rust test failure with `--no-fail-fast`.
+Each Rust partition extracts the same revision's archive into the checkout's
+`target/` directory and materializes matching migration inputs. The reconnect
+target is excluded from that archive and executed in the smoke job. No suite
+is dropped; the aggregate requires the build and every partition to succeed.
 `.github/workflows/architecture-drift.yml`
 runs the same architecture command every Monday and retains its JSON report for
 90 days; four consecutive runs are the time-based architecture KR evidence.

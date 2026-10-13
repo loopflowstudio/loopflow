@@ -155,7 +155,7 @@ def test_matrix_only_runs_for_candidates_and_queue_cannot_skip_aggregate(
     matrix = set(jobs) - {"merge-proof", "scratch-clear", "tests-result"}
     assert set(jobs["tests-result"]["needs"]) == matrix | {"merge-proof", "scratch-clear"}
     for name in matrix:
-        assert set(jobs[name]["needs"]) == {"merge-proof", "scratch-clear"}
+        assert {"merge-proof", "scratch-clear"} <= set(jobs[name]["needs"])
         assert "needs.scratch-clear.outputs.candidate == 'true'" in jobs[name]["if"]
     assert jobs["tests-result"]["if"] == (
         "${{ always() && (github.event_name != 'pull_request' || "

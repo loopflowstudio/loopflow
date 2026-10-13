@@ -413,3 +413,28 @@ that target lowers the bound to 268s before artifact transfer and scheduling.
 These are bounds, not predictions or a selected permanent runner count.
 Measure total runner occupancy alongside elapsed time; no premium hardware
 or reduced behavioral observation window is selected.
+
+## Shared-build experiment prepared
+
+The next workflow candidate builds one archive, runs eight four-slot Rust hash
+partitions, and uses partition zero for the existing Python checkout-refresh
+proof against that CLI. Both Linux reconnect cases move intact to the existing
+smoke job, whose integration build supplies the smoke CLI. The longest remaining
+quietness proof starts first. Every partition and the shared build feed the
+required aggregate; empty partitions fail and failed partitions do not cancel
+their peers. Exact merge-group proof reuse remains unchanged.
+
+The local archive contains 58 test binaries plus the CLI; the reconnect binary
+is absent. Comparing complete nextest listings verified that all 2,546 locally
+runnable cases occur exactly once across the eight partitions (306, 299, 351,
+321, 322, 295, 320, 332). Local platform counts do not establish Linux coverage.
+Matched historical cases sum to 391–451 seconds per partition before the newer
+matrix fixture speedup; the 120s quietness case remains the longest single case.
+These sums are scheduling inputs, not predicted elapsed or CPU time.
+
+Validation: actionlint 1.7.12 passed; all 35 CI gate tests passed; a Flow proof
+passed from the extracted archive/CLI in network isolation (17.925s). Archive
+creation took 55.84s compilation plus 0.72s packaging on this Mac. Raw evidence:
+`/tmp/ci-shard-*.{json,log}`. Hosted Linux transfer, setup, complete partition
+execution, total runner occupancy and under-five-minute acceptance remain open.
+Eight partitions are an experiment, not a cost-optimality claim.

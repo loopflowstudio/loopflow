@@ -24,7 +24,7 @@ fn git(repo: &Path, args: &[&str]) {
 }
 
 fn write_goal(repo: &Path, wave: &str, initiative: &str) {
-    let directory = repo.join("wave").join(wave);
+    let directory = repo.join(".lf/wave").join(wave);
     std::fs::create_dir_all(&directory).unwrap();
     std::fs::write(
         directory.join("GOAL.md"),
@@ -82,12 +82,12 @@ fn put_snapshot(
         .get_wave_at(&WaveLocator::discover(repo, wave).unwrap())
         .unwrap()
         .expect("registered Wave");
-    let goal = std::fs::read_to_string(repo.join("wave").join(wave).join("GOAL.md"))
+    let goal = std::fs::read_to_string(repo.join(".lf/wave").join(wave).join("GOAL.md"))
         .unwrap_or_else(|_| {
             format!("---\nlinear:\n  initiative: {initiative}\n---\nFixture Wave.\n")
         });
-    std::fs::create_dir_all(repo.join("wave").join(wave)).unwrap();
-    std::fs::write(repo.join("wave").join(wave).join("GOAL.md"), goal).unwrap();
+    std::fs::create_dir_all(repo.join(".lf/wave").join(wave)).unwrap();
+    std::fs::write(repo.join(".lf/wave").join(wave).join("GOAL.md"), goal).unwrap();
     store
         .seed_inventory(&InventoryFixture {
             wave_id: registered.id().clone(),

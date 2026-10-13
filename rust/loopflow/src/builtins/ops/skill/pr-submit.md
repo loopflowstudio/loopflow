@@ -1,6 +1,6 @@
 ---
 requires: a reviewable change
-produces: a ready PR assigned to its reviewer
+produces: a ready PR prepared for manual merge
 ---
 Prepare the current change for the reviewer's merge click.
 
@@ -9,13 +9,19 @@ Preserve unrelated active contributions. Fix clear readiness gaps and retain
 useful design conclusions and accepted later checks in durable PR copy before
 scratch cleanup.
 
-Run `lf pr submit --create-pr`. It stages the change, syncs, clears scratch,
-creates or updates the PR, marks it ready and assigns the reviewer. It consumes
+Run `lf pr submit --create-pr`. It stages the change, syncs, clears committed scratch additions,
+creates or updates the PR and marks it ready, preserving reviewers and assignees. It consumes
 valid prepared copy or generates it through pr-message. Supply explicit copy
 only for an intentional override, then check the returned scope and proof claims.
 
-After verified merge, an open Task can be completed when its outcome is satisfied.
-Optional later work uses ordinary Task creation; no disposition is required. A Task has at most one PR; additional delivery belongs to another Task.
+If the requested handoff names reviewers, use `lf pr request-review -r <login>`
+or `-r <org/team>` on the existing PR. Do not infer reviewers from assignees.
+Read `lf pr reviews` for requests and review submissions; inline discussion stays
+on the PR page. Publishing and submitting do not themselves request reviews.
+
+For an associated Task, leave completion to its selected work procedure after
+verified merge. A Task has at most one PR; additional accepted delivery belongs
+to another Task. Taskless delivery creates no Task or follow-up filing obligation.
 Repair a reported conflict in this checkout using the existing sync operation,
 then retry. Preserve actual errors and uncertain external effects.
 

@@ -47,7 +47,7 @@ pub fn github_merge_response(
     request: Option<&str>,
 ) -> String {
     let queued = request.and_then(|request| request.strip_prefix("queued:"));
-    serde_json::json!({"data":{"repository":{"pullRequest":{
+    serde_json::json!({"data":{"repository":{"mergeCommitAllowed":true,"squashMergeAllowed":true,"rebaseMergeAllowed":true,"pullRequest":{
         "id":queued.unwrap_or("PR_fixture"), "number":number,
         "url":format!("https://example.com/pr/{number}"),
         "state":state, "isDraft":false, "headRefName":"fixture", "headRefOid":head,
@@ -305,7 +305,7 @@ impl Drop for EnvGuard {
 pub fn bind_task_planning(repo: &TestRepo) {
     repo.create_file(".lf/config.yaml", "linear:\n  team: team-task-pr-tests\n");
     repo.create_file(
-        "wave/task-pr-tests/GOAL.md",
+        ".lf/wave/task-pr-tests/GOAL.md",
         "---\nlinear:\n  initiative: initiative-task-pr-tests\n---\nKeep work.\n",
     );
     repo.stage_all();

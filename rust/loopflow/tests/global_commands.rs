@@ -40,7 +40,7 @@ fn context_targets_measure_checkout_wave_and_refresh_local_edits() {
     let repo = TestRepo::new();
     fs::create_dir_all(home.path().join(".lf")).unwrap();
     fs::create_dir_all(repo.path().join(".lf")).unwrap();
-    fs::create_dir_all(repo.path().join("wave/local")).unwrap();
+    fs::create_dir_all(repo.path().join(".lf/wave/local")).unwrap();
     fs::create_dir_all(repo.path().join("scratch")).unwrap();
     fs::write(
         home.path().join(".lf/config.yaml"),
@@ -53,11 +53,11 @@ fn context_targets_measure_checkout_wave_and_refresh_local_edits() {
     )
     .unwrap();
     fs::write(
-        repo.path().join("wave/local/GOAL.md"),
+        repo.path().join(".lf/wave/local/GOAL.md"),
         "---\ncontext_budgets:\n  memory_tokens: 400\n---\nLocal objective.\n",
     )
     .unwrap();
-    let memory = repo.path().join("wave/local/MEMORY.md");
+    let memory = repo.path().join(".lf/wave/local/MEMORY.md");
     let scratch = repo.path().join("scratch/plan.md");
     fs::write(
         &memory,
@@ -89,7 +89,11 @@ fn context_targets_measure_checkout_wave_and_refresh_local_edits() {
     assert!(report.get("goal_status").is_none());
     let budgets = &report["context"]["budgets"];
     for (key, value, source) in [
-        ("memory_tokens", 400, repo.path().join("wave/local/GOAL.md")),
+        (
+            "memory_tokens",
+            400,
+            repo.path().join(".lf/wave/local/GOAL.md"),
+        ),
         ("scratch_tokens", 600, home.path().join(".lf/config.yaml")),
         ("scratch_bytes", 10000, repo.path().join(".lf/config.yaml")),
     ] {

@@ -439,32 +439,29 @@ fn land_cleans_up_remote_branch() {
 }
 
 #[test]
-fn land_clears_scratch_and_preserves_gitkeep() {
+fn land_cleans_added_scratch_and_retains_existing_edits() {
     let _env = EnvGuard::new(&[]);
     let repo = TestRepo::new();
+    repo.create_file("scratch/research.md", "original research");
+    repo.create_file("scratch/untouched.md", "keep this");
+    repo.create_file("scratch/renamed.md", "renamed research");
+    repo.create_file("scratch/.gitkeep", "");
+    repo.stage_all();
+    repo.commit("Existing repository research");
+    repo.push();
     repo.create_branch("feature");
     repo.create_file("feature.txt", "feature");
+    repo.create_file("scratch/research.md", "updated research");
+    fs::rename(
+        repo.path().join("scratch/renamed.md"),
+        repo.path().join("scratch/new-name.md"),
+    )
+    .unwrap();
+    repo.create_file("scratch/notes.md", "review notes");
+    repo.create_file("scratch/nested/new [notes].md", "temporary notes");
     repo.stage_all();
-    repo.commit("feature work");
+    repo.commit("Feature and notes");
     push_branch(&repo, "feature");
-
-    let scratch = repo.path().join("scratch");
-    fs::create_dir_all(scratch.join("nested")).expect("create nested scratch dir");
-    fs::write(scratch.join("notes.md"), "review notes").expect("write scratch note");
-    fs::write(scratch.join("nested").join("todo.md"), "todo").expect("write nested scratch note");
-    let status = Command::new("git")
-        .args(["add", "scratch"])
-        .current_dir(repo.path())
-        .status()
-        .expect("git add scratch");
-    assert!(status.success(), "git add scratch should succeed");
-    let status = Command::new("git")
-        .args(["commit", "-m", "add scratch docs"])
-        .current_dir(repo.path())
-        .status()
-        .expect("git commit scratch");
-    assert!(status.success(), "git commit scratch should succeed");
-
     land(
         repo.path(),
         &LandOptions {
@@ -480,19 +477,22 @@ fn land_clears_scratch_and_preserves_gitkeep() {
         },
         &NullProgress,
     )
-    .expect("land should clear scratch");
-
-    let scratch_entries = fs::read_dir(repo.path().join("scratch"))
-        .expect("read scratch after land")
-        .map(|entry| {
-            entry
-                .expect("scratch entry")
-                .file_name()
-                .to_string_lossy()
-                .into_owned()
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(scratch_entries, vec![".gitkeep"]);
+    .unwrap();
+    assert_eq!(
+        fs::read_to_string(repo.path().join("scratch/research.md")).unwrap(),
+        "updated research"
+    );
+    assert_eq!(
+        fs::read_to_string(repo.path().join("scratch/untouched.md")).unwrap(),
+        "keep this"
+    );
+    assert_eq!(
+        fs::read_to_string(repo.path().join("scratch/new-name.md")).unwrap(),
+        "renamed research"
+    );
+    assert!(repo.path().join("scratch/.gitkeep").exists());
+    assert!(!repo.path().join("scratch/notes.md").exists());
+    assert!(!repo.path().join("scratch/nested/new [notes].md").exists());
 }
 
 #[test]
@@ -667,6 +667,7 @@ fi
 #[test]
 fn land_preserves_checkpoint_history_and_pushes_the_final_tree_once() {
     let repo = TestRepo::new();
+    repo.push();
     repo.create_branch("feature");
     repo.create_file("first.txt", "first");
     repo.stage_all();
@@ -764,6 +765,7 @@ fn land_preserves_checkpoint_history_and_pushes_the_final_tree_once() {
 #[test]
 fn land_refuses_when_clearing_scratch_leaves_no_authored_change() {
     let repo = TestRepo::new();
+    repo.push();
     repo.create_file("scratch/.gitkeep", "");
     repo.stage_all();
     repo.commit("track scratch");
@@ -1048,7 +1050,7 @@ fn submit_and_land_make_no_presentation_attempt() {
 }
 
 #[test]
-fn submit_assigns_reviewer_and_skips_auto_merge() {
+fn submit_preserves_assignments_and_skips_auto_merge() {
     let repo = TestRepo::new();
     repo.create_branch("feature");
     repo.create_file("feature.txt", "feature");
@@ -1079,11 +1081,80 @@ fn submit_assigns_reviewer_and_skips_auto_merge() {
 
     // submit prepares but never merges — that click belongs to the reviewer.
     let log = fs::read_to_string(&log_path).expect("read gh log");
-    // Assigns the PR to the current user for a required, manual merge.
-    assert!(log.contains("pr edit --add-assignee @me"));
+    // Preparing a manual merge must not change the team's assignments.
+    assert!(!log.contains("--add-assignee"));
     // Marks the PR ready, but does NOT arm auto-merge.
     assert!(log.contains("pr ready"));
     assert!(!log.contains("merge --auto"));
+}
+
+#[test]
+fn auto_merge_follows_repository_methods_and_queue_policy() {
+    for (preference, queue, expected) in [
+        (None, false, "--merge"),
+        (Some("rebase"), false, "--rebase"),
+        (Some("squash"), false, "rejected"),
+        (Some("squash"), true, "queue"),
+    ] {
+        let directory = tempfile::tempdir().unwrap();
+        let log = directory.path().join("gh.log");
+        let mut script = gh_land_script(log.to_str().unwrap()).replace(
+            "\"squashMergeAllowed\":true",
+            "\"squashMergeAllowed\":false",
+        );
+        if queue {
+            script = script.replace(
+                "\"isMergeQueueEnabled\":false",
+                "\"isMergeQueueEnabled\":true",
+            );
+        }
+        // The provider accepts only its configured policy and the observed head.
+        let accept = if expected == "queue" {
+            r#"case "$*" in *--squash*|*--merge*|*--rebase*) exit 7 ;; esac"#.to_string()
+        } else {
+            format!(r#"case " $* " in *" {expected} "*) ;; *) exit 7 ;; esac"#)
+        };
+        script = script.replace("  touch \"$auto_state\"", &format!("  {accept}\n  case \"$*\" in *\"--match-head-commit $(git rev-parse HEAD)\"*) ;; *) exit 7 ;; esac\n  touch \"$auto_state\""));
+        let _env = EnvGuard::new(&[("gh", &script)]);
+        let repo = TestRepo::new();
+        if let Some(preference) = preference {
+            repo.create_file(".lf/config.yaml", &format!("merge_method: {preference}\n"));
+            repo.stage_all();
+            repo.commit("repository merge policy");
+            repo.push();
+        }
+        repo.create_branch("feature");
+        repo.create_file("feature.txt", "feature");
+        repo.stage_all();
+        repo.commit("feature");
+        push_branch(&repo, "feature");
+        let result = land(
+            repo.path(),
+            &LandOptions {
+                strict: true,
+                local: false,
+                create_pr: true,
+                wait_and_fix: false,
+                worktree: None,
+                commit_message: None,
+                pr_title: Some("Feature".into()),
+                pr_body: Some("Useful work".into()),
+                agent: None,
+            },
+            &NullProgress,
+        );
+        let armed = directory.path().join("gh.log.auto").exists();
+        if expected == "rejected" {
+            assert!(result
+                .unwrap_err()
+                .to_string()
+                .contains("disabled on GitHub"));
+            assert!(!armed);
+        } else {
+            result.unwrap();
+            assert!(armed, "provider must accept policy {expected}");
+        }
+    }
 }
 
 /// Managed Task delivery is independent of the end-to-end controller. An
@@ -1134,7 +1205,7 @@ fn submit_records_user_merge_for_a_managed_task() {
 
     let log = fs::read_to_string(&log_path).unwrap_or_default();
     assert!(
-        log.contains("pr ready") && log.contains("pr edit --add-assignee @me"),
+        log.contains("pr ready") && !log.contains("--add-assignee"),
         "submit must prepare the Task PR for review: {log}"
     );
     assert!(!log.contains("merge --auto"));

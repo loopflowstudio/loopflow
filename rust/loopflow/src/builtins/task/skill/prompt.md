@@ -1,7 +1,7 @@
 ---
 description: Author or audit a Loopflow skill, Wave goal, or inline prompt.
 requires: a prompt idea or existing prompt asset
-produces: .lf/skills/*.md | wave/<name>/GOAL.md | reviewed prompt text
+produces: .lf/skills/*.md | .lf/wave/<name>/GOAL.md | reviewed prompt text
 default_agent: claude
 action_style: exploratory
 ---
@@ -9,7 +9,7 @@ Turn intent into a prompt that can steer real work and prove when it is done.
 
 ```bash
 lf prompt: create a dependency-audit skill
-lf prompt: tighten wave/infra/GOAL.md
+lf prompt: tighten .lf/wave/infra/GOAL.md
 ```
 
 Read the supplied intent and existing asset. When someone is present, ask only
@@ -156,7 +156,7 @@ without assuming a particular launch mode or reviewer protocol.
 
 ## Wave goal contract
 
-The body of `wave/<name>/GOAL.md` is the prompt a Wave runs repeatedly. Make it
+The body of `.lf/wave/<name>/GOAL.md` is the prompt a Wave runs repeatedly. Make it
 loop well:
 
 1. **Identity by contrast** — what this Wave owns and what a sibling owns.

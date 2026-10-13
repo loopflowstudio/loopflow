@@ -86,7 +86,7 @@ adds flow and goal structure only where it earns its place.
 ## Context
 
 The provider loads `AGENTS.md` natively; Loopflow does not inject it again.
-Every skill also sees `LOOPFLOW.md`, `scratch/`, and `wave/`.
+Every skill also sees `LOOPFLOW.md`, `scratch/`, and `.lf/wave/`.
 Pull in more context explicitly:
 
 ```bash
@@ -107,14 +107,14 @@ Do not take the first N commits and call that the history.
   config.yaml             # Model, context defaults
   skills/                 # Skill prompts
   flows/                  # Flow definitions
-scratch/                  # PR scratchpad (cleared on merge)
-wave/                     # Wave goals and memory (persists)
+  wave/                   # Wave goals and memory (persists)
+scratch/                  # working notes; default delivery clears added files
 ~/.lf/                    # Global config, skills, and the local store
   loopflow.db             # Local identity and execution history
 ```
 
-`scratch/` dies with the PR; `wave/` lives forever. Design docs go in
-`scratch/`, forward-looking plans in `wave/`.
+`scratch/` dies with the PR; `.lf/wave/` lives forever. Design docs go in
+`scratch/`, forward-looking plans in `.lf/wave/`.
 
 ## For agents
 

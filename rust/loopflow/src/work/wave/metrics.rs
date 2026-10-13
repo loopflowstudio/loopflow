@@ -279,9 +279,9 @@ fn contract_issue_path(metrics_dir: &Path, path: &Path) -> String {
 
 fn contract_repository_root(metrics_dir: &Path) -> Option<&Path> {
     metrics_dir
-        .parent()
+        .ancestors()
+        .find(|ancestor| ancestor.ends_with(".lf/wave"))
         .and_then(Path::parent)
-        .filter(|parent| parent.file_name().is_some_and(|name| name == "wave"))
         .and_then(Path::parent)
 }
 
@@ -1648,7 +1648,7 @@ mod tests {
     #[test]
     fn malformed_and_unresolved_contracts_do_not_hide_valid_siblings() {
         let directory = tempfile::tempdir().unwrap();
-        let metrics_dir = directory.path().join("wave/product/metrics");
+        let metrics_dir = directory.path().join(".lf/wave/product/metrics");
         fs::create_dir_all(&metrics_dir).unwrap();
         fs::write(
             metrics_dir.join("task-loop-trust.md"),
@@ -1670,7 +1670,7 @@ mod tests {
 
         assert_eq!(discovery.contracts.len(), 2);
         assert!(discovery.contract_issues.iter().any(|issue| {
-            matches!(issue, MetricContractIssueDto::MalformedContract { path, .. } if path == "wave/product/metrics/wrong-name.md")
+            matches!(issue, MetricContractIssueDto::MalformedContract { path, .. } if path == ".lf/wave/product/metrics/wrong-name.md")
         }));
     }
 
@@ -1678,7 +1678,7 @@ mod tests {
     #[test]
     fn symlinked_contract_cannot_source_meaning_outside_reviewed_metrics() {
         let directory = tempfile::tempdir().unwrap();
-        let metrics_dir = directory.path().join("wave/product/metrics");
+        let metrics_dir = directory.path().join(".lf/wave/product/metrics");
         fs::create_dir_all(&metrics_dir).unwrap();
         let external_contract = directory.path().join("external.md");
         fs::write(
@@ -1694,7 +1694,7 @@ mod tests {
         assert!(matches!(
             discovery.contract_issues.as_slice(),
             [MetricContractIssueDto::MalformedContract { path, message }]
-                if path == "wave/product/metrics/external.md" && message.contains("symlink")
+                if path == ".lf/wave/product/metrics/external.md" && message.contains("symlink")
         ));
     }
 
@@ -1703,7 +1703,7 @@ mod tests {
     fn symlinked_metrics_directory_is_not_a_reviewed_contract_boundary() {
         let directory = tempfile::tempdir().unwrap();
         let repo = directory.path().join("repo");
-        let metrics_parent = repo.join("wave/product");
+        let metrics_parent = repo.join(".lf/wave/product");
         let external_metrics = directory.path().join("external-metrics");
         fs::create_dir_all(&metrics_parent).unwrap();
         fs::create_dir(&external_metrics).unwrap();
@@ -1726,10 +1726,10 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let repo = directory.path().join("repo");
         let external_wave = directory.path().join("external-wave");
-        fs::create_dir(&repo).unwrap();
+        fs::create_dir_all(repo.join(".lf")).unwrap();
         fs::create_dir_all(external_wave.join("product/metrics")).unwrap();
-        std::os::unix::fs::symlink(&external_wave, repo.join("wave")).unwrap();
-        let metrics_dir = repo.join("wave/product/metrics");
+        std::os::unix::fs::symlink(&external_wave, repo.join(".lf/wave")).unwrap();
+        let metrics_dir = repo.join(".lf/wave/product/metrics");
 
         let error = discover_metric_contracts(&metrics_dir, "product").unwrap_err();
 

@@ -205,6 +205,7 @@ fn persistent_selection_preserves_scratch_and_unrelated_index() {
     repo.create_file("scratch/.gitkeep", "");
     repo.stage_all();
     repo.commit("existing scratch");
+    repo.push();
     let persistent = loopflow::git::worktrees::ensure_agent_worktree(
         repo.path(),
         loopflow::git::worktrees::WorktreeSegment::parse("repo").unwrap(),
@@ -236,7 +237,7 @@ fn persistent_selection_preserves_scratch_and_unrelated_index() {
             "scratch",
             "other.md"
         ]),
-        "scratch/.gitkeep\n"
+        "scratch/.gitkeep\nscratch/design.md\n"
     );
     assert_eq!(git(&["show", ":other.md"]), "staged\n");
     assert_eq!(
@@ -247,20 +248,16 @@ fn persistent_selection_preserves_scratch_and_unrelated_index() {
         std::fs::read_to_string(persistent.path.join("scratch/design.md")).unwrap(),
         "latest private plan\n"
     );
-    let before = git(&["rev-parse", "HEAD"]);
-    let error = commit_selected(
+    commit_selected(
         &persistent.path,
         &["scratch/design.md".into()],
-        Some("Save local scratch"),
+        Some("Update existing research"),
     )
-    .unwrap_err()
-    .to_string();
-    assert!(error.contains("scratch/ stays local"), "{error}");
-    assert!(
-        error.contains("move durable notes outside scratch/"),
-        "{error}"
+    .unwrap();
+    assert_eq!(
+        git(&["show", "HEAD:scratch/design.md"]),
+        "latest private plan\n"
     );
-    assert_eq!(git(&["rev-parse", "HEAD"]), before);
     assert_eq!(git(&["show", ":other.md"]), "staged\n");
     commit_workflow(
         &persistent.path,
@@ -271,7 +268,68 @@ fn persistent_selection_preserves_scratch_and_unrelated_index() {
     .unwrap();
     assert_eq!(
         git(&["ls-tree", "-r", "--name-only", "HEAD", "--", "scratch"]),
-        "scratch/.gitkeep\n"
+        "scratch/.gitkeep\nscratch/design.md\n"
     );
     assert!(persistent.path.join("scratch/design.md").exists());
+}
+
+#[test]
+fn rejected_push_does_not_rewrite_remote_history() {
+    let _env = EnvGuard::new(&[]);
+    let repo = TestRepo::new();
+    repo.create_file("shared.txt", "already published");
+    repo.stage_all();
+    repo.commit("published work");
+    repo.push();
+    let published = repo.bare_head_sha();
+    git_output(repo.path(), &["reset", "--hard", "HEAD~1"]);
+    repo.create_file("replacement.txt", "divergent local work");
+    let result = commit_workflow(
+        repo.path(),
+        &CommitOptions {
+            push: true,
+            ..commit_options("replacement")
+        },
+        &NullProgress,
+        &|_| {},
+    );
+    assert!(
+        result.is_err(),
+        "ordinary publication must not force a rejected push"
+    );
+    assert_eq!(repo.bare_head_sha(), published);
+    assert_eq!(last_commit_message(&repo), "replacement");
+}
+
+#[test]
+fn persistent_workspace_checkpoints_added_scratch_until_explicit_cleanup() {
+    let _env = EnvGuard::new(&[]);
+    let repo = TestRepo::new();
+    let persistent = loopflow::git::worktrees::ensure_agent_worktree(
+        repo.path(),
+        loopflow::git::worktrees::WorktreeSegment::parse("repo").unwrap(),
+    )
+    .unwrap();
+    std::fs::create_dir_all(persistent.path.join("scratch")).unwrap();
+    std::fs::write(
+        persistent.path.join("scratch/design.md"),
+        "repository content",
+    )
+    .unwrap();
+    loopflow::ops::commit_selected(
+        &persistent.path,
+        &["scratch/design.md".into()],
+        Some("Save design"),
+    )
+    .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(persistent.path.join("scratch/design.md")).unwrap(),
+        "repository content"
+    );
+    assert_eq!(
+        git_output(&persistent.path, &["show", "HEAD:scratch/design.md"]),
+        "repository content"
+    );
+    assert_eq!(loopflow::ops::scratch::clear(&persistent.path).unwrap(), 1);
+    assert!(!persistent.path.join("scratch/design.md").exists());
 }

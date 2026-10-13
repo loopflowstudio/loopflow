@@ -492,6 +492,7 @@ fn build_prompt_at(
             message: message.map(|value| value.to_string()),
             skill_arguments: arguments.to_string(),
             no_loopflow: standalone_native,
+            work: cli.task.clone().map(crate::prompt::WorkContext::Task),
             agent: task_input
                 .as_ref()
                 .and_then(|(_, seed)| seed.task.agent.clone())
@@ -917,6 +918,17 @@ pub(crate) fn attributed_context(
             "operate",
         );
     }
+    if let Some(guidance) = tagged_block(system_prompt, "<lf:work-guidance>", "</lf:work-guidance>")
+    {
+        push(
+            guidance,
+            Kind::OperatingInstructions,
+            Scope::Global,
+            "work".to_string(),
+            None,
+            "work",
+        );
+    }
     if let Some(guidance) = tagged_block(
         system_prompt,
         "<lf:structured_replies>",
@@ -1085,12 +1097,80 @@ pub(crate) fn attributed_context(
         });
     }
 
-    crate::trace::PreparedTurnContext::from_attributed_prompts(
+    let mut context = crate::trace::PreparedTurnContext::from_attributed_prompts(
         system_prompt,
         task_prompt,
         specs,
         decisions,
-    )
+    );
+    for decision in &mut context.decisions {
+        if decision.decision != ContextDecisionKind::Included {
+            continue;
+        }
+        match decision.kind {
+            Kind::OperatingInstructions if decision.label == "LOOPFLOW.md" => {
+                decision.reason = "default launcher guidance".into();
+            }
+            Kind::OperatingInstructions if decision.label == "work" => {
+                if let Some(work) = &components.work {
+                    decision.reason = work.reason();
+                }
+            }
+            Kind::SkillInstructions => {
+                decision.reason = format!("selected skill: {}", decision.label);
+            }
+            Kind::SurfaceInstructions => {
+                decision.reason = format!("{:?} conversation surface", components.surface);
+            }
+            Kind::RepoInstructions => {
+                decision.reason = "repository guide included in this input".into();
+            }
+            _ => {}
+        }
+    }
+    let mut omitted = |label: &str, decision, reason: &str| {
+        context.decisions.push(ContextDecision {
+            position: context.decisions.len() as u32,
+            kind: Kind::OperatingInstructions,
+            scope: Scope::Global,
+            label: label.into(),
+            source_path: None,
+            decision,
+            reason: reason.into(),
+            original_bytes: None,
+            original_tokens: None,
+            asset_position: None,
+        });
+    };
+    if !components.operate {
+        omitted(
+            "LOOPFLOW.md",
+            ContextDecisionKind::Excluded,
+            "automatic guidance disabled for this input",
+        );
+        omitted(
+            "work",
+            ContextDecisionKind::Excluded,
+            "automatic guidance disabled for this input",
+        );
+    } else if components.work.is_none() {
+        omitted(
+            "work",
+            ContextDecisionKind::Excluded,
+            "no Task or Wave association",
+        );
+    } else if components
+        .skill
+        .as_ref()
+        .is_some_and(|skill| skill.name == "work")
+    {
+        omitted(
+            "work",
+            ContextDecisionKind::Deduplicated,
+            "the selected work skill supplies this guidance",
+        );
+    }
+    context
 }
 
 fn tagged_block<'a>(text: &'a str, open: &str, close: &str) -> Option<&'a str> {
@@ -1860,7 +1940,7 @@ for line in sys.stdin:
         );
         let goal =
             "## Objective\nShip a reliable release.\n\n## Bounds\nKeep rollback available.\n";
-        repo.create_file("wave/release/GOAL.md", goal);
+        repo.create_file(".lf/wave/release/GOAL.md", goal);
         let store =
             crate::store::sqlite::SqliteStore::open_ephemeral(&home.path().join(".lf/loopflow.db"))
                 .unwrap();
@@ -1882,6 +1962,17 @@ for line in sys.stdin:
         )
         .unwrap();
 
+        assert_eq!(
+            built
+                .agent_config
+                .system_prompt
+                .matches("<lf:work-guidance>")
+                .count(),
+            1
+        );
+        assert!(built.context.decisions.iter().any(|decision| {
+            decision.label == "work" && decision.reason == "Wave association: release"
+        }));
         assert!(!built.agent_config.system_prompt.contains(goal));
         let context = built
             .agent_config
@@ -1904,7 +1995,7 @@ for line in sys.stdin:
                     source: DocumentSource::Scratch,
                 },
                 Document {
-                    path: "wave/product/MEMORY.md".into(),
+                    path: ".lf/wave/product/MEMORY.md".into(),
                     content: "Earlier $design".into(),
                     source: DocumentSource::Wave,
                 },
@@ -1933,7 +2024,7 @@ for line in sys.stdin:
     fn attributed_context_keeps_nested_message_and_repeated_channel_sources() {
         let components = PromptComponents {
             docs: vec![Document {
-                path: "wave/product/MEMORY.md".to_string(),
+                path: ".lf/wave/product/MEMORY.md".to_string(),
                 content: "MEMORY".to_string(),
                 source: DocumentSource::Wave,
             }],

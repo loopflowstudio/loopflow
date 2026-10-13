@@ -99,12 +99,30 @@ its generated checklist: headless commands, conversational reviews, and loops.
 Flow exports yield to existing skills with the same name. See
 [chat Flows](docs/authoring.md#flows-in-chat) for boundaries.
 
+## Use only what you need
+
+```bash
+lf : "fix the failing test"  # launcher; no Task or Linear required
+lf flow pursue               # run a Flow in this checkout
+lf help skill work          # read the Task/Wave API contract
+lf --task INF-123 design     # continue an existing Task with work guidance
+```
+
+Every launch receives a small `LOOPFLOW.md` contract. Work-associated launches
+also preload the `work` skill's guidance, including when continuing a Task
+already associated with the checkout or resumed Session. Load it explicitly
+with `lf skill work`, or read `lf help skill work` in an existing conversation.
+
+Desktop and custom clients share the same work APIs. Choose operator skills
+when you want Loopflow to keep managed work moving. Standalone native skills
+retain their own guidance.
+
 ## Keep work moving
 
 Author a Wave in the repo and open its conversation:
 
 ```markdown
-<!-- wave/designer/GOAL.md -->
+<!-- .lf/wave/designer/GOAL.md -->
 ## Objective
 
 Keep the design system coherent. Each wake: read the chapter plan and
@@ -118,7 +136,7 @@ lf --wave designer wave-operate "ship the button audit first"
 lf session ensure -w designer          # the Wave's ongoing conversation, applying that pass on every return
 ```
 
-Edit `wave/designer/MEMORY.md` directly when durable context changes; it is a
+Edit `.lf/wave/designer/MEMORY.md` directly when durable context changes; it is a
 reviewed repository file, not live server state.
 
 Delegate durable work — the same verbs whether the caller is you or the wave:
@@ -240,7 +258,7 @@ Bind assigns an unbound conversation to one Task permanently, including a done T
 | **Skill** | Gives the agent reusable instructions and context | `.lf/skills/*.md` |
 | **Flow** | Composes agent work and mechanical operations; a run is one lf process and the step processes it starts | `.lf/flows/*.yaml` |
 | **Workflow** | Gives a Task nodes, where you take part in its conversation, joined by the Flows between them | `.lf/workflows/*.yaml` |
-| **Wave** | Keeps the objective, memory, cadence, budget and instruments | `wave/<name>/` |
+| **Wave** | Keeps the objective, memory, cadence, budget and instruments | `.lf/wave/<name>/` |
 | **Project** | Holds one Wave's plan, Tasks, KRs, targets and the workflow its Tasks take up | Linear |
 | **Chapter** | Names the repository's current group of In Progress Projects | Linear Project names and statuses |
 | **Task** | Owns concrete work, its checkout, optional PR and every Flow process for it | Linear and local SQLite |

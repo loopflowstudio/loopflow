@@ -4,7 +4,7 @@ use std::process::Command;
 use serde::Deserialize;
 
 use crate::agent::{run_agent, AgentCapabilities, AgentConfig, ProcessConfig};
-use crate::config::load_config_or_default;
+use crate::config::{load_config_or_default, load_repo_config, MergeMethod};
 use crate::flow::load_skill;
 use crate::git::worktrees::{list_worktrees, main_repo_root};
 use crate::git::{current_branch, get_default_branch, rev_parse};
@@ -93,7 +93,7 @@ pub fn create_or_update_pr(
     progress: &impl Progress,
 ) -> OpsResult<PrResult> {
     reject_control_plane_pr(repo)?;
-    crate::ops::commit::prepare_persistent_publication(repo)?;
+    crate::ops::commit::restart_landed_persistent(repo)?;
     if !gh_available() {
         return Err(OpsError::Message("gh CLI not found".to_string()));
     }
@@ -639,6 +639,40 @@ pub(crate) fn merge_needs_integration(state: Option<&str>, request: Option<&Merg
 pub(crate) struct PrMergeObservation {
     pub pr: PrInfo,
     pub request: Option<MergeRequest>,
+    merge_queue_enabled: bool,
+    methods: MergeMethods,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MergeMethods {
+    merge_commit_allowed: bool,
+    squash_merge_allowed: bool,
+    rebase_merge_allowed: bool,
+}
+
+impl MergeMethods {
+    fn allows(&self, method: MergeMethod) -> bool {
+        match method {
+            MergeMethod::Merge => self.merge_commit_allowed,
+            MergeMethod::Squash => self.squash_merge_allowed,
+            MergeMethod::Rebase => self.rebase_merge_allowed,
+        }
+    }
+
+    fn select(&self, configured: Option<MergeMethod>) -> OpsResult<MergeMethod> {
+        if let Some(method) = configured {
+            return if self.allows(method) {
+                Ok(method)
+            } else {
+                Err(OpsError::Message(format!("repository merge_method {method:?} is disabled on GitHub; update the repository policy or use manual submission")))
+            };
+        }
+        [MergeMethod::Squash, MergeMethod::Merge, MergeMethod::Rebase]
+            .into_iter()
+            .find(|method| self.allows(*method))
+            .ok_or_else(|| OpsError::Message("GitHub reports no allowed merge method; use manual submission to inspect repository policy".into()))
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -661,7 +695,7 @@ struct GhPrMerge {
 }
 
 pub(crate) fn observe_pr_merge(repo: &Path, number: u64) -> OpsResult<PrMergeObservation> {
-    let query = "query LoopflowPrMerge($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){id number url state isDraft headRefName headRefOid mergedAt mergeCommit{oid} mergeStateStatus isMergeQueueEnabled autoMergeRequest{enabledAt} mergeQueueEntry{id}}}}";
+    let query = "query LoopflowPrMerge($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed pullRequest(number:$number){id number url state isDraft headRefName headRefOid mergedAt mergeCommit{oid} mergeStateStatus isMergeQueueEnabled autoMergeRequest{enabledAt} mergeQueueEntry{id}}}}";
     let observation = Command::new("gh")
         .args([
             "api",
@@ -725,6 +759,10 @@ fn parse_pr_merge(output: &[u8]) -> OpsResult<PrMergeObservation> {
         Some(MergeRequest::Auto)
     };
     Ok(PrMergeObservation {
+        merge_queue_enabled: pr.is_merge_queue_enabled,
+        methods: serde_json::from_value(response["data"]["repository"].clone()).map_err(
+            |error| OpsError::Parse(format!("failed to read repository merge methods: {error}")),
+        )?,
         pr: PrInfo {
             url: pr.url,
             number: pr.number,
@@ -791,7 +829,17 @@ pub(crate) fn enable_auto_merge(
     head_sha: &str,
     inherit: &impl Fn(&mut Command),
 ) -> OpsResult<()> {
-    if auto_merge_enabled(repo, number)? {
+    let observation = observe_pr_merge(repo, number)?;
+    let configured = load_repo_config(repo)
+        .map_err(|error| OpsError::Message(error.to_string()))?
+        .and_then(|config| config.merge_method);
+    // A merge queue owns its strategy. Validate policy before replacing an arm.
+    let method = if observation.merge_queue_enabled {
+        None
+    } else {
+        Some(observation.methods.select(configured)?)
+    };
+    if observation.request.is_some() {
         let number = u32::try_from(number).map_err(|_| {
             OpsError::Message(format!("pull request #{number} exceeds supported range"))
         })?;
@@ -804,15 +852,21 @@ pub(crate) fn enable_auto_merge(
     let number_arg = number.to_string();
     let mut command = Command::new("gh");
     inherit(&mut command);
+    command.arg("pr").arg("merge").arg(&number_arg);
+    if let Some(method) = method {
+        command.arg(match method {
+            MergeMethod::Merge => "--merge",
+            MergeMethod::Squash => "--squash",
+            MergeMethod::Rebase => "--rebase",
+        });
+    }
     command
-        .arg("pr")
-        .arg("merge")
-        .arg(&number_arg)
-        .arg("--squash")
         .arg("--auto")
         .arg("--match-head-commit")
         .arg(head_sha);
-    if let Some(copy) = copy {
+    if let Some(copy) =
+        copy.filter(|_| matches!(method, Some(MergeMethod::Merge | MergeMethod::Squash)))
+    {
         command.arg("--subject").arg(&copy.title);
         if !copy.body.trim().is_empty() {
             command.arg("--body").arg(&copy.body);
@@ -823,7 +877,9 @@ pub(crate) fn enable_auto_merge(
         return Ok(());
     }
     Err(OpsError::CommandFailed {
-        command: format!("gh pr merge {number} --squash --auto --match-head-commit {head_sha}"),
+        command: format!(
+            "gh pr merge {number} --auto --match-head-commit {head_sha} (method: {method:?})"
+        ),
         stderr: stderr_from_output(&output),
     })
 }
@@ -1906,6 +1962,28 @@ mod tests {
     use std::ffi::OsString;
     use std::os::unix::fs::PermissionsExt;
     #[test]
+    fn merge_policy_uses_allowed_methods_and_rejects_disabled_preferences() {
+        use crate::config::MergeMethod;
+        let methods = super::MergeMethods {
+            merge_commit_allowed: true,
+            squash_merge_allowed: false,
+            rebase_merge_allowed: true,
+        };
+        assert_eq!(methods.select(None).unwrap(), MergeMethod::Merge);
+        assert_eq!(
+            methods.select(Some(MergeMethod::Rebase)).unwrap(),
+            MergeMethod::Rebase
+        );
+        assert!(methods.select(Some(MergeMethod::Squash)).is_err());
+        let none = super::MergeMethods {
+            merge_commit_allowed: false,
+            squash_merge_allowed: false,
+            rebase_merge_allowed: false,
+        };
+        assert!(none.select(None).is_err());
+    }
+
+    #[test]
     fn release_merge_observation_respects_queue_membership() {
         for (entry, auto, queue_enabled, behind, dirty) in [
             (
@@ -1937,7 +2015,7 @@ mod tests {
                 true,
             ),
         ] {
-            let value = serde_json::json!({"data":{"repository":{"pullRequest":{
+            let value = serde_json::json!({"data":{"repository":{"mergeCommitAllowed":true,"squashMergeAllowed":true,"rebaseMergeAllowed":true,"pullRequest":{
                 "id":"pr", "number":1, "url":"https://example.test/pr/1", "state":"OPEN", "isDraft":false,
                 "headRefName":"release", "headRefOid":"exact-head", "mergedAt":null, "mergeCommit":null,
                 "mergeStateStatus":"BEHIND", "isMergeQueueEnabled":queue_enabled,
@@ -2078,7 +2156,7 @@ esac
     }
 
     fn merge_response(state: &str, request: Value, queue: Value) -> Value {
-        json!({"data":{"repository":{"pullRequest":{
+        json!({"data":{"repository":{"mergeCommitAllowed":true,"squashMergeAllowed":true,"rebaseMergeAllowed":true,"pullRequest":{
             "id":"PR_fixture", "number":1329, "url":"https://example.com/pr/1329",
             "state":state, "isDraft":false, "headRefName":"feature", "headRefOid":"head-1",
             "mergedAt":"2026-09-29T05:02:15Z", "mergeCommit":{"oid":"merge-1"},

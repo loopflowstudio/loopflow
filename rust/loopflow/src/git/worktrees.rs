@@ -1,9 +1,9 @@
 use crate::error::GitError;
 use crate::git::worktree_name::WorktreeName;
 use crate::git::{
-    current_branch, delete_local_branch, fetch, get_default_branch, has_commits_beyond, has_origin,
-    is_clean, rev_parse, stash_including_untracked, stash_pop, worktree_add,
-    worktree_add_inheriting, worktree_remove, WorktreeBranch,
+    current_branch, delete_local_branch, get_default_branch, has_commits_beyond, is_clean,
+    rev_parse, stash_including_untracked, stash_pop, worktree_add, worktree_add_inheriting,
+    worktree_remove, WorktreeBranch,
 };
 use crate::naming::git_user;
 use serde::{Deserialize, Serialize};
@@ -188,16 +188,43 @@ pub fn git_common_dir(repo: &Path) -> Result<PathBuf, GitError> {
 }
 
 pub fn main_repo_root(repo: &Path) -> Result<PathBuf, GitError> {
-    git_common_dir(repo)?
-        .parent()
-        .map(PathBuf::from)
+    if let Ok(root) = crate::git::worktree_root(repo) {
+        if root.join(".git").is_dir() {
+            return Ok(root);
+        }
+    }
+    let worktrees = list_porcelain(repo)?;
+    // A bare or separate Git directory can appear first instead of a checkout.
+    if let Some((path, _)) = worktrees
+        .first()
+        .filter(|(path, _)| path.join(".git").exists())
+    {
+        return Ok(path.clone());
+    }
+    let own_git_dir = crate::git::absolute_git_dir(repo)?;
+    if own_git_dir == git_common_dir(repo)? {
+        if let Ok(root) = crate::git::worktree_root(repo) {
+            return Ok(root);
+        }
+    }
+    let default = get_default_branch(repo)?;
+    worktrees
+        .iter()
+        .find(|(path, branch)| branch.as_deref() == Some(&default) && path.join(".git").exists())
+        .or_else(|| {
+            worktrees
+                .iter()
+                .find(|(path, _)| path.join(".git").exists())
+        })
+        .map(|(path, _)| path.clone())
         .ok_or_else(|| GitError::CommandFailed {
-            command: "git rev-parse --git-common-dir".to_string(),
-            stderr: "unable to resolve common dir parent".to_string(),
+            command: "git worktree list --porcelain".to_string(),
+            stderr: "repository has no working checkout; create one before launching work"
+                .to_string(),
         })
 }
 
-/// The worktree directory for an identity: `<parent>/<repo>.<dir_component>`.
+/// Follow an established worktree layout, defaulting to `<parent>/<repo>.<name>`.
 /// The `/`-scoped branch never reaches disk — only the flat dir component does.
 pub fn worktree_dir(repo: &Path, id: &WorktreeName) -> PathBuf {
     dir_for_component(repo, id.dir_component())
@@ -205,6 +232,9 @@ pub fn worktree_dir(repo: &Path, id: &WorktreeName) -> PathBuf {
 
 fn dir_for_component(repo: &Path, component: &str) -> PathBuf {
     let repo_root = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
+    if let Some(path) = inferred_worktree_dir(&repo_root, component) {
+        return path;
+    }
     let repo_name = repo_root
         .file_name()
         .and_then(|n| n.to_str())
@@ -213,6 +243,39 @@ fn dir_for_component(repo: &Path, component: &str) -> PathBuf {
         .parent()
         .unwrap_or(repo_root.as_path())
         .join(format!("{repo_name}.{component}"))
+}
+
+fn inferred_worktree_dir(repo: &Path, component: &str) -> Option<PathBuf> {
+    let worktrees = list_porcelain(repo).ok()?;
+    let mut directory = None;
+    let mut examples = 0;
+    let repo_prefix = format!("{}.", repo.file_name()?.to_str()?);
+    let mut prefixed_siblings = true;
+    for (path, branch) in &worktrees {
+        if path == repo || !path.is_dir() {
+            continue;
+        }
+        if branch.is_none() {
+            continue;
+        }
+        // Directory names can outlive branch renames (for example, a host's
+        // city names). Infer placement without guessing a branch transformation.
+        let parent = path.parent()?;
+        if directory.is_some_and(|existing| existing != parent) {
+            return None;
+        }
+        directory = Some(parent);
+        prefixed_siblings &=
+            Some(parent) == repo.parent() && path.file_name()?.to_str()?.starts_with(&repo_prefix);
+        examples += 1;
+    }
+    let directory = directory.filter(|_| examples >= 2)?;
+    let name = if prefixed_siblings {
+        format!("{repo_prefix}{component}")
+    } else {
+        component.to_string()
+    };
+    Some(directory.join(name))
 }
 
 /// The worktree directory for a branch or local name. Invalid flat names use a
@@ -1310,7 +1373,7 @@ pub fn prune_worktrees(
     Ok(report)
 }
 
-/// Create a local named sibling worktree; the caller owns publishing its branch.
+/// Create a local named worktree; the caller owns publishing its branch.
 ///
 /// Source selection belongs to the caller. Wave and Project runtimes use the canonical
 /// main checkout; Task placement uses [`plan_placement`].
@@ -1651,16 +1714,11 @@ fn create_agent_worktree(
 }
 
 fn agent_base_ref(main_repo: &Path) -> Result<String, GitError> {
-    let default_branch = get_default_branch(main_repo)?;
-    if !has_origin(main_repo)? {
-        return Ok(default_branch);
-    }
-    match fetch(main_repo, "origin", &default_branch) {
-        Ok(()) => Ok(format!("origin/{default_branch}")),
-        Err(_) if rev_parse(main_repo, &format!("origin/{default_branch}")).is_ok() => {
-            Ok(format!("origin/{default_branch}"))
-        }
-        Err(_) => Ok(default_branch),
+    let base = crate::git::integration_base(main_repo)?;
+    match crate::git::fetch_tracking_ref(main_repo, &base) {
+        Ok(()) => Ok(base),
+        Err(_) if rev_parse(main_repo, &base).is_ok() => Ok(base),
+        Err(_) => get_default_branch(main_repo),
     }
 }
 

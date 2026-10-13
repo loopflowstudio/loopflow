@@ -52,7 +52,7 @@ enum PortfolioDiscovery {
     }
 
     nonisolated static func authoredWaves(inRepo repoPath: String) -> [String] {
-        let waveDir = URL(fileURLWithPath: repoPath).appendingPathComponent("wave", isDirectory: true)
+        let waveDir = URL(fileURLWithPath: repoPath).appendingPathComponent(".lf/wave", isDirectory: true)
         let fileManager = FileManager.default
         guard let children = try? fileManager.contentsOfDirectory(
             at: waveDir,

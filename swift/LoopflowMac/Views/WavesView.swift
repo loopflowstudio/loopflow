@@ -30,7 +30,7 @@ struct WavesView: View {
     /// Derived off the main thread in `refreshRepos`.
     @State private var repos: [PortfolioRepo] = []
 
-    /// Authored waves discovered on disk per repo path: `<repo>/wave/<name>/GOAL.md`.
+    /// Authored waves discovered on disk per repo path: `<repo>/.lf/wave/<name>/GOAL.md`.
     /// Merged with registered waves so not-yet-launched waves are still listed.
     @State private var authoredWavesByRepo: [String: [String]] = [:]
     @State private var plansByWaveKey: [String: WavePlan] = [:]
@@ -383,7 +383,7 @@ struct WavesView: View {
         )
     }
 
-    /// Enumerate each rail repo's authored waves — `<repo>/wave/<name>/GOAL.md`
+    /// Enumerate each rail repo's authored waves — `<repo>/.lf/wave/<name>/GOAL.md`
     /// directories — off the main thread, so the list can offer them as launchable
     /// rows before they have a registry entry.
     private func refreshAuthoredWaves() async {

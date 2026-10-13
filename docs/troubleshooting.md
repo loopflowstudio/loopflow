@@ -188,10 +188,9 @@ resume the provider. There is no Run slot or PR-limit counter to clear.
 
 **Symptom:** Task fails with context/token limit errors.
 
-The provider loads `AGENTS.md` natively. Loopflow adds `LOOPFLOW.md`, `scratch/`, and `wave/`. Reduce further:
+The provider loads `AGENTS.md` natively. Loopflow adds `LOOPFLOW.md`, `scratch/`, and `.lf/wave/`. Reduce further:
 
 ```bash
-lf qa --no-loopflow                    # skip LOOPFLOW.md
 lf qa --docs src/small/                # limit --docs to a narrower path or glob
 ```
 

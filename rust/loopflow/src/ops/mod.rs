@@ -27,6 +27,7 @@ mod read_retry;
 mod release;
 mod release_lock;
 mod run;
+pub mod scratch;
 mod sync;
 pub mod task;
 pub mod task_actions;

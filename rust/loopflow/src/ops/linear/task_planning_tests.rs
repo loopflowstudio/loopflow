@@ -3787,7 +3787,7 @@ fn wave_summary_sync_reads_committed_default_branch() {
             checkout.to_str().unwrap(),
         ],
     );
-    let goal = repo.join("wave/product/GOAL.md");
+    let goal = repo.join(".lf/wave/product/GOAL.md");
     let write = |text: &str| {
         std::fs::write(
             &goal,
@@ -3802,7 +3802,7 @@ fn wave_summary_sync_reads_committed_default_branch() {
             crate::lf::commands::ops::sync_planning(&checkout, Some("product"), false, plan, false)
         };
         std::fs::write(
-            checkout.join("wave/product/GOAL.md"),
+            checkout.join(".lf/wave/product/GOAL.md"),
             "---\nlinear:\n  initiative: initiative-1\n---\n\n## Objective\n\nEdited directly.\n",
         )
         .unwrap();
@@ -3869,7 +3869,7 @@ fn wave_summary_sync_reads_committed_default_branch() {
             ""
         );
         assert!(
-            std::fs::read_to_string(checkout.join("wave/product/GOAL.md"))
+            std::fs::read_to_string(checkout.join(".lf/wave/product/GOAL.md"))
                 .unwrap()
                 .contains("Edited directly.")
         );

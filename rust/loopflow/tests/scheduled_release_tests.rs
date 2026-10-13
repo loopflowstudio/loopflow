@@ -454,7 +454,7 @@ esac
             ".lf/flows/release-run.yaml",
             "- cmd: repo release run patch\n",
         );
-        repo.create_file("wave/infrastructure/GOAL.md", "# Infrastructure\n");
+        repo.create_file(".lf/wave/infrastructure/GOAL.md", "# Infrastructure\n");
         repo.stage_all();
         repo.commit("Release fixture");
         repo.push();

@@ -183,7 +183,6 @@ impl Cli {
                     | SessionCommand::Open { json: false, .. }
                     | SessionCommand::Ensure { .. }
                     | SessionCommand::Replace { .. }
-                    | SessionCommand::ServeConversation { .. }
             ),
             Some(Commands::Commit { message, .. }) => message.is_none(),
             Some(Commands::Sync(args)) => !args.plan && !args.abort && !args.manual,
@@ -356,6 +355,12 @@ impl Cli {
 }
 
 #[derive(Subcommand, Debug)]
+pub enum ScratchCommand {
+    /// Remove scratch files added in this branch's diff, keeping existing files and edits
+    Clear,
+}
+
+#[derive(Subcommand, Debug)]
 pub enum Commands {
     /// Pull request lifecycle
     Pr {
@@ -369,6 +374,11 @@ pub enum Commands {
     },
     /// Merge upstream into the current branch (default: main or stack parent)
     Sync(SyncArgs),
+    /// Manage working notes
+    Scratch {
+        #[command(subcommand)]
+        cmd: ScratchCommand,
+    },
     /// Commit changes
     Commit {
         #[arg(short = 'm', long = "message")]
@@ -884,7 +894,7 @@ pub enum SessionCommand {
         #[arg(long = "try", conflicts_with = "replace")]
         try_open: bool,
     },
-    /// Find or start the one ongoing conversation of this repository, a Wave or a Task
+    /// Find or prepare the one ongoing conversation of this repository, a Wave or a Task
     Ensure {
         /// The Wave's conversation instead of the repository's
         #[arg(short = 'w', long)]
@@ -929,9 +939,6 @@ pub enum SessionCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Run one prepared conversation in its durable terminal
-    #[command(name = "serve-conversation", hide = true)]
-    ServeConversation { input: String },
 }
 
 #[derive(Subcommand, Debug)]
@@ -1501,6 +1508,26 @@ pub enum PrCommand {
         watch: bool,
         #[arg(short = 'l', long = "logs")]
         logs: bool,
+        /// Show only checks required by repository protection.
+        #[arg(long)]
+        required: bool,
+    },
+
+    /// Request or re-request a teammate's review of an existing PR.
+    RequestReview {
+        /// PR number, URL or branch; defaults to the current branch's PR.
+        pr: Option<String>,
+        /// GitHub login or org/team. Repeat to request several reviewers.
+        #[arg(short = 'r', long, required = true)]
+        reviewer: Vec<String>,
+    },
+    /// Read requested reviews and review submissions from GitHub.
+    Reviews {
+        /// PR number, URL or branch; defaults to the current branch's PR.
+        pr: Option<String>,
+        /// Emit GitHub CLI JSON, including each review's commit and body.
+        #[arg(long)]
+        json: bool,
     },
 
     /// Publish a ready PR headlessly: push, create or refresh, print state + URL.
@@ -1519,8 +1546,8 @@ pub enum PrCommand {
         #[arg(long = "body")]
         body: Option<String>,
     },
-    /// Prepare a PR to land: sync, clear scratch, mark ready, and assign it
-    /// to you. Nothing merges until you click merge on GitHub.
+    /// Prepare a PR to land: sync, clear committed scratch additions and mark ready.
+    /// Leave it for manual merge without changing reviewers or assignees.
     Submit {
         #[arg(long)]
         strict: bool,
@@ -1756,7 +1783,7 @@ pub enum RepoCommand {
     Connect {
         /// Wave name (auto-detected if omitted)
         wave: Option<String>,
-        /// Recursively initialize every Wave under wave/
+        /// Recursively initialize every Wave under .lf/wave/
         #[arg(long, conflicts_with = "wave")]
         all: bool,
         /// Repository Team key = Task prefix (e.g. LOO). Defaults from the repository name.
@@ -2107,14 +2134,14 @@ pub enum ReleaseCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum WtCommand {
-    /// Create a low-level sibling worktree
+    /// Create a low-level worktree following the repository's existing layout
     Create {
         /// Worktree name
         name: String,
         /// Print the placement plan without creating a worktree
         #[arg(long)]
         plan: bool,
-        /// Keep this workspace after delivery and keep scratch local
+        /// Keep this workspace after delivery
         #[arg(long)]
         persistent: bool,
     },

@@ -81,10 +81,26 @@ pub struct GatherSpec {
     /// Specific files to include in context.
     pub files: Vec<String>,
     pub include_files: bool,
-    /// Wave name for wave/ scoping.
+    /// Wave name for .lf/wave/ scoping.
     pub wave: Option<String>,
     /// Related repos resolved from the edge graph.
     pub related_repos: Vec<RelatedRepoContext>,
+}
+
+/// The existing Work association that selects its API guidance.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WorkContext {
+    Task(String),
+    Wave(String),
+}
+
+impl WorkContext {
+    pub fn reason(&self) -> String {
+        match self {
+            Self::Task(task) => format!("Task association: {task}"),
+            Self::Wave(wave) => format!("Wave association: {wave}"),
+        }
+    }
 }
 
 /// Options for gathering context.
@@ -96,12 +112,14 @@ pub struct GatherContextOpts {
     pub message: Option<String>,
     /// Include loopflow operating guidance.
     pub operate: bool,
+    /// Include work API guidance for a selected or existing Work association.
+    pub work: Option<WorkContext>,
     pub surface: Surface,
     /// Explicit docs paths, globs, or directories to include in context.
     pub docs: Vec<String>,
     /// Specific files to include in context.
     pub files: Vec<String>,
-    /// Wave name for wave/ scoping.
+    /// Wave name for .lf/wave/ scoping.
     pub wave: Option<String>,
     pub include_diff: bool,
     pub include_diff_files: bool,
@@ -183,6 +201,8 @@ pub struct PromptComponents {
     pub wave: Option<String>,
     /// Include loopflow operating guidance.
     pub operate: bool,
+    /// Include work API guidance for a selected or existing Work association.
+    pub work: Option<WorkContext>,
     /// User message (positional args after skill/flow name)
     pub message: Option<String>,
     /// Semantic attribution for generated intent carried in `message`.
@@ -388,6 +408,10 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
         summaries,
         wave: opts.wave.clone(),
         operate: opts.operate,
+        work: opts
+            .work
+            .clone()
+            .or_else(|| opts.wave.clone().map(WorkContext::Wave)),
         message: opts.message.clone(),
         message_context: None,
         diff_tier,
@@ -402,7 +426,7 @@ pub fn gather_documents(spec: &GatherSpec) -> Result<Vec<Document>, CoreError> {
     // Preserve ambient ordering: scratch -> inherited context -> explicit docs.
     docs.extend(gather_scratch_docs(&spec.repo_root)?);
     let repo_memory = spec.repo_root.join("MEMORY.md");
-    if repo_memory.is_file() {
+    if !repo_memory.is_symlink() && repo_memory.is_file() {
         docs.push(Document {
             path: "MEMORY.md".into(),
             content: fs::read_to_string(repo_memory)?,
@@ -533,7 +557,7 @@ fn gather_wave_docs(repo_root: &Path, wave: Option<&str>) -> Result<Vec<Document
             prefix.push('/');
         }
         prefix.push_str(segment);
-        let directory = repo_root.join("wave").join(&prefix);
+        let directory = repo_root.join(".lf/wave").join(&prefix);
         let entries = match std::fs::read_dir(&directory) {
             Ok(entries) => entries,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
@@ -553,7 +577,7 @@ fn gather_wave_docs(repo_root: &Path, wave: Option<&str>) -> Result<Vec<Document
                 .to_string_lossy();
             let content = std::fs::read_to_string(&path)?;
             docs.push(Document {
-                path: format!("wave/{prefix}/{name}"),
+                path: format!(".lf/wave/{prefix}/{name}"),
                 content,
                 source: DocumentSource::Wave,
             });
@@ -930,7 +954,7 @@ fn gather_md_files(
     docs: &mut Vec<Document>,
     source: DocumentSource,
 ) -> Result<(), CoreError> {
-    if !dir.is_dir() {
+    if dir.is_symlink() || !dir.is_dir() {
         return Ok(());
     }
 
@@ -948,6 +972,12 @@ fn gather_md_files_from(
 
     for entry in entries {
         let path = entry.path();
+
+        // Ambient context must not follow links into unrelated private files
+        // or recursive directory cycles. Explicit document requests are separate.
+        if entry.file_type()?.is_symlink() {
+            continue;
+        }
 
         if path.is_dir() {
             gather_md_files_from(root, &path, docs, source)?;
@@ -1330,9 +1360,13 @@ const ALWAYS_EXCLUDE: &[&str] = &[
 ];
 
 fn should_exclude(repo_root: &Path, path: &Path, gitignore: &ignore::gitignore::Gitignore) -> bool {
-    if path
-        .components()
-        .any(|component| component.as_os_str() == ".lf")
+    let relative = path.strip_prefix(repo_root).unwrap_or(path);
+    // Wave definitions are authored documents; other .lf state stays out of
+    // explicit file context. Ambient Wave selection still controls discovery.
+    if !relative.starts_with(".lf/wave")
+        && path
+            .components()
+            .any(|component| component.as_os_str() == ".lf")
     {
         return true;
     }
@@ -1343,7 +1377,6 @@ fn should_exclude(repo_root: &Path, path: &Path, gitignore: &ignore::gitignore::
         }
     }
 
-    let relative = path.strip_prefix(repo_root).unwrap_or(path);
     gitignore
         .matched_path_or_any_parents(relative, path.is_dir())
         .is_ignore()
@@ -1504,6 +1537,14 @@ pub fn format_system_sections(components: &PromptComponents) -> Vec<String> {
 
     if components.operate {
         parts.push(loopflow_section());
+        if components.work.is_some()
+            && !components
+                .skill
+                .as_ref()
+                .is_some_and(|skill| skill.name == "work")
+        {
+            parts.push(work_section());
+        }
     }
 
     let user = render_user_context(components.user_name.as_deref());
@@ -1519,15 +1560,19 @@ pub fn format_system_sections(components: &PromptComponents) -> Vec<String> {
     parts
 }
 
-/// The one loopflow operating document (including the Speak vocabulary) as a
-/// prompt section. Emitted exactly once per prompt: assembled prompts get it
-/// from [`format_system_sections`]; the wave loop's seed bypasses assembly
-/// and appends the same section itself.
+/// The launcher contract, independent of Work association.
 pub fn loopflow_section() -> String {
     format!(
         "<lf:loopflow>\n{}\n</lf:loopflow>",
         crate::builtins::LOOPFLOW_DOC
     )
+}
+
+/// The work API contract is also available as the `work` skill.
+pub fn work_section() -> String {
+    let source = crate::builtins::get_builtin_skill("work").expect("bundled work skill");
+    let body = crate::flow::split_frontmatter(source).map_or(source, |(_, body)| body);
+    format!("<lf:work-guidance>\n{body}\n</lf:work-guidance>")
 }
 
 /// Name context is display data, not authorship for historical or external requests.
@@ -1669,7 +1714,7 @@ mod tests {
     #[test]
     fn wave_context_reads_fresh_checkout_files_without_a_registry() {
         let repo = tempfile::tempdir().unwrap();
-        let parent = repo.path().join("wave/tools");
+        let parent = repo.path().join(".lf/wave/tools");
         let child = parent.join("parser");
         std::fs::create_dir_all(&child).unwrap();
         std::fs::write(parent.join("MEMORY.md"), "Inherited decision").unwrap();
@@ -1904,11 +1949,7 @@ mod tests {
             .expect("assemble customer skill in a neutral repository");
             let prompt = render_full_prompt(components);
             assert_eq!(prompt.matches("<lf:loopflow>").count(), 1);
-            assert!(prompt.contains("Execute Here First"));
-            assert!(prompt.contains("Checks and Flow boundaries"));
-            assert!(prompt.contains("Gate owns\nverification once"));
-            assert!(prompt.contains("Checks must run headless"));
-            assert!(prompt.contains("lf land"));
+            assert!(!prompt.contains("<lf:work-guidance>"));
             assert!(!prompt.contains("scripts/dev-lf"));
             assert!(!prompt.contains("LOO-267"));
 
@@ -2096,7 +2137,7 @@ mod tests {
         let components = PromptComponents::default();
         let prompt = render_full_prompt(components);
         assert!(prompt.contains("Run mode is headless"));
-        assert!(prompt.contains("launch an ordinary contribution explicitly"));
+        assert!(!prompt.contains("lf --task"));
         assert!(prompt.contains("explain the failure in ordinary output and stop"));
         assert!(prompt.contains("For reversible ambiguity"));
     }
@@ -2462,6 +2503,51 @@ mod tests {
             scratch.expect("scratch doc should be gathered").source,
             DocumentSource::Scratch
         );
+    }
+
+    #[test]
+    fn ambient_context_does_not_follow_symlinks_to_private_content() {
+        let repo = tempfile::tempdir().unwrap();
+        let private = tempfile::tempdir().unwrap();
+        fs::write(
+            private.path().join("private.md"),
+            "SYNTHETIC_PRIVATE_MARKER",
+        )
+        .unwrap();
+        fs::create_dir(repo.path().join("scratch")).unwrap();
+        fs::write(repo.path().join("scratch/plan.md"), "allowed plan").unwrap();
+        std::os::unix::fs::symlink(private.path(), repo.path().join("scratch/linked")).unwrap();
+        std::os::unix::fs::symlink(
+            private.path().join("private.md"),
+            repo.path().join("MEMORY.md"),
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(
+            repo.path().join("scratch"),
+            repo.path().join("scratch/cycle"),
+        )
+        .unwrap();
+        let gathered = gather_context(&GatherContextOpts {
+            repo_root: repo.path().to_path_buf(),
+            ..Default::default()
+        })
+        .unwrap();
+        assert!(gathered
+            .docs
+            .iter()
+            .any(|doc| doc.content == "allowed plan"));
+        assert!(!gathered
+            .docs
+            .iter()
+            .any(|doc| doc.content.contains("SYNTHETIC_PRIVATE_MARKER")));
+        fs::remove_dir_all(repo.path().join("scratch")).unwrap();
+        std::os::unix::fs::symlink(private.path(), repo.path().join("scratch")).unwrap();
+        let gathered = gather_context(&GatherContextOpts {
+            repo_root: repo.path().to_path_buf(),
+            ..Default::default()
+        })
+        .unwrap();
+        assert!(gathered.docs.is_empty());
     }
 
     #[test]

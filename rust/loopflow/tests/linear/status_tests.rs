@@ -608,7 +608,7 @@ fn accepted_metric_evidence_is_identical_in_status_roadmap_and_text() {
     let home = tempfile::tempdir().expect("tempdir");
     let wave = seed(home.path(), "product");
     let repo = home.path().join("repo");
-    let metrics_dir = repo.join("wave/product/metrics");
+    let metrics_dir = repo.join(".lf/wave/product/metrics");
     std::fs::create_dir_all(&metrics_dir).expect("metrics directory");
     let contract_path = metrics_dir.join("task-loop-trust.md");
     std::fs::write(

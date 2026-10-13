@@ -22,7 +22,7 @@ fn unbound_command(cli: &Path, repo: &Path, args: &[&str]) -> Command {
 }
 
 #[test]
-fn stacked_checkout_starts_with_one_scratch_deletion_commit() {
+fn stacked_checkout_preserves_inherited_scratch_and_edits() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     let target = tempfile::tempdir().unwrap();
@@ -69,32 +69,23 @@ fn stacked_checkout_starts_with_one_scratch_deletion_commit() {
         .unwrap()
     };
     checkout();
-    assert!(!worktree.join("scratch").exists());
+    assert_eq!(
+        fs::read_to_string(worktree.join("scratch/design.md")).unwrap(),
+        "parent design"
+    );
     assert!(runtime
         .block_on(parent.store.active_task_pr(&child.id))
         .unwrap()
         .is_none());
     assert_eq!(
-        loopflow::git::rev_parse(worktree, "HEAD^").unwrap(),
+        loopflow::git::rev_parse(worktree, "HEAD").unwrap(),
         parent_head
     );
-    let subject = Command::new("git")
-        .current_dir(worktree)
-        .args(["log", "-1", "--format=%s"])
-        .output()
-        .unwrap();
-    assert!(subject.status.success());
-    assert_eq!(
-        String::from_utf8_lossy(&subject.stdout).trim(),
-        "Clear inherited scratch"
-    );
-    let child_head = loopflow::git::rev_parse(worktree, "HEAD").unwrap();
-    fs::create_dir(worktree.join("scratch")).unwrap();
     fs::write(worktree.join("scratch/design.md"), "child design").unwrap();
     checkout();
     assert_eq!(
         loopflow::git::rev_parse(worktree, "HEAD").unwrap(),
-        child_head
+        parent_head
     );
     assert_eq!(
         fs::read_to_string(worktree.join("scratch/design.md")).unwrap(),
@@ -106,6 +97,22 @@ fn stacked_checkout_starts_with_one_scratch_deletion_commit() {
         "parent design"
     );
     assert!(repo.path().join("scratch/review/notes.md").exists());
+    fs::write(worktree.join("scratch/child-only.md"), "child notes").unwrap();
+    for args in [vec!["add", "scratch"], vec!["commit", "-m", "Child notes"]] {
+        assert!(Command::new("git")
+            .current_dir(worktree)
+            .args(args)
+            .status()
+            .unwrap()
+            .success());
+    }
+    assert_eq!(loopflow::ops::scratch::clear(worktree).unwrap(), 1);
+    assert_eq!(
+        fs::read_to_string(worktree.join("scratch/design.md")).unwrap(),
+        "child design"
+    );
+    assert!(worktree.join("scratch/review/notes.md").exists());
+    assert!(!worktree.join("scratch/child-only.md").exists());
 }
 
 #[test]

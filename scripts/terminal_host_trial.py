@@ -628,7 +628,7 @@ class _Trial:
             "agent: claude\nlinear:\n  team: trial-team\n",
         )
         _write(
-            self.repo / "wave/trial/GOAL.md",
+            self.repo / ".lf/wave/trial/GOAL.md",
             "---\nlinear:\n  initiative: trial-initiative\n---\nSynthetic trial.\n",
         )
         planning = self._lf("prepare-planning", ["commit", "-m", "Bind synthetic planning"])

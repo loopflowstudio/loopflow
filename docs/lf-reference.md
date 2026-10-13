@@ -98,6 +98,27 @@ Show CI status for current branch
 |---|---|
 | `--watch / -w` | watch Default: false. |
 | `--logs / -l` | logs Default: false. |
+| `--required` | Show only checks required by repository protection Default: false. |
+| `--help / -h` | Print help |
+
+## lf pr request-review
+
+Request or re-request a teammate's review of an existing PR
+
+| Argument | What it does |
+|---|---|
+| `<pr>` | PR number, URL or branch; defaults to the current branch's PR |
+| `--reviewer / -r` | GitHub login or org/team. Repeat to request several reviewers |
+| `--help / -h` | Print help |
+
+## lf pr reviews
+
+Read requested reviews and review submissions from GitHub
+
+| Argument | What it does |
+|---|---|
+| `<pr>` | PR number, URL or branch; defaults to the current branch's PR |
+| `--json` | Emit GitHub CLI JSON, including each review's commit and body Default: false. |
 | `--help / -h` | Print help |
 
 ## lf pr publish
@@ -122,7 +143,7 @@ Push and create or update a draft PR, then open its GitHub page. Existing ready 
 
 ## lf pr submit
 
-Prepare a PR to land: sync, clear scratch, mark ready, and assign it to you. Nothing merges until you click merge on GitHub
+Prepare a PR to land: sync, clear committed scratch additions and mark ready. Leave it for manual merge without changing reviewers or assignees
 
 | Argument | What it does |
 |---|---|
@@ -183,13 +204,13 @@ Worktree operations
 
 ## lf wt create
 
-Create a low-level sibling worktree
+Create a low-level worktree following the repository's existing layout
 
 | Argument | What it does |
 |---|---|
 | `<name>` | Worktree name |
 | `--plan` | Print the placement plan without creating a worktree Default: false. |
-| `--persistent` | Keep this workspace after delivery and keep scratch local Default: false. |
+| `--persistent` | Keep this workspace after delivery Default: false. |
 | `--help / -h` | Print help |
 
 ## lf wt switch
@@ -251,6 +272,22 @@ Merge upstream into the current branch (default: main or stack parent)
 | `--abort` | Abort the local sync in progress Default: false. |
 | `--adopt` | Explicitly claim a raw sync that has no Loopflow owner Default: false. |
 | `<onto>` | Branch to sync onto |
+| `--help / -h` | Print help |
+
+## lf scratch
+
+Manage working notes
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
+## lf scratch clear
+
+Remove scratch files added in this branch's diff, keeping existing files and edits
+
+| Argument | What it does |
+|---|---|
 | `--help / -h` | Print help |
 
 ## lf commit
@@ -432,7 +469,7 @@ Stop headless Claude/OpenCode and resume history; connect to Codex live
 
 ## lf session ensure
 
-Find or start the one ongoing conversation of this repository, a Wave or a Task
+Find or prepare the one ongoing conversation of this repository, a Wave or a Task
 
 | Argument | What it does |
 |---|---|
@@ -637,7 +674,7 @@ Connect a Wave to its Initiative and the repository's Team (Task prefix)
 | Argument | What it does |
 |---|---|
 | `<wave>` | Wave name (auto-detected if omitted) |
-| `--all` | Recursively initialize every Wave under wave/ Default: false. |
+| `--all` | Recursively initialize every Wave under .lf/wave/ Default: false. |
 | `--team-key` | Repository Team key = Task prefix (e.g. LOO). Defaults from the repository name |
 | `--team-name` | Repository Team display name. Defaults to the repository name |
 | `--help / -h` | Print help |
@@ -1840,6 +1877,7 @@ Inspect a process or Session by identity
 | `--final` | Print a Session's last recorded provider conclusion Default: false. |
 | `--input` | Inspect an exact retained input belonging to this Session |
 | `--context` | Print only what the step's submitted input was made of, by source Default: false. |
+| `--instructions` | Explain recorded instruction inclusion and omission Default: false. |
 | `--help / -h` | Print help |
 
 ## lf history usage
@@ -1921,3 +1959,7 @@ Run a skill explicitly
 | Argument | What it does |
 |---|---|
 | `--help / -h` | Print help |
+
+## lf scratch clear
+
+Remove committed scratch additions relative to the Task or branch base. Existing files, edits and renames remain. Checkpoint intended notes before clearing.

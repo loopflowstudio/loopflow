@@ -702,7 +702,7 @@ fn ordinary_pr_publishes_when_no_registry_exists() {
 /// controller decision, so a person can submit a Task created with `prepare`
 /// or take over a Task whose controller is absent.
 #[test]
-fn managed_task_submit_assigns_for_human_review() {
+fn managed_task_submit_prepares_for_manual_merge() {
     let home = tempfile::TempDir::new().expect("temp home");
     let repo = TestRepo::new();
     let base = repo.head_sha();
@@ -736,7 +736,7 @@ fn managed_task_submit_assigns_for_human_review() {
     );
     let log = fs::read_to_string(&log_path).unwrap_or_default();
     assert!(
-        log.contains("pr ready") && log.contains("pr edit --add-assignee @me"),
+        log.contains("pr ready") && !log.contains("--add-assignee"),
         "submit must prepare the Task PR for manual merging, got log:\n{log}"
     );
     assert!(
@@ -746,7 +746,7 @@ fn managed_task_submit_assigns_for_human_review() {
 }
 
 #[test]
-fn ordinary_submit_still_assigns_for_review() {
+fn ordinary_submit_preserves_assignments() {
     let home = tempfile::TempDir::new().expect("temp home");
     let repo = TestRepo::new();
     let base = repo.head_sha();
@@ -775,12 +775,12 @@ fn ordinary_submit_still_assigns_for_review() {
         &land_options(true, "ordinary submit"),
         &NullProgress,
     )
-    .expect("ordinary non-Task submit still assigns for review");
+    .expect("ordinary non-Task submit prepares for manual merge");
 
     let log = fs::read_to_string(&log_path).unwrap_or_default();
     assert!(
-        log.contains("pr edit --add-assignee @me"),
-        "ordinary submit must assign the PR for manual merging, got log:\n{log}"
+        !log.contains("--add-assignee"),
+        "ordinary submit must preserve assignments, got log:\n{log}"
     );
     assert!(
         !log.contains("merge --auto"),

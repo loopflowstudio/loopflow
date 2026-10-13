@@ -99,7 +99,7 @@ pub(crate) fn metric_prompt_section(tag: &str, portfolio: Result<MetricPortfolio
 
 fn discover_wave_contracts(wave: &Wave) -> Result<MetricContractDiscovery> {
     let metrics_dir = metric_contract_repo(wave, std::env::var_os("LOOPFLOW_DEV_WAVE_REPO"))
-        .join("wave")
+        .join(".lf/wave")
         .join(wave.slug())
         .join("metrics");
     discover_metric_contracts(&metrics_dir, wave.id().as_str()).map_err(|error| anyhow!(error))
@@ -310,7 +310,7 @@ pub(crate) async fn publish_metric_observations(
             bail!("producer metric id {metric_id:?} is not a direct contract filename");
         }
         let contract_path = repo
-            .join("wave")
+            .join(".lf/wave")
             .join(&wave_name)
             .join("metrics")
             .join(format!("{metric_id}.md"));
@@ -462,7 +462,7 @@ mod tests {
     async fn shared_portfolio_joins_persisted_evidence_without_changing_krs() {
         let directory = tempdir().unwrap();
         let repo = directory.path().join("repo");
-        let metrics_dir = repo.join("wave/product/metrics");
+        let metrics_dir = repo.join(".lf/wave/product/metrics");
         fs::create_dir_all(&metrics_dir).unwrap();
         let trust_path = metrics_dir.join("task-loop-trust.md");
         fs::write(
@@ -624,7 +624,7 @@ mod tests {
     async fn source_build_without_draft_storage_keeps_installed_metric_visible() {
         let directory = tempdir().unwrap();
         let repo = directory.path().join("repo");
-        let metrics_dir = repo.join("wave/product/metrics");
+        let metrics_dir = repo.join(".lf/wave/product/metrics");
         fs::create_dir_all(&metrics_dir).unwrap();
         fs::write(
             metrics_dir.join("task-loop-trust.md"),
@@ -668,7 +668,7 @@ mod tests {
     async fn lifecycle_producer_persists_the_reading_consumers_project() {
         let directory = tempdir().unwrap();
         let repo = directory.path().join("repo");
-        let metrics_dir = repo.join("wave/product/metrics");
+        let metrics_dir = repo.join(".lf/wave/product/metrics");
         fs::create_dir_all(&metrics_dir).unwrap();
         fs::write(
             metrics_dir.join("task-loop-trust.md"),

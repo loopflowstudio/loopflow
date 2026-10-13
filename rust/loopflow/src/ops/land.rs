@@ -27,7 +27,7 @@ pub struct LandOptions {
     pub agent: Option<String>,
 }
 
-/// How a prepared PR is handed off once it is synced, scratch-cleared, and
+/// How a prepared PR is handed off once it is synced, cleaned up if configured, and
 /// marked ready.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Finalize {
@@ -44,9 +44,9 @@ enum Integration {
     Completed,
 }
 
-/// Prepare one PR: commit, sync onto main, clear scratch, mark it ready, and
-/// finalize per `finalize`. `arm` requests auto-merge; `submit` assigns the PR
-/// for the reviewer to merge. Neither rotates the worktree. Returns the resulting PR,
+/// Prepare one PR: commit, sync onto main, apply configured cleanup, mark ready, and
+/// finalize per `finalize`. `arm` requests auto-merge; `submit` leaves the PR
+/// for manual merge. Neither rotates the worktree. Returns the resulting PR,
 /// or `None` for a local merge.
 fn prepare_pr(
     repo: &Path,
@@ -65,7 +65,7 @@ fn prepare_pr(
         ));
     }
     crate::ops::pr::reject_control_plane_pr(&repo_root)?;
-    crate::ops::commit::prepare_persistent_publication(&repo_root)?;
+    crate::ops::commit::restart_landed_persistent(&repo_root)?;
     if !options.local && !crate::ops::pr::gh_available() {
         return Err(OpsError::Message("gh CLI not found".to_string()));
     }
@@ -139,8 +139,7 @@ fn prepare_pr(
         }
         Integration::Completed => {}
     }
-    // Refuse an already-empty Task before scratch cleanup can manufacture a
-    // bookkeeping-only `.gitkeep` commit or any GitHub command observes it.
+    // Refuse an already-empty Task before cleanup or any GitHub command observes it.
     crate::ops::task::require_task_pr_range_nonempty(&repo_root)?;
     let pr_exists = if options.local {
         false
@@ -167,7 +166,7 @@ fn prepare_pr(
         ));
     }
     if matches!(integration, Integration::Required) {
-        clear_scratch(&repo_root, progress)?;
+        crate::ops::scratch::clear(&repo_root)?;
     }
     crate::ops::task::require_task_pr_range_nonempty(&repo_root)?;
     let main_branch = match integration {
@@ -282,9 +281,9 @@ pub(crate) fn finish_arm_after_sync(
 }
 
 /// Prepare a PR to land without arming auto-merge: commit, sync onto main,
-/// clear scratch, mark the PR ready, and assign it to the current user. Nothing
-/// merges until that user clicks merge on GitHub — that one click is the
-/// required gate. Like `arm`, this never rotates the worktree.
+/// apply configured scratch cleanup and mark ready. Reviewer requests and
+/// assignments remain unchanged. A teammate merges on GitHub.
+/// Like `arm`, this never rotates the worktree.
 pub fn submit(
     repo: &Path,
     options: &LandOptions,
@@ -379,7 +378,7 @@ fn prepare_land(
 
 fn sync_land(repo_root: &Path, main_repo: &Path, progress: &impl Progress) -> OpsResult<String> {
     let main_branch = get_default_branch(main_repo)?;
-    let onto = format!("origin/{main_branch}");
+    let onto = crate::git::integration_base(main_repo)?;
     // Use the recorded parent base when integrating a squash-landed stack.
     let stacked = crate::ops::task::stack_for_landing(repo_root)?;
     let verification = crate::ops::sync::sync_for_delivery(
@@ -486,8 +485,9 @@ fn finalize_remote(
             crate::ops::pr::enable_auto_merge(repo_root, number, Some(copy), head_sha, inherit_pr)?;
         }
         Finalize::UserMerge => {
-            progress.status("Assigning PR for you to merge...");
-            assign_to_me(repo_root)?;
+            progress.status(
+                "PR prepared for manual merge. Reviewer requests and assignments are unchanged.",
+            );
         }
     }
 
@@ -495,24 +495,6 @@ fn finalize_remote(
         progress.status(&format!("\n{url}\n"));
     }
 
-    Ok(())
-}
-
-/// Assign the open PR to the authenticated user. Nothing merges until they
-/// explicitly click merge.
-fn assign_to_me(repo: &Path) -> OpsResult<()> {
-    let mut cmd = Command::new("gh");
-    cmd.arg("pr")
-        .arg("edit")
-        .arg("--add-assignee")
-        .arg("@me")
-        .current_dir(repo);
-    if let Err(err) = run_command(&mut cmd) {
-        return Err(OpsError::CommandFailed {
-            command: err.command_line(),
-            stderr: err.stderr,
-        });
-    }
     Ok(())
 }
 
@@ -538,69 +520,6 @@ pub(crate) fn resolve_repos(repo: &Path, worktree: Option<&str>) -> OpsResult<(P
     };
 
     Ok((repo_root, main_repo))
-}
-
-/// Clear `scratch/` down to `.gitkeep` and commit it.
-///
-/// This step is what greens the `scratch-clear` required check, which is why
-/// that check is a *land-time precondition* and no repair turn can act on it —
-/// see [`crate::work::task::CiCheck::land_time_precondition`], which keeps the landing
-/// supervisor from launching `ci-fix` against work only this function can do.
-fn clear_scratch(repo: &Path, progress: &impl Progress) -> OpsResult<()> {
-    if crate::git::worktrees::is_persistent_worktree(repo)? {
-        return Ok(());
-    }
-    let scratch = repo.join("scratch");
-    let gitkeep = scratch.join(".gitkeep");
-
-    // Ensure scratch/ always exists.
-    if !scratch.exists() {
-        std::fs::create_dir_all(&scratch)?;
-    }
-
-    let mut removed = false;
-    for entry in std::fs::read_dir(&scratch)? {
-        let entry = entry?;
-        let path = entry.path();
-        // Preserve .gitkeep so the directory survives git operations.
-        if path == gitkeep {
-            continue;
-        }
-        if path.is_dir() {
-            std::fs::remove_dir_all(&path)?;
-        } else {
-            std::fs::remove_file(&path)?;
-        }
-        removed = true;
-    }
-
-    // Ensure .gitkeep exists so scratch/ is tracked even when empty.
-    if !gitkeep.exists() {
-        std::fs::write(&gitkeep, "")?;
-        removed = true; // needs staging
-    }
-
-    if !removed {
-        return Ok(());
-    }
-
-    progress.status("Clearing scratch/...");
-    crate::git::stage_all(repo, &|_| {})?;
-    if has_staged_changes(repo)? {
-        crate::git::commit(repo, "lf land: clear scratch/", &|_| {})?;
-    }
-
-    Ok(())
-}
-
-fn has_staged_changes(repo: &Path) -> OpsResult<bool> {
-    let status = Command::new("git")
-        .arg("diff")
-        .arg("--cached")
-        .arg("--quiet")
-        .current_dir(repo)
-        .status()?;
-    Ok(!status.success())
 }
 
 fn read_worktree_state(repo: &Path) -> OpsResult<String> {

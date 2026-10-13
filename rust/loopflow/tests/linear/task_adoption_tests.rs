@@ -24,7 +24,7 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
             "agent: claude\nlinear:\n  team: team-1\n",
         );
         repo.create_file(
-            "wave/product/GOAL.md",
+            ".lf/wave/product/GOAL.md",
             "---\nlinear:\n  initiative: initiative-1\n---\nKeep working.\n",
         );
         repo.create_file(".lf/flows/adoption.yaml", "- cmd: sync --plan\n");

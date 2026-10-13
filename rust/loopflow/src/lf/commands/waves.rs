@@ -1669,8 +1669,7 @@ fn next_move_for_task(
             };
         }
         if let Some(ci) = ci {
-            let repairable_failure =
-                ci.state == CiState::Failing && !ci.only_land_time_preconditions();
+            let repairable_failure = ci.state == CiState::Failing;
             if repairable_failure {
                 return NextMove {
                     owner: NextMoveOwner::Ci,
@@ -1679,9 +1678,7 @@ fn next_move_for_task(
             }
         }
         if let Some(request) = merge {
-            if ci
-                .is_none_or(|ci| ci.state == CiState::Pending && !ci.only_land_time_preconditions())
-            {
+            if ci.is_none_or(|ci| ci.state == CiState::Pending) {
                 return NextMove {
                     owner: NextMoveOwner::Ci,
                     reason: "required checks have not passed for the requested merge".to_string(),
@@ -3328,7 +3325,7 @@ mod tests {
     }
 
     #[test]
-    fn land_only_failure_leaves_the_requested_merge_with_its_operator() {
+    fn repository_named_failure_stays_with_ci() {
         let ci = CiObservation {
             head_sha: "head".to_string(),
             state: CiState::Failing,
@@ -3353,6 +3350,6 @@ mod tests {
             None,
         );
 
-        assert_eq!(next.owner, NextMoveOwner::User);
+        assert_eq!(next.owner, NextMoveOwner::Ci);
     }
 }

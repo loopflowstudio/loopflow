@@ -684,9 +684,9 @@ mod tests {
         let _home =
             crate::lf::commands::flow::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
         let tmp = loopflow_test_support::TestRepo::new();
-        std::fs::create_dir_all(tmp.path().join("wave/release")).unwrap();
+        std::fs::create_dir_all(tmp.path().join(".lf/wave/release")).unwrap();
         let goal = "---\ncrons: []\n---\n## Objective\nShip a reliable release.\n\n## Bounds\nKeep rollback available.\n";
-        std::fs::write(tmp.path().join("wave/release/GOAL.md"), goal).unwrap();
+        std::fs::write(tmp.path().join(".lf/wave/release/GOAL.md"), goal).unwrap();
         let seed = super::render_wave_context(tmp.path(), "release", "");
         for message in [None, Some(seed)] {
             let prepared = crate::prompt::process::prepare_process_prompt(
@@ -699,7 +699,7 @@ mod tests {
                 crate::prompt::process::ProcessPromptInput {
                     repo_root: tmp.path().to_path_buf(),
                     wave: Some("release".into()),
-                    docs: vec!["wave/release/GOAL.md".into()],
+                    docs: vec![".lf/wave/release/GOAL.md".into()],
                     message,
                     ..Default::default()
                 },
@@ -731,13 +731,13 @@ mod tests {
                     .assets
                     .iter()
                     .filter(|asset| {
-                        asset.source_path.as_deref() == Some("wave/release/GOAL.md")
+                        asset.source_path.as_deref() == Some(".lf/wave/release/GOAL.md")
                     })
                     .count(),
                 0
             );
             assert!(context.decisions.iter().any(|decision| {
-                decision.source_path.as_deref() == Some("wave/release/GOAL.md")
+                decision.source_path.as_deref() == Some(".lf/wave/release/GOAL.md")
                     && decision.decision == crate::trace::ContextDecisionKind::Deduplicated
             }));
         }
@@ -757,7 +757,7 @@ mod tests {
             ("product", "Product memory"),
             ("infrastructure/auth", "Excluded auth memory"),
         ] {
-            let dir = repo.path().join("wave").join(name);
+            let dir = repo.path().join(".lf/wave").join(name);
             std::fs::create_dir_all(&dir).unwrap();
             std::fs::write(
                 dir.join("GOAL.md"),
@@ -795,12 +795,12 @@ mod tests {
                 // Registry relocation preserves bytes; authoring moves the directory.
                 assert!(repo
                     .path()
-                    .join("wave/infrastructure/release/GOAL.md")
+                    .join(".lf/wave/infrastructure/release/GOAL.md")
                     .is_file());
-                assert!(!repo.path().join("wave/infra").exists());
+                assert!(!repo.path().join(".lf/wave/infra").exists());
                 std::fs::rename(
-                    repo.path().join("wave/infrastructure"),
-                    repo.path().join("wave/infra"),
+                    repo.path().join(".lf/wave/infrastructure"),
+                    repo.path().join(".lf/wave/infra"),
                 )
                 .unwrap();
             } else if address == "product/release" {
@@ -816,11 +816,11 @@ mod tests {
                 )
                 .await
                 .unwrap();
-                assert!(repo.path().join("wave/infra/release/GOAL.md").is_file());
-                assert!(!repo.path().join("wave/product/release").exists());
+                assert!(repo.path().join(".lf/wave/infra/release/GOAL.md").is_file());
+                assert!(!repo.path().join(".lf/wave/product/release").exists());
                 std::fs::rename(
-                    repo.path().join("wave/infra/release"),
-                    repo.path().join("wave/product/release"),
+                    repo.path().join(".lf/wave/infra/release"),
+                    repo.path().join(".lf/wave/product/release"),
                 )
                 .unwrap();
             }
@@ -875,8 +875,11 @@ mod tests {
                 "Parent memory"
             }));
         }
-        assert!(repo.path().join("wave/product/release/GOAL.md").is_file());
-        assert!(!repo.path().join("wave/infra/release").exists());
+        assert!(repo
+            .path()
+            .join(".lf/wave/product/release/GOAL.md")
+            .is_file());
+        assert!(!repo.path().join(".lf/wave/infra/release").exists());
     }
 
     #[tokio::test]
@@ -1276,7 +1279,7 @@ mod tests {
     async fn direct_wave_binding_carries_flows_and_shared_metric_context() {
         let (directory, store) = test_store().await;
         let repo = directory.path().join("repo");
-        std::fs::create_dir_all(repo.join("wave/runtime")).unwrap();
+        std::fs::create_dir_all(repo.join(".lf/wave/runtime")).unwrap();
         std::fs::create_dir_all(repo.join(".lf/flows")).unwrap();
         std::fs::write(repo.join(".lf/flows/local-delivery.yaml"), "- implement\n").unwrap();
         let wave = Wave::new(

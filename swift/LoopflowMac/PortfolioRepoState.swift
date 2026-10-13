@@ -61,7 +61,7 @@ final class PortfolioRepoState {
         let repoURL = repo.url
         try await Task.detached {
             let waveDir = URL(fileURLWithPath: WaveOrigin.resolve(repoURL.path), isDirectory: true)
-                .appendingPathComponent("wave", isDirectory: true)
+                .appendingPathComponent(".lf/wave", isDirectory: true)
                 .appendingPathComponent(trimmed, isDirectory: true)
             let goalURL = waveDir.appendingPathComponent("GOAL.md", isDirectory: false)
             guard !FileManager.default.fileExists(atPath: goalURL.path) else {

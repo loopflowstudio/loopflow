@@ -41,18 +41,6 @@ impl CommitOptions {
     }
 }
 
-/// `scratch/.gitkeep` stays tracked so the directory exists on every branch.
-const UNTRACK_SCRATCH: &[&str] = &[
-    "rm",
-    "-r",
-    "--cached",
-    "--ignore-unmatch",
-    "-f",
-    "--",
-    ":(top)scratch",
-    ":(top,exclude)scratch/.gitkeep",
-];
-
 /// Commit an explicit document selection using an independent index. The real
 /// index retains unrelated staged work, and scratch remains on disk.
 pub fn commit_selected(repo: &Path, paths: &[String], message: Option<&str>) -> OpsResult<()> {
@@ -60,7 +48,6 @@ pub fn commit_selected(repo: &Path, paths: &[String], message: Option<&str>) -> 
         message.ok_or_else(|| OpsError::Message("selected-path commits require -m".into()))?;
     let _mutation = crate::ops::task::lock_task_pr_mutation(repo)?;
     restart_landed_persistent(repo)?;
-    let persistent = crate::git::worktrees::is_persistent_worktree(repo)?;
     let directory = tempfile::tempdir()?;
     let index = directory.path().join("index");
     let inherit_index = |command: &mut Command| {
@@ -75,29 +62,16 @@ pub fn commit_selected(repo: &Path, paths: &[String], message: Option<&str>) -> 
     if !paths.is_empty() {
         let mut args = vec!["add", "-A", "--"];
         args.extend(selected.iter().map(String::as_str));
-        if persistent {
-            args.push(":(top,exclude)scratch");
-        }
         run(&args)?;
     }
-    if persistent {
-        run(UNTRACK_SCRATCH)?;
-    }
     if run(&["diff", "--cached", "--name-only"])?.trim().is_empty() {
-        return Err(OpsError::Message(if persistent {
-            "Nothing selected to commit. scratch/ stays local in persistent workspaces; \
-             move durable notes outside scratch/ and select those files."
-                .into()
-        } else {
-            "Nothing selected to commit; edit the selected files or select changed paths.".into()
-        }));
+        return Err(OpsError::Message(
+            "Nothing selected to commit; edit the selected files or select changed paths.".into(),
+        ));
     }
     commit(repo, message, &inherit_index)?;
     let mut reset = vec!["reset", "-q", "HEAD", "--"];
     reset.extend(selected.iter().map(String::as_str));
-    if persistent {
-        reset.push(":(top)scratch");
-    }
     git_stdout(repo, &reset).map_err(|error| {
         OpsError::Message(format!("commit saved; index refresh failed: {error}"))
     })?;
@@ -106,35 +80,12 @@ pub fn commit_selected(repo: &Path, paths: &[String], message: Option<&str>) -> 
 
 /// Whenever a persistent checkout is about to commit or publish, drop history
 /// its merged PRs already delivered. Nothing has to observe the merge itself.
-fn restart_landed_persistent(repo: &Path) -> OpsResult<()> {
+pub(crate) fn restart_landed_persistent(repo: &Path) -> OpsResult<()> {
     if crate::git::worktrees::is_persistent_worktree(repo)?
         && crate::ops::sync::restart_landed_persistent(repo)?
     {
         eprintln!("Earlier commits have merged; restarted this branch from the default branch.");
     }
-    Ok(())
-}
-
-pub(crate) fn prepare_persistent_publication(repo: &Path) -> OpsResult<()> {
-    if !crate::git::worktrees::is_persistent_worktree(repo)? {
-        return Ok(());
-    }
-    restart_landed_persistent(repo)?;
-    let tracked = git_stdout(
-        repo,
-        &["ls-tree", "-r", "--name-only", "HEAD", "--", "scratch"],
-    )?;
-    if tracked.lines().any(|path| path != "scratch/.gitkeep") {
-        commit_selected(repo, &[], Some("Keep persistent scratch local"))?;
-    }
-    Ok(())
-}
-
-pub(crate) fn untrack_persistent_scratch(repo: &Path) -> OpsResult<()> {
-    if !crate::git::worktrees::is_persistent_worktree(repo)? {
-        return Ok(());
-    }
-    git_stdout(repo, UNTRACK_SCRATCH)?;
     Ok(())
 }
 
@@ -147,7 +98,6 @@ pub fn commit_workflow(
     inherit_git: &impl Fn(&mut Command),
 ) -> OpsResult<bool> {
     restart_landed_persistent(repo)?;
-    untrack_persistent_scratch(repo)?;
     if is_clean(repo)? {
         progress.status("Nothing to commit");
         if options.push {
@@ -161,11 +111,7 @@ pub fn commit_workflow(
 
     if options.add {
         progress.status("Staging changes...");
-        if crate::git::worktrees::is_persistent_worktree(repo)? {
-            git_stdout(repo, &["add", "-A", "--", ".", ":(top,exclude)scratch"])?;
-        } else {
-            stage_all(repo, inherit_git)?;
-        }
+        stage_all(repo, inherit_git)?;
     }
 
     if git_stdout(repo, &["diff", "--cached", "--name-only"])?
@@ -312,15 +258,6 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
     format!("{}\n\n[diff truncated]", &text[..end])
 }
 
-fn push_with_fallback(repo: &Path, inherit_git: &impl Fn(&mut Command)) -> OpsResult<()> {
-    if let Err(_err) = push(repo, false, inherit_git) {
-        if let Err(force_err) = push(repo, true, inherit_git) {
-            return Err(OpsError::Git(force_err));
-        }
-    }
-    Ok(())
-}
-
 fn ensure_draft_pr(repo: &Path, progress: &impl Progress) -> OpsResult<()> {
     if !crate::ops::pr::gh_available() {
         return Ok(());
@@ -375,7 +312,7 @@ fn push_with_upstream_if_needed_locked(
         .output()?;
 
     if output.status.success() {
-        push_with_fallback(repo, inherit_git)?;
+        push(repo, false, inherit_git)?;
         return Ok(());
     }
 

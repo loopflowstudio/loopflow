@@ -32,9 +32,8 @@ struct WorkDestinationTests {
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let query = RegistryQuery { args, _ in
             if args.starts(with: ["session", "ensure"]) { return encoded }
-            if args.starts(with: ["session", "list"]) { return #"{"entries":[\#(encoded)],"next":null}"# }
             if args.starts(with: ["wave", "show"]) { return data }
-            throw RegistryQueryError("Task entry cannot launch a Workflow or take over a client")
+            throw RegistryQueryError("Task entry cannot enumerate unrelated Sessions, launch a Workflow or take over a client")
         }
         let model = WorkModel(query: query, repoPath: wave.wave.repo)
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
@@ -53,6 +52,65 @@ struct WorkDestinationTests {
         #expect(model.linkedSession == nil)
         #expect(entry.multiplexer.layout == layout)
         #expect(model.navigation.content == .terminals)
+    }
+
+    @Test(arguments: ["valid", "updated-inventory", "unavailable-inventory", "foreign-session", "missing-task", "unavailable-plan"])
+    func ensuredTaskOpeningRetainsOtherSessionsAndValidation(outcome: String) async throws {
+        let data = try fixture()
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
+        let wave = try #require(snapshot.waves.first)
+        let task = try #require(wave.tasks.items.first)
+        let primary = try renameFixtureRecord("primary", title: "Primary", work: .task(id:
+            outcome == "foreign-session" ? "another-task" : #require(task.runtime?.workId)))
+        let retained = try renameFixtureRecord("retained", title: "Other conversation", work: nil)
+        let encoded = String(decoding: try JSONEncoder().encode(primary), as: UTF8.self)
+        let other = String(decoding: try JSONEncoder().encode(retained), as: UTF8.self)
+        let updated = other.replacingOccurrences(of: "Other conversation", with: "Updated conversation")
+        let missing = try oneTask(data, taskId: "absent")
+        let reads = DestinationReadCounter()
+        let barrier = LinkedDestinationBarrier()
+        let model = WorkModel(query: RegistryQuery { args, _ in
+            if args.starts(with: ["session", "list"]) {
+                if await reads.next() == 1 { return #"{"entries":[\#(other)],"next":null}"# }
+                if outcome == "updated-inventory" { return #"{"entries":[\#(updated)],"next":null}"# }
+            }
+            if args.starts(with: ["session", "ensure"]) { return encoded }
+            if args.starts(with: ["wave", "show"]) {
+                if outcome == "updated-inventory" { await barrier.wait("planning") }
+                if outcome == "unavailable-plan" { throw RegistryQueryError("Planning disconnected") }
+                return outcome == "missing-task" ? missing : data
+            }
+            throw RegistryQueryError("Opening cannot wait for unrelated Session pages")
+        }, repoPath: wave.wave.repo)
+        await model.refreshSessions()
+        if outcome == "unavailable-inventory" { await model.refreshSessions() }
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        if outcome == "updated-inventory" {
+            let opening = Task { await model.openTaskConversation(task.id) }
+            while !(await barrier.contains("planning")) { await Task.yield() }
+            await model.refreshSessions()
+            await barrier.release("planning")
+            await opening.value
+        } else { await model.openTaskConversation(task.id) }
+
+        #expect(model.sessions.value?.contains { $0.id == retained.id } == true)
+        if ["valid", "unavailable-inventory", "updated-inventory"].contains(outcome) {
+            #expect(model.linkedSession?.record == primary)
+            #expect(model.sessions.value?.contains { $0.id == primary.id } == true)
+            // Preparation cannot establish provider input readiness.
+            #expect(model.taskOpening?.status == .opening)
+            if outcome == "unavailable-inventory" {
+                #expect(model.sessions.errorMessage == "Opening cannot wait for unrelated Session pages")
+            }
+            if outcome == "updated-inventory" {
+                #expect(model.sessions.value?.first { $0.id == retained.id }?.title == "Updated conversation")
+            }
+        } else {
+            #expect(model.linkedSession == nil)
+            #expect(model.taskOpening?.status == .failed)
+            #expect(model.taskOpening?.reason?.contains(outcome == "foreign-session" ? "was not found in Task"
+                : outcome == "missing-task" ? "no longer available" : "Planning disconnected") == true)
+        }
     }
 
     @Test func failedTaskConversationRetainsItsReasonWithoutADuplicateAlert() async throws {

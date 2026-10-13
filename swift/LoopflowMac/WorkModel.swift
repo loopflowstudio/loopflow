@@ -297,6 +297,7 @@ final class WorkModel {
         let sameRepo = repoPath?.normalizedFilePath == wave.wave.repo.normalizedFilePath
         let retainedRecords = sameRepo && location == nil ? sessions.value ?? [] : []
         let sessionID: String
+        var ensuredRecord: SessionRecord?
         if let selected = link.session {
             sessionID = selected
         } else {
@@ -305,6 +306,7 @@ final class WorkModel {
             let record = try await executionQuery.ensureTaskSession(issue: executionTask, cwd: wave.wave.repo)
             guard !Task.isCancelled, destinationGeneration == generation else { return }
             sessionID = record.id
+            ensuredRecord = record
             // Preparation may have supplied a checkout/runtime absent from the
             // planning read. Refresh this exact Task, never the current selection.
             if location == nil {
@@ -319,12 +321,15 @@ final class WorkModel {
             }
         }
         var records: [SessionRecord] = []
-        if link.session != nil, retainedRecords.contains(where: { $0.id == sessionID }) {
+        if let ensuredRecord {
+            // Ensure already returned this Session's authoritative reading.
+            // Opening one Task must not wait for every repository Session.
+            records = [ensuredRecord]
+        } else if link.session != nil, retainedRecords.contains(where: { $0.id == sessionID }) {
             records = retainedRecords
         } else {
-            // Publishing a partial inventory would retire retained panes whose
-            // records occur on later pages. A newly ensured Session requires a
-            // complete reading too, even when its ID was already retained.
+            // An explicit Session link not held by this window still needs
+            // lookup evidence; publish its inventory only after the last page.
             var after: String?
             repeat {
                 let page = try await executionQuery.sessionPage(includingHeadless: true, after: after, cwd: wave.wave.repo)
@@ -351,12 +356,17 @@ final class WorkModel {
         if location != nil, let executionIdentity { navigation.preparedTaskWorktrees[task.id] = executionIdentity }
         openTaskDestination(wave: wave, task: task, preservingOpening: true)
         supersedeSessions()
-        if location != nil {
-            // This is one explicitly opened remote Session, not a replacement
-            // inventory for any Machine or a second planning hierarchy.
+        if location != nil || ensuredRecord != nil {
+            // One explicitly opened Session updates its own reading. Merge the
+            // latest inventory: it may have refreshed during preparation.
             records = [record] + (sessions.value ?? []).filter { $0.id != record.id }
         }
-        sessions = .available(records)
+        if ensuredRecord != nil, let reason = sessions.errorMessage {
+            // One successful acquisition does not repair an unrelated inventory failure.
+            sessions = .unavailable(lastGood: records, reason: reason)
+        } else {
+            sessions = .available(records)
+        }
         navigation.selectedSessionId = record.id
         navigation.content = .terminals
         linkedSession = LinkedSession(generation: generation, record: record, task: task, showsChanges: link.diff, location: location)

@@ -803,7 +803,6 @@ struct SessionsContentView: View {
                 Rectangle().fill(palette.border).frame(width: 1)
                 HSplitView {
                     VStack(spacing: 0) {
-                        workTabs
                         if workspaces.selectedWork == nil {
                             ContentUnavailableView("No Work open", systemImage: "rectangle.on.rectangle",
                                 description: Text("Open a repository, Wave or Task from the sidebar."))
@@ -969,35 +968,6 @@ struct SessionsContentView: View {
             Button("OK") { launchError = nil }
         } message: { Text(launchError ?? "") }
         .accessibilityIdentifier("sessions-surface")
-    }
-
-    private var workTabs: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 0) {
-                ForEach(workspaces.openWork, id: \.self) { key in
-                    HStack(spacing: Spacing.sm) {
-                        Button(title(for: key)) { selectTab(key) }
-                            .buttonStyle(.plain)
-                        Button { closeTab(key) } label: { Image(systemName: "xmark").font(.system(size: 9)) }
-                            .buttonStyle(.plain).accessibilityLabel("Close \(title(for: key)) tab")
-                    }
-                    .padding(.horizontal, 12).padding(.vertical, 8)
-                    .background(workspaces.selectedWork == key ? palette.surface : palette.background)
-                }
-            }
-        }
-        .accessibilityIdentifier("work-tabs")
-    }
-
-    private func selectTab(_ key: WorkWorkspaceKey) {
-        model.select(key.reference)
-    }
-
-    private func closeTab(_ key: WorkWorkspaceKey) {
-        if workspaces.selectedWork == key { model.dismissTaskLink() }
-        workspaces.hide(key)
-        if let selected = workspaces.selectedWork { selectTab(selected) }
-        else { store.surfaces.clearFocus() }
     }
 
     private func newShell(in workspace: SessionsWorkspace) {

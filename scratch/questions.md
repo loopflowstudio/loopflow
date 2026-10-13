@@ -59,3 +59,11 @@ preserves other Machine config keys. No existing generic global writer was found
 RepoScanner's discovery is removed; its explicit-opening validation survives as
 RepositoryPath. CLI-authored selection blocks legacy import at the Rust write,
 including a race after the Desktop offer. These are reversible implementation choices.
+
+## Sidebar-only switching — October 13
+
+Jack Heart selected removing the redundant Work tab strip: the sidebar already
+switches conversations. Retain all cached workspaces, native surfaces, panes,
+drafts and selection; this removes presentation only, not retention or history.
+Jack also requested Task-click-to-responsive-agent-input measurements and a
+scoped optimization contribution, now running independently of hook repairs.

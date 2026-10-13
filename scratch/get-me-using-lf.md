@@ -217,112 +217,19 @@ Review kept the unrelated Session in a separate checkout so Rust's real Task
 association cannot silently turn that case into a Task member.
 
 
-## This slice — one repository portfolio owned by lf
+## Portfolio — implemented, second review priority
 
-Jack Heart requested default discovery of main repositories under `~/src`, a
-changeable discovery folder, or manual selection across folders/subfolders. Jack
-explicitly included the existing Portfolio UI: build on or replace it in this
-same cut. Jack selected the Portfolio view as the primary configuration surface:
-choose a discovery folder or individual repositories there without requiring CLI
-setup. The view calls the lf API for reads and mutations through RegistryQuery;
-it must not scan folders or write configuration itself. lf owns persistence and
-discovery, not a competing Swift list. Jack considered multiple discovery roots
-and said they are probably unnecessary; defer them in this slice.
-This extends LOO-462's Work-first experience through publication/demo, not landing.
-
-**Implemented contract (reversible implementation choices):** one
-Machine-local portfolio selection, with folder and manual modes. Folder mode
-uses the existing `repo_root` (default `~/src`) and discovers immediate main Git
-checkouts, excluding linked worktrees. Manual mode uses explicit main-repository
-paths anywhere, including nested directories; it never silently unions folder
-scan results or the last opened repo. Preserve the inactive mode's settings when
-switching modes. Recursive folder scanning and per-repo folder exclusions are
-not required by the current request. No GitHub remote, Wave or Task is required.
-
-Use `lf portfolio` as the owner: list/read JSON, select folder/manual
-mode, set the root, and add/remove explicit repositories. Final subcommand syntax
-comes from the existing CLI conventions, not a parallel Desktop API. Changing
-the folder reuses `repo_root`, never a second root preference. Portfolio membership
-and the open-window set are separate: opening a repo does not enroll it; removing
-one affects navigation only, not files, Work, live panes, Sessions or execution.
-Use existing repository identity and Git main-checkout normalization. Paths remain
-Machine-local locators, not portable identity or execution assignment.
-
-Rust owns selection persistence, normalization, enumeration and mutations. Source
-inspection found no general Machine-local configuration writer; `config.rs` now
-provides the atomic writer, with portfolio mutations holding the config lock.
-No planning or execution table is needed. RegistryQuery exposes one typed reading
-with selected mode/root, repository entries and unavailable-path/read errors.
-Inspection creates no Work or conversations. Missing manual entries remain removable/unavailable, not silently
-deleted. A failed folder read is not an empty portfolio. Surface the same errors
-in CLI and Desktop; unknown state retains existing panes.
-
-**Existing UI, not a new window:** `LoopflowApp`'s `Window("Portfolio")` currently
-mounts `Views/WavesView.swift`. Adapt that view's repository rail and management
-controls, preserving its useful Wave/status contents. Provide folder/manual mode
-selection, a folder chooser, and add/remove individual repository controls here.
-Native pickers select paths only; shared lf operations validate and save them.
-Show pending/error state and render the authoritative result without requiring a
-terminal or silently assuming a write succeeded. `RepoView`, Open Repo/Move
-to Repo menus and repository windows consume the same shared membership. Keep
-window-local selection/last-opened presentation separate from membership. Respect
-configured data locations and normal installed CLI dispatch.
-
-**Delete in the cut:** Swift `PortfolioService` UserDefaults membership writer,
-`PortfolioDiscovery.repos`' hard-coded scan/persisted/launch union, and the
-portfolio-only `RepoScanner` duplication after surviving callers use the shared
-reader. Retain authored-Wave discovery until its own replacement exists. Reuse or
-reshape `PortfolioRepo` as the shared DTO rather than keeping two representations.
-The old `portfolioRepos` preference needs a one-time explicit import into shared
-manual membership; never discard it, auto-publish it or re-import on every refresh.
-Offer import only when shared selection is absent; CLI-authored selection wins.
-Remove obsolete exclusive tests; migrate behavior tests to the shared owner.
-
-**Implementation, October 11:** `portfolio.rs` owns the selection and reading;
-`lf portfolio [folder [PATH]|manual|add PATH…|remove PATH|import PATH…] --json`
-exposes it outside repositories. The Machine's `config.yaml` stores selection beside
-`repo_root`, preserving other keys with a locked atomic write. No existing general
-Machine-config writer was present; the atomic writer now lives in `config.rs`.
-No database migration or repository registration is needed.
-
-PortfolioService now retains shared readings and errors; it writes no preferences.
-WavesView configures both modes with native path pickers and calls RegistryQuery.
-Repo windows and menus read the same owner, refreshing on app activation. Import
-reads old `portfolioRepos` without changing it; Rust refuses import after any shared
-selection exists. The service serializes mutations after pending reads.
-`PortfolioDiscovery.repos`, its scan/launch union, Swift membership persistence,
-old PortfolioRepo and scan-only tests are removed. `RepositoryPath` retains only
-explicit-open validation from RepoScanner; authored-Wave discovery remains.
-Compression also removes `WorkModel.refreshPortfolio`'s duplicate CLI reader and
-error state, `WavesView.repos`' copied membership, and RepositoryPath's unused
-FileManager field. Repository windows apply PortfolioService's shared reading;
-the Portfolio view derives membership directly. Failed reads retain membership,
-activation still refreshes authored Waves, and canceled/superseded discovery cannot
-replace newer data. The delayed-read test now covers serialized service mutation.
-No deletion targets remain in the portfolio cut.
-
-Review fixed a global Clap `--json` identity collision and a rewritten-path mismatch
-between shared membership and authored Waves. Failed folder reads retain the last
-usable membership and expose the authoritative mode/root plus an error. Opening
-and removing membership do not touch retained Work. No acceptance is inferred from
-native path-picker code; both modes still require demo review.
-
-**Evidence and remaining acceptance:** Rust fixtures cover isolated roots with two
-repos, a linked worktree and a nested repo; folder changes, manual membership
-across directories, alias normalization, unavailable entries, explicit import and
-read-without-store-creation. Swift fixtures cover the shared DTO, error retention,
-serialized mutations and CLI readback through an isolated runtime. The retained-Work
-case removes nonempty membership without replacing panes or the unsaved document.
-These are automated owner/retention checks, not native path-picker acceptance.
-
-Publication checks now cover the affected Rust portfolio/CLI, lifecycle/DTO and
-Desktop suites at integrated revision `73d2861c1e` (results below).
-`PortfolioServiceTests.desktopWritesReadBackThroughCLI`
-requires `LOOPFLOW_PORTFOLIO_TEST_BIN` pointing to the built branch CLI; otherwise
-it is skipped. Native review must demonstrate both modes entirely from Portfolio,
-CLI readback, menu refresh and retained conversation/draft. The installed release
-must support both repository identity and portfolio commands; the launcher probes
-identity only. Multiple discovery roots remain deferred; cleanup is unauthorized.
+Jack Heart selected lf-owned folder/manual portfolio configuration through the
+existing Portfolio view. Default immediate-child main repositories under ~/src;
+change one root or choose individual repositories across folders. Exclude linked
+worktrees, preserve inactive selections and missing-path errors. Multiple roots,
+recursive discovery and exclusions remain deferred. Membership changes never
+remove Work, panes or history. RegistryQuery calls the single Rust writer/reader;
+no Swift scanner or configuration writer. Legacy membership import stays explicit.
+Implemented scope, failed attempts, focused/CLI readback tests and native-proof
+limits: `185c0b3c2e:scratch/get-me-using-lf.md`, **This slice — one repository
+portfolio owned by lf**. Native folder/manual picker, menu refresh and draft
+retention review remains after the main repo/Task experience feels right.
 
 ## Done when / unattended gate
 
@@ -464,33 +371,82 @@ selection, rehearsal and rollback limits: `d65dff0cbb:scratch/get-me-using-lf.md
 **Applied legacy reconciliation** and preceding paragraphs. Applied changes remain;
 this grants no broader cleanup authority. Current receipts: work-first-demo.md.
 
-## Paused — accepted October 12
+## Paused and prepared demo — October 13
 
-Jack Heart selected Paused and authorized pausing LOO-389. October 13: ship the
-independent lf-2086e0a / PR #1544 first. Repair head 9c6f263ebc is armed; CI pending.
-Preserve Task identity, history, checkout and Workflow. Default active navigation
-omits paused Tasks; the Wave plan keeps them reachable. Resume clears the hold,
-never launches execution. Pause does not kill an already-running process.
+Jack Heart selected Paused and authorized pausing LOO-389. Independent Task
+lf-2086e0a / PR #1544 merged as f2855f7bd46aa93d57b3a2e56fc8ec917f266ea3;
+installation/native pause remain outstanding. Preserve identity, history, checkout
+and Workflow; resume starts nothing and pause never kills a live process.
+LOO-427 is completed after verified merge; no unknown Process was retired.
+Earlier CI/queue failures, exact native trust observations and preserved draft
+receipts: `185c0b3c2e:scratch/get-me-using-lf.md`, **Paused**.
+Prepared unlaunched app at /tmp/loo462-next-demo/Loopflow Work Demo.app is an older
+50d6451b4 build, not the upcoming demo. Two running demos and their drafts remain.
+CMUX title environment scrub (9e79fa4970) awaits deployment; eight checks passed.
 
-The common writer owns portable Paused, independent of Linear disposition.
-CLI/Desktop share it; pause blocks future Flow/automatic repair launches.
-Verify native pause before applying LOO-389.
-October 13 native recheck: CI opens its correct Codex conversation and input prompt;
-LOO-380 retains Claude and its draft. LOO-312/367 initially showed hook review;
-Jack trusted LOO-312 on October 13; native input/tool execution now appears.
-LOO-367 still shows its own trust prompt; no choice submitted there.
+## Current pursuit — UX and end-to-end profiling, October 13
 
-Paused is not deployed: main's schema needs supported installation; preserve
-active clients. LOO-427 completed through `lf task complete` after verifying merge
-`9211b47c47bf986348af00b5a546c7cce2048c8c`; native sidebar removed it.
-Checkout/unknown Process `f1482ca7-35a6-4bea-89f8-1f2d5c3de5b2` remain.
-Earlier failures/repairs:
-`81ae973322:scratch/get-me-using-lf.md`, **Paused**.
-Local checks/limits: `9e79fa4970:scratch/get-me-using-lf.md`, **Paused**.
+Jack Heart requested this design update and a new pursue through publication for
+review, not landing. This section supersedes earlier visible Work-tab and Session
+picker proposals. Main repo/Task experience first; Portfolio revision stays second.
 
-Title leak: GUI now scrubs inherited CMUX keys to prevent host renaming;
-eight launcher tests pass (9e79fa4970). Deployment pending.
-October 13: candidate build/signature check PASS at
-/tmp/loo462-next-demo/Loopflow Work Demo.app (50d6451b4, bundled lf).
-Not launched; both live apps/drafts preserved. Jack queued PR #1544 October 13;
-position 1, AWAITING_CHECKS, run 38452715134. Earlier auto-merge did not enqueue.
+### UX polish
+
+- Sidebar is the Work/conversation switcher. Remove the redundant top Work tab
+  strip; retain every cached workspace, native surface, pane/layout, document and
+  terminal draft, focus selection and history. No eviction or Session completion.
+- Ordinary Task entry opens its one ongoing primary Task conversation through the
+  existing Rust owner. Remove the sibling Session dropdown and Independent Flow
+  provenance chrome from ordinary Task navigation. Historical/review conversations
+  remain stored, explicit links remain valid, and already-open panes survive. Do
+  not silently replace a deliberately opened historical conversation or take over
+  a live client. No new Session inventory/search UI.
+- Keep conversation first, compact breadcrumb and expandable Overview; do not add
+  buttons or permanent chrome. Collapse internal Opening conversation/Opening
+  Session stages into coherent opening feedback without hiding failure or retry.
+- Investigate Workflow rendering against actual Task records. LOO-462 has feature
+  at demo; loading/unavailable cannot mean No workflow yet. Some Tasks genuinely
+  have no captured Workflow: display that accurately, never invent/backfill one
+  merely to populate UI. Preserve last-good readings while refreshing.
+- Finish stable-hook native proof using 185c0b3c2e: unchanged declarations across
+  distinct Tasks, resume and compaction for each provider. Separate workspace or
+  account trust from hook review; never fabricate approval or approve other hooks.
+
+### Profiling and optimization
+
+Measure Codex and Claude separately for cached workspace switching, native resume,
+and fresh conversation launch. Start at the actual Task click and end at visible
+coding-agent input responding to an unsent draft keystroke. Process spawn, connect
+receipt, terminal creation, first draw and focus are intermediate events only.
+Use owned disposable conversations for input probes; never type into Jack Heart's
+existing drafts. Record build/helper revision, provider version, Machine/data
+selection, exact identities and cold/warm conditions; preserve failed attempts.
+
+Produce correlated wall-clock timelines across Desktop, lf preparation/connect,
+PTY/relay and provider startup, plus CPU flamegraphs for observable local processes
+across the full interval. Account explicitly for subprocess, lock, I/O and network
+waits; CPU samples cannot explain elapsed waiting alone. Closed provider internals
+and unavailable stack symbols stay explicit, not synthetic spans. Report hook
+approval separately alongside total elapsed time, never silently subtract it.
+
+Instrument through existing owners, not a second readiness lifecycle. Capture raw
+trace/profile artifacts with a reproducible command and readable flamegraph and
+phase breakdown; include observer overhead/limitations. Compare before/after on
+comparable cases and optimize measured bottlenecks. No arbitrary numeric target
+or retired soak requirement is restored. Unavailable native facilities do not block
+headless implementation; they leave named demo proof outstanding, never a claimed
+end-to-end pass. Current lookup repair and 63 passing tests are in
+scratch/task-opening-latency.md; historical read durations are not endpoint timings.
+
+### Delivery and demo
+
+Preserve the completed hook contribution and uncommitted sidebar/lookup changes;
+focused checks already pass (46 retention/navigation, 63 destination/Session tests).
+Finish focused regression coverage, compress, reconcile and publish through pursue.
+Build this diff's app with its matching bundled lf for every operation and embedded
+launch. Jack Heart requested relaunch after UX fixes; before terminating a demo,
+inspect its live panes/drafts and use a non-destructive replacement window/build if
+quitting would destroy input. No global install, client takeover, live migration,
+cleanup or full-Task landing follows from this pursuit. Demonstrate the real
+Loopflow repo, truthful Workflow and correct primary conversation; keep unresolved
+native timing/trust proof in this conversation rather than claiming completion.

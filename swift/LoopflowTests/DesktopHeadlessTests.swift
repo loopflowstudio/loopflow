@@ -210,6 +210,7 @@ struct DesktopHeadlessTests {
             }
             return ""
         })
+        model.confirmMachine(fixtureMachineId)
         let keeping = Task { await model.keepWorkCurrent() }
         defer { keeping.cancel() }
         func eventually(_ condition: @MainActor () -> Bool) async throws {

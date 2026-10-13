@@ -1573,66 +1573,40 @@ final class WorkModel {
     /// The outcome settles only the Task and repository that started it; a
     /// refusal is kept on that Task's draft and changes nothing else.
     func startTask(_ flow: String?, task: RoadmapTask, wave: WaveSnapshot) async {
-        let owner = navigation
-        let taskId = task.id
-        guard owner.taskRunDrafts[taskId]?.acting != true else { return }
-        owner.taskRunDrafts[taskId, default: TaskRunDraft()].acting = true
-        owner.taskRunDrafts[taskId]?.error = nil
-        let issue = task.task.identifier
-        let cwd = WaveOrigin.resolve(wave.repo)
-        do {
-            try await query.runTask(issue: issue, flow: flow, cwd: cwd)
-            owner.taskRunDrafts[taskId] = nil
-            await refresh()
-        } catch {
-            owner.taskRunDrafts[taskId]?.acting = false
-            owner.taskRunDrafts[taskId]?.error = error.localizedDescription
+        await performTaskAction(task.id) {
+            try await query.runTask(issue: task.task.identifier, flow: flow, cwd: WaveOrigin.resolve(wave.repo))
         }
     }
 
     /// Put the Task at a node of its Workflow, then refresh the shared
     /// reading. A refusal is kept on that Task's draft.
     func moveTask(to node: String, task: RoadmapTask, wave: WaveSnapshot) async {
-        let owner = navigation
-        let taskId = task.id
-        guard owner.taskRunDrafts[taskId]?.acting != true else { return }
-        owner.taskRunDrafts[taskId, default: TaskRunDraft()].acting = true
-        owner.taskRunDrafts[taskId]?.error = nil
-        do {
+        await performTaskAction(task.id) {
             try await query.moveTask(
                 issue: task.task.identifier, node: node, cwd: WaveOrigin.resolve(wave.repo))
-            owner.taskRunDrafts[taskId] = nil
-            await refresh()
-        } catch {
-            owner.taskRunDrafts[taskId]?.acting = false
-            owner.taskRunDrafts[taskId]?.error = error.localizedDescription
         }
     }
 
     func pauseTask(_ task: RoadmapTask, wave: WaveSnapshot, paused: Bool) async {
-        let owner = navigation
-        let taskId = task.id
-        guard owner.taskRunDrafts[taskId]?.acting != true else { return }
-        owner.taskRunDrafts[taskId, default: TaskRunDraft()].acting = true
-        owner.taskRunDrafts[taskId]?.error = nil
-        do {
+        await performTaskAction(task.id) {
             try await query.pauseTask(issue: task.task.identifier, paused: paused, cwd: WaveOrigin.resolve(wave.repo))
-            owner.taskRunDrafts[taskId] = nil
-            await refresh()
-        } catch {
-            owner.taskRunDrafts[taskId]?.acting = false
-            owner.taskRunDrafts[taskId]?.error = error.localizedDescription
         }
     }
 
     func completeTask(_ task: RoadmapTask, wave: WaveSnapshot) async {
+        await performTaskAction(task.id) {
+            try await query.completeTask(issue: task.task.identifier, cwd: WaveOrigin.resolve(wave.repo))
+        }
+    }
+
+    /// Feedback belongs to the navigation and Task that began the command.
+    private func performTaskAction(_ taskId: String, _ action: () async throws -> Void) async {
         let owner = navigation
-        let taskId = task.id
         guard owner.taskRunDrafts[taskId]?.acting != true else { return }
         owner.taskRunDrafts[taskId, default: TaskRunDraft()].acting = true
         owner.taskRunDrafts[taskId]?.error = nil
         do {
-            try await query.completeTask(issue: task.task.identifier, cwd: WaveOrigin.resolve(wave.repo))
+            try await action()
             owner.taskRunDrafts[taskId] = nil
             await refresh()
         } catch {

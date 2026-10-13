@@ -69,6 +69,20 @@ def test_failed_or_interrupted_trials_do_not_become_successes(tmp_path: Path) ->
     assert profile.summarize(tmp_path)["status"] == "failed"
 
 
+@pytest.mark.parametrize("phase", ["opening_failed", "provider_spawn_failed"])
+def test_launch_failure_cannot_supply_an_endpoint_or_comparison(tmp_path: Path, phase: str) -> None:
+    before, after = tmp_path / "before", tmp_path / "after"
+    _trial(before)
+    _trial(after)
+    (after / "lf-events.ndjson").write_text(
+        json.dumps({"phase": phase, "session": "session-owned", "wall": 11}) + "\n"
+    )
+    report = profile.summarize(after)
+    assert report["status"] == "failed"
+    assert report["click_to_observed_response_ms"] is None
+    assert profile.compare(before, after)["delta_ms"] is None
+
+
 def test_provider_and_case_comparisons_stay_separate(tmp_path: Path) -> None:
     _trial(tmp_path / "before")
     _trial(tmp_path / "after", provider="claude")
@@ -92,6 +106,8 @@ def test_flames_resolve_shared_stacks_and_exclude_other_processes(tmp_path: Path
     profile.flamegraph(stacks, output)
     assert "leaf &amp; work" in output.read_text()
     assert "unrelated" not in output.read_text()
+    profile.flamegraph({}, output)
+    assert not output.exists()
 
 
 def test_lf_spans_and_wall_events_share_timeline(tmp_path: Path) -> None:

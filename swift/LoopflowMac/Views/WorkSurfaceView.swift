@@ -552,7 +552,7 @@ struct WorkSurfaceView: View {
         ContentUnavailableView(
             "Selected Work is unavailable",
             systemImage: "questionmark.circle",
-            description: Text("This planning read cannot resolve the selection. Its retained Work tabs and conversations remain available.")
+            description: Text("This planning read cannot resolve the selection. Its workspace and conversations remain retained.")
         )
     }
 

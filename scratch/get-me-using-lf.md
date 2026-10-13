@@ -152,8 +152,18 @@ expectations are removed; full Session membership, explicit links, retained pane
 rename/binding and non-Task chrome survive. Duplicate opening labels collapse into
 one message. No new Session inventory or readiness store replaces them.
 
-No earlier deletion targets remain in this navigation cut. The launcher now reuses
-`cmd_install` for build/install in both launch modes, leaving their presentation
+The Session inventory controls and top strip are deleted; contextual exact-Session
+links and full membership still serve retained Work. Do not delete those owners.
+Task action feedback now shares one helper across run/move/pause/complete, retaining
+the originating navigation and Task. Profiling has one endpoint decision that returns
+status and elapsed time together; failure cannot leave a usable comparison number.
+An empty CPU reading removes an older SVG instead of leaving misleading evidence.
+Review also repaired the headless stream fixture's obsolete assumption that a
+data-directory frame confirms Machine identity; it now confirms the actual ID.
+
+Check: `scripts/test_desktop.sh --filter 'DesktopHeadlessTests|WorkDestinationTests|WorkNavigationTests' -Xswiftc -gnone` built and passed 102/103; after the identity fixture repair, `--filter DesktopHeadlessTests` passed all 12; `uv run pytest python/tests/test_agent_input_profile.py -q` passed 9; Ruff/format/diff checks passed. Native input/trust proof remains with demo; affected-suite verification remains with gate.
+
+The launcher reuses `cmd_install` for build/install in both launch modes, leaving their presentation
 separate. Task entry uses the pane's existing `sessionId` projection to detect a
 retained conversation instead of repeating its content switch.
 
@@ -226,78 +236,23 @@ wanted, but its present design is not accepted. The isolated empty-clone demo fa
 to establish the requested experience; see `work-first-demo.md` for the freeze,
 focused repair evidence and remaining native proof.
 
-## Sidebar cleanup and recurrence — October 11
+## Sidebar visibility and cleanup evidence
 
-Jack Heart rejected numeric conversation controls and requested a minimal visible
-working set. Remove sidebar Session counts/dropdowns; retain exact conversations
-in their Work and contextual opening. Jack authorized real-database cleanup after
-figuring out and rehearsing the specific changes in the private copy. This supersedes
-the blanket live-cleanup hold, not the requirement to preserve active work and review
-uncertain cases. The exact rehearsed LOO-376 and 126-row repairs are recorded
-in `work-first-demo.md`; no broader cleanup is implied.
+Jack Heart requested a minimal working set without Session tallies. Shared Started
+and unresolved execution now select ordinary Tasks; Session presence alone cannot
+admit unstarted or settled Tasks. A stopped failed Flow does not keep a completed
+Task current; live/unknown execution, completion refusals and unsettled files do.
+Task/Session history, binding and retained panes survive these filters.
 
-Keep two tracks separate: iteration debris from retired implementations/experiments
-can receive a one-time restorable repair; states reachable through ordinary current
-use need a lifecycle/visibility correction and regression proof. Unknown provenance
-is neither a deletion candidate nor evidence of recurrence.
-
-Read-only audit of the copied Loopflow data found 358 Tasks, 32 with unfinished
-interactive conversations: 22 completed, two canceled, seven unstarted in planning,
-and one with unknown planning state. Every one has recorded Started evidence.
-This is a snapshot, not current process liveness. Exact inventory is retained at
-`/private/tmp/loo462-native.FgtDmE/sidebar-data-audit.json`.
-
-Confirmed recurring bug: Task completion is independent of Session completion,
-but `inWorkingSet` returned true for any associated visible conversation, ahead of
-Task state. Settled completed/canceled/duplicate Tasks now stay out of ordinary
-navigation unless shared execution evidence remains unresolved. October 12 removes
-the same shortcut for unstarted Tasks: Session presence cannot establish Started. Conversations,
-Wave plan/history, retained panes and binding are not changed. Tests cover all three
-terminal planning states with/without unresolved execution while retaining Sessions.
-
-Iteration candidates remain unclassified. LOO-276 under abandoned Wave `list`,
-with unknown planning state and retained conversation, warrants provenance inspection;
-neither its age nor its parent name authorizes deletion. The shared Work reader
-currently reports an unrelated parse error in main's `.lf/config.yaml`; audit must
-not interpret that unavailable planning as an empty inventory or repair another
-checkout's active contribution.
-
-Check: `scripts/test_desktop.sh --filter WorkNavigationTests -Xswiftc -gnone` — 36 passed after count removal and terminal-visibility regression; native populated re-review remains.
-
-### Remaining classification after rendered sidebar review
-
-The config parse error was transient and is now gone. Native capture
-`/tmp/loopflow-20261011-213231.png` shows the current smaller sidebar without
-conversation tallies; all four main Waves fit in the viewport. The app still lands
-on “Choose Work”; repository conversation entry and Task workspace review remain.
-
-Second reproducible current-state bug: a completed Task retains a failed Flow,
-and the condition projection treats that stopped failure as unresolved execution
-forever. LOO-440 has a recorded merge and later completion at 1791767222, clean
-observed checkout, and an earlier blocked landing attempt. Exclude stopped failed
-Flow state from the terminal Task's unresolved-execution predicate, while retaining
-Starting/Running/Stalled/Unknown evidence, completion refusals and observed unsettled
-files/commits. Do not rewrite the execution reading or delete the failure history.
-
-Data-repair candidates, not dispositions: LOO-443/400/390/382/380/376/371 have
-recorded merges but no completion events in the copied history. This can also arise
-through ordinary unfinished delivery, so merge alone does not classify them as
-iteration debris. Inspect accepted remaining scope before completion. LOO-378 is
-explicitly paused with unpublished work in Product memory; preserve it. LOO-312 has
-a missing checkout and remains unfinished; missing files do not authorize closure.
-LOO-367/330/389 retain dirty files or unsettled commits; preserve them pending review.
-No real-data or copied-history deletion/retirement has been performed.
-
-Jack Heart distinguishes iteration debris from reproducible bugs. Repair current-use
-bugs in code; rehearse exact data repairs with restoration before cleanup. Unknown
-or interrupted Sessions never authorize closure.
-
-Check: `cargo test -p loopflow --lib a_finished_task_stays_current_only_while_execution_is_unresolved`, `cargo clippy --all-targets -- -D warnings`, `cargo fmt` — pass; native refresh of the stopped-failure correction remains.
-
-Earlier LOO-376 completion and 126-row legacy reconciliation, including exact
-selection, rehearsal and rollback limits: `d65dff0cbb:scratch/get-me-using-lf.md`,
-**Applied legacy reconciliation** and preceding paragraphs. Applied changes remain;
-this grants no broader cleanup authority. Current receipts: work-first-demo.md.
+Jack authorized exact real-data cleanup after rehearsal in the private copy.
+LOO-376 completion and the 126-row legacy repair were applied; restoration receipts
+and limits remain in work-first-demo.md. No broader cleanup is authorized.
+LOO-276 remains unclassified; merge alone cannot dispose of LOO-443/400/390/382/
+380/371. LOO-378 remains explicitly paused; LOO-367/330/389 have unsettled work.
+LOO-312 was subsequently recovered without changing its identity. Historical
+inventories, transient config failure, native screenshot, exact candidates and
+focused checks: `5b62453be7:scratch/get-me-using-lf.md`, **Sidebar cleanup and
+recurrence**. These observations are not a current execution inventory.
 
 ## Paused and prepared demo — October 13
 
@@ -339,6 +294,25 @@ picker proposals. Main repo/Task experience first; Portfolio revision stays seco
 - Finish stable-hook native proof using 185c0b3c2e: unchanged declarations across
   distinct Tasks, resume and compaction for each provider. Separate workspace or
   account trust from hook review; never fabricate approval or approve other hooks.
+
+### Sidebar metadata — remaining implementation
+
+Jack Heart's October 13 steers request slightly taller Task rows, using his cmux
+screenshot for density: compact title plus metadata line, no Session counts or
+branch/path clutter. Show program status through existing validated OSC 7501,
+ProgramStatus and Waiting owners. Compare the current Rex program-status contract
+at https://www.superlogical.com/rex/docs/build/program-status before implementation.
+Prefer actual reports; cheap existing runtime/stream inference may fill nonreporters,
+clearly labeled, with unknown preserved. Never assume Claude/Codex rollout or equate
+program done/error with Task completion, Paused or Workflow position.
+
+Use stored Task/PR destinations for links; clicking them must not open a conversation.
+Show the Machine name only for remote Tasks. Started Tasks use recorded execution/
+checkout ownership, never a changed delegation default. If an unstarted destination
+is shown, distinguish assignment from actual execution. Unknown/unavailable ownership
+stays unknown. Reuse shared location/Machine projections without polling, provider
+calls or another status authority. Preserve cached workspaces. This slice remains
+unimplemented at compression; add focused coverage before the next demo.
 
 ### Profiling and optimization
 

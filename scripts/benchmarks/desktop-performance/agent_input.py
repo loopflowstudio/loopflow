@@ -294,6 +294,7 @@ def folded_stacks(path: Path, pids: set[int]) -> collections.Counter[str]:
 def flamegraph(stacks: collections.Counter[str], path: Path) -> None:
     total = sum(stacks.values())
     if not total:
+        path.unlink(missing_ok=True)
         return
     nodes: dict[tuple[str, ...], int] = collections.Counter()
     for stack, count in stacks.items():
@@ -348,20 +349,10 @@ def _cpu_deltas(directory: Path) -> dict[int, float]:
     return {pid: max(0, values[-1] - values[0]) for pid, values in readings.items()}
 
 
-def summarize(directory: Path) -> dict:
-    metadata = _metadata(directory / "metadata.json")
-    timeline = events(directory)
-    timeline = [
-        row
-        for row in timeline
-        if (not row.get("session") or row["session"] == metadata["session"])
-        and (not row.get("task") or row["task"] == metadata["task"])
-    ]
-    clicks = [
-        row
-        for row in timeline
-        if row["phase"] == "task_click" and row.get("task") == metadata["task"]
-    ]
+def _input_response(
+    timeline: list[dict], clicks: list[dict], capture: dict | None, session: str
+) -> tuple[str, float | None]:
+    """A failed or incomplete trial has no endpoint, even if it contains later draws."""
     proof = {
         phase: [
             row
@@ -370,33 +361,8 @@ def summarize(directory: Path) -> dict:
         ]
         for phase in PHASES
     }
-    elapsed = None
-    status = "unproved"
-    # A single trial per recording prevents an earlier or superseded click from
-    # receiving another conversation's endpoint. Reject partial/failed evidence.
-    if len(clicks) == 1 and not proof["failed"] and all(len(proof[p]) == 1 for p in PHASES[:3]):
-        click, visible, probe, response = clicks[0], *(proof[p][0] for p in PHASES[:3])
-        keys = [
-            row
-            for row in timeline
-            if row["phase"] == "key_received"
-            and row.get("session") == metadata["session"]
-            and probe["wall"] <= row["wall"] <= response["wall"]
-        ]
-        draws = [
-            row
-            for row in timeline
-            if row["phase"] == "key_draw"
-            and row.get("session") == metadata["session"]
-            and keys
-            and keys[0]["wall"] <= row["wall"] <= response["wall"]
-        ]
-        if click["wall"] <= visible["wall"] <= probe["wall"] <= response["wall"] and draws:
-            elapsed = (response["wall"] - click["wall"]) * 1000
-            status = "observed; native captures require review"
     if proof["failed"] or any(row["phase"].endswith("_failed") for row in timeline):
-        status = "failed"
-    capture = _json(directory / "capture.json") if (directory / "capture.json").exists() else None
+        return "failed", None
     if capture is None or (
         capture["interrupted"]
         or not clicks
@@ -406,15 +372,45 @@ def summarize(directory: Path) -> dict:
             if row["phase"] in ("task_click", "input_response")
         )
     ):
-        elapsed = None
-        status = "unproved; recording does not cover the full interval"
+        return "unproved; recording does not cover the full interval", None
+    # One click and one ordered set of captures, never an earlier/superseded trial.
+    if len(clicks) != 1 or any(len(proof[p]) != 1 for p in PHASES[:3]):
+        return "unproved", None
+    click, visible, probe, response = clicks[0], *(proof[p][0] for p in PHASES[:3])
+    if not click["wall"] <= visible["wall"] <= probe["wall"] <= response["wall"]:
+        return "unproved", None
+    key_received = False
+    for row in timeline:
+        if row.get("session") != session or not probe["wall"] <= row["wall"] <= response["wall"]:
+            continue
+        if row["phase"] == "key_received":
+            key_received = True
+        elif row["phase"] == "key_draw" and key_received:
+            elapsed = (response["wall"] - click["wall"]) * 1000
+            return "observed; native captures require review", elapsed
+    return "unproved", None
+
+
+def summarize(directory: Path) -> dict:
+    metadata = _metadata(directory / "metadata.json")
+    timeline = [
+        row
+        for row in events(directory)
+        if (not row.get("session") or row["session"] == metadata["session"])
+        and (not row.get("task") or row["task"] == metadata["task"])
+    ]
+    clicks = [
+        row
+        for row in timeline
+        if row["phase"] == "task_click" and row.get("task") == metadata["task"]
+    ]
+    capture = _json(directory / "capture.json") if (directory / "capture.json").exists() else None
+    status, elapsed = _input_response(timeline, clicks, capture, metadata["session"])
     stacks: collections.Counter[str] = collections.Counter()
     cpu_error = None
-    if (directory / "cpu.xml").exists():
+    if capture is not None and (directory / "cpu.xml").exists():
         try:
-            stacks = folded_stacks(
-                directory / "cpu.xml", set(_json(directory / "capture.json")["pids"])
-            )
+            stacks = folded_stacks(directory / "cpu.xml", set(capture["pids"]))
         except (ET.ParseError, ValueError, KeyError) as error:
             cpu_error = str(error)
     if not stacks:

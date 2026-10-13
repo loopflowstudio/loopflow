@@ -92,7 +92,7 @@ The introductions in `README.md` and `docs/index.md` share the same text. When
 editing either introduction, update both and run
 `uv run --project website --extra test pytest website/tests/test_readme_index_sync.py`.
 
-`cargo test -p loopflow --test agent_startup_tests` exercises bare `lf` and
+`cargo test -p loopflow --test integration agent_startup_tests::` exercises bare `lf` and
 Session reconnect to a stand-in provider with an empty environment and no
 credentials. CI's ordinary Rust network isolation covers it. It bounds provider
 and Git launches, SQLite statement/returned-row counts, and time to provider
@@ -120,7 +120,7 @@ then checks its captured CLI and monitor population in Rust
 and Swift. It builds the CLI with Cargo so a unit-test binary cannot accidentally
 launch an installed version. Regenerate its wire capture with
 `LOOPFLOW_UPDATE_LIFECYCLE_FIXTURE=1 cargo test -p loopflow --lib ordinary_task_comments_and_completion_preserve_live_flow_and_arrival`,
-then run `cargo test -p loopflow --test dto_fixtures composed_lifecycle` and
+then run `cargo test -p loopflow --test integration dto_fixtures::composed_lifecycle` and
 `swift test --package-path swift --filter 'composedTaskLifecycle|dueDate'`.
 
 Provider fixtures must read the launch's actual context channel. When a final
@@ -513,6 +513,10 @@ Rust partitions wait for one shared build; the other suites run independently.
 
 Candidate and merge-group jobs must all pass for `tests-result` to pass. Both CI
 and the local runner collect every Rust test failure with `--no-fail-fast`.
+Ordinary integration modules are registered in `rust/loopflow/tests/integration.rs`
+and linked once. Add new modules there; Cargo auto-discovery is disabled. Dedicated
+installation, release, reconnect, live-provider and process-global fixture targets remain declared in
+`rust/loopflow/Cargo.toml`. Nextest runs every case in a separate process.
 Each Rust partition extracts the same revision's library or integration archive into the checkout's
 `target/` directory and materializes matching migration inputs. The reconnect
 target is excluded from that archive and executed in the smoke job. No suite
@@ -725,7 +729,7 @@ cannot skip a later review.
 Include the CLI/desktop unblock projection when changing builtin Flow composition:
 
 ```bash
-cargo test -p loopflow --test task_initialization_tests task_live_unblock
+cargo test -p loopflow --test integration task_initialization_tests::task_live_unblock
 ```
 
 Fixtures targeting a named boundary should resolve its node ID in the expanded
@@ -764,7 +768,7 @@ Listings keep effective skills and authored flows separate and show their source
 and invocations; `lf flow show` expands a flow's steps.
 
 ```bash
-cargo test -p loopflow --test cli_discovery list_preserves_kinds_overrides_sources_and_reserved_invocations
+cargo test -p loopflow --test integration cli_discovery::list_preserves_kinds_overrides_sources_and_reserved_invocations
 ```
 
 Catalog retirement also affects historical migration tests. Keep their persisted
@@ -807,7 +811,7 @@ alongside the delivery checks; a test-name filter alone misses ancestor coverage
 Rendering gathered documents must include the production deduplication step.
 
 ```bash
-cargo test -p loopflow --test context_tests
+cargo test -p loopflow --test integration context_tests::
 cargo test -p loopflow --lib context_delivery
 cargo test -p loopflow --lib skill_launch
 ```
@@ -849,7 +853,7 @@ For architecture/README documentation changes, run
 Model renames also require this focused website check; generating matching HTML
 does not catch stale vocabulary in the website assertions.
 For Markdown changes under `docs/`, builtins or skills, and changes to README or
-AGENTS, also run `cargo test -p loopflow --test documented_commands`. Its command
+AGENTS, also run `cargo test -p loopflow --test integration documented_commands::`. Its command
 scanner covers prose and headings as well as fenced examples; a focused runtime
 suite does not check those additions.
 Keep README and docs/index openings identical and regenerate docs/architecture.html
@@ -1171,7 +1175,7 @@ as controller tests. Bare interrupts prove local control during GitHub outages;
 steering publishes to Linear and belongs with the mocked Linear boundary tests.
 
 ```bash
-cargo nextest run -p loopflow --test task_github_cache_tests --no-fail-fast
+cargo nextest run -p loopflow --test integration task_github_cache_tests:: --no-fail-fast
 ```
 
 When changing Linear response shapes, run the client tests and PM-operation
@@ -1318,7 +1322,7 @@ suite's environment lock and restores them afterward. Prove isolation from a
 live Session without shell-level scrubbing:
 
 ```bash
-cargo test -p loopflow --test session_cli_tests session_names_are_shared_and_human_names_win
+cargo test -p loopflow --test integration session_cli_tests::session_names_are_shared_and_human_names_win
 ```
 
 Headless provider transport changes also run the research-artifact test

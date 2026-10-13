@@ -778,3 +778,46 @@ Validation: the focused proof with external networking blocked, `cargo fmt` and
 `cargo clippy --all-targets -- -D warnings` pass. Evidence:
 `/tmp/ci-removal-time.log`, `/tmp/ci-removal-clippy.log`,
 `/tmp/ci-rotation-failure-115254323494.log`.
+
+## Margin after the timestamp repair
+
+[Run 38402785080](https://github.com/loopflowstudio/loopflow/actions/runs/38402785080)
+passed at `1e9eb57c02` in **5:31**. Shared build finished at 2:43, the final
+integration partition at 5:26 and the aggregate at 5:31. Compared with the 4:56
+pass, build/archive rose from 109 to 124 seconds and that integration partition's
+artifact download rose from 4 to 31 seconds. Its test step fell from 114 to 112
+seconds. Swift finished at 4:54, installation at 4:18 and the last library
+partitions at 5:07. Summed runner occupancy was 43:23. One fast pass has not
+established enough margin or consecutive-run acceptance.
+
+### Link ordinary integration tests once
+
+The remaining integration archive contains dozens of executables that repeat
+linked application/dependency code. A local prototype combined 48 targets, with
+exact equality of all 481 collected case names after adding their former binary
+name as a module prefix. Its archive was 77,573,429 bytes with local debug info;
+the prior integration archive was 374,203,128 bytes without it. This directional
+comparison motivated a hosted experiment; it is not a matched Linux saving.
+
+The final layout combines **41 targets and 369 local cases** in `integration.rs`.
+Fourteen dedicated targets remain: seven installation/release/reconnect/live
+entrypoints and seven suites that directly mutate process environment. Keeping
+the latter separate preserves their ordinary libtest isolation. Existing test
+bodies, support modules, platform gates and ignored cases are unchanged.
+Nextest still starts a separate process for every case. Cargo's explicit target
+list and the integration module list register all 55 original integration source
+files exactly once. Repeated `mod support` declarations become imports from one
+shared fixture module; fixture implementations and assertions are unchanged.
+Focused command examples now select the corresponding integration module.
+
+A larger Zstandard window was also measured: recompression reduced the old
+374 MB integration archive to 252 MB in 3.5 seconds locally, but still packages
+and transfers repeated linked code. It was not added to the workflow; the
+consolidated executable addresses that repetition at its source.
+
+Validation: all 369 consolidated cases passed in network-isolated nextest
+(447.574s locally). After replacing duplicate fixture declarations with one
+shared module, four representative context/Session/planning/publication proofs
+passed (14.350s); formatting and all-target Clippy with warnings denied pass.
+Collected names and ignored flags match the original inventory exactly. Hosted
+Linux collection, archive size and full timing remain the next evidence.

@@ -1,4 +1,4 @@
-mod support;
+use crate::support;
 
 use loopflow::ops::{
     continue_sync_for_resolution, plan_sync, recover_sync, sync_with_recovery, NullProgress,

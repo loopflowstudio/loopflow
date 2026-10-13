@@ -1,5 +1,5 @@
 //! Public commands with isolated stores and a simulated SSH endpoint.
-mod support;
+use crate::support;
 use std::fs;
 use std::io::Write;
 use std::os::fd::FromRawFd;

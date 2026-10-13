@@ -1,5 +1,5 @@
 //! The real hook entry reads current owned sources without launching a provider.
-mod support;
+use crate::support;
 
 use std::fs;
 use std::path::Path;

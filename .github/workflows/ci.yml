@@ -198,14 +198,14 @@ jobs:
             --binaries-metadata target/nextest/binaries-metadata.json \
             --cargo-metadata target/nextest/cargo-metadata.json \
             -E 'not test(native_runner_is_quiet_until_its_turn_ends)' \
-            --partition hash:${{ matrix.shard }}/${{ matrix.partitions }} --test-threads 4 --no-tests fail --no-fail-fast
+            --partition hash:${{ matrix.shard }}/${{ matrix.partitions }} --test-threads 6 --no-tests fail --no-fail-fast
       - name: Prove native runner quietness
         if: matrix.shard == 0
         run: |
           LOOPFLOW_TEST_LF="$PWD/target/debug/lf" /usr/bin/time -v cargo --config "target.\"cfg(all())\".runner = [\"uv\", \"run\", \"--no-sync\", \"python\", \"$PWD/scripts/test_network.py\"]" nextest run \
             --binaries-metadata target/nextest/binaries-metadata.json \
             --cargo-metadata target/nextest/cargo-metadata.json \
-            -E 'test(native_runner_is_quiet_until_its_turn_ends)' --test-threads 1 --no-tests fail --no-fail-fast
+            -E 'test(native_runner_is_quiet_until_its_turn_ends)' --test-threads 4 --no-tests fail --no-fail-fast
       - name: Prove checkout refresh through the CLI
         if: matrix.shard == 0
         run: |

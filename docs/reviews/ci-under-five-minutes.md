@@ -663,3 +663,40 @@ proof, signing settings and all tests unchanged.
 
 Validation: 45 CI-proof/release-automation tests and actionlint pass. Hosted
 Xcode cache creation and subsequent warm full-workflow timing remain unproved.
+
+Run `38353681649` passed in **6:09**. The warmed shared Rust build finished
+within 2:42, Swift within 3:42, and macOS process tests within 3:19. The Xcode
+job's newly cold profile finished at 6:03. Its cache is now available for the
+next comparison. Installation finished at 4:07. The last integration partition
+finished at 5:11, with 117.363s test execution averaging 305% CPU; the quietness
+job finished at 5:09. Hardware and workload are unchanged by the following
+scheduling experiment.
+
+### Overlap existing quietness cases and use available execution slots
+
+The native quietness proof contained four independent fixture invocations in
+one sequential loop. It now exposes each existing case as a named test with
+one shared assertion body: foreground Codex, foreground Claude, task-bound
+headless Claude and taskless headless Claude. The 60-second Codex observation,
+the three one-second Claude observations, post-turn acquisition and every
+assertion are unchanged. Partition zero runs the four tests in separate nextest
+processes, retaining the fixture's environment isolation. No production code
+changes for this split.
+
+Local execution passed all four cases in 92.724s, including a 92.719s Codex
+case. Nextest reported one leaked output handle for foreground Claude; its
+focused standalone diagnostic passed in 18.688s without a leak. The intermittent
+local warning's cause is unconfirmed, not declared fixed. Hosted Linux execution
+is the next check. All 2,549 local runnable cases are assigned exactly once;
+the three additional names expose existing cases rather than adding behavior.
+
+The eight ordinary partitions move from four to six test slots on the same
+runners, addressing measured waiting without adding jobs. A six-library-shard
+alternative was inspected but had worse estimated balance; it was not selected.
+The fleet-receipt exclusivity override continues to reserve all configured slots.
+
+Validation: `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, the four
+focused proofs, 45 CI-proof/release-automation tests and actionlint pass, with
+the local nextest warning above retained. Raw evidence:
+`/tmp/ci-quietness-{split,foreground,clippy}.log`, `/tmp/ci-split-library-*.json`,
+`/tmp/ci-xcode-integration1.log`.

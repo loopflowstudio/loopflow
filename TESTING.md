@@ -517,6 +517,9 @@ Each Rust partition extracts the same revision's library or integration archive 
 `target/` directory and materializes matching migration inputs. The reconnect
 target is excluded from that archive and executed in the smoke job. No suite
 is dropped; the aggregate requires the build and every partition to succeed.
+Partitions use six test slots on the ordinary Linux runners. Partition zero
+runs the four native quietness cases in separate processes, preserving each
+observation window while overlapping independent waits.
 The shared Linux build and macOS Rust builds omit debug symbols to reduce
 compilation and transfer work.
 It retains unoptimized code and debug assertions; CI backtraces have less

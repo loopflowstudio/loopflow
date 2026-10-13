@@ -700,3 +700,40 @@ focused proofs, 45 CI-proof/release-automation tests and actionlint pass, with
 the local nextest warning above retained. Raw evidence:
 `/tmp/ci-quietness-{split,foreground,clippy}.log`, `/tmp/ci-split-library-*.json`,
 `/tmp/ci-xcode-integration1.log`.
+
+## First complete run below five minutes
+
+[Run 38362344076](https://github.com/loopflowstudio/loopflow/actions/runs/38362344076)
+passed at head `02eeedce51` in **4:56**, from creation at 07:23:27 UTC on
+October 13 to the required aggregate completing at 07:28:23. This was the full
+PR workload, not a checkpoint deferral or selective rerun. It proves one
+sub-five-minute run with four seconds of margin; ten consecutive real typical-code
+runs, merge-queue time and push-to-merged remain unproved.
+
+| Required path | Finish after creation |
+|---|---:|
+| Shared Rust build | 2:26 |
+| Last Rust partition | 4:50 |
+| Quietness and checkout refresh | 4:17 |
+| Installation | 4:02 |
+| Swift | 4:25 |
+| Xcode app and test-runner build | 4:26 |
+| macOS process discovery | 2:42 |
+| Smoke and reconnect | 4:34 |
+| Required aggregate | **4:56** |
+
+The shared build compiled two crates, not 256, and retained its up-to-date cache.
+All four hosted quietness cases passed without a leak warning in **71.577s**:
+Codex 71.575s and Claude 12.616–12.802s. Their original observation windows and
+assertions remain intact. The local Mac leaked-handle observation is not
+declared diagnosed merely because Linux passed cleanly.
+
+Summed runner occupancy was **42:08**, versus the original **46:44**: about 10%
+less. It exceeds the first serial reuse candidate's **34:29**, so parallelism
+buys much of the elapsed-time reduction with additional setup/transfer work.
+These are mixed-platform runner-seconds, not CPU time or dollar charges. No
+premium hardware, paid runner platform or coverage removal was introduced.
+
+Raw job records: `/tmp/ci-quietness-jobs.json`; logs:
+`/tmp/ci-under-five-{build,quietness,library1}.log`. The implementation remains
+published for review; merge is not armed and Task completion is not requested.

@@ -758,3 +758,23 @@ The focused proof passed all four connected/mapped combinations in 58.352s
 locally with external networking blocked; formatting and Clippy with warnings
 denied pass. Raw evidence:
 `/tmp/ci-confirmation-library1.log`, `/tmp/ci-rotation-order.log`.
+
+### Confirmation caught a same-second timestamp assumption
+
+[Run 38384646308](https://github.com/loopflowstudio/loopflow/actions/runs/38384646308)
+failed `incoming_removal_retains_task_and_prevents_first_placement` at head
+`c2ac0d29e6`. Observing deletion correctly increments the planning revision and
+updates `updated_at`; the test adjusted only the expected revision. It passed
+when creation and observation shared a second, then failed across a second
+boundary. Every other Task field matched.
+
+The fixture now starts with an old timestamp and explicitly proves advancement
+on deletion observation. It compares every other Task field at that boundary,
+then compares the entire post-observation Task before and after rejected
+placement. Empty PR, event and Workflow checks remain. No production change,
+retry, sleep or test removal is involved.
+
+Validation: the focused proof with external networking blocked, `cargo fmt` and
+`cargo clippy --all-targets -- -D warnings` pass. Evidence:
+`/tmp/ci-removal-time.log`, `/tmp/ci-removal-clippy.log`,
+`/tmp/ci-rotation-failure-115254323494.log`.

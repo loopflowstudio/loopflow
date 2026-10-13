@@ -6,7 +6,11 @@
   Always retaining Rust output would leave bounded lifetime unmet. Ordinary direct
   Cargo clean/build preservation remains required unless Jack Heart accepts a
   narrower participating-launcher contract. Swift clean/reset and node_modules
-  writer exclusion also remain unproved. Exact-CLI preparation is independent.
+  writer exclusion also remain unproved. The independent CLI slice is implemented;
+  the design owns its matched measurements and cleanup redesign candidates.
+- An exploratory prepared startup run passed with nextest's `LEAK` warning;
+  cause is unconfirmed. Preserve its raw log alongside clean runs rather than
+  claiming that CLI preparation repaired descendant/pipeline lifetime.
 - Broader Infrastructure overlap remains unknown after failed plan inspection;
   the design records the confirmed sibling scope.
 

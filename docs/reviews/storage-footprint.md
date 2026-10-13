@@ -1,5 +1,75 @@
 # Storage footprint review · 2026-10-06
 
+## Local verification CLI · 2026-10-13
+
+Jack Heart's lf-8f870b1 asks for measured local speed and safe, bounded build-output
+lifetime. Its independent CLI slice prepares one exact materialized CLI for the
+local Rust runner. Reclamation remains unimplemented after Cargo clean replaced
+a held lock inode; no preservation contract has been narrowed.
+
+Three matched warm pairs exercised the real local-planning Task/Flow fixture and
+the bare/connect startup fixture, using four compiler/test jobs, closed stdin,
+cleared LF_* authority, disposable fixture Homes and the normal network runner.
+Both variants used `target/materialized-tests`; holding isolation constant avoids
+reintroducing source-frontier sharing into the baseline. Each invocation made a
+fresh exact-tree source copy, so warm dependencies still incurred workspace builds.
+Rust/Cargo 1.98.1, arm64 macOS, unchanged Rust sources from `f2855f7bd`, and source
+Cargo.lock SHA-256 `a1f0adb56555425151764a415aeb536e986116b81c84d0ed779704b89b3c92e2`.
+Other host workloads remained active.
+
+| Pair and order | Fallback total | Prepared total | Fallback test phase | Prepared test phase |
+| --- | ---: | ---: | ---: | ---: |
+| 2, prepared → fallback | 107.753s | 72.729s | 38.549s | 5.891s |
+| 3, fallback → prepared | 113.050s | 81.800s | 41.499s | 6.416s |
+| 4, prepared → fallback | 120.410s | 79.716s | 41.998s | 6.433s |
+| Median | **113.050s** | **79.716s** | 41.499s | 6.416s |
+
+Total median improved **29.5%**; ranges were 107.753–120.410s and 72.729–81.800s.
+All six final runs passed both fixtures. Prepared compilation took 56.28–64s and
+nextest's subsequent build check 0.52–0.57s. Baseline initial compilation took
+58.78–68s; its test phase includes nested CLI preparation, so it is not pure
+execution time. Materialization, metadata/discovery and disposable-source cleanup
+occupy the remaining roughly 10–11s and were not individually timed. No build
+reclamation ran. This measures two selected fixtures, not the full suite or an
+installed app improvement.
+
+The first mechanism did not improve the whole path: ordinary CLI preparation
+took 32.78s, followed by another 54.48s test build; total 103.951s versus an
+exploratory fallback's 104.360s. Preparing `--tests` instead shares verification's
+dependency graph. Cargo JSON selects the non-harness `lf` artifact, never a
+guessed executable path. `--locked` also failed after materialization bumped the
+workspace version without updating Cargo.lock; offline preparation updates only
+the disposable lockfile. Development/validation-only build authority is explicit.
+An earlier test-graph trial passed with a nextest startup `LEAK` warning; its cause
+remains unconfirmed. The clean final runs do not establish a lifetime repair.
+
+| Retained output after the final prepared run | Logical GiB | Allocated GiB |
+| --- | ---: | ---: |
+| Entire Rust `target/`, including source, verification and app control | 9.994 | **10.101** |
+| Verification, included above | 4.405 | 4.492 |
+| App control, included above | 1.808 | 1.816 |
+| Swift `swift/.build` | 0.781 | 0.789 |
+| Rust + Swift total | 10.775 | **10.890** |
+
+The source/control target alone retained 6,022,094,848 allocated bytes (5.609 GiB).
+Isolation adds approximately 4.49 GiB; this slice claims no disk reduction. Matched
+fallback/prepared logical target sizes differed by only 1,680,150 bytes; allocated
+file counts varied by megabytes. `st_blocks * 512` sums file allocations, including
+possible hard-link/APFS sharing; it does not prove exclusive physical use or freed
+filesystem space. Swift and app-control bytes were retained unchanged, not rebuilt.
+Matched cold, small-edit and app measurements still belong to final acceptance.
+
+Raw commands, complete allocation snapshots and logs:
+`.lf/tmp/local-build-slice1/{measure.py,measure-final-pair.py,measurements.jsonl}`
+and the matching `baseline-2..4.log` / `candidate-2..4.log`. The command uses
+`cargo nextest run -p loopflow -E 'test(local_planning::public_local_task_places_and_runs_without_a_planning_provider) | test(agent_startup_tests::)' --no-tests fail --build-jobs 4 --test-threads 4`,
+with scripts/test.py's absolute-path network-runner configuration. The prepared
+variant adds `--prepare-cli` to the materializer; all CLI preparation is included.
+The initial isolated cold fallback total was 148.663s, recorded separately rather
+than compared to a warm candidate. Generic commands remain unprepared by default.
+
+## October 6 inventory and reclamation
+
 Jack Heart requested an account of Loopflow's disk use on a nearly full 1 TB
 development machine (LOO-390): what can be reclaimed, why the database reached
 several GB, what customers should expect, and what stops the accumulation.

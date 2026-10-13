@@ -3,9 +3,8 @@
 Task lf-8f870b1 · Draft reconciled October 13, 2026: reclamation requires redesign.
 Jack Heart accepted the outcome and delegated technical choices and autonomous
 delivery. These mechanisms are implementation decisions, not measured gains.
-Production code remains at the research baseline. The native Cargo counterexample
-invalidates reclamation's proposed writer exclusion, while exact-CLI preparation
-is independent and remains unimplemented. The accepted outcome still requires
+Slice 1 implements exact-CLI preparation independently. The native Cargo counterexample
+invalidates reclamation's proposed writer exclusion. The accepted outcome still requires
 both measured speed improvement and bounded, safe build-output lifetime.
 
 ## Problem and demo
@@ -14,8 +13,8 @@ Developers pay repeated Cargo startup and CLI resolution costs inside local test
 processes, while completed checkouts retain gigabytes of regenerable output.
 Preserve useful tests, warm builds, debugging information and retained source.
 
-Proposed: the Rust phase of `scripts/test.py` prepares its exact materialized CLI
-once for CLI-heavy fixtures. Proposed cleanup:
+The Rust phase of `scripts/test.py` prepares its exact materialized CLI
+once for CLI-heavy fixtures. Cleanup remains proposed:
 
 ```sh
 lf wt prune --builds --dry-run  # proposed: eligible output and retained reasons
@@ -32,7 +31,8 @@ Existing resource recovery calls the same deletion owner and reports its receipt
 probes. Baseline source: `f2855f7bd46aa93d57b3a2e56fc8ec917f266ea3`.
 The pre-compression design is preserved at
 `44ac1ec24242e22ecf5f77ef959d29f9609716df:scratch/local-build-speed-space.md`.
-One ordered fixture pair suggests prepared-CLI reuse; it proves no repeatable gain.
+The research's ordered fixture pair was only a hypothesis. Slice 1's final matched
+evidence now lives in the [storage review](../docs/reviews/storage-footprint.md#local-verification-cli--2026-10-13).
 
 Infrastructure's local-development friction and build_disk_bytes apply; no numeric
 Task KR is supplied. Authored objective and memory now live in
@@ -67,40 +67,77 @@ If the native lock survives those operations, preserve it and match native
 canonicalization, UTF-8 filename truncation and temporary-directory selection.
 Unproved output types stay intact with a reason. Selection-time activity is
 insufficient; arbitrary writers ignoring exclusion cannot be promised protection.
-No implementation or deletion cut has started.
+No reclamation implementation or deletion cut has started.
 The existing Python pressure cleaner still deletes using cwd/age facts and does
 not read positive Done ownership. Its continued presence is a known mismatch,
 not evidence of safe reclamation. website/node_modules also needs a supported
 writer contract and exclusion proof; Cargo and Swift lock probes cover neither
 package-manager writers nor arbitrary files under the target root.
 
-## Proposed implementation under the accepted outcome
+### Cleanup redesign candidates and evidence gaps · October 13
+
+- **Kernel filesystem detachment:** place generated output on an independently
+  detachable filesystem and reclaim its backing storage only after a normal,
+  non-forced detach succeeds. A kernel busy result must retain it; later direct
+  Cargo writers must create separate output rather than reach detached bytes.
+  No prototype exists. Prove behavior for unlinked-but-open locks, mapped running
+  binaries, clean/build races and new writers on macOS and Linux. Mount lifecycle,
+  crash recovery, privileges, app/control paths and overhead may make this too
+  large for the accepted small change. A directory rename alone supplies no such
+  kernel boundary and remains insufficient.
+- **Native exclusion outside deletable output:** investigate whether Cargo can
+  provide one persistent exclusion primitive shared by build and clean. Current
+  profile locks cannot. This likely requires upstream behavior rather than a
+  repository-only change; test the recorded clean/replacement counterexample
+  before selecting it. SwiftPM's existing external temporary lock is a cheaper
+  independent candidate, pending real clean/reset proof. Node package-manager
+  exclusion has no evidence yet. Proving only Swift cannot complete Rust lifetime.
+- **Participating-launcher leases:** mechanically smaller, but ordinary direct
+  Cargo does not participate. This requires Jack Heart to revise the preservation
+  contract and is unselected. Technical delegation alone does not authorize that
+  change. Never treat retention-only Rust behavior as satisfying bounded lifetime.
+
+These are candidates, not a replacement deletion design. Reclamation stays
+unimplemented until a mechanism proves the existing preservation contract, or
+Jack Heart explicitly accepts a different one. The existing pressure cleaner
+remains a known mismatch; this slice neither extends it nor certifies it.
+
+## Implementation and remaining design
 
 ### One prepared verification CLI
 
-Add explicit `--prepare-cli` to materialize_rust_tests.py, selected by test.py's
-full Rust phase. After exact-tree copying and migration materialization, prepare
-`cargo build --locked -p loopflow --bin lf --message-format=json` once in that
-source tree. Match target/toolchain/profile/features with verification. Resolve
-its executable from Cargo's artifact message, not a guessed target/debug/lf path.
-Set LOOPFLOW_TEST_LF for execution, replacing inherited candidates in this mode.
-Preparation failure stops tests; missing/ambiguous artifact is an error, never
-an installed/source-frontier fallback. Generic wrapper commands remain unprepared
-unless requested. Keep the support crate's direct-test preparation behavior.
+Implemented `--prepare-cli`, selected by test.py's Cargo/nextest Rust phase.
+Exact-tree copying and migration materialization precede one
+`cargo build --offline -p loopflow --bin lf --tests --message-format=json`.
+Build selection (toolchain, configuration, target, profile, features, jobs) follows
+the verification command. The executable comes from the one non-harness `lf`
+Cargo artifact. Missing, ambiguous, unavailable or failed preparation stops tests;
+LOOPFLOW_TEST_LF replaces inherited candidates with no installed/source fallback.
+Generic commands remain unprepared unless requested; direct-test support remains.
 
-Move the default materialized target to target/materialized-tests. Normalize
-explicit relative targets against the originating checkout before changing cwd.
-The full Rust path must separate a source-target collision rather than permit
-concurrent incompatible frontiers. Clear ambient LF authority during preparation
-and execution, close stdin, use four jobs and disposable test Homes. Retain the
-network runner and compiled development/validation-only authority.
+October 13 implementation decisions under Jack Heart's technical delegation:
+`--locked` failed because materialization advances workspace versions without
+updating Cargo.lock. Offline preparation permits Cargo to update only that
+disposable lockfile, matching the existing fixture path. Ordinary CLI preparation
+then repeated the root build across different dependency graphs: exploratory
+warm total 103.951s versus a fallback run's 104.360s. Preparing test targets instead
+keeps the verification graph. Three final alternating pairs improved total median
+113.050s → 79.716s (29.5%); all six passed both fixtures. Preparation is included.
+The verification root retained 4.492 GiB, entire Rust target 10.101 GiB and
+Rust + Swift 10.890 GiB. Isolation adds output rather than reclaiming it.
+The storage review owns full ranges, allocation counts and raw command references.
 
-This removes repeated CLI resolution, not every dependency feature variant.
-Ordinary CLI and test graphs differ. The installed nextest has no --no-build flag;
-do not invent one or add archives to skip a cheap warm Cargo check.
-Separating targets can increase cold work and retained bytes; its isolation benefit
-does not establish a disk improvement. Matched measurements include both source
-and materialized outputs plus app-control output, not only the prepared CLI.
+Default output is target/materialized-tests. Explicit CARGO_TARGET_DIR or
+--target-dir names its parent, resolved against the originating checkout before
+changing cwd. The nested verification root replaces source-target sharing.
+Materialized invocations remain serial in one checkout. Preparation/execution
+clear inherited LF_* authority and close stdin. Prepared mode explicitly sets
+development/validation_only and removes release tags; fixtures retain independent
+Homes and the network runner. Four jobs remain the default.
+
+Nextest still performs its cheap warm build check; no unsupported --no-build or
+archive path is added. Isolation adds retained output: source, materialized and
+app-control allocations are counted together. This slice claims no disk reduction.
 
 ### One build deletion owner
 
@@ -178,10 +215,10 @@ provides its replacement. Do not extend the predecessor to implement reclamation
   Carry source/history preservation, caps, age and pressure assertions into the
   Rust-backed path. Adapt mixed gate-capacity, busy-cleaner and busy-uv tests;
   keep their independent gate/cache guarantees and active-build preservation.
-- Replace the source-target default in materialize_rust_tests.py and the associated
-  TESTING.md overlap warning. Keep exact-tree copying, failure cleanup, network
-  isolation and existing materializer fixtures. Retain app-control output and
-  support-crate direct-test CLI preparation.
+
+Slice 1 has replaced the source-target default and TESTING.md's shared-target
+warning/recovery recipe. Exact-tree copying, failure cleanup, network isolation,
+app-control output and support-crate direct-test preparation remain intact.
 
 No new lifecycle store, clean-by-absence, incompatible mutable sharing or unlinking
 held locks. Allocation counts are not exclusive APFS physical savings; selecting
@@ -200,11 +237,14 @@ invalidated lock design.
 
 ## Internal slices and Done when
 
-1. Prepare the exact CLI and separate verification target; cut the full Rust runner
-   over. Extend test_materialize_rust_tests.py with executable probes proving dirty
-   source/frontier fidelity, stale inherited candidate replacement, preparation
-   failure cleanup and independent fixture Homes. Assert outcomes, not mock calls.
-   This slice is independent of deletion redesign; it alone does not meet Done.
+1. **Independent implementation and matched warm measurements complete.** The full
+   Rust runner prepares the exact CLI with test targets in a separate verification
+   root. Executable probes cover dirty/untracked/frontier fidelity, stale candidate
+   replacement, authority overrides, target selection, independent Homes and
+   preparation failure cleanup. Three final pairs passed real local-planning and
+   startup fixtures without leak warnings; an earlier exploratory trial's warning
+   remains unresolved. The measured graph-sharing alternative meets the draft
+   20% warm speed target. This slice alone does not meet Done.
 2. Resolve the writer-exclusion section above. Preserve the Cargo clean → lock
    replacement → build counterexample in the proof; test Swift clean/reset.
 3. **Unify safe reclamation after redesign.** Implement positive read-only ownership,
@@ -216,10 +256,11 @@ invalidated lock design.
    executable launched elsewhere, open files, held leases, writers starting after
    selection and lock inode retention. Use test-only race hooks plus real writer
    subprocesses; no production factory abstractions.
-4. Matched measurements and durable guidance. At least three alternating
-   baseline/candidate pairs, fixed toolchain/lockfile and four jobs. Count CLI
-   preparation plus real local-planning/startup execution; measure cold preparation,
-   small edit/test, Swift/control cold/warm and complete logical/allocated bytes.
+4. Remaining matched measurements and durable guidance. The warm CLI pairs and
+   full retained-output counts are complete; TESTING.md and the storage review
+   own operating guidance and results. Matched cold preparation, small edit/test,
+   Swift/control cold/warm and reclamation remain. Hold toolchain/lockfile and four
+   jobs fixed; include CLI preparation in measured totals.
    Report median/range, raw command references and compiler/setup/execution/cleanup
    separately. Draft technical targets, not Jack Heart's numeric acceptance:
    CLI-heavy warm median at least 20% faster; investigate >10% warm edit/app
@@ -252,6 +293,12 @@ before scratch cleanup. Done when normal local Rust verification demonstrates a
 matched fixture speedup, old completed inactive output is reclaimable through
 preview/apply and normal recovery with preservation proofs, affected/full hosted
 checks pass, and the PR is verified merged and Task completion recorded.
-Implementation and matched improvements remain unproved.
+Reclamation, final acceptance, full hosted CI and delivery remain unproved.
 
-Realign check: `git diff --check` passes; prose-only reconciliation, existing native-lock receipt reused; implementation and gate checks remain pending.
+Compression/review removed the shared-target default, stale overlap/recovery docs
+and hand-mirrored LF authority list. It corrected the prepared CLI's graph switch
+and inherited release authority before measurement. Direct-test preparation and
+all cleanup predecessors remain with their existing owners; no deletion mechanism
+was extended or certified.
+
+Implementation check: `uv run pytest python/tests/test_materialize_rust_tests.py python/tests/test_gate_bounded.py -q` — 56 passed; Ruff and diff checks pass; six final measured fixture runs pass; affected/full gate and cleanup proofs remain with later steps.

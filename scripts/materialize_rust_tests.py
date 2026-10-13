@@ -9,6 +9,7 @@ migrations there, and run the requested command without dirtying the checkout.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
 import signal
@@ -21,16 +22,6 @@ from types import FrameType
 from typing import Iterator
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-AMBIENT_WORK_AUTHORITY = (
-    "LF_AS",
-    "LF_BIN",
-    "LF_PROCESS_ID",
-    "LF_RUN_ID",
-    "LF_CAPTURE_KEY",
-    "LF_AGENT_CALLER",
-    "LF_TRACE_ID",
-    "LF_WAVE_ID",
-)
 
 
 def _run_git(repo_root: Path, *arguments: str, **kwargs: object) -> subprocess.CompletedProcess:
@@ -145,6 +136,9 @@ def _terminate(signum: int, _frame: FrameType | None) -> None:
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--prepare-cli", action="store_true", help="build the exact materialized fixture CLI once"
+    )
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
     if args.command[:1] == ["--"]:
@@ -152,6 +146,83 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     if not args.command:
         parser.error("provide a command after --")
     return args
+
+
+def _cargo_build_options(command: list[str]) -> list[str]:
+    # Forward build selection, not test selection or harness arguments.
+    parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+    for name in ("config", "target", "target-dir"):
+        parser.add_argument(f"--{name}", action="append", default=[])
+    parser.add_argument("--features", "-F", action="append", default=[])
+    profile_flag = "--cargo-profile" if "nextest" in command else "--profile"
+    parser.add_argument(profile_flag, dest="profile", action="append", default=[])
+    parser.add_argument("--jobs", "-j", "--build-jobs", dest="jobs")
+    for name in ("release", "all-features", "no-default-features", "offline", "frozen"):
+        parser.add_argument(f"--{name}", action="store_true")
+    arguments = command[: command.index("--")] if "--" in command else command
+    options, _ = parser.parse_known_args(arguments)
+    forwarded = ["--jobs", options.jobs or "4"]
+    if not options.profile and not options.release:
+        forwarded.extend(["--profile", "test"])
+    for name in ("config", "target", "target-dir", "profile", "features"):
+        for value in getattr(options, name.replace("-", "_")):
+            forwarded.extend([f"--{name}", value])
+    for name in ("release", "all-features", "no-default-features", "offline", "frozen"):
+        if getattr(options, name.replace("-", "_")):
+            forwarded.append(f"--{name}")
+    return forwarded
+
+
+def _verification_target(value: str) -> str:
+    return str((REPO_ROOT / value).resolve() / "materialized-tests")
+
+
+def _prepare_cli(worktree: Path, environment: dict[str, str], command: list[str]) -> str:
+    toolchain = (
+        command[1:2]
+        if command[:1] == ["cargo"] and command[1:2] and command[1].startswith("+")
+        else []
+    )
+    prepared = subprocess.run(
+        [
+            "cargo",
+            *toolchain,
+            "build",
+            # Materialization can advance workspace versions in the disposable lockfile.
+            "--offline",
+            "-p",
+            "loopflow",
+            "--bin",
+            "lf",
+            # Keep verification's dependency graph instead of rebuilding the ordinary CLI graph.
+            "--tests",
+            "--message-format=json",
+            *_cargo_build_options(command),
+        ],
+        cwd=worktree,
+        env=environment,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        text=True,
+        check=True,
+    )
+    executables = set()
+    for line in prepared.stdout.splitlines():
+        artifact = json.loads(line)
+        if (
+            artifact.get("reason") == "compiler-artifact"
+            and artifact["target"]["name"] == "lf"
+            and "bin" in artifact["target"]["kind"]
+            and not artifact["profile"]["test"]
+            and artifact.get("executable")
+        ):
+            executables.add(artifact["executable"])
+    if len(executables) != 1:
+        raise RuntimeError(f"expected one prepared lf executable, found {len(executables)}")
+    executable = Path(executables.pop())
+    if not executable.is_file() or not os.access(executable, os.X_OK):
+        raise RuntimeError(f"prepared lf executable is unavailable: {executable}")
+    return str(executable)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -173,12 +244,31 @@ def main(argv: list[str] | None = None) -> int:
                 return materialized.returncode
 
             environment = os.environ.copy()
-            for name in AMBIENT_WORK_AUTHORITY:
-                environment.pop(name, None)
+            for name in list(environment):
+                if name.startswith("LF_"):
+                    environment.pop(name)
             test_home = worktree / ".lf-test-home"
             environment["LF_HOME"] = str(test_home)
-            environment.setdefault("CARGO_TARGET_DIR", str(REPO_ROOT / "target"))
-            return subprocess.run(args.command, cwd=worktree, env=environment).returncode
+            environment["CARGO_TARGET_DIR"] = _verification_target(
+                environment.get("CARGO_TARGET_DIR", "target")
+            )
+            # Cargo's command-line target overrides its environment selection.
+            for index, argument in enumerate(args.command):
+                if argument == "--target-dir":
+                    args.command[index + 1] = _verification_target(args.command[index + 1])
+                elif argument.startswith("--target-dir="):
+                    args.command[index] = "--target-dir=" + _verification_target(
+                        argument.split("=", 1)[1]
+                    )
+            if args.prepare_cli:
+                environment.pop("LOOPFLOW_TEST_LF", None)
+                environment["LOOPFLOW_BUILD_PROVENANCE"] = "development"
+                environment["LOOPFLOW_MIGRATION_AUTHORITY"] = "validation_only"
+                environment.pop("LOOPFLOW_RELEASE_TAG", None)
+                environment["LOOPFLOW_TEST_LF"] = _prepare_cli(worktree, environment, args.command)
+            return subprocess.run(
+                args.command, cwd=worktree, env=environment, stdin=subprocess.DEVNULL
+            ).returncode
     except (OSError, RuntimeError, ValueError, subprocess.CalledProcessError) as exc:
         print(f"materialized Rust test setup failed: {exc}", file=sys.stderr)
         return 1

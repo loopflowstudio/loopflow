@@ -3,17 +3,14 @@
 ## Test maintenance reduction (lf-6d3ff35, 2026-10-13)
 
 Jack Heart authorized selective test cleanup and delivery, without retries or a
-five-minute CI claim. One CI repository architecture scan plus checker fixtures
-and one portable HTML renderer freshness check retain their distinct proof.
-Editorial metric/roadmap/title fragments cannot prove agent judgment; catalog,
-command resolution, safety contracts and unresolved prompt goldens remain.
+five-minute CI claim. CI's architecture scan, checker fixtures and portable HTML
+freshness retain distinct proof; editorial fragments cannot prove agent judgment.
+Catalog, command resolution, safety contracts and prompt goldens remain.
 [Assertion mapping](../../../docs/reviews/ci-test-coverage.md#applied-excess-test-reduction--2026-10-13)
-records the net 49-line reduction. CLI/disk and macOS overlap remain separate.
-Installation image acquisition failed before tests on #1545;
-other product jobs passed. Acquisition failure supplies no installation acceptance,
-and source completion establishes no delivery. Release's cold-image and
-operation-entry lessons apply; earlier retry recovery grants no
-exception to Jack's current no-retries boundary.
+records the net 49-line test reduction. #1545 merged as `414d4dd27`, including
+Docker Hub acquisition after ECR quota failure. Merge supplies no installation
+acceptance or measured CI saving. Release's cold-image/operation-entry lessons
+apply; earlier retry recovery grants no exception to Jack's no-retries boundary.
 
 ## Global agent override (LOO-440, curated 2026-10-11)
 
@@ -1080,25 +1077,25 @@ Direct invocation and large inputs.
 
 ## macOS CI evidence (lf-ddf2d53, 2026-10-13)
 
-Jack Heart authorized implementation/delivery toward CI under five minutes over
-ten real typical-code PRs; queue/push-to-merged stay separate. #1543 merged;
-queue 38452715134 took 6:24 to final job (6:25 updatedAt). Exact dependency hits
-still required changed-source Xcode compilation. lf-12be237 owns aggregate
-acceptance; other Tasks' numeric retirement does not waive it.
+Jack Heart authorized CI implementation/delivery: under five minutes over ten
+real typical-code PRs, owned by lf-12be237; queue/push-to-merged stay separate.
+#1543 merged; queue 38452715134 took 6:24 (6:25 updatedAt) despite exact
+dependency hits. Other Tasks' numeric retirement waives nothing here.
 
-Shell overlap was rejected and removed: cold pairs saved 13.453–39.668s, but
-reversed warm order erased the gain, totaling 0.417s slower. Actual compiler
-overlap proves no reliable gain or lower cost.
-Shared services/contention limit attribution; client time omits compiler CPU/RSS.
-Preparation must match Xcode's toolchain, SDK, deployment, source and
-target. Process groups alone left a Swift compiler alive after cancellation.
+Useful critical-path gain allows neutral warm samples. Removed overlap saved 13.453–39.668s cold;
+warm totaled 0.417s slower, weak regression evidence. Cleanup complexity and
+hosted benefit remain unresolved.
 
-Preserve ordinary signed Xcode proof, full Swift tests, copy/sign behavior,
-development provenance, validation-only migrations and disposable Home/network
-boundaries. No paid runners, test removal, relaxed cache identity or arbitrary
-retries. Release's operation-entry lesson applies: local proof establishes no
-hosted delivery. Evidence:
-[CI review](../../../docs/reviews/ci-under-five-minutes.md#october-13-follow-up-shell-overlap-rejected-before-publication).
+Package-only codegen-units=256 failed: cold 1.836s slower, warm 3.660s faster.
+Frontend dominated (21.49–26.56s, backend 3.60–4.77s), proving no source cause
+or Xcode gain. Shared services/contention limit attribution; Xcode client time
+omits compiler CPU/RSS. Match toolchain, SDK, deployment, source/target.
+Process groups alone left a Swift compiler alive after cancellation.
+
+Preserve signed Xcode proof, full Swift tests, copy/sign, development provenance,
+validation-only migrations and disposable Home/network boundaries. No paid
+runners, test removal, relaxed cache identity or retries. Release's lesson:
+local proof establishes no hosted delivery. [Trials](../../../docs/reviews/ci-under-five-minutes.md).
 
 ## Agent startup profiling (LOO-436, 2026-10-08)
 

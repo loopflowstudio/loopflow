@@ -352,3 +352,5 @@ quitting would destroy input. No global install, client takeover, live migration
 cleanup or full-Task landing follows from this pursuit. Demonstrate the real
 Loopflow repo, truthful Workflow and correct primary conversation; keep unresolved
 native timing/trust proof with the work; no completion follows from headless checks.
+
+Sync check October 13: `cargo test -p loopflow --lib -- git_get_default_branch zero_retry_after_still_pauses_other_callers_without_more_requests linear::cooldown::tests::rate_limit_pauses_independent_clients_and_resumes_after_reset` PASS (5); `scripts/test_desktop.sh --filter 'WorkModelTests|TaskHistoryFilterTests' -Xswiftc -gnone` PASS (31) after deleting auto-merged duplicate pauseTask; `git diff --check` PASS; broader checks remain with gate/CI.

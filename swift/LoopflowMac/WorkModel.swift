@@ -1593,22 +1593,6 @@ final class WorkModel {
         }
     }
 
-    func pauseTask(_ task: RoadmapTask, wave: WaveSnapshot, paused: Bool) async {
-        let owner = navigation
-        let taskId = task.id
-        guard owner.taskRunDrafts[taskId]?.acting != true else { return }
-        owner.taskRunDrafts[taskId, default: TaskRunDraft()].acting = true
-        owner.taskRunDrafts[taskId]?.error = nil
-        do {
-            try await query.pauseTask(issue: task.task.identifier, paused: paused, cwd: WaveOrigin.resolve(wave.repo))
-            owner.taskRunDrafts[taskId] = nil
-            await refresh()
-        } catch {
-            owner.taskRunDrafts[taskId]?.acting = false
-            owner.taskRunDrafts[taskId]?.error = error.localizedDescription
-        }
-    }
-
     func completeTask(_ task: RoadmapTask, wave: WaveSnapshot) async {
         await performTaskAction(task.id) {
             try await query.completeTask(issue: task.task.identifier, cwd: WaveOrigin.resolve(wave.repo))

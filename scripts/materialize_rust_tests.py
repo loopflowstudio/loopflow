@@ -157,7 +157,7 @@ def _cargo_build_options(command: list[str]) -> list[str]:
     profile_flag = "--cargo-profile" if "nextest" in command else "--profile"
     parser.add_argument(profile_flag, dest="profile", action="append", default=[])
     parser.add_argument("--jobs", "-j", "--build-jobs", dest="jobs")
-    for name in ("release", "all-features", "no-default-features", "offline", "frozen"):
+    for name in ("release", "all-features", "no-default-features", "frozen"):
         parser.add_argument(f"--{name}", action="store_true")
     arguments = command[: command.index("--")] if "--" in command else command
     options, _ = parser.parse_known_args(arguments)
@@ -167,7 +167,7 @@ def _cargo_build_options(command: list[str]) -> list[str]:
     for name in ("config", "target", "target-dir", "profile", "features"):
         for value in getattr(options, name.replace("-", "_")):
             forwarded.extend([f"--{name}", value])
-    for name in ("release", "all-features", "no-default-features", "offline", "frozen"):
+    for name in ("release", "all-features", "no-default-features", "frozen"):
         if getattr(options, name.replace("-", "_")):
             forwarded.append(f"--{name}")
     return forwarded

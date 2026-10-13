@@ -241,7 +241,9 @@ invalidated lock design.
    Rust runner prepares the exact CLI with test targets in a separate verification
    root. Executable probes cover dirty/untracked/frontier fidelity, stale candidate
    replacement, authority overrides, target selection, independent Homes and
-   preparation failure cleanup. Three final pairs passed real local-planning and
+   preparation failure cleanup. A real-Cargo probe also checks copied-input
+   fidelity and source-lockfile preservation with an explicit offline option.
+   Three final pairs passed real local-planning and
    startup fixtures without leak warnings; an earlier exploratory trial's warning
    remains unresolved. The measured graph-sharing alternative meets the draft
    20% warm speed target. This slice alone does not meet Done.
@@ -301,4 +303,4 @@ and inherited release authority before measurement. Direct-test preparation and
 all cleanup predecessors remain with their existing owners; no deletion mechanism
 was extended or certified.
 
-Implementation check: `uv run pytest python/tests/test_materialize_rust_tests.py python/tests/test_gate_bounded.py -q` — 56 passed; Ruff and diff checks pass; six final measured fixture runs pass; affected/full gate and cleanup proofs remain with later steps.
+Implementation check: `uv run pytest python/tests/test_materialize_rust_tests.py python/tests/test_gate_bounded.py -q` — 57 passed; Ruff and diff checks pass; six final measured fixture runs pass; affected/full gate and cleanup proofs remain with later steps.

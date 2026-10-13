@@ -3,6 +3,7 @@
 import ast
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -251,4 +252,47 @@ def test_preparation_failure_never_runs_tests_and_removes_worktree(
     assert result.returncode != 0
     assert "tests ran after failed preparation" not in result.stderr
     assert "materialized Rust test setup failed" in result.stderr
+    assert "loopflow-materialized-" not in _git(repo, "worktree", "list", "--porcelain").stdout
+
+
+def test_prepared_cli_builds_real_cargo_artifact_offline_without_touching_source(
+    repo: Path,
+) -> None:
+    if shutil.which("cargo") is None:
+        pytest.skip("Cargo unavailable; Rust gate owns the real artifact probe")
+    (repo / "Cargo.toml").write_text(
+        '[workspace]\nmembers = ["."]\n[workspace.package]\nversion = "0.12.3"\n'
+        '[package]\nname = "loopflow"\nversion.workspace = true\nedition = "2021"\n'
+        '[[bin]]\nname = "lf"\npath = "src/main.rs"\n'
+    )
+    (repo / "src").mkdir()
+    (repo / "src/main.rs").write_text(
+        'fn main() { print!("{}{}{}", include_str!("../tracked.txt"), '
+        'include_str!("../untracked.txt"), include_str!("../materialized.txt")); }\n'
+    )
+    (repo / "tracked.txt").write_text("dirty\n")
+    (repo / "untracked.txt").write_text("new\n")
+    environment = os.environ.copy()
+    environment.pop("CARGO_TARGET_DIR", None)
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/materialize_rust_tests.py",
+            "--prepare-cli",
+            "--",
+            sys.executable,
+            "-c",
+            "import os, subprocess; "
+            "assert subprocess.check_output([os.environ['LOOPFLOW_TEST_LF']], text=True) "
+            "== 'dirty\\nnew\\nready'",
+            "--offline",
+        ],
+        cwd=repo,
+        env=environment,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert not (repo / "Cargo.lock").exists()
+    assert not (repo / "materialized.txt").exists()
     assert "loopflow-materialized-" not in _git(repo, "worktree", "list", "--porcelain").stdout

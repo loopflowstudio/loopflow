@@ -11,6 +11,6 @@ PR #1543 merged; the full five-minute goal remains unmet. Latest real integrated
 
 Latest queue 38452715134 restored exact dependency caches for both Swift CLI and app control CLI. Xcode DerivedData missed because Swift source inputs changed. App control compilation reported 1m33s within the serial Xcode app/post-build/test-bundle sequence. Xcode compile step: 271s. Swift transport CLI:69s followed by Desktop/test step154s. Rust build/archive:81s; all Rust partitions finished before five minutes. Aggregate scheduling also consumed measurable margin; do not attribute the full elapsed delta to compilation.
 
-Follow-up lf-ddf2d53 owns measured macOS critical-path work, separately from local-speed/disk lf-8f870b1 and test deletion lf-6d3ff35. Both aggregate-target and shell-overlap experiments are rejected; [the current plan](macos-ci.md) retains the blocker and build requirements. No numeric acceptance is waived. lf-12be237 retains aggregate ten-run and queue/push-to-merged proof.
+lf-ddf2d53 owns the [macOS critical-path change](macos-ci.md), separately from local-speed/disk lf-8f870b1 and test deletion lf-6d3ff35. lf-12be237 retains aggregate ten-run and queue/push-to-merged proof. The earlier aggregate-target experiment also remains rejected.
 
-Sources: GitHub Actions run/jobs APIs and log for run38452715134, inspected October13. Exact push timestamps are still missing for these runs; publication start is only an upper bound. No new paid platform adopted and no tests removed.
+Sources: GitHub Actions run/jobs APIs and log for run 38452715134, inspected October 13. Exact push timestamps are still missing; publication start is only an upper bound.

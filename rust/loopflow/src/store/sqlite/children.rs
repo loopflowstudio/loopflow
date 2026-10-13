@@ -1097,8 +1097,8 @@ pub(super) fn require_task_planning(conn: &Connection, task: &Task) -> StoreResu
         [task.id.as_str()],
         |row| Ok((row.get(0)?, row.get(1)?)),
     )?;
-    if super::durable::task_state_in(conn, &task.id)? != crate::durable::TaskState::Active
-        && crate::linear::terminal_reason(state.as_deref(), completed).is_some()
+    if crate::linear::terminal_reason(state.as_deref(), completed).is_some()
+        && super::durable::task_state_in(conn, &task.id)? != crate::durable::TaskState::Active
     {
         return Err(StoreError::InvalidAuthority(
             "terminal planning state cannot start work; its execution history is preserved".into(),

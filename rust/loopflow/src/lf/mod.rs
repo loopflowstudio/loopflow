@@ -2273,9 +2273,15 @@ mod tests {
         ] {
             assert!(Cli::try_parse_from(args.clone()).is_ok(), "{args:?}");
         }
-        for verb in [
-            "recover", "enable", "disable", "prepare", "resume", "advance",
-        ] {
+        assert!(matches!(
+            Cli::try_parse_from(["lf", "task", "pause", "LOO-1"]).unwrap().command,
+            Some(Commands::Task { cmd: TaskCommand::Pause { issue } }) if issue == "LOO-1"
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["lf", "task", "resume", "LOO-1"]).unwrap().command,
+            Some(Commands::Task { cmd: TaskCommand::Resume { issue } }) if issue == "LOO-1"
+        ));
+        for verb in ["recover", "enable", "disable", "prepare", "advance"] {
             assert!(Cli::try_parse_from(["lf", "task", verb, "LOO-1"]).is_err());
         }
         assert!(Cli::try_parse_from(["lf", "wave", "status", "--no-sync"]).is_err());

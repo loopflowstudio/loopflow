@@ -1,6 +1,6 @@
 # LOO-462 decisions still open
 
-Reconciled October 11, 2026. Jack Heart authorized implementation through
+Reconciled October 13, 2026. Jack Heart authorized implementation through
 publication for demo review on October 10, not landing. October 11 authorizes
 real-data cleanup after rehearsal in the private copy; specific uncertain
 dispositions remain for review.
@@ -65,13 +65,31 @@ including a race after the Desktop offer. These are reversible implementation ch
 Jack Heart selected removing the redundant Work tab strip: the sidebar already
 switches conversations. Retain all cached workspaces, native surfaces, panes,
 drafts and selection; this removes presentation only, not retention or history.
-Jack also requested Task-click-to-responsive-agent-input measurements and a
-scoped optimization contribution, now running independently of hook repairs.
+Jack also requested Task-click-to-responsive-agent-input measurements. Lookup,
+hook declarations and profiling instrumentation are committed; native timing and
+trust evidence remain outstanding. No independent contribution remains running
+on the evidence supplied to this reconciliation.
 
 ## Profiling evidence — October 13
 
 Reversible choice: native endpoint evidence is captured and marked by the observer,
 with exact-Session key/draw checks; no provider prompt heuristic or synthetic
-readiness state. Marker times include observer delay. Time Profiler exports and
-closed provider waits need native validation; fixture parser tests establish no
-native endpoint or speedup. Both running apps/drafts remain untouched.
+readiness state. Marker times include observer delay. A real headless Time Profiler
+export validates parsing, not closed provider waits, a native endpoint or speedup.
+Both existing apps/drafts remain preserved.
+
+## Sidebar metadata — October 13
+
+Jack Heart requested program status, stored Task/PR links and remote Machine names.
+Compact title plus metadata line is a reversible presentation choice, still awaiting
+implementation and native review. No product decision blocks this slice; status
+provenance and recorded ownership must follow the accepted constraints in the plan.
+
+## Context accounting — October 13
+
+Main moved Product memory to `.lf/wave/product/`; no immediate child directories
+or child memories exist there. The supplied manifest and available `lf context`
+still use the old path and omit memory usage. Direct cl100k_base accounting covers
+the actual memory against the command's default 16,000-token/131,072-byte limits;
+scratch remains measured by `lf context`. No missing memory is inferred from the
+stale command's omission.

@@ -7,8 +7,9 @@ Remaining reversible UI details may be resolved during implementation; live data
 cleanup remains separate and requires a reviewed, restorable plan.
 Product owns this Task. LOO-427 is integrated and completed; historical stacking
 details remain at `0bb13e9261:scratch/get-me-using-lf.md`. Portfolio implementation:
-`d43aa248d3`; shared-reader compression: `50e2cf44d1`. Reconciled October 11
-against those changes, parent integration and the failed configured demo.
+`d43aa248d3`; shared-reader compression: `50e2cf44d1`. Reconciled October 13
+at `cf67067b0d`, including main `414d4dd27c`, completed chrome/profiling work and
+the failed configured demo. Sidebar metadata remains implementation work.
 
 ## Problem and accepted direction
 
@@ -146,7 +147,7 @@ toggle with its exclusive state/tests. CLI launching, explicit Session links,
 Run inspection, pane-owned new conversations, membership and missing-Work evidence
 remain. There is no replacement Session index or second primary/layout owner.
 
-October 13 removes the SessionsContentView Work-tab strip (already checkpointed),
+October 13 removed the SessionsContentView Work-tab strip,
 Task sibling Menu and ordinary Task Flow-membership chip. Their exclusive chrome
 expectations are removed; full Session membership, explicit links, retained panes,
 rename/binding and non-Task chrome survive. Duplicate opening labels collapse into
@@ -161,7 +162,10 @@ An empty CPU reading removes an older SVG instead of leaving misleading evidence
 Review also repaired the headless stream fixture's obsolete assumption that a
 data-directory frame confirms Machine identity; it now confirms the actual ID.
 
-Check: `scripts/test_desktop.sh --filter 'DesktopHeadlessTests|WorkDestinationTests|WorkNavigationTests' -Xswiftc -gnone` built and passed 102/103; after the identity fixture repair, `--filter DesktopHeadlessTests` passed all 12; `uv run pytest python/tests/test_agent_input_profile.py -q` passed 9; Ruff/format/diff checks passed. Native input/trust proof remains with demo; affected-suite verification remains with gate.
+Compression evidence is preserved at `ae691073c9:scratch/get-me-using-lf.md`:
+102/103 Desktop cases passed initially; repairing the obsolete Machine-identity
+fixture made its 12-case suite pass. Nine profiling tests passed. This establishes
+neither native input/trust proof nor a gate pass for later integration.
 
 The launcher reuses `cmd_install` for build/install in both launch modes, leaving their presentation
 separate. Task entry uses the pane's existing `sessionId` projection to detect a
@@ -273,27 +277,26 @@ Jack Heart requested this design update and a new pursue through publication for
 review, not landing. This section supersedes earlier visible Work-tab and Session
 picker proposals. Main repo/Task experience first; Portfolio revision stays second.
 
-### UX polish
+### UX implemented; native review remains
 
-- Sidebar is the Work/conversation switcher. Remove the redundant top Work tab
-  strip; retain every cached workspace, native surface, pane/layout, document and
-  terminal draft, focus selection and history. No eviction or Session completion.
-- Ordinary Task entry opens its one ongoing primary Task conversation through the
-  existing Rust owner. Remove the sibling Session dropdown and Independent Flow
-  provenance chrome from ordinary Task navigation. Historical/review conversations
-  remain stored, explicit links remain valid, and already-open panes survive. Do
-  not silently replace a deliberately opened historical conversation or take over
-  a live client. No new Session inventory/search UI.
-- Keep conversation first, compact breadcrumb and expandable Overview; do not add
-  buttons or permanent chrome. Collapse internal Opening conversation/Opening
-  Session stages into coherent opening feedback without hiding failure or retry.
-- Investigate Workflow rendering against actual Task records. LOO-462 has feature
-  at demo; loading/unavailable cannot mean No workflow yet. Some Tasks genuinely
-  have no captured Workflow: display that accurately, never invent/backfill one
-  merely to populate UI. Preserve last-good readings while refreshing.
-- Finish stable-hook native proof using 185c0b3c2e: unchanged declarations across
-  distinct Tasks, resume and compaction for each provider. Separate workspace or
-  account trust from hook review; never fabricate approval or approve other hooks.
+`0bb13e9261` removed the visible Work-tab strip while retaining the workspace
+registry. `5b62453be7` removed ordinary Task sibling menus and Flow-membership
+chrome, unified opening feedback, and added truthful Workflow refresh errors.
+The existing Rust primary owner still prepares first opening; a deliberately
+selected historical conversation remains selected on return. Explicit links,
+all Session membership, cached surfaces, layouts, focus and drafts survive.
+There is no new Session inventory, Workflow launch or client takeover.
+
+TaskWorkflowHeader distinguishes an unread Workflow, an unavailable reading, a
+successful null Workflow and a last-good value with refresh failure. It does not
+backfill Workflow records. LOO-462's recorded feature/demo position remains the
+real-repository review case. Conversation-first layout, compact breadcrumb and
+expandable Overview exist; sizing and native usability remain unaccepted.
+
+Stable-hook declarations are implemented in `185c0b3c2e`. Native approval-once
+proof across distinct Tasks, resume and compaction remains for each provider.
+Workspace/account trust is separate from hook review; no fabricated approval or
+approval of unrelated hooks is part of this work.
 
 ### Sidebar metadata — remaining implementation
 
@@ -312,9 +315,21 @@ checkout ownership, never a changed delegation default. If an unstarted destinat
 is shown, distinguish assignment from actual execution. Unknown/unavailable ownership
 stays unknown. Reuse shared location/Machine projections without polling, provider
 calls or another status authority. Preserve cached workspaces. This slice remains
-unimplemented at compression; add focused coverage before the next demo.
+unimplemented at reconciliation: WorkNavigator still renders a single title at
+28-point minimum height, with a Task-tone dot. Status provenance, link interaction
+and recorded remote-owner coverage remain part of this slice before demo.
 
 ### Profiling and optimization
+
+Implemented in `5b62453be7`, compressed in `ae691073c9`: one opt-in recorder joins
+Desktop click/key/draw events, lf preparation/lock/provider-launch milestones,
+process CPU deltas and exported Time Profiler stacks. Exact-Session ordered native
+captures are required for an observed endpoint; failed/incomplete trials have no
+elapsed comparison value. Running CPU samples alone enter the flamegraph; missing
+samples remove an older SVG. The real headless export validates the parser only.
+Commands and observer limits live in `scripts/benchmarks/desktop-performance/agent-input.md`.
+
+Remaining acceptance:
 
 Measure Codex and Claude separately for cached workspace switching, native resume,
 and fresh conversation launch. Start at the actual Task click and end at visible
@@ -331,9 +346,9 @@ waits; CPU samples cannot explain elapsed waiting alone. Closed provider interna
 and unavailable stack symbols stay explicit, not synthetic spans. Report hook
 approval separately alongside total elapsed time, never silently subtract it.
 
-Instrument through existing owners, not a second readiness lifecycle. Capture raw
-trace/profile artifacts with a reproducible command and readable flamegraph and
-phase breakdown; include observer overhead/limitations. Compare before/after on
+The instruments reuse existing owners, not a second readiness lifecycle. Native
+trials still need raw artifacts, readable flamegraphs and phase breakdowns with
+observer overhead/limitations. Compare before/after on
 comparable cases and optimize measured bottlenecks. No arbitrary numeric target
 or retired soak requirement is restored. Unavailable native facilities do not block
 headless implementation; they leave named demo proof outstanding, never a claimed
@@ -343,14 +358,20 @@ scratch/task-opening-latency.md; historical read durations are not endpoint timi
 ### Delivery and demo
 
 Hook fix `185c0b3c2e` and sidebar/lookup checkpoint `0bb13e9261` are preserved;
-focused checks already pass (46 retention/navigation, 63 destination/Session tests).
-Finish focused regression coverage, compress, reconcile and publish through pursue.
-Build this diff's app with its matching bundled lf for every operation and embedded
-launch. Jack Heart requested relaunch after UX fixes; before terminating a demo,
-inspect its live panes/drafts and use a non-destructive replacement window/build if
-quitting would destroy input. No global install, client takeover, live migration,
-cleanup or full-Task landing follows from this pursuit. Demonstrate the real
-Loopflow repo, truthful Workflow and correct primary conversation; keep unresolved
-native timing/trust proof with the work; no completion follows from headless checks.
+their focused checks remain applicable. Main `414d4dd27c` brings the authored
+Wave move into `.lf/wave/` and shared Task pause handling; `cf67067b0d` removed
+the duplicate pause method introduced by integration. Its five Rust and 31 Swift
+focused passes are recorded at `cf67067b0d:scratch/get-me-using-lf.md`.
 
-Sync check October 13: `cargo test -p loopflow --lib -- git_get_default_branch zero_retry_after_still_pauses_other_callers_without_more_requests linear::cooldown::tests::rate_limit_pauses_independent_clients_and_resumes_after_reset` PASS (5); `scripts/test_desktop.sh --filter 'WorkModelTests|TaskHistoryFilterTests' -Xswiftc -gnone` PASS (31) after deleting auto-merged duplicate pauseTask; `git diff --check` PASS; broader checks remain with gate/CI.
+Remaining delivery includes the sidebar slice and its regressions, affected-suite
+gate and publication for review. The unlaunched profiling build in
+task-opening-latency.md predates compression, main integration and the sidebar
+slice; the later demo needs a fresh matching bundled-lf app. Jack Heart requested
+relaunch after UX fixes, preserving both existing apps' live panes and unsent
+drafts. A replacement must not destroy that input. Real Loopflow repo/Task review,
+six provider/case timing trials, measured-cause optimization and stable-hook proof
+remain; Portfolio review follows the main experience. No global install, takeover,
+live migration, broader cleanup or landing is authorized. No product decision is
+needed for the remaining implementation; visual acceptance stays with demo review.
+
+Check: `git diff --check` PASS (prose-only reconciliation); prior focused results reused, affected-suite gate/CI and native demo remain outstanding.

@@ -96,20 +96,12 @@ Binding retains locators/Work/execution; imports allocate identity, exporting no
 RepositoryId. Locator readings need observation fences: A→B→A and concurrent
 locators defeat scene/per-path fences. Native proof remains.
 
-**Unmapping is not association:** it can enable duplicate creation. `66dd3c44f`
-composes LOO-412 through `de3c84b08`: correspondence/full-ID lookup preserves
-physical IDs, private selection, effects and execution; import creates no requests.
-Store/CLI/migration checks pass.
-`2afcfba1a`: lookup shares one snapshot, never a reservation.
-
-**Retention is not observation:** confirmation/frontier and correspondence lessons
-are preserved at `e97d908241:wave/product/MEMORY.md`, this heading. Their seeded
-execution fixtures never established live Linear, running-provider or mounted
-Desktop proof. Mixed-provider exchange is retired by LOO-412.
-
-#1512 connects live clients or resumes native history after driver death, never
-from import; #1517 preserves opaque AgentSessionId bytes. Evidence/limits:
-`829c9b993`, this heading; no takeover or native acceptance.
+**Unmapping is not association:** it can enable duplicate creation. Correspondence
+preserves physical IDs, private selection, effects and execution; lookup grants no
+reservation and import creates no requests. Retention is not observation.
+Historical exchange fixtures and contrary evidence remain at
+`cf67067b0d:.lf/wave/product/MEMORY.md`, this heading; no live Linear,
+running-provider or mounted Desktop proof follows. Mixed-provider exchange is retired.
 
 `e3ca861b1`: mounted-page/visibility observation replaces callbacks; request IDs
 fence registration only. Pre-registration failures survive.
@@ -127,20 +119,14 @@ Scoped alias resolution does not replace repository checks for historical branch
 selectors, which can resolve only later through retained placement.
 Preview probes no providers and performs no takeover or completion/cleanup.
 
-October 9 completion exchange: accepted Git mutations supersede intent even when
-offline complete/reopen returns to the same value; replay preserves newer requests.
-Supersession/delivery share a savepoint. Linear's title-only revisions cannot cancel
-intent; end retry cannot revive it. `e79451d05`/`2a2379913` repair the `37cd026a7`
-counterexample. Seeded Workflow/PR/placement, disk drafts and one fake provider prove
-no running Flow or native acceptance. Full evidence and earlier failures:
-`829c9b993:wave/product/MEMORY.md`, this heading.
-
-October 9: `787f440ea`/`50bf78f1e` exchange Machine ID/time/provenance through
-Placement. Null restores inheritance; unknown Machines create no connections.
-Reaffirming explicit intent preserves timestamp/mutation; selecting legacy intent
-authors a save. Two-Home/file-Git and Store fixtures cover conflicts, narrower/future
-inheritance, clearing/no-echo and unchanged seeded execution, not running Flows.
-Earlier evidence/failed attempts: `829c9b993:wave/product/MEMORY.md`, this heading.
+October 9 exchange lessons: accepted Git mutations supersede completion intent
+even after complete/reopen returns to the same value; replay preserves newer
+requests. Linear title-only revisions cannot cancel intent; end retry cannot
+revive it. Placement carries Machine provenance; null restores inheritance,
+unknown Machines create no connections, and reaffirming explicit intent preserves
+its timestamp. Fixtures, counterexamples and limits are archived at
+`cf67067b0d:.lf/wave/product/MEMORY.md`, this heading; no running-Flow or native
+acceptance was established.
 
 Remote evidence: `d16fc62d8`, this heading. Nonces fence replies; per-peer deadlines imply no global inventory. Positive owners survive unavailable peers; conflicting
 positives refuse, negatives never admit start. Remote Session/Files/shells retain
@@ -159,6 +145,7 @@ and LOO-453 (readiness/events); research:
 [the comparison](../../../docs/reviews/terminal-command-comparison.md#rex-composition-and-discoverability-2026-10-10).
 
 Jack Heart (October 10) accepted Work-named repository/Wave/Task tabs; close hides.
+October 13 replaced their visible strip with sidebar switching, retaining ownership.
 `39698225f3` keys registry/targets by Work with shared conversation state;
 hide/reopen retains panes, drafts and zoom.
 `37fa81df13`: terminals retain captured locations; Files/logs prefer recorded
@@ -176,12 +163,10 @@ New Tasks carry an immutable creating-Machine coordinator through planning; its
 SQLite transaction grants one permanent execution owner. Positive receipts stay
 local, outside planning merge. Lost replies retry the same owner; later delegation
 cannot replace it. Historical shared Tasks with no coordinator still refuse.
-Race/exchange and lost-reply CLI fixtures pass. This is isolated SSH/provider simulation,
-not live migration or native acceptance. LOO-414 keeps unavailable-coordinator
-recovery and detached launch retries. After #1491 merged (`d1973e5942`), integration
-checks passed: 2521 Rust cases across broad/focused runs, 18 skipped; Desktop
-build/66 focused tests; fmt and Clippy. Sync interrupted CLI-rebuilding tests;
-all affected cases passed on the stable checkout. CI and native proof remain.
+LOO-414 keeps unavailable-coordinator recovery and detached launch retries.
+Admission/integration checks and interrupted attempts:
+`cf67067b0d:.lf/wave/product/MEMORY.md`, this heading. Isolated SSH/provider
+simulation establishes neither live migration nor native acceptance.
 
 Jack Heart accepted LOO-427 for queue then Task-completing shipping on October 10
 (`16e9c950b9`), superseding the demo hold without claiming missing proof. LOO-397
@@ -354,7 +339,7 @@ launching again. The [review](../../../docs/reviews/session-operate-prompts.md) 
 simulations and two read-only model runs, not installed proof. Open conversations
 keep old instructions until `lf session replace`.
 
-## Capture and work-first entry (October 1–11)
+## Capture and work-first entry (October 1–13)
 
 Jack Heart accepted capture in the owning repo/Wave conversation: self-contained
 Tasks, no workers or new authority. Retry uncertain writes with identical input
@@ -397,6 +382,29 @@ with mutations, failed discovery retains membership, and removing membership lea
 Work/drafts intact. Authored-Wave discovery remains separate. Isolated CLI/Swift
 checks establish owner agreement, not native picker or menu acceptance. Configured
 review uses bundled portfolio/identity support; the launcher tests identity only.
+
+October 13: Jack Heart selected sidebar-only switching, primary Task conversation
+without sibling menus or Independent chrome, coherent opening feedback and truthful
+Workflow display. Removing navigation chrome never removes Session membership,
+explicit historical links or cached panes/drafts. A null successful reading differs
+from loading/unavailability; refresh failures preserve last-good Workflow content.
+The implemented chrome has focused tests, not native visual acceptance.
+
+Jack also requested taller compact Task rows with program status, stored Task/PR
+links and remote Machine names. Validated OSC 7501 reports and existing Waiting
+owners supply status; cheap nonreporter inference remains labeled and unknown
+stays unknown. Program completion is separate from Task/Workflow/Paused state.
+Started Tasks use recorded execution/checkout ownership, never changed delegation
+defaults; local names are omitted, assignment differs from execution. No new
+polling or status authority. This row slice remains unimplemented.
+
+Jack renewed measured optimization for Codex and Claude separately: cached switch,
+resume and fresh launch end at visibly responsive unsent agent input. October 7's
+numeric/soak retirement still stands. Correlated wall milestones and local CPU
+flamegraphs exist; a real headless export proves parsing only. Failed trials have
+no comparison time; hook review remains in total elapsed time. Neither draw/focus
+nor CPU samples prove readiness or explain waiting. Six native cases, paired
+before/after and stable-hook approval across Tasks/resume/compaction remain open.
 
 ## Session working set and Waiting (2026-10-03, revised 2026-10-06)
 
@@ -755,7 +763,7 @@ Session names seed from the invoked skill or the
 recovered magical-musical generator (history had no animal list); inline rename
 and later agent suggestions preserve human names. Session view omits Description.
 Exact membership distinguishes current, earlier, past, independent and unknown;
-its chip reveals the exact graph occurrence, never a newer same-named invocation.
+October 13 removes its chip from ordinary Task chrome, preserving exact history.
 Recent Runs load on demand; provider and summaries come from recorded evidence.
 
 Navigation retains the existing checkout layouts and native surfaces. Explicit
@@ -825,6 +833,8 @@ Session/Process evidence preserved. LOO-378 is explicitly paused, its substantia
 unpublished work retained. Earlier p95, twenty-trial and soak obligations below
 are historical evidence, not instructions to restart that work. This does not
 rewrite the chapter's authored KRs or claim native/provider acceptance.
+October 13 renewed targeted input profiling/optimization above, without numeric
+or soak acceptance.
 
 Keep hierarchy navigation and Task-workspace interaction as separate observations,
 with exact identities, source/build/population, rendered endpoint, retained input
@@ -890,8 +900,8 @@ mechanics remain at `b1e3f623a:wave/product/MEMORY.md`, this heading.
   boundary, with navigation owned by the following decider. There is no agent
   exchange row, answer lane,
   or dedicated answer controller.
-- **#1521 replaces stored Wave documents.** Checkout
-  `wave/<name>/*.md` owns goals, memory and ancestor context; Workflow records
+- **#1521 replaces stored Wave documents; #1536 moves them.** Checkout
+  `.lf/wave/<name>/*.md` owns goals, memory and ancestor context; Workflow records
   stay stored. Reads never provision. Recent Wave Chat is not ambient Task context.
 - **Environment configures a process; it never decides what the process is.**
   Work identity comes from durable state; execution and signal authority must

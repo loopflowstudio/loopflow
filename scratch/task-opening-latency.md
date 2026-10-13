@@ -13,8 +13,9 @@ refresh the exact Task, prepare `connect --json`, then run foreground connect in
 Ghostty. Rust owns the fresh-versus-resume choice, attachment lock and provider
 launch; Swift does not duplicate that decision.
 
-“Opening conversation” covers primary acquisition; “Opening session” covers
-connect/terminal preparation. The avoidable serial stage between them was a
+"Opening conversation" originally covered primary acquisition; "Opening session"
+covered connect/terminal preparation. Both now say "Opening conversation". The
+avoidable serial stage between them was a
 complete repository Session enumeration, even though ensure had already returned
 the authoritative Session. WorkModel now uses that record and merges only it into
 the latest retained inventory. Exact Task refresh, membership/location checks,
@@ -78,11 +79,12 @@ not any provider endpoint. Its first premature export failed before trace saving
 completed export passed. Rendering exposed a quadratic tree walk, replaced by
 one parent/child index (final real-export render/parse 0.38 s).
 
-Matching unlaunched debug app: `/tmp/loo462-oct13-profile/Loopflow Work Demo.app`;
+Unlaunched pre-compression debug app: `/tmp/loo462-oct13-profile/Loopflow Work Demo.app`;
 validation-only bundled lf, signature verified, private build receipt `build.json`.
 Initial signing rejected root SwiftPM resources; moved them under Contents/Resources.
 SwiftPM resolves its existing retained-checkout build-path fallback; this private
 artifact is not portable without that build directory.
-Native relaunch remains for demo; neither existing app or its drafts was changed.
+This artifact predates `ae691073c9` and main integration; the later demo requires
+a fresh matching build. Neither existing app nor its drafts was changed.
 Check: 38 WorkNavigation tests plus two final chrome/Workflow regressions PASS; seven profiling Python tests and one Rust timing test PASS; real xctrace export/SVG, cargo fmt/all-target Clippy, Ruff/diff PASS. Native six-case timing/trust proof remains with demo; affected-suite gate remains with gate. Review kept each Rust append in one
 serialized buffer so concurrent lf processes cannot interleave formatting writes.

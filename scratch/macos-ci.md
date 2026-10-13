@@ -19,6 +19,11 @@ Rejected trials (full inputs, resource accounting and exclusions in the reviews)
   cold totaled 1.836s slower; warm saved 3.660s. Frontend took 21.49–26.56s,
   backend 3.60–4.77s. Eight CLI build/copy/sign samples passed, but cold margin
   did not improve. No full Xcode trial qualified.
+- [Boxed planning future](../docs/reviews/ci-under-five-minutes.md#october-13-follow-up-nested-planning-future-attribution):
+  rustc profiling attributed expensive Flow caller queries to `sync_repository`.
+  Boxing reduced those queries from 208/224ms to 4.5/1.4ms, but eight ordinary
+  build/copy/sign samples totaled 0.921s slower cold and 0.446s slower warm.
+  No useful end-to-end gain; original source and ordinary outputs restored.
 
 Shared Xcode services and machine contention limit elapsed attribution. Ordinary
 signed Xcode compilation and the original control CLI copy/sign path are restored.
@@ -30,12 +35,17 @@ Removed prototype: `scripts/build_xcode_ci.py`,
 Prototype checkpoint: `34c40623b19d7176a3f8e452aa2bac9c8e753013`;
 raw trial data: `/tmp/macos-ci-*`.
 
-Compiler timing is complete. Remaining implementation: select one small frontend
-work reduction, benchmark matched cold and changed-source warm inputs in both
-orders, then establish its effect through the ordinary signed Xcode path.
-No reduction is selected; Cargo phase boundaries identify the dominant phase,
-not the expensive source construct. The local 21.49–26.56s frontend range does
-not explain all of the hosted 93-second control CLI segment.
+October 13 attribution is complete: 17,898 type-check roots and 16,159 borrow-check
+queries distribute the library's cost; no single multi-second source function
+was identified. The small specifically attributed boundary did not reduce build
+time. No measured mechanism within the current small-change scope qualifies.
+Further implementation needs new evidence of removable work, before matched
+cold/warm and ordinary signed Xcode proof. The local frontend measurements still
+do not explain all of the hosted 93-second control CLI segment.
+
+Delete — do not maintain: rejected overlap wiring, codegen override and boxed
+`sync_repository` trial are absent. Preserve the original single sync function,
+await ordering, timeouts, cancellation and on-demand acquisition tests.
 
 Upstream #1545 is integrated at `414d4dd27`: selective assertion cleanup and
 installation-image acquisition repair. It changes neither the control CLI build
@@ -55,4 +65,4 @@ verified delivery before follow-up completion. [Remaining CI proof](ci-remaining
 tracks lf-12be237's independent five-minute, ten-real-run goal and separate queue
 and push-to-merged proof. No numeric acceptance is waived.
 
-Check: `git diff --check` PASS; prose-only reconciliation reuses recorded trials; gate/hosted CI await a qualifying candidate.
+Check: eight matched `cargo build --locked --bin lf` + copy/sign samples and `codesign --verify --strict` PASS; performance rejected; `git diff --check` PASS; no code remains to gate or publish.

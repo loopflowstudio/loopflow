@@ -1134,3 +1134,85 @@ app signatures, runtime acceptance, gate, hosted CI and verified delivery were
 not attempted for this rejected candidate. The next mechanism needs a small
 frontend work reduction with reliable matched cold/warm proof. lf-ddf2d53 remains
 unfinished; lf-12be237 retains ten-real-run, queue and push-to-merged acceptance.
+
+
+## October 13 follow-up: nested planning future attribution
+
+The next source-level trial follows Jack Heart's authorization for measured
+macOS CI margin. Baseline `d27b81c14dee724171a209f5fc8216d06b0d8fd5`, unchanged
+Cargo.lock, rustup rustc 1.99.0 (`b940084d7`, aarch64-apple-darwin), dev/test
+debug=0, nonincremental dev optimization. No overlap, backend override, test
+deletion or cache identity change participates.
+
+The library was profiled with rustc's [self profiler](https://doc.rust-lang.org/beta/unstable-book/compiler-flags/self-profile.html),
+using `cargo rustc -p loopflow --locked --lib --target-dir target/dev-app-control
+-- -Zself-profile=<output> -Zself-profile-events=default,args -Ztime-passes`
+and diagnostic-only `RUSTC_BOOTSTRAP=1`. Official `rust-lang/measureme` tools
+decoded the trace. Those flags are absent from production and measured builds.
+Query-string recording alone cost 23.07s baseline / 23.23s candidate: profiled
+elapsed time is explicitly excluded from performance acceptance.
+
+Attribution found dispersed work: 17,898 type-check roots and 16,159 borrow-check
+queries, with no single multi-second source function. The largest borrow-check
+query was Flow `run_skill` (208.114ms); the largest instance-analysis query was
+Flow `run_command` (223.758ms). Both carry the nested planning future returned by
+`ops::linear_observe::sync_repository`.
+
+Trial: replace that function's concrete async return with a `BoxFuture`, keeping
+its body in one `Box::pin(async move { ... })`. No wrapper or second implementation.
+Callers still await the same work with the same deadlines and drop cancellation;
+the cost is one allocation and dynamic polling per sync. This moved the caller
+queries to 4.540ms and 1.398ms respectively. The sync function's own borrow check
+rose from 5.913ms to 15.113ms. Total self-time for obligation evaluation fell
+1.60s → 1.22s and instance analysis 1.14s → 0.979s, but total type checking and
+borrow checking increased. These diagnostic observations establish attribution,
+not a reliable end-to-end gain.
+
+Matched builds used SDK 26.2 (Xcode 26.2/17C52), deployment 15.0, and explicit
+development provenance / validation-only migrations. Preparation compiled the
+ordinary dependency set once (39.75s, excluded experimental setup); both variants
+then restored one identical source-cold snapshot at `target/dev-app-control`.
+Warm samples restored each variant's full output snapshot before the same
+`build_info.rs` error-message edit, with matching contents/timestamps. The only
+variant source difference was the boxed future. Ordinary Cargo flags, copy and
+ad-hoc signing were timed together. No candidate preparation or background cleanup
+exists; snapshot resets are experimental setup, outside both timers.
+
+| Inputs and execution order | Ordinary CLI + copy/sign, seconds | Boxed future + copy/sign, seconds | Saving, seconds |
+|---|---:|---:|---:|
+
+| cold: baseline then candidate | 27.849 | 28.678 | -0.829 |
+| cold: candidate then baseline | 28.511 | 28.603 | -0.092 |
+| warm: candidate then baseline | 27.330 | 27.167 | 0.163 |
+| warm: baseline then candidate | 27.209 | 27.819 | -0.610 |
+
+Cold pairs total **0.921s slower**; warm pairs total **0.446s slower**. Neither
+condition establishes useful end-to-end margin. Cargo library frontend ranges
+20.56–21.30s; isolated query savings do not turn into a meaningful build saving.
+All eight build/copy/sign samples completed; strict helper signature verification
+passed. Native Cargo user+sys totals: cold ordinary 75.11s / boxed 75.32s;
+warm ordinary 73.04s / boxed 72.57s. Peak RSS: ordinary 3.440–3.453GB,
+boxed 3.409–3.411GB. These are local process-tree measurements, not hosted cost;
+shared machine contention still limits attribution of sub-second differences.
+
+Review decision: reject the candidate. The allocation/type-erasure boundary adds
+maintenance and runtime cost without a measured CI benefit. Original source and
+ordinary output snapshot are restored. No production code, flags, dependencies,
+cache wiring, tests or installed Home changed. No full Xcode trial, runtime
+acceptance, gate, hosted CI, publication or merge is claimed for this candidate.
+
+Replay and raw evidence: `/tmp/macos-ci-frontend-bench.py`,
+`/tmp/macos-ci-frontend-snapshots/results.jsonl`,
+`/tmp/macos-ci-frontend-{baseline,candidate}.rs`, and
+`/tmp/macos-ci-frontend{,-boxed}-profile/`. The benchmark script preserves both
+source variants and restores temporary edits in `finally`; profile outputs use
+`summary.txt` and `chrome_profiler.json`. Benchmark logs have the prefix
+`/tmp/macos-ci-frontend-`.
+
+Remaining blocker: frontend cost is distributed across the large library; the
+largest specifically attributed small source boundary did not improve the
+ordinary build. There is no measured mechanism within the current small-change
+scope to advance. A further candidate needs new evidence of work that can be
+removed; another unchanged overlap, backend or boxing trial is not justified.
+lf-ddf2d53 remains unfinished. lf-12be237 retains ten-real-run, queue and
+push-to-merged acceptance; the supplied latest real queue remains 6:24.

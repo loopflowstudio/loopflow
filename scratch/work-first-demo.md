@@ -240,21 +240,21 @@ Check: five Rust Task-membership tests and 17 Swift Session/stream tests PASS; r
 
 ## Full sidebar opening pass — October 12
 
-All 13 Tasks were clicked in bundled native candidates, not just prepared in JSON. Codex hook review appeared for LOO-312/367/371/378/382/330,
-lf-12be237, lf-9c03797 and lf-8fed729. No trust choice or Task Flow action was
-submitted. LOO-380 opened Claude and began its configured Task conversation;
-preserve that active surface, not another app restart. LOO-462 correctly refuses
-implicit takeover. LOO-378 remains paused; opening its conversation does not
-resume implementation. Inventory and prepare IDs remain in the audit directory.
+All 13 sidebar Tasks were clicked. Exact results, legacy-null failure,
+ended-output repair, failed native attempt and passing checks:
+50d6451b45:scratch/work-first-demo.md, **Full sidebar opening pass**.
+LOO-380's Claude surface must survive; LOO-462 requires explicit takeover.
+No unknown-process retirement or native acceptance follows from those fixes.
 
-LOO-427 and LOO-389 lose their terminal failure behind Not running here. The former
-has an October 8 spawn_requested AgentProcess without PID/birth/exit evidence;
-the latter has an October 6 legacy null spawn_state and no PID. The null Boolean
-SQL expression crashes decoding. Treat null as not-reserved, not an observed exit.
-Neither record can yet authorize ordinary replacement. Command receipts:
-`427-native-commands.json`, `389-native-commands.json` in the audit directory.
+## Stable hook trust — October 13
 
-Ended Sessions retain a bounded final-screen excerpt through refresh until reopen
-or fresh live ownership. Reuse lf3; no transcript store, dead PTY retention or
-failure inference from prose. Label truncation and unavailable output.
-Check: 18 Swift Session/stream tests, legacy-null Rust regression, fmt/all-target Clippy/diff PASS. Native owned failing-child diagnostic PASS after exercising production pool exit detection (first attempt omitted it and timed out); `/tmp/loo462-ended-native-test{,2}.log`. Real app remains unchanged to preserve Claude; no unknown-process retirement or demo acceptance.
+Jack Heart requested at most one Loopflow hook review per Desktop app, not
+per Task/Session. Current ContextDelivery::hook_settings embeds a newly written
+delivery path in each command; Codex hashes exact declarations. Stable hook
+commands with separately supplied launch context are the proposed repair.
+harness/context.rs also synthesizes provider-internal trusted hashes; investigate
+the installed provider's actual identity before preserving that brittle coupling.
+Do not bypass unrelated hooks, manufacture approval, or silently trust changed
+code. Verify distinct Tasks, new Sessions, native resume and compaction receive
+their own context without another review for unchanged Loopflow hooks.
+Claude's distinct trust behavior needs separate proof. Keep live Sessions intact.

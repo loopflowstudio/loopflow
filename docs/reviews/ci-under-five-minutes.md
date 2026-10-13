@@ -979,3 +979,74 @@ its signed DerivedData but spent 256 seconds compiling the CLI, finishing at
 The first main run must populate the new cache namespaces; subsequent real PR
 and queue observations are still needed. No warmed rerun is substituted for
 that acceptance.
+
+## October 13 follow-up: shell overlap rejected before publication
+
+Jack Heart authorized lf-ddf2d53 to continue measured macOS critical-path work.
+The supplied latest real queue, [38452715134](https://github.com/loopflowstudio/loopflow/actions/runs/38452715134),
+remains **6:24 creation-to-aggregate completion**; #1543 is merged. No new
+hosted acceptance run, PR or merge is claimed by this experiment.
+
+The prototype started the exact development/validation-only app CLI build next
+to ordinary signed Xcode `build-for-testing`. One private Cargo build owner
+served preparation and the existing copy/sign phase. Cargo compiled `loopflow`
+once per sample; the post-build invocation waited on Cargo's lock and reported
+`Fresh loopflow`. Process snapshots observed simultaneous rustc and
+swift-frontend work, rather than inferring overlap from buffered Xcode logs.
+
+Matched snapshots were restored at the same checkout, Cargo target and
+DerivedData paths before every sample. Source-cold retains compiled Cargo
+dependencies and downloaded Swift package sources, but removes workspace and
+Xcode compilation outputs. Warm restores identical complete outputs, then
+changes AppearanceMode's Light label and a Rust error message, with identical
+contents/timestamps in both variants. These temporary source edits were restored;
+none is a typical-code PR or ten-run acceptance sample.
+
+| Inputs and execution order | Ordinary Xcode, seconds | Overlap including settings/preparation/cleanup, seconds | Saving, seconds |
+|---|---:|---:|---:|
+| Source-cold: baseline then overlap | 85.311 | 45.643 | 39.668 |
+| Source-cold: overlap then baseline | 60.298 | 46.845 | 13.453 |
+| Changed-source warm: overlap then baseline | 33.841 | 30.868 | 2.973 |
+| Changed-source warm: baseline then overlap | 36.835 | 40.225 | -3.390 |
+
+Both cold pairs improve, but the warm advantage does not survive reversed
+order: combined warm overlap takes **0.417 seconds longer**. The required useful
+cold/warm gain is not established. The first cold saving also shrinks sharply
+with reversed order; do not attribute all 39.668 seconds to the mechanism.
+Local machine contention and shared Xcode service caches remain confounders.
+The prototype and workflow wiring are removed; ordinary CI, tests, signatures,
+compiled authority, caches and job conditions retain their previous behavior.
+
+Inputs: source baseline `160adc7e6fe7f04d8a707003e8af04d3971e9b94`, rustup
+rustc 1.99.0 (`b940084d7`, aarch64-apple-darwin), Xcode 26.2 (17C52), SDK 26.2,
+deployment 15.0, dev/test debug=0 and unchanged Cargo.lock. Initial empty compiled
+outputs took 130.787s; package sources were already available, so this is not a
+fresh network-cache timing. An early mismatched Homebrew 1.98.1 preparation
+sample rebuilt dependencies and was excluded. Matching the app shell's existing
+Cargo search path eliminated that mismatch.
+
+Native preparation `(real/user/sys seconds; peak RSS bytes)` was
+`32.70/37.34/1.40;3446652928`, `33.20/39.81/1.35;3440082944` for cold,
+and `29.18/37.27/1.08;3443621888`, `38.46/36.77/1.46;3439296512` for warm.
+Xcode's native user/sys ranges were 1.11–1.58/0.38–0.60s cold and
+0.77–0.81/0.23–0.26s warm; peak RSS was198131712–200081408 bytes.
+Those Xcode figures exclude the shared build service and its compilers; they
+are not total compilation CPU/RSS or evidence of lower runner cost.
+
+Real cancellation exposed a compiler outside the owned process groups:
+Xcode returned BUILD INTERRUPTED while a running swift-frontend still emitted
+Darwin.pcm into this build's DerivedData. Scoped cleanup subsequently passed a
+real simultaneous Rust/Swift cancellation check with status 143 and no remaining
+checkout compiler. Eight focused process tests passed during the prototype,
+including preservation of pre-existing compiler work and other output paths.
+A candidate interrupted by concurrently running process fixtures was excluded;
+fixtures were moved to disposable source/output roots. Full gate, signature and
+runtime acceptance and hosted/queue verification were not performed after the
+performance rejection. No installed Home or Applications contents were modified.
+
+The locally checkpointed prototype is
+`34c40623b19d7176a3f8e452aa2bac9c8e753013`; raw timing/process logs and snapshot
+scripts use `/tmp/macos-ci-*`. The remaining blocker is a reliable macOS margin
+on changed-source builds, without adding unjustified scheduling/cleanup
+complexity. lf-ddf2d53 remains unfinished; lf-12be237 still owns the independent
+ten-real-run, queue and push-to-merged demonstration. Five minutes is not waived.

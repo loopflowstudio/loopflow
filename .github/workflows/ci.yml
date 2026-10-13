@@ -466,8 +466,20 @@ jobs:
         # that separate configuration's compile proof without launching a host.
         # The real hosted UI run is the separately named required gate
         # `scripts/test.py --ui-host`; see release/UI_HOST_GATE.md.
-        run: uv run python scripts/build_xcode_ci.py
+        run: |
+          /usr/bin/time -l xcodebuild build-for-testing \
+            -project LoopflowSwift.xcodeproj \
+            -scheme LoopflowMac \
+            -destination platform=macOS \
+            -derivedDataPath .build/xcode-derived-data \
+            -disableAutomaticPackageResolution \
+            CODE_SIGNING_ALLOWED=YES \
+            CODE_SIGNING_REQUIRED=YES \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY=- \
+            DEVELOPMENT_TEAM=
         timeout-minutes: 12
+        working-directory: swift
       - name: Record Xcode source timestamps
         if: github.ref == 'refs/heads/main' && steps.xcode-cache.outputs.cache-hit != 'true'
         run: uv run python scripts/swift_cache.py save --build-system xcode

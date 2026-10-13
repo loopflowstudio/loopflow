@@ -1,9 +1,9 @@
-# Open assumptions
+# Remaining uncertainty
 
-October 13 — The CI wrapper owns this job's checkout and exact Xcode DerivedData
-path. Cleanup identifies newly started compiler processes by their output
-arguments under that path, excluding pre-existing PIDs and other output paths.
-This is specific to the existing isolated Actions job, not a general process
-scheduler. Real Swift/Rust cancellation and a disposable compiler ownership
-fixture establish the current cleanup behavior. Hosted toolchain and elapsed
-margin remain gate/CI evidence; local improvements do not prove five minutes.
+October 13 — Cold shell overlap improves both matched local pairs; warm results
+reverse sign with order, and combined overlap is 0.417s slower. Native preparation
+CPU remains similar while elapsed time varies; machine contention/shared Xcode
+service reuse prevent reliable attribution. The accepted cold/warm improvement
+criterion is unmet. The prototype is removed rather than publishing an experiment;
+no numeric acceptance or Task completion is inferred. Durable evidence is in
+`docs/reviews/ci-under-five-minutes.md` and prototype commit `34c40623b19d7176a3f8e452aa2bac9c8e753013`.

@@ -889,3 +889,29 @@ deadline case was rechecked after refinement and passed in 0.165s. Formatting
 and all-target Clippy with warnings denied pass. The watcher check also passed
 its full fresh-read comparison; its local 156.683s included rebuilding the CLI
 fixture, not a longer observation window. No retry was introduced.
+
+### Full 4:55 pass; overlap the bundled CLI build with Swift
+
+[Run 38427516700](https://github.com/loopflowstudio/loopflow/actions/runs/38427516700)
+at `22c2afe45b` passed the complete required workload in **4:55** (16:04:45–
+16:09:40 UTC, October 13). All Rust partitions finished by 4:32; Xcode finished
+at 4:47 and the aggregate at 4:55. Its exact PushEvent timestamp was not found;
+publication began at 16:04:25, an upper bound of 5:15 through completion rather
+than a measured push-to-checks interval. Ten consecutive real runs, merge queue
+and push-to-merged remain unproved.
+
+Xcode's build step took 190 seconds. The app's post-build script began about
+33 seconds into it and spent 150 seconds compiling the bundled Rust CLI.
+The next candidate makes that build a macOS aggregate target independent of the
+Swift framework, with the app depending on both. CI explicitly enables parallel
+targets. The app still copies and signs the CLI before its own signing; the
+same Python command supplies development provenance and validation-only migration
+authority. No test, build output or signing requirement is removed.
+
+This changes the app's Xcode build graph, including callers outside CI; release
+and nightly workflow files remain unchanged. XcodeGen accepts the graph, and
+the aggregate and app both resolve macOS deployment target 15.0 and the same SDK.
+The headless app/unit/UI-runner build passes; strict helper and deep app signature
+verification pass. Forty-five CI-proof/release-automation tests and actionlint
+pass. Hosted timing, including the changed Xcode cache fingerprint, owns the
+performance result; the local build is correctness evidence only.

@@ -24,5 +24,6 @@ Implementation uses native modification times for the 24-hour grace and counts
 unique `(device, inode)` allocations per generated root. Native metadata/ownership
 uncertainty retains output. The direct-Cargo probe uses a compiler shim only to
 keep actual Cargo observable; no replaceable Cargo lock grants deletion authority.
-Infrastructure memory remains another contribution, untouched at 15,997 tokens /
-73,615 bytes, within its defaults; the installed context query still omits it.
+Infrastructure memory includes another contribution, preserved outside this Task's
+checkpoints. Reconciliation updates only its local-build lessons; the installed
+context query still omits the relocated memory, so it is measured separately.

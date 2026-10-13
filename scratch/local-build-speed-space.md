@@ -1,11 +1,11 @@
 # Local test speed and build-output space
 
-Task lf-8f870b1 · Reconciled October 13, 2026: practical cleanup policy accepted.
-Jack Heart accepted the outcome and delegated technical choices and autonomous
-delivery. These mechanisms are implementation decisions, not measured gains.
-Slice 1 implements exact-CLI preparation independently. The native Cargo counterexample
-limits the supported concurrency contract; it does not authorize deleting busy work. The accepted outcome still requires
-both measured speed improvement and bounded, safe build-output lifetime.
+Task lf-8f870b1 · Reconciled October 13, 2026 after implementation, compression
+and main integration (`471f9a4875`). Jack Heart accepted the outcome, practical
+concurrency policy and autonomous delivery. Prepared CLI measurements show a
+29.5% warm median gain; disposable normal recovery removed 100% of measured
+output allocation. Matched cold/edit/app acceptance, gate, hosted CI and verified
+delivery remain. Neither measurement proves whole-outcome completion.
 
 ## Problem and demo
 
@@ -42,8 +42,11 @@ were read; no other immediate child memory exists in this checkout. Release's
 operation-entry lesson requires proof through prune/recovery, not only selectors.
 LOO-390 owns history/install retention, lf-6d3ff35 owns test
 deletion and lf-12be237 owns the ten-real-run CI proof. Exact sibling Task input
-confirmed lf-6d3ff35's separate scope; broad plan inspection failed, so other
-overlap remains unknown.
+confirmed lf-6d3ff35's separate scope. Its delivered test reduction and installation
+image-acquisition repair (#1545, `414d4dd27c`) are integrated by `471f9a4875`.
+The reviewed local `origin/main` ends there; newer remote work and lf-ddf2d53's
+macOS overlap delivery are not established by this reconciliation. Broader plan
+inspection previously failed.
 
 ## Writer exclusion: accepted practical policy
 
@@ -73,10 +76,10 @@ perfect exclusion of arbitrary direct tools is no longer a prerequisite.
 
 Do not add mounted filesystems, a cache daemon, an upstream Cargo lock protocol or
 a generic retention framework for this rare race. Preserve the research receipt.
-The existing Python cwd/age-only cleaner still lacks positive completed ownership;
-replace its build deletion through the supported owner in the same cut.
+Python's former cwd/age-only build deletion has been removed. Its inventory
+activity labels remain advisory; only Rust's fresh selector authorizes removal.
 
-## Implementation and remaining design
+## Implemented behavior
 
 ### One prepared verification CLI
 
@@ -119,16 +122,15 @@ Implemented on October 13. Rust build pruning and Python recovery use one
 read-only ownership/process selector and the existing worktree lease. Unavailable
 inspection retains output; direct package-manager races remain unsupported.
 
-Extend lf wt prune with --builds, --json and bounded policy arguments for retention
+`lf wt prune` has --builds, --json and bounded policy arguments for retention
 hours, maximum roots and bytes. Defaults: 24h, eight roots, 64 GiB. Resource recovery
 passes its existing policy and remaining budget; cache and build actions retain
 current per-operation caps. No new retention table, journal or background service.
 
 Build mode bypasses main refresh, branch deletion and ordinary checkout pruning.
-Extend the existing read-only SQLite ownership reader in place to return positive
-completion evidence as well as unfinished ownership. Preserve its released-schema
-handling; do not migrate the installed store. A root qualifies only with a recorded
-Done Task, no nonterminal Task association, and idle associated execution. Missing
+The existing read-only SQLite ownership reader returns positive completion and
+unfinished ownership with released-schema handling; it does not migrate stores.
+A root qualifies only with a recorded Done Task, no nonterminal Task association, and idle associated execution. Missing
 Home/Task, abandonment alone, incompatible schema, unresolved execution or failed
 ownership reads retain output. PR-less completed Tasks can qualify. Never infer
 completion from branches or missing PRs. Primary/current/persistent checkouts stay
@@ -142,22 +144,23 @@ free-disk thresholds. Lifetime is operation-bound: eligible on the first support
 prune/recovery after grace, not wall-clock expiry without invocation. Capped calls
 may require repeats to drain a backlog; recent/active output keeps its warm state.
 
-Acquire the existing nonblocking worktree lease before mutation, then re-read Task
-and execution facts and inspect cwd, executable mappings and open output files.
+Each candidate acquires the existing nonblocking worktree lease; apply re-reads
+Task/execution facts and inspects cwd, executable mappings and open output files
+under that lease immediately before removal.
 Failed/timed-out/incomplete inspection retains output and explains why. Normalize
 /tmp versus /private/tmp. A running executable survives even with cwd elsewhere.
 
-Return candidates, retained reasons, removed paths, allocated bytes and failures
-in a required/optional JSON DTO. Python retains inventory and gate/uv-cache recovery,
-and delegates all build deletion to this owner. Unavailable capable CLI retains
+The JSON DTO reports candidates, retained reasons, removed paths, allocated
+bytes and failures; unknown allocation is null. Python retains inventory and
+gate/uv-cache recovery, and delegates all build deletion to this owner. Unavailable capable CLI retains
 builds with actionable reporting; no Python deletion fallback. Candidate CLI reads
 production ownership only; verification registries remain disposable. No Desktop
-UI change; fixture any wire DTO in each actual consumer.
+UI change; Rust and Python consume the shared receipt fixture.
 
 ## Alternatives, exclusions and failure
 
 - Cross-worktree mutable sharing is rejected by frontier and binary-race evidence.
-  Prepared-CLI reuse is the selected hypothesis; no compiler-cache daemon or paid
+  Prepared-CLI reuse has the matched warm evidence above; no compiler-cache daemon or paid
   service without evidence that the simpler path is insufficient.
 - Profile tuning/incremental is not selected: debug=1/incremental=false already
   bounds output. Losing dependency debugging or adding retained state needs its
@@ -171,7 +174,8 @@ UI change; fixture any wire DTO in each actual consumer.
 
 Success means independent fixtures without repeated preparation and inexpensive
 retained finished source. Failure means fast tests using the wrong frontier or
-cleanup deleting a running binary/new writer's output. Those block delivery even
+cleanup deleting detected running output or admitting a cooperating writer
+under its held lease. Those block delivery even
 when elapsed time improves.
 
 ## Delete — do not maintain
@@ -224,7 +228,7 @@ validation and delivery; research and kickoff need no replay.
    executable launched elsewhere, open files, held leases, cooperating writers starting after
    selection and detected direct-process retention. Use test-only race hooks plus real writer
    subprocesses; no production factory abstractions.
-4. Remaining matched measurements and durable guidance. The warm CLI pairs and
+4. **Remaining matched measurements and durable guidance.** The warm CLI pairs and
    full retained-output counts are complete; TESTING.md and the storage review
    own operating guidance and results. Matched cold preparation, small edit/test,
    Swift/control cold/warm remain. Disposable reclamation removed 100% of measured
@@ -241,7 +245,7 @@ validation and delivery; research and kickoff need no replay.
 Gate commands, headless, once for the affected final content:
 
 ```sh
-uv run pytest python/tests/test_materialize_rust_tests.py python/tests/test_resource_envelope.py
+uv run pytest python/tests/test_materialize_rust_tests.py python/tests/test_resource_envelope.py python/tests/test_gate_bounded.py
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
 uv run python scripts/materialize_rust_tests.py --prepare-cli -- cargo nextest run -p loopflow -E 'test(build_cleanup) | test(local_planning::public_local_task_places_and_runs_without_a_planning_provider) | test(agent_startup_tests::)' --no-tests fail
@@ -249,13 +253,15 @@ swift build --package-path swift --jobs 4
 uv run python scripts/loopflow-dev.py bundle-control-tools --output /tmp/loopflow-build-demo
 ```
 
-Rust commands run with inherited LF_* unset and closed stdin. Apply the exact Cargo
-runner configuration from scripts/test.py to the focused command for test_network.py
-isolation. The proposed build_cleanup tests cross CLI → read-only store → cleanup
-→ JSON → Python receipt, rather than only testing selectors. Include changed app
-launcher lease tests in Python and existing worktree/prune preservation tests in
-Rust. The resource recovery acceptance must prove eligible cleanup above pressure
-thresholds and repeated invocation idempotence. Full hosted CI remains required.
+Rust commands require cleared inherited LF_* and closed stdin, with test_network.py
+isolation configured exactly as scripts/test.py does. Existing build_cleanup tests
+cross CLI → read-only store → cleanup → JSON → Python receipt and prove recovery
+without disk pressure plus apply idempotence. Affected gate also includes
+`python/tests/test_gate_bounded.py` (changed by this branch), existing materializer
+and resource-envelope tests, worktree/prune preservation, and released ownership.
+No app launcher implementation or lease test changed in this branch. Full hosted
+CI remains required. Compression passes precede #1545 integration; they are focused
+evidence, not a gate pass for the integrated tree.
 
 Final measurements/usage belong in TESTING.md and docs/reviews/storage-footprint.md
 before scratch cleanup. Done when normal local Rust verification demonstrates a
@@ -263,8 +269,9 @@ matched fixture speedup, old completed inactive output is reclaimable through
 preview/apply and normal recovery with preservation proofs, affected/full hosted
 checks pass, and the PR is verified merged and Task completion recorded.
 Disposable reclamation is implemented; final matched acceptance, affected gate,
-full hosted CI and delivery remain. Refresh must sync delivered sibling work while
-preserving the separate dirty Infrastructure memory contribution.
+full hosted CI and delivery remain. The test-reduction sibling is already
+integrated. Any later delivered sibling work needs integration without duplicating its scope. The pre-existing dirty
+Infrastructure memory contribution remains separate from this Task's checkpoints.
 
 Review conclusions: target rewriting stops at the harness separator; authority
 filtering has one owner. Prepared-CLI measurements remain applicable and were not
@@ -275,10 +282,11 @@ execution fixtures use a current start. Prior implementation evidence remains at
 `.lf/tmp/local-build-reclamation/{focused-all,receipt,ownership-unknown,clippy}.log`
 and `1b0fc20c980fda14340d0b35f04f6893b8582eb8`.
 
-Compression removes the temporary ownership tuple, the symlink allocation early
-return and orphaned cwd-only documentation. Files and links now share accounting
-and retained-state checks; links are still never traversed. Process launch failures
-retain their underlying cause in the receipt. Recovery-budget tests consume the
-shared Rust receipt while real reclamation remains covered through the CLI.
+Resource inspection now bounds each `du` measurement to five seconds and records
+measurement failures as issues. Python inventory supplies no build candidates or
+deletion authority: recovery delegates independently to Rust, whose Git/process
+inspections and generated-tree walk have their own five-second limits. Unknown
+ownership/activity/content retains output. Whole inventory still scales with the
+number of roots; no broad-inventory latency claim follows.
 
-Check: materialized/network-isolated nextest cleanup + released ownership — pass (`.lf/tmp/local-build-reclamation/compress.log`); `uv run pytest python/tests/test_resource_envelope.py -q` — 15 pass; fmt, Ruff and `cargo clippy --all-targets --jobs 4 -- -D warnings` — pass; matched cold/edit/app acceptance and affected suites remain with refresh/gate.
+Check: `git diff --check` and `lf context` — pass; prior compression's 15 network-isolated cleanup/ownership tests and 15 Python resource tests retained as evidence; integrated affected gate and matched cold/edit/app measurements remain.

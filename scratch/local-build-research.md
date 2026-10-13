@@ -4,7 +4,7 @@ Research for lf-8f870b1, following Jack Heart's autonomous delivery request.
 This records baseline research before implementation; the design and storage
 review own the subsequent matched CLI gain and disposable reclamation evidence.
 
-## Current owners and boundaries
+## Baseline owners and boundaries
 
 - `Cargo.toml`: dev/test already have debug=1, incremental=false and targeted
   SHA-256/SQLite optimization. A profile change needs measured tradeoffs.

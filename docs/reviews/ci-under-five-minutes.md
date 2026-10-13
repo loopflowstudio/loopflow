@@ -645,3 +645,21 @@ landing. The first seeding run can still be cold and pay upload overhead.
 Validation: 45 CI-proof/release-automation tests and actionlint pass for the
 cache policy change. Raw build/installation logs:
 `/tmp/ci-macos-{rust-build,task-installation}.log`.
+
+Run `38352209666` ultimately passed in **5:59**; Swift finished at 5:20 and
+the final Rust partition at 5:54. Swift's changed profile compiled 258 crates
+in 163.46s, while its actual SwiftPM build reused outputs in 1.13s and 503 tests
+ran in 63.625s. This isolates the remaining repeated Rust dependency work from
+Swift source compilation.
+
+The cache-seeding run `38352858853` passed in **6:57**. The shared Rust job
+uploaded 310,652,887 cache bytes and macOS process tests uploaded 299,789,746.
+The Xcode job exposed a third macOS Rust build: its app script invokes Cargo
+for the bundled CLI in `target/dev-app-control`. That job spent 71s updating
+Rust and 258s in build-for-testing. The next candidate applies the same no-debug
+profile and PR cache-seeding policy there. The other three changed build jobs
+can now consume their seeded caches. This keeps the app's bundled-CLI compile
+proof, signing settings and all tests unchanged.
+
+Validation: 45 CI-proof/release-automation tests and actionlint pass. Hosted
+Xcode cache creation and subsequent warm full-workflow timing remain unproved.

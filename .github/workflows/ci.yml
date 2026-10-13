@@ -420,6 +420,9 @@ jobs:
     needs: [merge-proof, scratch-clear]
     if: ${{ !cancelled() && needs.scratch-clear.outputs.candidate == 'true' }}
     runs-on: macos-15
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -431,7 +434,7 @@ jobs:
         id: rust-cache
         with:
           key: loopflow-ui-test-${{ steps.rust-profiles.outputs.key }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.event_name == 'pull_request' }}
           workspaces: . -> target/dev-app-control
       - name: Install XcodeGen
         run: brew install xcodegen

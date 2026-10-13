@@ -1009,11 +1009,12 @@ none is a typical-code PR or ten-run acceptance sample.
 | Changed-source warm: overlap then baseline | 33.841 | 30.868 | 2.973 |
 | Changed-source warm: baseline then overlap | 36.835 | 40.225 | -3.390 |
 
-Both cold pairs improve, but the warm advantage does not survive reversed
-order: combined warm overlap takes **0.417 seconds longer**. The required useful
-cold/warm gain is not established. The first cold saving also shrinks sharply
-with reversed order; do not attribute all 39.668 seconds to the mechanism.
-Local machine contention and shared Xcode service caches remain confounders.
+Both cold pairs improve; combined warm overlap takes **0.417 seconds longer**.
+That small warm delta alone does not establish material regression: acceptance
+requires useful margin without material warm regression, not improvement in every
+sample. Cleanup complexity and hosted benefit remain unresolved. The first cold
+saving shrinks sharply with reversed order; do not attribute all 39.668 seconds
+to the mechanism. Machine contention and shared Xcode services remain confounders.
 The prototype and workflow wiring are removed; ordinary CI, tests, signatures,
 compiled authority, caches and job conditions retain their previous behavior.
 

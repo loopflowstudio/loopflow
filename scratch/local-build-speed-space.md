@@ -1,10 +1,10 @@
 # Local test speed and build-output space
 
-Task lf-8f870b1 · Draft reconciled October 13, 2026: reclamation requires redesign.
+Task lf-8f870b1 · Reconciled October 13, 2026: practical cleanup policy accepted.
 Jack Heart accepted the outcome and delegated technical choices and autonomous
 delivery. These mechanisms are implementation decisions, not measured gains.
 Slice 1 implements exact-CLI preparation independently. The native Cargo counterexample
-invalidates reclamation's proposed writer exclusion. The accepted outcome still requires
+limits the supported concurrency contract; it does not authorize deleting busy work. The accepted outcome still requires
 both measured speed improvement and bounded, safe build-output lifetime.
 
 ## Problem and demo
@@ -45,62 +45,36 @@ deletion and lf-12be237 owns the ten-real-run CI proof. Exact sibling Task input
 confirmed lf-6d3ff35's separate scope; broad plan inspection failed, so other
 overlap remains unknown.
 
-## Writer exclusion: unresolved
+## Writer exclusion: accepted practical policy
 
-Cargo 1.98.1 `clean` unlinks a held profile lock; a replacement build then succeeds
-while the original descriptor remains locked. More snapshots, inode rechecks or
-profile locks cannot close that race. A worktree lease excludes participating
-launchers, but direct Cargo does not participate. Rust reclamation needs proven
-common exclusion or an explicit revision of the supported writer contract,
-covering clean/build, profiles, target triples and nested dev-app-control output.
-Always retaining Rust would leave the bounded-lifetime outcome unmet.
+Jack Heart accepted the smaller practical policy on October 13: do not build
+extra machinery for arbitrary direct Cargo starting cleanup/build in a completed
+worktree during reclamation. Jack Heart emphasized that a Cargo process in a
+worktree selected for deletion would raise a candidate-selection concern.
+Eligibility and preservation of detected activity are therefore the priority.
 
-The unresolved choice is a mechanism protecting ordinary direct Cargo clean/build
-as well as Loopflow launchers, versus narrowing concurrent-writer support to
-participating launchers. The latter changes a preservation promise and has not
-been accepted by Jack Heart. No common exclusion mechanism is yet proved;
-process inspection and rename-before-delete alone do not exclude a later writer.
+Require positive completed-Task ownership, no unfinished association, old
+regenerable output, fresh execution/process evidence and the existing worktree
+lease for cooperating operations. Missing or failed ownership/activity inspection
+retains output. Keep primary/current/persistent checkouts and active or uncertain
+work. Detect cwd, executable mappings and open files; a binary running with cwd
+elsewhere must retain its output. Preview explains candidates and retained reasons.
+Re-read eligibility under the lease immediately before mutation. Verify the actual
+prune/recovery path with disposable state and real process/lease counterexamples.
 
-SwiftPM's canonical-path-derived temporary lock blocked a real warm build;
-`.build/.lock` and directory locks did not. Clean/reset exclusion remains unproved.
-If the native lock survives those operations, preserve it and match native
-canonicalization, UTF-8 filename truncation and temporary-directory selection.
-Unproved output types stay intact with a reason. Selection-time activity is
-insufficient; arbitrary writers ignoring exclusion cannot be promised protection.
-No reclamation implementation or deletion cut has started.
-The existing Python pressure cleaner still deletes using cwd/age facts and does
-not read positive Done ownership. Its continued presence is a known mismatch,
-not evidence of safe reclamation. website/node_modules also needs a supported
-writer contract and exclusion proof; Cargo and Swift lock probes cover neither
-package-manager writers nor arbitrary files under the target root.
+Cargo 1.98.1 clean unlinks a held profile lock, allowing a replacement build. This
+remains contrary evidence against universal native exclusion, not an outstanding
+approval blocker. No snapshots, rename or native-profile-lock scheme may claim to
+solve it. Concurrent manual build/clean/package-manager operations ignoring the
+cleanup lease in a completed candidate are unsupported and must be documented.
+Existing detected processes and uncertain facts still preserve output; no universal
+race-free guarantee is claimed. Native lock probes may inform implementation but
+perfect exclusion of arbitrary direct tools is no longer a prerequisite.
 
-### Cleanup redesign candidates and evidence gaps · October 13
-
-- **Kernel filesystem detachment:** place generated output on an independently
-  detachable filesystem and reclaim its backing storage only after a normal,
-  non-forced detach succeeds. A kernel busy result must retain it; later direct
-  Cargo writers must create separate output rather than reach detached bytes.
-  No prototype exists. Prove behavior for unlinked-but-open locks, mapped running
-  binaries, clean/build races and new writers on macOS and Linux. Mount lifecycle,
-  crash recovery, privileges, app/control paths and overhead may make this too
-  large for the accepted small change. A directory rename alone supplies no such
-  kernel boundary and remains insufficient.
-- **Native exclusion outside deletable output:** investigate whether Cargo can
-  provide one persistent exclusion primitive shared by build and clean. Current
-  profile locks cannot. This likely requires upstream behavior rather than a
-  repository-only change; test the recorded clean/replacement counterexample
-  before selecting it. SwiftPM's existing external temporary lock is a cheaper
-  independent candidate, pending real clean/reset proof. Node package-manager
-  exclusion has no evidence yet. Proving only Swift cannot complete Rust lifetime.
-- **Participating-launcher leases:** mechanically smaller, but ordinary direct
-  Cargo does not participate. This requires Jack Heart to revise the preservation
-  contract and is unselected. Technical delegation alone does not authorize that
-  change. Never treat retention-only Rust behavior as satisfying bounded lifetime.
-
-These are candidates, not a replacement deletion design. Reclamation stays
-unimplemented until a mechanism proves the existing preservation contract, or
-Jack Heart explicitly accepts a different one. The existing pressure cleaner
-remains a known mismatch; this slice neither extends it nor certifies it.
+Do not add mounted filesystems, a cache daemon, an upstream Cargo lock protocol or
+a generic retention framework for this rare race. Preserve the research receipt.
+The existing Python cwd/age-only cleaner still lacks positive completed ownership;
+replace its build deletion through the supported owner in the same cut.
 
 ## Implementation and remaining design
 
@@ -198,7 +172,7 @@ when elapsed time improves.
 
 ## Delete — do not maintain
 
-These cuts follow writer-exclusion redesign; preserve consumers until each cut
+These cuts follow the accepted practical policy; preserve consumers until each cut
 provides its replacement. Do not extend the predecessor to implement reclamation.
 
 - In `scripts/resource_envelope.py`, replace the build branch of recover_resources
@@ -226,14 +200,10 @@ zero tests is not proof.
 
 ## Current execution boundary
 
-The October 13 operator inspection confirmed the first Flow stopped with no
-production changes and no live Task process. Independent slice 1 remains
-authorized by Jack Heart’s fully autonomous direction; its implementation and
-matched measurement proceed without claiming that reclamation is solved.
-The Cargo counterexample blocks only dependent deletion work. No preservation
-promise is narrowed, and no PR lands or Task completes on this slice alone.
-Reclamation needs a revised mechanism with new proof, not a repeat of the
-invalidated lock design.
+The prepared CLI Flow finished successfully as dfc7550eaf. Jack Heart subsequently
+accepted the practical concurrency policy above, unblocking reclamation. No PR
+lands or Task completes on CLI preparation alone. Remaining work is reclamation,
+whole-outcome validation and delivery; research and kickoff need no replay.
 
 ## Internal slices and Done when
 
@@ -247,16 +217,17 @@ invalidated lock design.
    startup fixtures without leak warnings; an earlier exploratory trial's warning
    remains unresolved. The measured graph-sharing alternative meets the draft
    20% warm speed target. This slice alone does not meet Done.
-2. Resolve the writer-exclusion section above. Preserve the Cargo clean → lock
-   replacement → build counterexample in the proof; test Swift clean/reset.
-3. **Unify safe reclamation after redesign.** Implement positive read-only ownership,
+2. Apply the accepted practical concurrency policy above. Preserve the native Cargo
+   counterexample as a documented unsupported race; prove correct selection,
+   observed-busy retention, inspection failure and participating-lease exclusion.
+3. **Unify safe reclamation under the accepted policy.** Implement positive read-only ownership,
    native/process preservation and bounded build-mode pruning; replace Python
    deletion in the same cut. Focused disposable-registry tests retain a dirty Done
    checkout with generated output. Preview changes no content; apply reduces
    allocation while source/untracked bytes, history, stores and registration survive.
    Cover pending/unknown Task facts, incompatible registries, inspection failure,
-   executable launched elsewhere, open files, held leases, writers starting after
-   selection and lock inode retention. Use test-only race hooks plus real writer
+   executable launched elsewhere, open files, held leases, cooperating writers starting after
+   selection and detected direct-process retention. Use test-only race hooks plus real writer
    subprocesses; no production factory abstractions.
 4. Remaining matched measurements and durable guidance. The warm CLI pairs and
    full retained-output counts are complete; TESTING.md and the storage review

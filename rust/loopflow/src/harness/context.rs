@@ -1,4 +1,4 @@
-//! Provider-owned conversation hooks. Settings are launch-scoped; no user files
+//! Stable provider hook declarations and separately saved launch context. No user files
 //! or trust decisions are replaced. Saved sources survive driver replacement.
 use anyhow::Result;
 use serde_json::{json, Value};
@@ -11,18 +11,22 @@ pub(crate) fn claude_args(context: &ContextDelivery) -> Result<Vec<String>> {
     let mut hooks = context.hook_settings()?;
     hooks["PostToolUseFailure"] = hooks["PostToolUse"].clone();
     let settings = json!({"hooks": hooks});
-    let path = write_prompt_log(
-        &context.repo,
-        &serde_json::to_string(&settings)?,
-        "claude-hooks",
-        None,
-    )?;
+    let bytes = serde_json::to_vec(&settings)?;
+    let directory = context.home.join("hook-settings");
+    std::fs::create_dir_all(&directory)?;
+    let path = directory.join(format!(
+        "claude-{}.json",
+        hex::encode(Sha256::digest(&bytes))
+    ));
+    if !path.exists() {
+        let file = tempfile::NamedTempFile::new_in(&directory)?;
+        serde_json::to_writer(file.as_file(), &settings)?;
+        file.persist(&path)?;
+    }
     Ok(vec!["--settings".into(), path.display().to_string()])
 }
 
-/// Codex hashes normalized hook declarations as sorted JSON. Trust only these
-/// exact commands in the session-flags layer, never all hooks on the machine.
-/// Protocol: codex-rs/hooks/src/engine/discovery.rs (0.161.0).
+/// Stable declarations only. The provider owns review and persisted trust.
 pub(crate) fn codex_config(context: Option<&ContextDelivery>, capture: bool) -> Result<Value> {
     let mut hooks = match context {
         Some(context) => context.hook_settings()?,
@@ -41,33 +45,6 @@ pub(crate) fn codex_config(context: Option<&ContextDelivery>, capture: bool) -> 
                 "matcher": "startup", "hooks": [{"type":"command", "command":command, "timeout":5}]
             }));
     }
-    let mut states = serde_json::Map::new();
-    for (event, event_name) in [
-        ("SessionStart", "session_start"),
-        ("Stop", "stop"),
-        ("PostToolUse", "post_tool_use"),
-        ("UserPromptSubmit", "user_prompt_submit"),
-    ] {
-        let Some(groups) = hooks[event].as_array() else {
-            continue;
-        };
-        for (index, group) in groups.iter().enumerate() {
-            let mut handler = group["hooks"][0].clone();
-            handler["async"] = json!(false);
-            let mut identity =
-                json!({"event_name":event_name, "matcher":group["matcher"], "hooks":[handler]});
-            identity.sort_all_objects();
-            let hash = format!(
-                "sha256:{}",
-                hex::encode(Sha256::digest(serde_json::to_vec(&identity)?))
-            );
-            states.insert(
-                format!("/<session-flags>/config.toml:{event_name}:{index}:0"),
-                json!({"trusted_hash":hash}),
-            );
-        }
-    }
-    hooks["state"] = Value::Object(states);
     Ok(json!({"hooks":hooks}))
 }
 
@@ -173,6 +150,57 @@ pub(crate) fn native_args(
 mod tests {
     use super::opencode_config;
     use crate::context_block::ContextDelivery;
+
+    #[test]
+    fn hook_identity_is_shared_across_tasks_and_sessions_without_granting_trust() {
+        let _env = crate::test_ambient::EnvGuard::clear(&["LF_BIN"]);
+        let home = tempfile::tempdir().unwrap();
+        let repos = [tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap()];
+        let contexts: Vec<_> = repos
+            .iter()
+            .enumerate()
+            .map(|(index, repo)| ContextDelivery {
+                repo: repo.path().to_owned(),
+                home: home.path().to_owned(),
+                wave: Some(format!("wave-{index}")),
+                skill_file: Some(repo.path().join("saved-skill.md")),
+                references: vec![repo.path().join("task-reference.md")],
+            })
+            .collect();
+        for capture in [true, false] {
+            let first = super::codex_config(Some(&contexts[0]), capture).unwrap();
+            assert_eq!(
+                first,
+                super::codex_config(Some(&contexts[1]), capture).unwrap()
+            );
+            assert!(first["hooks"]["state"].is_null());
+            assert!(!first.to_string().contains("trusted_hash"));
+        }
+        assert_eq!(
+            super::claude_args(&contexts[0]).unwrap(),
+            super::claude_args(&contexts[1]).unwrap()
+        );
+        let mut saved = Vec::new();
+        for context in &contexts {
+            let mut command = std::process::Command::new("provider");
+            context.configure_hooks(&mut command).unwrap();
+            let path = command
+                .get_envs()
+                .find(|(key, _)| *key == "LF_CONTEXT_DELIVERY")
+                .unwrap()
+                .1
+                .unwrap();
+            let restored: ContextDelivery =
+                serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+            assert_eq!(&restored, context);
+            saved.push(path.to_owned());
+        }
+        assert_ne!(saved[0], saved[1]);
+        // Later launches never overwrite a retained native resume's sources.
+        let restored: ContextDelivery =
+            serde_json::from_slice(&std::fs::read(&saved[0]).unwrap()).unwrap();
+        assert_eq!(restored, contexts[0]);
+    }
 
     #[test]
     fn opencode_context_preserves_settings_and_existing_plugins() {

@@ -248,13 +248,16 @@ No unknown-process retirement or native acceptance follows from those fixes.
 
 ## Stable hook trust — October 13
 
-Jack Heart requested at most one Loopflow hook review per Desktop app, not
-per Task/Session. Current ContextDelivery::hook_settings embeds a newly written
-delivery path in each command; Codex hashes exact declarations. Stable hook
-commands with separately supplied launch context are the proposed repair.
-harness/context.rs also synthesizes provider-internal trusted hashes; investigate
-the installed provider's actual identity before preserving that brittle coupling.
-Do not bypass unrelated hooks, manufacture approval, or silently trust changed
-code. Verify distinct Tasks, new Sessions, native resume and compaction receive
-their own context without another review for unchanged Loopflow hooks.
-Claude's distinct trust behavior needs separate proof. Keep live Sessions intact.
+Jack Heart requested one review of unchanged Loopflow hooks per app/provider.
+Deleted launch paths from declarations and synthetic Codex trust hashes. Native
+launches supply context separately; headless Codex binds exact native threads
+before the first turn. Claude settings paths are content-addressed. Review fixed
+the agent terminal launch and fenced binding replacement.
+
+Installed Codex 0.162.1 isolated hooks/list probe: changed launch context retains
+key/hash and remains untrusted. Claude 2.1.296 workspace trust remains per folder;
+Codex account/config homes may require separate review. Sources and limits:
+README.md. Native approval-once, distinct Tasks, resume and compaction proof still
+belongs to the primary demo. No trust clicks or live restart performed.
+
+Checks: 13 focused tests, cargo fmt, all-target Clippy passed; native approval proof deferred.

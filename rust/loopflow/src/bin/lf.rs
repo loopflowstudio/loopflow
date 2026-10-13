@@ -2333,10 +2333,10 @@ fn execute_command(
             loopflow::lf::commands::session_history::observe_provider_session()
         }
         Some(Commands::ContextBlock { delivery, moment }) => {
-            loopflow::lf::commands::context::emit_block(delivery, *moment)
+            loopflow::lf::commands::context::emit_block(delivery.as_deref(), *moment)
         }
         Some(Commands::PlanningCheck { delivery }) => {
-            loopflow::lf::commands::context::check_planning(delivery)
+            loopflow::lf::commands::context::check_planning(delivery.as_deref())
         }
         Some(Commands::SessionTitle { .. }) => {
             unreachable!("title callbacks dispatch before command admission")

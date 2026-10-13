@@ -28,6 +28,7 @@ drops it too, so sessions a person opens by hand inherit none of it.
 
 | Variable | Set by | Read by | Policy |
 |---|---|---|---|
+| `LF_CONTEXT_DELIVERY` | Native provider launch | Context and planning hooks | Private saved launch sources, separate from stable hook declarations. Scrubbed for independent launches and Codex app-server processes; headless Codex callbacks use their native thread binding. |
 | `LF_CAPTURE_KEY` | Session capture and native resume | Capture lookup, provider callbacks, Task comments | Selects subordinate captured history in the resolved Machine. SQLite must record its owning Session; a present manifest must agree. It grants neither Task nor Flow authority. |
 | `LF_TRACE_ID`, `LF_PROCESS_ID` | Journal, agent and session launch | Journal, git operations | Joins a child's events to its caller's trace. |
 | `LF_AGENT_CALLER` | Session capture and native resume | Journal, once, then resolved process context | Carries Session identity, AgentProcess identity and origin Process for nested command ancestry and checkpoint composition. |

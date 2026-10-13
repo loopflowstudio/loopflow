@@ -4,6 +4,7 @@
 mod support;
 
 use std::fs;
+use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::process::Command;
 
@@ -46,6 +47,7 @@ for arg in "$@"; do
     [ "${#arg}" -lt 122880 ] || exit 99
     printf '%s\000' "$arg" >> "$HOME/argv"
 done
+printf '%s' "$LF_CONTEXT_DELIVERY" > "$HOME/delivery-path"
 printf 'provider fixture refused this request\n' >&2
 exit 23
 "#,
@@ -112,7 +114,7 @@ exit 23
                 .collect()
         } else {
             let flags = args.iter().find(|arg| arg.starts_with("hooks=")).unwrap();
-            assert!(flags.contains("trusted_hash"));
+            assert!(!flags.contains("trusted_hash"));
             // Exercise the emitted commands, not a reconstructed callback or
             // whichever saved delivery happens to have the newest timestamp.
             // The owned TOML encoder emits command values as JSON strings.
@@ -130,6 +132,10 @@ exit 23
                 .env_clear()
                 .env("PATH", "/usr/bin:/bin")
                 .env("HOME", home.path())
+                .env(
+                    "LF_CONTEXT_DELIVERY",
+                    fs::read_to_string(home.path().join("delivery-path")).unwrap(),
+                )
                 .current_dir(repo.path())
                 .args(["-c", callback])
                 .output()
@@ -187,6 +193,7 @@ fn headless_codex_keeps_large_first_turn_separate_from_additive_instructions() {
         ".lf/config.yaml",
         "diff: false\ndiff_files: false\npaste: false\n",
     );
+    repo.create_file("scratch/thread-context.md", "ONLY_THREAD_FIXTURE_CONTEXT");
     let provider = bin.join("codex");
     let script = support::codex_socket_script(
         r#"#!/bin/sh
@@ -247,6 +254,43 @@ while read -r line; do :; done
         .as_str()
         .unwrap()
         .contains(&content));
+    // The actual emitted hook runs with no launch-delivery environment. Codex's
+    // app-server supplies native thread identity on stdin, including compaction.
+    for (group, expected) in [(0, "start"), (1, "compact")] {
+        let callback = thread["params"]["config"]["hooks"]["SessionStart"][group]["hooks"][0]
+            ["command"]
+            .as_str()
+            .unwrap();
+        assert!(callback.ends_with(expected));
+        let mut child = Command::new("/bin/sh")
+            .env_clear()
+            .env("HOME", home.path())
+            .env("PATH", "/usr/bin:/bin")
+            .current_dir(repo.path())
+            .args(["-c", callback])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(br#"{"session_id":"thread-fixture","hook_event_name":"SessionStart"}"#)
+            .unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let context: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert!(context["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap()
+            .contains("ONLY_THREAD_FIXTURE_CONTEXT"));
+    }
     let turn: serde_json::Value =
         serde_json::from_slice(&fs::read(home.path().join("turn-request")).unwrap()).unwrap();
     assert!(turn["params"]["input"][0]["text"]

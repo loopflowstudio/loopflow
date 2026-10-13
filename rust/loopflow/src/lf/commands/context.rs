@@ -266,11 +266,18 @@ pub fn explain_task_checkout(
 
 /// Provider callbacks use launch-owned authority rather than the current client.
 pub fn emit_block(
-    delivery: &std::path::Path,
+    delivery: Option<&std::path::Path>,
     moment: crate::context_block::ContextMoment,
 ) -> Result<()> {
-    use crate::context_block::ContextDelivery;
-    let delivery: ContextDelivery = serde_json::from_slice(&std::fs::read(delivery)?)?;
+    let input = read_callback()?;
+    if input.get("agent_id").is_some_and(|id| !id.is_null()) {
+        return Ok(());
+    }
+    let delivery = load_delivery(delivery, &input)?;
+    emit_context(delivery, input, moment)
+}
+
+fn read_callback() -> Result<serde_json::Value> {
     let mut input = String::new();
     std::io::stdin()
         .take(1_048_577)
@@ -279,14 +286,36 @@ pub fn emit_block(
         input.len() <= 1_048_576,
         "Context callback exceeds input limit"
     );
-    let input: serde_json::Value = if input.trim().is_empty() {
+    Ok(if input.trim().is_empty() {
         serde_json::json!({})
     } else {
         serde_json::from_str(&input)?
-    };
-    if input.get("agent_id").is_some_and(|id| !id.is_null()) {
-        return Ok(());
-    }
+    })
+}
+
+fn load_delivery(
+    path: Option<&std::path::Path>,
+    input: &serde_json::Value,
+) -> Result<crate::context_block::ContextDelivery> {
+    let path = path
+        .map(std::path::Path::to_path_buf)
+        .or_else(|| std::env::var_os(crate::context_block::CONTEXT_DELIVERY_ENV).map(Into::into))
+        .or_else(|| {
+            input["session_id"].as_str().map(|session| {
+                crate::context_block::codex_delivery_path(&crate::store::lf_home_dir(), session)
+            })
+        })
+        .ok_or_else(|| {
+            anyhow::anyhow!("Provider callback has no launch context or native session binding")
+        })?;
+    Ok(serde_json::from_slice(&std::fs::read(path)?)?)
+}
+
+fn emit_context(
+    delivery: crate::context_block::ContextDelivery,
+    input: serde_json::Value,
+    moment: crate::context_block::ContextMoment,
+) -> Result<()> {
     let event = input["hook_event_name"].as_str().unwrap_or("SessionStart");
     let render = |prefix: &str| -> crate::store::StoreResult<String> {
         delivery
@@ -355,9 +384,8 @@ pub fn emit_block(
 }
 
 /// Native turn hooks consume the same team freshness as CLI and watcher reads.
-pub fn check_planning(path: &std::path::Path) -> Result<()> {
-    let delivery: crate::context_block::ContextDelivery =
-        serde_json::from_slice(&std::fs::read(path)?)?;
+pub fn check_planning(path: Option<&std::path::Path>) -> Result<()> {
+    let delivery = load_delivery(path, &read_callback()?)?;
     let database = delivery.home.join("loopflow.db");
     if !database.exists() {
         return Ok(());
@@ -496,4 +524,80 @@ fn write_output(mut bytes: &[u8]) -> std::io::Result<()> {
         return Err(std::io::Error::last_os_error());
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::load_delivery;
+    use crate::context_block::{ContextDelivery, ContextMoment};
+
+    #[test]
+    fn callbacks_select_exact_session_after_other_tasks_and_resume() {
+        let _env = crate::test_ambient::EnvGuard::clear(&["LF_CONTEXT_DELIVERY", "LF_HOME"]);
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("LF_HOME", home.path());
+        let repos = [tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap()];
+        let mut contexts = Vec::new();
+        for (index, repo) in repos.iter().enumerate() {
+            let skill = repo.path().join("skill.md");
+            std::fs::write(&skill, format!("SESSION_{index}_SKILL")).unwrap();
+            let context = ContextDelivery {
+                repo: repo.path().to_owned(),
+                home: home.path().to_owned(),
+                wave: None,
+                skill_file: Some(skill),
+                references: Vec::new(),
+            };
+            context
+                .bind_codex_session(&format!("thread-{index}"))
+                .unwrap();
+            contexts.push(context);
+        }
+        // Native launches retain independent files even when another Task has
+        // launched since. Resume restores that Session's environment from capture.
+        let paths: Vec<_> = contexts
+            .iter()
+            .map(|context| {
+                let mut command = std::process::Command::new("provider");
+                context.configure_hooks(&mut command).unwrap();
+                command
+                    .get_envs()
+                    .find(|(key, _)| *key == "LF_CONTEXT_DELIVERY")
+                    .unwrap()
+                    .1
+                    .unwrap()
+                    .to_owned()
+            })
+            .collect();
+        for index in [0, 1, 0] {
+            std::env::set_var("LF_CONTEXT_DELIVERY", &paths[index]);
+            let restored = load_delivery(None, &serde_json::json!({})).unwrap();
+            assert_eq!(restored, contexts[index]);
+            let compact = restored.block(ContextMoment::Compact).unwrap().text;
+            assert!(compact.contains(&format!("SESSION_{index}_SKILL")));
+            assert!(!compact.contains(&format!("SESSION_{}_SKILL", 1 - index)));
+        }
+        std::env::remove_var("LF_CONTEXT_DELIVERY");
+        for index in [0, 1, 0] {
+            let input = serde_json::json!({"session_id":format!("thread-{index}")});
+            let restored = load_delivery(None, &input).unwrap();
+            assert_eq!(restored, contexts[index]);
+            let compact = restored.block(ContextMoment::Compact).unwrap().text;
+            assert!(compact.contains(&format!("SESSION_{index}_SKILL")));
+            assert!(!compact.contains(&format!("SESSION_{}_SKILL", 1 - index)));
+        }
+        assert!(load_delivery(None, &serde_json::json!({"session_id":"unbound"})).is_err());
+        assert!(load_delivery(None, &serde_json::json!({})).is_err());
+        // Resume refreshes only the chosen native conversation's binding.
+        contexts[0].wave = Some("resumed".into());
+        contexts[0].bind_codex_session("thread-0").unwrap();
+        for index in [0, 1] {
+            let restored = load_delivery(
+                None,
+                &serde_json::json!({"session_id":format!("thread-{index}")}),
+            )
+            .unwrap();
+            assert_eq!(restored, contexts[index]);
+        }
+    }
 }

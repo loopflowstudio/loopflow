@@ -220,6 +220,22 @@ lf session bind SESSION --task INF-123
 
 Claude and Codex terminal Sessions load assembled context from a system instructions
 file, keeping the initial command-line message short even with large Wave memory.
+Startup, resume and compaction hooks refresh reference context from the Session's
+saved launch sources. Hook declarations stay identical across Tasks and Sessions
+for the same lf executable and Machine. Each native launch gets its own context
+file through `LF_CONTEXT_DELIVERY`; Codex app-server threads use separate native
+thread bindings because hooks inherit the server's environment.
+
+Codex owns hook approval. Review new or changed declarations with `/hooks`;
+Loopflow supplies no trust hashes or trust bypass. Approval is scoped to the
+provider's config home, so another account/profile or a changed executable path
+may need review again. Codex hashes declarations, not executable contents.
+Headless runs skip untrusted hooks until reviewed in that provider profile.
+Claude interactive hooks also require workspace trust, potentially once per
+folder; `claude -p` treats the workspace as trusted. Loopflow follows the providers’ [Codex hook trust](https://learn.chatgpt.com/docs/hooks#review-and-trust-hooks)
+and [Claude workspace trust](https://code.claude.com/docs/en/hooks#workspace-trust)
+policies. Unchanged declarations cannot remove Claude’s folder trust requirement.
+
 New Session names use a short excerpt of the request, or the invoked skill when
 no request was supplied. Task conversations use the Task title when no specific
 purpose was supplied. Human-assigned names survive reconnects and suggestions.

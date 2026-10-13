@@ -155,8 +155,9 @@ Flow process for a Task is equally its work.
 
 Flow output shows each step's position and name followed by the agent's messages.
 Use `lf -v -b task run EXP-12 pursue` for context token accounting and INFO
-diagnostics. Codex Session capture uses a temporary launch profile so terminal
-wrapper hooks stay active. No hook setup or saved trust changes are required.
+diagnostics. Codex Session capture adds stable launch hooks alongside existing
+hooks. Review new or changed declarations with Codex’s `/hooks`; headless runs
+skip untrusted hooks. Loopflow never writes provider trust decisions.
 
 A Task takes up its Project's workflow and moves through its nodes.
 Each `task run` takes one edge leaving the current node: the only one, or the

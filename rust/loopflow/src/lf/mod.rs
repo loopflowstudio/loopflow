@@ -416,7 +416,7 @@ pub enum Commands {
     #[command(name = "__context-block", hide = true)]
     ContextBlock {
         #[arg(long)]
-        delivery: std::path::PathBuf,
+        delivery: Option<std::path::PathBuf>,
         #[arg(long, value_enum)]
         moment: crate::context_block::ContextMoment,
     },
@@ -424,7 +424,7 @@ pub enum Commands {
     #[command(name = "__planning-check", hide = true)]
     PlanningCheck {
         #[arg(long)]
-        delivery: std::path::PathBuf,
+        delivery: Option<std::path::PathBuf>,
     },
     /// Native provider naming callback.
     #[command(name = "__session-title", hide = true)]

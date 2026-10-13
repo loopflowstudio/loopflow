@@ -4755,6 +4755,8 @@ fn linear_on_demand_hook_child() {
     let Some(crate::lf::Commands::PlanningCheck { delivery }) = cli.command else {
         panic!("generated turn hook must select the planning callback")
     };
+    let delivery =
+        delivery.unwrap_or_else(|| std::env::var_os("LF_CONTEXT_DELIVERY").unwrap().into());
     let context: crate::context_block::ContextDelivery =
         serde_json::from_slice(&std::fs::read(&delivery).unwrap()).unwrap();
     let path = context.home.join("loopflow.db");
@@ -4783,7 +4785,7 @@ fn linear_on_demand_hook_child() {
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
     LINEAR_TEST_CONTEXT.sync_scope(context, || {
-        crate::lf::commands::context::check_planning(&delivery).unwrap();
+        crate::lf::commands::context::check_planning(Some(&delivery)).unwrap();
     });
 }
 
@@ -4833,6 +4835,7 @@ fn linear_on_demand_native_hooks_share_freshness_across_processes() {
             {
                 command.env_remove(name);
             }
+            delivery.configure_hooks(&mut command).unwrap();
             command
                 .args(["-c", hook.as_str().unwrap()])
                 .env(

@@ -1443,6 +1443,11 @@ impl CodexHarness {
         match tokio::time::timeout(Duration::from_secs(10), thread_id_rx).await {
             Ok(Ok(thread_id)) => {
                 let (store, session, attachment) = &owner;
+                if let Some(context) = &launch.conversation_context {
+                    store.with_session_attachment(session, attachment, || {
+                        Ok(context.bind_codex_session(thread_id.as_str()))
+                    })??;
+                }
                 store.record_session_connection(
                     session,
                     attachment,

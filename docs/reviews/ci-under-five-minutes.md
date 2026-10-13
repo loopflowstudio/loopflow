@@ -611,3 +611,17 @@ large total-work reduction is demonstrated.
 
 Raw evidence: `/tmp/ci-grouped-{jobs,artifacts}.json`,
 `/tmp/ci-grouped-{build,task-installation,swift-test}.log`.
+
+### Next macOS measurement
+
+The slow Swift runner upgraded Rust 1.98.1 to 1.99.0, downloading five components
+because its preinstalled stable toolchain included Clippy and rustfmt. No
+toolchain-selection change is selected from one slow download. The next candidate
+sets dev/test debug-info levels to zero in Swift's CLI build and the independent
+macOS process-test job. Debug assertions, optimization and coverage are unchanged;
+CI backtraces lose source-line detail as on Linux. This may start with cold
+dependency caches for the changed profile. Local and release profiles are untouched.
+The same run can measure restoration of the now-populated installation cache.
+
+Validation: 45 CI-proof/release-automation tests and actionlint pass; hosted macOS
+compilation and timing are the remaining verification.

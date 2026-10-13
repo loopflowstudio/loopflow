@@ -516,7 +516,8 @@ Each Rust partition extracts the same revision's library or integration archive 
 `target/` directory and materializes matching migration inputs. The reconnect
 target is excluded from that archive and executed in the smoke job. No suite
 is dropped; the aggregate requires the build and every partition to succeed.
-The shared Linux build omits debug symbols to keep archive transfer small.
+The shared Linux build and macOS Rust builds omit debug symbols to reduce
+compilation and transfer work.
 It retains unoptimized code and debug assertions; CI backtraces have less
 source-line detail. Local Cargo profiles are unchanged.
 `.github/workflows/architecture-drift.yml`

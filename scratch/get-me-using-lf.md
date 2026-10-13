@@ -468,7 +468,8 @@ this grants no broader cleanup authority. Current receipts: work-first-demo.md.
 
 ## Paused — accepted October 12
 
-Jack Heart selected explicit Paused in this diff and authorized pausing LOO-389.
+Jack Heart selected Paused and authorized pausing LOO-389. October 13: ship the
+independent extraction first as lf-2086e0a (checkout loopflow.task-paused).
 Preserve Task identity, history, checkout and Workflow. Default active navigation
 omits paused Tasks; the Wave plan keeps them reachable. Resume clears the hold,
 never launches execution. Pause does not kill an already-running process.
@@ -488,7 +489,8 @@ active clients. LOO-427 completed through `lf task complete` after verifying mer
 Checkout/unknown Process `f1482ca7-35a6-4bea-89f8-1f2d5c3de5b2` remain.
 Pause fixture failures and historical journal-seeding repair:
 `81ae973322:scratch/get-me-using-lf.md`, **Paused**.
-Check: pause persistence/migration/exchange and Rust/Swift DTO tests pass; 17 focused Swift tests pass; fmt, all-target Clippy and diff-check pass. Native pause controls and live migration remain unproved.
+Local checks/limits: `9e79fa4970:scratch/get-me-using-lf.md`, **Paused**.
+Standalone slice verification remains; native acceptance is not claimed.
 
 Title leak: running demo PID 44545 inherited CMUX workspace/surface/socket keys;
 `terminal_title.rs` uses them to rename the launching host. GUI environment now

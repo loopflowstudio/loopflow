@@ -988,8 +988,8 @@ remains **6:24 creation-to-aggregate completion**; #1543 is merged. No new
 hosted acceptance run, PR or merge is claimed by this experiment.
 
 The prototype started the exact development/validation-only app CLI build next
-to ordinary signed Xcode `build-for-testing`. One private Cargo build owner
-served preparation and the existing copy/sign phase. Cargo compiled `loopflow`
+to ordinary signed Xcode `build-for-testing`. One private function built the CLI
+for preparation and the existing copy/sign phase. Cargo compiled `loopflow`
 once per sample; the post-build invocation waited on Cargo's lock and reported
 `Fresh loopflow`. Process snapshots observed simultaneous rustc and
 swift-frontend work, rather than inferring overlap from buffered Xcode logs.
@@ -1029,7 +1029,7 @@ Native preparation `(real/user/sys seconds; peak RSS bytes)` was
 `32.70/37.34/1.40;3446652928`, `33.20/39.81/1.35;3440082944` for cold,
 and `29.18/37.27/1.08;3443621888`, `38.46/36.77/1.46;3439296512` for warm.
 Xcode's native user/sys ranges were 1.11–1.58/0.38–0.60s cold and
-0.77–0.81/0.23–0.26s warm; peak RSS was198131712–200081408 bytes.
+0.77–0.81/0.23–0.26s warm; peak RSS was 198131712–200081408 bytes.
 Those Xcode figures exclude the shared build service and its compilers; they
 are not total compilation CPU/RSS or evidence of lower runner cost.
 

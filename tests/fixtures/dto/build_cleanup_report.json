@@ -1,0 +1,10 @@
+{
+  "dry_run": false,
+  "entries": [
+    {"worktree": "/completed", "path": "/completed/target", "allocated_bytes": 4096,
+     "status": "removed", "reason": "completed and idle"},
+    {"worktree": "/busy", "path": "/busy/target", "allocated_bytes": null,
+     "status": "retained", "reason": "open output"}
+  ],
+  "removed_bytes": 4096
+}

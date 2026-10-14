@@ -1,12 +1,90 @@
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Child, ExitStatus};
+use std::process::{Child, Command, ExitStatus, Output, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex};
+use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{anyhow, Result};
 
 pub(crate) const DISCORD_TOKEN_ENV: &str = "LF_DISCORD_TOKEN";
+
+/// Bound both execution and inherited output pipes, then reap the owned group.
+pub(crate) fn bounded_output(command: &mut Command, timeout: Duration) -> std::io::Result<Output> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    let mut child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    let group = ProcessGroupGuard::new(child.id());
+    let deadline = Instant::now() + timeout;
+    let (sender, receiver) = mpsc::channel();
+    let stdout = child.stdout.take().expect("stdout was piped");
+    let stderr = child.stderr.take().expect("stderr was piped");
+    for (index, mut pipe) in [
+        (0, Box::new(stdout) as Box<dyn Read + Send>),
+        (1, Box::new(stderr)),
+    ] {
+        let sender = sender.clone();
+        thread::spawn(move || {
+            let mut bytes = Vec::new();
+            let result = pipe.read_to_end(&mut bytes).map(|_| bytes);
+            let _ = sender.send((index, result));
+        });
+    }
+    drop(sender);
+    let result = (|| {
+        let mut streams = [None, None];
+        let mut status = None;
+        loop {
+            while let Ok((index, bytes)) = receiver.try_recv() {
+                streams[index] = Some(bytes?);
+            }
+            if status.is_none() {
+                status = child.try_wait()?;
+            }
+            if let Some(status) = status {
+                if streams.iter().all(Option::is_some) {
+                    return Ok(Output {
+                        status,
+                        stdout: streams[0].take().expect("stdout completed"),
+                        stderr: streams[1].take().expect("stderr completed"),
+                    });
+                }
+            }
+            if Instant::now() >= deadline {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "command inspection deadline exceeded",
+                ));
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+    })();
+    // Kill the owned group even if its leader has exited but descendants retain pipes.
+    group.terminate();
+    let cleanup_deadline = Instant::now() + Duration::from_secs(1);
+    while child.try_wait()?.is_none() {
+        if Instant::now() >= cleanup_deadline {
+            // Retain a reaper if the OS cannot settle the killed child promptly.
+            thread::spawn(move || {
+                let _ = child.wait();
+            });
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "command child cleanup deadline exceeded",
+            ));
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    result
+}
 
 /// Wait for an owned child, returning its exit status and whether it timed out.
 pub(crate) fn wait_for_exit(

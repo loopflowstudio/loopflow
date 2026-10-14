@@ -233,12 +233,39 @@ uses a prior pass only when tracked and untracked file content, the worktree,
 and the selected command plan are identical. Full and optional hosted runs never
 reuse evidence.
 
-Do not run source-tree Cargo builds alongside the materialized Rust phase.
-The materializer reuses this checkout's `target/`; rebuilding `target/debug/lf`
-from source mid-suite replaces the candidate with a different migration frontier.
-Wait for gate to finish, then run focused repairs serially (or use a separate
-`CARGO_TARGET_DIR`). Version/schema mismatches after such overlap are invalid
-verification evidence, not permission to alter a fixture or installed database.
+The Rust phase prepares one exact-tree fixture CLI after draft materialization,
+then supplies it through `LOOPFLOW_TEST_LF`. It builds the CLI with test targets
+so nextest and Cargo tests reuse that dependency graph. Preparation is offline;
+Cargo updates the disposable lockfile when materialization advances the package
+version. Development provenance and validation-only migration authority are
+explicit, including when the calling shell supplied release overrides.
+
+Verification uses `target/materialized-tests/`, separate from source builds and
+app-control output. `CARGO_TARGET_DIR` or `--target-dir` selects its parent;
+relative paths resolve against the originating checkout. Serialize materialized
+runs in a checkout, since they reuse that verification target. Generic wrapper
+commands prepare no CLI unless `--prepare-cli` is supplied:
+
+```sh
+uv run python scripts/materialize_rust_tests.py --prepare-cli -- cargo nextest run -p loopflow -E 'test(local_planning::public_local_task_places_and_runs_without_a_planning_provider)' --no-tests fail
+```
+
+Fixtures still create their own disposable Homes. Source and materialized schema
+frontiers stay separate; a version/schema mismatch is invalid verification
+evidence, never permission to alter an installed database.
+
+October 13 matched local-planning/startup runs, including preparation, improved
+from 113.05s to 79.72s median (29.5%, three pairs). The isolated verification root
+retained 4.49 GiB in addition to source/control output. Two further fixed-input
+pairs, including a small Rust edit, improved edit/test median from 106.34s to
+70.02s (34.2%). Fresh prepared targets used 3.39 GiB versus fallback's 4.47 GiB;
+existing warm targets retain older variants until eligible cleanup. Cold totals
+favored preparation but varied widely. Unchanged Swift/control warm builds took
+0.36s/0.23s median; no app speedup is claimed. See the
+[measurements and limits](docs/reviews/storage-footprint.md#local-verification-cli--2026-10-13).
+
+Runner/materializer changes also need the command-plan checks in
+`python/tests/test_release_automation.py` during focused verification.
 
 Slow suites (`loopflow`, `e2e`) stay off in changed-mode even when
 their paths change—the run prints why and how to force them:
@@ -264,11 +291,39 @@ Individual root thresholds are cleanup signals, not gates: an oversized sibling 
 worktree in a warning and does not block a healthy checkout. The 24 GiB build threshold
 identifies cleanup candidates, not a limit on what a worktree may build.
 
-Verification preflight and explicit `--recover` reclaim inactive worktrees'
-allowlisted build roots only when unchanged for at least 24 hours and either
-oversized or needed to restore the cleanup target. They also prune old disposable
-gate output and entries accepted by `uv cache prune`. Cleanup runs before
-verification, not on an independent timer. A busy uv cache is reported immediately
+```sh
+lf wt prune --builds --dry-run       # candidates and retained reasons
+lf wt prune --builds --json          # reclaim output; retain checkouts
+```
+
+Verification preflight and explicit resource `--recover` use the same build-output
+owner. It requires a recorded completed local Task, no unfinished association,
+idle execution and ignored output whose entire tree has gone unchanged for 24 hours.
+It rechecks ownership, execution, cwd, executable mappings and open files under the
+worktree lease before deletion. Unknown inspection, busy leases, running binaries,
+tracked content, symlink escapes and primary/current/persistent checkouts retain
+output. Dirty and untracked source outside generated roots survives.
+
+Eligible output is reclaimed on the next supported invocation regardless of disk
+pressure or individual size. Defaults bound each invocation to eight generated roots
+and 64 GiB; `--retention-hours`, `--maximum-roots` and `--maximum-bytes` select the
+prune policy. Repeated calls drain an eligible backlog. Python inventories capacity
+and consumes Rust cleanup receipts; an unavailable capable `lf` retains builds and
+reports the missing owner. A timed-out or invalid cleanup receipt reports an unknown
+result and triggers fresh inventory, since deletion may already have occurred.
+Each inventory `du` has a five-second deadline;
+failures appear as measurement issues. Total inventory time still scales with the
+number of roots. Inventory timeouts grant no deletion authority; Rust independently
+retains candidates whose ownership, activity or content inspection is unknown.
+
+The lease coordinates Loopflow operations. Concurrent direct Cargo/npm/Swift
+build or clean commands newly racing cleanup in a completed candidate are unsupported.
+Cargo can replace a held profile lock during clean; native locks do not provide
+universal exclusion. Detected activity always retains output.
+
+Recovery also prunes old disposable gate output and entries accepted by
+`uv cache prune`. Cleanup runs before verification, not on an independent timer.
+A busy uv cache is reported immediately
 without waiting for its reader locks, including the parent `uv run`. Other cleanup
 and above-reserve verification continue. To reclaim uv entries, run
 `UV_LOCK_TIMEOUT=0 uv cache prune` directly when other uv commands are idle.
@@ -1260,13 +1315,12 @@ When changing remote account-selection docs, run `cd website && uv run python
 dev.py test -k test_docs_subscriptions_page_owns_account_selection`; the rendered
 guide must retain the current invocation, laptop account selection, and target-resident login contract.
 
-For gate runs launched inside managed execution, clear inherited `LF_*` authority and
-pin `LF_BIN` to the checkout's compiled `target/debug/lf` before invoking the test
-runner. On macOS, also set `TMPDIR=/private/tmp`: Wave/Task fixtures that
+The materializer and `test_network.py` clear all inherited `LF_*` authority.
+The prepared `LOOPFLOW_TEST_LF` candidate survives the network boundary; provider
+fixtures pin `LF_BIN` inside it. On macOS, set `TMPDIR=/private/tmp`: Wave/Task fixtures that
 register raw `/var/folders` paths otherwise disagree with canonical repository
 readers. This affects cron lookup, authored-goal context and exact-Task roadmap
-checks, not just orphan Session proofs. The materialization wrapper clears only its listed variables; it does not
-clear every inherited pin. The provider harness prepends the selected CLI's parent
+checks, not just orphan Session proofs. The provider harness prepends the selected CLI's parent
 to PATH, so an inherited CLI directory containing `claude` can outrank a fixture's
 fake provider and launch the real one. A temporary `LF_HOME` alone does not prevent
 this. Keep the failed evidence if this occurs, stop the test group, and verify the
@@ -1275,10 +1329,9 @@ fixture under the corrected executable context before completing the suite.
 inside that boundary. Integration `EnvGuard` uses `CARGO_BIN_EXE_lf`, not the
 installed CLI directory, so its provider stand-ins remain first on PATH.
 
-After a materialized run, a direct test can reuse `loopflow-test-support` with
-the deleted temporary checkout embedded in `CARGO_MANIFEST_DIR`. If fixture CLI
-construction fails with `No such file or directory`, run
-`cargo clean -p loopflow-test-support` before the focused rerun.
+Direct source tests retain their own target and the support crate's offline CLI
+preparation. Materialized test artifacts embed a disposable source path; execute
+them through the wrapper while that source exists.
 
 Default-runtime selection reads the OS account's installation records. Use the
 installation harness for default-runtime proofs; never replace the machine's

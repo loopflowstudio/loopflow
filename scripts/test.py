@@ -276,6 +276,7 @@ def _rust_commands(_changed: list[str]) -> list[Command]:
                 "run",
                 "python",
                 "scripts/materialize_rust_tests.py",
+                "--prepare-cli",
                 "--",
                 *test_argv,
             ],

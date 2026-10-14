@@ -2182,11 +2182,26 @@ pub enum WtCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Remove clean terminal or inactive worktrees
+    /// Prune worktrees or completed build output
     Prune {
         /// Show what would be pruned without removing anything
         #[arg(long)]
         dry_run: bool,
+        /// Reclaim old generated output from completed Tasks; retain checkouts
+        #[arg(long)]
+        builds: bool,
+        /// Emit cleanup entries and allocated-byte receipts
+        #[arg(long, requires = "builds")]
+        json: bool,
+        /// Keep output modified within this many hours
+        #[arg(long, requires = "builds", default_value_t = 24)]
+        retention_hours: u64,
+        /// Maximum generated roots removed per invocation
+        #[arg(long, requires = "builds", default_value_t = 8)]
+        maximum_roots: usize,
+        /// Maximum allocated bytes removed per invocation
+        #[arg(long, requires = "builds", default_value_t = 64 * 1024 * 1024 * 1024)]
+        maximum_bytes: u64,
     },
     /// Delete a worktree and its local and remote branch; retain PR and Task outcomes
     Delete {

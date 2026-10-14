@@ -170,6 +170,9 @@ When editing `*.rs` files:
 - When a name conflicts with a keyword: use `r#type` or `type_`, not `typ`
 - Use `#[non_exhaustive]` on public enums that may grow
 - Never use `()` as an error type
+- SQLite read helpers that join statements use savepoints so they compose inside
+  the Work reader's pinned snapshot as well as standalone. Keep write transactions
+  at their existing command boundaries.
 - For public APIs, include `# Panics`/`# Errors`/`# Safety` doc sections where non-obvious
 
 When editing Rust tests:

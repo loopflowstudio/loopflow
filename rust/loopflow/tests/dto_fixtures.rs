@@ -535,6 +535,8 @@ fn work_frames_keep_each_part_and_require_every_envelope_field() {
     assert!(matches!(frames[2].content, WorkContent::Task(None)));
     assert!(frames[2].unavailable.is_some());
     assert!(frames[4].revisions.is_none());
+    assert!(matches!(frames[8].content, WorkContent::Checkpoint));
+    assert_eq!(frames[8].answers, Some(8));
     let WorkContent::PeerPlanning(Some(peers)) = &frames[7].content else {
         panic!("peer planning frame");
     };

@@ -140,7 +140,7 @@ impl SqliteStore {
     /// another foreground connection acknowledges or resolves a delivery.
     pub fn task_comments(&self, task: &TaskId) -> StoreResult<TaskComments> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction()?;
+        let tx = conn.savepoint()?;
         let task = super::children::task_on(&tx, task)?.ok_or(StoreError::NotFound)?;
         let repo: String = tx.query_row(
             "SELECT w.repo FROM projects p JOIN waves w ON w.id=p.wave_id WHERE p.id=?1",

@@ -239,6 +239,7 @@ struct SessionBindingDraft: Equatable {
 /// An in-place Session name edit. It belongs to exactly one Session; a
 /// completion for another Session can never touch it.
 struct SessionRenameDraft: Equatable {
+    let id = UUID()
     let sessionId: String
     var text: String
     var error: String?

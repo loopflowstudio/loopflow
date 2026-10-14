@@ -157,5 +157,19 @@
       "repo": "/src/loopflow",
       "destinations": []
     }
+  },
+  {
+    "sequence": 9,
+    "answers": 8,
+    "home": "/home",
+    "revisions": {
+      "planning": 912,
+      "sessions": 17,
+      "flows": 3,
+      "processes": 12,
+      "usage": 0
+    },
+    "unavailable": null,
+    "part": "checkpoint"
   }
 ]

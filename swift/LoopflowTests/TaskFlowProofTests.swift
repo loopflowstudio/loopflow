@@ -372,10 +372,12 @@ private final class ScriptedReader {
         switch request {
         case .scope(let request, let scope): (id, task) = (request, scope.task)
         case .refresh(let request): id = request
+        case .checkpoint(let request, _): id = request
         }
         send("planning", answers: id, body: planning)
         send("sessions", answers: id, body: ["repo": repo, "includes_headless": false, "entries": sessions])
         if let task { send("task", answers: id, body: ["task": task, "work": work, "flow_processes": runs, "comments": ["identifier": task, "comments": [], "pending_sync": [], "conflicts": [String: String](), "refresh_error": NSNull()]]) }
+        if case .checkpoint = request { send("checkpoint", answers: id, body: [:]) }
     }
 
     private func send(_ part: String, answers: Int, body: [String: Any]) {

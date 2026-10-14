@@ -457,8 +457,8 @@ impl SqliteStore {
         now: i64,
     ) -> StoreResult<Vec<crate::session::SessionSummary>> {
         let live_agents = self.live_agent_ids(filter.waiting)?;
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let conn = conn.unchecked_transaction()?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let conn = conn.savepoint()?;
         let mut labels = std::collections::HashMap::new();
         let (page, values) = inventory_query(filter, SUMMARY_SELECT, now, &live_agents)?;
         let mut query = conn.prepare(&summary_query(&page, filter.after.is_some(), now))?;
@@ -473,8 +473,8 @@ impl SqliteStore {
         id: &str,
         now: i64,
     ) -> StoreResult<Option<crate::session::SessionSummary>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let conn = conn.unchecked_transaction()?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let conn = conn.savepoint()?;
         let mut labels = std::collections::HashMap::new();
         conn.query_row(
             &summary_query(&format!("{SUMMARY_SELECT} WHERE s.id=?1"), false, now),
@@ -596,8 +596,8 @@ impl SqliteStore {
         // A captured input cannot outlive its lf process. Terminal and provider
         // turn evidence describe outcomes; attachment exit events do not own life.
         let inputs = {
-            let conn = self.conn.lock().expect("store mutex poisoned");
-            let conn = conn.unchecked_transaction()?;
+            let mut conn = self.conn.lock().expect("store mutex poisoned");
+            let conn = conn.savepoint()?;
             let mut query = conn.prepare("WITH inputs AS (
                 SELECT i.seq AS captured,i.receipt_key AS input_id,i.session_id,json_extract(i.payload,'$.caller_key') AS caller_input_id,
                     COALESCE(m.observed_at,i.observed_at) AS started,
@@ -1135,8 +1135,8 @@ impl SqliteStore {
 
     /// Sessions assigned to a Task after they began, oldest bind first.
     pub(crate) fn bound_sessions(&self) -> StoreResult<Vec<crate::session::SessionBind>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let conn = conn.unchecked_transaction()?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let conn = conn.savepoint()?;
         let mut query = conn.prepare(
             "SELECT s.id,s.bound_at,t.id,(SELECT slug FROM wave_addresses WHERE id=s.wave_id)
              FROM agent_sessions s JOIN tasks t ON t.id=s.task_id

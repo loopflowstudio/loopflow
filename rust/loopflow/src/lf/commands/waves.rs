@@ -622,6 +622,7 @@ pub(crate) async fn wave_detail(store: &SharedStore, wave: &Wave) -> Result<Wave
         project_readiness: store.sqlite.project_readiness(wave.id())?,
         history: Evidence::from_result(
             crate::lf::commands::session_history::collect_recent_history(
+                &store.sqlite,
                 crate::lf::commands::WorkFilter {
                     wave: Some(wave.slug()),
                     project: None,

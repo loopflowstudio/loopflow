@@ -874,8 +874,8 @@ struct DTOFixtureTests {
         let lines = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
         let frames = try lines.map { try WorkFrame.decode(line: JSONSerialization.data(withJSONObject: $0)) }
 
-        #expect(frames.map(\.content.part) == ["planning", "sessions", "task", "work_activity", "activity", "heartbeat", "task", "peer_planning"])
-        #expect(frames.map(\.sequence) == [1, 2, 3, 4, 5, 6, 7, 8])
+        #expect(frames.map(\.content.part) == ["planning", "sessions", "task", "work_activity", "activity", "heartbeat", "task", "peer_planning", "checkpoint"])
+        #expect(frames.map(\.sequence) == [1, 2, 3, 4, 5, 6, 7, 8, 9])
         guard case .peerPlanning(let peers?) = frames[7].content else {
             Issue.record("peer planning frame missing")
             return
@@ -886,6 +886,11 @@ struct DTOFixtureTests {
         #expect(frames[1].answers == 7)
         #expect(frames[0].revisions?.planning == 911)
         #expect(frames[4].revisions == nil)
+        guard case .checkpoint = frames[8].content else {
+            Issue.record("checkpoint frame missing")
+            return
+        }
+        #expect(frames[8].answers == 8)
         guard case .task(nil) = frames[2].content else {
             Issue.record("a failed reading has no body")
             return

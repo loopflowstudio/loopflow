@@ -263,9 +263,9 @@ struct DesktopHeadlessTests {
         let oldRead = Task { await model.loadComments(task: task, wave: wave) }
         try await eventually { model.comments.inFlight.contains(task.id) }
 
-        // Desktop's own write asks the reader again and shows what it answers.
+        // The subscription updates normally; command confirmation is separate.
         let moving = Task { await model.moveTask(to: "demo", task: task, wave: wave) }
-        try await eventually { feed.requests.last == .refresh(id: 3) }
+        try await eventually { feed.requests.last == .checkpoint(id: 3, replay: []) }
         var workflow = try #require(work["workflow"] as? [String: Any])
         workflow["position"] = ["kind": "node", "node": "demo"]
         work["workflow"] = workflow
@@ -285,10 +285,11 @@ struct DesktopHeadlessTests {
         ]
         // A frame read before the write cannot stand for it.
         feed.send(try frame("task", sequence: 3, answers: 2, body: moved))
-        try await Task.sleep(for: .milliseconds(50))
-        #expect(model.taskWork[task.id].value?.flowProcesses.count == 1)
+        try await eventually { model.taskWork[task.id].value?.flowProcesses.count == 2 }
+        #expect(model.navigation.taskRunDrafts[task.id]?.acting == true)
         feed.send(try frame("task", sequence: 4, answers: 3, body: moved))
         feed.send(try frame("planning", sequence: 5, answers: 3, body: planning))
+        feed.send(try frame("checkpoint", sequence: 6, answers: 3, body: [:]))
         await moving.value
         try await eventually { model.taskWork[task.id].value?.flowProcesses.count == 2 }
         #expect(model.taskWork[task.id].value?.workflow?.position == .node("demo"))

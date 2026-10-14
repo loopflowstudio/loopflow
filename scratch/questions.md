@@ -113,3 +113,17 @@ and derive its loading flag; canceled A cannot clear newer A. Keep compact Workf
 position/actions visible and disclose the graph in Overview. These are reversible
 presentation choices pending native review. Retain all 183 unresolved exported-API
 audit entries; absence of local callers is insufficient downstream evidence.
+
+
+## Database updates — October 14
+
+For Jack Heart's accepted subscription cut, a post-command checkpoint samples the
+existing stream's committed snapshot and acknowledges after changed frames. It
+needs no new writer revision API. An authoritative Session result requests cached
+replay to fence queued stale frames; replay is delivery, not another query. Scope
+changes likewise replay unchanged sibling readings. Query narrowing stays at the
+existing audited domains: Work history ignores Flow-only writes; remaining joins
+retain all domains they read. External liveness, Git and definition adapters remain. Source inspection corrected
+the study: stored `wave_workflows` definitions invalidate catalogues through the
+planning revision, including heartbeat-only changes; file definitions retain their
+activation/customization adapter.

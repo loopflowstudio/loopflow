@@ -278,12 +278,8 @@ for arg in "$@"; do
     [ "${#arg}" -lt 122880 ] || exit 99
     printf '%s\000' "$arg" >> "$HOME/argv"
 done
-<<<<<<< HEAD
 printf '%s' "$LF_CONTEXT_DELIVERY" > "$HOME/delivery-path"
-||||||| e3c3a038aa
-=======
 cat > "$HOME/input"
->>>>>>> f9a16d6f84fde87b6650bab34af375bfb4981508
 printf 'provider fixture refused this request\n' >&2
 exit 23
 "#,
@@ -354,6 +350,10 @@ exit 23
             .env_clear()
             .env("PATH", "/usr/bin:/bin")
             .env("HOME", home.path())
+            .env(
+                "LF_CONTEXT_DELIVERY",
+                fs::read_to_string(home.path().join("delivery-path")).unwrap(),
+            )
             .current_dir(repo.path())
             .args(["-c", callback])
             .output()
@@ -363,203 +363,6 @@ exit 23
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
-<<<<<<< HEAD
-        let raw = fs::read_to_string(home.path().join("argv")).unwrap();
-        let args: Vec<_> = raw.split('\0').collect();
-        let instructions = if harness == "claude" {
-            let index = args
-                .iter()
-                .position(|arg| *arg == "--append-system-prompt-file")
-                .unwrap();
-            fs::read_to_string(args[index + 1]).unwrap()
-        } else {
-            let value = args
-                .iter()
-                .find_map(|arg| arg.strip_prefix("developer_instructions="))
-                .unwrap();
-            serde_json::from_str::<String>(value).unwrap()
-        };
-        assert_eq!(instructions.matches("<lf:work-guidance>").count(), 1);
-        assert!(!instructions.contains("CURRENT_SCRATCH"));
-        assert!(!instructions.contains("CURRENT_WAVE_MEMORY"));
-        assert!(!instructions.contains("Saved active skill."));
-        assert!(!raw.contains("model_instructions_file"));
-        assert!(!raw.contains("dangerously-bypass-hook-trust"));
-        assert_eq!(raw.matches("<lf:skill:probe>\nSaved active skill.\n</lf:skill:probe>\n\n<lf:message>\nFind the bug.\n</lf:message>").count(), 1);
-        let callbacks: Vec<String> = if harness == "claude" {
-            let index = args.iter().position(|arg| *arg == "--settings").unwrap();
-            let settings: serde_json::Value =
-                serde_json::from_slice(&fs::read(args[index + 1]).unwrap()).unwrap();
-            settings["hooks"]["SessionStart"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|group| group["hooks"][0]["command"].as_str().unwrap().to_owned())
-                .collect()
-        } else {
-            let flags = args.iter().find(|arg| arg.starts_with("hooks=")).unwrap();
-            assert!(!flags.contains("trusted_hash"));
-            // Exercise the emitted commands, not a reconstructed callback or
-            // whichever saved delivery happens to have the newest timestamp.
-            // The owned TOML encoder emits command values as JSON strings.
-            codex_command
-                .captures_iter(flags)
-                .map(|capture| serde_json::from_str(&capture[1]).unwrap())
-                .collect()
-        };
-        let invoke = |moment: &str| {
-            let callback = callbacks
-                .iter()
-                .find(|callback| callback.ends_with(&format!(" {moment}")))
-                .unwrap();
-            let output = Command::new("/bin/sh")
-                .env_clear()
-                .env("PATH", "/usr/bin:/bin")
-                .env("HOME", home.path())
-                .env(
-                    "LF_CONTEXT_DELIVERY",
-                    fs::read_to_string(home.path().join("delivery-path")).unwrap(),
-                )
-                .current_dir(repo.path())
-                .args(["-c", callback])
-                .output()
-                .unwrap();
-            assert!(
-                output.status.success(),
-                "{}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-            let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-            value["hookSpecificOutput"]["additionalContext"]
-                .as_str()
-                .unwrap()
-                .to_string()
-        };
-        let first = invoke("start");
-        assert!(first.contains("CURRENT_SCRATCH"));
-        assert!(first.contains("CURRENT_WAVE_MEMORY"));
-        assert!(!first.contains("Saved active skill.\n"));
-        assert!(first.contains("UNCHANGED_LARGE_FILE"));
-        assert!(first.contains("source=\"scratch/large.md\" excerpt=\"start\""));
-        assert!(!first.contains(&large));
-        repo.create_file("scratch/small.md", "FRESH_SCRATCH");
-        repo.create_file(".lf/wave/fixture/MEMORY.md", "FRESH_WAVE_MEMORY");
-        let compact = invoke("compact");
-        assert!(compact.contains("FRESH_WAVE_MEMORY"));
-        assert!(!compact.contains("CURRENT_WAVE_MEMORY"));
-        assert!(compact.contains("FRESH_SCRATCH"));
-        assert!(!compact.contains("CURRENT_SCRATCH"));
-        assert!(compact.contains("Saved active skill."));
-        assert!(!compact.contains("Find the bug."));
-        assert!(compact.len() <= 10_000);
-        assert_eq!(
-            fs::read_to_string(repo.path().join("scratch/large.md")).unwrap(),
-            large
-        );
-        repo.create_file("scratch/small.md", "CURRENT_SCRATCH");
-        let db = rusqlite::Connection::open(home.path().join("machine/loopflow.db")).unwrap();
-        let sessions: i64 = db
-            .query_row("SELECT count(*) FROM agent_sessions", [], |row| row.get(0))
-            .unwrap();
-        assert_eq!(sessions, 1);
-    }
-||||||| e3c3a038aa
-        let raw = fs::read_to_string(home.path().join("argv")).unwrap();
-        let args: Vec<_> = raw.split('\0').collect();
-        let instructions = if harness == "claude" {
-            let index = args
-                .iter()
-                .position(|arg| *arg == "--append-system-prompt-file")
-                .unwrap();
-            fs::read_to_string(args[index + 1]).unwrap()
-        } else {
-            let value = args
-                .iter()
-                .find_map(|arg| arg.strip_prefix("developer_instructions="))
-                .unwrap();
-            serde_json::from_str::<String>(value).unwrap()
-        };
-        assert_eq!(instructions.matches("<lf:work-guidance>").count(), 1);
-        assert!(!instructions.contains("CURRENT_SCRATCH"));
-        assert!(!instructions.contains("CURRENT_WAVE_MEMORY"));
-        assert!(!instructions.contains("Saved active skill."));
-        assert!(!raw.contains("model_instructions_file"));
-        assert!(!raw.contains("dangerously-bypass-hook-trust"));
-        assert_eq!(raw.matches("<lf:skill:probe>\nSaved active skill.\n</lf:skill:probe>\n\n<lf:message>\nFind the bug.\n</lf:message>").count(), 1);
-        let callbacks: Vec<String> = if harness == "claude" {
-            let index = args.iter().position(|arg| *arg == "--settings").unwrap();
-            let settings: serde_json::Value =
-                serde_json::from_slice(&fs::read(args[index + 1]).unwrap()).unwrap();
-            settings["hooks"]["SessionStart"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|group| group["hooks"][0]["command"].as_str().unwrap().to_owned())
-                .collect()
-        } else {
-            let flags = args.iter().find(|arg| arg.starts_with("hooks=")).unwrap();
-            assert!(flags.contains("trusted_hash"));
-            // Exercise the emitted commands, not a reconstructed callback or
-            // whichever saved delivery happens to have the newest timestamp.
-            // The owned TOML encoder emits command values as JSON strings.
-            codex_command
-                .captures_iter(flags)
-                .map(|capture| serde_json::from_str(&capture[1]).unwrap())
-                .collect()
-        };
-        let invoke = |moment: &str| {
-            let callback = callbacks
-                .iter()
-                .find(|callback| callback.ends_with(&format!(" {moment}")))
-                .unwrap();
-            let output = Command::new("/bin/sh")
-                .env_clear()
-                .env("PATH", "/usr/bin:/bin")
-                .env("HOME", home.path())
-                .current_dir(repo.path())
-                .args(["-c", callback])
-                .output()
-                .unwrap();
-            assert!(
-                output.status.success(),
-                "{}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-            let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-            value["hookSpecificOutput"]["additionalContext"]
-                .as_str()
-                .unwrap()
-                .to_string()
-        };
-        let first = invoke("start");
-        assert!(first.contains("CURRENT_SCRATCH"));
-        assert!(first.contains("CURRENT_WAVE_MEMORY"));
-        assert!(!first.contains("Saved active skill.\n"));
-        assert!(first.contains("UNCHANGED_LARGE_FILE"));
-        assert!(first.contains("source=\"scratch/large.md\" excerpt=\"start\""));
-        assert!(!first.contains(&large));
-        repo.create_file("scratch/small.md", "FRESH_SCRATCH");
-        repo.create_file(".lf/wave/fixture/MEMORY.md", "FRESH_WAVE_MEMORY");
-        let compact = invoke("compact");
-        assert!(compact.contains("FRESH_WAVE_MEMORY"));
-        assert!(!compact.contains("CURRENT_WAVE_MEMORY"));
-        assert!(compact.contains("FRESH_SCRATCH"));
-        assert!(!compact.contains("CURRENT_SCRATCH"));
-        assert!(compact.contains("Saved active skill."));
-        assert!(!compact.contains("Find the bug."));
-        assert!(compact.len() <= 10_000);
-        assert_eq!(
-            fs::read_to_string(repo.path().join("scratch/large.md")).unwrap(),
-            large
-        );
-        repo.create_file("scratch/small.md", "CURRENT_SCRATCH");
-        let db = rusqlite::Connection::open(home.path().join("machine/loopflow.db")).unwrap();
-        let sessions: i64 = db
-            .query_row("SELECT count(*) FROM agent_sessions", [], |row| row.get(0))
-            .unwrap();
-        assert_eq!(sessions, 1);
-    }
-=======
         let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
         value["hookSpecificOutput"]["additionalContext"]
             .as_str()
@@ -593,7 +396,6 @@ exit 23
         .query_row("SELECT count(*) FROM agent_sessions", [], |row| row.get(0))
         .unwrap();
     assert_eq!(sessions, 1);
->>>>>>> f9a16d6f84fde87b6650bab34af375bfb4981508
 }
 
 #[test]

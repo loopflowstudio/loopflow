@@ -279,7 +279,7 @@ struct RoadmapView: View {
                     try await Task.detached(priority: .userInitiated) {
                         try LocalWaveAgentLauncher.runTask(repoPath: repo, issue: issue)
                     }.value
-                    await refresh()
+                    try await model.confirmWorkUpdate()
                 } catch {
                     controlError = error.localizedDescription
                 }

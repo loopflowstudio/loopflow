@@ -9,8 +9,8 @@ use crate::store::StoreResult;
 
 impl SqliteStore {
     pub fn task_planning_sync(&self, task: &TaskId) -> StoreResult<PlanningSyncStatus> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.unchecked_transaction()?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.savepoint()?;
         let (repo, project): (String, String) = tx.query_row(
             "SELECT w.repo,p.id FROM tasks t JOIN projects p ON p.id=t.project_id
              JOIN waves w ON w.id=p.wave_id WHERE t.id=?1",
@@ -42,8 +42,8 @@ impl SqliteStore {
     }
 
     pub fn project_planning_sync(&self, project: &ProjectId) -> StoreResult<PlanningSyncStatus> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.unchecked_transaction()?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.savepoint()?;
         let repo: String = tx.query_row(
             "SELECT w.repo FROM projects p JOIN waves w ON w.id=p.wave_id WHERE p.id=?1",
             [project.as_str()],

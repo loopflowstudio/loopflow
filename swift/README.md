@@ -538,16 +538,22 @@ lf monitor work --watch --json    # what a window shows, as it changes
 Each window keeps one such reader open through `RegistryQuery.watchWork()`.
 Its frames carry planning, the repository's Sessions, the shown Task's work
 with its Workflow and every Flow process, the shown Wave's detail and activity.
-The Task page reads nothing else: after `lf task run` or `lf task move` the
-window asks the reader again and shows the frame that answers. A part arrives again only when a commit
+After Task actions and Workflow changes, the window waits for a checkpoint:
+the reader delivers changed subscriptions before confirming the committed state.
+Unchanged subscriptions do not query again. A part arrives again only when a commit
 changed what it shows, so a Task created by `lf`, a worker or another window
 appears without a refresh. A file written or a commit made in a Task checkout
 shows within a few seconds, and token totals within about ten. A Session
 turns **Waiting** after two quiet minutes on the reader's clock, with no write.
-Nothing in the window reads on a timer. Workflow definitions are files: the
-catalogue is read once per repository and again when the app becomes active. Each request
-the window sends carries an id and each frame names the newest one it answers;
-a frame read before a local write is ignored. If the reader ends, the last
+Nothing in the window reads on a timer. Stored Workflow definitions follow the
+stream’s planning revision, even when only a heartbeat changes. File definitions
+are reread when the app becomes active or after customization.
+Database joins and their revisions share one read snapshot; Git, file and process
+observations remain separate from that transactional guarantee. Each request
+carries an id. A checkpoint follows its changed frames even when the command
+made no visible change. Session commands can replay the reader's cached projection
+after showing their authoritative returned record, without another query.
+Explicit Retry and recovery after sleep still force fresh readings. If the reader ends, the last
 reading stays on screen marked unavailable until a new reader answers.
 
 The reader's pipes drain off the main actor. Ten seconds without a frame ends

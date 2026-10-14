@@ -668,8 +668,8 @@ impl SqliteStore {
     }
 
     pub(crate) fn work_identities(&self) -> StoreResult<Vec<WorkIdentity>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let conn = conn.unchecked_transaction()?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let conn = conn.savepoint()?;
         let mut statement = conn.prepare(
             "SELECT 0 AS kind, id, NULL AS parent, slug, NULL AS external_id, created_at FROM wave_addresses
              UNION ALL

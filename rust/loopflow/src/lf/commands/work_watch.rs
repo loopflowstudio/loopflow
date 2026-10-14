@@ -79,6 +79,9 @@ pub enum WorkContent {
     WorkActivity(Option<WorkActivityPart>),
     Activity(Option<ActivitySnapshot>),
     Heartbeat(Heartbeat),
+    /// All selected database projections have caught up to this read snapshot.
+    /// Sent after their changed frames, even when every body stayed equal.
+    Checkpoint,
 }
 
 /// `lf wave show --all` and `lf wave list --all --current`, read together.
@@ -152,9 +155,10 @@ enum Request {
         wave: Option<String>,
         activity: Option<WorkActivityScope>,
     },
-    /// Read every part again and answer, changed or not: after a local
-    /// write, sleep, or any other gap in observation.
+    /// Explicit retry or recovery after a gap in observation.
     Refresh { id: u64 },
+    /// Confirm committed writes without forcing unchanged subscriptions to read.
+    Checkpoint { id: u64, replay: Vec<Part> },
 }
 
 #[derive(Debug, Clone, Default)]
@@ -166,7 +170,8 @@ struct Scope {
     activity: Option<WorkActivityScope>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+#[serde(rename_all = "snake_case")]
 enum Part {
     Sessions,
     Planning,
@@ -218,6 +223,11 @@ impl Part {
         if self == Part::Activity {
             return old.processes != new.processes;
         }
+        // History reads Work labels/PRs, captured inputs and their Processes;
+        // it never reads Flow graphs or steps (activity::build_snapshot).
+        if self == Part::WorkActivity {
+            old.flows = new.flows;
+        }
         if self != Part::Wave {
             old.usage = new.usage;
         }
@@ -264,6 +274,10 @@ struct PartState {
     stale: bool,
     /// Consecutive failed readings.
     failures: u32,
+    /// Replay a reading superseded by an authoritative command result without
+    /// querying unchanged data again.
+    replay: bool,
+    last: Option<(Option<String>, WorkContent)>,
 }
 
 impl PartState {
@@ -284,7 +298,7 @@ struct Mailbox {
     look: bool,
     closed: bool,
     error: Option<String>,
-    /// At most one unsent frame per part; a newer one replaces it in place.
+    /// At most one unsent frame per part, ordered by its latest reading.
     unsent: VecDeque<(&'static str, WorkFrame)>,
     sequence: u64,
     answers: Option<u64>,
@@ -310,14 +324,19 @@ fn enqueue(
         sequence: mailbox.sequence,
         answers: mailbox.answers,
         home: home.to_owned(),
-        revisions: mailbox.revisions,
+        // Activity uses a separate OS/process reader, outside the Work snapshot.
+        revisions: if matches!(content, WorkContent::Activity(_)) {
+            None
+        } else {
+            mailbox.revisions
+        },
         unavailable,
         content,
     };
-    match mailbox.unsent.iter_mut().find(|(unsent, _)| *unsent == key) {
-        Some(slot) => slot.1 = frame,
-        None => mailbox.unsent.push_back((key, frame)),
+    if let Some(index) = mailbox.unsent.iter().position(|(unsent, _)| *unsent == key) {
+        mailbox.unsent.remove(index);
     }
+    mailbox.unsent.push_back((key, frame));
 }
 
 fn encode(frame: &WorkFrame) -> Result<Vec<u8>> {
@@ -513,7 +532,7 @@ impl Reader {
                 wave,
                 activity,
             } => {
-                self.scope = Scope {
+                let next = Scope {
                     repo,
                     headless,
                     task,
@@ -521,10 +540,26 @@ impl Reader {
                     activity,
                 };
                 for part in Part::SCOPED {
+                    let changed = match part {
+                        Part::Sessions => {
+                            self.scope.repo != next.repo || self.scope.headless != next.headless
+                        }
+                        Part::PeerPlanning => self.scope.repo != next.repo,
+                        Part::Task => self.scope.task != next.task,
+                        Part::Wave => self.scope.wave != next.wave,
+                        Part::WorkActivity => self.scope.activity != next.activity,
+                        _ => false,
+                    };
                     let state = self.parts.entry(part).or_default();
-                    state.force = true;
-                    state.sent = None;
+                    if changed {
+                        state.force = true;
+                    } else {
+                        // Swift advances its scope floor for every scoped part.
+                        // Deliver unchanged siblings from cache, without queries.
+                        state.replay = true;
+                    }
                 }
+                self.scope = next;
                 id
             }
             Request::Refresh { id } => {
@@ -533,10 +568,22 @@ impl Reader {
                 }
                 id
             }
+            Request::Checkpoint { id, replay } => {
+                for part in replay {
+                    self.parts.entry(part).or_default().replay = true;
+                }
+                id
+            }
         }
     }
 
-    fn due(&self, part: Part, revisions: Option<StoreRevisions>, now: Instant) -> bool {
+    fn due(
+        &self,
+        part: Part,
+        revisions: Option<StoreRevisions>,
+        now: Instant,
+        checkpoint: bool,
+    ) -> bool {
         if !part.selected(&self.scope) {
             return false;
         }
@@ -548,10 +595,13 @@ impl Reader {
         };
         state.force
             || state.stale
+            // Confirmation cannot defer a failed or throttled database reading.
+            || (checkpoint && state.failures > 0)
             || state.retry_due(read_on, now)
             || match (state.read_at, revisions) {
                 (Some(old), Some(new)) => {
-                    part.changed(old, new) && (!part.rests(old, new) || now - read_on >= USAGE_REST)
+                    part.changed(old, new)
+                        && (checkpoint || !part.rests(old, new) || now - read_on >= USAGE_REST)
                 }
                 (None, None) => false,
                 _ => true,
@@ -853,7 +903,7 @@ pub(super) fn run(watch: bool) -> Result<()> {
     let result = (|| -> Result<()> {
         let mut seen = None;
         loop {
-            let requests = {
+            let (requests, mut checkpoint) = {
                 let mut mailbox = lock(&shared);
                 if let Some(error) = mailbox.error.take() {
                     anyhow::bail!(error);
@@ -862,10 +912,20 @@ pub(super) fn run(watch: bool) -> Result<()> {
                     return Ok(());
                 }
                 mailbox.look = false;
-                std::mem::take(&mut mailbox.requests)
+                // A pending confirmation follows any replacement frames from
+                // this pass, including normally throttled dependencies.
+                let pending = mailbox
+                    .unsent
+                    .iter()
+                    .position(|(key, _)| *key == "checkpoint");
+                if let Some(index) = pending {
+                    mailbox.unsent.remove(index);
+                }
+                (std::mem::take(&mut mailbox.requests), pending.is_some())
             };
             let mut answers = None;
             for request in requests {
+                checkpoint |= matches!(request, Request::Checkpoint { .. });
                 answers = Some(reader.accept(request));
             }
             reader.open();
@@ -880,6 +940,19 @@ pub(super) fn run(watch: bool) -> Result<()> {
                 reader.observe_checkouts(revisions, &shared);
                 reader.observe_quiet(revisions);
             }
+            // Only this loop uses the read-only connection. The first revision
+            // query pins the WAL snapshot used by every joined projection below.
+            // OS, Git and config observations are not transactional database facts.
+            let store = reader.store.clone();
+            let snapshot = store
+                .as_ref()
+                .map(|store| store.sqlite.read_snapshot())
+                .transpose()?;
+            let revisions = store
+                .as_ref()
+                .map(|store| store.sqlite.revisions())
+                .transpose()?;
+            let mut frames = Vec::new();
             {
                 let mut mailbox = lock(&shared);
                 mailbox.revisions = revisions;
@@ -889,7 +962,7 @@ pub(super) fn run(watch: bool) -> Result<()> {
             }
             for part in Part::ALL {
                 let now = Instant::now();
-                if !reader.due(part, revisions, now) {
+                if !reader.due(part, revisions, now, checkpoint) {
                     continue;
                 }
                 let (reason, content) = match reader.project(part) {
@@ -909,12 +982,48 @@ pub(super) fn run(watch: bool) -> Result<()> {
                     0
                 };
                 state.sent = Some(identity);
-                let mut mailbox = lock(&shared);
-                *mailbox.projections.entry(part.name().into()).or_default() += 1;
+                *lock(&shared)
+                    .projections
+                    .entry(part.name().into())
+                    .or_default() += 1;
                 if send {
-                    enqueue(&mut mailbox, part.name(), &home, reason, content);
-                    shared.1.notify_all();
+                    state.last = Some((reason.clone(), content.clone()));
+                    state.replay = false;
+                    frames.push((part, reason, content));
                 }
+            }
+            for (part, state) in &mut reader.parts {
+                if part.selected(&reader.scope) && std::mem::take(&mut state.replay) {
+                    if let Some((reason, content)) = &state.last {
+                        // This is delivery of an existing projection, not query work.
+                        frames.push((*part, reason.clone(), content.clone()));
+                    }
+                }
+            }
+            drop(snapshot);
+            {
+                let mut mailbox = lock(&shared);
+                for (part, reason, content) in frames {
+                    enqueue(&mut mailbox, part.name(), &home, reason, content);
+                }
+                if checkpoint {
+                    let failed: Vec<_> = reader
+                        .parts
+                        .iter()
+                        .filter(|(part, state)| part.selected(&reader.scope) && state.failures > 0)
+                        .map(|(part, _)| part.name())
+                        .collect();
+                    let reason = (!failed.is_empty())
+                        .then(|| format!("Work confirmation unavailable: {}", failed.join(", ")));
+                    enqueue(
+                        &mut mailbox,
+                        "checkpoint",
+                        &home,
+                        reason,
+                        WorkContent::Checkpoint,
+                    );
+                }
+                shared.1.notify_all();
                 if mailbox.closed {
                     return Ok(());
                 }

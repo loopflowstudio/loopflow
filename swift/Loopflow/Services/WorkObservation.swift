@@ -62,10 +62,13 @@ public struct WorkScope: Equatable, Sendable {
 public enum WorkRequest: Equatable, Sendable {
     case scope(id: Int, WorkScope)
     case refresh(id: Int)
+    /// Confirm delivery through a post-command snapshot. Replay only readings
+    /// superseded by an authoritative command result; this does not force queries.
+    case checkpoint(id: Int, replay: [String])
 
     public var id: Int {
         switch self {
-        case .scope(let id, _), .refresh(let id): id
+        case .scope(let id, _), .refresh(let id), .checkpoint(let id, _): id
         }
     }
 
@@ -84,6 +87,9 @@ public enum WorkRequest: Equatable, Sendable {
                  "task": activity.task ?? NSNull()] as [String: Any]
             } ?? NSNull()
         case .refresh: object["action"] = "refresh"
+        case .checkpoint(_, let replay):
+            object["action"] = "checkpoint"
+            object["replay"] = replay
         }
         // The values above are all JSON types.
         var data = (try? JSONSerialization.data(withJSONObject: object)) ?? Data()
@@ -163,6 +169,7 @@ public struct WorkFrame: Decodable, Sendable {
         case workActivity(WorkActivityPart?)
         case activity(ActivitySnapshot?)
         case heartbeat(Heartbeat)
+        case checkpoint
 
         public var part: String {
             switch self {
@@ -174,6 +181,7 @@ public struct WorkFrame: Decodable, Sendable {
             case .workActivity: "work_activity"
             case .activity: "activity"
             case .heartbeat: "heartbeat"
+            case .checkpoint: "checkpoint"
             }
         }
     }
@@ -227,6 +235,7 @@ public struct WorkFrame: Decodable, Sendable {
         case "work_activity": content = .workActivity(try container.decode(WorkActivityPart?.self, forKey: .body))
         case "activity": content = .activity(try container.decode(ActivitySnapshot?.self, forKey: .body))
         case "heartbeat": content = .heartbeat(try container.decode(Heartbeat.self, forKey: .body))
+        case "checkpoint": content = .checkpoint
         default:
             throw DecodingError.dataCorruptedError(forKey: .part, in: container,
                                                    debugDescription: "unknown work part \(part)")

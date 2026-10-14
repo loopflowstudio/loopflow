@@ -184,7 +184,7 @@ impl SqliteStore {
         expected_team: StoreResult<Option<String>>,
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let conn = conn.transaction()?;
+        let conn = conn.savepoint()?;
         let mut initiatives = std::collections::BTreeMap::new();
         let mut projects = std::collections::BTreeMap::new();
         let mut issues = std::collections::BTreeMap::new();

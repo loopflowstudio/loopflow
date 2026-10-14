@@ -411,7 +411,7 @@ pub(crate) struct OpenProcesses {
 }
 
 fn members(
-    tx: &rusqlite::Transaction<'_>,
+    tx: &rusqlite::Connection,
     task: &TaskId,
 ) -> StoreResult<(
     Vec<TaskSession>,
@@ -473,7 +473,7 @@ impl SqliteStore {
     /// Read all three owners in one SQLite snapshot, including closed history.
     pub fn task_work(&self, task: &TaskId) -> StoreResult<TaskWork> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction()?;
+        let tx = conn.savepoint()?;
         let (sessions, flows) = members(&tx, task)?;
         let processes = tx
             .prepare(&format!(
@@ -498,7 +498,7 @@ impl SqliteStore {
 
     pub(crate) fn open_processes(&self) -> StoreResult<OpenProcesses> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction()?;
+        let tx = conn.savepoint()?;
         let processes = super::processes::unfinished_processes(&tx)?;
         let mut tasks: HashMap<LfProcessId, Vec<String>> = HashMap::new();
         let mut query = tx.prepare(&open_process_tasks())?;
@@ -527,7 +527,7 @@ impl SqliteStore {
         open: &OpenProcesses,
     ) -> StoreResult<TaskWork> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction()?;
+        let tx = conn.savepoint()?;
         let (sessions, flows) = members(&tx, task)?;
         let workflow = workflow_row(&tx, task)?;
         let history = workflow_moves(&tx, task)?;

@@ -753,6 +753,9 @@ final class WorkModel {
         flowCatalogReadings[repoPath ?? ""] ?? .loading
     }
     private var workflowCatalogReadings: [String: WorkReading<[WorkflowCatalogEntry]>] = [:]
+    @ObservationIgnored private var definitionRevision: Int64?
+    @ObservationIgnored private var workflowCatalogRevisions: [String: Int64] = [:]
+    @ObservationIgnored private var workflowCatalogRequests: [String: UUID] = [:]
     private var workflowWave: String? { breadcrumb?.wave?.roadmap.wave.id }
     private var workflowCatalogKey: String { "\(repoPath ?? "")|\(workflowWave ?? "")" }
     var workflowCatalog: WorkReading<[WorkflowCatalogEntry]> {
@@ -807,6 +810,7 @@ final class WorkModel {
     @ObservationIgnored private var scopeFloor = 0
     @ObservationIgnored private var taskFloor = 0
     @ObservationIgnored private var planningWaiters: [(id: Int, resume: CheckedContinuation<Void, Never>)] = []
+    @ObservationIgnored private var checkpointWaiters: [(id: Int, resume: CheckedContinuation<Void, any Error>)] = []
     private var workActivityGeneration = 0
 
     /// A launch repository taken from the saved workspace without running
@@ -1026,6 +1030,9 @@ final class WorkModel {
                 workObservation = opened
                 workOpened = .now
                 appliedSequence = [:]
+                definitionRevision = nil
+                workflowCatalogRevisions = [:]
+                workflowCatalogRequests = [:]
                 (planningFloor, sessionsFloor, scopeFloor, taskFloor, sentScope) = (0, 0, 0, 0, nil)
                 syncWorkScope()
                 for try await frame in opened.frames {
@@ -1043,6 +1050,7 @@ final class WorkModel {
             workObservation = nil
             await observation?.cancel()
             resumePlanningWaiters(through: .max)
+            finishCheckpoints(through: .max, reason: "Work observation ended before the update was confirmed")
             do { try await Task.sleep(for: delay) } catch { return }
             delay = min(delay * 2, .seconds(30))
         }
@@ -1084,7 +1092,33 @@ final class WorkModel {
     private func supersedeSessions() {
         sessionsGeneration &+= 1
         guard workObservation != nil else { return }
-        sessionsFloor = send { .refresh(id: $0) }
+        sessionsFloor = send { .checkpoint(id: $0, replay: ["sessions"]) }
+    }
+
+    private func finishCheckpoints(through answered: Int, reason: String?) {
+        let ready = checkpointWaiters.filter { $0.id <= answered }
+        checkpointWaiters.removeAll { $0.id <= answered }
+        for waiter in ready {
+            if let reason { waiter.resume.resume(throwing: RegistryQueryError(reason)) }
+            else { waiter.resume.resume() }
+        }
+    }
+
+    /// Confirmation follows the command's commit. Subscriptions choose what
+    /// to read; a heartbeat or unrelated frame cannot confirm a saved draft.
+    func confirmWorkUpdate(after home: String? = nil) async throws {
+        if let home, home != workDataDirectory {
+            throw RegistryQueryError("Machine changed before the update was confirmed")
+        }
+        guard workObservation != nil else {
+            if query.streamsWork { throw RegistryQueryError("Update accepted; Work observation is unavailable") }
+            // One-shot transports have no subscription to deliver their writes.
+            await refresh()
+            if let reason = roadmap.errorMessage { throw RegistryQueryError(reason) }
+            return
+        }
+        let id = send { .checkpoint(id: $0, replay: []) }
+        try await withCheckedThrowingContinuation { checkpointWaiters.append((id, $0)) }
     }
 
     private func resumePlanningWaiters(through answered: Int) {
@@ -1111,12 +1145,18 @@ final class WorkModel {
 
     private func apply(_ frame: WorkFrame) async {
         let part = frame.content.part
-        if case .heartbeat = frame.content { return }
+        if case .heartbeat = frame.content {
+            // Heartbeats can carry a stored-definition commit whose planning
+            // body stayed equal. They do not establish a new Machine identity.
+            if workDataDirectory == frame.home { await observeDefinitions(frame.revisions?.planning) }
+            return
+        }
         guard frame.sequence > appliedSequence[part] ?? 0 else { return }
         if let workDataDirectory, workDataDirectory != frame.home {
             // The stream names its data directory, not the opaque Machine ID
             // returned by machine id and used by Session locations.
             dropMachineContent()
+            finishCheckpoints(through: .max, reason: "Machine changed before the update was confirmed")
         }
         workDataDirectory = frame.home
         let answers = frame.answers ?? 0
@@ -1194,10 +1234,20 @@ final class WorkModel {
             await Self.resolveRepoOrigins(body.nodes.compactMap(\.repo))
             let next = WorkReading.available(body)
             if processActivity != next { processActivity = next }
+        case .checkpoint:
+            await observeDefinitions(frame.revisions?.planning)
+            finishCheckpoints(through: answers, reason: frame.unavailable)
         case .heartbeat:
             break
         }
         appliedSequence[part] = frame.sequence
+        await observeDefinitions(frame.revisions?.planning)
+    }
+
+    private func observeDefinitions(_ revision: Int64?) async {
+        guard let revision, definitionRevision.map({ revision > $0 }) ?? true else { return }
+        definitionRevision = revision
+        if workflowCatalogReadings[workflowCatalogKey] != nil { await loadWorkflowCatalog() }
     }
 
     private func applyPlanning(_ body: WorkFrame.Planning?, wire: WorkFrame.Wire?, reason: String) async {
@@ -1230,6 +1280,10 @@ final class WorkModel {
     }
 
     private func dropMachineContent() {
+        definitionRevision = nil
+        workflowCatalogRevisions = [:]
+        workflowCatalogRequests = [:]
+        workflowCatalogReadings = [:]
         roadmap = .loading
         waves = .loading
         showsSavedPlanning = false
@@ -1247,7 +1301,7 @@ final class WorkModel {
         flowProcesses = [:]
     }
 
-    /// One explicit read of everything, for a change the cadence should not wait on.
+    /// Explicit Retry/recovery, or a one-shot transport without subscriptions.
     func refresh() async {
         if workObservation != nil {
             // Frames read before this request may predate the caller's write.
@@ -1382,33 +1436,27 @@ final class WorkModel {
 
 
     func updateTaskDirective(task: RoadmapTask, wave: WaveSnapshot, text: String) async throws {
+        let home = workDataDirectory
         try await query.updateTaskDirective(id: task.id, wave: wave.name, text: text, cwd: wave.repo)
-        if workObservation != nil {
-            await refresh()
-            if let reason = roadmap.errorMessage {
-                throw RegistryQueryError("Update accepted, but planning refresh failed: \(reason)")
-            }
-            guard roadmap.value?.waves.contains(where: { row in
-                row.wave.id == wave.id && row.tasks.items.contains(where: { $0.id == task.id })
-            }) == true else {
-                throw RegistryQueryError("Update accepted, but the Task is absent from refreshed planning. Your draft is retained.")
-            }
-            return
+        let observed: WorkReading<RoadmapSnapshot>
+        if query.streamsWork {
+            try await confirmWorkUpdate(after: home)
+            observed = roadmap
+        } else {
+            // Polls started before this write must not restore the old directive.
+            roadmapGeneration &+= 1
+            let generation = roadmapGeneration
+            let result = await readRoadmap()
+            if generation == roadmapGeneration { publishRoadmap(result, lastGood: roadmap.value) }
+            observed = reading(from: result.map { $0.0 }, lastGood: nil)
         }
-        // Polls started before this write must not restore the old directive.
-        roadmapGeneration &+= 1
-        let generation = roadmapGeneration
-        let result = await readRoadmap()
-        if generation == roadmapGeneration { publishRoadmap(result, lastGood: roadmap.value) }
-        switch result {
-        case .success(let (snapshot, _)):
-            guard snapshot.waves.contains(where: { row in
-                row.wave.id == wave.id && row.tasks.items.contains(where: { $0.id == task.id })
-            }) else {
-                throw RegistryQueryError("Update accepted, but the Task is absent from refreshed planning. Your draft is retained.")
-            }
-        case .failure(let error):
-            throw RegistryQueryError("Update accepted, but planning refresh failed: \(error.localizedDescription)")
+        if let reason = observed.errorMessage {
+            throw RegistryQueryError("Update accepted, but planning refresh failed: \(reason)")
+        }
+        guard observed.value?.waves.contains(where: { row in
+            row.wave.id == wave.id && row.tasks.items.contains(where: { $0.id == task.id })
+        }) == true else {
+            throw RegistryQueryError("Update accepted, but the Task is absent from refreshed planning. Your draft is retained.")
         }
     }
 
@@ -1585,13 +1633,11 @@ final class WorkModel {
         self[keyPath: readings].values[taskId] = reading(from: result, lastGood: self[keyPath: readings][taskId].value)
     }
 
-    /// Definitions are files, which no store revision follows. Coming back
-    /// from an editor, read the catalogue this window already shows again, so
-    /// a saved mistake shows as invalid.
+    /// File definitions have no store revision. Returning from an editor
+    /// rereads only catalogues this window has opened.
     func rereadDefinitions() async {
-        guard flowCatalogReadings[repoPath ?? ""] != nil || workflowCatalogReadings[workflowCatalogKey] != nil else { return }
-        await loadFlowCatalog(force: true)
-        await loadWorkflowCatalog(force: true)
+        if flowCatalogReadings[repoPath ?? ""] != nil { await loadFlowCatalog(force: true) }
+        if workflowCatalogReadings[workflowCatalogKey] != nil { await loadWorkflowCatalog(force: true) }
     }
 
     /// Read the Flow catalogue for the current repository the first time it
@@ -1608,12 +1654,19 @@ final class WorkModel {
 
     func loadWorkflowCatalog(force: Bool = false) async {
         let key = workflowCatalogKey
-        if !force, workflowCatalogReadings[key]?.value != nil { return }
+        if !force, workflowCatalogReadings[key]?.value != nil,
+           workflowCatalogRevisions[key] == definitionRevision { return }
+        let revision = definitionRevision
+        let home = workDataDirectory
+        let request = UUID()
+        workflowCatalogRequests[key] = request
         let previous = workflowCatalogReadings[key]?.value
         let result: Result<[WorkflowCatalogEntry], Error>
         do { result = .success(try await query.workflowCatalog(cwd: repoPath, wave: workflowWave)) }
         catch { result = .failure(error) }
+        guard home == workDataDirectory, workflowCatalogRequests[key] == request else { return }
         workflowCatalogReadings[key] = reading(from: result, lastGood: previous)
+        workflowCatalogRevisions[key] = revision
     }
 
     func workflowSource(_ name: String, wave: WaveSnapshot) async throws -> String {
@@ -1621,20 +1674,24 @@ final class WorkModel {
     }
 
     func saveWorkflow(_ name: String, content: String, wave: WaveSnapshot) async throws {
-        try await query.saveWorkflow(name, content: content, wave: wave.id, cwd: WaveOrigin.resolve(wave.repo))
-        await refresh()
-        await loadWorkflowCatalog(force: true)
+        let repo = WaveOrigin.resolve(wave.repo)
+        let home = workDataDirectory
+        try await query.saveWorkflow(name, content: content, wave: wave.id, cwd: repo)
+        try await confirmWorkUpdate(after: home)
+        // Standalone transports have no revision subscription.
+        if !query.streamsWork { await loadWorkflowCatalog(force: true) }
     }
 
     /// Why a Wave's last workflow or source change was refused, by Wave.
     private(set) var workflowErrors: [String: String] = [:]
 
-    /// Make `name` the workflow of the Wave's current chapter, then reread planning.
+    /// Make `name` the workflow of the Wave's current chapter and confirm its observation.
     func setWorkflow(_ name: String, wave: WaveSnapshot) async {
+        let home = workDataDirectory
         do {
             try await query.setWorkflow(name, wave: wave.id, cwd: WaveOrigin.resolve(wave.repo))
             workflowErrors[wave.id] = nil
-            await refresh()
+            try await confirmWorkUpdate(after: home)
         } catch {
             workflowErrors[wave.id] = error.localizedDescription
         }
@@ -1646,7 +1703,7 @@ final class WorkModel {
         return URL(fileURLWithPath: path)
     }
 
-    /// Launch a fresh Flow for the Task, then refresh the shared reading.
+    /// Launch a fresh Flow for the Task, then confirm its subscription update.
     /// Without `flow`, Rust takes up the Project's workflow or the only edge.
     /// The outcome settles only the Task and repository that started it; a
     /// refusal is kept on that Task's draft and changes nothing else.
@@ -1656,8 +1713,8 @@ final class WorkModel {
         }
     }
 
-    /// Put the Task at a node of its Workflow, then refresh the shared
-    /// reading. A refusal is kept on that Task's draft.
+    /// Put the Task at a node of its Workflow, then confirm its subscription
+    /// update. A refusal is kept on that Task's draft.
     func moveTask(to node: String, task: RoadmapTask, wave: WaveSnapshot) async {
         await performTaskAction(task.id) {
             try await query.moveTask(
@@ -1680,13 +1737,14 @@ final class WorkModel {
     /// Feedback belongs to the navigation and Task that began the command.
     private func performTaskAction(_ taskId: String, _ action: () async throws -> Void) async {
         let owner = navigation
+        let home = workDataDirectory
         guard owner.taskRunDrafts[taskId]?.acting != true else { return }
         owner.taskRunDrafts[taskId, default: TaskRunDraft()].acting = true
         owner.taskRunDrafts[taskId]?.error = nil
         do {
             try await action()
+            try await confirmWorkUpdate(after: home)
             owner.taskRunDrafts[taskId] = nil
-            await refresh()
         } catch {
             owner.taskRunDrafts[taskId]?.acting = false
             owner.taskRunDrafts[taskId]?.error = error.localizedDescription
@@ -1713,9 +1771,9 @@ final class WorkModel {
             // A read started before the rename must not restore the old name.
             supersedeSessions()
             replaceSession(record, key: key)
-            if owner.renaming?.sessionId == target { owner.renaming = nil }
+            if owner.renaming?.id == draft.id { owner.renaming = nil }
         } catch {
-            guard owner.renaming?.sessionId == target else { return }
+            guard owner.renaming?.id == draft.id else { return }
             owner.renaming?.submitting = false
             owner.renaming?.error = error.localizedDescription
         }

@@ -380,9 +380,11 @@ the duplicate pause method introduced by integration. Its five Rust and 31 Swift
 focused passes are recorded at `cf67067b0d:scratch/get-me-using-lf.md`.
 
 Remaining delivery includes affected-suite gate and publication for review.
-Prepared unlaunched app: `/tmp/loo462-oct13-sidebar/Loopflow Work Demo.app`,
-built from `88d91e53ca` with its matching validation-only bundled lf; signature
+Prepared unlaunched app: `/tmp/loo462-oct13-compress/Loopflow Work Demo.app`,
+built from `0480344945` with its matching validation-only bundled lf; signature
 verified. `build.json` beside it records source/signed hashes and revision.
+The earlier sidebar app at `/tmp/loo462-oct13-sidebar/Loopflow Work Demo.app`
+(`88d91e53ca`) remains preserved.
 SwiftPM resource lookup still relies on the retained checkout build directory;
 this private review artifact is not portable. Earlier profiling/demo apps remain.
 Jack Heart requested
@@ -394,4 +396,4 @@ live migration, broader cleanup or landing is authorized. No product decision is
 needed for the remaining implementation; visual acceptance stays with demo review.
 
 Earlier sidebar Rust/DTO/cache checks: `69f7005b05:scratch/get-me-using-lf.md`, final check. These remain evidence for that revision, not an affected-suite gate.
-Check: `scripts/test_desktop.sh --filter 'TaskRowMetadataTests|ProgramStatusTests|WorkNavigationTests' -Xswiftc -gnone` PASS (57); `git diff --check` PASS. Gate owns affected suites; demo owns native timing/trust/link/density proof.
+Check: `scripts/test_desktop.sh --filter 'TaskRowMetadataTests|ProgramStatusTests|WorkNavigationTests' -Xswiftc -gnone` PASS (57); validation-only `cargo build --locked --bin lf --target-dir target/dev-app-control`, `codesign --verify --deep --strict` and `git diff --check` PASS. Gate owns affected suites; demo owns native timing/trust/link/density proof.

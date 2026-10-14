@@ -270,17 +270,19 @@ def test_release_installer_uses_the_promotion_boundary_to_activate_the_binary():
 
 def test_loopflow_ui_gate_keeps_mac_test_runners_signed():
     ci = (ROOT / ".github/workflows/ci.yml").read_text()
+    ci_build = (ROOT / "scripts/build_xcode_ci.py").read_text()
     test_script = (ROOT / "scripts/test.py").read_text()
     screenshot_script = (ROOT / "scripts/generate_screenshots.py").read_text()
 
-    for text in (ci, test_script, screenshot_script):
+    for text in (ci, ci_build, test_script, screenshot_script):
         assert "CODE_SIGNING_ALLOWED=NO" not in text
         assert "CODE_SIGNING_REQUIRED=NO" not in text
 
-    assert "CODE_SIGN_IDENTITY=-" in ci
+    assert "uv run python scripts/build_xcode_ci.py" in ci
+    assert '"CODE_SIGN_IDENTITY=-"' in ci_build
     assert '"CODE_SIGN_IDENTITY=-"' in test_script
     assert '"CODE_SIGN_IDENTITY=-"' in screenshot_script
-    assert "-disableAutomaticPackageResolution" in ci
+    assert "-disableAutomaticPackageResolution" in ci_build
 
 
 def test_rust_ci_materializes_drafts_before_building_tests():

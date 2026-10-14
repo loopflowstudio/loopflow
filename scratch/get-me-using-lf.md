@@ -8,8 +8,9 @@ cleanup remains separate and requires a reviewed, restorable plan.
 Product owns this Task. LOO-427 is integrated and completed; historical stacking
 details remain at `0bb13e9261:scratch/get-me-using-lf.md`. Portfolio implementation:
 `d43aa248d3`; shared-reader compression: `50e2cf44d1`. Reconciled October 13
-after refresh repair `279078f02d` and review-app receipt `83fa49adf4`, including
-main `414d4dd27c` and sidebar implementation/compression `88d91e53ca`/`0480344945`.
+after refresh repair `279078f02d`, shared publication `a590ecb7ee` and review-app
+receipt `2406680a23`, including main `37ca5fca81` and sidebar
+implementation/compression `88d91e53ca`/`0480344945`.
 The earlier feedback describing
 28-point single-line Task rows is superseded by those commits. Sidebar metadata
 is implemented; affected-suite gate and native review remain.
@@ -268,8 +269,7 @@ and Workflow; resume starts nothing and pause never kills a live process.
 LOO-427 is completed after verified merge; no unknown Process was retired.
 Earlier CI/queue failures, exact native trust observations and preserved draft
 receipts: `185c0b3c2e:scratch/get-me-using-lf.md`, **Paused**.
-Prepared unlaunched app at /tmp/loo462-next-demo/Loopflow Work Demo.app is an older
-50d6451b4 build, not the upcoming demo. Two running demos and their drafts remain.
+Older app receipts remain at `c89c789fd1:scratch/get-me-using-lf.md`, this heading.
 CMUX title environment scrub (9e79fa4970) awaits deployment; eight checks passed.
 
 ## Current pursuit — UX and end-to-end profiling, October 13
@@ -375,6 +375,12 @@ the duplicate pause method introduced by integration. Its five Rust and 31 Swift
 focused passes are recorded at `cf67067b0d:scratch/get-me-using-lf.md`.
 
 Remaining delivery includes affected-suite gate and publication for review.
+Unlaunched review app:
+`/tmp/loo462-oct13-retention-compress/Loopflow Work Demo.app` (`a590ecb7ee`),
+with matching validation-only helper and verified signature; receipt in
+work-first-demo.md. Main `37ca5fca81`, merged as `c89c789fd1`, changes CI build
+scheduling and helper preparation without changing Work or the helper's migration
+authority. It supplies no native acceptance or newer app receipt.
 Earlier app: `/tmp/loo462-oct13-compress/Loopflow Work Demo.app`,
 built from `0480344945` with its matching validation-only bundled lf; signature
 verified. Jack Heart subsequently launched it and reported a failed fresh-planning
@@ -392,7 +398,7 @@ remain; Portfolio review follows the main experience. No global install, takeove
 live migration, broader cleanup or landing is authorized. No product decision is
 needed for the remaining implementation; visual acceptance stays with demo review.
 
-Earlier sidebar Rust/DTO/cache checks: `69f7005b05:scratch/get-me-using-lf.md`, final check. These remain evidence for that revision, not an affected-suite gate.
+Earlier sidebar Rust/DTO/cache checks: `69f7005b05:scratch/get-me-using-lf.md`, final check; not a current gate.
 
 ### Native failure repair — October 13
 
@@ -418,7 +424,9 @@ review, six provider timing cases, hook trust and visual acceptance.
 
 Review found and fixed stale Workflow mutation buttons and old tests that expected
 Task ancestry to vanish on incomplete planning. No new Workflow/cache authority.
-Context: `lf context` under scratch limits; actual `.lf/wave/product/MEMORY.md`
-15,997/16,000 tokens and 75,077/131,072 bytes (unchanged; manifest path is stale).
+Reconciliation inspected the production reader, shared roadmap publication,
+Workflow header and regressions. The repair is implemented; no additional code
+mismatch was established. The installation prerequisite remains outside this
+publication-only pursuit, and no native acceptance follows from retained fixtures.
 
-Check: `scripts/test_desktop.sh --filter 'WorkModelStreamTests|WorkNavigationTests|WorkCacheTests' -Xswiftc -gnone` PASS (62); `git diff --check` PASS; unchanged Rust/schema checks remain at `83fa49adf4:scratch/get-me-using-lf.md`; gate owns affected suites, demo owns native proof.
+Check: `git diff --check` PASS (prose reconciliation); reuse `scripts/test_desktop.sh --filter 'WorkModelStreamTests|WorkNavigationTests|WorkCacheTests' -Xswiftc -gnone` PASS (62 at `a590ecb7ee`) and Rust/schema checks at `83fa49adf4:scratch/get-me-using-lf.md`; gate owns affected suites, demo owns native proof.

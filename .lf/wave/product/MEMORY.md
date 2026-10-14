@@ -388,7 +388,17 @@ without sibling menus or Independent chrome, coherent opening feedback and truth
 Workflow display. Removing navigation chrome never removes Session membership,
 explicit historical links or cached panes/drafts. A null successful reading differs
 from loading/unavailability; refresh failures preserve last-good Workflow content.
-The implemented chrome has focused tests, not native visual acceptance.
+
+Jack Heart's October 13 demo failed on missing `tasks.paused`, lost cached rows
+and showed “No workflow yet”; UI causes remain unconfirmed. A released-schema
+fixture reproduces failure before planning emission while the Task Workflow stays
+readable. A Task-status preflight
+cannot establish Work-stream compatibility. Bundling newer code cannot supply an
+unreleased migration; supported release installation remains separate authority.
+Partial planning now preserves previously readable rows and cache; stream and
+one-shot reads share publication. Disconnection marks Task readings stale, retaining
+Workflow content but disabling stale actions. Project Workflow recommendations
+cannot prove Task take-up. These regressions do not establish native recovery.
 
 Jack's October 13 Task metadata rows are implemented (`88d91e53ca`). Validated
 reports precede labeled nonreporter inference; cleared reporters stay unknown.
@@ -423,10 +433,8 @@ not establish status in cmux or herdr.
 
 ## Current Tasks and completion history (2026-10-02)
 
-LOO-371 measurements, failed attempts and limits: `5044add03:wave/product/MEMORY.md`,
-this heading, and [evidence](../../../scripts/benchmarks/desktop-performance/20261005-task-open/README.md).
-OCR split an ID: verify the observer. Own benchmark process groups; overlaps prove
-nothing. October 7 retired performance acceptance; LOO-408 owns installed settlement.
+LOO-371's retired measurements and observer failures remain in the archive below;
+LOO-408 owns installed settlement.
 
 Jack Heart requested current work without obsolete duplicates, completed Tasks
 hidden initially, and Show completed with 7 days, positive N days and All time
@@ -442,27 +450,22 @@ makes planning current despite an old timestamp. Equal-revision storage enrichme
 may fill a genuinely absent completion-date key, but cannot change an observed
 null or date. Snapshot acquisition and unrelated updates cannot establish recency.
 
-Jack relayed the coordinator finding that settled Tasks with removed checkouts
-still carried recovery conditions. That condition alone must not bypass history
-filtering. Current planning, nonterminal runtime, unresolved pinned Flow execution
-and observed unsettled files/commits remain visible; open Sessions stay reachable
-independently. This agrees with the Task workspace's checkout association contract.
+Jack relayed that removed checkouts alone must not keep settled Tasks current.
+Started and unresolved execution now own ordinary sidebar membership (LOO-462);
+history filters never evict retained conversations. Earlier predicates remain in
+the archive below.
 
-Jack Heart subsequently approved the inline checkbox/number prototype and
-requested Desktop implementation. Completed enables the remembered range
-(initially seven days); the active label edits N Days, with zero shown as All
-Tasks. Enter/blur applies, Escape cancels, and invalid drafts preserve the range.
-One native text surface handles display and editing to preserve glyph placement;
-long integers scroll within the compact viewport. Wave identity bounds drafts.
+Jack Heart approved inline checkbox/number editing: remembered range starts at
+seven days; zero means All Tasks. Enter/blur applies, Escape cancels, invalid
+drafts preserve the range. Wave-scoped native text preserves glyph placement and
+scrolls long integers. Prototype details: the archive below.
 
-The earlier affected gate and configured app compilation passed. The later inline
-revision and compression have seven focused passing tests and SwiftPM compilation;
-queue gate and native visual/focus review remain separate. Jack's Growth screenshot
-shows six current Tasks without the seven duplicates. The isolated offline capture
-has no successful completions or Sessions, so it cannot prove recency or native
-Session continuation. Live refresh and retained-Session review remain unproven.
-See [the review evidence](../../../docs/reviews/task-history.md). These observations
-provide no sustained-use KR or external-progress credit.
+Earlier gate, seven focused tests and Jack's Growth screenshot are preserved at
+`c89c789fd1:.lf/wave/product/MEMORY.md`, this heading, and
+[the review evidence](../../../docs/reviews/task-history.md). The offline capture
+had no successful completions or Sessions: recency, native focus/continuation,
+live refresh and retained-Session review remain unproved. No sustained-use KR or
+external-progress credit follows.
 
 ## Ask removal decision (2026-10-01)
 

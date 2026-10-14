@@ -283,3 +283,8 @@ reads; 62 focused Desktop tests passed. Validation-only lf build and ad-hoc
 signature verification PASS; source/signed hashes are in adjacent `build.json`.
 SwiftPM resources still require this retained checkout. Existing apps and drafts
 remain untouched; gate/publication and native review remain ahead.
+October 13 reconciliation confirmed the receipt and inspected the repair's reader,
+retention and Workflow paths. Later main merge `c89c789fd1` changes CI build
+scheduling, not those runtime sources; it does not resolve the schema prerequisite
+or supply another native observation. The exact disappearance/null-Workflow cause
+remains unconfirmed; the isolated regressions are not a successful real-schema demo.

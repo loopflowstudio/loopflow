@@ -635,7 +635,12 @@ SUITES: list[Suite] = [
         slow=False,
         trigger_desc="swift/ (headless app build and view tests)",
         match=lambda c: (
-            _touches(c, "swift/")
+            _touches(
+                c,
+                "swift/",
+                "rust/loopflow/src/store/sqlite/sessions.rs",
+                "rust/loopflow/src/naming.rs",
+            )
             or _touches_exact(c, "scripts/test_desktop.sh", "scripts/desktop-headless.sb")
         ),
         build=_swift_commands,

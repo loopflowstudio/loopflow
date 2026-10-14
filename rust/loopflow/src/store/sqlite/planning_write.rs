@@ -288,6 +288,11 @@ fn write_record(
             }
         }
     }
+    let previous_identifier = if table == "tasks" && columns.contains_key("issue_identifier") {
+        super::children::short_task_id(conn, &crate::durable::TaskId::from_raw(id))?
+    } else {
+        None
+    };
     let changed = !columns.is_empty();
     if changed {
         let assignments = columns
@@ -303,6 +308,13 @@ fn write_record(
         conn.execute(
             &format!("UPDATE {} SET {assignments}{revision} WHERE id=?1", table),
             params![id, serde_json::to_string(&columns)?],
+        )?;
+    }
+    if table == "tasks" && columns.contains_key("issue_identifier") {
+        super::sessions::repair_task_titles_in(
+            conn,
+            &crate::durable::TaskId::from_raw(id),
+            previous_identifier.as_deref(),
         )?;
     }
     if matches!(origin, WriteOrigin::Local) {

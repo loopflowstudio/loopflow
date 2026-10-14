@@ -2,6 +2,7 @@
 
 use super::planning_write;
 use crate::work::edit::WorkValue as Edit;
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 // Product writes read before they write (for example, validating parent Work),
@@ -227,10 +228,11 @@ impl SqliteStore {
 
     pub(crate) fn task_checkout(&self, task: &TaskId) -> StoreResult<Option<TaskCheckout>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
+        let conn = conn.unchecked_transaction()?;
         conn.query_row(
             &format!("{TASK_CHECKOUT_COLUMNS} AND id=?1"),
             [task.as_str()],
-            map_task_checkout,
+            |row| map_task_checkout(&conn, row),
         )
         .optional()
         .map_err(Into::into)
@@ -238,8 +240,9 @@ impl SqliteStore {
 
     pub(crate) fn task_checkouts(&self) -> StoreResult<Vec<TaskCheckout>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
+        let conn = conn.unchecked_transaction()?;
         let mut statement = conn.prepare(TASK_CHECKOUT_COLUMNS)?;
-        let rows = statement.query_map([], map_task_checkout)?;
+        let rows = statement.query_map([], |row| map_task_checkout(&conn, row))?;
         rows.map(|row| row.map_err(StoreError::from)).collect()
     }
 
@@ -408,6 +411,7 @@ impl SqliteStore {
 
     pub fn task(&self, task_id: &TaskId) -> StoreResult<Option<Task>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
+        let conn = conn.unchecked_transaction()?;
         task_on(&conn, task_id)
     }
 
@@ -451,26 +455,27 @@ impl SqliteStore {
 
     pub fn task_by_branch(&self, branch: &str) -> StoreResult<Option<Task>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let query = format!("{} WHERE t.branch=?1", task_columns());
+        let conn = conn.unchecked_transaction()?;
+        let query = format!("{TASK_COLUMNS} WHERE t.branch=?1");
         let mut statement = conn.prepare(&query)?;
         let tasks = statement
-            .query_map(params![branch], map_task_row)?
+            .query_map(params![branch], |row| map_task_row(&conn, row))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         resolve_current_task(branch, tasks)
     }
 
     pub fn list_tasks(&self, wave_id: Option<&WaveId>) -> StoreResult<Vec<Task>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
+        let conn = conn.unchecked_transaction()?;
         let filter = match wave_id {
             Some(_) => "p.wave_id=?1 AND ",
             None => "",
         };
-        let query = format!(
-            "{} WHERE {filter}{TASK_VISIBLE} ORDER BY t.updated_at DESC",
-            task_columns()
-        );
+        let query =
+            format!("{TASK_COLUMNS} WHERE {filter}{TASK_VISIBLE} ORDER BY t.updated_at DESC");
         let mut statement = conn.prepare(&query)?;
-        let rows = statement.query_map(params_from_iter(wave_id), map_task_row)?;
+        let rows =
+            statement.query_map(params_from_iter(wave_id), |row| map_task_row(&conn, row))?;
         rows.collect::<rusqlite::Result<_>>()
             .map_err(StoreError::from)
     }
@@ -1262,35 +1267,76 @@ fn validate_task_project(conn: &Connection, task: &Task) -> StoreResult<()> {
     Ok(())
 }
 
-const TASK_CHECKOUT_COLUMNS: &str = "SELECT id, issue_identifier, worktree, checkout_machine_id
+const TASK_CHECKOUT_COLUMNS: &str = "SELECT id, worktree, checkout_machine_id
     FROM tasks WHERE worktree IS NOT NULL";
 
-fn map_task_checkout(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskCheckout> {
-    let machine: Option<String> = row.get(3)?;
+fn map_task_checkout(conn: &Connection, row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskCheckout> {
+    let task_id = TaskId::from_raw(row.get::<_, String>(0)?);
+    let issue_identifier = short_task_id(conn, &task_id)
+        .map_err(|error| invalid_column(0, error))?
+        .ok_or(rusqlite::Error::QueryReturnedNoRows)?;
+    let machine: Option<String> = row.get(2)?;
     Ok(TaskCheckout {
-        task_id: TaskId::from_raw(row.get::<_, String>(0)?),
-        issue_identifier: row.get(1)?,
-        worktree: PathBuf::from(row.get::<_, String>(2)?),
+        task_id,
+        issue_identifier,
+        worktree: PathBuf::from(row.get::<_, String>(1)?),
         machine_id: machine
             .map(|id| crate::durable::MachineId::parse(&id))
             .transpose()
-            .map_err(|error| invalid_column(3, error))?,
+            .map_err(|error| invalid_column(2, error))?,
     })
 }
 
 const TASK_VISIBLE: &str = "t.planning_deleted_at IS NULL
     AND NOT EXISTS(SELECT 1 FROM task_deletions d WHERE d.wave_id=p.wave_id AND d.issue_id=t.external_issue_id)";
-// Both Work records and planning projections display the same unique local prefix.
-pub(super) const TASK_IDENTIFIER: &str = "CASE WHEN t.issue_identifier='lf-' || substr(t.id,6) THEN
-        'lf-' || substr(t.id,6,COALESCE((WITH RECURSIVE selector_lengths(n) AS (
-            SELECT 7 UNION ALL SELECT n+1 FROM selector_lengths WHERE n<32
-        ) SELECT min(n) FROM selector_lengths
-            WHERE NOT EXISTS(SELECT 1 FROM tasks other WHERE other.id!=t.id
-                AND substr(other.id,6,n)=substr(t.id,6,n))),32))
-        ELSE t.issue_identifier END";
+/// Present locally known Linear identity, otherwise the shortest unique local hex prefix.
+pub(super) fn short_task_id(conn: &Connection, id: &TaskId) -> StoreResult<Option<String>> {
+    let identifier: Option<String> = conn
+        .query_row(
+            "SELECT issue_identifier FROM tasks WHERE id=?1",
+            [id.as_str()],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let Some(identifier) = identifier else {
+        return Ok(None);
+    };
+    let hex = id.as_str().trim_start_matches("task_").to_ascii_lowercase();
+    if identifier != format!("lf-{hex}") {
+        return Ok(Some(identifier));
+    }
+    let mut query = conn.prepare(
+        "SELECT lower(substr(id,6)) FROM tasks WHERE id!=?1 AND substr(lower(id),6,6)=?2",
+    )?;
+    let others = query
+        .query_map(params![id.as_str(), &hex[..6]], |row| {
+            row.get::<_, String>(0)
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let length = (6..=hex.len())
+        .find(|length| {
+            others
+                .iter()
+                .all(|other| !other.starts_with(&hex[..*length]))
+        })
+        .unwrap_or(hex.len());
+    Ok(Some(hex[..length].to_string()))
+}
 
-fn task_columns() -> String {
-    format!("SELECT t.id,t.external_issue_id,{TASK_IDENTIFIER},
+pub(super) fn cached_short_task_id(
+    conn: &Connection,
+    labels: &mut HashMap<TaskId, Option<String>>,
+    id: &TaskId,
+) -> StoreResult<Option<String>> {
+    if let Some(label) = labels.get(id) {
+        return Ok(label.clone());
+    }
+    let label = short_task_id(conn, id)?;
+    labels.insert(id.clone(), label.clone());
+    Ok(label)
+}
+
+const TASK_COLUMNS: &str = "SELECT t.id,t.external_issue_id,
     t.issue_title, t.issue_description,
     p.wave_id, t.worktree, t.workspace_slug,
     t.created_at, t.updated_at, t.pm_snapshot_synced_at,
@@ -1303,8 +1349,7 @@ fn task_columns() -> String {
         json_object('state','current')),
     t.project_id, t.abandon_requested_at, t.abandon_reason, t.agent, t.planning_revision, t.branch, t.base_commit, t.parent_pr_id,
     t.planning_rank,t.planning_assignee,t.planning_due_date,t.planning_state,t.planning_completed,t.planning_completed_at
-    FROM tasks t JOIN projects p ON p.id=t.project_id")
-}
+    FROM tasks t JOIN projects p ON p.id=t.project_id";
 const TASK_PR_COLUMNS: &str = "SELECT
     id, task_id, sequence, slug, branch, base_commit,
     publication_requested_at, after_merge, next_slug, github_number, github_url,
@@ -1573,9 +1618,9 @@ fn project_on(conn: &Connection, project_id: &ProjectId) -> StoreResult<Option<P
 
 pub(super) fn task_on(conn: &Connection, task_id: &TaskId) -> StoreResult<Option<Task>> {
     conn.query_row(
-        &format!("{} WHERE t.id=?1", task_columns()),
+        &format!("{TASK_COLUMNS} WHERE t.id=?1"),
         [task_id.as_str()],
-        map_task_row,
+        |row| map_task_row(conn, row),
     )
     .optional()
     .map_err(StoreError::from)
@@ -1718,10 +1763,14 @@ fn invalid_column(
     rusqlite::Error::FromSqlConversionFailure(index, rusqlite::types::Type::Text, Box::new(error))
 }
 
-fn map_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
+fn map_task_row(conn: &Connection, row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
+    let id = TaskId::from_raw(row.get::<_, String>(0)?);
+    let identifier = short_task_id(conn, &id)
+        .map_err(|error| invalid_column(0, error))?
+        .ok_or(rusqlite::Error::QueryReturnedNoRows)?;
     let abandon_intent = match (
-        row.get::<_, Option<i64>>(13)?,
-        row.get::<_, Option<String>>(14)?,
+        row.get::<_, Option<i64>>(12)?,
+        row.get::<_, Option<String>>(13)?,
     ) {
         (Some(requested_at), Some(reason)) => Some(AbandonIntent {
             requested_at: crate::store::rows::unix_to_datetime(requested_at),
@@ -1730,36 +1779,36 @@ fn map_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         _ => None,
     };
     Ok(Task {
-        id: TaskId::from_raw(row.get::<_, String>(0)?),
+        id,
 
-        revision: row.get::<_, i64>(16)? as u64,
+        revision: row.get::<_, i64>(15)? as u64,
         linear_id: row
             .get::<_, Option<String>>(1)?
             .map(LinearIssueId::from_raw),
-        identifier: row.get(2)?,
-        title: row.get(3)?,
-        description: row.get(4)?,
-        pm_snapshot_synced_at: row.get(10)?,
+        identifier,
+        title: row.get(2)?,
+        description: row.get(3)?,
+        pm_snapshot_synced_at: row.get(9)?,
 
-        pm_writeback: serde_json::from_str(&row.get::<_, String>(11)?)
-            .map_err(|error| invalid_column(11, error))?,
-        wave_id: row.get(5)?,
-        project_id: ProjectId::from_raw(row.get::<_, String>(12)?),
-        worktree: row.get::<_, Option<String>>(6)?.map(PathBuf::from),
-        workspace_slug: row.get(7)?,
-        branch: row.get(17)?,
-        base_commit: row.get(18)?,
-        parent_pr_id: row.get::<_, Option<String>>(19)?.map(TaskPrId::from_raw),
-        agent: row.get(15)?,
+        pm_writeback: serde_json::from_str(&row.get::<_, String>(10)?)
+            .map_err(|error| invalid_column(10, error))?,
+        wave_id: row.get(4)?,
+        project_id: ProjectId::from_raw(row.get::<_, String>(11)?),
+        worktree: row.get::<_, Option<String>>(5)?.map(PathBuf::from),
+        workspace_slug: row.get(6)?,
+        branch: row.get(16)?,
+        base_commit: row.get(17)?,
+        parent_pr_id: row.get::<_, Option<String>>(18)?.map(TaskPrId::from_raw),
+        agent: row.get(14)?,
         abandon_intent,
-        created_at: crate::store::rows::unix_to_datetime(row.get(8)?),
-        updated_at: crate::store::rows::unix_to_datetime(row.get(9)?),
-        rank: row.get(20)?,
-        assignee: row.get(21)?,
-        due_date: row.get(22)?,
-        state: row.get(23)?,
-        completed: row.get(24)?,
-        completed_at: row.get(25)?,
+        created_at: crate::store::rows::unix_to_datetime(row.get(7)?),
+        updated_at: crate::store::rows::unix_to_datetime(row.get(8)?),
+        rank: row.get(19)?,
+        assignee: row.get(20)?,
+        due_date: row.get(21)?,
+        state: row.get(22)?,
+        completed: row.get(23)?,
+        completed_at: row.get(24)?,
         // Runtime freshness is derived when reconciliation decides whether the
         // durable GitHub observation can be reused.
         observation: crate::work::task::Observation::NotRequired,
@@ -2120,6 +2169,178 @@ mod local_planning_tests {
     }
 
     #[test]
+    fn task_labels_and_generated_names_follow_local_identity_and_linear_mapping() {
+        use crate::session::{SessionFilter, TitleSource, WorkSource};
+        use crate::work::edit::{WorkEdit, WorkValue};
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let task = store
+            .create_task(&NewTask {
+                id: TaskId::from_raw("task_abcdef10000000000000000000000001"),
+                project_id: local_project(&store),
+                title: "Fix login".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+        assert_eq!(task.identifier, "abcdef");
+        let template = store.test_session("template", &crate::session_record::new_artifact_key());
+        for (id, source, title) in [
+            ("generated", TitleSource::Generated, "Fix login"),
+            ("human", TitleSource::Human, "My login notes"),
+        ] {
+            let mut session = template.clone();
+            session.id = id.into();
+            session.artifact_key = crate::session_record::new_artifact_key();
+            session.captured = None;
+            session.task_id = Some(task.id.clone());
+            session.wave_id = Some(task.wave_id.clone());
+            session.work_source = Some(WorkSource::Declared);
+            session.title = title.into();
+            session.title_source = source;
+            let saved = store.create_session(session, None).unwrap();
+            assert_eq!(
+                saved.title,
+                if id == "generated" {
+                    "abcdef Fix login"
+                } else {
+                    title
+                }
+            );
+        }
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute("UPDATE tasks SET worktree='/retained',branch='old/branch',external_issue_id='pending-export' WHERE id=?1", [task.id.as_str()]).unwrap();
+            conn.execute(
+                "UPDATE agent_sessions SET title=?1 WHERE id='generated'",
+                [format!(
+                    "lf-{} Fix login",
+                    task.id.as_str().trim_start_matches("task_")
+                )],
+            )
+            .unwrap();
+        }
+        let summaries = store
+            .session_summaries(&SessionFilter::default(), 0)
+            .unwrap();
+        let summary = summaries
+            .iter()
+            .find(|session| session.id == "generated")
+            .unwrap();
+        assert_eq!(summary.task_identifier.as_deref(), Some("abcdef"));
+        assert!(
+            summary.title.starts_with("lf-abcdef1000"),
+            "passive reads preserve titles"
+        );
+        assert_eq!(
+            store
+                .task_checkout(&task.id)
+                .unwrap()
+                .unwrap()
+                .issue_identifier,
+            "abcdef"
+        );
+        let process = crate::id::LfProcessId::new();
+        store.conn.lock().unwrap().execute(
+            "INSERT INTO processes(id,trace_id,started_at,command,cwd) VALUES(?1,'trace',1,'lf session connect','/fixture')",
+            [&process],
+        ).unwrap();
+        store
+            .claim_session_attachment("generated", None, &process, false)
+            .unwrap();
+        assert_eq!(
+            store.session("generated").unwrap().unwrap().title,
+            "abcdef Fix login"
+        );
+        let history = store
+            .conversation_history(None, None, Some("abcdef"), None, 0, true)
+            .unwrap();
+        assert_eq!(history.len(), 2);
+        assert!(history
+            .iter()
+            .all(|input| input.task_identifier.as_deref() == Some("abcdef")));
+        {
+            let mut conn = store.conn.lock().unwrap();
+            let tx = conn.transaction().unwrap();
+            super::planning_write::local(
+                &tx,
+                &WorkEdit::for_target(
+                    task.id.as_str(),
+                    &[WorkValue::TaskIdentifier("ENG-123".into())],
+                ),
+            )
+            .unwrap();
+            tx.commit().unwrap();
+        }
+        let mapped = store.task(&task.id).unwrap().unwrap();
+        assert_eq!(mapped.identifier, "ENG-123");
+        assert_eq!(mapped.branch, "old/branch");
+        assert_eq!(
+            store.task_checkouts().unwrap()[0].issue_identifier,
+            "ENG-123"
+        );
+        assert_eq!(
+            store.session("generated").unwrap().unwrap().title,
+            "ENG-123 Fix login"
+        );
+        assert_eq!(
+            store.session("human").unwrap().unwrap().title,
+            "My login notes"
+        );
+        store
+            .rename_session("generated", "Review login", TitleSource::Generated)
+            .unwrap();
+        assert_eq!(
+            store.session("generated").unwrap().unwrap().title,
+            "ENG-123 Review login"
+        );
+        let history = store
+            .conversation_history(None, None, Some("ENG-123"), None, 0, true)
+            .unwrap();
+        assert_eq!(history.len(), 2);
+        assert!(history
+            .iter()
+            .all(|input| input.task_identifier.as_deref() == Some("ENG-123")));
+        let summary = store.session_summary("generated", 0).unwrap().unwrap();
+        assert_eq!(summary.task_identifier.as_deref(), Some("ENG-123"));
+    }
+
+    #[test]
+    fn local_labels_extend_only_for_collisions_including_completed_tasks() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let project = local_project(&store);
+        let first = TaskId::from_raw("task_abcdef10000000000000000000000001");
+        let second = TaskId::from_raw("task_abcdef20000000000000000000000002");
+        for id in [&first, &second] {
+            store
+                .create_task(&NewTask {
+                    id: id.clone(),
+                    project_id: project.clone(),
+                    title: "Fix login".into(),
+                    description: String::new(),
+                    due_date: None,
+                })
+                .unwrap();
+        }
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET planning_completed=1,issue_identifier='ENG-9' WHERE id=?1",
+                [second.as_str()],
+            )
+            .unwrap();
+        assert_eq!(store.task(&first).unwrap().unwrap().identifier, "abcdef1");
+        assert_eq!(store.task(&second).unwrap().unwrap().identifier, "ENG-9");
+        assert!(store.task_by_issue("abcdef").is_err());
+        assert_eq!(store.task_by_issue("abcdef1").unwrap().unwrap().id, first);
+        let conn = store.conn.lock().unwrap();
+        assert_eq!(super::short_task_id(&conn, &TaskId::new()).unwrap(), None);
+    }
+
+    #[test]
     fn task_checkout_read_distinguishes_unplaced_and_unknown_machine() {
         let directory = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&directory.path().join("db")).unwrap();
@@ -2145,10 +2366,7 @@ mod local_planning_tests {
             .unwrap();
         let checkout = store.task_checkout(&task.id).unwrap().unwrap();
         assert_eq!(checkout.task_id, task.id);
-        assert_eq!(
-            checkout.issue_identifier,
-            format!("lf-{}", task.id.as_str().trim_start_matches("task_"))
-        );
+        assert_eq!(checkout.issue_identifier, task.identifier);
         assert_eq!(
             checkout.worktree,
             std::path::Path::new("/retained/checkout")
@@ -2436,7 +2654,7 @@ mod local_planning_tests {
             description: String::new(),
         };
         let first = store.create_task(&input).unwrap();
-        assert_eq!(first.identifier, "lf-0123456");
+        assert_eq!(first.identifier, "012345");
         for selector in ["0123", "0123456789A", "lf-0123", "task_0123"] {
             assert_eq!(store.task_by_issue(selector).unwrap().unwrap().id, first.id);
         }
@@ -2468,8 +2686,8 @@ mod local_planning_tests {
             assert!(error.contains("use a longer Task ID"));
         }
         let first = store.task(&first.id).unwrap().unwrap();
-        assert_eq!(first.identifier.len(), 35);
-        assert_eq!(second.identifier.len(), 35);
+        assert_eq!(first.identifier.len(), 32);
+        assert_eq!(second.identifier.len(), 32);
         for task in [first, second] {
             assert_eq!(
                 store.task_by_issue(task.id.as_str()).unwrap().unwrap().id,

@@ -1164,7 +1164,7 @@ exit 2
                 let listed = inspect(&["session", "list", "--all", "--json"]);
                 assert_eq!(listed.as_array().unwrap().len(), 1, "{listed}");
                 id = listed[0]["id"].as_str().unwrap().to_string();
-                assert_eq!(listed[0]["title"], name);
+                assert_eq!(listed[0]["title"], title(name));
                 if let Some(task) = &task {
                     assert!(
                         listed[0]["task_ids"]

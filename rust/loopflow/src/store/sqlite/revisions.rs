@@ -189,7 +189,7 @@ mod tests {
     #[test]
     fn a_session_reading_moves_sessions_only_when_waiting_could_change() {
         let (_dir, store) = store();
-        session(&store, "conversation");
+        store.test_session("conversation", &crate::session_record::new_artifact_key());
         let process = LfProcessId::new();
         store
             .conn

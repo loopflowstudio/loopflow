@@ -9,6 +9,208 @@ use std::process::Command;
 
 use loopflow_test_support::TestRepo;
 
+fn install_native_codex(home: &std::path::Path) {
+    let bin = home.join("bin");
+    fs::create_dir(&bin).unwrap();
+    let provider = bin.join("codex");
+    fs::write(
+        &provider,
+        format!(
+            "#!/bin/sh\nexec /usr/bin/python3 '{}' \"$@\"\n",
+            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/native_codex.py")
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&provider, fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+fn native_codex_command(repo: &std::path::Path, home: &std::path::Path, args: &[&str]) -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+    command
+        .env_clear()
+        .env(
+            "PATH",
+            format!("{}:/usr/bin:/bin", home.join("bin").display()),
+        )
+        .env("HOME", home)
+        .env("LF_HOME", home)
+        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+        .env("CODEX_HOME", home.join(".codex"))
+        .current_dir(repo)
+        .args(args)
+        .stdin(std::process::Stdio::null());
+    command
+}
+
+#[test]
+fn codex_startup_failures_preserve_input_and_allow_reconnect() {
+    for failure in [
+        "fail-server",
+        "stall-server",
+        "fail-terminal",
+        "fail-after-submit",
+    ] {
+        let repo = TestRepo::new();
+        repo.create_file(
+            ".lf/config.yaml",
+            "diff: false\ndiff_files: false\npaste: false\n",
+        );
+        let home = tempfile::tempdir().unwrap();
+        install_native_codex(home.path());
+        fs::write(home.path().join(failure), "").unwrap();
+        let start = std::time::Instant::now();
+        let output = native_codex_command(
+            repo.path(),
+            home.path(),
+            &["-i", "-a", "codex", ":", "Preserve this request"],
+        )
+        .output()
+        .unwrap();
+        assert!(!output.status.success(), "{failure}");
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(30),
+            "{failure} must fail before the opener's deadline"
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            (failure == "fail-after-submit" && stderr.contains("native terminal connection"))
+                || stderr.contains(if failure == "fail-terminal" {
+                    "before submitting"
+                } else if failure == "fail-after-submit" {
+                    "status"
+                } else {
+                    "app-server"
+                }),
+            "{failure}: {stderr}"
+        );
+        let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+        let live: i64 = database
+            .query_row(
+                "SELECT count(*) FROM processes WHERE kind='agent' AND completed_at IS NULL",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(live, 0, "{failure} must settle the owned provider");
+        let session: String = database
+            .query_row("SELECT id FROM agent_sessions LIMIT 1", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        fs::remove_file(home.path().join(failure)).unwrap();
+        let output =
+            native_codex_command(repo.path(), home.path(), &["session", "connect", &session])
+                .output()
+                .unwrap();
+        assert!(
+            output.status.success(),
+            "{failure}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let turns: serde_json::Value =
+            serde_json::from_slice(&fs::read(home.path().join("native-turns.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            turns.as_array().unwrap().len(),
+            if failure == "fail-after-submit" { 2 } else { 1 },
+            "{failure}"
+        );
+        if failure == "fail-after-submit" {
+            assert_eq!(
+                turns[1]["items"][0]["content"][0]["text"],
+                "Native follow-up"
+            );
+        }
+        assert!(turns[0]["items"][0]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("Preserve this request"));
+        let sessions: i64 = database
+            .query_row("SELECT count(*) FROM agent_sessions", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(sessions, 1, "retry keeps the same conversation");
+    }
+}
+
+#[test]
+fn codex_terminal_delivers_large_input_and_approvals_then_reconnects_without_replay() {
+    let repo = TestRepo::new();
+    repo.create_file(
+        ".lf/config.yaml",
+        "diff: false\ndiff_files: false\npaste: false\n",
+    );
+    let body = "Preserve 雪, \"quotes\", $(shell syntax), and newlines.\n".repeat(8_000);
+    repo.create_file(".lf/skills/probe.md", &body);
+    let home = tempfile::tempdir().unwrap();
+    install_native_codex(home.path());
+    let command = |args: &[&str]| native_codex_command(repo.path(), home.path(), args);
+    let output = command(&["-i", "-a", "codex", "probe", "Find the bug."])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let read = |name: &str| -> serde_json::Value {
+        serde_json::from_slice(&fs::read(home.path().join(name)).unwrap()).unwrap()
+    };
+    let turns = read("native-turns.json");
+    let input = turns[0]["items"][0]["content"][0]["text"].as_str().unwrap();
+    let expected = format!(
+        "<lf:skill:probe>\n{body}\n</lf:skill:probe>\n\n<lf:message>\nFind the bug.\n</lf:message>"
+    );
+    assert!(
+        input == expected,
+        "first input differs: expected {} bytes, received {}",
+        expected.len(),
+        input.len()
+    );
+    assert_eq!(turns.as_array().unwrap().len(), 1);
+    assert_eq!(
+        read("native-approval.json")["decision"],
+        "decline",
+        "the terminal must answer, not a headless auto-approver"
+    );
+    let config = read("native-config.json");
+    let capture = fs::read_to_string(home.path().join("launched")).unwrap();
+    let key = capture.lines().next().unwrap();
+    let shard = &key.strip_prefix("run_").unwrap_or(key)[..2];
+    let manifest = read(&format!("runs/{shard}/{key}/manifest.json"));
+    assert_eq!(
+        config["developerInstructions"],
+        manifest["exec"]["system_prompt"]
+    );
+    assert!(config.get("baseInstructions").is_none());
+    assert!(config["config"]["hooks"]["SessionStart"].is_array());
+    let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let session: String = database
+        .query_row("SELECT id FROM agent_sessions LIMIT 1", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    let output = command(&["session", "connect", &session]).output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let turns = read("native-turns.json");
+    assert_eq!(turns.as_array().unwrap().len(), 2);
+    assert_eq!(
+        turns[1]["items"][0]["content"][0]["text"],
+        "Native follow-up"
+    );
+    let live: i64 = database
+        .query_row(
+            "SELECT count(*) FROM processes WHERE kind='agent' AND completed_at IS NULL",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(live, 0, "both launches must settle their owned providers");
+}
+
 #[test]
 fn terminal_context_refreshes_without_replacing_instructions_or_losing_failed_sessions() {
     let repo = TestRepo::new();
@@ -20,28 +222,26 @@ fn terminal_context_refreshes_without_replacing_instructions_or_losing_failed_se
     let large = "UNCHANGED_LARGE_FILE".repeat(12_000);
     repo.create_file("scratch/large.md", &large);
     repo.create_file("scratch/small.md", "CURRENT_SCRATCH");
-    let codex_command = regex::Regex::new(r#""command" = ("(?:[^"\\]|\\.)*")"#).unwrap();
-    for harness in ["claude", "codex"] {
-        repo.create_file(".lf/wave/fixture/MEMORY.md", "CURRENT_WAVE_MEMORY");
-        let home = tempfile::tempdir().unwrap();
-        let store =
-            loopflow::store::sqlite::SqliteStore::new(&home.path().join("machine/loopflow.db"))
-                .unwrap();
-        store
-            .create_wave(&loopflow::work::wave::Wave::new(
-                loopflow::id::WaveId::new(),
-                "fixture".into(),
-                loopflow::repository::CanonicalRepo::discover(repo.path())
-                    .unwrap()
-                    .to_string(),
-            ))
-            .unwrap();
-        let bin = home.path().join("bin");
-        fs::create_dir(&bin).unwrap();
-        let provider = bin.join(harness);
-        fs::write(
-            &provider,
-            r#"#!/bin/sh
+    let harness = "claude";
+    repo.create_file(".lf/wave/fixture/MEMORY.md", "CURRENT_WAVE_MEMORY");
+    let home = tempfile::tempdir().unwrap();
+    let store = loopflow::store::sqlite::SqliteStore::new(&home.path().join("machine/loopflow.db"))
+        .unwrap();
+    store
+        .create_wave(&loopflow::work::wave::Wave::new(
+            loopflow::id::WaveId::new(),
+            "fixture".into(),
+            loopflow::repository::CanonicalRepo::discover(repo.path())
+                .unwrap()
+                .to_string(),
+        ))
+        .unwrap();
+    let bin = home.path().join("bin");
+    fs::create_dir(&bin).unwrap();
+    let provider = bin.join(harness);
+    fs::write(
+        &provider,
+        r#"#!/bin/sh
 for arg in "$@"; do
     [ "${#arg}" -lt 122880 ] || exit 99
     printf '%s\000' "$arg" >> "$HOME/argv"
@@ -49,130 +249,113 @@ done
 printf 'provider fixture refused this request\n' >&2
 exit 23
 "#,
-        )
+    )
+    .unwrap();
+    fs::set_permissions(&provider, fs::Permissions::from_mode(0o755)).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .env_clear()
+        .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+        .env("HOME", home.path())
+        .env("LF_HOME", home.path().join("machine"))
+        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+        .env("CODEX_HOME", home.path().join(".codex"))
+        .env("CLAUDE_CONFIG_DIR", home.path().join(".claude"))
+        .current_dir(repo.path())
+        .args([
+            "-i",
+            "-a",
+            harness,
+            "--wave",
+            "fixture",
+            "probe",
+            "Find the bug.",
+        ])
+        .output()
         .unwrap();
-        fs::set_permissions(&provider, fs::Permissions::from_mode(0o755)).unwrap();
-        let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("provider fixture refused"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let raw = fs::read_to_string(home.path().join("argv")).unwrap();
+    let args: Vec<_> = raw.split('\0').collect();
+    let instructions = {
+        let index = args
+            .iter()
+            .position(|arg| *arg == "--append-system-prompt-file")
+            .unwrap();
+        fs::read_to_string(args[index + 1]).unwrap()
+    };
+    assert_eq!(instructions.matches("<lf:work-guidance>").count(), 1);
+    assert!(!instructions.contains("CURRENT_SCRATCH"));
+    assert!(!instructions.contains("CURRENT_WAVE_MEMORY"));
+    assert!(!instructions.contains("Saved active skill."));
+    assert!(!raw.contains("model_instructions_file"));
+    assert!(!raw.contains("dangerously-bypass-hook-trust"));
+    assert_eq!(raw.matches("<lf:skill:probe>\nSaved active skill.\n</lf:skill:probe>\n\n<lf:message>\nFind the bug.\n</lf:message>").count(), 1);
+    let callbacks: Vec<String> = {
+        let index = args.iter().position(|arg| *arg == "--settings").unwrap();
+        let settings: serde_json::Value =
+            serde_json::from_slice(&fs::read(args[index + 1]).unwrap()).unwrap();
+        settings["hooks"]["SessionStart"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|group| group["hooks"][0]["command"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    let invoke = |moment: &str| {
+        let callback = callbacks
+            .iter()
+            .find(|callback| callback.ends_with(&format!(" {moment}")))
+            .unwrap();
+        let output = Command::new("/bin/sh")
             .env_clear()
-            .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+            .env("PATH", "/usr/bin:/bin")
             .env("HOME", home.path())
-            .env("LF_HOME", home.path().join("machine"))
-            .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
-            .env("CODEX_HOME", home.path().join(".codex"))
-            .env("CLAUDE_CONFIG_DIR", home.path().join(".claude"))
             .current_dir(repo.path())
-            .args([
-                "-i",
-                "-a",
-                harness,
-                "--wave",
-                "fixture",
-                "probe",
-                "Find the bug.",
-            ])
+            .args(["-c", callback])
             .output()
             .unwrap();
-        assert!(!output.status.success());
         assert!(
-            String::from_utf8_lossy(&output.stderr).contains("provider fixture refused"),
+            output.status.success(),
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
-        let raw = fs::read_to_string(home.path().join("argv")).unwrap();
-        let args: Vec<_> = raw.split('\0').collect();
-        let instructions = if harness == "claude" {
-            let index = args
-                .iter()
-                .position(|arg| *arg == "--append-system-prompt-file")
-                .unwrap();
-            fs::read_to_string(args[index + 1]).unwrap()
-        } else {
-            let value = args
-                .iter()
-                .find_map(|arg| arg.strip_prefix("developer_instructions="))
-                .unwrap();
-            serde_json::from_str::<String>(value).unwrap()
-        };
-        assert_eq!(instructions.matches("<lf:work-guidance>").count(), 1);
-        assert!(!instructions.contains("CURRENT_SCRATCH"));
-        assert!(!instructions.contains("CURRENT_WAVE_MEMORY"));
-        assert!(!instructions.contains("Saved active skill."));
-        assert!(!raw.contains("model_instructions_file"));
-        assert!(!raw.contains("dangerously-bypass-hook-trust"));
-        assert_eq!(raw.matches("<lf:skill:probe>\nSaved active skill.\n</lf:skill:probe>\n\n<lf:message>\nFind the bug.\n</lf:message>").count(), 1);
-        let callbacks: Vec<String> = if harness == "claude" {
-            let index = args.iter().position(|arg| *arg == "--settings").unwrap();
-            let settings: serde_json::Value =
-                serde_json::from_slice(&fs::read(args[index + 1]).unwrap()).unwrap();
-            settings["hooks"]["SessionStart"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|group| group["hooks"][0]["command"].as_str().unwrap().to_owned())
-                .collect()
-        } else {
-            let flags = args.iter().find(|arg| arg.starts_with("hooks=")).unwrap();
-            assert!(flags.contains("trusted_hash"));
-            // Exercise the emitted commands, not a reconstructed callback or
-            // whichever saved delivery happens to have the newest timestamp.
-            // The owned TOML encoder emits command values as JSON strings.
-            codex_command
-                .captures_iter(flags)
-                .map(|capture| serde_json::from_str(&capture[1]).unwrap())
-                .collect()
-        };
-        let invoke = |moment: &str| {
-            let callback = callbacks
-                .iter()
-                .find(|callback| callback.ends_with(&format!(" {moment}")))
-                .unwrap();
-            let output = Command::new("/bin/sh")
-                .env_clear()
-                .env("PATH", "/usr/bin:/bin")
-                .env("HOME", home.path())
-                .current_dir(repo.path())
-                .args(["-c", callback])
-                .output()
-                .unwrap();
-            assert!(
-                output.status.success(),
-                "{}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-            let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-            value["hookSpecificOutput"]["additionalContext"]
-                .as_str()
-                .unwrap()
-                .to_string()
-        };
-        let first = invoke("start");
-        assert!(first.contains("CURRENT_SCRATCH"));
-        assert!(first.contains("CURRENT_WAVE_MEMORY"));
-        assert!(!first.contains("Saved active skill.\n"));
-        assert!(first.contains("UNCHANGED_LARGE_FILE"));
-        assert!(first.contains("source=\"scratch/large.md\" excerpt=\"start\""));
-        assert!(!first.contains(&large));
-        repo.create_file("scratch/small.md", "FRESH_SCRATCH");
-        repo.create_file(".lf/wave/fixture/MEMORY.md", "FRESH_WAVE_MEMORY");
-        let compact = invoke("compact");
-        assert!(compact.contains("FRESH_WAVE_MEMORY"));
-        assert!(!compact.contains("CURRENT_WAVE_MEMORY"));
-        assert!(compact.contains("FRESH_SCRATCH"));
-        assert!(!compact.contains("CURRENT_SCRATCH"));
-        assert!(compact.contains("Saved active skill."));
-        assert!(!compact.contains("Find the bug."));
-        assert!(compact.len() <= 10_000);
-        assert_eq!(
-            fs::read_to_string(repo.path().join("scratch/large.md")).unwrap(),
-            large
-        );
-        repo.create_file("scratch/small.md", "CURRENT_SCRATCH");
-        let db = rusqlite::Connection::open(home.path().join("machine/loopflow.db")).unwrap();
-        let sessions: i64 = db
-            .query_row("SELECT count(*) FROM agent_sessions", [], |row| row.get(0))
-            .unwrap();
-        assert_eq!(sessions, 1);
-    }
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        value["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    let first = invoke("start");
+    assert!(first.contains("CURRENT_SCRATCH"));
+    assert!(first.contains("CURRENT_WAVE_MEMORY"));
+    assert!(!first.contains("Saved active skill.\n"));
+    assert!(first.contains("UNCHANGED_LARGE_FILE"));
+    assert!(first.contains("source=\"scratch/large.md\" excerpt=\"start\""));
+    assert!(!first.contains(&large));
+    repo.create_file("scratch/small.md", "FRESH_SCRATCH");
+    repo.create_file(".lf/wave/fixture/MEMORY.md", "FRESH_WAVE_MEMORY");
+    let compact = invoke("compact");
+    assert!(compact.contains("FRESH_WAVE_MEMORY"));
+    assert!(!compact.contains("CURRENT_WAVE_MEMORY"));
+    assert!(compact.contains("FRESH_SCRATCH"));
+    assert!(!compact.contains("CURRENT_SCRATCH"));
+    assert!(compact.contains("Saved active skill."));
+    assert!(!compact.contains("Find the bug."));
+    assert!(compact.len() <= 10_000);
+    assert_eq!(
+        fs::read_to_string(repo.path().join("scratch/large.md")).unwrap(),
+        large
+    );
+    repo.create_file("scratch/small.md", "CURRENT_SCRATCH");
+    let db = rusqlite::Connection::open(home.path().join("machine/loopflow.db")).unwrap();
+    let sessions: i64 = db
+        .query_row("SELECT count(*) FROM agent_sessions", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(sessions, 1);
 }
 
 #[test]

@@ -595,6 +595,7 @@ pub struct CodexHarness {
     /// installed. The harness alone mutates it; the lifeline covers lf death.
     child_group: Option<u32>,
     agent_directory: Option<tempfile::TempDir>,
+    native_start: Option<(std::path::PathBuf, Value)>,
     session_attachment: Option<super::agent_process::AttachmentOwner>,
 }
 
@@ -631,8 +632,13 @@ impl CodexHarness {
             should_seed_prompt: true,
             child_group: None,
             agent_directory: None,
+            native_start: None,
             session_attachment: None,
         }
+    }
+
+    pub(crate) fn native_start(&self) -> Option<(std::path::PathBuf, Value)> {
+        self.native_start.clone()
     }
 
     async fn send_request(&mut self, method: &str, params: Value) -> Result<i64> {
@@ -911,7 +917,9 @@ impl Harness for CodexHarness {
     async fn stop(&mut self) -> Result<()> {
         self.shutdown_requested.store(true, Ordering::Relaxed);
 
-        if self.session_attachment.is_some() && self.agent_session().is_some() {
+        if self.session_attachment.is_some()
+            && (self.agent_session().is_some() || self.native_start.is_some())
+        {
             // The invocation closes its AgentProcess under the attachment lock
             // during settlement, without holding SQLite across provider I/O.
             // Harness teardown only drops this connection after takeover.
@@ -990,7 +998,10 @@ impl CodexHarness {
         let connection = store.session_connection(session)?;
         let saved_thread = store.session_thread(session)?;
         if let Some(thread) = &saved_thread {
-            if self.resume_agent_session.as_ref() != Some(thread) {
+            if self.resume_agent_session.as_ref() != Some(thread)
+                && !(self.approval == ApprovalPolicy::NativeClient
+                    && self.resume_agent_session.is_none())
+            {
                 anyhow::bail!(
                     "Saved conversation thread differs; reconnect with its recorded provider"
                 );
@@ -1115,7 +1126,8 @@ impl CodexHarness {
                 }
             }
         })
-        .await??;
+        .await
+        .map_err(|_| anyhow!("Codex app-server did not open its socket within 15s"))??;
         let (socket, _) = client_async("ws://localhost", socket).await?;
         let (mut writer, mut reader) = socket.split();
         let stderr = child.as_mut().and_then(|child| child.stderr.take());
@@ -1318,6 +1330,7 @@ impl CodexHarness {
                 if let Some(id) = value.get("id") {
                     let result = match approval {
                         ApprovalPolicy::AutoApprove => json!({ "decision": "accept" }),
+                        ApprovalPolicy::NativeClient => continue,
                     };
                     let _ = approval_tx
                         .send(OutboundRpc::Response {
@@ -1421,10 +1434,53 @@ impl CodexHarness {
             "allow_login_shell": false,
             "features.shell_snapshot": false,
         });
+        if self.approval == ApprovalPolicy::NativeClient
+            && launch.write_scope == crate::agent::AgentWriteScope::Configured
+        {
+            if let Some(cwd) = &launch.cwd {
+                let roots = crate::agent::workspace_add_dirs(cwd);
+                if !roots.is_empty() {
+                    // --add-dir used to append to the user's configured roots.
+                    // Resolve that same configuration through the provider,
+                    // including its selected account and trusted project layers.
+                    let inherited = self
+                        .send_observed_request(
+                            "config/read",
+                            json!({"cwd":cwd,"includeLayers":false}),
+                        )
+                        .await?
+                        .recv()
+                        .await?
+                        .map_err(|error| anyhow!("Codex config/read failed: {error}"))?;
+                    anyhow::ensure!(
+                        inherited["config"].is_object(),
+                        "Codex config/read returned no configuration"
+                    );
+                    let mut writable = inherited
+                        .pointer("/config/sandbox_workspace_write/writable_roots")
+                        .and_then(Value::as_array)
+                        .cloned()
+                        .unwrap_or_default();
+                    for root in roots {
+                        let root = json!(root);
+                        if !writable.contains(&root) {
+                            writable.push(root);
+                        }
+                    }
+                    config["sandbox_workspace_write.writable_roots"] = json!(writable);
+                }
+            }
+        }
         if let Some(context) = &launch.conversation_context {
-            config["hooks"] = super::context::codex_config(Some(context), false)?["hooks"].clone();
+            config["hooks"] = super::context::codex_config(context)?["hooks"].clone();
         }
         thread_params.insert("config".into(), config);
+        if self.approval == ApprovalPolicy::NativeClient {
+            let (store, session, attachment) = &owner;
+            store.record_agent_endpoint(session, attachment, &endpoint.to_string_lossy())?;
+            self.native_start = Some((endpoint, Value::Object(thread_params)));
+            return Ok(());
+        }
         // The thread params include Loopflow's conservative defaults only when
         // Codex config is missing or less permissive. More permissive user or
         // repo config, such as danger-full-access, is left alone.

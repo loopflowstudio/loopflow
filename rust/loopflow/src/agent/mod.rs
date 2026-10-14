@@ -992,49 +992,6 @@ pub fn build_claude_command(
     cmd
 }
 
-/// Build Codex CLI command.
-pub fn build_codex_command(launch: &AgentConfig, model_variant: Option<&str>) -> Vec<String> {
-    let mut cmd = vec!["codex".to_string()];
-    cmd.push("-c".to_string());
-    cmd.push(format!("service_tier=\"{CODEX_DEFAULT_SERVICE_TIER}\""));
-
-    let instructions = system_prompt_with_structured_replies(launch);
-    if !instructions.is_empty() {
-        cmd.push("-c".into());
-        cmd.push(format!(
-            "developer_instructions={}",
-            serde_json::to_string(&instructions).expect("instructions serialize")
-        ));
-    }
-    if let Some(variant) = model_variant {
-        cmd.push("-c".to_string());
-        cmd.push(format!("model=\"{variant}\""));
-    }
-
-    if let Some(ref cwd) = launch.cwd {
-        cmd.push("-C".to_string());
-        cmd.push(cwd.to_string_lossy().to_string());
-    }
-
-    if (launch.write_scope == AgentWriteScope::Worktree && launch.execution_boundary.is_none())
-        || !launch.skip_permissions
-    {
-        for dir in provider_writable_roots(launch) {
-            cmd.push("--add-dir".to_string());
-            cmd.push(dir.to_string_lossy().to_string());
-        }
-    }
-
-    cmd.extend(codex_permission_args_for_scope(
-        launch.cwd.as_deref(),
-        false,
-        launch.skip_permissions,
-        launch.write_scope,
-    ));
-
-    cmd
-}
-
 /// Build OpenCode CLI command.
 pub fn build_opencode_command(model_variant: Option<&str>) -> Vec<String> {
     let mut cmd = vec!["opencode".to_string()];
@@ -1104,7 +1061,6 @@ pub fn build_model_command(
     let (harness, model_variant) = parse_agent(agent);
     let model_variant = model_variant.as_deref();
     Ok(match harness.as_str() {
-        "codex" => build_codex_command(launch, model_variant),
         "opencode" => build_opencode_command(model_variant),
         "claude" => build_claude_command(launch, process, capabilities, model_variant),
         _ => {
@@ -1713,13 +1669,21 @@ fn _run_agent_once(
     if process.auto {
         return _run_harness_once(launch, process, model, retry);
     }
+    if harness == "codex" {
+        let result = crate::lf::commands::util::run_native_codex_agent(launch)
+            .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
+        return Ok(AgentAttempt::Finished {
+            result,
+            can_failover: false,
+        });
+    }
     validate_terminal_turn(&launch.task_prompt)?;
     let mut cmd_args = build_model_command(launch, process, capabilities)?;
     if cmd_args.is_empty() {
         return Err(CoreError::ExecutionFailed("Empty command".to_string()));
     }
     let hooks =
-        crate::harness::context::native_args(&harness, launch.conversation_context.as_ref(), false)
+        crate::harness::context::native_args(&harness, launch.conversation_context.as_ref())
             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     cmd_args.splice(1..1, hooks);
 
@@ -2169,58 +2133,6 @@ trust_level = "trusted"
     }
 
     #[test]
-    fn build_codex_command_interactive() {
-        let launch = AgentConfig {
-            skip_permissions: false,
-            ..default_launch()
-        };
-        let cmd = build_codex_command(&launch, None);
-        assert_arg_pair(&cmd, "-c", "service_tier=\"default\"");
-        assert!(
-            !cmd.contains(&"exec".to_string()),
-            "interactive mode should not use 'exec'"
-        );
-        assert!(!cmd.contains(&"--full-auto".to_string()));
-        assert_eq!(
-            cmd.contains(&"--sandbox".to_string()),
-            codex_permission_args(None, false, false).contains(&"--sandbox".to_string())
-        );
-    }
-
-    #[test]
-    fn build_codex_command_adds_main_repo_for_worktree_metadata() {
-        let (_tmp, main, worktree) = git_worktree_fixture();
-        let launch = AgentConfig {
-            cwd: Some(worktree),
-            skip_permissions: false,
-            ..default_launch()
-        };
-
-        let cmd = build_codex_command(&launch, None);
-        let idx = cmd
-            .iter()
-            .position(|arg| arg == "--add-dir")
-            .expect("add-dir flag");
-        assert_eq!(
-            PathBuf::from(&cmd[idx + 1]).canonicalize().unwrap(),
-            main.canonicalize().unwrap()
-        );
-    }
-
-    #[test]
-    fn build_codex_command_omits_add_dir_for_main_repo() {
-        let (_tmp, main, _worktree) = git_worktree_fixture();
-        let launch = AgentConfig {
-            cwd: Some(main),
-            skip_permissions: false,
-            ..default_launch()
-        };
-
-        let cmd = build_codex_command(&launch, None);
-        assert!(!cmd.contains(&"--add-dir".to_string()));
-    }
-
-    #[test]
     fn managed_task_scope_carries_exact_delivery_capabilities() {
         let (_tmp, main, worktree) = git_worktree_fixture();
         let git_control = main.join(".git");
@@ -2237,9 +2149,6 @@ trust_level = "trusted"
         };
         let process = auto_process();
 
-        let codex = build_codex_command(&launch, None);
-        assert!(codex.contains(&"--dangerously-bypass-approvals-and-sandbox".to_string()));
-        assert!(!codex.contains(&"--add-dir".to_string()));
         let thread = build_codex_thread_start_params(&launch);
         assert_eq!(thread["sandbox"], "danger-full-access");
         assert_eq!(thread["approvalPolicy"], "never");
@@ -2248,26 +2157,6 @@ trust_level = "trusted"
         let claude = build_claude_command(&launch, &process, &AgentCapabilities::default(), None);
         assert!(claude.contains(&"--dangerously-skip-permissions".to_string()));
         assert!(!claude.contains(&"--add-dir".to_string()));
-    }
-
-    #[test]
-    fn build_codex_command_with_model() {
-        let launch = default_launch();
-        let cmd = build_codex_command(&launch, Some("o3"));
-        assert!(cmd.contains(&"model=\"o3\"".to_string()));
-    }
-
-    #[test]
-    fn build_codex_command_yolo() {
-        let launch = AgentConfig {
-            skip_permissions: true,
-            ..default_launch()
-        };
-        let cmd = build_codex_command(&launch, None);
-        assert!(cmd.contains(&"--dangerously-bypass-approvals-and-sandbox".to_string()));
-        assert!(!cmd.contains(&"--sandbox".to_string()));
-        assert!(!cmd.contains(&"--ask-for-approval".to_string()));
-        assert!(!cmd.contains(&"--full-auto".to_string()));
     }
 
     #[test]
@@ -2280,19 +2169,6 @@ trust_level = "trusted"
         let cmd = build_claude_command(&launch, &process, &AgentCapabilities::default(), None);
         assert!(cmd.contains(&"--append-system-prompt-file".to_string()));
         assert!(cmd.contains(&"/tmp/context.md".to_string()));
-    }
-
-    #[test]
-    fn build_codex_command_keeps_native_instructions() {
-        let launch = AgentConfig {
-            system_prompt: "Fixed additions.".into(),
-            ..default_launch()
-        };
-        let cmd = build_codex_command(&launch, None);
-        assert!(cmd.contains(&"developer_instructions=\"Fixed additions.\"".to_string()));
-        assert!(!cmd
-            .iter()
-            .any(|arg| arg.contains("model_instructions_file")));
     }
 
     #[test]
@@ -2529,7 +2405,7 @@ trust_level = "trusted"
 
     #[test]
     fn bare_harness_commands_do_not_select_a_model() {
-        for harness in ["claude", "codex", "opencode"] {
+        for harness in ["claude", "opencode"] {
             let launch = AgentConfig {
                 agent: Some(harness.to_string()),
                 ..default_launch()

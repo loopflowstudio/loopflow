@@ -101,6 +101,13 @@ pub struct AgentProcessRequest {
 }
 
 impl AgentProcessRequest {
+    pub(crate) fn codex_initial_input(&self) -> String {
+        match &self.skill_invocation {
+            Some(skill) => format!("{}\n\n{}", skill.codex_prompt(), self.task_prompt),
+            None => self.task_prompt.clone(),
+        }
+    }
+
     pub(crate) fn from_prepared(
         config: &crate::agent::AgentConfig,
         capabilities: &crate::agent::AgentCapabilities,

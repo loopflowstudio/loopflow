@@ -1,0 +1,21 @@
+--- a/Resources/bin/cmux-codex-wrapper
++++ b/Resources/bin/cmux-codex-wrapper
+@@ -57,7 +57,7 @@
+ }
+ 
+ codex_launch_has_subrouter_provider() {
+-    local argument assignment compact provider=""
++    local argument assignment key compact provider=""
+     local expects_config_value=0
+     for argument in "$@"; do
+         [[ "$argument" == "--" ]] && break
+@@ -79,6 +79,9 @@
+                     ;;
+             esac
+         fi
++        key="${assignment%%=*}"
++        key="${key//[[:space:]]/}"
++        [[ "$key" == "model_provider" ]] || continue
+         compact="${assignment//[[:space:]]/}"
+         case "$compact" in
+             model_provider=subrouter|model_provider=\"subrouter\"|model_provider=\'subrouter\')

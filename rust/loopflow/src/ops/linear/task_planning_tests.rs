@@ -4823,7 +4823,7 @@ fn linear_on_demand_native_hooks_share_freshness_across_processes() {
         let claude = crate::harness::context::claude_args(&delivery).unwrap();
         let settings: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&claude[1]).unwrap()).unwrap();
-        let codex = crate::harness::context::codex_config(Some(&delivery), false).unwrap();
+        let codex = crate::harness::context::codex_config(&delivery).unwrap();
         let hooks = [
             &settings["hooks"]["Stop"][0]["hooks"][0]["command"],
             &codex["hooks"]["Stop"][0]["hooks"][0]["command"],

@@ -23,24 +23,8 @@ pub(crate) fn claude_args(context: &ContextDelivery) -> Result<Vec<String>> {
 /// Codex hashes normalized hook declarations as sorted JSON. Trust only these
 /// exact commands in the session-flags layer, never all hooks on the machine.
 /// Protocol: codex-rs/hooks/src/engine/discovery.rs (0.161.0).
-pub(crate) fn codex_config(context: Option<&ContextDelivery>, capture: bool) -> Result<Value> {
-    let mut hooks = match context {
-        Some(context) => context.hook_settings()?,
-        None => json!({"SessionStart": []}),
-    };
-    if capture {
-        let executable = crate::os_process::resolve_lf_binary();
-        let command = format!(
-            "{} __provider-session",
-            crate::os_process::shell_escape(&executable.to_string_lossy())
-        );
-        hooks["SessionStart"]
-            .as_array_mut()
-            .expect("hook groups")
-            .push(json!({
-                "matcher": "startup", "hooks": [{"type":"command", "command":command, "timeout":5}]
-            }));
-    }
+pub(crate) fn codex_config(context: &ContextDelivery) -> Result<Value> {
+    let mut hooks = context.hook_settings()?;
     let mut states = serde_json::Map::new();
     for (event, event_name) in [
         ("SessionStart", "session_start"),
@@ -69,40 +53,6 @@ pub(crate) fn codex_config(context: Option<&ContextDelivery>, capture: bool) -> 
     }
     hooks["state"] = Value::Object(states);
     Ok(json!({"hooks":hooks}))
-}
-
-pub(crate) fn codex_args(context: Option<&ContextDelivery>, capture: bool) -> Result<Vec<String>> {
-    let config = codex_config(context, capture)?;
-    let hooks = inline_toml(&config["hooks"]);
-    Ok(vec!["-c".into(), format!("hooks={hooks}")])
-}
-
-// Only the non-null JSON values in our owned hook declarations enter this encoder.
-fn inline_toml(value: &Value) -> String {
-    match value {
-        Value::Object(fields) => format!(
-            "{{ {} }}",
-            fields
-                .iter()
-                .map(|(key, value)| format!(
-                    "{} = {}",
-                    serde_json::to_string(key).expect("key serializes"),
-                    inline_toml(value)
-                ))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-        Value::Array(values) => format!(
-            "[{}]",
-            values
-                .iter()
-                .map(inline_toml)
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-        Value::Null => unreachable!("hook declarations contain no null values"),
-        value => value.to_string(),
-    }
 }
 
 pub(crate) fn opencode_config(
@@ -157,14 +107,9 @@ pub(crate) fn configure_opencode(
     Ok(())
 }
 
-pub(crate) fn native_args(
-    harness: &str,
-    context: Option<&ContextDelivery>,
-    capture: bool,
-) -> Result<Vec<String>> {
+pub(crate) fn native_args(harness: &str, context: Option<&ContextDelivery>) -> Result<Vec<String>> {
     match (harness, context) {
         ("claude", Some(context)) => claude_args(context),
-        ("codex", _) if context.is_some() || capture => codex_args(context, capture),
         _ => Ok(Vec::new()),
     }
 }

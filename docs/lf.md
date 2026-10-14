@@ -138,8 +138,10 @@ Flow process for a Task is equally its work.
 
 Flow output shows each step's position and name followed by the agent's messages.
 Use `lf -v -b task run EXP-12 pursue` for context token accounting and INFO
-diagnostics. Codex Session capture uses a temporary launch profile so terminal
-wrapper hooks stay active. No hook setup or saved trust changes are required.
+diagnostics. Codex Sessions start through the provider protocol and attach the
+native terminal.
+Prompts and instructions stay off the command line; no hook setup or saved trust
+changes are required to record the conversation.
 
 A Task takes up its Project's workflow and moves through its nodes.
 Each `task run` takes one edge leaving the current node: the only one, or the
@@ -174,8 +176,10 @@ text. Loopflow adds fixed instructions without replacing the provider's native p
 Startup and compaction deliver current Wave memory and scratch as a capped
 conversation block: whole files, marked start excerpts and readable source paths.
 Compaction also restores the saved active skill. Task direction and summaries
-remain complete private reference files. Terminal first turns use argv; only a
-first turn exceeding the argument cap is refused before spawning the provider.
+remain complete private reference files. Codex terminal first turns travel through
+its protocol after the terminal connects.
+Claude and OpenCode first turns use argv; a first turn exceeding their argument
+cap is refused before spawning the provider.
 
 Wave goals use the same whole-file, excerpt and listing rules as memory.
 Distinct source files remain separate even when their text matches.

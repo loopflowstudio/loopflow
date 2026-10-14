@@ -402,3 +402,7 @@ in this subscription cut. Pre-compression uncommitted evidence is preserved in
 `/tmp/loo462-compress-before.patch`; native and publication gaps above remain.
 
 Check: `materialize_rust_tests.py --prepare-cli -- cargo nextest run -p loopflow` with work_watch/revisions/DTO/context filters: 32/33 PASS, repaired peer receipt case 1/1 PASS separately (no full rerun); `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone` focused suites: 104 PASS, rename 4 PASS, final stream/catalogue/Task Flow 34 PASS (overlapping coverage); `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` PASS. Logs `/tmp/loo462-reactivity-{rust,peer,swift,rename,catalog,clippy}.log`; broader gate/resource preflight and native proof remain with their Flow steps.
+
+Sync review — October 14: merged pinned main `92b88800ec` through the owned sequencer (`b10cc7ce10`). Kept retained pane placement, authoritative Session inventory merging, checkout restoration, hook delivery and timing. Adopt the Task preparation returned by main without preparing again; ended terminals accept explicit preparation. Native acceptance gaps above remain.
+
+Check: `scripts/test_desktop.sh --jobs 4 --filter 'WorkDestinationTests|SessionsStoreTests' -Xswiftc -gnone` PASS (65 tests; initial compile exposed the repaired ended-state case); `cargo test -p loopflow --test session_lifecycle_tests a_task_primary_is_one_of_its_own_conversations -- --exact` PASS (1 test, inherited LF_* unset, stdin closed); logs `/tmp/loo462-sync-{desktop,rust}.log`. Broader checks remain with gate/CI.

@@ -597,7 +597,7 @@ final class SessionsStore {
     func adoptPreparation(_ record: SessionRecord) {
         guard let index = _index(record.id), localTerminal(for: record) == nil else { return }
         switch sessions[index].state {
-        case .pending, .failed:
+        case .pending, .failed, .ended:
             sessions[index].record = record
             if let reason = record.action(.open)?.unavailableReason {
                 sessions[index].state = .failed(reason)

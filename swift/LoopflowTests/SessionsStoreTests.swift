@@ -45,13 +45,19 @@ struct SessionsStoreTests {
         #expect(item(store, "second")?.surface?.openArgv.suffix(3) == ["session", "connect", "second"])
     }
 
-    @Test("A prepared Task target enters its terminal without another preparation")
-    func taskPreparationIsConsumedDirectly() async throws {
+    @Test("A prepared Task target enters its terminal without another preparation", arguments: [false, true])
+    func taskPreparationIsConsumedDirectly(ended: Bool) async throws {
         let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { _, _ in
             throw RegistryQueryError("The prepared command is already available")
         })
         let prepared = try #require(records([session(id: "primary", state: "closed")]).first)
         store.reconcile([prepared])
+        if ended {
+            store.adoptPreparation(prepared)
+            store.recordPaneLive(prepared.id)
+            store.noteSurfaceClosed(.session(prepared.id, machineId: fixtureMachineId), output: "Provider exited")
+            #expect(item(store, prepared.id)?.state == .ended("Provider exited"))
+        }
         store.adoptPreparation(prepared)
 
         await store.select(prepared.id)

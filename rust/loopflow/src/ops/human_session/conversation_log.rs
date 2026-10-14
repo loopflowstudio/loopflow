@@ -1,10 +1,12 @@
-//! A native transcript as plain text another provider can read: what people
+//! A native conversation as plain text another provider can read: what people
 //! asked, what the agent said, one line per tool call, and the tail of each
-//! failed call's output. No summarization; rendering is a file read.
+//! failed call's output. No summarization: Claude and Codex are read from
+//! their transcript files, OpenCode from `opencode export`.
 
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
+use std::process::Command;
 
 use anyhow::{anyhow, bail, Context, Result};
 use serde_json::Value;
@@ -37,22 +39,28 @@ enum Entry {
 pub(crate) fn continuation(store: &SqliteStore, session: &LfSession) -> Result<String> {
     let id = &session.id;
     let from = session.provider.as_deref().unwrap_or_default();
-    let provider = match from.parse() {
-        Ok(provider @ (Provider::Claude | Provider::Codex)) => provider,
-        _ => bail!("Session {id} has no {from} log another provider can read"),
-    };
     let reference = store
         .input_provider_session(&session.artifact_key)?
         .ok_or_else(|| anyhow!("Session {id} has no native conversation to continue"))?;
-    let source = conversation_home(store, provider, &reference)?
-        .and_then(|home| transcript(provider, &home, reference.agent_session.as_str()))
-        .ok_or_else(|| {
-            anyhow!(
-                "The {from} transcript of Session {id} ({}) was not found",
-                reference.agent_session
-            )
-        })?;
-    let log = render(provider, &source)?;
+    let thread = reference.agent_session.as_str();
+    let entries = match from {
+        "opencode" => opencode_entries(&opencode_export(&session.cwd, thread)?),
+        "claude" | "codex" => {
+            let provider = if from == "codex" {
+                Provider::Codex
+            } else {
+                Provider::Claude
+            };
+            let source = conversation_home(store, provider, &reference)?
+                .and_then(|home| transcript(provider, &home, thread))
+                .ok_or_else(|| {
+                    anyhow!("The {from} transcript of Session {id} ({thread}) was not found")
+                })?;
+            transcript_entries(provider, &source)?
+        }
+        _ => bail!("Session {id} has no {from} history another provider can read"),
+    };
+    let log = render(&entries);
     let path = super::local_capture_dir(&session.artifact_key)
         .ok_or_else(|| anyhow!("Session {id} has an invalid capture reference"))?
         .join("conversation.md");
@@ -80,8 +88,8 @@ fn excerpt(log: &str) -> String {
     )
 }
 
-/// Plain-text log of a native transcript: user and assistant text, one line per tool call.
-fn render(provider: Provider, transcript: &Path) -> Result<String> {
+/// Claude or Codex JSONL transcript entries.
+fn transcript_entries(provider: Provider, transcript: &Path) -> Result<Vec<Entry>> {
     let file = fs::File::open(transcript)
         .with_context(|| format!("open transcript {}", transcript.display()))?;
     let mut entries = Vec::new();
@@ -94,8 +102,73 @@ fn render(provider: Provider, transcript: &Path) -> Result<String> {
             _ => claude_row(&row, &mut entries),
         }
     }
+    Ok(entries)
+}
+
+/// OpenCode keeps history in its own store; its CLI exports one session as JSON.
+fn opencode_export(cwd: &Path, thread: &str) -> Result<Value> {
+    let output = Command::new("opencode")
+        .args(["export", thread])
+        .current_dir(cwd)
+        .output()
+        .context("run opencode export")?;
+    if !output.status.success() {
+        bail!(
+            "opencode export {thread} failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    serde_json::from_slice(&output.stdout).context("parse opencode export")
+}
+
+/// Entries of an `opencode export`: messages, each with text and tool parts.
+fn opencode_entries(export: &Value) -> Vec<Entry> {
+    let mut entries = Vec::new();
+    for message in export["messages"].as_array().into_iter().flatten() {
+        let role = message["info"]["role"].as_str();
+        for part in message["parts"].as_array().into_iter().flatten() {
+            if part["synthetic"].as_bool() == Some(true) {
+                continue;
+            }
+            let text = part["text"].as_str().unwrap_or_default();
+            match (role, part["type"].as_str()) {
+                (Some("user"), Some("text")) => {
+                    // Loopflow's context rides in the user turn after the person's words.
+                    let request = lf_message(text).unwrap_or_else(|| {
+                        text.split("<lf:").next().unwrap_or_default().to_owned()
+                    });
+                    if !request.trim().is_empty() {
+                        entries.push(Entry::User(request));
+                    }
+                }
+                (Some("assistant"), Some("text")) if !text.trim().is_empty() => {
+                    entries.push(Entry::Assistant(text.to_owned()));
+                }
+                (Some("assistant"), Some("tool")) => {
+                    let state = &part["state"];
+                    let mut entry = tool(
+                        part["callID"].as_str(),
+                        part["tool"].as_str(),
+                        &state["input"].to_string(),
+                    );
+                    if state["status"] == "error" {
+                        if let Entry::Tool { error, .. } = &mut entry {
+                            *error = Some(failure(&text_of(&state["error"])));
+                        }
+                    }
+                    entries.push(entry);
+                }
+                _ => {}
+            }
+        }
+    }
+    entries
+}
+
+/// Plain-text log: user and assistant text, one line per tool call.
+fn render(entries: &[Entry]) -> String {
     let mut markdown = String::new();
-    for entry in &entries {
+    for entry in entries {
         match entry {
             Entry::User(text) => markdown.push_str(&format!("## user\n\n{}\n\n", text.trim())),
             Entry::Assistant(text) => {
@@ -110,7 +183,7 @@ fn render(provider: Provider, transcript: &Path) -> Result<String> {
             }
         }
     }
-    Ok(markdown)
+    markdown
 }
 
 fn claude_row(row: &Value, entries: &mut Vec<Entry>) {
@@ -254,8 +327,12 @@ fn tool(call: Option<&str>, name: Option<&str>, input: &str) -> Entry {
     }
 }
 
+fn failure(output: &str) -> String {
+    tail(output.trim(), ERROR_TAIL_CHARS).replace('\n', "\n    ")
+}
+
 fn fail(entries: &mut [Entry], call_id: &str, output: &str) {
-    let tail = tail(output.trim(), ERROR_TAIL_CHARS).replace('\n', "\n    ");
+    let tail = failure(output);
     if let Some(Entry::Tool { error, .. }) = entries
         .iter_mut()
         .rev()
@@ -348,7 +425,7 @@ mod tests {
             serde_json::json!({"type":"user","userType":"external","isMeta":true,"message":{"content":"meta line"}}),
             serde_json::json!({"type":"user","userType":"external","message":{"content":[{"type":"text","text":"Try again with sudo"}]}}),
         ]);
-        let text = &render(Provider::Claude, transcript.path()).unwrap();
+        let text = &render(&transcript_entries(Provider::Claude, transcript.path()).unwrap());
         assert!(text.contains("## user\n\nSkill fix:\n\nFix things.\n\nFix the parser"));
         assert!(text.contains("## assistant\n\nReading the parser."));
         assert!(text.contains(r#"- tool: Read {"file_path":"src/parser.rs"}"#));
@@ -375,7 +452,7 @@ mod tests {
             serde_json::json!({"type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"c2","output":[{"type":"input_text","text":"Exit code: 0\nOutput:\npatched cleanly"}]}}),
             serde_json::json!({"type":"event_msg","payload":{"type":"user_message","message":"duplicate"}}),
         ]);
-        let text = &render(Provider::Codex, transcript.path()).unwrap();
+        let text = &render(&transcript_entries(Provider::Codex, transcript.path()).unwrap());
         assert!(text.contains("## user\n\nShip the fix"));
         assert!(text.contains("## assistant\n\nRunning tests."));
         assert!(text.contains("- tool: shell"));
@@ -387,6 +464,34 @@ mod tests {
             "hidden reasoning",
             "patched cleanly",
             "duplicate",
+        ] {
+            assert!(!text.contains(absent), "{absent} leaked into {text}");
+        }
+    }
+
+    #[test]
+    fn opencode_log_keeps_conversation_and_failures_only() {
+        let export = serde_json::json!({"info":{"id":"ses_1"},"messages":[
+            {"info":{"role":"user"},"parts":[
+                {"type":"text","text":"Fix the build\n\n<lf:loopflow>\nrules\n</lf:loopflow>"},
+                {"type":"text","synthetic":true,"text":"injected file"}]},
+            {"info":{"role":"assistant"},"parts":[
+                {"type":"step-start"},
+                {"type":"reasoning","text":"hidden reasoning"},
+                {"type":"text","text":"Checking status."},
+                {"type":"tool","callID":"c1","tool":"bash","state":{"status":"completed","input":{"command":"ls"},"output":"listing output"}},
+                {"type":"tool","callID":"c2","tool":"bash","state":{"status":"error","input":{"command":"git push"},"error":"remote rejected"}}]}
+        ]});
+        let text = &render(&opencode_entries(&export));
+        assert!(text.contains("## user\n\nFix the build"));
+        assert!(text.contains("## assistant\n\nChecking status."));
+        assert!(text.contains(r#"- tool: bash {"command":"ls"}"#));
+        assert!(text.contains("remote rejected"));
+        for absent in [
+            "rules",
+            "injected file",
+            "hidden reasoning",
+            "listing output",
         ] {
             assert!(!text.contains(absent), "{absent} leaked into {text}");
         }

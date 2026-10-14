@@ -15,7 +15,7 @@ struct TaskRowMetadataTests {
                                          app: "cargo", title: nil, msg: "**literal**\u{202E}")
         let reporting = try session("reporter", status: ProgramStatusRecords(seen: true, records: [report]))
         let waiting = try session("waiting", attention: .waiting)
-        let status = TaskRowProgramStatus(sessions: [waiting, reporting], unavailable: nil)
+        let status = SessionProgramStatus(sessions: [waiting, reporting], unavailable: nil)
         #expect(status.label == state.rawValue.capitalized)
         #expect(status.help.contains("reporter"))
         #expect(status.help.contains("**literal**"))
@@ -33,7 +33,7 @@ struct TaskRowMetadataTests {
         let blocked = ProgramStatusReport(state: .blocked, id: nil, kind: .auth, progress: nil, app: nil, title: nil, msg: "Sign in")
         let sessions = [try session("a", status: .init(seen: true, records: [working])),
                         try session("b", status: .init(seen: true, records: [blocked]))]
-        let status = TaskRowProgramStatus(sessions: sessions, unavailable: nil)
+        let status = SessionProgramStatus(sessions: sessions, unavailable: nil)
         #expect(status.label == "Blocked · Auth")
         #expect(status.help.contains("(b)"))
     }
@@ -42,18 +42,18 @@ struct TaskRowMetadataTests {
     func inference() throws {
         let active = try session("active")
         let waiting = try session("waiting", attention: .waiting)
-        #expect(TaskRowProgramStatus(sessions: [active], unavailable: nil).label == nil)
-        #expect(TaskRowProgramStatus(sessions: [active, waiting], unavailable: nil).label == "Waiting · inferred")
+        #expect(SessionProgramStatus(sessions: [active], unavailable: nil).label == nil)
+        #expect(SessionProgramStatus(sessions: [active, waiting], unavailable: nil).label == "Waiting · inferred")
         let unknown = try session("unknown", state: .unknown)
         let closed = try session("closed", state: .closed, attention: .waiting)
-        #expect(TaskRowProgramStatus(sessions: [unknown, closed], unavailable: nil).label == nil)
-        #expect(TaskRowProgramStatus(sessions: [active], unavailable: "Offline").label == nil)
+        #expect(SessionProgramStatus(sessions: [unknown, closed], unavailable: nil).label == nil)
+        #expect(SessionProgramStatus(sessions: [active], unavailable: "Offline").label == nil)
     }
 
     @Test("Cleared reporter records do not revive inferred activity or Waiting")
     func clearDoesNotInfer() throws {
         let cleared = try session("cleared", attention: .waiting, status: .init(seen: true, records: []))
-        #expect(TaskRowProgramStatus(sessions: [cleared], unavailable: nil).label == nil)
+        #expect(SessionProgramStatus(sessions: [cleared], unavailable: nil).label == nil)
     }
 
     @Test("Saved readings cannot resurrect program reports or Waiting")
@@ -76,13 +76,14 @@ struct TaskRowMetadataTests {
                               repoPath: "/src/loopflow", cache: WorkCache(directory: directory))
         let restored = try #require(model.sessions.value)
         #expect(restored.map(\.id) == [record.id])
-        #expect(TaskRowProgramStatus(sessions: restored, unavailable: nil).label == nil)
+        #expect(SessionProgramStatus(sessions: restored, unavailable: nil).label == nil)
     }
 
     @Test("Unknown and live-client-only rows omit status; read failures stay inspectable")
     func quietStatus() throws {
         let task = try #require(roadmap().waves.first?.tasks.items[1])
-        for status in [TaskRowProgramStatus.unknown, .active(try session("live"))] {
+        for records in [[], [try session("live")]] {
+            let status = SessionProgramStatus(sessions: records, unavailable: nil)
             #expect(status.label == nil)
             #expect(status.tone == nil)
             let view = TaskRowMetadata(task: task, status: status, localMachineId: nil)
@@ -100,15 +101,15 @@ struct TaskRowMetadataTests {
         let task = try #require(roadmap().waves.first?.tasks.items[1])
         let error = ProgramStatusReport(state: .error, id: nil, kind: nil, progress: nil,
                                        app: nil, title: nil, msg: "Build failed")
-        let reported = TaskRowProgramStatus(sessions: [try session("failed", status: .init(seen: true, records: [error]))], unavailable: nil)
-        #expect(reported.tone == .blocked)
+        let reported = SessionProgramStatus(sessions: [try session("failed", status: .init(seen: true, records: [error]))], unavailable: nil)
+        #expect(reported.tone == .failure)
         let selected = TaskRowMetadata(task: task, status: reported, localMachineId: nil).workSelection(true)
         #expect(try selected.inspect().find(text: "Error").string() == "Error")
-        let waiting = TaskRowProgramStatus(sessions: [try session("waiting", attention: .waiting)], unavailable: nil)
-        #expect(waiting.tone == .human)
+        let waiting = SessionProgramStatus(sessions: [try session("waiting", attention: .waiting)], unavailable: nil)
+        #expect(waiting.tone == .waiting)
         #expect(waiting.label == "Waiting · inferred")
         #expect(ProgramStatusState.working.workTone == .running)
-        #expect(ProgramStatusState.blocked.workTone == .human)
+        #expect(ProgramStatusState.blocked.workTone == .waiting)
         #expect(ProgramStatusState.done.workTone == .done)
     }
 

@@ -50,7 +50,7 @@ struct TaskHistoryControls: View {
             if let message = filter.validationMessage {
                 Text(message)
                     .font(Typography.caption())
-                    .foregroundStyle(WorkTone.human.ink)
+                    .foregroundStyle(palette.waiting)
             }
         }
     }

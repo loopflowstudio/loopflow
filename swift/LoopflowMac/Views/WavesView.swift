@@ -218,7 +218,7 @@ struct WavesView: View {
             Spacer(minLength: 0)
 
             Circle()
-                .fill(isAnyConnected ? WorkTone.done.ink : Color.white.opacity(0.3))
+                .fill(isAnyConnected ? palette.success : Color.white.opacity(0.3))
                 .frame(width: 6, height: 6)
                 .help(isAnyConnected ? "Connected" : "Connecting…")
 
@@ -682,7 +682,7 @@ private struct CreateWaveSheet: View {
             if let errorMessage {
                 Text(errorMessage)
                     .font(Typography.caption())
-                    .foregroundStyle(WorkTone.blocked.ink)
+                    .foregroundStyle(palette.failure)
             }
 
             HStack(spacing: Spacing.md) {

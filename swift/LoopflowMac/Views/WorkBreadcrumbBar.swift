@@ -131,7 +131,7 @@ struct WorkBreadcrumbBar<Trailing: View>: View {
                 .disabled(draft.submitting)
             if let error = draft.error {
                 Text(error)
-                    .foregroundStyle(WorkTone.human.ink)
+                    .foregroundStyle(palette.waiting)
                     .lineLimit(2)
                     .accessibilityIdentifier("session-rename-error")
             }
@@ -207,7 +207,7 @@ struct WorkBreadcrumbBar<Trailing: View>: View {
                         .accessibilityIdentifier("session-bind-preview")
                 }
                 if let error = draft.error {
-                    Text(error).foregroundStyle(WorkTone.human.ink)
+                    Text(error).foregroundStyle(palette.waiting)
                         .accessibilityIdentifier("session-bind-error")
                 }
                 Button("Cancel") { model.cancelSessionBinding() }.disabled(draft.submitting)

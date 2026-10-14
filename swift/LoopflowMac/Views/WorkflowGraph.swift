@@ -179,7 +179,7 @@ struct WorkflowGraph: View {
             ZStack(alignment: .topLeading) {
                 Canvas { context, _ in
                     for arrow in layout.arrows {
-                        let color = tone(arrow.index)?.ink ?? palette.borderStrong
+                        let color = tone(arrow.index)?.ink(in: palette) ?? palette.borderStrong
                         context.stroke(arrow.line, with: .color(color), lineWidth: 1.5)
                         context.fill(arrow.head, with: .color(color))
                     }
@@ -240,7 +240,7 @@ struct WorkflowGraph: View {
             } else {
                 Text(arrow.text)
                     .font(Typography.code(11))
-                    .foregroundStyle(tone(arrow.index)?.ink ?? palette.textTertiary)
+                    .foregroundStyle(tone(arrow.index)?.ink(in: palette) ?? palette.textTertiary)
                     .accessibilityValue(state)
                     .accessibilityIdentifier("task-workflow-edge-\(arrow.index)")
             }

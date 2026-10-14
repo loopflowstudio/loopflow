@@ -183,20 +183,20 @@ struct WorkActivityView: View {
 
     private func activityAppearance(_ fact: WorkActivityFact) -> (icon: String, color: Color) {
         switch fact {
-        case .workCreated: ("plus", WorkTone.neutral.ink)
-        case .inputCaptured, .providerHistoryRecorded: ("play.fill", WorkTone.running.ink)
+        case .workCreated: ("plus", palette.textTertiary)
+        case .inputCaptured, .providerHistoryRecorded: ("play.fill", palette.working)
         case .inputCompletionRecorded(_, _, let status):
             (
                 "checkmark",
                 ["ok", "completed", "succeeded"].contains(status.lowercased())
-                    ? WorkTone.done.ink
-                    : WorkTone.human.ink
+                    ? palette.success
+                    : palette.waiting
             )
-        case .prStarted: ("arrow.triangle.branch", WorkTone.neutral.ink)
-        case .prPublishRequested: ("arrow.up.right", WorkTone.running.ink)
-        case .prMergeRequested: ("arrow.triangle.merge", WorkTone.running.ink)
-        case .prMerged: ("checkmark.seal.fill", WorkTone.done.ink)
-        case .prAbandoned: ("xmark", WorkTone.human.ink)
+        case .prStarted: ("arrow.triangle.branch", palette.textTertiary)
+        case .prPublishRequested: ("arrow.up.right", palette.working)
+        case .prMergeRequested: ("arrow.triangle.merge", palette.working)
+        case .prMerged: ("checkmark.seal.fill", palette.success)
+        case .prAbandoned: ("xmark", palette.waiting)
         case .steerIssued: ("arrow.turn.down.right", Color.loopflowBurgundy)
         }
     }
@@ -214,13 +214,13 @@ struct WorkActivityView: View {
     private func evidenceBanner(_ reason: String) -> some View {
         Label(reason, systemImage: "exclamationmark.triangle.fill")
             .font(Typography.caption(9))
-            .foregroundStyle(WorkTone.human.ink)
+            .foregroundStyle(palette.waiting)
             .lineLimit(2)
             .textSelection(.enabled)
             .padding(.horizontal, Spacing.lg)
             .padding(.vertical, Spacing.sm)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(WorkTone.human.ink.opacity(0.10))
+            .background(palette.waiting.opacity(0.10))
     }
 
 }

@@ -407,7 +407,7 @@ struct RoadmapView: View {
     private func evidenceBanner(title: String, detail: String) -> some View {
         HStack(alignment: .top, spacing: Spacing.sm) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(WorkTone.human.ink)
+                .foregroundStyle(palette.waiting)
             VStack(alignment: .leading, spacing: Spacing.xxs) {
                 Text(title)
                     .font(Typography.caption(11).weight(.semibold))
@@ -421,7 +421,7 @@ struct RoadmapView: View {
         }
         .padding(.horizontal, Spacing.xl)
         .padding(.vertical, Spacing.sm)
-        .background(WorkTone.human.ink.opacity(0.12))
+        .background(palette.waiting.opacity(0.12))
     }
 
     @MainActor
@@ -525,7 +525,7 @@ private struct RoadmapWaveCard: View {
             if let chapter = roadmap.currentProject { WaveProjectView(project: chapter) }
             switch roadmap.tasks {
             case .unavailable(let reason):
-                Label(reason, systemImage: "exclamationmark.triangle").foregroundStyle(WorkTone.human.ink)
+                Label(reason, systemImage: "exclamationmark.triangle").foregroundStyle(palette.waiting)
             case .available(let tasks, let truncated):
                 if tasks.isEmpty { Text("No Tasks in this Project.").foregroundStyle(palette.textSecondary) }
                 ForEach(tasks) { task in
@@ -533,10 +533,10 @@ private struct RoadmapWaveCard: View {
                         activeControlId: activeControlId, onSelect: { onSelect(.task(id: task.id)) },
                         onAction: { action in onTaskAction(task, action) }, onOpenWorktree: onOpenWorktree)
                 }
-                if truncated { Text("Older Tasks are truncated.").foregroundStyle(WorkTone.human.ink) }
+                if truncated { Text("Older Tasks are truncated.").foregroundStyle(palette.waiting) }
             }
             ForEach(roadmap.unavailableTasks, id: \.taskId) { task in
-                Text("\(task.taskIdentifier): \(task.reason) · \(task.recovery)").foregroundStyle(WorkTone.human.ink)
+                Text("\(task.taskIdentifier): \(task.reason) · \(task.recovery)").foregroundStyle(palette.waiting)
             }
         }
         .padding(Spacing.lg)
@@ -570,7 +570,7 @@ struct RoadmapTaskRow: View {
         HStack(alignment: .top, spacing: Spacing.sm) {
             Image(systemName: task.task.isSuccessful ? "checkmark.circle.fill" : "circle")
                 .font(Typography.caption(11))
-                .foregroundStyle(task.task.isSuccessful ? WorkTone.done.ink : task.section.color)
+                .foregroundStyle(task.task.isSuccessful ? palette.success : task.section.color(in: palette))
                 .frame(width: 14)
             VStack(alignment: .leading, spacing: Spacing.xxs) {
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
@@ -589,7 +589,7 @@ struct RoadmapTaskRow: View {
                     Spacer()
                     Text(task.section.label)
                         .font(Typography.caption(9).weight(.semibold))
-                        .foregroundStyle(task.section.color)
+                        .foregroundStyle(task.section.color(in: palette))
                 }
                 Text(task.condition.reason)
                     .font(Typography.caption(10))
@@ -625,9 +625,9 @@ struct WorkChannelChips: View {
 
     var body: some View {
         HStack(spacing: Spacing.xs) {
-            channel("Condition", task.condition.state.rawValue, task.condition.state.color)
+            channel("Condition", task.condition.state.rawValue, task.condition.state.color(in: palette))
             channel("PM", task.task.terminalLabel ?? "open",
-                    task.task.isSuccessful ? WorkTone.done.ink : palette.textSecondary)
+                    task.task.isSuccessful ? palette.success : palette.textSecondary)
             if let runtime = task.runtime {
                 channel("Status", runtime.status.label, statusColor(runtime.status))
             } else {
@@ -649,7 +649,7 @@ struct WorkChannelChips: View {
     }
 
     private func statusColor(_ status: TaskState) -> Color {
-        status.isTerminal ? WorkTone.neutral.ink : WorkTone.running.ink
+        status.isTerminal ? palette.textTertiary : palette.working
     }
 }
 
@@ -702,7 +702,7 @@ struct NowSectionView: View {
             HStack(spacing: Spacing.sm) {
                 Text(section.group.title)
                     .font(Typography.sectionTitle(15))
-                    .foregroundStyle(section.group.color)
+                    .foregroundStyle(section.group.color(in: palette))
                 Text("\(section.rows.count)")
                     .font(Typography.caption(10).weight(.semibold))
                     .foregroundStyle(palette.textSecondary)
@@ -802,23 +802,19 @@ extension RoadmapSection {
         }
     }
 
-    var color: Color {
+    func color(in palette: LoopflowPalette) -> Color {
         switch self {
-        case .now: WorkTone.neutral.ink
-        case .waiting: WorkTone.human.ink
-        case .available: WorkTone.neutral.ink
-        case .later: WorkTone.neutral.ink
+        case .waiting: palette.waiting
+        case .now, .available, .later: palette.textTertiary
         }
     }
 }
 
 private extension TaskConditionState {
-    var color: Color {
+    func color(in palette: LoopflowPalette) -> Color {
         switch self {
-        case .blocked: WorkTone.human.ink
-        case .waiting: WorkTone.human.ink
-        case .clear: WorkTone.neutral.ink
-        case .unknown: WorkTone.neutral.ink
+        case .blocked, .waiting: palette.waiting
+        case .clear, .unknown: palette.textTertiary
         }
     }
 }

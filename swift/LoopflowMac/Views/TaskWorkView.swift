@@ -68,7 +68,7 @@ struct TaskWorkflowHeader: View {
             }
             if work.value?.workflow != nil, let error = work.errorMessage {
                 Text("Workflow refresh failed: \(error)")
-                    .foregroundStyle(WorkTone.blocked.ink)
+                    .foregroundStyle(palette.failure)
                     .textSelection(.enabled)
                     .accessibilityIdentifier("task-workflow-refresh-error")
             }
@@ -87,7 +87,7 @@ struct TaskWorkflowHeader: View {
             if let conflict = task.runtime?.completionPending {
                 HStack(spacing: Spacing.sm) {
                     Text(conflict)
-                        .foregroundStyle(WorkTone.blocked.ink)
+                        .foregroundStyle(palette.failure)
                         .textSelection(.enabled)
                         .accessibilityIdentifier("task-completion-pending")
                     Button("Retry completion") {
@@ -101,7 +101,7 @@ struct TaskWorkflowHeader: View {
             }
             if let error = draft?.error ?? model.navigation.taskSessionErrors[task.id] {
                 Text(error)
-                    .foregroundStyle(WorkTone.blocked.ink)
+                    .foregroundStyle(palette.failure)
                     .lineLimit(3)
                     .textSelection(.enabled)
                     .accessibilityIdentifier("task-workflow-error")
@@ -317,7 +317,7 @@ struct FlowProcessView: View {
                         .accessibilityHidden(true)
                     Text(flow.name).font(Typography.code(12)).foregroundStyle(palette.text)
                     Text(flow.state == .current ? "running" : flow.state.rawValue)
-                        .foregroundStyle(tone?.ink ?? palette.textSecondary)
+                        .foregroundStyle(tone?.ink(in: palette) ?? palette.textSecondary)
                     Spacer()
                     Text(Date(timeIntervalSince1970: TimeInterval(started))
                         .formatted(date: .abbreviated, time: .shortened))

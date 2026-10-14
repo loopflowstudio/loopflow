@@ -2,9 +2,6 @@
 
 ## Direction after October 7
 
-LOO-387–430 briefs and LOO-427 steers supersede older designs.
-LOO-389 comments failed: unbound Initiative.
-
 - **Machine replaces Home** (LOO-394); one OS user and data directory.
   `LF_HOME`, provider homes and stored opaque IDs keep their meanings. LOO-411
   replaces `lf ssh` with global `lf --machine LABEL COMMAND`, no alias or
@@ -339,7 +336,7 @@ launching again. The [review](../../../docs/reviews/session-operate-prompts.md) 
 simulations and two read-only model runs, not installed proof. Open conversations
 keep old instructions until `lf session replace`.
 
-## Capture and work-first entry (October 1–13)
+## Capture and work-first entry (October 1–14)
 
 Jack Heart accepted capture in the owning repo/Wave conversation: self-contained
 Tasks, no workers or new authority. Retry uncertain writes with identical input
@@ -365,49 +362,49 @@ once redirected logs into prior Work. Overview sizing remains unreviewed.
 Rust/Swift capture proves primary reuse and retention, not native/provider usability.
 Cleanup still needs exact reviewed candidates and demonstrated isolated restoration.
 
-October 12: Jack Heart authorized bundled lf throughout Desktop, embedded shells
-and new Session children to make the real-data demo viable. Installed 0.13.12
-still lacks branch Portfolio/filter/query changes; source help never proved the
-selected runtime. LF_BIN selects executable independently of LF_HOME. Existing
-provider reattachment retains its environment, not silent restart. Store schema
-validation/migration ownership and explicit takeover remain. Earlier failed demos:
-`946dae6203:scratch/work-first-demo.md`; no native acceptance or global install.
+October 12: Jack Heart authorized bundled lf for Desktop, shells and new Session
+children. LF_BIN selects code independently of LF_HOME; existing providers retain
+their environment. Bundling grants no migration or takeover authority. Earlier
+runtime failures: `946dae6203:scratch/work-first-demo.md`.
 
-October 11: Jack Heart included portfolio management in LOO-462. Portfolio configures
-lf-owned folder/manual membership through RegistryQuery: one `repo_root`, default
-`~/src`, or manual paths across directories. Opening never enrolls; explicit legacy
-import preserves CLI selection. Multiple roots are deferred. Publication/demo only.
-The implemented service shares one reading across windows; delayed reads serialize
-with mutations, failed discovery retains membership, and removing membership leaves
-Work/drafts intact. Authored-Wave discovery remains separate. Isolated CLI/Swift
-checks establish owner agreement, not native picker or menu acceptance. Configured
-review uses bundled portfolio/identity support; the launcher tests identity only.
+October 11: Jack Heart selected Portfolio as the primary UI for lf-owned
+folder/manual membership through RegistryQuery: one root (default `~/src`) or
+manual paths across directories, excluding linked worktrees. Opening never enrolls;
+legacy import is explicit. Multiple roots stay deferred. Shared readings serialize
+with mutations; failure/removal preserves Work and drafts. CLI/Swift proof is not
+native picker/menu acceptance. Earlier receipts: `0fe7f5da8a:.lf/wave/product/MEMORY.md`,
+this heading.
 
-October 13: Jack Heart selected sidebar-only switching, primary Task conversation
-without sibling menus or Independent chrome, coherent opening feedback and truthful
-Workflow display. Removing navigation chrome never removes Session membership,
-explicit historical links or cached panes/drafts. A null successful reading differs
-from loading/unavailability; refresh failures preserve last-good Workflow content.
+October 13: Jack Heart selected sidebar-only switching, primary Task conversation,
+no sibling/Independent chrome, coherent opening and truthful Workflow display.
+Membership, historical links, panes and drafts survive. Successful null differs
+from loading/unavailability; failures preserve last-good Workflow content.
 
-Jack Heart's October 13 demo failed on missing `tasks.paused`, lost cached rows
-and showed “No workflow yet”; UI causes remain unconfirmed. A released-schema
-fixture reproduces failure before planning emission while the Task Workflow stays
-readable. A Task-status preflight
-cannot establish Work-stream compatibility. Bundling newer code cannot supply an
-unreleased migration; supported release installation remains separate authority.
-Partial planning now preserves previously readable rows and cache; stream and
-one-shot reads share publication. Disconnection marks Task readings stale, retaining
-Workflow content but disabling stale actions. Project Workflow recommendations
-cannot prove Task take-up. These regressions do not establish native recovery.
+Jack Heart's October 13 demo failed on missing `tasks.paused`, disappearing rows
+and null Workflow. The released-schema fixture fails before planning; the exact UI
+cause remains unconfirmed. Partial planning now retains readable rows/cache;
+disconnection retains Workflow content and disables stale actions. Task-status
+preflight cannot prove stream compatibility; Project recommendations cannot prove
+Task take-up. Authorized v0.13.14 installation and matching helper later restored
+real-repo navigation and LOO-462's feature/demo display, not provider input or
+overall acceptance. Failures/receipts: `7192b2cc00:scratch/work-first-demo.md`.
 
 Jack's October 13 Task metadata rows are implemented (`88d91e53ca`). Validated
-reports precede labeled nonreporter inference; cleared reporters stay unknown.
+reports precede shared Waiting inference; cleared reporters stay unknown.
 Program status cannot complete Task/Workflow/Paused state. Stored Task/PR links
 are separate from conversation opening. Recorded checkout ownership supplies remote
 names, never delegation defaults; local names and assignments are omitted.
 Saved Session pages strip reports and Waiting with liveness: restoring them revived
 stale status. Focused tests pass; native link dispatch and density remain unproved.
 No new polling or authority.
+
+October 14, LOO-462: Jack Heart selected semantic roles in both existing appearances,
+preserving palette, ANSI and retained clients/drafts. Neutral selection, separate
+focus outline, quiet links and restrained action emphasis follow VISUAL_DESIGN.md.
+Omit unknown/client-only activity without calling it idle. Preserve report provenance:
+Working blue, Waiting/Blocked amber with distinct wording, Error red. Stopped edges
+alone are not errors. Use the supplied palette; native appearance can disagree.
+Composited contrast checks pass; native focus/appearance/input judgment remains.
 
 Jack renewed measured optimization for Codex and Claude separately: cached switch,
 resume and fresh launch end at visibly responsive unsent agent input. October 7's
@@ -635,7 +632,8 @@ tokens, rows, toolbar and typography. Diagnosis:
 
 Decisions that outlive the branch (Jack's, verbatim where quoted):
 
-- Light mode only for now; dark is a follow-up "when we're at a happy place".
+- September 26 selected light first; October 14's semantic cut above now covers
+  both existing appearances. Neither has new native acceptance.
 - Serif for the repo name and page titles, including the Task title ("I'm
   kinda liking the serif task title now"). Sidebar Wave rows are sans
   ("sans-serif wins") with no glyph, no count, no dot ("nothing at all is

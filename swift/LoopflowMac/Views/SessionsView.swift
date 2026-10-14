@@ -851,7 +851,7 @@ struct SessionsContentView: View {
                             HStack {
                                 Text(error).textSelection(.enabled)
                                 Button("Retry", action: retryConversation)
-                            }.foregroundStyle(WorkTone.human.ink).padding(8)
+                            }.foregroundStyle(palette.waiting).padding(8)
                         }
                         ZStack {
                             Group {
@@ -864,7 +864,7 @@ struct SessionsContentView: View {
                                         if let task = fileTask { Text(task.task.task.description) }
                                         Button("Prepare workspace") { prepareTaskWorkspace(conversation: false) }
                                         Button("New conversation") { prepareTaskWorkspace(conversation: true) }
-                                        if let error = launchError { Text(error).foregroundStyle(WorkTone.human.ink) }
+                                        if let error = launchError { Text(error).foregroundStyle(palette.waiting) }
                                     }.padding()
                                 } else {
                                     WorkspacePanesView(workspace: workspace,
@@ -1614,7 +1614,7 @@ private struct SessionPaneView: View {
 
     private var programTone: WorkTone? {
         if let report = _programStatus?.summary { return report.state.workTone }
-        return TaskRowProgramStatus(sessions: paneSessions.map(\.record), unavailable: nil).tone
+        return SessionProgramStatus(sessions: paneSessions.map(\.record), unavailable: nil).tone
     }
 
     private var paneSessions: [SessionItem] {

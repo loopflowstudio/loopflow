@@ -7,13 +7,11 @@ Remaining reversible UI details may be resolved during implementation; live data
 cleanup remains separate and requires a reviewed, restorable plan.
 Product owns this Task. LOO-427 is integrated and completed; historical stacking
 details remain at `0bb13e9261:scratch/get-me-using-lf.md`. Portfolio implementation:
-`d43aa248d3`; shared-reader compression: `50e2cf44d1`. Reconciled October 13
-after refresh repair `279078f02d`, shared publication `a590ecb7ee` and review-app
-receipt `2406680a23`, including main `37ca5fca81` and sidebar
-implementation/compression `88d91e53ca`/`0480344945`.
-The earlier feedback describing
-28-point single-line Task rows is superseded by those commits. Sidebar metadata
-is implemented; publication checks and repairs are recorded below. Native review remains.
+`d43aa248d3`; shared-reader compression: `50e2cf44d1`. Reconciled October 14
+against semantic implementation `c5ff92d50f`, its uncommitted compression and
+upstream merge `0fe7f5da8a`. Earlier refresh/publication receipts remain at
+`945686275c:scratch/get-me-using-lf.md`. Sidebar metadata and semantic roles are
+implemented; headless Desktop verification passed; updated publication and native review remain.
 
 ## Problem and accepted direction
 
@@ -261,7 +259,8 @@ recurrence**. These observations are not a current execution inventory.
 
 Jack Heart selected Paused and authorized pausing LOO-389. Independent Task
 lf-2086e0a / PR #1544 merged as f2855f7bd46aa93d57b3a2e56fc8ec917f266ea3;
-installation/native pause remain outstanding. Preserve identity, history, checkout
+v0.13.14 supplied the migration; native pausing of LOO-389 remains unverified.
+Preserve identity, history, checkout
 and Workflow; resume starts nothing and pause never kills a live process.
 LOO-427 is completed after verified merge; no unknown Process was retired.
 Earlier CI/queue failures, exact native trust observations and preserved draft
@@ -309,8 +308,9 @@ on October 13: the existing reducer matches states, record replacement, clear/ex
 lifetimes and source-scoped validation. Sidebar rendering consumes validated shared
 Session reports; it does not parse terminal output. Across Sessions, report severity
 wins, primary then stable Session ID breaks ties, and the tooltip identifies the
-Session. Reports outrank inferred shared Waiting/client activity. Cleared reporters
-stay unknown; failed readings stay unavailable. No Claude/Codex rollout is assumed.
+Session. Reports outrank inferred shared Waiting. Client liveness alone supplies no
+visible activity; cleared reporters stay unknown and are omitted. Failed readings
+remain inspectable. No Claude/Codex rollout is assumed.
 Done/Error never supplies Task completion, Paused or Workflow position.
 
 Rust adds the optional Machine label to the existing checkout projection, reading
@@ -374,16 +374,29 @@ responsive input, six provider timing cases, hook approval-once, Portfolio or
 complete visual acceptance. No new installation, live migration, client takeover,
 broader cleanup or landing is authorized by this pursuit.
 
+That recorded review app uses pre-semantic Swift `a590ecb7ee`. A matching bundle
+for the October 14 changes and its native review remain outstanding; navigation
+shown in the earlier app does not establish the new colors or focus behavior.
+
+Main `e3c3a038aa` adds `lf clone` (merged here by `0fe7f5da8a`): isolated
+navigation and fresh stand-in conversation fixtures can use the shared clone
+facility instead of inventing another snapshot runner. Its documented boundary
+refuses copied Session continuation and external provider traffic; it cannot prove
+real Codex/Claude input readiness or replace the accepted populated-repository
+demo. Native clone acceptance belongs to lf-4e4cc84. No clone trial was performed
+in this reconciliation; [data-clones.md](../docs/data-clones.md) owns its limits.
+
 ## Color and activity redesign — October 13 review direction
 
 Jack Heart requested preserving the palette while assigning consistent roles across
 Desktop: neutral structure and text, selection independent of status, quiet links,
 restrained burgundy emphasis, and evidence-backed blue/amber/red activity. Keep
 Task lifecycle and Workflow separate from program activity. Omit unknown activity;
-a live client alone cannot claim Working. This supersedes the sidebar's current
+a live client alone cannot claim Working. This supersedes the sidebar's former
 “Status unknown”/“Active · inferred” presentation, not its underlying observations.
 The semantic-token cutover is implemented below; rendered judgment remains with
-demo. The local `pr-review.html` now distinguishes implementation from acceptance.
+demo. The previously referenced `pr-review.html` is absent from this checkout;
+an updated walkthrough remains a review artifact, not current validation evidence.
 
 
 ### Implementation cut — October 14
@@ -439,7 +452,7 @@ focus stays with the existing terminal owner. Review caught dark
 selected-background contrast loss and stopped edges falsely painted as errors;
 neutral selection composition and lifted dark inks repair both.
 
-Remaining: affected-suite gate and publication, matching-app demo in both
+Remaining: publication, matching-app demo in both
 appearances, native hover/focus/link dispatch, pending profiling/trust acceptance.
 The existing apps and drafts were not touched. No native acceptance is claimed.
 
@@ -450,4 +463,24 @@ edge; control focus uses the distinct outline. Emphasized-button focus sits outs
 its filled background to avoid burgundy-on-burgundy disappearance. Inline native
 prose retains native text-link behavior; navigation/control links use WorkLinkStyle.
 
-Check: `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone --filter 'WorkPaletteTests|TaskRowMetadataTests|TaskFilesTests|ProgramStatusTests|DesktopHeadlessTests|WorkNavigationTests|WorkDestinationTests'` PASS 147; focused after focus/selection review (`WorkPaletteTests|TaskRowMetadataTests|DesktopHeadlessTests|WorkNavigationTests`) PASS 63, final pane semantics (`DesktopHeadlessTests|WorkPaletteTests`) PASS 15; `git diff --check` PASS; affected-suite gate/publication and native demo remain with later Flow steps. Logs: `/tmp/loo462-semantics-{tests,final,pane}.log`.
+Compression removes `TaskRowProgramStatus.active`, the misleading row-specific
+reducer name, ambient `WorkTone.ink` / `Color.adaptive` resolution and duplicate
+`MetricEvidence.stateColor`. `SessionProgramStatus` now serves sidebar, history and
+pane presentation; shared records still retain client liveness. Waiting/failure
+tone names match their visible meaning. Views use their supplied palette for ink,
+chip text/fills, borders and loop tints; existing color values are preserved.
+No deletion targets remain in this cut. Review caught mixed palette/native-appearance
+resolution; the contrast regression covers explicit palette selection. Native
+appearance, focus and retained-input judgment remains with demo.
+
+Earlier implementation checks: `c5ff92d50f:scratch/get-me-using-lf.md`, this section.
+The first compression build found a missing WorkflowEditor palette reference,
+repaired before the passing run.
+Check: `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone --filter 'WorkPaletteTests|TaskRowMetadataTests|ProgramStatusTests|DesktopHeadlessTests|FlowGraphTests|TaskFlowTests|WorkflowGraphTests'` PASS 44 tests in 5 suites (reused `/tmp/loo462-compress-semantics.log`, code unchanged by realign); `git diff --check` PASS; `lf context` within both limits. Affected-suite gate/publication and native demo remain.
+
+Publication review: inspected the range from actual base `e3c3a038aa`, including
+compression and reconciled notes. Shared Session evidence remains the status owner;
+palette resolution is explicit; neither selection nor client liveness invents
+program activity. No new blocker found for Jack Heart's demo-review boundary.
+Native acceptance and updated walkthrough remain with demo; no landing is requested.
+Check: `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone` PASS 526 tests in 62 suites (`/tmp/loo462-publish-desktop.log`); optional display diagnostics and opt-in CLI Portfolio readback skipped; `uv run python scripts/check_swift_multiplatform_boundaries.py` PASS; `git diff --check` PASS. No Rust changes since earlier verification.

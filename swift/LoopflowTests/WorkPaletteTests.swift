@@ -40,9 +40,22 @@ struct WorkPaletteTests {
         #expect(palette.selectionEdge != palette.failure)
         #expect(palette.keyboardFocus != palette.selectionEdge)
         #expect(palette.keyboardFocus != palette.failure)
-        #expect(WorkTone.blocked.ink(in: palette) == palette.failure)
-        #expect(WorkTone.human.ink(in: palette) == palette.waiting)
+        #expect(WorkTone.failure.ink(in: palette) == palette.failure)
+        #expect(WorkTone.waiting.ink(in: palette) == palette.waiting)
         #expect(WorkTone.running.ink(in: palette) == palette.working)
+    }
+
+    @Test("Status chip colors follow the supplied palette, independently of native appearance")
+    func chipPalette() {
+        var environment = EnvironmentValues()
+        environment.colorScheme = .light
+        for tone in [WorkTone.running, .done, .waiting, .failure, .stopped] {
+            let darkFill = rgb(tone.fill(in: .dark), environment)
+            let lightFill = rgb(tone.fill(in: .light), environment)
+            #expect(darkFill != lightFill)
+            #expect(ratio(rgb(tone.text(in: .dark), environment), darkFill) >= 4.5)
+            #expect(ratio(rgb(tone.text(in: .light), environment), lightFill) >= 4.5)
+        }
     }
 
     @Test("Keyboard focus stays visible around a selected failed row", arguments: [false, true])

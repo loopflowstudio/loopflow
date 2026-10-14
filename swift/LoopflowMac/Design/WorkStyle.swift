@@ -1,7 +1,6 @@
 // Workspace roles come from LoopflowPalette. Selection, keyboard focus and
 // program activity remain independent; terminal ANSI has its own owner.
 
-import AppKit
 import Loopflow
 import SwiftUI
 
@@ -41,57 +40,49 @@ extension WorkSectionHeading where Trailing == EmptyView {
 
 /// Tone shared by plan chips, Session state, status dots, and Flow nodes.
 enum WorkTone {
-    case running, done, human, blocked, stopped, neutral
+    case running, done, waiting, failure, stopped, neutral
 
     func ink(in palette: LoopflowPalette) -> Color {
         switch self {
         case .running: palette.working
         case .done: palette.success
-        case .human: palette.waiting
-        case .blocked: palette.failure
+        case .waiting: palette.waiting
+        case .failure: palette.failure
         case .stopped: palette.textSecondary
         case .neutral: palette.textTertiary
         }
     }
 
-    var ink: Color {
-        .adaptive(light: ink(in: .light), dark: ink(in: .dark))
-    }
-
     /// Opaque fill so a tone keeps its hue over a loop tint.
-    var fill: Color {
+    func fill(in palette: LoopflowPalette) -> Color {
         switch self {
-        case .running: adaptive(0xE7EFFA, 0x2C3E57)
-        case .done: adaptive(0xD6EBD9, 0x2D4735)
-        case .human: adaptive(0xF8E3AE, 0x544321)
-        case .blocked: adaptive(0xFBE6E3, 0x5A2E2B)
-        case .stopped: adaptive(0xEEEAE5, 0x3E434A)
+        case .running: Color(hex: palette.isDark ? 0x2C3E57 : 0xE7EFFA)
+        case .done: Color(hex: palette.isDark ? 0x2D4735 : 0xD6EBD9)
+        case .waiting: Color(hex: palette.isDark ? 0x544321 : 0xF8E3AE)
+        case .failure: Color(hex: palette.isDark ? 0x5A2E2B : 0xFBE6E3)
+        case .stopped: Color(hex: palette.isDark ? 0x3E434A : 0xEEEAE5)
         case .neutral: .clear
         }
     }
 
-    var stroke: Color {
+    func stroke(in palette: LoopflowPalette) -> Color {
         switch self {
-        case .running, .blocked, .stopped: ink
-        case .done: adaptive(0x9CC4A3, 0x5E8E6A)
-        case .human: adaptive(0xDDB763, 0x9A7A36)
-        case .neutral: adaptive(0xD6CCC0, 0x56606B)
+        case .running, .failure, .stopped: ink(in: palette)
+        case .done: Color(hex: palette.isDark ? 0x5E8E6A : 0x9CC4A3)
+        case .waiting: Color(hex: palette.isDark ? 0x9A7A36 : 0xDDB763)
+        case .neutral: Color(hex: palette.isDark ? 0x56606B : 0xD6CCC0)
         }
     }
 
     /// Text on `fill`.
-    var text: Color {
+    func text(in palette: LoopflowPalette) -> Color {
         switch self {
-        case .running: adaptive(0x1C4480, 0xC9DCF5)
-        case .done: adaptive(0x28523A, 0xC4E6CC)
-        case .human: adaptive(0x6F4C0C, 0xF4DDA6)
-        case .blocked: adaptive(0x8A2A22, 0xF8CBC5)
-        case .stopped, .neutral: adaptive(0x5F5752, 0xD2CBC3)
+        case .running: Color(hex: palette.isDark ? 0xC9DCF5 : 0x1C4480)
+        case .done: Color(hex: palette.isDark ? 0xC4E6CC : 0x28523A)
+        case .waiting: Color(hex: palette.isDark ? 0xF4DDA6 : 0x6F4C0C)
+        case .failure: Color(hex: palette.isDark ? 0xF8CBC5 : 0x8A2A22)
+        case .stopped, .neutral: Color(hex: palette.isDark ? 0xD2CBC3 : 0x5F5752)
         }
-    }
-
-    private func adaptive(_ light: UInt, _ dark: UInt) -> Color {
-        Color.adaptive(light: light, dark: dark)
     }
 }
 
@@ -100,27 +91,10 @@ extension TaskExecutionState {
     var presentation: (label: String?, tone: WorkTone) {
         switch self {
         case .running, .starting: ("Running", .running)
-        case .blocked: ("Blocked", .human)
-        case .stalled: ("Stalled", .human)
+        case .blocked: ("Blocked", .waiting)
+        case .stalled: ("Stalled", .waiting)
         case .idle, .unknown: (nil, .stopped)
         }
-    }
-}
-
-extension Color {
-    static func adaptive(light: Color, dark: Color) -> Color {
-        Color(nsColor: NSColor(name: nil) { appearance in
-            NSColor(appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light)
-        })
-    }
-
-    /// Resolves against the view's effective appearance, so one workspace
-    /// color serves the light and dark palettes.
-    static func adaptive(light: UInt, dark: UInt) -> Color {
-        Color(nsColor: NSColor(name: nil) { appearance in
-            let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-            return NSColor(Color(hex: isDark ? dark : light))
-        })
     }
 }
 
@@ -128,19 +102,20 @@ extension Color {
 struct WorkChip: View {
     let text: String
     let tone: WorkTone
+    @Environment(\.palette) private var palette
 
     var body: some View {
         Text(text)
             .font(Typography.strong(10.5))
             .tracking(0.2)
-            .foregroundStyle(tone == .neutral ? tone.ink : tone.text)
+            .foregroundStyle(tone == .neutral ? tone.ink(in: palette) : tone.text(in: palette))
             .lineLimit(1)
             .padding(.horizontal, 7)
             .padding(.vertical, 1)
-            .background(tone.fill, in: RoundedRectangle(cornerRadius: 4))
+            .background(tone.fill(in: palette), in: RoundedRectangle(cornerRadius: 4))
             .overlay {
                 if tone == .neutral {
-                    RoundedRectangle(cornerRadius: 4).strokeBorder(tone.stroke, lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 4).strokeBorder(tone.stroke(in: palette), lineWidth: 1)
                 }
             }
     }
@@ -236,10 +211,10 @@ struct WorkDisclosureHeading: View {
             } else if let hasLastGood = failure {
                 Text(hasLastGood ? "May be out of date" : "Unavailable")
                     .font(Typography.strong(10.5))
-                    .foregroundStyle(WorkTone.human.text)
+                    .foregroundStyle(WorkTone.waiting.text(in: palette))
                     .padding(.horizontal, 7)
                     .padding(.vertical, 1)
-                    .background(WorkTone.human.fill, in: RoundedRectangle(cornerRadius: 4))
+                    .background(WorkTone.waiting.fill(in: palette), in: RoundedRectangle(cornerRadius: 4))
                     .accessibilityIdentifier("\(identifier)-stale")
                 Button("Retry", action: retry)
                     .buttonStyle(WorkOutlineButtonStyle())
@@ -306,8 +281,8 @@ extension ProgramStatusState {
     var workTone: WorkTone {
         switch self {
         case .working: .running
-        case .blocked: .human
-        case .error: .blocked
+        case .blocked: .waiting
+        case .error: .failure
         case .done: .done
         case .idle, .clear: .neutral
         }

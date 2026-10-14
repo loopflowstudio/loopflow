@@ -168,7 +168,7 @@ struct WorkSurfaceView: View {
                 case .unavailable(let reason):
                     section {
                         WorkSectionHeading("Tasks")
-                        Text(reason).font(Typography.body(13)).foregroundStyle(WorkTone.human.ink)
+                        Text(reason).font(Typography.body(13)).foregroundStyle(palette.waiting)
                     }
                 case .available(let inventory, let truncated):
                     let filter = model.taskHistoryFilters[roadmap.wave.id] ?? TaskHistoryFilter()
@@ -196,7 +196,7 @@ struct WorkSurfaceView: View {
                             .workPanel()
                         }
                         if truncated {
-                            Text("Planning is partial; more Tasks exist.").font(Typography.body(12)).foregroundStyle(WorkTone.human.ink)
+                            Text("Planning is partial; more Tasks exist.").font(Typography.body(12)).foregroundStyle(palette.waiting)
                         }
                     }
                 }
@@ -364,7 +364,7 @@ struct WorkSurfaceView: View {
     }
 
     private func sessionRow(_ session: SessionRecord) -> some View {
-        let status = TaskRowProgramStatus(sessions: [session], unavailable: nil)
+        let status = SessionProgramStatus(sessions: [session], unavailable: nil)
         return Button { onOpenSession(session) } label: {
             HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
                 Image(systemName: "bubble.left")
@@ -431,7 +431,7 @@ struct WorkSurfaceView: View {
                     .lineLimit(1)
                 primaryTag(session)
                 Spacer(minLength: Spacing.sm)
-                if let label = TaskRowProgramStatus(sessions: [session], unavailable: nil).label {
+                if let label = SessionProgramStatus(sessions: [session], unavailable: nil).label {
                     Text(label).font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
                 }
             }
@@ -444,7 +444,7 @@ struct WorkSurfaceView: View {
     }
 
     private func membershipTone(_ membership: SessionFlowMembership) -> Color {
-        if case .step = membership { return FlowPalette.loops[1] }
+        if case .step = membership { return FlowPalette.loop(1, in: palette) }
         return palette.textTertiary
     }
 
@@ -460,8 +460,8 @@ struct WorkSurfaceView: View {
                     .foregroundStyle(palette.textTertiary)
                     .frame(width: 20, alignment: .trailing)
                 Circle()
-                    .fill(state.tone == .neutral ? Color.clear : state.tone.ink)
-                    .overlay(Circle().strokeBorder(state.tone == .neutral ? palette.borderStrong : state.tone.ink, lineWidth: 1.5))
+                    .fill(state.tone == .neutral ? Color.clear : state.tone.ink(in: palette))
+                    .overlay(Circle().strokeBorder(state.tone == .neutral ? palette.borderStrong : state.tone.ink(in: palette), lineWidth: 1.5))
                     .frame(width: 9, height: 9)
                     .frame(width: 14)
                 Text(task.task.name)
@@ -508,9 +508,9 @@ struct WorkSurfaceView: View {
         return VStack(alignment: .leading, spacing: Spacing.xs) {
             HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
                 Image(systemName: "exclamationmark.circle")
-                    .foregroundStyle(WorkTone.human.ink)
+                    .foregroundStyle(palette.waiting)
                 Text("\(task.taskIdentifier) is outside the current plan.")
-                    .foregroundStyle(WorkTone.human.text)
+                    .foregroundStyle(WorkTone.waiting.text(in: palette))
                 Spacer(minLength: Spacing.sm)
                 Button(open ? "Hide details" : "Details") {
                     if open { model.navigation.expandedNotices.remove(task.taskId) } else { model.navigation.expandedNotices.insert(task.taskId) }
@@ -538,7 +538,7 @@ struct WorkSurfaceView: View {
         .font(Typography.body(12.5))
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(WorkTone.human.fill.opacity(0.55), in: RoundedRectangle(cornerRadius: 10))
+        .background(WorkTone.waiting.fill(in: palette).opacity(0.55), in: RoundedRectangle(cornerRadius: 10))
         .accessibilityIdentifier("wave-notice-\(task.taskId)")
     }
 
@@ -567,7 +567,7 @@ struct WorkSurfaceView: View {
     private func evidenceBanner(title: String, detail: String) -> some View {
         HStack(alignment: .top, spacing: Spacing.sm) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(WorkTone.human.ink)
+                .foregroundStyle(palette.waiting)
             VStack(alignment: .leading, spacing: Spacing.xxs) {
                 Text(title)
                     .font(Typography.strong(11))
@@ -581,7 +581,7 @@ struct WorkSurfaceView: View {
         }
         .padding(.horizontal, Spacing.xl)
         .padding(.vertical, Spacing.sm)
-        .background(WorkTone.human.ink.opacity(0.12))
+        .background(palette.waiting.opacity(0.12))
     }
 
     // MARK: - Controls
@@ -690,7 +690,7 @@ struct TaskDirectiveEditor: View {
             if let saveError {
                 Text(saveError)
                     .font(Typography.body(12))
-                    .foregroundStyle(WorkTone.human.ink)
+                    .foregroundStyle(palette.waiting)
                     .textSelection(.enabled)
                     .accessibilityIdentifier("task-directive-error")
             }
@@ -772,18 +772,18 @@ struct WaveWorkflowView: View {
                      ?? model.workflowCatalog.errorMessage
                      ?? (model.workflowCatalog.isLoading ? "Reading workflows…" : "\(name) names no workflow here"))
                     .font(Typography.caption())
-                    .foregroundStyle(WorkTone.human.ink)
+                    .foregroundStyle(palette.waiting)
                     .textSelection(.enabled)
                     .accessibilityIdentifier("wave-workflow-invalid")
             }
             if let error = model.workflowCatalog.errorMessage {
-                Text(error).foregroundStyle(WorkTone.human.ink)
+                Text(error).foregroundStyle(palette.waiting)
                 Button("Retry") { Task { await model.loadWorkflowCatalog(force: true) } }
             }
             if let error = model.workflowErrors[wave.id] {
                 Text(error)
                     .font(Typography.body(12))
-                    .foregroundStyle(WorkTone.blocked.ink)
+                    .foregroundStyle(palette.failure)
                     .textSelection(.enabled)
                     .accessibilityIdentifier("wave-workflow-error")
             }
@@ -794,6 +794,7 @@ struct WaveWorkflowView: View {
 }
 
 struct WorkflowEditor: View {
+    @Environment(\.palette) private var palette
     let model: WorkModel
     let wave: WaveSnapshot
     let name: String
@@ -809,7 +810,7 @@ struct WorkflowEditor: View {
             TextEditor(text: $content).font(.system(.body, design: .monospaced))
                 .disabled(!ready || saving)
                 .accessibilityIdentifier("workflow-content")
-            if let error { Text(error).foregroundStyle(WorkTone.human.ink) }
+            if let error { Text(error).foregroundStyle(palette.waiting) }
             HStack {
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Spacer()

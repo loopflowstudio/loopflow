@@ -1,70 +1,6 @@
 import Loopflow
 import SwiftUI
 
-/// Presentation of shared Session evidence; never Task completion or Workflow state.
-enum TaskRowProgramStatus {
-    case reported(SessionRecord, ProgramStatusReport)
-    case waiting(SessionRecord)
-    case active(SessionRecord)
-    case unknown
-    case unavailable(String)
-
-    init(sessions: [SessionRecord], unavailable: String?) {
-        if let unavailable { self = .unavailable(unavailable); return }
-        // Preserve report identity: different terminals can use the same record id.
-        let ordered = sessions.sorted {
-            if $0.taskPrimary != $1.taskPrimary { return $0.taskPrimary }
-            return $0.id < $1.id
-        }
-        let reports = ordered.compactMap { session in
-            session.programStatus?.summary.map { (session, $0) }
-        }
-        for state in ProgramStatusState.summaryOrder {
-            if let (session, report) = reports.first(where: { $0.1.state == state }) {
-                self = .reported(session, report); return
-            }
-        }
-        // Once a reporter clears its records, do not re-infer its old status.
-        let nonreporters = ordered.filter { $0.programStatus?.seen != true && $0.state != .closed }
-        if let waiting = nonreporters.first(where: { $0.attention == .waiting }) {
-            self = .waiting(waiting)
-        } else if let active = nonreporters.first(where: { $0.state == .active }) {
-            self = .active(active)
-        } else { self = .unknown }
-    }
-
-    var label: String? {
-        switch self {
-        case .reported(_, let report):
-            let kind = report.kind.map { " · \($0.rawValue.capitalized)" } ?? ""
-            let progress = report.progress.map { " · \($0)%" } ?? ""
-            return "\(report.state.rawValue.capitalized)\(kind)\(progress)"
-        case .waiting: return "Waiting · inferred"
-        case .active, .unknown, .unavailable: return nil
-        }
-    }
-
-    var help: String {
-        switch self {
-        case .reported(let session, let report):
-            return "Program report · \(ProgramStatusReport.displaySafe(session.title)) (\(session.id))\n\(report.displayText)"
-        case .waiting(let session): return "Inferred from shared Session Waiting · \(session.id)"
-        case .active(let session): return "Inferred from a live Session client · \(session.id). Activity does not establish program progress."
-        case .unknown: return "No current program report or runtime observation."
-        case .unavailable(let reason): return "Current program status unavailable: \(reason)"
-        }
-    }
-
-    var tone: WorkTone? {
-        switch self {
-        case .reported(_, let report):
-            report.state.workTone
-        case .waiting: .human
-        case .active, .unknown, .unavailable: nil
-        }
-    }
-}
-
 extension TaskWorktreeSnapshot {
     func sidebarMachine(localMachineId: String?) -> String? {
         guard let machineId, let localMachineId else { return "Machine unknown" }
@@ -76,7 +12,7 @@ extension TaskWorktreeSnapshot {
 
 struct TaskRowMetadata: View {
     let task: RoadmapTask
-    let status: TaskRowProgramStatus
+    let status: SessionProgramStatus
     let localMachineId: String?
     @Environment(\.palette) private var palette
 

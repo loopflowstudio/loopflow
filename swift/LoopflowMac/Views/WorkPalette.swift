@@ -219,6 +219,7 @@ struct WorkPaletteShortcut: NSViewRepresentable {
 }
 
 struct FlowCatalogInspector: View {
+    @Environment(\.palette) private var palette
     let entry: FlowCatalogEntry?
     @Bindable var navigation: WorkNavigation
     let model: WorkModel
@@ -240,7 +241,7 @@ struct FlowCatalogInspector: View {
                 }
             }
             if let error = sourceError ?? model.flowCatalog.errorMessage {
-                Text(error).foregroundStyle(WorkTone.human.ink)
+                Text(error).foregroundStyle(palette.waiting)
             }
             Button("Refresh") { Task { await model.loadFlowCatalog(force: true) } }
             if let graph = entry?.graph, let composition = entry?.composition {
@@ -253,6 +254,7 @@ struct FlowCatalogInspector: View {
 }
 
 struct WorkflowCatalogInspector: View {
+    @Environment(\.palette) private var palette
     let entry: WorkflowCatalogEntry?
     let model: WorkModel
     @State private var editingWorkflow = false
@@ -268,7 +270,7 @@ struct WorkflowCatalogInspector: View {
                 .disabled(model.breadcrumb?.wave?.roadmap.wave == nil)
             }
             if let error = model.workflowCatalog.errorMessage {
-                Text(error).foregroundStyle(WorkTone.human.ink)
+                Text(error).foregroundStyle(palette.waiting)
             }
             Button("Refresh") { Task { await model.loadWorkflowCatalog(force: true) } }
             if let workflow = entry?.workflow {

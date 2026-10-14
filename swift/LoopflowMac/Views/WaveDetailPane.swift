@@ -234,7 +234,7 @@ private struct WavePlanView: View {
                 switch workMap.tasks {
                 case .unavailable(let reason):
                     WorkSectionHeading("Tasks")
-                    Text(reason).foregroundStyle(WorkTone.human.ink)
+                    Text(reason).foregroundStyle(palette.waiting)
                 case .available(let inventory, let truncated):
                     let tasks = inventory.filter {
                         historyFilter.includes($0.task, condition: $0.condition, now: historyNow)
@@ -253,7 +253,7 @@ private struct WavePlanView: View {
             }
             ForEach(reading.snapshot?.unavailableTasks ?? [], id: \.taskId) { task in
                 Text("\(task.taskIdentifier): \(task.reason) · \(task.recovery)")
-                    .foregroundStyle(WorkTone.human.ink)
+                    .foregroundStyle(palette.waiting)
             }
         }.accessibilityIdentifier("wave-tasks")
     }
@@ -330,7 +330,7 @@ struct WaveMetricPortfolioView: View {
                             systemImage: "exclamationmark.circle.fill"
                         )
                         .font(Typography.caption(11))
-                        .foregroundStyle(WorkTone.blocked.ink)
+                        .foregroundStyle(palette.failure)
                     }
                 }
                 .accessibilityIdentifier("wave-metric-summary")
@@ -362,7 +362,7 @@ struct WaveMetricPortfolioView: View {
                             systemImage: "exclamationmark.triangle.fill"
                         )
                         .font(Typography.strong(11))
-                        .foregroundStyle(WorkTone.human.ink)
+                        .foregroundStyle(palette.waiting)
                         ForEach(Array(portfolio.contractIssues.enumerated()), id: \.offset) { _, issue in
                             Text(issue.summary)
                                 .font(Typography.caption(11))
@@ -373,9 +373,9 @@ struct WaveMetricPortfolioView: View {
                     }
                     .padding(.horizontal, Spacing.md)
                     .padding(.vertical, Spacing.sm)
-                    .background(WorkTone.human.ink.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                    .background(palette.waiting.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
                     .overlay(alignment: .leading) {
-                        Rectangle().fill(WorkTone.human.ink).frame(width: 2)
+                        Rectangle().fill(palette.waiting).frame(width: 2)
                     }
                     .clipShape(RoundedRectangle(cornerRadius: 10))
                     .accessibilityIdentifier("wave-metric-contract-issues")
@@ -464,13 +464,13 @@ private struct WaveMetricTableRow: View {
             }
             Text(detail(presentation))
                 .font(Typography.caption(11))
-                .foregroundStyle(metric.instrumented ? palette.textTertiary : WorkTone.human.ink)
+                .foregroundStyle(metric.instrumented ? palette.textTertiary : palette.waiting)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
             if let reason = presentation.reason {
                 Text(reason)
                     .font(Typography.caption(11))
-                    .foregroundStyle(metric.evidence.stateColor)
+                    .foregroundStyle(metric.evidence.tone.ink(in: palette))
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -597,21 +597,12 @@ private extension MetricFreshness {
 }
 
 private extension MetricEvidence {
-    var stateColor: Color {
-        switch self {
-        case .met: return WorkTone.done.ink
-        case .missed: return WorkTone.blocked.ink
-        case .unknown, .untargeted: return WorkTone.neutral.ink
-        case .unavailable: return WorkTone.human.ink
-        }
-    }
-
     var tone: WorkTone {
         switch self {
         case .met: return .done
-        case .missed: return .blocked
+        case .missed: return .failure
         case .unknown, .untargeted: return .neutral
-        case .unavailable: return .human
+        case .unavailable: return .waiting
         }
     }
 
@@ -873,8 +864,8 @@ struct WaveProjectView: View {
             ForEach(project.krs) { kr in
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     Circle()
-                        .fill(kr.holds ? WorkTone.done.ink : Color.clear)
-                        .overlay(Circle().strokeBorder(kr.holds ? WorkTone.done.ink : palette.borderStrong, lineWidth: 1.5))
+                        .fill(kr.holds ? palette.success : Color.clear)
+                        .overlay(Circle().strokeBorder(kr.holds ? palette.success : palette.borderStrong, lineWidth: 1.5))
                         .frame(width: 12, height: 12)
                         .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
                     Text(kr.text)

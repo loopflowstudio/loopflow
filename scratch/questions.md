@@ -1,6 +1,6 @@
 # LOO-462 decisions still open
 
-Reconciled October 13, 2026. Jack Heart authorized implementation through
+Reconciled October 14, 2026. Jack Heart authorized implementation through
 publication for demo review on October 10, not landing. October 11 authorizes
 real-data cleanup after rehearsal in the private copy; specific uncertain
 dispositions remain for review.
@@ -67,8 +67,7 @@ switches conversations. Retain all cached workspaces, native surfaces, panes,
 drafts and selection; this removes presentation only, not retention or history.
 Jack also requested Task-click-to-responsive-agent-input measurements. Lookup,
 hook declarations and profiling instrumentation are committed; native timing and
-trust evidence remain outstanding. No independent contribution remains running
-on the evidence supplied to this reconciliation.
+trust evidence remain outstanding.
 
 ## Profiling evidence — October 13
 
@@ -92,9 +91,10 @@ or placement authority. Native external-link dispatch remains a demo check.
 Jack Heart's native observation supersedes the unlaunched-app account. Reversible
 choice: an incomplete replacement retains the previously readable planning snapshot
 and reports its error; already unavailable Waves do not block healthy reads; no saved-cache replacement or empty-repo acquisition.
-Fresh Task/Session streams remain independent. A released installation containing
-the pause migration is required for current-code planning against the real store;
-0.13.13 has no `tasks.paused`. No fabricated unpaused fallback or live migration.
+Fresh Task/Session streams remain independent. Authorized v0.13.14 installation
+and release-main integration resolved the missing pause migration; real-repo
+navigation then passed (work-first-demo.md). The exact earlier disappearance/null
+Workflow trigger remains unconfirmed. No further live migration is authorized.
 
 ## Color roles — October 14
 

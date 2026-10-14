@@ -112,7 +112,7 @@ struct TaskFilesView: View {
     private func directoryRows(_ path: String) -> AnyView {
         AnyView(VStack(alignment: .leading, spacing: 2) {
             if let error = store.directoryErrors[path] {
-                Text(error).font(.caption).foregroundStyle(WorkTone.human.ink)
+                Text(error).font(.caption).foregroundStyle(palette.waiting)
             }
             ForEach(store.directories[path]?.entries ?? []) { entry in
                 if entry.kind == .directory {
@@ -181,7 +181,7 @@ struct TaskFilesView: View {
             .background(palette.surfaceMuted)
             Divider()
             if let error = store.error {
-                Text(error).font(.caption).foregroundStyle(WorkTone.human.ink).padding(8)
+                Text(error).font(.caption).foregroundStyle(palette.waiting).padding(8)
             }
             if let reason = store.selectedDocument?.readOnlyReason {
                 Text(reason).font(.caption).padding(8)

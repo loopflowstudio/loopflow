@@ -187,7 +187,7 @@ struct WorkNavigator: View {
     private func outlineRow(_ row: WorkOutlineRow) -> some View {
         let isWave = row.id.work.kind == .wave
         let status = row.task.map { _ in
-            TaskRowProgramStatus(sessions: row.inlineSessions, unavailable: model.sessions.errorMessage)
+            SessionProgramStatus(sessions: row.inlineSessions, unavailable: model.sessions.errorMessage)
         }
         return HStack(spacing: 6) {
             if row.hasChildren {
@@ -278,6 +278,6 @@ struct WorkNavigator: View {
 
     private func warning(_ text: String) -> some View {
         Label(text, systemImage: "exclamationmark.triangle")
-            .foregroundStyle(WorkTone.human.ink).textSelection(.enabled).padding(4)
+            .foregroundStyle(palette.waiting).textSelection(.enabled).padding(4)
     }
 }

@@ -257,8 +257,10 @@ SwiftPM resources remain required. Launched against real `/Users/jack/.lf` and
 `/Users/jack/src/loopflow`; embedded commands select the bundled helper.
 
 Check: bundled `monitor work --json` PASS, planning frame has 48 Waves and no top-level unavailable error; `/tmp/loo462-release14-work.{json,err}`. This is not sidebar membership or native readiness proof.
-Native inspection remains blocked by the locked macOS screen. PID 24383 was live;
-no screenshot or usable provider input is claimed. Existing root client 38604/38805
-was preserved. Next: unlock, inspect the rendered sidebar and LOO-462 feature/demo,
-then verify Task conversation opening without taking over an existing client.
-PR #1531 is published, not approved to land. Profiling and hook acceptance remain.
+After Jack Heart unlocked the screen, native inspection confirmed the real Loopflow
+sidebar, taller status/link rows, no redundant Work tabs, and no migration error.
+Clicking LOO-462 selected its exact primary Session and rendered feature/demo.
+It correctly showed “Active in another terminal” with explicit Move here; no
+other client was stopped or input sent. This verifies launch/navigation, not
+responsive provider input, complete sidebar cleanup or overall UX acceptance.
+PR #1531 remains published, not approved to land. Profiling and hook acceptance remain.

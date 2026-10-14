@@ -420,7 +420,7 @@ LOO-462 retains feature/demo; that later inspection is not a screen receipt.
 The real store needs a published release containing the currently unreleased
 `task_paused` migration, installed through `lf install`; reinstalling 0.13.13
 cannot supply it. No live schema change or invented compatibility value. Remaining:
-matching review artifact, gate's affected suites, publication, then real-schema
+gate's affected suites, publication, then real-schema
 review, six provider timing cases, hook trust and visual acceptance.
 
 Review found and fixed stale Workflow mutation buttons and old tests that expected

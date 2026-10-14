@@ -274,3 +274,9 @@ Current read-only cache inspection names LOO-382 as the saved Loopflow selection
 its Task has no captured Workflow. The cache and database name the same Machine.
 This is a plausible explanation for the null Workflow, not proof of the October 13
 screen's selected Task. LOO-462 remains the required known-Workflow native case.
+
+Matching unlaunched review app: `/tmp/loo462-oct13-refresh/Loopflow Work Demo.app`,
+revision `279078f02d`, bundle `studio.loopflow.work-demo.refresh`. Validation-only
+lf build and ad-hoc signature verification PASS; source/signed hashes are in adjacent
+`build.json`. SwiftPM resources still require this retained checkout. Existing apps
+and drafts remain untouched; gate/publication and native review remain ahead.

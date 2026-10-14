@@ -922,11 +922,11 @@ async fn import(store: &SharedStore, id: &str, agent: &str) -> Result<()> {
     let (provider, model) = crate::config::parse_agent(agent);
     next.provider = Some(provider);
     next.model = model;
-    // The skill ran in the earlier conversation and is in its log.
+    // The skill ran in the earlier conversation and is in its log. The
+    // continuation is stored so a relaunch after a failed start still carries it.
     next.skill = None;
-    let mut next = append_input(store, next).await?;
-    // The Session's original request stays on its row; this turn opens the new provider.
     next.request = Some(request);
+    let next = append_input(store, next).await?;
     serve_locked(store, &next, launch_lock).await
 }
 

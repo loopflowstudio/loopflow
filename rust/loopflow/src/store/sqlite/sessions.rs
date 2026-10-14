@@ -1504,10 +1504,10 @@ pub(super) fn replace_input_in(
     // A selected AgentSession belongs to its provider; another provider starts
     // a fresh one. Earlier selections remain in session_events.
     conn.execute("UPDATE agent_sessions SET current_capture=?2,input_published=?3,skill=?4,provider=?5,model=?6,
-        provider_thread=CASE WHEN provider IS ?5 THEN provider_thread END
+        request=?7,provider_thread=CASE WHEN provider IS ?5 THEN provider_thread END
         WHERE id=?1",
         params![session.id,session.captured,session.input_published,
-            session.skill,session.provider,session.model])?;
+            session.skill,session.provider,session.model,session.request])?;
     Ok(())
 }
 

@@ -33,6 +33,8 @@ fn command(repo: &Path, home: &Path, args: &[&str]) -> Command {
 const CODEX_TERMINAL: &str = r#"#!/bin/sh
 if [ "$1" = --version ]; then echo fixture; exit 0; fi
 printf '%s\n' "$@" > "$LF_HOME/codex-turn"
+# The first launch crashes before reporting a conversation.
+if [ ! -e "$LF_HOME/codex-crashed" ]; then touch "$LF_HOME/codex-crashed"; exit 1; fi
 exec python3 - "$@" <<'PYTHON'
 import subprocess, sys, tomllib
 config = tomllib.loads(next(arg for arg in sys.argv[1:] if arg.startswith("hooks=")))
@@ -251,13 +253,19 @@ for line in sys.stdin:
         .join("\n"),
     )
     .unwrap();
-    let imported = command(
+    let crashed = command(
         repo.path(),
         home.path(),
         &["session", "connect", &session, "-a", "codex"],
     )
     .output()
     .unwrap();
+    assert!(!crashed.status.success());
+    // Retrying without -a relaunches Codex with the same continuation.
+    fs::remove_file(home.path().join("codex-turn")).unwrap();
+    let imported = command(repo.path(), home.path(), &["session", "connect", &session])
+        .output()
+        .unwrap();
     assert!(
         imported.status.success(),
         "{}",

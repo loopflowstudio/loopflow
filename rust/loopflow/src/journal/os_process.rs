@@ -2,7 +2,11 @@
 //! Invalid observations are errors, never evidence that a process disappeared.
 
 use std::io;
+#[cfg(not(target_os = "macos"))]
 use std::process::Command;
+
+#[cfg(target_os = "macos")]
+mod macos;
 
 use super::ProcessIdentityEvidence;
 
@@ -17,6 +21,12 @@ pub(crate) struct OsProcess {
 }
 
 impl OsProcess {
+    #[cfg(target_os = "macos")]
+    pub(crate) fn read(pid: u32) -> io::Result<Option<Self>> {
+        macos::read(pid)
+    }
+
+    #[cfg(not(target_os = "macos"))]
     pub(crate) fn read(pid: u32) -> io::Result<Option<Self>> {
         let mut rows = query(
             &["-p", &pid.to_string()],
@@ -29,8 +39,14 @@ impl OsProcess {
         }
     }
 
+    #[cfg(not(target_os = "macos"))]
     pub(crate) fn sample(now: i64) -> io::Result<Vec<Self>> {
         query(&["-ax"], now)
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn sample(_now: i64) -> io::Result<Vec<Self>> {
+        macos::sample()
     }
 
     pub(crate) fn evidence(&self, started_at: i64) -> ProcessIdentityEvidence {
@@ -54,6 +70,7 @@ impl OsProcess {
     }
 }
 
+#[cfg(not(target_os = "macos"))]
 fn query(selection: &[&str], now: i64) -> io::Result<Vec<OsProcess>> {
     let output = Command::new("ps")
         .args(selection)
@@ -78,6 +95,7 @@ fn query(selection: &[&str], now: i64) -> io::Result<Vec<OsProcess>> {
         .collect()
 }
 
+#[cfg(any(not(target_os = "macos"), test))]
 fn parse(line: &str, now: i64) -> Option<OsProcess> {
     // The command is the final column and may itself contain whitespace.
     // ps pads columns, so consume each fixed field from the remaining suffix.
@@ -106,6 +124,7 @@ fn parse(line: &str, now: i64) -> Option<OsProcess> {
     })
 }
 
+#[cfg(any(not(target_os = "macos"), test))]
 pub(crate) fn elapsed_seconds(value: &str) -> Option<u64> {
     let (days, clock) = match value.split_once('-') {
         Some((days, clock)) => (days.parse().ok()?, clock),

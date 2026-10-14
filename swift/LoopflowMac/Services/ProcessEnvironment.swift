@@ -31,7 +31,11 @@ enum GUIProcessEnvironment {
 
     static func enriched(_ env: [String: String]) -> [String: String] {
         var copy = env
-        copy["PATH"] = enrichedPath(from: env["PATH"])
+        // An offline clone selects its executables deliberately. Adding native
+        // provider/install paths would defeat that selection in embedded panes.
+        if env["LF_CLONE_ROOT"] == nil {
+            copy["PATH"] = enrichedPath(from: env["PATH"])
+        }
         // The GUI is a new human control surface, not a continuation of the
         // Work process that opened it. Preserve Machine and account authority.
         for key in ["LF_WAVE_ID", "LF_RUN_ID", "LF_CAPTURE_KEY", "LF_PREPARED_CAPTURE", "LF_HUMAN_SESSION_RUN", "LF_RUN_DIR", "LF_TRACE_ID", "LF_PROCESS_ID",

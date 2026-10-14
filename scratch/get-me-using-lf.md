@@ -8,8 +8,9 @@ cleanup remains separate and requires a reviewed, restorable plan.
 Product owns this Task. LOO-427 is integrated and completed; historical stacking
 details remain at `0bb13e9261:scratch/get-me-using-lf.md`. Portfolio implementation:
 `d43aa248d3`; shared-reader compression: `50e2cf44d1`. Reconciled October 13
-after `30b70b75b3`, including main `414d4dd27c`, sidebar implementation
-`88d91e53ca` and compression `0480344945`. The earlier feedback describing
+after refresh repair `279078f02d` and review-app receipt `83fa49adf4`, including
+main `414d4dd27c` and sidebar implementation/compression `88d91e53ca`/`0480344945`.
+The earlier feedback describing
 28-point single-line Task rows is superseded by those commits. Sidebar metadata
 is implemented; affected-suite gate and native review remain.
 
@@ -37,15 +38,9 @@ Jack's October 10 decisions:
 - Reuse LOO-427's repository window, Work identity, multiplexer and control owners.
   Relaunch persistence belongs to LOO-416; existing native proof gaps to LOO-391.
 
-Earlier discovery observed 2,419 historical Sessions, 138 interactive, 2,281
-headless; the unlimited default interactive inventory had 106 (11 active,
-18 interrupted, 77 unknown), 61 without Task association. These are prior
-observations, not a fresh inventory or a deletion candidate set. Read-only cmux
-inspection showed Loopflow, Etude, Fantasia and Kata windows with task workspaces.
-The original uncommitted discovery was preserved at
-`/tmp/loo462-discovery-ddc009d/` before consolidation; its quotes and open decisions
-are retained here and in questions.md. The attempted lf checkpoint returned an
-empty error; no successful checkpoint is inferred.
+Historical Session inventory, cmux inspection and original discovery preservation
+receipts remain at `83fa49adf4:scratch/get-me-using-lf.md`, **Problem and accepted
+direction**. They are neither a current inventory nor a deletion candidate set.
 
 ## The demo
 
@@ -170,14 +165,12 @@ An empty CPU reading removes an older SVG instead of leaving misleading evidence
 Review also repaired the headless stream fixture's obsolete assumption that a
 data-directory frame confirms Machine identity; it now confirms the actual ID.
 
-Compression evidence is preserved at `ae691073c9:scratch/get-me-using-lf.md`:
-102/103 Desktop cases passed initially; repairing the obsolete Machine-identity
-fixture made its 12-case suite pass. Nine profiling tests passed. This establishes
-neither native input/trust proof nor a gate pass for later integration.
-
-The launcher reuses `cmd_install` for build/install in both launch modes, leaving their presentation
-separate. Task entry uses the pane's existing `sessionId` projection to detect a
-retained conversation instead of repeating its content switch.
+Earlier compression checks and launcher/entry reductions remain at
+`83fa49adf4:scratch/get-me-using-lf.md`, **Delete — do not maintain**. No remaining
+obsolete owner was found in the refresh repair. Stream and one-shot roadmap reads
+now share `publishRoadmap`: acceptance, failure retention, saved-state reset and
+cache replacement stay together. Absent wire text stays absent instead of becoming
+an empty cache entry.
 
 ## Implementation and remaining work
 
@@ -428,4 +421,4 @@ Task ancestry to vanish on incomplete planning. No new Workflow/cache authority.
 Context: `lf context` under scratch limits; actual `.lf/wave/product/MEMORY.md`
 15,997/16,000 tokens and 75,077/131,072 bytes (unchanged; manifest path is stale).
 
-Check: `scripts/test_desktop.sh --filter 'WorkModelStreamTests|WorkNavigationTests|WorkCacheTests' -Xswiftc -gnone` PASS (62; updated stream cases rerun, 9 PASS); `cargo test -p loopflow --lib released_planning_failure_keeps_the_stored_workflow_readable` PASS; `cargo fmt --check`, all-target Clippy and diff check PASS; gate retains affected suites and demo retains native proof.
+Check: `scripts/test_desktop.sh --filter 'WorkModelStreamTests|WorkNavigationTests|WorkCacheTests' -Xswiftc -gnone` PASS (62); `git diff --check` PASS; unchanged Rust/schema checks remain at `83fa49adf4:scratch/get-me-using-lf.md`; gate owns affected suites, demo owns native proof.

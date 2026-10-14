@@ -1132,20 +1132,14 @@ final class WorkModel {
             roadmap = .unavailable(lastGood: roadmap.value, reason: reason)
             return
         }
-        if let reason = planningFailure(body.roadmap, replacing: roadmap.value) {
-            roadmap = .unavailable(lastGood: roadmap.value ?? body.roadmap, reason: reason)
-            return
-        }
         await Self.resolveRepoOrigins(body.waves.map(\.repo))
+        let reportsLaunch = showsSavedPlanning || roadmapGeneration == 1
+        guard publishRoadmap(.success((body.roadmap, wire?.roadmap)), lastGood: roadmap.value) else { return }
         let nextWaves = WorkReading.available(body.waves.map { $0.toWave() })
         if waves != nextWaves { waves = nextWaves }
-        let next = WorkReading.available(body.roadmap)
-        if roadmap != next { roadmap = next }
-        if showsSavedPlanning || roadmapGeneration == 1 {
+        if reportsLaunch {
             LaunchJournal.home.refreshed("planning", ms: workOpened.elapsedMs, ok: true)
         }
-        showsSavedPlanning = false
-        if let text = wire?.roadmap { cache?.saveRoadmap(text) }
         if let text = wire?.waves { cache?.saveWaves(text) }
         endLaunchWhenCurrent()
         selectRequestedWaveIfNeeded()
@@ -1896,27 +1890,30 @@ final class WorkModel {
     }
 
     /// The snapshot with the wire text it was decoded from.
-    private func readRoadmap() async -> Result<(RoadmapSnapshot, String), Error> {
+    private func readRoadmap() async -> Result<(RoadmapSnapshot, String?), Error> {
         let wire = WireCapture()
         do {
             let snapshot = try await query.recording(wire.record).roadmap()
-            return .success((snapshot, wire.texts.last ?? ""))
+            return .success((snapshot, wire.texts.last))
         } catch {
             return .failure(error)
         }
     }
 
-    /// A successful read replaces the saved workspace, on screen and on disk.
-    private func publishRoadmap(_ result: Result<(RoadmapSnapshot, String), Error>, lastGood: RoadmapSnapshot?) {
+    /// Stream and one-shot reads share the decision to replace visible planning
+    /// and its cache. A failed replacement leaves both intact.
+    @discardableResult
+    private func publishRoadmap(_ result: Result<(RoadmapSnapshot, String?), Error>, lastGood: RoadmapSnapshot?) -> Bool {
         if case .success(let (snapshot, _)) = result, let reason = planningFailure(snapshot, replacing: lastGood) {
             roadmap = .unavailable(lastGood: lastGood ?? snapshot, reason: reason)
-            return
+            return false
         }
         let next = reading(from: result.map(\.0), lastGood: lastGood)
         if roadmap != next { roadmap = next }
-        guard case .success(let (_, text)) = result else { return }
+        guard case .success(let (_, text)) = result else { return false }
         showsSavedPlanning = false
-        cache?.saveRoadmap(text)
+        if let text { cache?.saveRoadmap(text) }
+        return true
     }
 
     /// Do not replace previously readable planning with a failed partial frame.

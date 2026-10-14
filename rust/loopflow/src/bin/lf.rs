@@ -992,10 +992,11 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
         TaskCommand::Sync {
             issue,
             retry_creation,
+            retry_updates,
         } => {
             println!(
                 "{}",
-                loopflow::ops::task::task_sync(issue, *retry_creation)?
+                loopflow::ops::task::task_sync(issue, *retry_creation, *retry_updates)?
             );
             Ok(())
         }

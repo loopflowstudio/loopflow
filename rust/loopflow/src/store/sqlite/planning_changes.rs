@@ -83,6 +83,7 @@ impl SqliteStore {
         owner: PlanningChanges<'_>,
         change: &PlanningChange,
         revision: Option<&str>,
+        retry: bool,
     ) -> StoreResult<bool> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -103,12 +104,12 @@ impl SqliteStore {
         let changed = tx.execute(
             &format!(
                 "UPDATE {owner}_changes SET attempted=1,error=NULL WHERE id=?1 AND {owner}_id=?2
-             AND attempted=0 AND acknowledged=0 AND conflict_json IS NULL
+             AND (attempted=0 OR ?4) AND acknowledged=0 AND conflict_json IS NULL
              AND seq=(SELECT max(seq) FROM {owner}_changes WHERE {owner}_id=?2 AND field=?3)
              AND NOT EXISTS(SELECT 1 FROM {owner}_changes WHERE {owner}_id=?2 AND field=?3
-                 AND attempted=1 AND acknowledged=0 AND conflict_json IS NULL)"
+                 AND attempted=1 AND acknowledged=0 AND conflict_json IS NULL AND (id!=?1 OR NOT ?4))"
             ),
-            params![change.id, id, change.value.field()],
+            params![change.id, id, change.value.field(), retry],
         )? == 1;
         tx.commit()?;
         Ok(changed)

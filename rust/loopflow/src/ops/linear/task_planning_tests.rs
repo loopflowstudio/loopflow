@@ -542,7 +542,9 @@ async fn planning_response(
             mark_issue_updated(&mut state.issues[0]);
         }
         json!({"issue":{"attachments":page(state.attachments.iter().map(|url| json!({"url":url})).collect::<Vec<_>>())}})
-    } else if query.contains("query LinearIssueObservation") {
+    } else if query.contains("query LinearIssueObservation")
+        || query.contains("query IssueObservation")
+    {
         let mut issue = state
             .issues
             .iter()
@@ -580,6 +582,9 @@ async fn planning_response(
         json!({"comment":comment})
     } else if query.contains("mutation SyncComment") {
         let id = vars["id"].as_str().unwrap();
+        if uuid::Uuid::parse_str(id).unwrap().get_version_num() != 4 {
+            return axum::Json(json!({"errors":[{"message":"id must be a UUID."}]}));
+        }
         if state.comments.iter().any(|c| c["id"] == id) {
             return axum::Json(json!({"errors":[{"message":"ID already exists"}]}));
         }
@@ -1402,7 +1407,11 @@ fn task_completion_late_acknowledgement_preserves_explicit_reopening() {
             .pending_task_state(&task.id)
             .unwrap()
             .unwrap();
-        assert!(fixture.store.sqlite.attempt_task_state(&completed).unwrap());
+        assert!(fixture
+            .store
+            .sqlite
+            .attempt_task_state(&completed, false)
+            .unwrap());
         let process = crate::process::LfProcess {
             kind: crate::process::ProcessKind::Lf,
             agent_session_id: None,
@@ -1516,7 +1525,11 @@ fn task_completion_late_acknowledgement_preserves_explicit_reopening() {
                 .unwrap(),
             WorkStatus::Ready
         );
-        assert!(!fixture.store.sqlite.attempt_task_state(&completed).unwrap());
+        assert!(!fixture
+            .store
+            .sqlite
+            .attempt_task_state(&completed, false)
+            .unwrap());
         let conn = rusqlite::Connection::open(&fixture.database).unwrap();
         let receipt: (bool, Option<String>) = conn
             .query_row(
@@ -1779,7 +1792,11 @@ fn assert_completion_adopts_reopening(during_delivery: bool) {
         assert_eq!(retained.local_value, json!("completed"));
         assert_eq!(retained.linear_value, Some(json!("unstarted")));
         assert!(retained.error.is_none());
-        assert!(!fixture.store.sqlite.attempt_task_state(&original).unwrap());
+        assert!(!fixture
+            .store
+            .sqlite
+            .attempt_task_state(&original, false)
+            .unwrap());
         let receipt: (bool, bool, String, String) = conn.query_row(
             "SELECT attempted,settled,target,conflict_json FROM task_state_deliveries WHERE id=?1",
             [&original.id],
@@ -2977,6 +2994,7 @@ fn planning_fields_selected_before_deletion_cannot_be_attempted_afterward() {
                     .base
                     .as_ref()
                     .and_then(|base| base.revision.as_deref()),
+                false,
             )
             .unwrap());
         assert!(fixture
@@ -3546,10 +3564,124 @@ fn task_create_in_linear_repository_returns_published_task_without_execution() {
 }
 
 #[test]
+fn task_sync_explicit_updates_retry_saved_state_and_fields_without_execution() {
+    with_planning_task(|runtime, fixture, repo, task, state| {
+        runtime.block_on(async {
+            let mut provider = state.lock().await;
+            provider.fail_completion = true;
+            provider.field_reject_write = true;
+        });
+        crate::ops::task::task_edit(
+            repo,
+            task.id.as_str(),
+            None,
+            crate::work::task::TaskUpdate {
+                title: Some("Saved new title".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        crate::ops::task::task_complete(repo, task.id.as_str(), None).unwrap();
+        runtime.block_on(state.lock()).field_reject_write = false;
+        let pending = crate::ops::task::task_sync(task.id.as_str(), false, false).unwrap();
+        assert!(
+            pending.contains("confirmation") || pending.contains("uncertain"),
+            "{pending}"
+        );
+        crate::ops::task::task_sync(task.id.as_str(), false, true).unwrap();
+        runtime.block_on(async {
+            let provider = state.lock().await;
+            assert_eq!(provider.issues[0]["title"], "Saved new title");
+            assert_eq!(provider.issues[0]["state"]["type"], "completed");
+            assert_eq!(provider.completion_writes, 1);
+        });
+        assert!(fixture
+            .store
+            .sqlite
+            .pending_task_state(&task.id)
+            .unwrap()
+            .is_none());
+        let saved = runtime
+            .block_on(fixture.store.get_task(&task.id))
+            .unwrap()
+            .unwrap();
+        assert_eq!(saved.worktree, task.worktree);
+    });
+}
+
+#[test]
+fn task_sync_explicit_retry_still_adopts_a_newer_linear_state() {
+    with_planning_task(|runtime, fixture, repo, task, state| {
+        runtime.block_on(state.lock()).fail_completion = true;
+        crate::ops::task::task_complete(repo, task.id.as_str(), None).unwrap();
+        runtime.block_on(async {
+            let mut provider = state.lock().await;
+            provider.issues[0]["state"] = json!({"type":"started"});
+            mark_issue_updated(&mut provider.issues[0]);
+        });
+        crate::ops::task::task_sync(task.id.as_str(), false, true).unwrap();
+        let saved = runtime
+            .block_on(fixture.store.get_task(&task.id))
+            .unwrap()
+            .unwrap();
+        assert_eq!(saved.state.as_deref(), Some("started"));
+        assert!(!saved.completed);
+        assert_eq!(runtime.block_on(state.lock()).completion_writes, 0);
+    });
+}
+
+#[test]
+fn historical_comment_delivery_retains_local_identity_after_linear_readback() {
+    with_planning_task(|runtime, fixture, _repo, task, state| {
+        let comment = crate::work::task::comment::TaskComment {
+            id: uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_URL, b"retained-filing").to_string(),
+            body: "Retained follow-up evidence".into(),
+            author: crate::work::task::comment::TaskCommentAuthor::Person {
+                name: Some("Jack Heart".into()),
+            },
+            created_at: Some("2026-10-08T01:00:00Z".into()),
+        };
+        fixture
+            .store
+            .sqlite
+            .append_task_comment(&task.id, &comment)
+            .unwrap();
+        runtime.block_on(async {
+            state.lock().await.lose_comment = true;
+            crate::ops::linear_observe::sync_task_comments(&fixture.store, task)
+                .await
+                .unwrap();
+            crate::ops::linear_observe::refresh_task_comments(&fixture.store, task)
+                .await
+                .unwrap();
+            crate::ops::linear_observe::sync_task_comments(&fixture.store, task)
+                .await
+                .unwrap();
+            let provider = state.lock().await;
+            assert_eq!(provider.comments.len(), 1);
+            assert_eq!(
+                provider.comments[0]["id"],
+                crate::linear::comment_delivery_id(&comment.id).unwrap()
+            );
+        });
+        assert!(fixture
+            .store
+            .sqlite
+            .pending_task_comments(&task.id)
+            .unwrap()
+            .is_empty());
+        let thread = fixture.store.sqlite.task_comments(&task.id).unwrap();
+        assert_eq!(thread.comments.len(), 1);
+        assert_eq!(thread.comments[0].id, comment.id);
+        assert_eq!(thread.comments[0].body, comment.body);
+    });
+}
+
+#[test]
 fn task_sync_publishes_saved_task_and_reuses_its_identity() {
     with_export_plan(|runtime, fixture, _repo, task, state| {
         assert!(task.linear_id.is_none());
-        let result = crate::ops::task::task_sync(task.id.as_str(), false).unwrap();
+        let result = crate::ops::task::task_sync(task.id.as_str(), false, false).unwrap();
         let saved = runtime
             .block_on(fixture.store.get_task(&task.id))
             .unwrap()
@@ -3557,7 +3689,7 @@ fn task_sync_publishes_saved_task_and_reuses_its_identity() {
         assert!(saved.linear_id.is_some());
         assert!(result.contains(&saved.identifier));
         assert!(!saved.identifier.starts_with("lf-"));
-        crate::ops::task::task_sync(task.id.as_str(), false).unwrap();
+        crate::ops::task::task_sync(task.id.as_str(), false, false).unwrap();
         assert_eq!(runtime.block_on(state.lock()).creation_writes, 2);
     });
 }
@@ -3583,7 +3715,7 @@ fn task_sync_does_not_claim_success_for_uncertain_publication() {
             .is_err());
             state.lock().await.hide_exports = true;
         });
-        let error = crate::ops::task::task_sync(task.id.as_str(), false).unwrap_err();
+        let error = crate::ops::task::task_sync(task.id.as_str(), false, false).unwrap_err();
         assert!(error.to_string().contains("uncertain"), "{error}");
         assert_eq!(runtime.block_on(state.lock()).creation_writes, 2);
     });
@@ -3615,9 +3747,9 @@ fn task_sync_explicit_retry_preserves_saved_creation_identity() {
                 .issues
                 .retain(|issue| issue["title"] != task.title);
         });
-        assert!(crate::ops::task::task_sync(task.id.as_str(), false).is_err());
+        assert!(crate::ops::task::task_sync(task.id.as_str(), false, false).is_err());
         runtime.block_on(state.lock()).rate_limit_query = Some("mutation DeliverTaskCreation");
-        assert!(crate::ops::task::task_sync(task.id.as_str(), true).is_err());
+        assert!(crate::ops::task::task_sync(task.id.as_str(), true, false).is_err());
         assert!(
             fixture
                 .store
@@ -3631,7 +3763,7 @@ fn task_sync_explicit_retry_preserves_saved_creation_identity() {
         runtime.block_on(async {
             tokio::time::sleep(std::time::Duration::from_millis(2100)).await;
         });
-        crate::ops::task::task_sync(task.id.as_str(), true).unwrap();
+        crate::ops::task::task_sync(task.id.as_str(), true, false).unwrap();
         let saved = runtime
             .block_on(fixture.store.get_task(&task.id))
             .unwrap()
@@ -3647,7 +3779,7 @@ fn task_sync_explicit_retry_preserves_saved_creation_identity() {
             .unwrap();
         assert_eq!(saved.linear_id.unwrap().as_str(), receipt.id);
         assert_eq!(saved.id, task.id);
-        crate::ops::task::task_sync(task.id.as_str(), true).unwrap();
+        crate::ops::task::task_sync(task.id.as_str(), true, false).unwrap();
         assert_eq!(runtime.block_on(state.lock()).creation_writes, 3);
     });
 }

@@ -16,6 +16,25 @@ pub(super) fn ingest_task_comment(
     task: &TaskId,
     comment: &crate::linear::LinearComment,
 ) -> StoreResult<bool> {
+    // A historical filing keeps its original local UUID. Only its Linear
+    // representation changes version bits; an existing delivery proves the link.
+    let mut comment = comment.clone();
+    if let Ok(uuid) = uuid::Uuid::parse_str(&comment.id) {
+        if uuid.get_version_num() == 4 {
+            let mut bytes = *uuid.as_bytes();
+            bytes[6] = (bytes[6] & 0x0f) | 0x50;
+            let local = uuid::Uuid::from_bytes(bytes).to_string();
+            let retained: bool = conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM task_comment_deliveries WHERE comment_id=?1)",
+                [&local],
+                |row| row.get(0),
+            )?;
+            if retained {
+                comment.id = local;
+            }
+        }
+    }
+    let comment = &comment;
     let existing: Option<(String, Option<String>)> = conn
         .query_row(
             "SELECT task_id,provider_revision FROM task_comments WHERE id=?1",

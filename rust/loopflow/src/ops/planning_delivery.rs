@@ -39,6 +39,15 @@ pub(crate) async fn sync_repository_fields(store: &Store, repo: &str) -> OpsResu
 }
 
 pub(crate) async fn sync_fields(store: &Store, repo: &Path, work: &WorkRef) -> OpsResult<()> {
+    deliver_fields(store, repo, work, false).await
+}
+
+pub(crate) async fn deliver_fields(
+    store: &Store,
+    repo: &Path,
+    work: &WorkRef,
+    retry: bool,
+) -> OpsResult<()> {
     if !super::linear_observe::connected(&repo.to_string_lossy()) {
         return Ok(());
     }
@@ -64,7 +73,7 @@ pub(crate) async fn sync_fields(store: &Store, repo: &Path, work: &WorkRef) -> O
         let mut observation = observe(store, repo, owner, &client).await?;
         for change in &changes {
             if let Err(error) =
-                sync_field(store, repo, owner, &client, change, &mut observation).await
+                sync_field(store, repo, owner, &client, change, &mut observation, retry).await
             {
                 store
                     .sqlite
@@ -231,6 +240,7 @@ async fn sync_field(
     client: &LinearClient,
     change: &PlanningChange,
     observation: &mut FieldObservation,
+    retry: bool,
 ) -> OpsResult<()> {
     let Some(current) = pending(store, owner)?
         .into_iter()
@@ -247,7 +257,7 @@ async fn sync_field(
     };
     if !store
         .sqlite
-        .attempt_planning_field(owner, &current, observation.revision.as_deref())
+        .attempt_planning_field(owner, &current, observation.revision.as_deref(), retry)
         .map_err(message)?
     {
         return Ok(());
@@ -262,7 +272,7 @@ async fn sync_field(
     {
         Ok(response) => response,
         Err(error) => {
-            if matches!(error, crate::linear::LinearError::RateLimited { .. }) {
+            if !retry && matches!(error, crate::linear::LinearError::RateLimited { .. }) {
                 store
                     .sqlite
                     .reject_planning_field(owner, &current.id)

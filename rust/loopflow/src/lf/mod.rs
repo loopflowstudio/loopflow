@@ -1108,6 +1108,9 @@ pub enum TaskCommand {
         /// Retry an uncertain issue creation with its saved ID; may recreate a deleted issue
         #[arg(long)]
         retry_creation: bool,
+        /// Retry uncertain saved field/state updates after observing current Linear values
+        #[arg(long)]
+        retry_updates: bool,
     },
     /// Inspect or reset this Task's captured Workflow
     Workflow {

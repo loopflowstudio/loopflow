@@ -3118,7 +3118,7 @@ pub fn task_reopen(issue: &str, note: Option<&str>) -> OpsResult<Task> {
     })
 }
 
-pub fn task_sync(issue: &str, retry_creation: bool) -> OpsResult<String> {
+pub fn task_sync(issue: &str, retry_creation: bool, retry_updates: bool) -> OpsResult<String> {
     block_on_task(async {
         let store = task_store().await?;
         let task = store
@@ -3162,20 +3162,31 @@ pub fn task_sync(issue: &str, retry_creation: bool) -> OpsResult<String> {
             return Err(task_error("Task publication to Linear remains pending"));
         }
         // Independent effects do not make each other a prerequisite.
-        let (state, comments) = tokio::join!(
-            super::linear_observe::sync_task_state(&store, &task),
+        let work = crate::durable::WorkRef::Task(task.id.clone());
+        let (state, comments, fields) = tokio::join!(
+            super::linear_observe::deliver_task_state(&store, &task, retry_updates),
             super::linear_observe::sync_task_comments(&store, &task),
+            super::planning_delivery::deliver_fields(&store, repo, &work, retry_updates),
         );
         state?;
         comments?;
+        fields?;
         let saved = store
             .get_task(&task.id)
             .await
             .map_err(task_error)?
             .ok_or_else(|| task_error("Task is missing"))?;
+        let sync = store
+            .sqlite
+            .task_planning_sync(&saved.id)
+            .map_err(task_error)?;
+        let pending = sync.lines();
+        if !pending.is_empty() {
+            return Ok(format!("{}: {}", saved.identifier, pending.join("\n")));
+        }
         Ok(match saved.pm_writeback {
             crate::work::task::LinearWritebackState::Current => {
-                format!("{}: state synchronized", saved.identifier)
+                format!("{}: synchronized", saved.identifier)
             }
             crate::work::task::LinearWritebackState::Pending { error, .. } => {
                 format!("{}: {error}", saved.identifier)

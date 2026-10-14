@@ -278,6 +278,10 @@ pub(super) async fn sync_repository_deliveries(store: &Store, repository: &str) 
 }
 
 pub(crate) async fn sync_task_state(store: &Store, task: &Task) -> OpsResult<()> {
+    deliver_task_state(store, task, false).await
+}
+
+pub(crate) async fn deliver_task_state(store: &Store, task: &Task, retry: bool) -> OpsResult<()> {
     let path = store
         .sqlite
         .home_dir()
@@ -335,7 +339,7 @@ pub(crate) async fn sync_task_state(store: &Store, task: &Task) -> OpsResult<()>
         {
             return Ok(());
         }
-        if delivery.attempted {
+        if delivery.attempted && !retry {
             return Err(OpsError::Message(
                 "Prior state delivery remains uncertain; saved decision retained".into(),
             ));
@@ -346,7 +350,7 @@ pub(crate) async fn sync_task_state(store: &Store, task: &Task) -> OpsResult<()>
             .map_err(message)?;
         if !store
             .sqlite
-            .attempt_task_state(&delivery)
+            .attempt_task_state(&delivery, retry)
             .map_err(message)?
         {
             return Ok(());
@@ -357,7 +361,9 @@ pub(crate) async fn sync_task_state(store: &Store, task: &Task) -> OpsResult<()>
         let confirmed = match client.set_item_state(issue.as_str(), &state_id).await {
             Ok(confirmed) => confirmed,
             Err(error) => {
-                if matches!(error, crate::linear::LinearError::RateLimited { .. }) {
+                if !delivery.attempted
+                    && matches!(error, crate::linear::LinearError::RateLimited { .. })
+                {
                     store.sqlite.reject_task_state(&delivery).map_err(message)?;
                 }
                 return Err(message(&error));

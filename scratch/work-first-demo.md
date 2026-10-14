@@ -198,15 +198,11 @@ out by the October 11 rate-limit workaround. PR #1540 is included in installed
 0.13.14; restored the Team setting, preserving `/tmp/loo462-main-config-before-linear-restore.yaml`.
 The patched CLI published 15 retained Tasks as LOO-466–480 on the real Home;
 two SQLite-lock failures recovered by observing the same creation IDs, not by
-creating replacements. Five older Tasks initially remained unmapped. Their original rate-limit
-errors survive in `/private/tmp/loo462-native.FgtDmE/live-before-abandoned-repair.db`;
-that snapshot alone does not distinguish rejected creation from a later failed read.
+creating replacements. Earlier uncertainty evidence: `34b08a608d:scratch/work-first-demo.md`.
 
-Targeted Task sync now publishes retained Project/Task identities before state/comments;
-repository delivery uses each operation's deadline rather than canceling the whole
-queue after five seconds and starving later Tasks. Review retained uncertainty
-refusal and added a slow-first-export regression; no new retries or identities.
-Check: library planning suite PASS (73), Clippy all-targets PASS, fmt/diff PASS; `/tmp/loo462-linear-{regressions,clippy,live-batch,live-reconcile}.log`. Native link verification and whole-repo reconciliation remain; no completion claim.
+Task sync publishes saved identities; per-operation deadlines prevent starvation.
+Review retained uncertainty refusal and added a slow-first-export regression.
+Check: library planning suite PASS (73), Clippy all-targets PASS, fmt/diff PASS; `/tmp/loo462-linear-{regressions,clippy,live-batch,live-reconcile}.log`. Native links remain unverified.
 
 October 14 continuation: Jack Heart approved explicitly retrying the five saved
 issue IDs, including possible recreation of a deleted provider issue. Ordinary
@@ -217,9 +213,19 @@ retries succeeded as LOO-481–485; zero non-deleted repo Tasks lack Linear IDs.
 Found the same shared five-second deadline in `sync_after_save`, now removed;
 creation output must show the saved identifier and warn only while unmapped.
 Checks: slow-export regressions PASS (2), normal creation PASS (1; initial nonexistent `started_at` assertion removed), explicit/ordinary retry PASS (3, including rate-limited retry preserving earlier uncertainty), all-target Clippy PASS. Logs: `/tmp/loo462-linear-{retry-rate-tests,retry-final-clippy,approved-retries}.log`.
-Whole-repo audit: 373 non-deleted Tasks mapped; 166 lack cached provider observations,
-five known state mismatches (LOO-376/440/450/451 completed, LOO-367 canceled locally;
-Linear unstarted), and LOO-462 description delivery remains uncertain. Full
-`repo refresh --all` refused before mutation because spend/engbot/list GOAL files
-are missing on main. Do not restore retired Waves or erase uncertainty to bypass it.
-Use scoped acquisition/delivery; inspect remaining project/comment receipts too.
+Audit: 373 Tasks; 372 read from Linear, 371 match title/description/state.
+`task sync` now reads/delivers fields too and reports pending receipts instead of
+claiming only state success. Explicit `--retry-updates` preserves saved intentions,
+fresh conflict precedence and uncertain rate-limit evidence; it never retries deletion.
+Five state discrepancies and the description receipt reconciled without execution changes.
+Historical filing comments used UUIDv5, which Linear rejects; confirmation errors
+hid that cause. Delivery now uses deterministic v4-form IDs, retaining original local
+IDs through readback. Lost-reply/readback regression passes; initial fixture failed
+on missing IssueObservation support, repaired. Live delivery leaves six rejected comments; state/field/Project queues are empty.
+Evidence: `/tmp/loo462-linear-{every-task-audit,audit-recovery}.ndjson` and
+`/tmp/loo462-linear-{updates-suite,historical-comment-test2,comment-live-proof}.log`.
+Remaining: W2-86 is unavailable; LOO-276's retired list Wave lacks authored ownership
+and retains canceled locally versus completed in Linear. Six historical comments
+now fail because Linear rejects their target Issues, not UUIDs. Preserve these,
+not silent recreation/unarchiving. Full refresh refused missing spend/engbot/list
+GOAL files; four active Wave refreshes succeeded. Clippy PASS; planning suite PASS (79), `/tmp/loo462-linear-comment-suite.log`.

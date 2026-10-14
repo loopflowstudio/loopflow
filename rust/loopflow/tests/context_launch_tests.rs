@@ -246,6 +246,7 @@ for arg in "$@"; do
     [ "${#arg}" -lt 122880 ] || exit 99
     printf '%s\000' "$arg" >> "$HOME/argv"
 done
+cat > "$HOME/input"
 printf 'provider fixture refused this request\n' >&2
 exit 23
 "#,
@@ -293,7 +294,9 @@ exit 23
     assert!(!instructions.contains("Saved active skill."));
     assert!(!raw.contains("model_instructions_file"));
     assert!(!raw.contains("dangerously-bypass-hook-trust"));
-    assert_eq!(raw.matches("<lf:skill:probe>\nSaved active skill.\n</lf:skill:probe>\n\n<lf:message>\nFind the bug.\n</lf:message>").count(), 1);
+    let input = fs::read_to_string(home.path().join("input")).unwrap();
+    assert!(!raw.contains("Saved active skill."));
+    assert_eq!(input.matches("<lf:skill:probe>\nSaved active skill.\n</lf:skill:probe>\n\n<lf:message>\nFind the bug.\n</lf:message>").count(), 1);
     let callbacks: Vec<String> = {
         let index = args.iter().position(|arg| *arg == "--settings").unwrap();
         let settings: serde_json::Value =
@@ -439,10 +442,11 @@ while read -r line; do :; done
 }
 
 #[test]
-fn terminal_rejects_only_the_oversized_first_turn_before_provider_spawn() {
+fn claude_terminal_delivers_large_first_turn_without_prompt_arguments() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
-    repo.create_file(".lf/skills/large.md", &"x".repeat(122_880));
+    let content = "Preserve 雪, \"quotes\", $(shell syntax), and newlines.\n".repeat(8_000);
+    repo.create_file(".lf/skills/large.md", &content);
     repo.create_file(
         ".lf/config.yaml",
         "diff: false\ndiff_files: false\npaste: false\n",
@@ -452,7 +456,7 @@ fn terminal_rejects_only_the_oversized_first_turn_before_provider_spawn() {
     let provider = bin.join("claude");
     fs::write(
         &provider,
-        "#!/bin/sh\ntouch \"$HOME/provider-started\"\nexit 91\n",
+        "#!/bin/sh\nfor arg in \"$@\"; do [ \"${#arg}\" -lt 1024 ] || exit 99; done\ncat > \"$HOME/input\"\n",
     )
     .unwrap();
     fs::set_permissions(&provider, fs::Permissions::from_mode(0o755)).unwrap();
@@ -473,14 +477,15 @@ fn terminal_rejects_only_the_oversized_first_turn_before_provider_spawn() {
         .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
         .output()
         .unwrap();
-    assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("first turn is"), "{stderr}");
     assert!(
-        stderr.contains("terminal argument cap is 122880 bytes"),
-        "{stderr}"
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
     );
-    assert!(!home.path().join("provider-started").exists());
+    assert!(fs::read_to_string(home.path().join("input"))
+        .unwrap()
+        .contains(&content));
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("\x1b[2K"));
 }
 
 #[test]

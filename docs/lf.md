@@ -178,8 +178,12 @@ conversation block: whole files, marked start excerpts and readable source paths
 Compaction also restores the saved active skill. Task direction and summaries
 remain complete private reference files. Codex terminal first turns travel through
 its protocol after the terminal connects.
-Claude and OpenCode first turns use argv; a first turn exceeding their argument
-cap is refused before spawning the provider.
+Claude reads its first turn from stdin, then uses the terminal for keyboard input.
+OpenCode first turns still use argv; a first turn exceeding its argument cap is
+refused before spawning the provider.
+
+Interactive startup shows the current preparation stage and elapsed seconds.
+The indicator clears before the native terminal opens; redirected output stays clean.
 
 Wave goals use the same whole-file, excerpt and listing rules as memory.
 Distinct source files remain separate even when their text matches.

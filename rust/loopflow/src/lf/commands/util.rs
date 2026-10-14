@@ -47,6 +47,7 @@ pub(crate) fn parse_since(value: &str, now: OffsetDateTime) -> Result<OffsetDate
 #[derive(Debug, Clone)]
 pub(crate) struct SessionCommand {
     pub(crate) codex: Option<crate::agent::AgentConfig>,
+    pub(crate) input: Option<String>,
     pub(crate) program: String,
     pub(crate) args: Vec<String>,
     pub(crate) cwd: PathBuf,
@@ -113,7 +114,7 @@ pub(crate) fn build_session_command(
     agent_session: Option<&AgentSessionId>,
     context_file: Option<&Path>,
 ) -> Result<SessionCommand> {
-    if harness != "codex" {
+    if harness == "opencode" {
         crate::agent::validate_terminal_turn(prompt)?;
     }
     let worktree_arg = worktree.to_string_lossy().to_string();
@@ -138,9 +139,7 @@ pub(crate) fn build_session_command(
                 args.push("--append-system-prompt-file".to_string());
                 args.push(path.to_string_lossy().to_string());
             }
-            // Claude's variadic --add-dir otherwise consumes the positional prompt.
             args.push("--".to_string());
-            args.push(prompt.to_string());
             args
         }
         "opencode" => {
@@ -157,6 +156,7 @@ pub(crate) fn build_session_command(
         ),
     };
     Ok(SessionCommand {
+        input: (harness == "claude" && !prompt.is_empty()).then(|| prompt.to_owned()),
         codex: (harness == "codex")
             .then(|| -> Result<_> {
                 Ok(crate::agent::AgentConfig {
@@ -398,6 +398,7 @@ fn build_resume_session_command(
     };
     Ok(SessionCommand {
         codex: None,
+        input: None,
         context: None,
         attachment: None,
         remote: None,
@@ -522,6 +523,7 @@ fn session_command_status_with_env(
     exact_account_id: Option<&crate::store::ProviderAccountId>,
     launch_lock: Option<File>,
 ) -> Result<SessionCommandOutcome> {
+    let mut progress = crate::startup::Startup::new(format!("Preparing {}", command.program));
     let argv = std::env::args().collect::<Vec<_>>();
     crate::journal::with_runtime(&command.cwd, &argv, || {
         let mut command = command.clone();
@@ -586,6 +588,7 @@ fn session_command_status_with_env(
             agent_session,
             exact_account_id,
             launch_lock,
+            &mut progress,
         );
         let outcome = if result
             .as_ref()
@@ -619,6 +622,7 @@ fn run_native_session(
     agent_session: Option<&AgentSessionId>,
     exact_account_id: Option<&crate::store::ProviderAccountId>,
     launch_lock: Option<File>,
+    progress: &mut crate::startup::Startup,
 ) -> Result<SessionCommandOutcome> {
     let started = std::time::Instant::now();
     let attachment = native_provider_attachment(command, environment)?;
@@ -641,6 +645,7 @@ fn run_native_session(
             agent_session,
             exact_account_id,
             launch_lock,
+            progress,
         );
     }
     let provider = match command.program.as_str() {
@@ -660,6 +665,8 @@ fn run_native_session(
         .map_err(|error| anyhow!("failed to select provider account: {error}"))?
         .flatten();
 
+    progress.stage(format!("Opening {} terminal", command.program));
+    progress.finish();
     let mut process = Command::new(&command.program);
     process
         .env_remove("LOOPFLOW_DIRECTIVE_FILE")
@@ -695,6 +702,11 @@ fn run_native_session(
         command.context.as_ref(),
     )?);
     process.args(&command.args);
+    if command.program == "claude" {
+        if let Some(input) = &command.input {
+            crate::agent::configure_native_input(&mut process, input)?;
+        }
+    }
     if let (Some(capture_dir), Some(agent_session)) = (capture_dir.as_deref(), agent_session) {
         crate::session_record::write_provider_session(
             capture_dir,
@@ -801,6 +813,7 @@ pub(crate) fn run_native_codex_agent(
     }
     let command = SessionCommand {
         codex: Some(launch.clone()),
+        input: None,
         program: "codex".into(),
         args: Vec::new(),
         cwd,
@@ -846,11 +859,13 @@ fn run_codex_native(
     agent_session: Option<&AgentSessionId>,
     exact_account_id: Option<&crate::store::ProviderAccountId>,
     launch_lock: Option<File>,
+    progress: &mut crate::startup::Startup,
 ) -> Result<SessionCommandOutcome> {
     use crate::harness::{
         codex::CodexHarness, codex_connection::CodexConnection, ApprovalPolicy, Harness,
     };
 
+    progress.stage("Starting Codex");
     let owner = native_provider_attachment(command, environment)?;
     let mut launch = command
         .codex
@@ -952,6 +967,7 @@ fn run_codex_native(
                     thread.as_ref(),
                     account.as_ref(),
                     launch_lock,
+                    progress,
                 )
             }
             Err(_) => Err(anyhow!(
@@ -1149,6 +1165,7 @@ mod tests {
         .unwrap();
         let command = SessionCommand {
             codex: None,
+            input: None,
             context: None,
             attachment: None,
             remote: None,
@@ -1203,7 +1220,7 @@ mod tests {
 
         assert_eq!(launch.program, "claude");
         assert_eq!(launch.cwd, path());
-        assert_eq!(launch.args, args(&["--model", "sonnet", "--", "fix it"]));
+        assert_eq!(launch.args, args(&["--model", "sonnet", "--"]));
         assert!(launch.codex.is_none());
     }
 
@@ -1221,12 +1238,7 @@ mod tests {
 
         assert_eq!(
             launch.args,
-            args(&[
-                "--session-id",
-                "01234567-89ab-cdef-0123-456789abcdef",
-                "--",
-                "test",
-            ])
+            args(&["--session-id", "01234567-89ab-cdef-0123-456789abcdef", "--",])
         );
     }
 
@@ -1441,6 +1453,7 @@ mod tests {
         .unwrap();
         let command = SessionCommand {
             codex: None,
+            input: None,
             context: None,
             attachment: None,
             remote: None,
@@ -1491,6 +1504,7 @@ mod tests {
         });
         let command = SessionCommand {
             codex: None,
+            input: None,
             context: None,
             program: "/bin/sleep".into(),
             args: vec!["10".into()],
@@ -1511,6 +1525,7 @@ mod tests {
         let home = ledger.home();
         let mut command = SessionCommand {
             codex: None,
+            input: None,
             program: "/bin/sh".into(),
             args: vec!["-c".into(), "printf '%s' \"$$\" > pid".into()],
             cwd: home.into(),
@@ -1606,6 +1621,7 @@ mod tests {
             let before = store.process(&attached.agent_process_id)?.unwrap();
             let mut command = SessionCommand {
                 codex: None,
+                input: None,
                 program: "/usr/bin/true".into(),
                 args: vec![],
                 cwd: home.into(),
@@ -1690,6 +1706,7 @@ mod tests {
             )?;
             let command = SessionCommand {
                 codex: None,
+                input: None,
                 context: None,
                 attachment: capture.session_attachment(),
                 remote: None,
@@ -1735,7 +1752,8 @@ mod tests {
             PathBuf::from(&launch.args[idx + 1]).canonicalize().unwrap(),
             main.canonicalize().unwrap()
         );
-        assert!(launch.args.ends_with(&args(&["--", "fix it"])));
+        assert!(launch.args.ends_with(&args(&["--"])));
+        assert_eq!(launch.input.as_deref(), Some("fix it"));
     }
 
     #[allow(clippy::await_holding_lock)]

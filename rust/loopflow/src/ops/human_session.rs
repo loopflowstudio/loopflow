@@ -609,6 +609,7 @@ pub(crate) async fn open(
     mode: OpenMode,
     resume: bool,
 ) -> Result<SessionRecord> {
+    let progress = resume.then(|| crate::startup::Startup::new("Preparing conversation"));
     let target = match find_session(store, session_id, true).await? {
         Some(target) => target,
         // Connecting is what brings a provider-started conversation in.
@@ -641,6 +642,7 @@ pub(crate) async fn open(
         crate::lf::commands::util::require_provider_session_process(&native.dir)?;
         stop_headless_for_resume(store, session, provider_session.as_ref()).await?;
     }
+    drop(progress);
     let Some(provider_session) = provider_session else {
         let surface = surface(store, session).await?;
         if resume {

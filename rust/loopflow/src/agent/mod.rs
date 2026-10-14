@@ -9,7 +9,7 @@ use crate::id::AgentSessionId;
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;
-use std::io::Write;
+use std::io::{Seek, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -1071,6 +1071,16 @@ pub fn build_model_command(
     })
 }
 
+/// Claude consumes initial stdin and reopens the controlling terminal for keys.
+/// A file avoids blocking on pipe capacity before the native process starts.
+pub(crate) fn configure_native_input(command: &mut Command, prompt: &str) -> std::io::Result<()> {
+    let mut input = tempfile::tempfile()?;
+    input.write_all(prompt.as_bytes())?;
+    input.rewind()?;
+    command.stdin(input);
+    Ok(())
+}
+
 /// Native terminal launch arguments must fit cmux's per-argument transport limit.
 pub(crate) fn validate_terminal_turn(prompt: &str) -> Result<(), CoreError> {
     const CAP: usize = 122_880;
@@ -1677,7 +1687,10 @@ fn _run_agent_once(
             can_failover: false,
         });
     }
-    validate_terminal_turn(&launch.task_prompt)?;
+    let mut progress = crate::startup::Startup::new(format!("Preparing {harness}"));
+    if harness == "opencode" {
+        validate_terminal_turn(&launch.task_prompt)?;
+    }
     let mut cmd_args = build_model_command(launch, process, capabilities)?;
     if cmd_args.is_empty() {
         return Err(CoreError::ExecutionFailed("Empty command".to_string()));
@@ -1712,10 +1725,16 @@ fn _run_agent_once(
         )
         .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     }
+    progress.finish();
     let title = crate::terminal_title::TerminalTitle::prepare(&launch.env, &harness, &mut cmd);
     cmd.args(args);
     if !launch.task_prompt.is_empty() {
-        cmd.arg(&launch.task_prompt);
+        if harness == "claude" {
+            configure_native_input(&mut cmd, &launch.task_prompt)
+                .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
+        } else {
+            cmd.arg(&launch.task_prompt);
+        }
     }
 
     if let Some(ref cwd) = launch.cwd {

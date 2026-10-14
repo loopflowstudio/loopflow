@@ -275,8 +275,11 @@ its Task has no captured Workflow. The cache and database name the same Machine.
 This is a plausible explanation for the null Workflow, not proof of the October 13
 screen's selected Task. LOO-462 remains the required known-Workflow native case.
 
-Matching unlaunched review app: `/tmp/loo462-oct13-refresh/Loopflow Work Demo.app`,
-revision `279078f02d`, bundle `studio.loopflow.work-demo.refresh`. Validation-only
-lf build and ad-hoc signature verification PASS; source/signed hashes are in adjacent
-`build.json`. SwiftPM resources still require this retained checkout. Existing apps
-and drafts remain untouched; gate/publication and native review remain ahead.
+Matching unlaunched review app: `/tmp/loo462-oct13-retention-compress/Loopflow Work Demo.app`,
+revision `a590ecb7ee`, bundle `studio.loopflow.work-demo.retention-compress`.
+The refresh repair's earlier app remains at `/tmp/loo462-oct13-refresh/Loopflow Work Demo.app`
+(`279078f02d`). The new app shares roadmap publication across stream and one-shot
+reads; 62 focused Desktop tests passed. Validation-only lf build and ad-hoc
+signature verification PASS; source/signed hashes are in adjacent `build.json`.
+SwiftPM resources still require this retained checkout. Existing apps and drafts
+remain untouched; gate/publication and native review remain ahead.

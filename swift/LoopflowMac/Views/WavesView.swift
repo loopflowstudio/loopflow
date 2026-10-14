@@ -385,7 +385,7 @@ struct WavesView: View {
             )
             .id(waveSelectionId(wave))
         } else {
-            RoadmapView(model: model, onOpenWave: openRoadmapWave)
+            RoadmapView(model: model, onOpenWave: openRoadmapWave, onOpenTask: openTask)
         }
     }
 

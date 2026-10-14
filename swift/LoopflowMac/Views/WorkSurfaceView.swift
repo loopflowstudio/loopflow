@@ -298,35 +298,14 @@ struct WorkSurfaceView: View {
                     .font(Typography.body(12))
                     .foregroundStyle(palette.textSecondary)
                     .accessibilityIdentifier("task-debug")
-                if let sessions, !sessions.isEmpty {
-                    let groups = TaskSessionGroups(sessions)
-                    if !groups.waiting.isEmpty {
-                        section {
-                            WorkSectionHeading("Waiting", count: groups.waiting.count)
-                            VStack(alignment: .leading, spacing: 0) {
-                                ForEach(Array(groups.waiting.enumerated()), id: \.element.id) { index, session in
-                                    if index > 0 { Divider().overlay(palette.border.opacity(0.6)) }
-                                    sessionRow(session)
-                                }
-                            }
-                            .workPanel()
-                        }
-                        .accessibilityIdentifier("task-sessions-waiting")
+                // Exact Waiting links preserve access to secondary conversations
+                // needing input without restoring a Session inventory.
+                ForEach((sessions ?? []).filter { $0.attention == .waiting }) { session in
+                    Button { onOpenSession(session) } label: {
+                        Label(session.readySummary ?? "Input needed in \(session.title)", systemImage: "bubble.left")
                     }
-                    if !groups.working.isEmpty {
-                        section {
-                            WorkSectionHeading("Sessions", count: groups.working.count)
-                            VStack(alignment: .leading, spacing: 0) {
-                                ForEach(groups.working) { session in compactSessionRow(session) }
-                            }
-                        }
-                        .accessibilityIdentifier("task-sessions-working")
-                    }
-                } else if sessions != nil, model.sessions.value != nil, model.sessions.errorMessage == nil {
-                    Text("No open Sessions.")
-                        .font(Typography.body(12.5))
-                        .foregroundStyle(palette.textTertiary)
-                        .accessibilityIdentifier("work-no-sessions")
+                    .buttonStyle(WorkPlainButtonStyle())
+                    .accessibilityIdentifier("task-waiting-\(session.id)")
                 }
                 section {
                     WorkSectionHeading(title: "Description") {
@@ -361,91 +340,6 @@ struct WorkSurfaceView: View {
     /// A heading and its content, spaced as one unit.
     private func section<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 10) { content() }
-    }
-
-    private func sessionRow(_ session: SessionRecord) -> some View {
-        let status = SessionProgramStatus(sessions: [session], unavailable: nil)
-        return Button { onOpenSession(session) } label: {
-            HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
-                Image(systemName: "bubble.left")
-                    .font(.system(size: 12))
-                    .foregroundStyle(palette.textTertiary)
-                    .frame(width: 16)
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
-                        Text(session.title)
-                            .font(Typography.strong(13))
-                            .foregroundStyle(palette.text)
-                        primaryTag(session)
-                    }
-                    HStack(spacing: Spacing.xs) {
-                        if let provider = session.provider {
-                            Text(provider)
-                                .font(Typography.caption(11))
-                                .foregroundStyle(palette.textSecondary)
-                                .accessibilityIdentifier("task-session-provider-\(session.id)")
-                            Text("·").foregroundStyle(palette.textTertiary)
-                        }
-                        Text(session.flowMembership.label)
-                            .font(Typography.code(11))
-                            .foregroundStyle(membershipTone(session.flowMembership))
-                    }
-                    // Only a summary the Session actually recorded; never a
-                    // preview derived from its prompt or transcript.
-                    if let summary = session.readySummary {
-                        Text(summary)
-                            .font(Typography.body(12))
-                            .foregroundStyle(palette.textSecondary)
-                            .lineLimit(2)
-                            .help(summary)
-                            .accessibilityIdentifier("task-session-summary-\(session.id)")
-                    }
-                }
-                Spacer(minLength: Spacing.sm)
-                if let label = status.label, let tone = status.tone {
-                    WorkChip(text: label, tone: tone)
-                }
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(WorkPlainButtonStyle())
-        .accessibilityIdentifier("task-session-\(session.id)")
-    }
-
-    @ViewBuilder
-    private func primaryTag(_ session: SessionRecord) -> some View {
-        if session.taskPrimary {
-            Text("primary").font(Typography.caption(10.5)).foregroundStyle(palette.textTertiary)
-        }
-    }
-
-    /// One line for a conversation that is not waiting on anyone.
-    private func compactSessionRow(_ session: SessionRecord) -> some View {
-        Button { onOpenSession(session) } label: {
-            HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
-                Text(session.title)
-                    .font(Typography.body(12.5))
-                    .foregroundStyle(palette.text)
-                    .lineLimit(1)
-                primaryTag(session)
-                Spacer(minLength: Spacing.sm)
-                if let label = SessionProgramStatus(sessions: [session], unavailable: nil).label {
-                    Text(label).font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
-                }
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 3)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(WorkPlainButtonStyle())
-        .accessibilityIdentifier("task-session-\(session.id)")
-    }
-
-    private func membershipTone(_ membership: SessionFlowMembership) -> Color {
-        if case .step = membership { return FlowPalette.loop(1, in: palette) }
-        return palette.textTertiary
     }
 
     private func planRow(_ task: RoadmapTask, rank: Int) -> some View {

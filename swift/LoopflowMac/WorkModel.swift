@@ -89,8 +89,8 @@ struct TaskReadings<Value> {
     }
 }
 
-/// One pending view request: its companion must never outlive or drift from the Session.
-struct LinkedSession: Equatable {
+/// One resolved opening: its companion must never outlive or drift from the Session.
+struct LinkedSession {
     let generation: Int
     let record: SessionRecord
     let task: RoadmapTask
@@ -158,7 +158,6 @@ final class WorkModel {
     private(set) var taskLinkURL: URL?
     private(set) var taskLinkReading: WorkReading<RoadmapSnapshot> = .loading
     var showsTaskLink = false
-    var linkedSession: LinkedSession?
     private(set) var linkedTaskPage: LinkedTaskPage?
     private(set) var taskOpening: DesktopOpening?
     @ObservationIgnored private var destinationGeneration = 0
@@ -220,7 +219,6 @@ final class WorkModel {
         }
         destinationGeneration &+= 1
         if showsTaskLink { showsTaskLink = false }
-        if linkedSession != nil { linkedSession = nil }
         if linkedTaskPage != nil { linkedTaskPage = nil }
     }
 
@@ -261,6 +259,27 @@ final class WorkModel {
     }
 
     private func openLinkedTask(wave: WaveRoadmap, task: RoadmapTask, link: TaskLink, generation: Int) async throws {
+        let opensConversation = link.session != nil || link.diff || taskLinkConversation
+        let isLocalRepository = repoPath?.normalizedFilePath == wave.wave.repo.normalizedFilePath
+        if opensConversation, isLocalRepository {
+            openTaskDestination(wave: wave, task: task, preservingOpening: true)
+            navigation.content = .terminals
+        }
+        let key = workspaceKey(for: .task(id: task.id), repository: workspaceRepository ?? "")
+        let workspace = opensConversation && isLocalRepository ? workspaceRegistry?.retained(key) : nil
+        let request = UUID()
+        workspace?.conversationRequest = request
+        workspace?.conversationError = nil
+        defer { if workspace?.conversationRequest == request { workspace?.conversationRequest = nil } }
+        do {
+            try await prepareLinkedTask(wave: wave, task: task, link: link, generation: generation)
+        } catch {
+            if destinationGeneration == generation { workspace?.conversationError = error.localizedDescription }
+            throw error
+        }
+    }
+
+    private func prepareLinkedTask(wave: WaveRoadmap, task: RoadmapTask, link: TaskLink, generation: Int) async throws {
         try Task.checkCancellation()
         guard destinationGeneration == generation else { return }
         var task = task
@@ -370,9 +389,79 @@ final class WorkModel {
         } else {
             sessions = .available(records)
         }
-        navigation.selectedSessionId = record.id
-        navigation.content = .terminals
-        linkedSession = LinkedSession(generation: generation, record: record, task: task, showsChanges: link.diff, location: location)
+        let destination = LinkedSession(generation: generation, record: record, task: task, showsChanges: link.diff, location: location)
+        try await installConversation(destination, repository: wave.wave.repo)
+    }
+
+    /// Install the record and pane synchronously, before preparation can end.
+    /// Native readiness is observed separately and never chooses navigation.
+    private func installConversation(_ destination: LinkedSession, repository: String) async throws {
+        guard let registry = workspaceRegistry, let repositoryID = workspaceRepository else {
+            throw RegistryQueryError("The repository workspace is not available; retry opening it.")
+        }
+        guard registry.localMachineId != nil else {
+            throw RegistryQueryError(registry.machineError ?? "Workspace Machine is unavailable; retry opening it.")
+        }
+        let store = registry.sessionStore(repository: repositoryID, repoPath: repository, query: query)
+        let record = destination.record
+        if let location = destination.location { store.retainLocation(location, for: record) }
+        store.reconcile(sessions.value ?? [])
+        let key = workspaceKey(for: .task(id: destination.task.id), repository: repositoryID)
+        let target = registry.workspace(for: key, title: destination.task.task.name, location: record.workspace?.identity)
+        let workspace = placeSession(record, in: target, store: store, registry: registry)
+        let files = try registry.openLinkedFiles(destination, in: workspace.key, query: store.query)
+        if files != nil, let zoomed = workspace.multiplexer.zoomedPaneId {
+            workspace.multiplexer.setZoom(zoomed, enabled: false)
+        }
+        await connectLinkedOpening(destination, store: store, workspace: workspace, files: files)
+    }
+
+    /// Exact contextual links share the same synchronous pane placement as Task entry.
+    func openSession(_ record: SessionRecord, store: SessionsStore) {
+        guard let registry = workspaceRegistry, let repository = workspaceRepository else { return }
+        if let retained = registry.key(containingSession: record.id) {
+            select(retained.reference)
+        } else {
+            let selectedKey = workspaceKey(for: selection, repository: repository)
+            if selection?.kind == .task,
+               record.taskIds.contains(selectedKey.id) || record.workspace?.taskId == selectedKey.id {
+                select(selection)
+            } else if selection?.kind == .wave, record.waveId == selectedKey.id {
+                select(selection)
+            } else {
+                select(store.taskSubject(for: record) ?? projection.subject(for: record.id))
+            }
+        }
+        let key = workspaceKey(for: selection, repository: repository)
+        let target = registry.workspace(for: key, title: workspaceTitle(key), location: record.workspace?.identity)
+        store.reconcile([record])
+        _ = placeSession(record, in: target, store: store, registry: registry)
+        Task { await store.select(record.id) }
+    }
+
+    private func placeSession(_ record: SessionRecord, in target: SessionsWorkspace,
+                              store: SessionsStore, registry: SessionsWorkspaceRegistry) -> SessionsWorkspace {
+        Perf.begin(Perf.taskWorkspaceReady, "session", id: record.id)
+        let workspace: SessionsWorkspace
+        if case .shell(let id, let machine) = store.localTerminal(for: record),
+           let key = registry.key(containingShell: id, machineId: machine),
+           let retained = registry.retained(key) {
+            workspace = retained
+            select(key.reference, preservingOpening: true)
+            workspace.multiplexer.setCollapsed(paneId: id, collapsed: false)
+            workspace.multiplexer.setFocusedPane(id)
+            store.surfaces.focus(.shell(id, machineId: machine))
+        } else {
+            workspace = target
+            registry.revealSession(record, in: workspace)
+            if let machine = record.workspace?.machineId {
+                store.surfaces.focus(.session(record.id, machineId: machine))
+            }
+        }
+        workspace.presentation.selectedSessionId = record.id
+        workspace.presentation.content = .terminals
+        store.beginPaneLoad(record.id)
+        return workspace
     }
 
     /// Called by the requested Task's mounted page (or its unavailable surface).
@@ -385,15 +474,9 @@ final class WorkModel {
         linkedTaskPage = nil
     }
 
-    func failLinkedOpening(_ destination: LinkedSession, reason: String) {
-        guard destination.generation == destinationGeneration, let opening = taskOpening,
-              opening.status == .opening else { return }
-        taskOpening = DesktopOpening(url: opening.url, status: .failed, reason: reason)
-    }
-
     /// Observe the existing Session and Files owners, never a second readiness store.
     /// Each callback retains the request generation, including repeated identical URLs.
-    func connectLinkedOpening(_ destination: LinkedSession, store: SessionsStore, workspace: SessionsWorkspace, files: TaskFilesStore?) async {
+    private func connectLinkedOpening(_ destination: LinkedSession, store: SessionsStore, workspace: SessionsWorkspace, files: TaskFilesStore?) async {
         guard destination.generation == destinationGeneration, taskOpening?.status == .opening else { return }
         let layout = workspace.multiplexer.layout
         let sessionPane: PaneState?
@@ -503,14 +586,7 @@ final class WorkModel {
         openTaskDestination(wave: found.wave, task: found.task)
         navigation.content = .terminals
         if !retainedConversation {
-            let workspace = workspaceRegistry?.retained(key)
-            workspace?.openingConversation = true
-            workspace?.conversationError = nil
-            defer { workspace?.openingConversation = false }
             await openTaskLink(url, expectedTaskID: found.task.id, conversation: true)
-            if taskLinkExpectedID == found.task.id, taskOpening?.status == .failed {
-                workspace?.conversationError = taskOpening?.reason
-            }
         }
     }
 

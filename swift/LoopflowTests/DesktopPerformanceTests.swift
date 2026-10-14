@@ -136,7 +136,6 @@ struct DesktopPerformanceTests {
                                     "Each write waits for the reader to be idle; overlapping writes are not sampled.",
                                     "Forced bitmap capture and OCR are intrusive observer costs."]])
         let navigator = try view.inspect().find(WorkNavigator.self).actualView()
-        let picker = try navigator.inspect().find(ViewType.Picker.self)
         let search = try navigator.inspect().find(ViewType.TextField.self)
         let run = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
         let shows = { (text: String) in window.outlineText.contains { $0.contains(text) } }
@@ -148,7 +147,6 @@ struct DesktopPerformanceTests {
                 let task = "bench-\(run)-\(attempt)"
                 // The filter keeps the written row on screen whatever the Machine holds.
                 try search.setInput("Probe")
-                try picker.select(value: WorkPresentation.compact)
                 await model.refresh()
                 try await written("task_renamed", attempt, journal, window, store, sql: """
                     UPDATE pm_items SET body=json_set(body,'$.name','\(label) moved') WHERE id='\(template.id.sqlQuoted)';
@@ -165,7 +163,6 @@ struct DesktopPerformanceTests {
 
                 // Outside every interval: the next attempt starts from the same Tasks.
                 try store.write("DELETE FROM pm_items WHERE id='\(task)'; \(restore)")
-                try picker.select(value: WorkPresentation.compact)
                 try await wait(window, render: true, for: .seconds(60)) { !shows(label) }
             }
         } catch {
@@ -428,7 +425,6 @@ struct DesktopPerformanceTests {
         defer { window.contentView = nil; window.close() }
         try await wait(window, render: true) { hasRendered(window, "work-task-perf-task-0") }
         let navigator = try view.inspect().find(WorkNavigator.self).actualView()
-        let picker = try navigator.inspect().find(ViewType.Picker.self)
         let search = try navigator.inspect().find(ViewType.TextField.self)
         let records = try #require(model.sessions.value)
         let first = try #require(records.first { $0.id == "perf-session-0" })
@@ -440,27 +436,12 @@ struct DesktopPerformanceTests {
             // Reset outside the measured interval; every attempt starts from the
             // same visible population and retained surfaces, including the first.
             try search.setInput("")
-            try picker.select(value: WorkPresentation.compact)
             try await wait(window, render: true) { hasRendered(window, "work-task-perf-task-0") }
-            try await sample("full", population, attempt, journal, window, action: {
-                try picker.select(value: WorkPresentation.full)
-            }, ready: { hasRendered(window, "work-wave-wave-1") && hasRendered(window, "work-task-perf-task-0") })
-            let disclosure = try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-disclose-wave-wave-1").button()
-            try await sample("fold", population, attempt, journal, window, action: {
-                try disclosure.tap()
-            }, ready: { hasRendered(window, "work-wave-wave-1") && !hasRendered(window, "work-task-perf-task-0") })
-            try await sample("expand", population, attempt, journal, window, action: {
-                try disclosure.tap()
-            }, ready: { hasRendered(window, "work-task-perf-task-0")  })
-            try await sample("compact", population, attempt, journal, window, action: {
-                try picker.select(value: WorkPresentation.compact)
-            }, ready: { hasRendered(window, "work-task-perf-task-0") && !hasRendered(window, "work-wave-wave-1") })
             try await sample("filter", population, attempt, journal, window, action: {
-                try search.setInput("Conversation 002")
+                try search.setInput("Task 002")
             }, ready: { hasRendered(window, "work-task-perf-task-2") && !hasRendered(window, "work-task-perf-task-0") })
             try #require(model.selection == .task(id: "perf-task-0"))
             try search.setInput("")
-            try picker.select(value: WorkPresentation.compact)
             // Keep the same population; a shorter viewport makes both sizes
             // scrollable. Resize and start the held read outside the interval.
             window.setContentSize(NSSize(width: 1400, height: 300))
@@ -759,7 +740,7 @@ struct DesktopPerformanceTests {
             try await sample("native_session_reopen", "snapshot", round, journal, window, soaking: round >= samples, captureWhenReady: true, action: {
                 await model.openTaskLink(url)
                 try journal.write(["event": "reopen_request", "round": round,
-                                   "linked": model.linkedSession?.record.id as Any? ?? NSNull(),
+                                   "selected_session": model.navigation.selectedSessionId as Any? ?? NSNull(),
                                    "state": String(describing: store.sessions.first { $0.id == fixture.sessionId }?.state),
                                    "actions": String(describing: store.sessions.first { $0.id == fixture.sessionId }?.record.actions)])
             }, ready: {
@@ -773,7 +754,7 @@ struct DesktopPerformanceTests {
                 let readiness = "\(terminal.surface != nil)/\(hasHistory)/\(focused)/\(selected)/\(state)"
                 if readiness != lastReadiness {
                     try? journal.write(["event": "reopen_state", "round": round,
-                                        "linked": model.linkedSession?.record.id as Any? ?? NSNull(),
+                                        "selected_session": model.navigation.selectedSessionId as Any? ?? NSNull(),
                                         "has_surface": terminal.surface != nil, "has_history": hasHistory,
                                         "focused": focused, "selected": selected, "state": state])
                     lastReadiness = readiness

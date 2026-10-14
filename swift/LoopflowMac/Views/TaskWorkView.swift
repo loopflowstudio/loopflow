@@ -1,10 +1,8 @@
 import Loopflow
 import SwiftUI
 
-/// The Task workspace's header: the Task's Workflow as a graph scaled to the
-/// window, the node it waits at or the edge it is on marked. The edges that
-/// can be chosen now are buttons (`lf task run`) and **Move to** sets a node
-/// (`lf task move`). Rust owns the graph and the position.
+/// Keep current Workflow position/actions compact; disclose its graph in Overview.
+/// Rust owns the graph, position and legal actions.
 struct TaskWorkflowHeader: View {
     let model: WorkModel
     let task: RoadmapTask
@@ -23,12 +21,21 @@ struct TaskWorkflowHeader: View {
             HStack(alignment: .center, spacing: Spacing.md) {
                 if task.runtime?.status == .paused { Text("Paused").foregroundStyle(palette.textSecondary) }
                 if let workflow = work.value?.workflow {
-                    WorkflowGraph(
-                        nodes: workflow.nodes, edges: workflow.edges, position: workflow.position,
-                        choices: workflow.outgoing, unavailable: unavailable, fits: true,
-                        hint: { "lf task run \(task.task.identifier) \($0.launchName) · to \($0.to)" },
-                        choose: { edge in Task { await model.startTask(edge.launchName, task: task, wave: wave) } })
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Text(positionLabel(workflow))
+                        .lineLimit(1)
+                        .foregroundStyle(palette.textSecondary)
+                        .accessibilityIdentifier("task-workflow-position")
+                    ForEach(workflow.outgoing, id: \.self) { index in
+                        if workflow.edges.indices.contains(index) {
+                            let edge = workflow.edges[index]
+                            Button(edge.launchName) { Task { await model.startTask(edge.launchName, task: task, wave: wave) } }
+                                .buttonStyle(WorkOutlineButtonStyle(emphasized: true))
+                                .disabled(unavailable != nil)
+                                .help(unavailable ?? "lf task run \(task.task.identifier) \(edge.launchName)")
+                                .accessibilityIdentifier("task-workflow-action-\(index)")
+                        }
+                    }
+                    Spacer(minLength: 0)
                     // Put the Task at a node without running anything.
                     Menu("Move to") {
                         ForEach(["start"] + workflow.nodes.map(\.name) + ["end"], id: \.self) { node in
@@ -66,6 +73,8 @@ struct TaskWorkflowHeader: View {
                 }
                 if acting { ProgressView().controlSize(.small) }
             }
+            .lineLimit(1)
+            .frame(minHeight: 28)
             if work.value?.workflow != nil, let error = work.errorMessage {
                 Text("Workflow refresh failed: \(error)")
                     .foregroundStyle(palette.failure)
@@ -76,6 +85,14 @@ struct TaskWorkflowHeader: View {
                 get: { expandedTasks.contains(task.id) },
                 set: { if $0 { expandedTasks.insert(task.id) } else { expandedTasks.remove(task.id) } }
             )) {
+                if let workflow = work.value?.workflow {
+                    WorkflowGraph(
+                        nodes: workflow.nodes, edges: workflow.edges, position: workflow.position,
+                        choices: workflow.outgoing, unavailable: unavailable, fits: true,
+                        hint: { "lf task run \(task.task.identifier) \($0.launchName) · to \($0.to)" },
+                        choose: { edge in Task { await model.startTask(edge.launchName, task: task, wave: wave) } })
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
                 Text(task.task.description)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -121,6 +138,16 @@ struct TaskWorkflowHeader: View {
         .background(palette.background)
         .overlay(alignment: .bottom) { Rectangle().fill(palette.border).frame(height: 1) }
         .accessibilityIdentifier("task-workflow")
+    }
+
+    private func positionLabel(_ workflow: Workflow) -> String {
+        switch workflow.position {
+        case .node(let name): return "\(workflow.name) · \(name)"
+        case .edge(let index, _, let running):
+            guard workflow.edges.indices.contains(index) else { return "Workflow position unavailable" }
+            let edge = workflow.edges[index]
+            return "\(edge.from) → \(edge.to) · \(running ? "running" : "stopped")"
+        }
     }
 
     /// Why no edge can be started now.

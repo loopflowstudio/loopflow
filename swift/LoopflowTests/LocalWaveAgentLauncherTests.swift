@@ -70,28 +70,6 @@ struct LocalWaveAgentLauncherTests {
     }
 
 
-    @Test("Task controls use the Task commands")
-    func taskControlCommandShapes() {
-        let lf = "/Applications/Loopflow.app/Contents/MacOS/lf"
-
-        #expect(LocalWaveAgentLauncher.taskRunArguments(issue: "W2-131") == ["-b", "task", "run", "W2-131"])
-        #expect(LocalWaveAgentLauncher.taskInterruptCommand(lfPath: lf, issue: "W2-131") == [
-            lf, "task", "interrupt", "W2-131",
-        ])
-    }
-
-    @Test("PR review delegates to lf pr open rather than opening a URL itself")
-    func pullRequestReviewDelegatesToCLI() {
-        let lf = "/Applications/Loopflow.app/Contents/MacOS/lf"
-        let command = LocalWaveAgentLauncher.pullRequestReviewCommand(lfPath: lf)
-
-        // The one review-presentation action shells `lf pr open` — the single
-        // presentation boundary — and never constructs a github.com URL to open.
-        #expect(command == [lf, "pr", "open"])
-        #expect(!command.contains { $0.contains("github.com") })
-        #expect(!command.contains { $0.hasPrefix("http") })
-    }
-
     @Test("Prepared checkout receipts retain the owning Machine and require its evidence")
     func checkoutIdentityFixture() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()

@@ -8,10 +8,10 @@ cleanup remains separate and requires a reviewed, restorable plan.
 Product owns this Task. LOO-427 is integrated and completed; historical stacking
 details remain at `0bb13e9261:scratch/get-me-using-lf.md`. Portfolio implementation:
 `d43aa248d3`; shared-reader compression: `50e2cf44d1`. Reconciled October 14
-against semantic implementation `c5ff92d50f`, its uncommitted compression and
-upstream merge `0fe7f5da8a`. Earlier refresh/publication receipts remain at
-`945686275c:scratch/get-me-using-lf.md`. Sidebar metadata and semantic roles are
-implemented; headless Desktop verification passed; updated publication and native review remain.
+against HEAD `87f275c282` and the working rendering diff over `9f19e3c5d1`.
+Implementation and compression are complete; affected-suite gate, publication and
+native acceptance remain. The reconciliation changes documentation only. Product
+has no immediate child Wave memories in this checkout; parent objective and memory were read in full.
 
 ## Problem and accepted direction
 
@@ -171,6 +171,32 @@ now share `publishRoadmap`: acceptance, failure retention, saved-state reset and
 cache replacement stay together. Absent wire text stays absent instead of becoming
 an empty cache entry.
 
+October 14 rendering cut removes `WorkModel.linkedSession`, the view's
+`onChange` mailbox and `openLinkedSession`, unprepared-Task container swapping,
+and unused directory threading through pane views. `WorkModel.placeSession`
+now installs both resolved Task openings and exact contextual links. It preserves
+Machine/location checks, request generations and separate readiness observation.
+Opening uses one per-workspace request token instead of a resettable Boolean;
+an old request cannot clear a newer request's feedback.
+
+Audit-backed removals: Task details' ordinary Session inventory and row helpers;
+`ReferenceTextView.swift` and its exclusive Mac/absent-UIKit tests;
+`PlatformHelpers.swift`; uncalled launcher interrupt/PR-review wrappers;
+`WorkActivityView.turnIntentError`; constant-nil Roadmap selection/detail branches;
+and `WorkPresentation` with its obsolete picker-only test/benchmark paths.
+Waiting retains exact contextual links; history, raw diagnostics, public
+`TaskSessionGroups` and `ChatReference`, platform callbacks, surface pools and
+drafts survive. Portfolio rows now call its existing repository/Task opener.
+SessionControls and retained native WorkNavigation proof keep takeover/input
+coverage; the deleted UI inventory journey supplied no current navigation proof.
+
+Compression completes the Portfolio cut through `RoadmapWaveCard`, `RoadmapTaskRow`,
+`NowSectionView` and `NowRowView`: remove always-nil selection and unused callbacks;
+rows open their repository Task or Wave directly. Exact Session opening first reuses
+retained placement before resolving membership. `LinkedSession` no longer needs the
+mailbox's equality conformance. No remaining deletion targets in this rendering cut;
+the unresolved exported-API inventory remains retained.
+
 ## Implementation and remaining work
 
 The Work-first entry/navigation cut, isolated persisted fixture, configured-runtime
@@ -220,53 +246,27 @@ provider acceptance, installation, or three-day adoption credit. Chapter KRs rem
 historically readable; October 7 retired numeric/soak acceptance, not retention or
 usefulness. No external-product progress credit follows from Loopflow UI work alone.
 
-Earlier gate and composition evidence: `0bb13e9261:scratch/get-me-using-lf.md`,
-**Done when / unattended gate**. October 11 publication at `73d2861c1e` passed
-65 Rust acceptance tests (one Linux-only ignored), three portfolio tests, 193
-Desktop tests, eight launcher tests and static checks; those revisions are not a
-new gate pass. Display diagnostics were skipped and installed runtime/native
-proof remained unresolved. Later bundled-runtime authority supersedes the
-installed-only hold, never authorizing landing or live migration.
-
-## Current review order — October 11
-
-Jack Heart prioritized the populated Loopflow repo, Wave and Task views: correct
-Wave/Task visibility and minimal buttons/chrome. Get those main views feeling right
-before revising Portfolio. The repository/Portfolio view remains in scope and is
-wanted, but its present design is not accepted. The isolated empty-clone demo failed
-to establish the requested experience; see `work-first-demo.md` for the freeze,
-focused repair evidence and remaining native proof.
+Earlier gate/publication and review-order evidence remains at
+`9f19e3c5d1:scratch/get-me-using-lf.md`, **Done when** and **Current review order**.
+Jack Heart prioritizes populated repo/Wave/Task usability before Portfolio.
+Fixture checks and publication never grant installation, takeover or adoption credit.
 
 ## Sidebar visibility and cleanup evidence
 
-Jack Heart requested a minimal working set without Session tallies. Shared Started
-and unresolved execution now select ordinary Tasks; Session presence alone cannot
-admit unstarted or settled Tasks. A stopped failed Flow does not keep a completed
-Task current; live/unknown execution, completion refusals and unsettled files do.
-Task/Session history, binding and retained panes survive these filters.
-
-Jack authorized exact real-data cleanup after rehearsal in the private copy.
-LOO-376 completion and the 126-row legacy repair were applied; restoration receipts
-and limits remain in work-first-demo.md. No broader cleanup is authorized.
-LOO-276 remains unclassified; merge alone cannot dispose of LOO-443/400/390/382/
-380/371. LOO-378 remains explicitly paused; LOO-367/330/389 have unsettled work.
-LOO-312 was subsequently recovered without changing its identity. Historical
-inventories, transient config failure, native screenshot, exact candidates and
-focused checks: `5b62453be7:scratch/get-me-using-lf.md`, **Sidebar cleanup and
-recurrence**. These observations are not a current execution inventory.
+Started and unresolved execution select ordinary Tasks; Session presence alone
+cannot admit unstarted or settled Tasks. Live/unknown execution, completion refusals
+and unsettled files remain evidence. History, binding and panes survive filtering.
+Exact cleanup and unresolved Task dispositions remain in work-first-demo.md and
+`9f19e3c5d1:scratch/get-me-using-lf.md`, this heading. The bounded LOO-376 and
+126-row repairs grant no broader cleanup authority; LOO-312 was recovered intact.
 
 ## Paused and prepared demo — October 13
 
-Jack Heart selected Paused and authorized pausing LOO-389. Independent Task
-lf-2086e0a / PR #1544 merged as f2855f7bd46aa93d57b3a2e56fc8ec917f266ea3;
-v0.13.14 supplied the migration; native pausing of LOO-389 remains unverified.
-Preserve identity, history, checkout
-and Workflow; resume starts nothing and pause never kills a live process.
-LOO-427 is completed after verified merge; no unknown Process was retired.
-Earlier CI/queue failures, exact native trust observations and preserved draft
-receipts: `185c0b3c2e:scratch/get-me-using-lf.md`, **Paused**.
-Older app receipts remain at `c89c789fd1:scratch/get-me-using-lf.md`, this heading.
-CMUX title environment scrub (9e79fa4970) awaits deployment; eight checks passed.
+Jack Heart selected Paused and authorized pausing LOO-389; native pausing remains
+unverified. Released v0.13.14 supplied its migration. Preserve identity, history,
+checkout and Workflow; resume starts nothing and pause kills no process.
+Earlier Task/release/hook receipts: `9f19e3c5d1:scratch/get-me-using-lf.md`, this heading.
+No additional installation, migration or cleanup is authorized.
 
 ## Current pursuit — UX and end-to-end profiling, October 13
 
@@ -300,32 +300,16 @@ approval of unrelated hooks is part of this work.
 Jack Heart's October 13 steers selected compact title/metadata rows. Task rows now
 use 44-point minimum height, with program status, stored Task/PR links and recorded
 remote Machine labels. Native density remains unaccepted. No Session counts or
-branch/path clutter. Native Link controls are siblings of the title button; only
-the title selects the conversation. Existing workspace and surface owners survive.
+branch/path clutter. The full row background selects its conversation; independent
+Task/PR links do not. Existing workspace and surface owners survive.
 
-Compared the current [Rex OSC 7501 contract](https://www.superlogical.com/rex/docs/build/program-status)
-on October 13: the existing reducer matches states, record replacement, clear/exit
-lifetimes and source-scoped validation. Sidebar rendering consumes validated shared
-Session reports; it does not parse terminal output. Across Sessions, report severity
-wins, primary then stable Session ID breaks ties, and the tooltip identifies the
-Session. Reports outrank inferred shared Waiting. Client liveness alone supplies no
-visible activity; cleared reporters stay unknown and are omitted. Failed readings
-remain inspectable. No Claude/Codex rollout is assumed.
-Done/Error never supplies Task completion, Paused or Workflow position.
-
-Rust adds the optional Machine label to the existing checkout projection, reading
-registered Machines once per planning snapshot and joining the recorded checkout
-owner. Changed delegation defaults cannot relabel started work. Swift omits local
-names; unknown ownership and unnamed remote Machines stay explicit. No assignment
-label, discovery polling, network read or second owner is added. The shared Rust
-and Swift fixtures carry the field. Review found saved Session pages retaining
-old reports/Waiting; cache restoration now strips both with client liveness.
-
-Focused proof covers report/inference/unknown precedence, independent terminal
-record IDs, clear/cache boundaries, stored link destinations outside title actions,
-retained layout/Files draft, remote/local/unknown names and recorded ownership after
-changed delegation and Machine rename. Browser dispatch and density remain native
-demo checks; headless inspection cannot synthesize either.
+Shared reports outrank inferred Waiting; severity, primary then Session ID order
+them. Unknown/client-only activity stays hidden, failures inspectable. Done/Error
+never changes Task or Workflow state. Recorded checkout ownership supplies remote
+Machine labels; changed delegation defaults cannot relabel started work. Cached
+pages strip old reports, Waiting and client liveness. Detailed contract comparison,
+implementation and focused proof: `9f19e3c5d1:scratch/get-me-using-lf.md`, this section.
+Native link dispatch, density and retained draft review remain outstanding.
 
 ### Profiling and optimization
 
@@ -374,9 +358,11 @@ responsive input, six provider timing cases, hook approval-once, Portfolio or
 complete visual acceptance. No new installation, live migration, client takeover,
 broader cleanup or landing is authorized by this pursuit.
 
-That recorded review app uses pre-semantic Swift `a590ecb7ee`. A matching bundle
-for the October 14 changes and its native review remain outstanding; navigation
-shown in the earlier app does not establish the new colors or focus behavior.
+The October 13 app used pre-semantic Swift `a590ecb7ee`. October 14 semantic,
+row-hit-target and navigation-polish relaunches supersede that app receipt
+(work-first-demo.md); they establish populated navigation and the observed contrast
+repair, not complete visual acceptance. A bundle containing the current rendering
+ownership cut and its native review remain outstanding.
 
 Main `e3c3a038aa` adds `lf clone` (merged here by `0fe7f5da8a`): isolated
 navigation and fresh stand-in conversation fixtures can use the shared clone
@@ -395,44 +381,19 @@ Task lifecycle and Workflow separate from program activity. Omit unknown activit
 a live client alone cannot claim Working. This supersedes the sidebar's former
 “Status unknown”/“Active · inferred” presentation, not its underlying observations.
 The semantic-token cutover is implemented below; rendered judgment remains with
-demo. The previously referenced `pr-review.html` is absent from this checkout;
-an updated walkthrough remains a review artifact, not current validation evidence.
+demo. `scratch/pr-review.html` describes the implementation; it is a review artifact,
+not native validation evidence.
 
 
-### Implementation cut — October 14
+### Semantic cut — implemented October 14
 
-Jack Heart requested continuing the redesign after the walkthrough. One coherent
-Desktop cut in LOO-462, returning to demo; no landing or installation authority.
-
-- Keep `LoopflowPalette` as the color owner. Add explicit roles for selection
-  fill/edge, keyboard focus, link ink/hover, and emphasized versus ordinary actions.
-  Reuse cream/charcoal, burgundy/rose, blue, amber, green and failure red. Do not
-  invent a new theme or force appearance; both existing appearances need deliberate
-  role assignments. Text uses primary/secondary/muted ink, never selection hue.
-- Cut over `WorkNavigator`, `TaskRowMetadata`, `WorkBreadcrumbBar`, shared button
-  styles, Workflow and Files/control chrome to these roles. Repo identity may retain
-  burgundy; Wave/Task titles stay neutral. Links are secondary ink with underline
-  on hover/focus. Selection uses tint plus edge; keyboard focus uses a distinct
-  outline and survives selection. Ordinary buttons are neutral; emphasized action
-  alone uses burgundy. Red remains failures/destructive affordances, not navigation.
-- Keep status evidence intact. Presentation omits unknown and client-liveness-only
-  labels/dots, without falsely classifying either as idle. Valid working reports
-  use blue; supported Waiting/blocked uses amber with wording that preserves their
-  distinction; actual errors use red. Successful program reports are not Task
-  completion. Read failures remain inspectable without painting every row as failed.
-- Delete replaced direct `accentInk` choices and duplicate Desktop status-color
-  mappings rather than layer another theme over them. Preserve terminal ANSI colors,
-  selected-failed combinations, retained panes/drafts, APIs and all data records.
-  Update `VISUAL_DESIGN.md` to separate Desktop semantics from marketing examples.
-- Focused checks: palette/row/headless view tests for unknown/active omission,
-  reported working/error, shared Waiting, selection plus failure, muted links and
-  focus visibility. Build using `scripts/test_desktop.sh` with affected filters;
-  contrast checks must resolve actual light/dark colors and composited backgrounds
-  (4.5:1 ordinary text, 3:1 meaningful indicators). No empty filter counts as proof.
-- Demo: same real Loopflow repository in the matching bundled app, sidebar → Task
-  → Files/Workflow. Inspect both appearances, hover/focus/selection and status
-  combinations without creating fake live reports or interrupting user clients.
-  Refresh `pr-review.html` after implementation so it stops describing old code.
+Accepted role assignments, contrast checks and native acceptance remain at
+`9f19e3c5d1:scratch/get-me-using-lf.md`, **Implementation cut — October 14**, and
+VISUAL_DESIGN.md. Preserve palette/ANSI, neutral selection, distinct keyboard focus,
+quiet links, restrained burgundy actions and source-backed activity. Unknown and
+client-only activity stay hidden; read errors remain inspectable. Done/Error never
+sets Task completion or Workflow state. Native light/dark, focus/hover/selection,
+link dispatch and provider input remain unverified; no synthetic live reports.
 
 ### Current pursuit — rendering ownership, October 14
 
@@ -443,50 +404,86 @@ cleanup, native takeover, or restart of the running demo is authorized by this c
 Prior semantic-color implementation and passing checks are preserved at
 `5ade59f428:scratch/get-me-using-lf.md`, **Implementation state — October 14**.
 
-Read these complete local artifacts before implementation:
-- `scratch/rendering-state-review.html`: red/green data structures and APIs. Green
-  is a proposal, not implemented code or verified native behavior.
-- `scratch/cmux-implementation-study.html`: pinned source/test research and limits.
-- `scratch/swift-relevance-audit.html` and `swift-relevance-inventory.json`: every
-  tracked Swift file/declaration inventoried; 183 unresolved symbol entries require
-  judgment, not blanket deletion. Runtime callbacks and public APIs need evidence.
+The rendering cut is implemented in the working diff:
 
-Build the smallest coherent cut:
-1. Move Task conversation preparation-to-pane handoff into the existing model/
-   workspace owner. Install the resolved Session into its retained workspace before
-   clearing opening. Remove the view-observed linkedSession mailbox for that role,
-   replacing it through the same opening owner for deep links and CLI companions.
-   Preserve request generations, Machine locations, readiness/failure receipts,
-   explicit takeover and delayed-result destination identity. A late A result may
-   populate A, never redirect a person who selected B.
-2. Render the selected destination immediately. Keep cached Work, Workflow, panes,
-   native surfaces, focus and drafts across reads and switching. Refresh must not
-   clear a good value. Derive presentation from existing state rather than add
-   another persisted lifecycle or copied selected-Session field. Prepared permits
-   mounting; it does not prove responsive coding-agent input.
-3. Keep sidebar, compact header and terminal host structurally stable. Any necessary
-   initial opening feedback belongs inside the terminal area, with one vocabulary;
-   errors remain actionable without replacing retained content. Reduce cold Workflow
-   height jumps by placing expanded graph/detail in Overview while keeping compact
-   current-position/available-action information visible. This is a reversible
-   implementation choice for the next demo, not claimed visual acceptance.
-4. Learn cmux's separation of retained native ownership, mounted visibility, focus
-   and diagnostic readiness. Reuse our existing surface pool; no AppKit portal
-   rewrite, custom Observation registrar, TCA adoption or new Swift SQLite reader.
-   Rust/lf retains datastore and legal-action ownership. Narrow observation where
-   concrete dependencies cause rebuilding, not speculative global debouncing.
-5. Apply audit-backed deletions relevant to this current app: obsolete reachable
-   Session inventory/chrome, dead presentation branches and replaced handoff paths,
-   plus their obsolete tests. Resolve remaining inventory entries by evidence or
-   explicitly retain uncertainty. Do not infer dead code from textual call counts
-   or erase history/CLI access to make the UI simpler. Preserve platform consumers.
+- `WorkModel.installConversation` installs the resolved record and pane before
+  preparation ends; `placeSession` also serves exact contextual links. The existing
+  workspace carries a request token, not the proposed new workspace-opening API
+  or a view-observed mailbox. Generation and Machine/location checks survive.
+  Superseded preparation results are discarded; late readiness cannot redirect
+  navigation. Cached switches reuse their selected conversation without preparation.
+- The selected Work renders immediately through the retained pane host. Initial
+  opening/recovery feedback lives in its terminal area. Last-good Work/Workflow,
+  panes, native surfaces, focus targets and drafts retain their existing owners.
+  Prepared permits mounting; it does not prove responsive coding-agent input.
+- Current Workflow position/actions stay compact; Overview holds graph/details.
+  This is a reversible implementation choice for Jack Heart's suggested expandable
+  header, pending native geometry and interaction review.
+- Audit-backed deletions remove the obsolete inventory, handoff, presentation
+  branches and exclusive tests described above. Portfolio Task/Wave rows call
+  the existing destination opener. Unresolved exported APIs remain retained.
 
-Tests must observe intermediate transitions, not only final state: first opening
-never flashes empty between resolution and pane installation; cached switch retains
-exact pane/draft without preparing again; late replies stay with their Work;
-metadata errors retain content; stale readiness cannot mark another surface ready.
-Run focused headless Swift build/tests; repair failures. Keep existing end-to-end
-Codex/Claude readiness profiling obligations honest: native input readiness is not
-surface creation. Do not claim timings, flamegraphs or visual stability from mocks.
-Record one-line checks and concrete review findings; refresh the HTML walkthrough
-with actual APIs after implementation. The running demo and user clients stay intact.
+The historical proposal in `rendering-state-review.html` is pinned to
+`5ade59f428`; its green APIs are not the final API. `pr-review.html` describes the
+working implementation. The cmux study is pinned to
+`321d7d4458abb4005584f8459cf98ade967b38ad`: retained terminal ownership, mounted
+visibility, focus and diagnostic readiness are separate. Its source research
+establishes no cmux benchmark or Loopflow native frame sequence.
+The Swift audit/inventory preserves 183 unresolved entries, not deletion authority.
+Reconciliation reviewed its metadata and eight cuts, not all 14,483 inventory entries.
+
+Jack Heart accepted broad update-boundary tests, preferring useful coverage to
+brittle exact SwiftUI body counts or private scheduling assertions. Existing
+headless opening/retention tests cover this rendering cut. They do not prove that
+unrelated database writes or transcript output avoid every expensive query.
+`scratch/datastore-reactivity-study.html` records separate, initial source research:
+current subscriptions are coarse, mutations still request broad refreshes, and
+revision tags alone do not establish a coherent SQLite snapshot. Query-dependent
+invalidation, second-process write coverage, read-your-write acknowledgment and
+external liveness/file adapters remain separate substantial work. No datastore
+framework rewrite or new Swift SQLite reader is part of this cut; Rust/lf remains
+the sole internal-schema reader and legal-action owner.
+
+Upstream `f9a16d6f84` adds provider continuation with `lf resume -a`; that does not
+supply native approval-once or input-readiness evidence for either provider here.
+The existing clone facility can isolate stand-in checks but still cannot substitute
+for real provider input or the accepted populated-repository demo.
+
+### Rendering implementation and remaining proof
+
+Implemented against `9f19e3c5d1`: immediate Work selection, model-owned synchronous
+Session/pane installation, terminal-local feedback and stable pane host; compact
+Workflow position/actions with graph in Overview. Last-good readings and surface
+ownership are unchanged. Headless tests observe ensure → installed/opening pane →
+prepared, same-pane/draft return, delayed request cancellation, companion visibility
+and readiness failures. Prepared still means mountable, never responsive agent input.
+
+Review findings fixed: contextual links and Task entry had duplicate placement;
+both now call `placeSession`. Per-workspace request identity prevents older cleanup
+from clearing a newer opening. Portfolio Task clicks previously wrote a constant-nil
+binding; they now route to the existing opener. The missing-Machine path must fail
+before connection instead of bypassing the unavailable workspace.
+
+All 183 unresolved audit entries remain intentionally retained: exported library
+APIs and their tests lack downstream-use evidence. Authored-Wave discovery/write
+ownership and SwiftPM/XcodeGen resource parity remain separate follow-up candidates,
+not deletion targets in this rendering cut. The pinned audit/research artifacts
+remain historical evidence; `pr-review.html` now describes actual APIs.
+
+Remaining: affected-suite gate and publication, then native geometry,
+focus, exact links and Portfolio review. Six Codex/Claude input trials, paired
+wall/CPU evidence and hook approval-once proof remain open. No install, app restart,
+takeover, live cleanup or datastore framework rewrite occurred.
+
+Publication review repaired TaskFlowProofTests' stale expectation that the Workflow
+graph remains visible in the collapsed header. It now checks compact position/actions
+and the graph under Overview. The initial Desktop run failed only that assertion;
+the repaired full run passes. The required consolidated gate did not start product
+suites: resource recovery exceeded its 60-second wrapper deadline while build pruning
+was still running. That invocation's orphaned pruning child was stopped. A subsequent
+read-only inventory also failed its five-second uv-cache measurement deadline;
+64.4 GiB remained free. Publication is blocked on a successful resource preflight and
+affected-suite gate. No PR update, app restart or installation occurred; the separate
+datastore study remains outside this checkpoint.
+
+Check: `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone` PASS (524 tests, 61 suites; optional native diagnostics skipped); architecture, Swift boundary and diff checks PASS; `uv run python scripts/test.py --reuse-passing --base f9a16d6f84 < /dev/null` BLOCKED (resource preflight, no product suites); logs `/tmp/loo462-publish-{desktop-final,gate}.log`, inventory `/tmp/loo462-publish-resources.json`. Native proof remains with demo; affected suites with gate.

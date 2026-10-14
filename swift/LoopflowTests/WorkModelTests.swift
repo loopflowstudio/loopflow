@@ -454,7 +454,7 @@ struct WorkModelStreamTests {
         workspace.multiplexer.load(sessionId: "retained")
         let layout = workspace.multiplexer.layout
         model.navigation.renaming = SessionRenameDraft(sessionId: "retained", text: "Unsent name")
-        let initial = model.visibleWork.outline(presentation: .full, collapsed: [], search: "", planningReadable: true)
+        let initial = model.visibleWork.outline(collapsed: [], search: "", planningReadable: true)
         #expect(initial.contains { $0.id == key })
         let keeping = Task { await model.keepWorkCurrent() }
         defer { keeping.cancel() }
@@ -463,7 +463,7 @@ struct WorkModelStreamTests {
         await feed.send(WorkFrame(sequence: 1, answers: scope.id, home: "/home", revisions: nil,
             unavailable: "sqlite: no such column: t.paused", content: .planning(nil), wire: nil))
         try await eventually { model.roadmap.errorMessage?.contains("t.paused") == true }
-        #expect(model.visibleWork.outline(presentation: .full, collapsed: [], search: "", planningReadable: false).map(\.id) == initial.map(\.id))
+        #expect(model.visibleWork.outline(collapsed: [], search: "", planningReadable: false).map(\.id) == initial.map(\.id))
         #expect(model.selection == key.work)
         #expect(workspace.multiplexer.layout == layout)
         for (index, truncated) in [false, true].enumerated() {
@@ -477,7 +477,7 @@ struct WorkModelStreamTests {
             await feed.send(try fixture.frame("planning", sequence: index + 2, answers: scope.id,
                 body: "{\"roadmap\":\(roadmap),\"waves\":\(fixture.wavesJSON)}"))
             try await eventually { model.roadmap.errorMessage?.contains(truncated ? "incomplete" : "Task snapshot") == true }
-            #expect(model.visibleWork.outline(presentation: .full, collapsed: [], search: "", planningReadable: false).map(\.id) == initial.map(\.id))
+            #expect(model.visibleWork.outline(collapsed: [], search: "", planningReadable: false).map(\.id) == initial.map(\.id))
             #expect(model.selection == key.work)
             #expect(model.navigation.renaming?.text == "Unsent name")
             #expect(registry.retained(workspaceKey) === workspace)

@@ -9,8 +9,8 @@ Accepted direction and implementation evidence live in `get-me-using-lf.md`.
 ## Product review
 
 - Jack selected conversation-first Tasks and suggested a small expandable overview
-  header. The implementation retains the Workflow graph and collapses the description
-  under Overview. Required immediately visible supporting material, sizing and native
+  header. Current Workflow position/actions stay compact; Overview holds the graph
+  and description. Required immediately visible supporting material, sizing and native
   usability remain for demo review; the implementation choice is not visual acceptance.
 - Historical-only repositories keep ordinary Work/history navigation and do not
   auto-acquire. This is the conservative implementation choice; a distinct historical
@@ -105,3 +105,11 @@ A retained selected pane gets a neutral edge, not a keyboard-focus claim; the
 existing native terminal owns its responder/caret. No program report/client-only
 evidence means no activity indicator; unavailable
 reads retain an info icon and reason. Native interaction judgment remains with demo.
+
+## Rendering ownership — October 14
+
+For Jack Heart's accepted rendering cut, use a per-workspace opening request token
+and derive its loading flag; canceled A cannot clear newer A. Keep compact Workflow
+position/actions visible and disclose the graph in Overview. These are reversible
+presentation choices pending native review. Retain all 183 unresolved exported-API
+audit entries; absence of local callers is insufficient downstream evidence.

@@ -79,6 +79,11 @@ struct RepoView: View {
                     model.inspectDesktop(repository: repository, window: incarnation, workspaces: sessionWorkspaces)
                 }, controlPane: { try sessionWorkspaces.controlPane($0, model: model) },
                    readText: { try sessionWorkspaces.readText($0) }) { url in
+                    if sessionWorkspaces.localMachineId == nil { await sessionWorkspaces.refreshMachine(query: query) }
+                    if let machine = sessionWorkspaces.localMachineId {
+                        model.confirmMachine(machine)
+                        model.bindWorkspaces(sessionWorkspaces, repository: repository)
+                    }
                     await model.openTaskLink(url)
                 }.frame(width: 0, height: 0)
             }

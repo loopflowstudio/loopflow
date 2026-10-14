@@ -269,17 +269,23 @@ struct TaskFlowTests {
         try await eventually("the explicitly addressed Session opens") { panes.focusedPane.sessionId == record.id }
         #expect(await calls.calls.allSatisfy { $0.prefix(2) != ["session", "ensure"] })
 
-        // The header is the Workflow: the current node, its edges as buttons, Move to.
+        // The compact header keeps position/actions; Overview holds the graph.
         try await eventually("the Task part arrives") { model.taskWork[task.id].value != nil }
         try await settle()
-        #expect(try find("task-workflow-node-demo").accessibilityValue().string() == "Current")
-        #expect(try find("task-workflow-process-4").button().labelView().text().string() == "ship")
+        let workflowName = try #require(workflow["name"] as? String)
+        #expect(try find("task-workflow-position").text().string() == "\(workflowName) · demo")
+        #expect(try find("task-workflow-action-4").button().labelView().text().string() == "ship")
         _ = try find("task-workflow-move")
+        let overview = try find("task-overview").disclosureGroup()
+        #expect(try !overview.isExpanded())
+        #expect(try overview.find(viewWithAccessibilityIdentifier: "task-workflow-node-demo")
+            .accessibilityValue().string() == "Current")
         let header = drawn()
-        #expect(header.contains("task-workflow-node-demo"), "the accessibility tree is readable")
+        #expect(header.contains("task-workflow"), "the accessibility tree is readable")
+        #expect(!header.contains("task-workflow-node-demo"), "the graph stays collapsed in Overview")
         #expect(header.isDisjoint(with: [
             "work-materials", "work-toggle-materials", "work-toggle-files",
-            "work-current-stage", "task-show-monitor-\(task.id)", "task-workflow-position",
+            "work-current-stage", "task-show-monitor-\(task.id)",
             "task-flow-processes", "task-work", "task-flow-start",
         ]))
 

@@ -29,7 +29,7 @@ struct WorkNavigator: View {
 
     private func rows(_ workspace: WorkProjection) -> [WorkOutlineRow] {
         workspace.outline(
-            presentation: model.navigation.presentation, collapsed: model.navigation.collapsed,
+            collapsed: model.navigation.collapsed,
             search: model.navigation.search,
             planningReadable: model.roadmap.value != nil && model.roadmap.errorMessage == nil
         )

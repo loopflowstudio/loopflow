@@ -1,6 +1,7 @@
 #if os(macOS)
 import Foundation
 import Testing
+import ViewInspector
 @testable import Loopflow
 @testable import LoopflowMac
 
@@ -35,6 +36,20 @@ struct RoadmapViewTests {
 
         #expect(openingPR.recommended == .openPr)
         #expect(openingPR.reason == "merge head abc1234 on GitHub")
+    }
+
+    @Test @MainActor func portfolioTaskClickOpensItsRepositoryDestination() throws {
+        let snapshot = try loadRoadmapFixture()
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("No read needed") })
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        var opened: (String, String)?
+        let view = RoadmapView(model: model, onOpenWave: { _ in }, onOpenTask: { opened = ($0, $1) })
+        let section = try view.inspect().find(NowSectionView.self).actualView()
+        let row = try #require(section.section.rows.first)
+        try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-task-\(row.task.id)").callOnTapGesture()
+        #expect(opened?.0 == row.wave.repo)
+        #expect(opened?.1 == row.task.id)
+        #expect(model.selection == nil)
     }
 
     private func loadRoadmapFixture(sourceFile: String = #filePath) throws -> RoadmapSnapshot {

@@ -198,16 +198,11 @@ against an unseen reopening. LOO-385 overlap does not establish closure.
 
 ## Terminal-host adoption (2026-10-07)
 
-Jack Heart selected Flow → Task → Wave, Desktop optional, with account-free
-trials and real providers started by Jack in dedicated windows; no host code
-is lifted. Jack confirmed cmux step two and herdr Flow/question/resize/input
-trials and authorized landing. Taskless/28-Flow tests are not fresh-Task adoption,
-native resume, Task publication or Continue/Stop proof. LOO-421 remains open.
-Native resume repeated the operating guide once; first-content naming is only
-a hypothesis. Preserve native hooks/titles. No host integration or external
-progress is established. Failed attempts, release revision and limits:
-`ddc009d780:wave/product/MEMORY.md`, this heading, and
-[findings](../../../docs/reviews/terminal-host-trial.md).
+Jack Heart confirmed cmux/herdr trials and authorized landing; native resume
+repeated the guide once. No fresh-Task adoption, configured continuation, publication
+or Continue/Stop proof follows. LOO-421 remains open. Decisions, failed attempts and
+limits: `87f275c282:.lf/wave/product/MEMORY.md`, this heading, and
+[findings](../../../docs/reviews/terminal-host-trial.md). No host code was lifted.
 
 ## Live Home reconciliation
 
@@ -324,10 +319,9 @@ plain; its primary wrapper remembers the ID (LOO-364). Jack approved the demo
 and requested PR-linked reports grouped as waiting on him, moving and stuck.
 Leaving unarmed merges to Jack is unreviewed.
 
-PR #1439 supersedes stopped-Flow continuation: a Task run starts fresh execs;
-reconcile never resumes. The agent's unreviewed policy waits on Jack at nodes
-and reruns failed edges for three attempts. Historical decisions and the dated
-disabled-cron observation: `6448e3c9e:wave/product/MEMORY.md`, this heading.
+Stopped-Flow continuation, retry-policy and cron history:
+`87f275c282:.lf/wave/product/MEMORY.md`, this heading. Current Workflow contracts
+govern; stopped execution is history, not permission to resume.
 
 An operator once reported `next_move.owner: wave` as someone else's handoff:
 name the reader's own responsibility explicitly. Nothing re-invokes a
@@ -405,6 +399,15 @@ Omit unknown/client-only activity without calling it idle. Preserve report prove
 Working blue, Waiting/Blocked amber with distinct wording, Error red. Stopped edges
 alone are not errors. Use the supplied palette; native appearance can disagree.
 Composited contrast checks pass; native focus/appearance/input judgment remains.
+
+October 14 rendering: Jack Heart approved the ownership cut with cmux research.
+Model-owned pane installation now precedes ending preparation; exact links share
+placement. Request identity prevents an old opening clearing a newer one; superseded
+results cannot redirect navigation. Compact Workflow actions plus Overview's
+graph await native review. Rust/lf alone reads the internal schema;
+coarse subscriptions and caller refreshes need separate query-boundary work, not a
+Swift datastore replacement. Headless transition checks establish neither native
+geometry nor provider readiness.
 
 Jack renewed measured optimization for Codex and Claude separately: cached switch,
 resume and fresh launch end at visibly responsive unsent agent input. October 7's

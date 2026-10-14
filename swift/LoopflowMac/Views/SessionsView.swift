@@ -33,16 +33,18 @@ extension PaneState {
 @Observable
 final class SessionsWorkspace {
     var showsDetails = false
-    var openingConversation = false
+    var conversationRequest: UUID?
+    var openingConversation: Bool { conversationRequest != nil }
     var conversationError: String?
     var didConsiderRepositoryEntry = false
 
     /// Populate this retained Work even if navigation changes while lf prepares it.
     func openRepositoryConversation(store: SessionsStore, registry: SessionsWorkspaceRegistry, onlyIfEmpty: Bool = false) async {
         guard !openingConversation else { return }
-        openingConversation = true
+        let request = UUID()
+        conversationRequest = request
         conversationError = nil
-        defer { openingConversation = false }
+        defer { if conversationRequest == request { conversationRequest = nil } }
         do {
             if onlyIfEmpty {
                 guard try await store.query.repositoryWaves(cwd: store.repoPath).isEmpty,
@@ -217,6 +219,14 @@ final class SessionsWorkspaceRegistry {
     private(set) var machineError: String?
 
     init(localMachineId: String? = nil) { self.localMachineId = localMachineId }
+
+    func sessionStore(repository: String, repoPath: String, query: RegistryQuery) -> SessionsStore {
+        let path = WaveOrigin.resolve(repoPath)
+        let root = WorkWorkspaceKey(repository: repository, kind: .repository, id: repository)
+        return workspace(for: root, title: URL(fileURLWithPath: path).lastPathComponent,
+            location: localMachineId.map { WorkspaceIdentity(machineId: $0, worktree: path) })
+            .sessionStore(repoPath: path, query: query)
+    }
 
     func refreshMachine(query: RegistryQuery) async {
         do { localMachineId = try await query.localMachineId(); machineError = nil }
@@ -728,9 +738,6 @@ struct SessionsView: View {
 struct SessionsContentView: View {
     let machineId: String
     private var rootIdentity: WorkspaceIdentity { WorkspaceIdentity(machineId: machineId, worktree: store.repoPath) }
-    private var currentIdentity: WorkspaceIdentity {
-        selectedWorkspace?.identity ?? taskIdentity ?? rootIdentity
-    }
     let repository: String
     private var currentKey: WorkWorkspaceKey { key(for: model.selection) }
     private func key(for reference: WorkReference?) -> WorkWorkspaceKey {
@@ -772,13 +779,7 @@ struct SessionsContentView: View {
         self.workspaces = workspaces
         self.query = query
         model.bindWorkspaces(workspaces, repository: repository)
-        let root = model.workspaceKey(for: nil, repository: repository)
-        // Match SessionsStore's resolved location so view reconstruction cannot
-        // alternate it with a caller alias and invalidate rendering indefinitely.
-        let resolvedPath = WaveOrigin.resolve(repoPath)
-        let store = workspaces.workspace(for: root, title: URL(fileURLWithPath: resolvedPath).lastPathComponent,
-            location: WorkspaceIdentity(machineId: machineId, worktree: resolvedPath)).sessionStore(repoPath: resolvedPath, query: query)
-        self.store = store
+        self.store = workspaces.sessionStore(repository: repository, repoPath: repoPath, query: query)
     }
 
     private var navigation: WorkNavigation { model.navigation }
@@ -844,31 +845,23 @@ struct SessionsContentView: View {
                                 }
                             if taskPath != nil { missingCheckout }
                         }
-                        if let error = workspace.conversationError {
-                            HStack {
-                                Text(error).textSelection(.enabled)
-                                Button("Retry", action: retryConversation)
-                            }.foregroundStyle(palette.waiting).padding(8)
-                        }
                         ZStack {
-                            Group {
-                                if let taskPath {
-                                    WorkspacePanesView(workspace: workspace,
-                                        path: taskPath, isFocused: terminalsVisible, sessions: store)
-                                        .id(currentKey)
-                                } else if fileTask != nil {
-                                    VStack(spacing: Spacing.md) {
-                                        if let task = fileTask { Text(task.task.task.description) }
-                                        Button("Prepare workspace") { prepareTaskWorkspace(conversation: false) }
-                                        Button("New conversation") { prepareTaskWorkspace(conversation: true) }
-                                        if let error = launchError { Text(error).foregroundStyle(palette.waiting) }
-                                    }.padding()
-                                } else {
-                                    WorkspacePanesView(workspace: workspace,
-                                        path: currentIdentity.worktree, isFocused: terminalsVisible, sessions: store)
-
+                            WorkspacePanesView(workspace: workspace,
+                                isFocused: terminalsVisible, sessions: store)
+                                .id(currentKey)
+                                .overlay(alignment: .top) {
+                                    if let error = workspace.conversationError {
+                                        HStack {
+                                            Text(error).textSelection(.enabled)
+                                            Button("Retry") {
+                                                if let work = workspace.key.reference, work.kind == .task { openTask(work) }
+                                                else { openRepositoryConversation() }
+                                            }
+                                        }
+                                        .foregroundStyle(TerminalPalette.foreground)
+                                        .padding(8).background(TerminalPalette.background)
+                                    }
                                 }
-                            }
                             .opacity(terminalsVisible ? 1 : 0)
                             .disabled(!terminalsVisible)
                             .allowsHitTesting(terminalsVisible)
@@ -946,9 +939,6 @@ struct SessionsContentView: View {
             if model.sessions.errorMessage == nil { workspaces.reconcileMembership(records) }
         }
 
-        .onChange(of: model.linkedSession, initial: true) { _, destination in
-            if let destination { openLinkedSession(destination) }
-        }
         .onReceive(NotificationCenter.default.publisher(for: .ghosttySurfaceClosed)) { notification in
             guard let terminal = notification.object as? TerminalIdentity else { return }
             store.noteSurfaceClosed(terminal, output: notification.userInfo?["output"] as? String)
@@ -1004,7 +994,7 @@ struct SessionsContentView: View {
                     Text("Recorded checkout is missing. This Task is \(runtime.status.label); it cannot be restored.")
                 } else {
                     Text("Recorded checkout is missing")
-                    Button("Restore checkout") { prepareTaskWorkspace(conversation: false) }
+                    Button("Restore checkout") { prepareTaskWorkspace() }
                 }
                 Spacer()
             }
@@ -1014,21 +1004,18 @@ struct SessionsContentView: View {
         }
     }
 
-    private func prepareTaskWorkspace(conversation: Bool) {
+    private func prepareTaskWorkspace() {
         guard let task = fileTask else { return }
         Task { @MainActor in
             do {
-                if conversation { try await newTaskSession(task.task.id) }
-                else {
-                    let repo = store.repoPath
-                    let issue = task.task.task.identifier
-                    let path = try await Task.detached(priority: .userInitiated) {
-                        try LocalWaveAgentLauncher.checkoutTask(repoPath: repo, issue: issue)
-                    }.value
-                    navigation.preparedTaskWorktrees[task.task.id] = path
-                }
+                let repo = store.repoPath
+                let issue = task.task.task.identifier
+                let path = try await Task.detached(priority: .userInitiated) {
+                    try LocalWaveAgentLauncher.checkoutTask(repoPath: repo, issue: issue)
+                }.value
+                navigation.preparedTaskWorktrees[task.task.id] = path
             } catch {
-                launchErrorTitle = conversation ? "Could not start conversation" : "Could not prepare checkout"
+                launchErrorTitle = "Could not prepare checkout"
                 launchError = error.localizedDescription
             }
         }
@@ -1065,63 +1052,8 @@ struct SessionsContentView: View {
         model.remember(destination)
     }
 
-    private func openLinkedSession(_ destination: LinkedSession) {
-        guard model.linkedSession == destination,
-              model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath else { return }
-        let record = destination.record
-        model.linkedSession = nil
-        if let location = destination.location { store.retainLocation(location, for: record) }
-        store.reconcile(model.sessions.value ?? [])
-        openSession(record, preservingOpening: true)
-        let files: TaskFilesStore?
-        do { files = try workspaces.openLinkedFiles(destination, in: currentKey, query: store.query) }
-        catch {
-            model.failLinkedOpening(destination, reason: error.localizedDescription)
-            return
-        }
-        let openingWorkspace = workspace
-        if files != nil, let zoomed = openingWorkspace.multiplexer.zoomedPaneId {
-            openingWorkspace.multiplexer.setZoom(zoomed, enabled: false)
-        }
-        Task { await model.connectLinkedOpening(destination, store: store, workspace: openingWorkspace, files: files) }
-    }
-
     private func openSession(_ record: SessionRecord) {
-        openSession(record, preservingOpening: false)
-    }
-
-    private func openSession(_ record: SessionRecord, preservingOpening: Bool) {
-        let subject: WorkReference?
-        if let selected = model.selection, selected.kind == .task,
-           record.taskIds.contains(key(for: selected).id) || record.workspace?.taskId == key(for: selected).id {
-            subject = selected
-        } else if let selected = model.selection, selected.kind == .wave, record.waveId == selected.id {
-            subject = selected
-        } else { subject = store.taskSubject(for: record) ?? model.projection.subject(for: record.id) }
-        if let retained = workspaces.key(containingSession: record.id) {
-            if !preservingOpening { model.select(retained.reference, preservingOpening: false) }
-        } else if !preservingOpening { model.select(subject, preservingOpening: false) }
-        Perf.begin(Perf.taskWorkspaceReady, "session", id: record.id)
-        // Place the opening/error/elsewhere pane immediately. A slow preparation
-        // must never change focus after the human selects another subject.
-        if case .shell(let id, let machineId) = store.localTerminal(for: record),
-           let key = workspaces.key(containingShell: id, machineId: machineId),
-           let retained = workspaces.retained(key) {
-            model.select(key.reference, preservingOpening: preservingOpening)
-            let panes = retained.multiplexer
-            panes.setCollapsed(paneId: id, collapsed: false)
-            panes.setFocusedPane(id)
-            store.surfaces.focus(.shell(id, machineId: machineId))
-        } else {
-            workspaces.revealSession(record, in: workspace)
-            if let machineId = record.workspace?.machineId {
-                store.surfaces.focus(.session(record.id, machineId: machineId))
-            }
-        }
-        navigation.selectedSessionId = record.id
-        navigation.content = .terminals
-        store.beginPaneLoad(record.id)
-        if !preservingOpening { Task { @MainActor in await store.select(record.id) } }
+        model.openSession(record, store: store)
     }
 
     private func openTask(_ work: WorkReference) {
@@ -1130,11 +1062,6 @@ struct SessionsContentView: View {
             Perf.agentInput("task_click", task: work.id)
             Task { await model.openTaskConversation(work.id) }
         }
-    }
-
-    private func retryConversation() {
-        if let work = workspace.key.reference, work.kind == .task { openTask(work) }
-        else { openRepositoryConversation() }
     }
 
     private func openRepositoryConversation() {
@@ -1256,7 +1183,6 @@ struct SessionsContentView: View {
 
 private struct WorkspacePanesView: View {
     let workspace: SessionsWorkspace
-    let path: String
     let isFocused: Bool
     let sessions: SessionsStore
 
@@ -1268,7 +1194,7 @@ private struct WorkspacePanesView: View {
             layout: layout,
             focusedPaneId: isFocused ? store.focusedPaneId : "",
             zoomedPaneId: store.zoomedPaneId,
-            workingDirectory: path, sessions: sessions, store: store, hover: workspace.hover
+            sessions: sessions, store: store, hover: workspace.hover
         )
         } else {
             ContentUnavailableView("Panes collapsed", systemImage: "rectangle.compress.vertical",
@@ -1289,7 +1215,6 @@ private struct MultiplexerView: View {
     let layout: LayoutNode
     let focusedPaneId: String
     let zoomedPaneId: String?
-    let workingDirectory: String
     let sessions: SessionsStore
     let store: MultiplexerStore
     let hover: PaneHover
@@ -1300,7 +1225,6 @@ private struct MultiplexerView: View {
                 SessionPaneView(
                     pane: pane,
                     isFocused: pane.id == focusedPaneId,
-                    workingDirectory: workingDirectory,
                     sessions: sessions,
                     store: store,
                     hover: hover
@@ -1309,7 +1233,6 @@ private struct MultiplexerView: View {
                 MultiplexerNodeView(
                     node: layout,
                     focusedPaneId: focusedPaneId,
-                    workingDirectory: workingDirectory,
                     sessions: sessions,
                     store: store,
                     hover: hover
@@ -1325,7 +1248,6 @@ private struct MultiplexerView: View {
 private struct MultiplexerNodeView: View {
     let node: LayoutNode
     let focusedPaneId: String
-    let workingDirectory: String
     let sessions: SessionsStore
     let store: MultiplexerStore
     let hover: PaneHover
@@ -1339,7 +1261,6 @@ private struct MultiplexerNodeView: View {
                 SessionPaneView(
                     pane: pane,
                     isFocused: pane.id == focusedPaneId,
-                    workingDirectory: workingDirectory,
                     sessions: sessions,
                     store: store,
                     hover: hover
@@ -1387,7 +1308,6 @@ private struct MultiplexerNodeView: View {
         MultiplexerNodeView(
             node: child,
             focusedPaneId: focusedPaneId,
-            workingDirectory: workingDirectory,
             sessions: sessions,
             store: store,
             hover: hover
@@ -1445,7 +1365,6 @@ private struct SessionPaneView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let pane: PaneState
     let isFocused: Bool
-    let workingDirectory: String
     let sessions: SessionsStore
     let store: MultiplexerStore
     let hover: PaneHover
@@ -1758,6 +1677,10 @@ private struct SessionPaneView: View {
             } actions: {
                 openButton(item, retrying: true)
             }
+        case .pending where workspace.openingConversation:
+            ProgressView("Opening conversation…")
+                .foregroundStyle(TerminalPalette.foreground)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .pending, .live:
             ContentUnavailableView {
                 Label("Not running here", systemImage: "terminal")

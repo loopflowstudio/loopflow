@@ -24,11 +24,6 @@ struct TaskProjection: Identifiable {
     }
 }
 
-enum WorkPresentation: String, CaseIterable {
-    case compact = "Compact"
-    case full = "Full hierarchy"
-}
-
 struct WaveProjection: Identifiable {
     let id: WorkNodeKey
     let roadmap: WaveRoadmap
@@ -178,7 +173,7 @@ struct WorkOutlineRow: Identifiable {
 
 extension WorkProjection {
     func outline(
-        presentation: WorkPresentation, collapsed: Set<WorkNodeKey>,
+        collapsed: Set<WorkNodeKey>,
         search: String, planningReadable: Bool
     ) -> [WorkOutlineRow] {
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -206,7 +201,7 @@ extension WorkProjection {
             } else { complete = false }
             let workingSet = wave.tasks.filter(\.inWorkingSet)
             let waveHasChildren = !workingSet.isEmpty
-            let omitWave = presentation == .compact && waves.count == 1 && complete
+            let omitWave = waves.count == 1 && complete
                 && waveHasChildren && wave.sessions.isEmpty && expanded(wave.id)
             let waveStart = rows.count
             if !omitWave { appendWork(waveSubject, depth: 0, ancestors: [], hasChildren: waveHasChildren,
@@ -281,7 +276,6 @@ final class WorkNavigation {
     /// Source revisions isolate disclosure from changed definitions and repositories.
     var expandedCompositionGroups: [String: Set<String>] = [:]
     var showsActivity = false
-    var presentation: WorkPresentation = .compact
     var selectedSessionId: String? {
         get { workspacePresentation.selectedSessionId }
         set {

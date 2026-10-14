@@ -76,7 +76,7 @@ struct DesktopHeadlessTests {
         }, repoPath: "/src/loopflow")
         await model.refresh()
         #expect(model.peerPlanning.value?.count == 2)
-        let view = RoadmapView(model: model, onOpenWave: { _ in })
+        let view = RoadmapView(model: model, onOpenWave: { _ in }, onOpenTask: { _, _ in })
         let statusView = try view.inspect().find(PeerPlanningView.self)
         #expect(try statusView.find(text: "Local changes pending").string() == "Local changes pending")
     }
@@ -429,12 +429,10 @@ struct DesktopHeadlessTests {
 
         // At `demo` the edges leaving it are the buttons, named by what they run.
         let waiting = try view(position: ["kind": "node", "node": "demo"], outgoing: [3, 4])
-        #expect(throws: (any Error).self) {
-            try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-position")
-        }
+        #expect(try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-position").text().string() == "feature · demo")
         #expect(try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-node-demo")
             .accessibilityValue().string() == "Current")
-        let ship = try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-process-4").button()
+        let ship = try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-action-4").button()
         #expect(try ship.labelView().text().string() == "ship")
         try ship.tap()
         for _ in 0..<200 where await started.calls.isEmpty { try await Task.sleep(for: .milliseconds(5)) }
@@ -589,7 +587,6 @@ struct DesktopHeadlessTests {
         let wave = try #require(roadmap.waves.first).wave
         model.applyFixture(roadmap: .available(roadmap), waves: .available([wave.toWave()]),
                            workActivity: .loading, repos: [])
-        model.navigation.presentation = .full
         let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
         try navigator.inspect()
             .find(viewWithAccessibilityIdentifier: "work-wave-\(wave.id)").button().tap()

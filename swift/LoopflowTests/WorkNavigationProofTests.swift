@@ -601,7 +601,9 @@ struct WorkNavigationProofTests {
         draft.withCString { ghostty_surface_text(surfaces[0], $0, UInt(draft.utf8.count)) }
 
         for index in [1, 0] {
-            try view.inspect().find(viewWithAccessibilityIdentifier: "debug-session-row-\(index)").button().tap()
+            let record = try #require(model.sessions.value?.first { $0.id == "row-\(index)" })
+            let navigator = try view.inspect().find(WorkNavigator.self).actualView()
+            navigator.onOpenSession(record)
             try await settle(window)
             #expect(window.firstResponder === terminals[index * 2])
             #expect(terminals[index * 2].window === window)
@@ -797,9 +799,8 @@ struct WorkNavigationProofTests {
         let draft = "split-draft"
         draft.withCString { ghostty_surface_text(sessionSurface, $0, UInt(draft.utf8.count)) }
 
-        for presentation in WorkPresentation.allCases {
-            model.navigation.presentation = presentation
-            model.navigation.content = presentation == .full ? .details : .terminals
+        for content in [WorkNavigation.Content.details, .terminals] {
+            model.navigation.content = content
             try await settle(window)
             if model.navigation.content == .details {
                 #expect(!model.navigation.showsActivity)
@@ -817,7 +818,7 @@ struct WorkNavigationProofTests {
             }
             if let directory = ProcessInfo.processInfo.environment["LOOPFLOW_OUTLINE_CAPTURE_DIR"] {
                 let path = URL(fileURLWithPath: directory)
-                    .appendingPathComponent("\(presentation.rawValue).png")
+                    .appendingPathComponent("\(content).png")
                 _ = try SnapshotService().snapshotWindow(window, to: path)
             }
             #expect(terminals[0].surface == sessionSurface)
@@ -830,7 +831,6 @@ struct WorkNavigationProofTests {
             }
         }
         if let directory = ProcessInfo.processInfo.environment["LOOPFLOW_OUTLINE_CAPTURE_DIR"] {
-            model.navigation.presentation = .compact
             model.select(.wave(id: "wave-1"))
             try await settle(window)
             _ = try SnapshotService().snapshotWindow(window, to: URL(fileURLWithPath: directory)

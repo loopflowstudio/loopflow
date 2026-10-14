@@ -15,28 +15,6 @@ enum LocalWaveAgentLauncher {
         try startLf(taskRunArguments(issue: issue), cwd: WaveOrigin.resolve(repoPath))
     }
 
-    /// Queue the audited Task interrupt. The live run observes it, stops its
-    /// provider turn and records the receipt in the shared store.
-    static func interruptTask(repoPath: String, issue: String) throws {
-        let origin = WaveOrigin.resolve(repoPath)
-        let lfPath = try controlLfPath()
-        try runChecked(taskInterruptCommand(lfPath: lfPath, issue: issue), cwd: origin)
-    }
-
-    /// Open the branch's PR for review from `worktree`. This delegates to
-    /// `lf pr open` — the single presentation boundary — instead of building a
-    /// GitHub URL and opening it here, so any later review-surface preference is
-    /// honored in one place. Only an explicit user review action calls this;
-    /// background app work publishes with `lf pr publish`.
-    static func reviewPullRequest(worktree: String) throws {
-        let lfPath = try controlLfPath()
-        try runChecked(pullRequestReviewCommand(lfPath: lfPath), cwd: worktree)
-    }
-
-    static func pullRequestReviewCommand(lfPath: String) -> [String] {
-        [lfPath, "pr", "open"]
-    }
-
     /// Ensure Task Work and its checkout without running a Flow; returns
     /// the authoritative worktree.
     static func checkoutTask(repoPath: String, issue: String) throws -> WorkspaceIdentity {
@@ -60,10 +38,6 @@ enum LocalWaveAgentLauncher {
 
     static func taskRunArguments(issue: String) -> [String] {
         ["-b", "task", "run", issue]
-    }
-
-    static func taskInterruptCommand(lfPath: String, issue: String) -> [String] {
-        [lfPath, "task", "interrupt", issue]
     }
 
     /// Use the app's bundled CLI, or the pinned helper inside an offline clone.
@@ -156,10 +130,6 @@ enum LocalWaveAgentLauncher {
             process.currentDirectoryURL = URL(fileURLWithPath: cwd, isDirectory: true)
         }
         return process
-    }
-
-    private static func runChecked(_ args: [String], cwd: String) throws {
-        _ = try runCheckedOutput(args, cwd: cwd)
     }
 
     private static func runCheckedOutput(_ args: [String], cwd: String) throws -> String {

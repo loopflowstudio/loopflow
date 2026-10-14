@@ -5,7 +5,6 @@ struct WorkActivityView: View {
     @Bindable var model: WorkModel
 
     @Environment(\.palette) private var palette
-    @State private var turnIntentError: String?
 
     var body: some View {
         VStack(spacing: 0) {

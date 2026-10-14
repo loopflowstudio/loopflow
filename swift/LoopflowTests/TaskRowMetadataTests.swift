@@ -23,7 +23,7 @@ struct TaskRowMetadataTests {
         // A program result never removes unresolved Task work from the outline.
         let snapshot = try roadmap()
         let rows = WorkProjection(roadmaps: snapshot.waves, sessions: [reporting])
-            .outline(presentation: .compact, collapsed: [], search: "", planningReadable: true)
+            .outline(collapsed: [], search: "", planningReadable: true)
         #expect(rows.contains { $0.task?.id == snapshot.waves[0].tasks.items[1].id })
     }
 

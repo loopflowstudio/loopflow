@@ -154,16 +154,15 @@ Stopping a response alone never closes the conversation or completes a review.
 Each Session or shell's **…** menu holds its pane actions. **Collapse** hides a pane while its process
 continues; **Expand** returns to it. **Focus** gives one conversation the content
 area; **Restore** brings back the panes and files. **Terminate** ends a shell.
-New conversations arrive in the list without taking focus.
 
-The sidebar lists Work, not an unscoped Session inventory or conversation counts.
+The sidebar lists Work without conversation counts.
 Repository and Wave conversations retain their own scopes. Shell-launched unscoped
 conversations stay out of the sidebar without deleting their history.
 **Available** means the conversation can be joined. Historical feedback remains
 readable without granting completion authority. Failed provider starts offer recovery.
 
-Use the outline menu for **Compact** or **Full hierarchy**. Search Work names and
-identifiers, not Session titles. Click the repository name to return to its retained,
+The outline compresses single-Wave structure automatically. Search Work names and
+identifiers. Click the repository name to return to its retained,
 configured conversation. An empty repository opens that conversation directly:
 begin with what to work on, without creating a Wave or Task first.
 Unscoped Sessions remain available through `lf session list --orphan`, not a
@@ -176,8 +175,12 @@ or takes over another client. The sidebar switches retained Work; no top tab str
 is needed. Returning preserves panes, drafts and focus, including deliberately
 opened historical conversations. Explicit bare
 CLI Task links still support inspection without conversation acquisition.
-The workspace keeps its Workflow in the header and a multiplexer below.
-The header draws the Workflow as a graph scaled to the window:
+The compact header shows the current Workflow position and available actions;
+**Overview** expands its graph and description above the multiplexer. Opening
+feedback stays inside the terminal area. Resolving a conversation installs its
+record and pane before ending preparation, including explicit Session links.
+Cached switches reuse their panes and drafts without preparing again.
+The expanded graph scales to the window:
 `start` and `end` as circles, each node a box saying what you do there, one
 labelled arrow per edge, a loop back as an arc over its node. The current node
 or running edge is marked. The labels of the edges leaving the current node
@@ -234,7 +237,7 @@ dim slightly; nothing draws a focus border.
 Files and the Flow process log open beside retained Sessions and shells in the
 same multiplexer. Split, resize, zoom, close and Undo work for all pane content.
 
-Press **⌘K** to search Waves, all planned Tasks, named Sessions and Flows in the
+Press **⌘K** to search Waves, all planned Tasks, Workflows and Flows in the
 selected repository. Empty search shows recent destinations first; arrows select,
 Return opens and Escape returns focus to the previous terminal. Flow entries
 inspect the template. **Flow processes of ISSUE** opens the Task's log pane.
@@ -319,16 +322,10 @@ Rust `SessionRecord` projection; it owns no parallel queue.
 The Session ID targets conversation actions and history lookup. A prepared
 input alone does not establish live provider activity.
 
-Choose a skill beside **New Session** below the repository name. Search by name
-or description, use ↑/↓ and Return to select, or Escape to close. Selection is
-remembered per repository and does not launch anything. Click **New Session**
-to launch the selected skill in an interactive conversation.
+Click the repository name to open its configured conversation. Task rows open the
+Task's primary conversation; Task details retain exact links to conversations
+waiting for input, plus disclosed Session history and raw diagnostics.
 
-The default **capture-tasks** skill explores an idea and captures
-Tasks for their owning Waves, including in other repositories. From a Task, capture
-starts with its parent Wave in the repository checkout. The conversation remains
-available for more ideas; filing does not start workers or move existing panes.
-Wave rows also offer **New Session** with the selected skill in their context menu.
 
 Use **New conversation** to talk about the selected repo, Wave, or Task
 in the configured app or terminal. It opens an interactive prompt without
@@ -357,8 +354,7 @@ machine-wide aggregate.
 Planning and Sessions share the WorkModel readings; there is no separate
 Sessions-only roadmap query. A failed read keeps its last useful evidence and
 exposes the error. Inspection shows the planning snapshot's generation time,
-which does not establish a fresh provider sync, and an explicit no-Session state
-only after a successful Session read. Compact retains an empty Wave
+which does not establish a fresh provider sync. The outline retains an empty Wave
 as an inspectable leaf; it compresses structural levels only when descendants
 can take their place.
 
@@ -402,12 +398,10 @@ decisions, deliveries, and actionable failures remain visible. The detail pane
 reads the current chapter plan, Tasks, decisions, PR delivery, and Task conditions
 from `lf wave status <wave> --json`.
 
-Start, attach, or interrupt a Task from the roadmap. Open its worktree
-in Warp, or attach to the running Task agent in the workspace sheet beside its
-changed files, per-file patches, current contents, and embedded shells.
-The condition chip and spoken row use the same `lf wave show` reason: green is a
-live advancing body, blue is waiting, red is blocked, black is settled or
-unstarted, and unknown means the required evidence could not be read.
+Open a Task from the roadmap in its repository window, start its legal Flow,
+or open its PR. **Worktree** opens the recorded checkout in Warp.
+Rows show the shared condition and reason from `lf wave show`; unknown means
+the required evidence could not be read.
 
 Open **Go → Telemetry** for token spend, codebase growth, a token-weighted
 codebase tree, and registry health.
@@ -439,7 +433,7 @@ codebase tree, and registry health.
 - `Loopflow/Models/MultiplexerStore.swift` — reference-owned layout, focus, zoom, and undo
 - `LoopflowMac/Views/WorkActivityView.swift` — filtered durable Activity and proof links
 - `LoopflowMac/WorkModel.swift` — shared readings, stable selection, and local scope
-- `LoopflowMac/Views/WavesView.swift` — previous Wave workspace during migration
+- `LoopflowMac/Views/WavesView.swift` — Portfolio membership and Wave inspectors
 - `LoopflowMac/Views/RoadmapView.swift` — all-Wave roadmap and lifecycle controls
 - `LoopflowMac/Views/WaveDetailPane.swift` — streamed Project plan, Tasks and metrics
 - `LoopflowMac/PortfolioRepoState.swift` — one repository's Wave projection

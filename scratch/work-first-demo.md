@@ -164,13 +164,7 @@ migration with a backup. Installation succeeded; skill sync rejected portable na
 then refused the newly named release migration. `lf sync` merged release main
 conflict-free as `fe0cf994a1`; no schema provenance was fabricated.
 
-Current demo: `/tmp/loo462-post-release/Loopflow Work Demo.app`, bundle
-`studio.loopflow.work-demo.release14`. Unchanged Swift executable from `a590ecb7ee`,
-new validation-only helper built from `fe0cf994a1`, ad-hoc signed. Retained-checkout
-SwiftPM resources remain required. Launched against real `/Users/jack/.lf` and
-`/Users/jack/src/loopflow`; embedded commands select the bundled helper.
-
-Check: bundled `monitor work --json` PASS, planning frame has 48 Waves and no top-level unavailable error; `/tmp/loo462-release14-work.{json,err}`. This is not sidebar membership or native readiness proof.
+Earlier release-14 demo/build receipts: `1a1ab0ef7f:scratch/work-first-demo.md`.
 After Jack Heart unlocked the screen, native inspection confirmed the real Loopflow
 sidebar, taller status/link rows, no redundant Work tabs, and no migration error.
 Clicking LOO-462 selected its exact primary Session and rendered feature/demo.
@@ -182,13 +176,14 @@ PR #1531 remains published, not approved to land. Profiling and hook acceptance 
 
 ## Semantic demo — October 14
 
-Built Swift and matching validation-only helper from `e7e3e0fc6d`; ad-hoc signed
-`/tmp/loo462-semantic-demo/Loopflow Work Demo.app` (bundle
-`studio.loopflow.work-demo.semantic`). Launched on the real Loopflow repo/Home.
-Native AX inspection confirms links and absent unknown/client-only labels;
-selected LOO-462 for review. Existing clients were not explicitly replaced.
-Capture returned a malformed tall bitmap, so full visual/color acceptance remains
-with Jack Heart; no provider-input or both-appearance proof is claimed.
+October 14 relaunch requested by Jack Heart: retained unchanged Swift from
+`e7e3e0fc6d`, bundled validation-only helper from `1a1ab0ef7f`, ad-hoc signed
+`/tmp/loo462-semantic-demo/Loopflow Work Demo.app` against real repo/Home.
+PID 92573 native inspection shows cached sidebar, blocked live refresh: historical
+Product Performance Project `55a32ac0-d386-4d84-8231-cc4165c936ba` retains foreign
+Team `60558c53-2169-49f8-a76a-1f4586705aa9`. This is a failed demo, not ready
+acceptance. Task-row agreement did not prove whole-repository projection health.
+Prior semantic captures: `1a1ab0ef7f`, this section. No existing client takeover.
 
 ## Linear linkage — October 14
 

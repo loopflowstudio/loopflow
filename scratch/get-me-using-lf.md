@@ -401,8 +401,38 @@ including throttled dependencies; replay does not query. No remaining deletion t
 in this subscription cut. Pre-compression uncommitted evidence is preserved in
 `/tmp/loo462-compress-before.patch`; native and publication gaps above remain.
 
-Check: `materialize_rust_tests.py --prepare-cli -- cargo nextest run -p loopflow` with work_watch/revisions/DTO/context filters: 32/33 PASS, repaired peer receipt case 1/1 PASS separately (no full rerun); `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone` focused suites: 104 PASS, rename 4 PASS, final stream/catalogue/Task Flow 34 PASS (overlapping coverage); `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` PASS. Logs `/tmp/loo462-reactivity-{rust,peer,swift,rename,catalog,clippy}.log`; broader gate/resource preflight and native proof remain with their Flow steps.
+Check: `materialize_rust_tests.py --prepare-cli -- cargo nextest run -p loopflow` with the network-isolation runner and `test(work_watch::)` / `test(store::sqlite::revisions::)` filters PASS (24 + 7 tests; nextest reported two leaky exits, including the pure usage predicate test; gate owns diagnosis); `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone --filter 'TaskDirectiveEditorTests|WorkModelStreamTests|SessionRenameTests|TaskFlowProofTests'` PASS (30), updated catalogue case PASS (1 overlapping); `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` PASS. Logs `/tmp/loo462-compress-{stream,rust,swift,catalog,clippy}.log`; initial Rust filter selected only revisions, corrected stream run above. Earlier implementation checks remain in `/tmp/loo462-reactivity-*.log` and the preserved patch. Broader gate/resource preflight, publication and native proof remain with their Flow steps.
 
 Sync review — October 14: merged pinned main `92b88800ec` through the owned sequencer (`b10cc7ce10`). Kept retained pane placement, authoritative Session inventory merging, checkout restoration, hook delivery and timing. Adopt the Task preparation returned by main without preparing again; ended terminals accept explicit preparation. Native acceptance gaps above remain.
 
 Check: `scripts/test_desktop.sh --jobs 4 --filter 'WorkDestinationTests|SessionsStoreTests' -Xswiftc -gnone` PASS (65 tests; initial compile exposed the repaired ended-state case); `cargo test -p loopflow --test session_lifecycle_tests a_task_primary_is_one_of_its_own_conversations -- --exact` PASS (1 test, inherited LF_* unset, stdin closed); logs `/tmp/loo462-sync-{desktop,rust}.log`. Broader checks remain with gate/CI.
+
+### Selected terminal Tasks and CLI regression — October 14
+
+Jack Heart requested real CLI creation/start into an already open subscription and
+production sidebar projection, exactly once under the correct Wave; unstarted
+backlog stays hidden. Jack selected completed/canceled Tasks remaining in sidebar
+and main pane while selected, with green Completed or red Canceled header text.
+Navigating elsewhere removes only this selection exception; retained Sessions,
+surfaces, files, drafts and history survive. Jack Heart selected navigation Back
+to restore the same workspace and temporary sidebar row with its lifecycle header,
+without reopening execution. Test completion/cancellation → away → Back.
+Late replies cannot steal the new selection. Headless model/projection proof is
+accepted here but is not rendered native proof.
+
+Implemented: the outline admits the selected terminal Task; navigation away drops
+only that exception. The header uses shared planning lifecycle text and success/
+failure colors. Repository-local Back (⌘[) selects existing Work without preparation;
+Machine changes clear its history. CLI create/run/complete/abandon and subsequent
+edits flow through the real subscription into the production outline. The retained
+Session/native view is synthetic and unmounted; no provider or display was used.
+
+Deleted the unconditional working-set-only filter for the selected terminal Task
+and unlabeled terminal header. Ordinary active/history filters and workspace owners
+survive. Review repaired a nil-selection/nil-runtime comparison that could admit
+unselected terminal Tasks; a regression covers that boundary. Back does not record
+its own return or leak visits across repositories. No cleanup or execution restart.
+Remaining: normal gate/resource preflight, publication, and native proof above.
+
+Check: `cargo build -p loopflow --bin lf --jobs 4` PASS; `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone --filter 'WorkCLISubscriptionTests|WorkNavigationTests|WorkDestinationTests|WorkModelTests'` PASS (123 tests); final CLI/Back/unplaced-terminal filter PASS (3 tests, CLI includes completion and cancellation); `git diff --check` PASS. Logs `/tmp/loo462-retention-{cli-build,desktop,final}.log`. Gate owns broader checks; demo owns rendered native proof.
+

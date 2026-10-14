@@ -19,6 +19,11 @@ struct TaskWorkflowHeader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .center, spacing: Spacing.md) {
+                if let label = task.task.terminalLabel {
+                    Text(label)
+                        .foregroundStyle(task.task.isSuccessful ? palette.success : palette.failure)
+                        .accessibilityIdentifier("task-lifecycle-status")
+                }
                 if task.runtime?.status == .paused { Text("Paused").foregroundStyle(palette.textSecondary) }
                 if let workflow = work.value?.workflow {
                     Text(positionLabel(workflow))

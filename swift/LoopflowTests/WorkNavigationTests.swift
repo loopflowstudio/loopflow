@@ -574,6 +574,27 @@ struct WorkNavigationTests {
         }
     }
 
+    @Test("Unplaced terminal Tasks only join the outline when selected")
+    func unplacedTerminalSelection() throws {
+        var json = try #require(JSONSerialization.jsonObject(with: Data(roadmapJSON().utf8)) as? [String: Any])
+        var waves = try #require(json["waves"] as? [[String: Any]])
+        var tasks = try #require(waves[0]["tasks"] as? [String: Any])
+        var item = try #require((tasks["items"] as? [[String: Any]])?.first)
+        var task = try #require(item["task"] as? [String: Any])
+        let id = try #require(task["id"] as? String)
+        task["state"] = "canceled"
+        item["task"] = task
+        item["runtime"] = NSNull()
+        tasks["items"] = [item]
+        waves[0]["tasks"] = tasks
+        json["waves"] = [waves[0]]
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: json))
+        let projection = WorkProjection(roadmaps: snapshot.waves, sessions: [])
+        #expect(projection.outline(collapsed: [], search: "", planningReadable: true).allSatisfy { $0.task == nil })
+        #expect(projection.outline(collapsed: [], search: "", planningReadable: true, selection: .task(id: id))
+            .filter { $0.task?.id == id }.count == 1)
+    }
+
     @Test("Many started Tasks across Waves populate the sidebar while every planned Task stays reachable")
     func denseWorkingSet() throws {
         var json = try #require(JSONSerialization.jsonObject(with: Data(roadmapJSON().utf8)) as? [String: Any])

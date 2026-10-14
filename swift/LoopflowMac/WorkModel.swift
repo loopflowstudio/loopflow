@@ -939,6 +939,7 @@ final class WorkModel {
                 // Work chosen from the other Machine's rows names nothing here.
                 for navigation in navigationByRepo.values {
                     navigation.selection = nil
+                    navigation.backStack = []
                     navigation.selectedTaskEvidence = nil
                     navigation.content = .overview
                 }
@@ -1291,6 +1292,7 @@ final class WorkModel {
         showsSavedPlanning = false
         for navigation in navigationByRepo.values {
             navigation.selection = nil
+            navigation.backStack = []
             navigation.selectedTaskEvidence = nil
             navigation.content = .overview
         }
@@ -1466,7 +1468,12 @@ final class WorkModel {
         select(requested, preservingOpening: false)
     }
 
-    func select(_ requested: WorkReference?, preservingOpening: Bool) {
+    func goBack() {
+        guard let previous = navigation.backStack.popLast() else { return }
+        select(previous, preservingOpening: false, recordingHistory: false)
+    }
+
+    func select(_ requested: WorkReference?, preservingOpening: Bool, recordingHistory: Bool = true) {
         if !preservingOpening { dismissTaskLink() }
         historyLookup?.cancel()
         historyLookup = nil
@@ -1482,6 +1489,9 @@ final class WorkModel {
                 return
             }
         } else { selection = requested }
+        if recordingHistory, self.selection != selection {
+            navigation.backStack.append(self.selection)
+        }
         if workspaceRegistry == nil {
             navigation.selectedSessionId = nil
             navigation.content = selection == nil ? .overview : .details

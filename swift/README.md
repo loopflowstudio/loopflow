@@ -180,6 +180,10 @@ The compact header shows the current Workflow position and available actions;
 feedback stays inside the terminal area. Resolving a conversation installs its
 record and pane before ending preparation, including explicit Session links.
 Cached switches reuse their panes and drafts without preparing again.
+When the selected Task completes or is canceled, it stays visible with a green
+**Completed** or red **Canceled** header. Navigating away restores the ordinary
+sidebar filters. **Back** (⌘[) returns to the retained workspace and its sidebar
+row, preserving conversations, files and drafts without starting execution.
 The expanded graph scales to the window:
 `start` and `end` as circles, each node a box saying what you do there, one
 labelled arrow per edge, a loop back as an arc over its node. The current node

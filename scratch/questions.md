@@ -127,3 +127,10 @@ retain all domains they read. External liveness, Git and definition adapters rem
 the study: stored `wave_workflows` definitions invalidate catalogues through the
 planning revision, including heartbeat-only changes; file definitions retain their
 activation/customization adapter.
+
+## Back navigation — October 14
+
+Jack Heart selected Back restoring the terminal Task and retained workspace. Use a
+repository-local visit stack and the existing passive selection path, exposed by
+the header Back button and ⌘[. No Forward control or relaunch persistence is added.
+These are reversible presentation choices; Machine changes clear visit history.

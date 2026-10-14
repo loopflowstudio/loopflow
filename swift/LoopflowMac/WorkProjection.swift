@@ -174,7 +174,8 @@ struct WorkOutlineRow: Identifiable {
 extension WorkProjection {
     func outline(
         collapsed: Set<WorkNodeKey>,
-        search: String, planningReadable: Bool
+        search: String, planningReadable: Bool,
+        selection: WorkReference? = nil
     ) -> [WorkOutlineRow] {
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
         func matches(_ text: String) -> Bool {
@@ -199,7 +200,11 @@ extension WorkProjection {
             if case .available(_, false) = wave.roadmap.tasks {
                 complete = planningReadable && wave.roadmap.unavailableTasks.isEmpty
             } else { complete = false }
-            let workingSet = wave.tasks.filter(\.inWorkingSet)
+            let workingSet = wave.tasks.filter { task in
+                if task.inWorkingSet { return true }
+                guard task.task.task.isTerminal, let selection else { return false }
+                return selection == task.id.work || selection == task.task.runtime.map { .task(id: $0.workId) }
+            }
             let waveHasChildren = !workingSet.isEmpty
             let omitWave = waves.count == 1 && complete
                 && waveHasChildren && wave.sessions.isEmpty && expanded(wave.id)
@@ -311,6 +316,8 @@ final class WorkNavigation {
     var collapsed: Set<WorkNodeKey> = []
     var search = ""
     var selection: WorkReference?
+    /// Repository-local visits; nil names the repository conversation.
+    var backStack: [WorkReference?] = []
     var selectedTaskEvidence: (wave: WaveRoadmap, task: RoadmapTask)?
     var listScrollOffset: CGFloat = 0
 

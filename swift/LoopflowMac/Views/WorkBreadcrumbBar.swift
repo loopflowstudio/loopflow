@@ -15,6 +15,9 @@ struct WorkBreadcrumbBar<Trailing: View>: View {
 
     var body: some View {
         HStack(spacing: 10) {
+            WorkGlyphButton("chevron.left", label: "Back", identifier: "work-back") { model.goBack() }
+                .disabled(model.navigation.backStack.isEmpty)
+                .keyboardShortcut("[", modifiers: .command)
             if let crumb { crumbs(crumb) }
             Spacer(minLength: 10)
             if let programStatus, programStatus.summary != nil {

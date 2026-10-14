@@ -482,6 +482,10 @@ swift test --package-path swift --filter SomeTestClass  # Filtered
 ```
 
 Pass `--no-parallel` explicitly: main-actor observations share scheduling.
+`WorkCLISubscriptionTests` creates and starts Tasks with `target/debug/lf` in an
+isolated repository while the production Work reader is already open. It checks
+sidebar updates, completion/cancellation, Back and retained workspace identity.
+It launches no provider and proves no rendered native behavior.
 After integrating Session kind changes, run `scripts/test_desktop.sh --filter
 'TaskFlowTests|WorkspaceNavigationTests'` to compile Desktop consumers and exercise
 participation and navigation fixtures together.

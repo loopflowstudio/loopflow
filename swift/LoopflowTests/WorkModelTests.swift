@@ -8,6 +8,32 @@ import ViewInspector
 @Suite("Work model")
 @MainActor
 struct WorkModelTests {
+    @Test("Back visits retained Work in repository order without recording its own return")
+    func backUsesRepositoryHistory() throws {
+        let fixture = try WorkTestFixture.load()
+        let model = WorkModel(query: RegistryQuery { _, _ in
+            throw RegistryQueryError("Back must not prepare or launch a conversation")
+        }, repoPath: "/src/loopflow")
+        model.applyFixture(roadmap: .available(fixture.roadmap), waves: .available(fixture.waves),
+                           workActivity: .available(fixture.workActivity), repos: [])
+        model.select(.wave(id: "wave-1"))
+        model.select(.task(id: "issue-now"))
+        model.select(.task(id: "issue-now"))
+        model.select(nil)
+        model.setRepoPath("/src/context")
+        #expect(model.navigation.backStack.isEmpty)
+        model.goBack()
+        #expect(model.selection == nil)
+        model.setRepoPath("/src/loopflow")
+        model.goBack()
+        #expect(model.selection == .task(id: "issue-now"))
+        model.goBack()
+        #expect(model.selection == .wave(id: "wave-1"))
+        model.goBack()
+        #expect(model.selection == nil)
+        #expect(model.navigation.backStack.isEmpty)
+    }
+
     @Test("Repository scope filters one shared snapshot and clears outside selection")
     func repositoryScopeFiltersSharedSnapshot() async throws {
         let fixture = try WorkTestFixture.load()

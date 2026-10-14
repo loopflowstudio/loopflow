@@ -31,7 +31,8 @@ struct WorkNavigator: View {
         workspace.outline(
             collapsed: model.navigation.collapsed,
             search: model.navigation.search,
-            planningReadable: model.roadmap.value != nil && model.roadmap.errorMessage == nil
+            planningReadable: model.roadmap.value != nil && model.roadmap.errorMessage == nil,
+            selection: model.selection
         )
     }
 

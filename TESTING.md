@@ -257,6 +257,9 @@ favored preparation but varied widely. Unchanged Swift/control warm builds took
 0.36s/0.23s median; no app speedup is claimed. See the
 [measurements and limits](docs/reviews/storage-footprint.md#local-verification-cli--2026-10-13).
 
+Runner/materializer changes also need the command-plan checks in
+`python/tests/test_release_automation.py` during focused verification.
+
 Slow suites (`loopflow`, `e2e`) stay off in changed-mode even when
 their paths change—the run prints why and how to force them:
 

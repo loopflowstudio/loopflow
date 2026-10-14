@@ -42,6 +42,12 @@ const SESSION_OPERATE_PAIRS: &[(&str, &str)] = &[
 ];
 
 fn main() {
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
+        println!("cargo:rerun-if-changed=src/journal/os_process/macos.c");
+        cc::Build::new()
+            .file("src/journal/os_process/macos.c")
+            .compile("loopflow_process_info");
+    }
     let manifest_dir =
         PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set"));
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR not set"));

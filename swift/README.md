@@ -9,8 +9,11 @@ uv run python scripts/loopflow-dev.py test         # run Swift tests
 
 The development app bundles this checkout's CLI. Ordinary launches use the
 installed CLI and main Machine. For a branch demo, launch with an explicit private
-`LF_HOME`; that uses the matching source CLI on disposable data. A copied Machine
-retains real checkout paths, so file edits still affect those checkouts.
+`LF_HOME`; that uses the matching source CLI on disposable data. For populated
+data, use [offline data clones](../docs/data-clones.md): `lf clone run` confines
+Desktop and its embedded terminals, preserves source checkouts read-only, and
+reports copied Sessions' continuation limits. A bare SQLite copy provides no
+filesystem, provider or client isolation.
 Repository selectors list only Git main checkouts. Linked worktrees stay visible
 only through the Task Work that owns them.
 

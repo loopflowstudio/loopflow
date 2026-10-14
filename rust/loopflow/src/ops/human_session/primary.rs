@@ -84,6 +84,7 @@ pub(crate) async fn ensure_task(
 /// Give the scope a fresh conversation. The predecessor's provider stops
 /// first; if it cannot be stopped, the predecessor stays primary.
 pub(crate) async fn replace(store: &SharedStore, id: &str) -> Result<SessionRecord> {
+    crate::data_clone::require_writable_session(id)?;
     let scope = store
         .sqlite
         .primary_scope(id)?

@@ -609,6 +609,7 @@ pub(crate) async fn open(
     mode: OpenMode,
     resume: bool,
 ) -> Result<SessionRecord> {
+    crate::data_clone::require_writable_session(session_id)?;
     let target = match find_session(store, session_id, true).await? {
         Some(target) => target,
         // Connecting is what brings a provider-started conversation in.
@@ -617,6 +618,7 @@ pub(crate) async fn open(
             .ok_or_else(|| session_not_found(session_id))?,
     };
     let session = &target;
+    crate::data_clone::require_writable_session(&session.id)?;
     if store
         .sqlite
         .input_provider_session(&session.artifact_key)?
@@ -916,7 +918,15 @@ async fn surface(store: &SharedStore, session: &LfSession) -> Result<SessionReco
         )?
         .ok_or_else(|| session_not_found(&session.id))?;
     let state = session_state(&metadata);
-    let actions = session_actions(state);
+    let mut actions = session_actions(state);
+    let open_argv = if let Some(reason) = crate::data_clone::session_unavailable(&session.id)? {
+        for action in &mut actions {
+            action.unavailable_reason = Some(reason.clone());
+        }
+        Vec::new()
+    } else {
+        human_open_argv(&session.id)?
+    };
     let flow_membership = match (&session.flow_lf_process_id, &metadata.flow) {
         (None, _) if metadata.independent => SessionFlowMembership::Independent,
         (None, _) => SessionFlowMembership::Unknown {
@@ -960,7 +970,7 @@ async fn surface(store: &SharedStore, session: &LfSession) -> Result<SessionReco
         state,
         ready_summary: session.ready_summary.clone(),
         terminal_ids: metadata.terminal_id.clone().into_iter().collect(),
-        open_argv: human_open_argv(&session.id)?,
+        open_argv,
     };
     workspace::associate(store, std::slice::from_mut(&mut reading)).await?;
     Ok(reading)
@@ -1180,6 +1190,7 @@ pub(crate) fn resume_native_session(
     let Some(session) = store.sqlite.session_for_artifact(artifact_key)? else {
         return Ok(false);
     };
+    crate::data_clone::require_writable_session(&session.id)?;
     if session.artifact_key != *artifact_key {
         bail!("Session {} changed its input before resume", session.id);
     }
@@ -1206,6 +1217,7 @@ pub(crate) fn resume_native_session(
 }
 
 fn human_open_argv(id: &str) -> Result<Vec<String>> {
+    crate::data_clone::require_writable_session(id)?;
     let context = crate::os_process::execution_context()?;
     // A fresh terminal does not inherit the listing process's data selection.
     // Carry the executable and its data together, including when a different

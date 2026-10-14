@@ -699,10 +699,8 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
         );
 
         let bin = TempDir::new().unwrap();
-        let launched = bin.path().join("launched");
-        write_executable(&bin.path().join("codex"), &format!(
-            "#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\nif [ \"$1\" = --dangerously-bypass-hook-trust ] && [ \"$2\" = --model ]; then echo \"a value is required for '--model <MODEL>'\" >&2; exit 2; fi\nprintf '%s' '{{\"session_id\":\"ses-'\"$LF_CAPTURE_KEY\"'\"}}' | \"$LF_BIN\" __provider-session || exit $?\necho \"$LF_CAPTURE_KEY\" > '{}'\n", launched.display(),
-        ));
+        let launched = home.path().join("launched");
+        support::install_native_codex(bin.path());
         let path = format!(
             "{}:{}",
             bin.path().display(),
@@ -794,6 +792,7 @@ fn flow_parsing_parity() {
 fn interactive_flow_keeps_input_and_advances_only_after_each_provider_exits() {
     use std::io::Write;
     use std::os::fd::FromRawFd;
+    use std::os::unix::process::CommandExt;
     use std::process::Stdio;
 
     for (flags, stop) in [
@@ -815,22 +814,21 @@ fn interactive_flow_keeps_input_and_advances_only_after_each_provider_exits() {
             r#"#!/bin/sh
 set -eu
 if [ "${1-}" = --version ]; then echo '2.1.0 (fixture)'; exit 0; fi
-first_turn=
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --print|--output-format) echo 'unexpected headless launch' >&2; exit 1;;
         --append-system-prompt-file|--settings) shift;;
-        *) first_turn="$1";;
     esac
     shift
 done
+first_turn=$(cat)
 case "$first_turn" in
     *'<lf:skill:first>'*) step=first;;
     *'<lf:skill:second>'*) step=second;;
     *) exit 2;;
 esac
 touch "$LF_HOME/$step.ready"
-IFS= read -r answer
+IFS= read -r answer < /dev/tty
 printf '%s' "$answer" > "$LF_HOME/$step.answer"
 [ "$answer" != stop ] || exit 130
 "#,
@@ -858,15 +856,31 @@ printf '%s' "$answer" > "$LF_HOME/$step.answer"
         let log_path = home.path().join("output");
         let log = fs::File::create(&log_path).unwrap();
         let path = format!("{}:/usr/bin:/bin", bin.display());
-        let mut child = lf_command(repo.path(), home.path(), &flags, Some(&path))
+        let mut command = lf_command(repo.path(), home.path(), &flags, Some(&path));
+        command
             .args(["-a", "claude"])
             .env_remove("CLAUDE_CONFIG_DIR")
             .env_remove("ANTHROPIC_API_KEY")
             .stdin(Stdio::from(slave))
             .stdout(Stdio::from(log.try_clone().unwrap()))
-            .stderr(Stdio::from(log))
-            .spawn()
-            .unwrap();
+            .stderr(Stdio::from(log));
+        // SAFETY: the child owns the PTY slave on stdin; setsid/ioctl are
+        // async-signal-safe and establish its native controlling terminal.
+        unsafe {
+            command.pre_exec(|| {
+                if libc::setsid() == -1 || libc::ioctl(0, libc::TIOCSCTTY as _, 0) == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        let mut child = command.spawn().unwrap();
+        drop(command);
+        // Drain terminal echo so the session leader can close its controlling PTY.
+        let mut terminal = master.try_clone().unwrap();
+        let reader = std::thread::spawn(move || {
+            let _ = std::io::copy(&mut terminal, &mut std::io::sink());
+        });
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
         let mut wait = |ready: &dyn Fn() -> bool| {
             while !ready() {
@@ -910,6 +924,7 @@ printf '%s' "$answer" > "$LF_HOME/$step.answer"
             }
             std::thread::sleep(std::time::Duration::from_millis(20));
         };
+        reader.join().unwrap();
         assert_eq!(
             status.success(),
             !stop,
@@ -1427,19 +1442,9 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
     // An explicit `--task` launch runs in that Task's worktree, which has its
     // own uncommitted catalog.
     write_skill(&sibling_worktree, "binding-work", "Do proof-owned work.");
-    // A codex TUI stand-in. It records its provider Session the way the real
-    // client's session-start hook does and notes which Run launched it.
     let bin = TempDir::new().unwrap();
-    let launched = bin.path().join("launched");
-    write_executable(
-        &bin.path().join("codex"),
-        &format!(
-            "#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\nif [ \"$1\" = --dangerously-bypass-hook-trust ] && [ \"$2\" = --model ]; then echo \"a value is required for '--model <MODEL>'\" >&2; exit 2; fi\n\
-             printf '%s' '{{\"session_id\":\"ses-'\"$LF_CAPTURE_KEY\"'\"}}' \
-             | \"$LF_BIN\" __provider-session || exit $?\necho \"$LF_CAPTURE_KEY\" >> '{}'\n",
-            launched.display()
-        ),
-    );
+    let launched = home.path().join("launched");
+    support::install_native_codex(bin.path());
     let path = format!(
         "{}:{}",
         bin.path().display(),

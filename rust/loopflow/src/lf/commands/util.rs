@@ -1,4 +1,4 @@
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
@@ -6,7 +6,6 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
 
-use crate::agent::codex_permission_args;
 use crate::agent::missing_agent_message;
 use crate::agent::workspace_add_dirs;
 use crate::id::AgentSessionId;
@@ -45,8 +44,10 @@ pub(crate) fn parse_since(value: &str, now: OffsetDateTime) -> Result<OffsetDate
         .ok_or_else(|| anyhow!("--since duration is too large"))
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub(crate) struct SessionCommand {
+    pub(crate) codex: Option<crate::agent::AgentConfig>,
+    pub(crate) input: Option<String>,
     pub(crate) program: String,
     pub(crate) args: Vec<String>,
     pub(crate) cwd: PathBuf,
@@ -113,33 +114,13 @@ pub(crate) fn build_session_command(
     agent_session: Option<&AgentSessionId>,
     context_file: Option<&Path>,
 ) -> Result<SessionCommand> {
-    crate::agent::validate_terminal_turn(prompt)?;
+    if harness == "opencode" {
+        crate::agent::validate_terminal_turn(prompt)?;
+    }
     let worktree_arg = worktree.to_string_lossy().to_string();
 
     let args = match harness {
-        "codex" => {
-            let mut args = vec!["-C".to_string(), worktree_arg];
-            if let Some(model) = model {
-                args.push("-c".to_string());
-                args.push(format!("model=\"{model}\""));
-            }
-            for dir in workspace_add_dirs(worktree) {
-                args.push("--add-dir".to_string());
-                args.push(dir.to_string_lossy().to_string());
-            }
-            args.extend(codex_permission_args(Some(worktree), false, false));
-            if let Some(path) = context_file {
-                args.push("-c".to_string());
-                args.push(format!(
-                    "developer_instructions={}",
-                    serde_json::to_string(&std::fs::read_to_string(path)?)?
-                ));
-            }
-            // Ported skill frontmatter starts with `---`, which is prompt data.
-            args.push("--".to_string());
-            args.push(prompt.to_string());
-            args
-        }
+        "codex" => Vec::new(),
         "claude" => {
             let mut args = Vec::new();
             if let Some(model) = model {
@@ -158,9 +139,7 @@ pub(crate) fn build_session_command(
                 args.push("--append-system-prompt-file".to_string());
                 args.push(path.to_string_lossy().to_string());
             }
-            // Claude's variadic --add-dir otherwise consumes the positional prompt.
             args.push("--".to_string());
-            args.push(prompt.to_string());
             args
         }
         "opencode" => {
@@ -177,6 +156,25 @@ pub(crate) fn build_session_command(
         ),
     };
     Ok(SessionCommand {
+        input: (harness == "claude" && !prompt.is_empty()).then(|| prompt.to_owned()),
+        codex: (harness == "codex")
+            .then(|| -> Result<_> {
+                Ok(crate::agent::AgentConfig {
+                    agent: Some(
+                        model
+                            .map(|model| format!("codex:{model}"))
+                            .unwrap_or_else(|| "codex".into()),
+                    ),
+                    cwd: Some(worktree.to_path_buf()),
+                    task_prompt: prompt.to_owned(),
+                    system_prompt: context_file
+                        .map(std::fs::read_to_string)
+                        .transpose()?
+                        .unwrap_or_default(),
+                    ..Default::default()
+                })
+            })
+            .transpose()?,
         context: None,
         attachment: None,
         remote: None,
@@ -193,12 +191,12 @@ pub(crate) fn resume_session(
     artifact_key: &String,
     provider_session: &crate::session_record::ProviderSessionRef,
 ) -> Result<()> {
-    resume_session_with_env(
+    open_saved_session_with_env(
         harness,
         model,
         worktree,
         artifact_key,
-        provider_session,
+        Some(provider_session),
         &BTreeMap::new(),
         None,
         None,
@@ -207,12 +205,12 @@ pub(crate) fn resume_session(
 }
 
 #[allow(clippy::too_many_arguments)] // Native launch inputs plus its startup exclusion lock.
-pub(crate) fn resume_session_with_env(
+pub(crate) fn open_saved_session_with_env(
     harness: &str,
     model: Option<&str>,
     worktree: &Path,
     artifact_key: &String,
-    provider_session: &crate::session_record::ProviderSessionRef,
+    provider_session: Option<&crate::session_record::ProviderSessionRef>,
     extra_environment: &BTreeMap<String, String>,
     launch_lock: Option<File>,
     remote: Option<NativeConnection>,
@@ -220,12 +218,18 @@ pub(crate) fn resume_session_with_env(
 ) -> Result<()> {
     let selected_model = crate::config::resume_model(harness, model)?;
     let user_name = crate::config::participant_name()?;
-    let mut command = build_resume_session_command(
-        harness,
-        selected_model.as_deref(),
-        worktree,
-        &provider_session.agent_session,
-    )?;
+    let mut command = match provider_session {
+        Some(provider) => build_resume_session_command(
+            harness,
+            selected_model.as_deref(),
+            worktree,
+            &provider.agent_session,
+        )?,
+        None => {
+            build_session_command(harness, selected_model.as_deref(), worktree, "", None, None)?
+        }
+    };
+    let mut account_id = provider_session.and_then(|provider| provider.account_id.clone());
     command.attachment = attachment;
     command.remote = remote;
     if let Some(remote) = &command.remote {
@@ -254,18 +258,27 @@ pub(crate) fn resume_session_with_env(
             Err(error) => return Err(error.into()),
         };
     if let Some(request) = request {
+        account_id = account_id.or(request.account_id.clone());
         command.context = request.conversation_context.clone();
         if harness == "codex" {
-            command.args.splice(
-                0..0,
-                [
-                    "-c".into(),
-                    format!(
-                        "developer_instructions={}",
-                        serde_json::to_string(&request.system_prompt)?
-                    ),
-                ],
-            );
+            let config = crate::agent::AgentConfig {
+                agent: Some(
+                    selected_model
+                        .as_ref()
+                        .map(|model| format!("codex:{model}"))
+                        .unwrap_or_else(|| "codex".into()),
+                ),
+                cwd: Some(worktree.to_path_buf()),
+                system_prompt: request.system_prompt,
+                task_prompt: request.task_prompt,
+                skill_invocation: request.skill_invocation,
+                conversation_context: request.conversation_context,
+                write_scope: request.write_scope,
+                execution_boundary: request.execution_boundary,
+                skip_permissions: request.skip_permissions,
+                ..Default::default()
+            };
+            command.codex = Some(config);
         } else if harness == "claude" && !request.system_prompt.is_empty() {
             let path = crate::prompt::write_prompt_log(
                 worktree,
@@ -302,8 +315,8 @@ pub(crate) fn resume_session_with_env(
     spawn_session_command_with_env(
         &command,
         &environment,
-        Some(&provider_session.agent_session),
-        provider_session.account_id.as_ref(),
+        provider_session.map(|provider| &provider.agent_session),
+        account_id.as_ref(),
         launch_lock,
     )
 }
@@ -343,6 +356,11 @@ fn build_resume_session_command(
     agent_session: &AgentSessionId,
 ) -> Result<SessionCommand> {
     let cwd = absolute_path(worktree);
+    if harness == "codex" {
+        let mut command = build_session_command(harness, model, &cwd, "", None, None)?;
+        command.args = vec!["resume".into(), "--".into(), agent_session.to_string()];
+        return Ok(command);
+    }
     let worktree_arg = cwd.to_string_lossy().to_string();
     let args = match harness {
         "claude" => {
@@ -354,18 +372,6 @@ fn build_resume_session_command(
                 args.extend(["--add-dir".to_string(), dir.to_string_lossy().to_string()]);
             }
             args.extend(["--resume".to_string(), agent_session.to_string()]);
-            args
-        }
-        "codex" => {
-            let mut args = vec!["resume".to_string(), "-C".to_string(), worktree_arg];
-            if let Some(model) = model {
-                args.extend(["--model".to_string(), model.to_string()]);
-            }
-            for dir in workspace_add_dirs(&cwd) {
-                args.extend(["--add-dir".to_string(), dir.to_string_lossy().to_string()]);
-            }
-            args.extend(codex_permission_args(Some(&cwd), false, false));
-            args.extend(["--".to_string(), agent_session.to_string()]);
             args
         }
         "opencode" => {
@@ -387,6 +393,8 @@ fn build_resume_session_command(
         }
     };
     Ok(SessionCommand {
+        codex: None,
+        input: None,
         context: None,
         attachment: None,
         remote: None,
@@ -482,12 +490,14 @@ fn native_provider_attachment(
     let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
     store.with_session_attachment(session, attachment, || {
         if let Some(remote) = &command.remote {
-            let connection = store.session_connection(session)?.ok_or_else(|| {
-                crate::store::StoreError::InvalidAuthority(
-                    "Remote client has no recorded AgentProcess endpoint".into(),
-                )
-            })?;
-            if Path::new(&connection.0) != remote.upstream {
+            let endpoint = store
+                .agent_endpoint(&attachment.agent_process_id)?
+                .ok_or_else(|| {
+                    crate::store::StoreError::InvalidAuthority(
+                        "Remote client has no recorded AgentProcess endpoint".into(),
+                    )
+                })?;
+            if Path::new(&endpoint) != remote.upstream {
                 return Err(crate::store::StoreError::InvalidAuthority(
                     "Remote client endpoint differs from its AgentProcess".into(),
                 ));
@@ -509,6 +519,7 @@ fn session_command_status_with_env(
     exact_account_id: Option<&crate::store::ProviderAccountId>,
     launch_lock: Option<File>,
 ) -> Result<SessionCommandOutcome> {
+    let mut progress = crate::startup::Startup::new(format!("Preparing {}", command.program));
     let argv = std::env::args().collect::<Vec<_>>();
     crate::journal::with_runtime(&command.cwd, &argv, || {
         let mut command = command.clone();
@@ -573,6 +584,7 @@ fn session_command_status_with_env(
             agent_session,
             exact_account_id,
             launch_lock,
+            &mut progress,
         );
         let outcome = if result
             .as_ref()
@@ -606,6 +618,7 @@ fn run_native_session(
     agent_session: Option<&AgentSessionId>,
     exact_account_id: Option<&crate::store::ProviderAccountId>,
     launch_lock: Option<File>,
+    progress: &mut crate::startup::Startup,
 ) -> Result<SessionCommandOutcome> {
     let started = std::time::Instant::now();
     let attachment = native_provider_attachment(command, environment)?;
@@ -621,6 +634,17 @@ fn run_native_session(
         &attachment.2,
         crate::session_record::current_terminal_id().as_deref(),
     )?;
+    if command.program == "codex" && command.remote.is_none() {
+        return run_codex_native(
+            command,
+            environment,
+            agent_session,
+            exact_account_id,
+            launch_lock,
+            progress,
+            attachment,
+        );
+    }
     let provider = match command.program.as_str() {
         "claude" => Some(Provider::Claude),
         "codex" => Some(Provider::Codex),
@@ -638,6 +662,8 @@ fn run_native_session(
         .map_err(|error| anyhow!("failed to select provider account: {error}"))?
         .flatten();
 
+    progress.stage(format!("Opening {} terminal", command.program));
+    progress.finish();
     let mut process = Command::new(&command.program);
     process
         .env_remove("LOOPFLOW_DIRECTIVE_FILE")
@@ -646,10 +672,6 @@ fn run_native_session(
         crate::terminal_title::TerminalTitle::prepare(environment, &command.program, &mut process);
     if let Some(route) = &account_route {
         process.args(route.provider_args());
-    }
-    if command.program == "codex" {
-        // Codex's shared background server keeps the login it started with.
-        process.arg("--no-daemon");
     }
     let observed_capture = capture_dir
         .clone()
@@ -672,14 +694,16 @@ fn run_native_session(
         );
         route.pin_session_blocking(agent_session.cloned())?;
     }
-    let capture_codex =
-        command.program == "codex" && agent_session.is_none() && capture_dir.is_some();
     process.args(crate::harness::context::native_args(
         &command.program,
         command.context.as_ref(),
-        capture_codex,
     )?);
     process.args(&command.args);
+    if command.program == "claude" {
+        if let Some(input) = &command.input {
+            crate::agent::configure_native_input(&mut process, input)?;
+        }
+    }
     if let (Some(capture_dir), Some(agent_session)) = (capture_dir.as_deref(), agent_session) {
         crate::session_record::write_provider_session(
             capture_dir,
@@ -765,18 +789,233 @@ fn run_native_session(
             }
         }
     }
-    if status.success() && capture_codex {
-        let capture_dir = capture_dir
-            .as_deref()
-            .expect("Codex capture has a directory");
-        if crate::session_record::read_provider_session(capture_dir)?.is_none() {
-            bail!("Codex exited without recording its native Session ID. Launch evidence remains at {}. Inspect the provider's hook diagnostic before retrying; no unrelated Session was attached.", capture_dir.display());
-        }
-    }
     Ok(SessionCommandOutcome {
         status,
         interrupted,
     })
+}
+
+pub(crate) fn run_native_codex_agent(
+    launch: &crate::agent::AgentConfig,
+) -> Result<crate::agent::AgentProcessResult> {
+    let cwd = launch
+        .cwd
+        .clone()
+        .map(Ok)
+        .unwrap_or_else(std::env::current_dir)?;
+    let command = SessionCommand {
+        codex: Some(launch.clone()),
+        input: None,
+        program: "codex".into(),
+        args: Vec::new(),
+        cwd,
+        context: launch.conversation_context.clone(),
+        remote: None,
+        attachment: launch.session_attachment.clone(),
+    };
+    let outcome = session_command_status_with_env(
+        &command,
+        &launch.env,
+        launch.resume_token.as_ref(),
+        launch.provider_account_id.as_ref(),
+        None,
+    )?;
+    let agent_session =
+        launch
+            .env
+            .get(crate::session_record::CAPTURE_KEY_ENV)
+            .map(|input| -> Result<_> {
+                Ok(crate::session_record::read_provider_session(
+                    &crate::session_record::capture_dir(input)?,
+                )?
+                .map(|provider| provider.agent_session))
+            })
+            .transpose()?
+            .flatten();
+    Ok(crate::agent::AgentProcessResult {
+        exit_code: if outcome.interrupted {
+            0
+        } else {
+            outcome.status.code().unwrap_or(1)
+        },
+        stdout: String::new(),
+        stderr: String::new(),
+        agent_session,
+        failure: None,
+    })
+}
+
+fn run_codex_native(
+    command: &SessionCommand,
+    environment: &BTreeMap<String, String>,
+    agent_session: Option<&AgentSessionId>,
+    exact_account_id: Option<&crate::store::ProviderAccountId>,
+    launch_lock: Option<File>,
+    progress: &mut crate::startup::Startup,
+    owner: crate::harness::agent_process::AttachmentOwner,
+) -> Result<SessionCommandOutcome> {
+    progress.stage("Starting Codex");
+    let mut launch = command
+        .codex
+        .as_ref()
+        .expect("native Codex command carries its launch configuration")
+        .clone();
+    launch.env = environment.clone();
+    launch.session_attachment = command.attachment.clone();
+    launch.conversation_context = command.context.clone();
+    launch.resume_token = agent_session.cloned();
+    launch.provider_account_id = exact_account_id.cloned();
+    if let Some(skill) = launch.skill_invocation.take() {
+        launch.task_prompt = skill.terminal_input("codex", &launch)?.1;
+    }
+    let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
+    let (closed_tx, closed_rx) = tokio::sync::oneshot::channel();
+
+    // Keep the terminal on its invoking thread and foreground process group.
+    // The protocol worker owns only startup and the fenced native relay.
+    std::thread::scope(|scope| {
+        let worker = scope.spawn(move || -> Result<()> {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()?;
+            runtime.block_on(serve_codex_native(launch, owner, ready_tx, closed_rx))
+        });
+        let prepared = ready_rx.recv();
+        let result = match prepared {
+            Ok((thread, remote, account)) => {
+                let mut client = match &thread {
+                    Some(thread) => {
+                        build_resume_session_command("codex", None, &command.cwd, thread)?
+                    }
+                    None => build_session_command("codex", None, &command.cwd, "", None, None)?,
+                };
+                client.args.splice(
+                    0..0,
+                    [
+                        "--remote".into(),
+                        format!("unix://{}", remote.relay.display()),
+                    ],
+                );
+                client.remote = Some(remote);
+                client.attachment = command.attachment.clone();
+                run_native_session(
+                    &client,
+                    environment,
+                    thread.as_ref(),
+                    account.as_ref(),
+                    launch_lock,
+                    progress,
+                )
+            }
+            Err(_) => Err(anyhow!(
+                "Codex startup worker ended before the terminal could attach"
+            )),
+        };
+        let _ = closed_tx.send(());
+        worker
+            .join()
+            .map_err(|_| anyhow!("Codex startup worker panicked"))??;
+        result
+    })
+}
+
+async fn serve_codex_native(
+    launch: crate::agent::AgentConfig,
+    owner: crate::harness::agent_process::AttachmentOwner,
+    ready_tx: std::sync::mpsc::SyncSender<(
+        Option<AgentSessionId>,
+        NativeConnection,
+        Option<crate::store::ProviderAccountId>,
+    )>,
+    closed_rx: tokio::sync::oneshot::Receiver<()>,
+) -> Result<()> {
+    use crate::harness::{
+        codex::CodexHarness, codex_connection::CodexConnection, ApprovalPolicy, Harness,
+    };
+
+    let (events, _events) = tokio::sync::mpsc::unbounded_channel();
+    let mut harness = CodexHarness::new(events, ApprovalPolicy::NativeClient);
+    harness.set_agent_session(launch.resume_token.clone());
+    harness.set_provider_account_id(launch.provider_account_id.clone());
+    // No turn is sent on this bootstrap connection. Close it before
+    // the UI connects so it cannot answer the UI's approvals.
+    match tokio::time::timeout(std::time::Duration::from_secs(20), harness.start(&launch)).await {
+        Ok(result) => result?,
+        Err(_) => {
+            harness.stop().await?;
+            bail!("Codex conversation startup timed out after 20s; the owned provider was stopped");
+        }
+    }
+    let account = harness.provider_account_id();
+    let (endpoint, params) = harness
+        .native_start()
+        .ok_or_else(|| anyhow!("Codex startup ended without its native launch configuration"))?;
+    let thread = params["threadId"].as_str().map(AgentSessionId::from);
+    harness.stop().await?;
+    let (store, session, attachment) = &owner;
+    let connection = CodexConnection {
+        store: store.clone(),
+        session_id: session.clone(),
+        thread_id: thread.clone(),
+        attachment: Some(attachment.clone()),
+        account_id: account.clone(),
+    };
+    // Decide whether the original input is pending before opening
+    // the UI. A resumed terminal can exit before it subscribes.
+    let empty = if thread.is_some() {
+        tokio::time::timeout(
+            std::time::Duration::from_secs(20),
+            connection.recover_history(&endpoint),
+        )
+        .await
+        .context("Codex native history recovery timed out")??
+    } else {
+        true
+    };
+    let initial = std::sync::Arc::new(tokio::sync::Mutex::new(
+        crate::harness::codex_connection::NativeInput {
+            params: Some(params),
+            text: (empty && !launch.task_prompt.is_empty()).then(|| launch.task_prompt.clone()),
+        },
+    ));
+    let directory = tempfile::tempdir()?;
+    let relay = directory.path().join("client.sock");
+    let listener = tokio::net::UnixListener::bind(&relay)?;
+    ready_tx
+        .send((
+            thread,
+            NativeConnection {
+                relay,
+                upstream: endpoint.clone(),
+            },
+            account,
+        ))
+        .map_err(|_| anyhow!("Native terminal launch was cancelled"))?;
+    let mut clients = tokio::task::JoinSet::new();
+    tokio::pin!(closed_rx);
+    loop {
+        tokio::select! {
+            _ = &mut closed_rx => break,
+            accepted = listener.accept() => {
+                let (client, _) = accepted?;
+                let connection = connection.clone();
+                let endpoint = endpoint.clone();
+                let initial = initial.clone();
+                clients.spawn(async move {
+                    connection.serve_with_input(client, &endpoint, Some(initial)).await
+                });
+            }
+            result = clients.join_next(), if !clients.is_empty() => {
+                if let Some(result) = result { result?.context("Codex native terminal connection failed")?; }
+            }
+        }
+    }
+    if initial.lock().await.text.is_some() {
+        bail!(
+            "Codex terminal exited before submitting the saved initial request; reconnect to retry"
+        );
+    }
+    Ok(())
 }
 
 fn observe_opencode_session(capture_dir: &Path, stderr: impl Read) -> std::io::Result<()> {
@@ -961,6 +1200,8 @@ mod tests {
         )
         .unwrap();
         let command = SessionCommand {
+            codex: None,
+            input: None,
             context: None,
             attachment: None,
             remote: None,
@@ -983,15 +1224,11 @@ mod tests {
 
         assert_eq!(launch.program, "codex");
         assert_eq!(launch.cwd, path());
-        assert!(launch
-            .args
-            .starts_with(&args(&["-C", "/tmp/loop flow", "-c", "model=\"o3\""])));
-        assert_eq!(launch.args.last().map(String::as_str), Some("fix it"));
-        assert_eq!(
-            launch.args.contains(&"--sandbox".to_string()),
-            crate::agent::codex_permission_args(Some(&path()), false, false)
-                .contains(&"--sandbox".to_string())
-        );
+        assert!(launch.args.is_empty());
+        let config = launch.codex.as_ref().unwrap();
+        assert_eq!(config.task_prompt, "fix it");
+        assert_eq!(config.agent.as_deref(), Some("codex:o3"));
+        assert_eq!(config.cwd.as_ref(), Some(&path()));
     }
 
     #[test]
@@ -1013,39 +1250,14 @@ mod tests {
     }
 
     #[test]
-    fn session_launch_tui_codex_adds_main_repo_for_worktree_metadata() {
-        let (_tmp, main, worktree) = git_worktree_fixture();
-
-        let launch = build_session_command("codex", None, &worktree, "fix it", None, None)
-            .expect("build launch");
-
-        let idx = launch
-            .args
-            .iter()
-            .position(|arg| arg == "--add-dir")
-            .expect("add-dir flag");
-        assert_eq!(
-            PathBuf::from(&launch.args[idx + 1]).canonicalize().unwrap(),
-            main.canonicalize().unwrap()
-        );
-    }
-
-    #[test]
     fn session_launch_tui_claude_runs_in_worktree_with_model_and_prompt() {
         let launch = build_session_command("claude", Some("sonnet"), &path(), "fix it", None, None)
             .expect("build launch");
 
-        assert_eq!(
-            launch,
-            SessionCommand {
-                context: None,
-                attachment: None,
-                remote: None,
-                program: "claude".to_string(),
-                args: args(&["--model", "sonnet", "--", "fix it"]),
-                cwd: path(),
-            }
-        );
+        assert_eq!(launch.program, "claude");
+        assert_eq!(launch.cwd, path());
+        assert_eq!(launch.args, args(&["--model", "sonnet", "--"]));
+        assert!(launch.codex.is_none());
     }
 
     #[test]
@@ -1062,12 +1274,7 @@ mod tests {
 
         assert_eq!(
             launch.args,
-            args(&[
-                "--session-id",
-                "01234567-89ab-cdef-0123-456789abcdef",
-                "--",
-                "test",
-            ])
+            args(&["--session-id", "01234567-89ab-cdef-0123-456789abcdef", "--",])
         );
     }
 
@@ -1158,12 +1365,12 @@ mod tests {
                 None => std::env::remove_var("LF_USER_NAME"),
             }
             let resume = || {
-                resume_session_with_env(
+                open_saved_session_with_env(
                     "opencode",
                     None,
                     temp.path(),
                     &capture.artifact_key(),
-                    &session,
+                    Some(&session),
                     &BTreeMap::new(),
                     None,
                     None,
@@ -1281,6 +1488,8 @@ mod tests {
         )
         .unwrap();
         let command = SessionCommand {
+            codex: None,
+            input: None,
             context: None,
             attachment: None,
             remote: None,
@@ -1330,6 +1539,8 @@ mod tests {
             }
         });
         let command = SessionCommand {
+            codex: None,
+            input: None,
             context: None,
             program: "/bin/sleep".into(),
             args: vec!["10".into()],
@@ -1349,6 +1560,8 @@ mod tests {
         let _ambient = crate::test_ambient::EnvGuard::new();
         let home = ledger.home();
         let mut command = SessionCommand {
+            codex: None,
+            input: None,
             program: "/bin/sh".into(),
             args: vec!["-c".into(), "printf '%s' \"$$\" > pid".into()],
             cwd: home.into(),
@@ -1443,6 +1656,8 @@ mod tests {
             )]);
             let before = store.process(&attached.agent_process_id)?.unwrap();
             let mut command = SessionCommand {
+                codex: None,
+                input: None,
                 program: "/usr/bin/true".into(),
                 args: vec![],
                 cwd: home.into(),
@@ -1526,6 +1741,8 @@ mod tests {
                 },
             )?;
             let command = SessionCommand {
+                codex: None,
+                input: None,
                 context: None,
                 attachment: capture.session_attachment(),
                 remote: None,
@@ -1571,7 +1788,8 @@ mod tests {
             PathBuf::from(&launch.args[idx + 1]).canonicalize().unwrap(),
             main.canonicalize().unwrap()
         );
-        assert!(launch.args.ends_with(&args(&["--", "fix it"])));
+        assert!(launch.args.ends_with(&args(&["--"])));
+        assert_eq!(launch.input.as_deref(), Some("fix it"));
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -1756,19 +1974,9 @@ mod tests {
             })
             .await
             .unwrap();
-        launch_session(
-            "codex",
-            None,
-            temp.path(),
-            "review it",
-            &BTreeMap::new(),
-            Some(&"existing-codex-thread".into()),
-            &[],
-            None,
-            None,
-            None,
-        )
-        .unwrap();
+        let mut command = Command::new(&codex);
+        crate::provider_auth::apply_provider_env_to_command("codex", &mut command);
+        assert!(command.status().unwrap().success());
     }
 
     #[test]
@@ -1783,22 +1991,18 @@ mod tests {
         )
         .expect("build launch");
 
+        assert_eq!(launch.program, "opencode");
+        assert_eq!(launch.cwd, path());
         assert_eq!(
-            launch,
-            SessionCommand {
-                context: None,
-                attachment: None,
-                remote: None,
-                program: "opencode".to_string(),
-                args: args(&[
-                    "/tmp/loop flow",
-                    "--prompt",
-                    "fix it",
-                    "--model",
-                    "moonshotai/kimi-k2",
-                ]),
-                cwd: path(),
-            }
+            launch.args,
+            args(&[
+                "/tmp/loop flow",
+                "--prompt",
+                "fix it",
+                "--model",
+                "moonshotai/kimi-k2"
+            ])
         );
+        assert!(launch.codex.is_none());
     }
 }

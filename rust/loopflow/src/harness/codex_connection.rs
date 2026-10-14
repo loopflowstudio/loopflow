@@ -5,13 +5,18 @@
 
 use crate::id::AgentSessionId;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use tokio::net::UnixStream;
-use tokio_tungstenite::{accept_async, client_async, tungstenite::Message, WebSocketStream};
+use tokio_tungstenite::{
+    accept_async, client_async,
+    tungstenite::{error::ProtocolError, Error, Message},
+    WebSocketStream,
+};
 
 use crate::process::SessionAttachment;
 use crate::store::sqlite::SqliteStore;
@@ -20,7 +25,10 @@ use crate::store::{StoreError, StoreResult};
 /// Refuse shutdown if the saved endpoint serves an unrelated conversation.
 /// The caller holds the Session attachment lock through inspection and shutdown;
 /// this check neither signals the provider nor changes its saved history.
-pub(crate) fn validate_agent_process_close(endpoint: &str, thread: &AgentSessionId) -> Result<()> {
+pub(crate) fn validate_agent_process_close(
+    endpoint: &str,
+    thread: Option<&AgentSessionId>,
+) -> Result<()> {
     // Use a separate runtime: exit is also reached from synchronous capture
     // settlement and signal cleanup, sometimes inside an existing runtime.
     std::thread::scope(|scope| {
@@ -43,7 +51,7 @@ pub(crate) fn validate_agent_process_close(endpoint: &str, thread: &AgentSession
     })
 }
 
-async fn inspect_agent_threads(endpoint: &str, thread: &AgentSessionId) -> Result<()> {
+async fn inspect_agent_threads(endpoint: &str, thread: Option<&AgentSessionId>) -> Result<()> {
     let socket = match UnixStream::connect(endpoint).await {
         Ok(socket) => socket,
         Err(error)
@@ -80,7 +88,7 @@ async fn inspect_agent_threads(endpoint: &str, thread: &AgentSessionId) -> Resul
                 .ok_or_else(|| anyhow!("loaded thread has no ID"))?
                 .to_owned();
             let mut ancestors = std::collections::HashSet::new();
-            while current != thread.as_str() {
+            while Some(current.as_str()) != thread.map(AgentSessionId::as_str) {
                 if !ancestors.insert(current.clone()) {
                     return Err(anyhow!("provider thread parent cycle"));
                 }
@@ -118,14 +126,25 @@ async fn inspect_agent_threads(endpoint: &str, thread: &AgentSessionId) -> Resul
 pub struct CodexConnection {
     pub store: SqliteStore,
     pub session_id: String,
-    pub thread_id: AgentSessionId,
+    pub thread_id: Option<AgentSessionId>,
     pub attachment: Option<SessionAttachment>,
+    pub account_id: Option<crate::store::ProviderAccountId>,
+}
+
+#[derive(Debug)]
+pub(crate) struct NativeInput {
+    pub params: Option<Value>,
+    pub text: Option<String>,
 }
 
 impl CodexConnection {
     /// Read all native turn pages before displaying the conversation. This
     /// connection never subscribes, answers approvals, or acquires an attachment.
-    pub async fn recover_history(&self, endpoint: &Path) -> Result<()> {
+    pub async fn recover_history(&self, endpoint: &Path) -> Result<bool> {
+        let thread = self
+            .thread_id
+            .as_ref()
+            .ok_or_else(|| anyhow!("Conversation has no native history yet"))?;
         let (mut upstream, _) =
             client_async("ws://localhost", UnixStream::connect(endpoint).await?).await?;
         rpc_request(
@@ -144,6 +163,7 @@ impl CodexConnection {
             .await?;
         let mut history = super::codex_history::History::default();
         let mut cursor = Value::Null;
+        let mut empty = true;
         loop {
             let result = rpc_request(
                 &mut upstream,
@@ -154,12 +174,16 @@ impl CodexConnection {
                 }),
             )
             .await?;
+            empty &= result["data"]
+                .as_array()
+                .ok_or_else(|| anyhow!("Native history response has no turns"))?
+                .is_empty();
             super::dispatch::off_reactor(|| {
                 history.record(
                     &self.store,
                     &self.session_id,
                     None,
-                    Some(&self.thread_id),
+                    Some(thread),
                     &json!({"result":result}),
                 )
             })?;
@@ -173,41 +197,82 @@ impl CodexConnection {
             cursor = next;
         }
         upstream.close(None).await?;
-        Ok(())
+        Ok(empty)
     }
 
     pub async fn serve(&self, client: UnixStream, endpoint: &Path) -> Result<()> {
+        self.serve_with_input(client, endpoint, None).await
+    }
+
+    /// Submit the saved first input on the native client's connection, after it
+    /// subscribes. Approval requests then belong to that client, never a headless
+    /// auto-approver. All connections in this launch share the one pending input.
+    pub(crate) async fn serve_with_input(
+        &self,
+        client: UnixStream,
+        endpoint: &Path,
+        initial: Option<Arc<tokio::sync::Mutex<NativeInput>>>,
+    ) -> Result<()> {
         let mut client = accept_async(client).await?;
         let (mut upstream, _) =
             client_async("ws://localhost", UnixStream::connect(endpoint).await?).await?;
         let mut history = super::codex_history::History::default();
+        let mut resume_request = None;
+        let mut bind_thread = false;
+        let mut initial_request = None;
+        let mut thread = self.thread_id.clone();
         loop {
             tokio::select! {
                 incoming = client.next() => {
                     let Some(incoming) = incoming else { break };
-                    let Message::Text(text) = incoming? else { continue };
+                    let text = match client_result(incoming)? {
+                        Some(Message::Text(text)) => text,
+                        None | Some(Message::Close(_)) => break,
+                        _ => continue,
+                    };
                     let mut rpc: Value = serde_json::from_str(&text)?;
                     let method = rpc.get("method").and_then(Value::as_str).unwrap_or_default();
                     let target = rpc.pointer("/params/threadId").and_then(Value::as_str);
-                    let wrong_thread = target.is_some_and(|id| id != self.thread_id.as_str());
-                    // Creating another thread is another conversation admission.
-                    let admission = matches!(method, "thread/start" | "thread/fork");
-                    if wrong_thread || admission {
+                    let wrong_thread = target.is_some_and(|id| Some(id) != thread.as_ref().map(AgentSessionId::as_str));
+                    let starting = method == "thread/start" && thread.is_none();
+                    if wrong_thread || method == "thread/fork" || (method == "thread/start" && !starting) {
                         reject(&mut client, &rpc, "Client belongs to another conversation").await?;
                         continue;
                     }
                     let passive = match method {
                         "initialize" | "initialized" => true,
-                        "thread/read" => target == Some(self.thread_id.as_str()),
-                        "thread/resume" => {
-                            // Subscribe to the existing thread. Do not forward
-                            // config/cwd overrides from a passive or stale UI.
-                            rpc["params"] = json!({"threadId": self.thread_id});
-                            true
+                        "thread/read" => target == thread.as_ref().map(AgentSessionId::as_str),
+                        "thread/start" | "thread/resume" => {
+                            let params = match &initial {
+                                Some(initial) => initial.lock().await.params.take(),
+                                None => None,
+                            };
+                            if starting && params.is_none() {
+                                reject(&mut client, &rpc, "Conversation startup was already submitted").await?;
+                                continue;
+                            }
+                            let passive = params.is_none();
+                            bind_thread = !passive;
+                            // Keep native tools and explicitly selected UI settings;
+                            // prepared instructions and launch configuration win.
+                            // A passive or stale UI can only subscribe.
+                            rpc["params"] = match params {
+                                Some(params) => native_start_params(&rpc["params"], params),
+                                None => json!({"threadId":thread}),
+                            };
+                            resume_request = rpc.get("id").cloned();
+                            passive
                         }
                         _ => false,
                     };
-                    history.request(&rpc, self.attachment.as_ref().map(|attachment| (&self.store,self.session_id.as_str(),attachment)))?;
+                    match history.request(&rpc, self.attachment.as_ref().map(|attachment| (&self.store,self.session_id.as_str(),attachment))) {
+                        Ok(()) => {},
+                        Err(StoreError::InvalidAuthority(reason)) => {
+                            reject(&mut client, &rpc, &reason).await?;
+                            continue;
+                        }
+                        Err(error) => return Err(error.into()),
+                    }
                     let message = Message::Text(serde_json::to_string(&rpc)?.into());
                     if passive {
                         upstream.send(message).await?;
@@ -229,13 +294,67 @@ impl CodexConnection {
                         Message::Close(_) => break,
                         Message::Text(text) => {
                             let rpc: Value = serde_json::from_str(&text)?;
+                            let resumed = resume_request.as_ref().is_some_and(|id| rpc.get("id") == Some(id))
+                                && rpc.get("result").is_some();
+                            if resumed {
+                                let selected = rpc.pointer("/result/thread/id").and_then(Value::as_str)
+                                    .ok_or_else(|| anyhow!("Codex returned no native conversation ID"))?;
+                                if thread.as_ref().is_some_and(|thread| thread.as_str() != selected) {
+                                    return Err(anyhow!("Codex resumed another conversation"));
+                                }
+                                thread = Some(selected.into());
+                                if bind_thread {
+                                    if let Some(attachment) = &self.attachment {
+                                        self.store.record_session_connection(&self.session_id, attachment,
+                                            &endpoint.to_string_lossy(), thread.as_ref().expect("selected thread"))?;
+                                    }
+                                    bind_thread = false;
+                                }
+                            }
+                            if rpc["method"] == "turn/started" && initial.is_some() {
+                                if let Some(thread) = &thread {
+                                    let session = self.store.session(&self.session_id)?
+                                        .ok_or_else(|| anyhow!("Session disappeared during native startup"))?;
+                                    crate::session_record::write_provider_session(
+                                        &crate::session_record::capture_dir(&session.artifact_key)?, thread, self.account_id.clone())?;
+                                }
+                            }
                             super::dispatch::off_reactor(|| {
                                 history.record(&self.store, &self.session_id,
-                                    self.attachment.as_ref(), Some(&self.thread_id), &rpc)
+                                    self.attachment.as_ref(), thread.as_ref(), &rpc)
                             })?;
-                            client.send(Message::Text(text)).await?;
+                            if initial_request.as_ref().is_some_and(|id| rpc.get("id") == Some(id)) {
+                                initial_request = None;
+                                if let Some(error) = rpc.get("error") {
+                                    return Err(anyhow!("Codex rejected the initial request: {error}"));
+                                }
+                                continue;
+                            }
+                            if client_result(client.send(Message::Text(text)).await)?.is_none() { break; }
+                            if resumed {
+                                resume_request = None;
+                                if let Some(initial) = &initial {
+                                    let mut initial = initial.lock().await;
+                                    let turns = rpc.pointer("/result/thread/turns").and_then(Value::as_array)
+                                        .ok_or_else(|| anyhow!("Codex returned no native turn history"))?;
+                                    if !turns.is_empty() { initial.text = None; }
+                                    if let Some(text) = initial.text.take() {
+                                        let id = json!(format!("lf-initial-{}", uuid::Uuid::new_v4()));
+                                        let request = json!({"id":id,"method":"turn/start","params":{
+                                            "threadId":thread,"input":[{"type":"text","text":text}]
+                                        }});
+                                        history.request(&request, self.attachment.as_ref().map(|attachment| (&self.store,self.session_id.as_str(),attachment)))?;
+                                        let outcome;
+                                        (upstream, outcome) = self.send(upstream, Message::Text(request.to_string().into())).await?;
+                                        outcome?;
+                                        initial_request = Some(id);
+                                    }
+                                }
+                            }
                         }
-                        message => client.send(message).await?,
+                        message => {
+                            if client_result(client.send(message).await)?.is_none() { break; }
+                        }
                     }
                 }
             }
@@ -269,6 +388,50 @@ impl CodexConnection {
         })
         .await
         .map_err(|error| anyhow!("Native dispatch task failed: {error}"))
+    }
+}
+
+fn native_start_params(client: &Value, prepared: Value) -> Value {
+    let mut params = client.as_object().cloned().unwrap_or_default();
+    let mut config = client["config"].as_object().cloned().unwrap_or_default();
+    let mut prepared = prepared
+        .as_object()
+        .expect("prepared thread parameters are an object")
+        .clone();
+    if let Some(overrides) = prepared.remove("config") {
+        config.extend(
+            overrides
+                .as_object()
+                .expect("prepared configuration is an object")
+                .clone(),
+        );
+    }
+    params.extend(prepared);
+    params.insert("config".into(), Value::Object(config));
+    Value::Object(params)
+}
+
+// A terminal may close without completing the WebSocket handshake. This applies
+// only to its side of the relay: provider disconnects still propagate as failures.
+fn client_result<T>(result: std::result::Result<T, Error>) -> Result<Option<T>> {
+    match result {
+        Ok(value) => Ok(Some(value)),
+        Err(
+            Error::ConnectionClosed
+            | Error::AlreadyClosed
+            | Error::Protocol(ProtocolError::ResetWithoutClosingHandshake),
+        ) => Ok(None),
+        Err(Error::Io(error))
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::BrokenPipe
+                    | std::io::ErrorKind::ConnectionReset
+                    | std::io::ErrorKind::NotConnected
+            ) =>
+        {
+            Ok(None)
+        }
+        Err(error) => Err(error.into()),
     }
 }
 
@@ -324,4 +487,58 @@ async fn reject(client: &mut WebSocketStream<UnixStream>, rpc: &Value, reason: &
             .await?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CodexConnection;
+    use crate::store::sqlite::SqliteStore;
+    use futures_util::{SinkExt, StreamExt};
+    use tokio::net::{UnixListener, UnixStream};
+    use tokio_tungstenite::{accept_async, client_async, tungstenite::Message};
+
+    #[tokio::test]
+    async fn terminal_exit_with_or_without_close_handshake_ends_the_relay_cleanly() {
+        for handshake in [false, true] {
+            let home = tempfile::tempdir_in("/tmp").unwrap();
+            let endpoint = home.path().join("provider.sock");
+            let listener = UnixListener::bind(&endpoint).unwrap();
+            let provider = tokio::spawn(async move {
+                let (stream, _) = listener.accept().await.unwrap();
+                let mut socket = accept_async(stream).await.unwrap();
+                let input = socket.next().await.unwrap().unwrap();
+                socket.send(input).await.unwrap();
+                let _ = socket.next().await;
+            });
+            let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+            store.test_session("conversation", "input");
+            let connection = CodexConnection {
+                store,
+                session_id: "conversation".into(),
+                thread_id: None,
+                attachment: None,
+                account_id: None,
+            };
+            let (terminal, relay) = UnixStream::pair().unwrap();
+            let relay = tokio::spawn(async move { connection.serve(relay, &endpoint).await });
+            let (mut terminal, _) = client_async("ws://localhost", terminal).await.unwrap();
+            terminal
+                .send(Message::Text(
+                    r#"{"method":"initialize","params":{}}"#.into(),
+                ))
+                .await
+                .unwrap();
+            assert!(terminal.next().await.unwrap().unwrap().is_text());
+            if handshake {
+                terminal.close(None).await.unwrap();
+            }
+            drop(terminal);
+            tokio::time::timeout(std::time::Duration::from_secs(2), relay)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            provider.await.unwrap();
+        }
+    }
 }

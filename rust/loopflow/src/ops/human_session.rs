@@ -610,6 +610,7 @@ pub(crate) async fn open(
     resume: bool,
 ) -> Result<SessionRecord> {
     crate::data_clone::require_writable_session(session_id)?;
+    let progress = resume.then(|| crate::startup::Startup::new("Preparing conversation"));
     let target = match find_session(store, session_id, true).await? {
         Some(target) => target,
         // Connecting is what brings a provider-started conversation in.
@@ -643,6 +644,7 @@ pub(crate) async fn open(
         crate::lf::commands::util::require_provider_session_process(&native.dir)?;
         stop_headless_for_resume(store, session, provider_session.as_ref()).await?;
     }
+    drop(progress);
     let Some(provider_session) = provider_session else {
         let surface = surface(store, session).await?;
         if resume {
@@ -793,13 +795,20 @@ async fn connect_live_codex(
         )
         .context("Codex AgentProcess is stopping after its attached lf exited")?;
         store.sqlite.make_session_interactive(&session.id, &attachment)?;
-        let directory = tempfile::Builder::new().prefix("lf-connect-").tempdir_in("/tmp")?;
+        let directory = tempfile::tempdir()?;
         let remote = directory.path().join("client.sock");
         let listener = tokio::net::UnixListener::bind(&remote)?;
         let connection = crate::harness::codex_connection::CodexConnection {
-            store: store.sqlite.clone(), session_id: session.id.clone(), thread_id: thread, attachment: Some(attachment.clone()),
+            store: store.sqlite.clone(), session_id: session.id.clone(), thread_id: Some(thread), attachment: Some(attachment.clone()), account_id: provider.account_id.clone(),
         };
-        connection.recover_history(Path::new(&endpoint)).await?;
+        let empty = connection.recover_history(Path::new(&endpoint)).await?;
+        let initial = if empty {
+            let (_, manifest) = crate::session_record::resolve_manifest(
+                &crate::store::lf_home_dir(), &session.artifact_key,
+            )?;
+            manifest.process.map(|request| request.codex_initial_input()).filter(|input| !input.is_empty())
+        } else { None };
+        let initial = std::sync::Arc::new(tokio::sync::Mutex::new(crate::harness::codex_connection::NativeInput { params: None, text: initial }));
         let upstream = PathBuf::from(&endpoint);
         let relay = tokio::spawn(async move {
             let mut clients = tokio::task::JoinSet::new();
@@ -809,7 +818,8 @@ async fn connect_live_codex(
                         let Ok((client, _)) = accepted else { break };
                         let connection = connection.clone();
                         let endpoint = endpoint.clone();
-                        clients.spawn(async move { connection.serve(client, Path::new(&endpoint)).await });
+                        let initial = initial.clone();
+                        clients.spawn(async move { connection.serve_with_input(client, Path::new(&endpoint), Some(initial)).await });
                     }
                     result = clients.join_next(), if !clients.is_empty() => {
                         if let Some(Ok(Err(error))) = result { tracing::warn!(%error, "native conversation connection ended"); }
@@ -825,8 +835,8 @@ async fn connect_live_codex(
             serde_json::to_string(&launch_attachment.caller(session.id.clone()))?,
         )]);
         let result = tokio::task::spawn_blocking(move || {
-            crate::lf::commands::util::resume_session_with_env(
-                "codex", session.model.as_deref(), &session.cwd, &session.artifact_key, &provider,
+            crate::lf::commands::util::open_saved_session_with_env(
+                "codex", session.model.as_deref(), &session.cwd, &session.artifact_key, Some(&provider),
                 &environment, None, Some(crate::lf::commands::util::NativeConnection { relay: remote, upstream }),
                 Some((session.id.clone(), launch_attachment)),
             )
@@ -1154,6 +1164,12 @@ pub(crate) async fn spawn_session_process(
             bail!("{launch}: exited with {status} before becoming resumable");
         }
         if tokio::time::Instant::now() >= deadline {
+            // Reap the launcher before returning. Protocol providers are tied to
+            // its lifeline, including wrappers that never finish starting.
+            child
+                .kill()
+                .await
+                .context("stop timed-out Session launcher")?;
             bail!("{launch}: did not become resumable within 30s");
         }
         tokio::time::sleep(Duration::from_millis(10)).await;
@@ -1195,19 +1211,29 @@ pub(crate) fn resume_native_session(
         bail!("Session {} changed its input before resume", session.id);
     }
     let native = NativeSession::of(&session)?;
-    let Some(provider_session) = store.sqlite.input_provider_session(artifact_key)? else {
-        return Ok(false);
-    };
+    let provider_session = store.sqlite.input_provider_session(artifact_key)?;
+    if provider_session.is_none() {
+        if native.provider != "codex" {
+            return Ok(false);
+        }
+        // A failed Codex bootstrap may have no provider history yet. Reopen its
+        // captured request, not the Session's optional summary/request label.
+        let saved =
+            crate::session_record::resolve_manifest(&crate::store::lf_home_dir(), artifact_key)?;
+        if saved.1.process.is_none() {
+            return Ok(false);
+        }
+    }
     crate::lf::commands::util::require_provider_session_process(&native.dir)?;
     crate::harness::agent_process::stop_session_agent(&store.sqlite, &session.id)?;
     let environment =
         BTreeMap::from([(HUMAN_SESSION_ENV.to_string(), serde_json::to_string(token)?)]);
-    crate::lf::commands::util::resume_session_with_env(
+    crate::lf::commands::util::open_saved_session_with_env(
         native.provider,
         session.model.as_deref(),
         &session.cwd,
         &session.artifact_key,
-        &provider_session,
+        provider_session.as_ref(),
         &environment,
         launch_lock.take(),
         None,
@@ -1713,7 +1739,7 @@ mod tests {
                     if transfer == "none" {
                         assert!(result?, "composed connection did not launch");
                         let args = std::fs::read_to_string(&args_path)?;
-                        assert!(args.contains("--remote\nunix:///tmp/lf-connect-"), "{args}");
+                        assert!(args.contains("--remote\nunix://"), "{args}");
                         assert!(args.contains("client.sock") && args.contains("saved-thread"));
                         assert!(!args.contains(endpoint.to_str().unwrap()));
                         assert!(attachment.lf_process_id.is_none());

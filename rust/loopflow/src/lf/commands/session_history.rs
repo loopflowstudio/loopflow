@@ -1,7 +1,5 @@
 //! Read retained Session inputs and observe provider conversations.
 
-use std::io::Read;
-
 use anyhow::{anyhow, Result};
 
 use crate::lf::commands::WorkFilter;
@@ -97,29 +95,6 @@ pub fn name_native_session(provider: &str) -> Result<()> {
         Err(error) => eprintln!("Session title unavailable: {error:#}"),
     }
     Ok(())
-}
-
-/// Record a provider callback against its owning Session capture.
-pub fn observe_provider_session() -> Result<()> {
-    let key = crate::session_record::inherited_capture_key()?
-        .ok_or_else(|| anyhow!("provider session callback has no active Session capture"))?;
-    let capture_dir = crate::session_record::capture_dir(&key)?;
-    let mut payload = String::new();
-    std::io::stdin().read_to_string(&mut payload)?;
-    let payload: serde_json::Value = serde_json::from_str(&payload)
-        .map_err(|error| anyhow!("invalid provider session callback: {error}"))?;
-    let agent_session = payload
-        .get("session_id")
-        .and_then(serde_json::Value::as_str)
-        .filter(|session_id| !session_id.is_empty())
-        .ok_or_else(|| anyhow!("provider session callback has no session_id"))?;
-    let account_id = std::env::var(crate::session_record::PROVIDER_ACCOUNT_ID_ENV)
-        .ok()
-        .map(|value| crate::store::ProviderAccountId::parse(&value))
-        .transpose()
-        .map_err(|error| anyhow!("invalid provider account in session callback: {error}"))?;
-    crate::session_record::write_provider_session(&capture_dir, &agent_session.into(), account_id)
-        .map_err(|error| anyhow!("cannot preserve provider session: {error}"))
 }
 
 pub fn inspect(

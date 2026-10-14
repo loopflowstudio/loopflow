@@ -1,20 +1,18 @@
 # Work-first native demo
 
-Jack Heart requested real configured-repository review, main Work views before
-Portfolio. Initial installed-CLI mismatch, failed launch and stacking history:
+Initial CLI mismatch, failed launch and stacking history:
 `ce367d7143:scratch/work-first-demo.md`, opening sections. Those failures remain
 unaccepted; no live installation or landing is authorized. Current design:
 [get-me-using-lf.md](get-me-using-lf.md), PR #1531.
 
-Empty-clone launch evidence: `53c4c156e3:scratch/work-first-demo.md`,
-**Isolated branch demo**. Jack Heart rejected it for populated Loopflow Work.
+Jack Heart rejected the empty-clone demo (`53c4c156e3:scratch/work-first-demo.md`).
 
 ## Review priority
 
 Jack Heart requested real populated Loopflow Work before Portfolio, no added
 chrome or Session counts. Failed launches, redraw freeze, loading repair and
 membership evidence: `61f7090d660:scratch/work-first-demo.md`, **Review priority**.
-Headless membership checks do not establish native speed or provider continuation.
+Headless checks prove neither native speed nor continuation.
 
 ## Earlier cleanup and opening evidence
 

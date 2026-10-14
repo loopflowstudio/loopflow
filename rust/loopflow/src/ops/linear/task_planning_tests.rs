@@ -1609,13 +1609,8 @@ fn assert_native_runner_is_quiet_until_its_turn_ends(agent: &str, auto: bool, ta
         runtime.block_on(async {
             let running = tokio::task::spawn_blocking(move || {
                 crate::journal::with_test_ledger(database, || {
-                    LINEAR_TEST_CONTEXT.sync_scope(context, || {
-                        crate::agent::run_agent(
-                            &launch,
-                            &process,
-                            &crate::agent::AgentCapabilities::default(),
-                        )
-                    })
+                    LINEAR_TEST_CONTEXT
+                        .sync_scope(context, || crate::agent::run_agent(&launch, &process))
                 })
             });
             let observed = tokio::time::timeout(std::time::Duration::from_secs(70), async {

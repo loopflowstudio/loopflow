@@ -193,8 +193,9 @@ sys.stdin.read()
             "-b",
             "--isolate",
             "session",
-            "resume",
+            "connect",
             &session,
+            "--message",
             "RESUME_END",
         ])
         .stdin(Stdio::null())

@@ -34,8 +34,9 @@ pub fn run(
         &cli.command,
         Some(crate::lf::Commands::Session {
             cmd: crate::lf::SessionCommand::List { .. }
-                | crate::lf::SessionCommand::Open { .. }
+                | crate::lf::SessionCommand::Connect { .. }
                 | crate::lf::SessionCommand::Ensure { .. }
+                | crate::lf::SessionCommand::Resume(..)
         }) | Some(crate::lf::Commands::Task {
             cmd: crate::lf::TaskCommand::Location { .. }
                 | crate::lf::TaskCommand::Admission { .. }
@@ -140,13 +141,18 @@ pub fn run(
         print!("{}", String::from_utf8(bytes)?);
         return Ok(());
     }
-    if matches!(
-        &cli.command,
+    let preparation = match &cli.command {
         Some(crate::lf::Commands::Session {
-            cmd: crate::lf::SessionCommand::Open { json: true, .. }
-        })
-    ) && !preview
-    {
+            cmd:
+                crate::lf::SessionCommand::Connect { connection, .. }
+                | crate::lf::SessionCommand::Resume(connection),
+        }) if connection.prepare && !preview => Some(connection),
+        _ => None,
+    };
+    if let Some(connection) = preparation {
+        if !connection.json {
+            cmd.push("--json".into());
+        }
         let bytes = runtime.block_on(request(&target, &cmd[1..]))?;
         let mut record: crate::ops::human_session::SessionRecord = serde_json::from_slice(&bytes)?;
         anyhow::ensure!(
@@ -165,7 +171,14 @@ pub fn run(
             );
             record.open_argv = ssh_argv(&target.route, forward_agent, &script, true)?;
         }
-        println!("{}", serde_json::to_string(&record)?);
+        if connection.json {
+            println!("{}", serde_json::to_string(&record)?);
+        } else {
+            println!(
+                "{}",
+                shlex::try_join(record.open_argv.iter().map(String::as_str))?
+            );
+        }
         return Ok(());
     }
     let preamble = build_preamble(

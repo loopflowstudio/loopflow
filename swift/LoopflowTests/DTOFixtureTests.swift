@@ -51,7 +51,7 @@ struct DTOFixtureTests {
         let reports = try JSONDecoder().decode([SessionConnectExplanation].self, from: data)
         #expect(reports[0].action?.intent == .start)
         #expect(reports[0].action?.mode == .refuse)
-        #expect(reports[1].action?.mode == .replace)
+        #expect(reports[1].action?.mode == .takeover)
         #expect(reports[1].action?.prepareOnly == true)
         #expect(reports[2].action?.intent == .connectOrResume)
         #expect(reports[2].action?.mode == .try)

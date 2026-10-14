@@ -9,7 +9,7 @@ use fs2::FileExt;
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 
-use crate::agent::{run_agent, AgentCapabilities, AgentConfig, ProcessConfig};
+use crate::agent::{run_agent, AgentConfig, ProcessConfig};
 use crate::config::load_config_or_default;
 use crate::flow::load_skill;
 use crate::git::current_branch;
@@ -609,6 +609,7 @@ fn process_ci_fix(
     );
     let config = load_config_or_default(Some(&landing.worktree));
     let mut launch = AgentConfig {
+        chrome: config.chrome,
         task_prompt: prompt,
         agent: Some(config.agent().to_string()),
         cwd: Some(landing.worktree.clone()),
@@ -650,16 +651,14 @@ fn process_ci_fix(
         }
     }
     crate::agent::pin_provider_account_id_blocking(&mut launch)?;
-    let capabilities = AgentCapabilities {
-        chrome: config.chrome,
-    };
+
     let (harness, model) = crate::config::parse_agent(launch.agent());
     let session = store
         .sqlite
         .session(session_id)
         .map_err(repair_error)?
         .ok_or_else(|| repair_error("reserved Session disappeared"))?;
-    let request = AgentProcessRequest::from_prepared(&launch, &capabilities);
+    let request = AgentProcessRequest::from_prepared(&launch);
     let context = crate::trace::PreparedTurnContext::from_prompts(
         &request.system_prompt,
         &request.task_prompt,
@@ -697,7 +696,7 @@ fn process_ci_fix(
         capture: Some(capture.clone().into()),
         ..Default::default()
     };
-    let result = run_agent(&launch, &process, &capabilities);
+    let result = run_agent(&launch, &process);
     let outcome = if matches!(&result, Ok(result) if result.exit_code == 0) {
         "completed"
     } else {

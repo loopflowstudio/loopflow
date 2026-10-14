@@ -270,7 +270,15 @@ fn remote_session_open_returns_an_owner_pinned_terminal_command() {
         &fixture.root.path().join("remote/.local/bin/lf"),
         &format!("#!/bin/sh\ncat <<'RECORD'\n{record}\nRECORD\n"),
     );
-    let opened = fixture.json(&["--machine", "mini", "session", "connect", &id, "--json"]);
+    let opened = fixture.json(&[
+        "--machine",
+        "mini",
+        "session",
+        "connect",
+        &id,
+        "--prepare",
+        "--json",
+    ]);
     let argv = opened["open_argv"]
         .as_array()
         .unwrap()
@@ -279,7 +287,18 @@ fn remote_session_open_returns_an_owner_pinned_terminal_command() {
         .collect::<Vec<_>>();
     assert_eq!(argv[0], "ssh");
     assert!(argv.contains(&"-tt"));
-    assert!(!argv.contains(&"--replace"));
+    assert!(!argv.contains(&"--takeover"));
+    for target in [vec!["connect", id.as_str()], vec!["resume"]] {
+        let mut arguments = vec!["--machine", "mini", "session"];
+        arguments.extend(target);
+        arguments.push("--prepare");
+        let output = fixture.command(&arguments).output().unwrap();
+        assert_success(&output);
+        let text = String::from_utf8(output.stdout).unwrap();
+        assert_eq!(shlex::split(text.trim()).unwrap(), argv);
+        arguments.push("--json");
+        assert_eq!(fixture.json(&arguments)["open_argv"], opened["open_argv"]);
+    }
     let mut command = Command::new(fixture.root.path().join("bin/ssh"));
     command
         .args(&argv[1..])

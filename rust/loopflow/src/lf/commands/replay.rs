@@ -6,7 +6,6 @@ use std::io::Write;
 use crate::agent::check_cli_available;
 use crate::agent::run_agent;
 use crate::agent::stream::StreamFormat;
-use crate::agent::AgentCapabilities;
 use crate::agent::AgentConfig;
 use crate::agent::ProcessConfig;
 use crate::session_record::{AttributionSource, CaptureHandle, SessionCaptureSpec};
@@ -59,6 +58,7 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
         write_scope: request.write_scope,
         execution_boundary: request.execution_boundary.clone(),
         skip_permissions: request.skip_permissions,
+        chrome: request.chrome,
         ..AgentConfig::default()
     };
     config.apply_agent_override();
@@ -75,9 +75,6 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
     crate::agent::pin_provider_account_id_blocking(&mut config).map_err(anyhow::Error::from)?;
     request.agent = config.agent().to_owned();
     request.account_id = config.provider_account_id.clone();
-    let capabilities = AgentCapabilities {
-        chrome: request.chrome,
-    };
     let spec = SessionCaptureSpec {
         harness: selected_harness,
         model,
@@ -119,7 +116,7 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
         context_file: context_file.as_ref().map(|file| file.path().to_path_buf()),
         ..ProcessConfig::default()
     };
-    let result = run_agent(&config, &process, &capabilities);
+    let result = run_agent(&config, &process);
     let outcome = match &result {
         Ok(result) if result.exit_code == 0 => "completed",
         Ok(_) | Err(_) => "failed",

@@ -4,7 +4,7 @@ use base64::prelude::*;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use loopflow::agent::{run_agent, AgentCapabilities, AgentConfig, ProcessConfig};
+use loopflow::agent::{run_agent, AgentConfig, ProcessConfig};
 use loopflow::error::CoreError;
 use loopflow::profile::{ProviderRoute, RouteScope};
 use loopflow::provider_auth::Provider;
@@ -70,8 +70,7 @@ fn claude_batch_reads_large_context_without_argv_limits() {
             stream,
             ..base_process()
         };
-        let result = run_agent(&launch, &process, &AgentCapabilities::default())
-            .expect("large context launch");
+        let result = run_agent(&launch, &process).expect("large context launch");
         assert_eq!(result.exit_code, 0);
         assert_eq!(std::fs::read_to_string(&path).unwrap(), prompt);
     }
@@ -86,7 +85,7 @@ fn library_launch_records_each_provider_under_its_invocation() {
         ..base_launch()
     };
     for _ in 0..2 {
-        let result = run_agent(&launch, &base_process(), &AgentCapabilities::default()).unwrap();
+        let result = run_agent(&launch, &base_process()).unwrap();
         assert_eq!(result.exit_code, 0);
         let pid: u32 = result
             .stdout
@@ -135,7 +134,7 @@ fn library_launch_reuses_the_enclosing_invocation() {
     };
     loopflow::journal::with_runtime(directory.path(), &["fixture".into()], || {
         for _ in 0..2 {
-            let result = run_agent(&launch, &base_process(), &AgentCapabilities::default())?;
+            let result = run_agent(&launch, &base_process())?;
             assert_eq!(result.exit_code, 0);
         }
         let store =
@@ -164,24 +163,14 @@ fn library_launch_reuses_the_enclosing_invocation() {
 #[test]
 fn launch_returns_exit_code() {
     let _env = EnvGuard::new(&[("claude", &claude_script("text = 'done'"))]);
-    let result = run_agent(
-        &base_launch(),
-        &base_process(),
-        &AgentCapabilities::default(),
-    )
-    .expect("launch");
+    let result = run_agent(&base_launch(), &base_process()).expect("launch");
     assert_eq!(result.exit_code, 0);
 }
 
 #[test]
 fn launch_captures_stdout() {
     let _env = EnvGuard::new(&[("claude", &claude_script("text = 'hello'"))]);
-    let result = run_agent(
-        &base_launch(),
-        &base_process(),
-        &AgentCapabilities::default(),
-    )
-    .expect("launch");
+    let result = run_agent(&base_launch(), &base_process()).expect("launch");
     assert!(result.stdout.contains("hello"));
 }
 
@@ -191,12 +180,7 @@ fn launch_captures_stderr() {
         "claude",
         &claude_script("text = 'fixture error'; failed = True"),
     )]);
-    let result = run_agent(
-        &base_launch(),
-        &base_process(),
-        &AgentCapabilities::default(),
-    )
-    .expect("launch");
+    let result = run_agent(&base_launch(), &base_process()).expect("launch");
     assert!(result.stderr.contains("error"));
 }
 
@@ -211,8 +195,7 @@ fn launch_scopes_process_environment_to_child() {
         ..base_launch()
     };
 
-    let result = run_agent(&launch, &base_process(), &AgentCapabilities::default())
-        .expect("launch with scoped environment");
+    let result = run_agent(&launch, &base_process()).expect("launch with scoped environment");
 
     assert_eq!(result.stdout, "owned");
 }
@@ -220,12 +203,7 @@ fn launch_scopes_process_environment_to_child() {
 #[test]
 fn launch_nonzero_exit() {
     let _env = EnvGuard::new(&[("claude", &claude_script("sys.exit(7)"))]);
-    let result = run_agent(
-        &base_launch(),
-        &base_process(),
-        &AgentCapabilities::default(),
-    )
-    .expect("launch");
+    let result = run_agent(&base_launch(), &base_process()).expect("launch");
     assert_ne!(result.exit_code, 0);
 }
 
@@ -335,8 +313,7 @@ while read -r line; do :; done
         skip_permissions: true,
         ..Default::default()
     };
-    let result =
-        run_agent(&launch, &base_process(), &AgentCapabilities::default()).expect("route failover");
+    let result = run_agent(&launch, &base_process()).expect("route failover");
 
     assert_eq!(result.exit_code, 0);
     assert!(result.stdout.contains("fallback account completed"));
@@ -412,11 +389,7 @@ while read -r line; do :; done
 #[test]
 fn launch_missing_binary_returns_error() {
     let _env = EnvGuard::new_isolated(&[]);
-    let result = run_agent(
-        &base_launch(),
-        &base_process(),
-        &AgentCapabilities::default(),
-    );
+    let result = run_agent(&base_launch(), &base_process());
     assert!(matches!(
         result,
         Err(CoreError::IoError(_)) | Err(CoreError::ExecutionFailed(_))
@@ -429,8 +402,7 @@ fn launch_with_cwd() {
     let cwd = TempDir::new().expect("cwd");
     let mut launch = base_launch();
     launch.cwd = Some(cwd.path().to_path_buf());
-    let result =
-        run_agent(&launch, &base_process(), &AgentCapabilities::default()).expect("launch");
+    let result = run_agent(&launch, &base_process()).expect("launch");
     assert!(result.stdout.contains(&cwd.path().display().to_string()));
 }
 
@@ -442,8 +414,7 @@ fn launch_streaming_mode() {
         stream: true,
         ..Default::default()
     };
-    let result =
-        run_agent(&base_launch(), &process, &AgentCapabilities::default()).expect("launch");
+    let result = run_agent(&base_launch(), &process).expect("launch");
     assert!(result.stdout.contains("first"));
     assert!(result.stdout.contains("second"));
 }
@@ -458,7 +429,7 @@ fn launch_batch_times_out() {
         ..Default::default()
     };
 
-    let result = run_agent(&base_launch(), &process, &AgentCapabilities::default());
+    let result = run_agent(&base_launch(), &process);
     assert!(
         matches!(result, Err(CoreError::ExecutionFailed(ref message)) if message.contains("timed out")),
         "expected timeout error, got: {result:?}"
@@ -475,9 +446,67 @@ fn launch_streaming_times_out() {
         ..Default::default()
     };
 
-    let result = run_agent(&base_launch(), &process, &AgentCapabilities::default());
+    let result = run_agent(&base_launch(), &process);
     assert!(
         matches!(result, Err(CoreError::ExecutionFailed(ref message)) if message.contains("timed out")),
         "expected timeout error, got: {result:?}"
+    );
+}
+
+#[test]
+fn direct_native_codex_launch_preserves_account_policy_and_literal_input() {
+    let home = TempDir::new().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    let bin = home.path().join("bin");
+    support::install_native_codex(&bin);
+    let path = std::env::var_os("PATH").unwrap();
+    std::env::set_var(
+        "PATH",
+        std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(&path))).unwrap(),
+    );
+    support::register_codex_account(home.path());
+    std::env::set_var("LF_ACCOUNT_ISOLATION", "isolated");
+    let launch = AgentConfig {
+        agent: Some("codex:model".into()),
+        system_prompt: "Keep these instructions".into(),
+        task_prompt: "--- literal prompt".into(),
+        cwd: Some(home.path().into()),
+        skip_permissions: true,
+        provider_account_id: Some(ProviderAccountId::parse("fixture").unwrap()),
+        ..Default::default()
+    };
+    let result = run_agent(&launch, &ProcessConfig::default()).unwrap();
+    assert_eq!(result.exit_code, 0);
+    let received = std::fs::read_to_string(home.path().join("native-argv.jsonl")).unwrap();
+    let launches: Vec<Vec<String>> = received
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let args = launches
+        .iter()
+        .find(|args| args.contains(&"--remote".into()))
+        .unwrap();
+    let remote = args.iter().position(|arg| arg == "--remote").unwrap();
+    assert!(args[..remote].contains(&"cli_auth_credentials_store=\"file\"".into()));
+    assert_eq!(
+        std::fs::read_to_string(home.path().join("native-thread")).unwrap(),
+        result.agent_session.as_ref().unwrap().as_str()
+    );
+    assert!(!launches
+        .iter()
+        .flatten()
+        .any(|arg| arg.contains("--- literal prompt")));
+    let params: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(home.path().join("native-config.json")).unwrap())
+            .unwrap();
+    assert_eq!(params["model"], "model");
+    assert_eq!(params["sandbox"], "danger-full-access");
+    assert_eq!(params["approvalPolicy"], "never");
+    let turns: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(home.path().join("native-turns.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        turns[0]["items"][0]["content"][0]["text"],
+        "--- literal prompt"
     );
 }

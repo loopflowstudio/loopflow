@@ -51,7 +51,7 @@ pub fn resolve_child(
     let mut matches = Vec::new();
     if prefix.is_empty() {
         let owner = match name {
-            "resume" => Some("session"),
+            "resume" | "connect" => Some("session"),
             "comment" => Some("task"),
             _ => None,
         };

@@ -114,7 +114,7 @@ public enum SessionConnectIntent: String, Codable, Equatable, Sendable {
 }
 
 public enum SessionOpenMode: String, Codable, Equatable, Sendable {
-    case refuse, replace, `try`
+    case refuse, takeover, `try`
 }
 
 public struct SessionConnectAction: Codable, Equatable, Sendable {

@@ -3,26 +3,29 @@ use std::sync::Arc;
 use anyhow::{bail, Context};
 
 use crate::lf::SessionCommand;
+use crate::lf::SessionConnectionArgs;
 use crate::ops::human_session::{OpenMode, SessionState};
 use crate::session_record::SessionTitleSource;
 use crate::store::{open_store, storage_config_from_env, Store};
 
-pub fn run(command: &SessionCommand) -> anyhow::Result<()> {
+pub fn run(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
-    let worktree = match command {
-        SessionCommand::Open { json: false, .. } | SessionCommand::Resume { .. } => {
-            Some(crate::repo::working_directory()?)
-        }
-        _ => None,
-    };
-    let Some(worktree) = worktree else {
-        return runtime.block_on(run_async(command));
-    };
-    let argv = std::env::args().collect::<Vec<_>>();
-    crate::journal::with_runtime(&worktree, &argv, || runtime.block_on(run_async(command)))
+    if matches!(
+        command,
+        SessionCommand::Connect {
+            connection: SessionConnectionArgs { prepare: false, .. },
+            ..
+        } | SessionCommand::Resume(SessionConnectionArgs { prepare: false, .. })
+    ) {
+        let cwd = crate::repo::working_directory()?;
+        let argv = std::env::args().collect::<Vec<_>>();
+        crate::journal::with_runtime(&cwd, &argv, || runtime.block_on(run_async(command, cli)))
+    } else {
+        runtime.block_on(run_async(command, cli))
+    }
 }
 
-async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
+async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()> {
     match command {
         SessionCommand::Steer { id, message } => {
             let store = open_shared_store().await?;
@@ -93,21 +96,15 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
             )
             .await
         }
-        SessionCommand::Resume { id, message } => {
-            anyhow::ensure!(
-                message.is_none(),
-                "a resume message is a headless turn: lf -b session resume ID MESSAGE"
-            );
-            let progress = crate::startup::Startup::new("Finding conversation");
-            let store = open_shared_store().await?;
-            let id = crate::ops::human_session::select_connection(
-                &store,
-                &std::env::current_dir()?,
-                id.as_deref(),
+        SessionCommand::Resume(connection) => {
+            connect(
+                cli,
+                connection,
+                connection.target(cli, None)?,
+                OpenMode::Refuse,
+                false,
             )
-            .await?;
-            drop(progress);
-            open(&store, &id, false, OpenMode::Refuse).await
+            .await
         }
         SessionCommand::History {
             id,
@@ -172,14 +169,20 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
             )
             .await
         }
-        SessionCommand::Open {
+        SessionCommand::Connect {
             id,
-            json,
-            replace,
+            connection,
+            takeover,
             try_open,
         } => {
-            let store = open_shared_store().await?;
-            open(&store, id, *json, OpenMode::from_flags(*replace, *try_open)).await
+            connect(
+                cli,
+                connection,
+                connection.target(cli, id.as_deref())?,
+                OpenMode::from_flags(*takeover, *try_open),
+                true,
+            )
+            .await
         }
         SessionCommand::Ensure {
             wave,
@@ -196,7 +199,7 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
             };
             report_primary(&session, *json)
         }
-        SessionCommand::Replace { id, json } => {
+        SessionCommand::New { id, json } => {
             let store = open_shared_store().await?;
             let session = crate::ops::human_session::primary::replace(&store, id).await?;
             report_primary(&session, *json)
@@ -303,15 +306,60 @@ async fn list(
     Ok(())
 }
 
-async fn open(
-    store: &crate::store::SharedStore,
-    id: &str,
-    json: bool,
+async fn connect(
+    cli: &crate::lf::Cli,
+    connection: &SessionConnectionArgs,
+    target: crate::ops::human_session::SessionTarget<'_>,
     mode: OpenMode,
+    prepare_primary: bool,
 ) -> anyhow::Result<()> {
-    let session = crate::ops::human_session::open(store, id, mode, !json).await?;
-    if json {
+    let SessionConnectionArgs {
+        message,
+        prepare,
+        json,
+        ..
+    } = connection;
+    anyhow::ensure!(
+        message.is_none() || cli.batch,
+        "a next-turn message requires -b"
+    );
+    anyhow::ensure!(
+        !cli.batch || *prepare || message.is_some(),
+        "a headless connection requires --message TEXT"
+    );
+    anyhow::ensure!(
+        *prepare || cli.batch || cli.output_schema.is_none(),
+        "response schemas require a headless Session (-b)"
+    );
+    anyhow::ensure!(
+        !prepare_primary || !matches!(target, crate::ops::human_session::SessionTarget::Context),
+        "connect requires a Session ID, --task or --wave; use resume for contextual discovery"
+    );
+    let progress = crate::startup::Startup::new("Finding conversation");
+    let store = open_shared_store().await?;
+    let id = crate::ops::human_session::select_connection(
+        &store,
+        &std::env::current_dir()?,
+        target,
+        prepare_primary,
+    )
+    .await?;
+    drop(progress);
+    if let Some(message) = message {
+        let id = crate::ops::human_session::session_by_id(&store, &id)
+            .await?
+            .context("Session not found")?
+            .id;
+        return tokio::task::block_in_place(|| crate::lf::commands::run::resume(&id, message, cli));
+    }
+    let session = crate::ops::human_session::open(&store, &id, mode, !*prepare).await?;
+    if *json || cli.json {
         println!("{}", serde_json::to_string_pretty(&session)?);
+    } else if *prepare {
+        println!(
+            "{}",
+            shlex::try_join(session.open_argv.iter().map(String::as_str))?
+        );
     }
     Ok(())
 }

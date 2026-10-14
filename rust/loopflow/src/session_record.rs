@@ -101,6 +101,13 @@ pub struct AgentProcessRequest {
 }
 
 impl AgentProcessRequest {
+    pub(crate) fn codex_initial_input(&self) -> String {
+        match &self.skill_invocation {
+            Some(skill) => format!("{}\n\n{}", skill.codex_prompt(), self.task_prompt),
+            None => self.task_prompt.clone(),
+        }
+    }
+
     pub(crate) fn from_prepared(
         config: &crate::agent::AgentConfig,
         capabilities: &crate::agent::AgentCapabilities,
@@ -1859,6 +1866,9 @@ impl CaptureHandle {
         let expected = store.session_attachment(session)?;
         next.artifact_key = new_artifact_key();
         next.input_published = false;
+        // The row records the agent this input actually launches.
+        next.provider = Some(spec.harness.clone());
+        next.model = spec.model.clone();
         let (next, attachment) =
             store.claim_session_input(next, expected.as_ref(), &lf_process_id, || {
                 crate::harness::agent_process::close_session_agent_process(&store, session)

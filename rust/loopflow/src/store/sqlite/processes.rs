@@ -237,6 +237,7 @@ pub(super) fn attach_in(
     if current.as_ref() != expected {
         return Err(attachment_changed());
     }
+    super::sessions::repair_session_title_in(tx, session, None)?;
     let replacing = current.is_none() || replace_provider;
     let attached = SessionAttachment {
         agent_process_id: current
@@ -586,6 +587,35 @@ impl SqliteStore {
         tx.execute(
             "UPDATE agent_sessions SET provider_thread=?2 WHERE id=?1",
             params![session, thread],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub(crate) fn agent_endpoint(&self, process: &LfProcessId) -> StoreResult<Option<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.query_row(
+            "SELECT endpoint FROM processes WHERE id=?1",
+            [process],
+            |row| row.get(0),
+        )
+        .optional()
+        .map(Option::flatten)
+        .map_err(Into::into)
+    }
+
+    pub(crate) fn record_agent_endpoint(
+        &self,
+        session: &str,
+        expected: &SessionAttachment,
+        endpoint: &str,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        require_attachment_in(&tx, session, expected)?;
+        tx.execute(
+            "UPDATE processes SET endpoint=?2 WHERE id=?1",
+            params![expected.agent_process_id, endpoint],
         )?;
         tx.commit()?;
         Ok(())

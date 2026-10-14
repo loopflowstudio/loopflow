@@ -44,13 +44,17 @@ impl SqliteStore {
         external_issue_id: &str,
     ) -> StoreResult<Option<String>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.query_row(
-            "SELECT issue_identifier FROM tasks WHERE external_issue_id=?1",
-            [external_issue_id],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(Into::into)
+        let conn = conn.unchecked_transaction()?;
+        let id = conn
+            .query_row(
+                "SELECT id FROM tasks WHERE external_issue_id=?1",
+                [external_issue_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        id.map(|id| super::children::short_task_id(&conn, &TaskId::from_raw(id)))
+            .transpose()
+            .map(Option::flatten)
     }
 
     pub fn machine_by_id(&self, machine_id: &MachineId) -> StoreResult<Option<Machine>> {

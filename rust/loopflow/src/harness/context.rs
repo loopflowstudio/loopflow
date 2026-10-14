@@ -26,6 +26,7 @@ pub(crate) fn claude_args(context: &ContextDelivery) -> Result<Vec<String>> {
     Ok(vec!["--settings".into(), path.display().to_string()])
 }
 
+<<<<<<< HEAD
 /// Stable declarations only. The provider owns review and persisted trust.
 pub(crate) fn codex_config(context: Option<&ContextDelivery>, capture: bool) -> Result<Value> {
     let mut hooks = match context {
@@ -45,41 +46,111 @@ pub(crate) fn codex_config(context: Option<&ContextDelivery>, capture: bool) -> 
                 "matcher": "startup", "hooks": [{"type":"command", "command":command, "timeout":5}]
             }));
     }
-    Ok(json!({"hooks":hooks}))
-}
-
-pub(crate) fn codex_args(context: Option<&ContextDelivery>, capture: bool) -> Result<Vec<String>> {
-    let config = codex_config(context, capture)?;
-    let hooks = inline_toml(&config["hooks"]);
-    Ok(vec!["-c".into(), format!("hooks={hooks}")])
-}
-
-// Only the non-null JSON values in our owned hook declarations enter this encoder.
-fn inline_toml(value: &Value) -> String {
-    match value {
-        Value::Object(fields) => format!(
-            "{{ {} }}",
-            fields
-                .iter()
-                .map(|(key, value)| format!(
-                    "{} = {}",
-                    serde_json::to_string(key).expect("key serializes"),
-                    inline_toml(value)
-                ))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-        Value::Array(values) => format!(
-            "[{}]",
-            values
-                .iter()
-                .map(inline_toml)
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-        Value::Null => unreachable!("hook declarations contain no null values"),
-        value => value.to_string(),
+||||||| e3c3a038aa
+/// Codex hashes normalized hook declarations as sorted JSON. Trust only these
+/// exact commands in the session-flags layer, never all hooks on the machine.
+/// Protocol: codex-rs/hooks/src/engine/discovery.rs (0.161.0).
+pub(crate) fn codex_config(context: Option<&ContextDelivery>, capture: bool) -> Result<Value> {
+    let mut hooks = match context {
+        Some(context) => context.hook_settings()?,
+        None => json!({"SessionStart": []}),
+    };
+    if capture {
+        let executable = crate::os_process::resolve_lf_binary();
+        let command = format!(
+            "{} __provider-session",
+            crate::os_process::shell_escape(&executable.to_string_lossy())
+        );
+        hooks["SessionStart"]
+            .as_array_mut()
+            .expect("hook groups")
+            .push(json!({
+                "matcher": "startup", "hooks": [{"type":"command", "command":command, "timeout":5}]
+            }));
     }
+    let mut states = serde_json::Map::new();
+    for (event, event_name) in [
+        ("SessionStart", "session_start"),
+        ("Stop", "stop"),
+        ("PostToolUse", "post_tool_use"),
+        ("UserPromptSubmit", "user_prompt_submit"),
+    ] {
+        let Some(groups) = hooks[event].as_array() else {
+            continue;
+        };
+        for (index, group) in groups.iter().enumerate() {
+            let mut handler = group["hooks"][0].clone();
+            handler["async"] = json!(false);
+            let mut identity =
+                json!({"event_name":event_name, "matcher":group["matcher"], "hooks":[handler]});
+            identity.sort_all_objects();
+            let hash = format!(
+                "sha256:{}",
+                hex::encode(Sha256::digest(serde_json::to_vec(&identity)?))
+            );
+            states.insert(
+                format!("/<session-flags>/config.toml:{event_name}:{index}:0"),
+                json!({"trusted_hash":hash}),
+            );
+        }
+    }
+    hooks["state"] = Value::Object(states);
+=======
+/// Codex hashes normalized hook declarations as sorted JSON. Trust only these
+/// exact commands in the session-flags layer, never all hooks on the machine.
+/// Protocol: codex-rs/hooks/src/engine/discovery.rs (0.162.1).
+pub(crate) fn codex_config(
+    context: &ContextDelivery,
+    session_hooks: Option<&Value>,
+) -> Result<Value> {
+    // Thread configuration replaces the app-server's session-flags layer. Keep
+    // wrapper declarations at their original indices so their trust IDs survive.
+    let mut hooks = session_hooks.cloned().unwrap_or_else(|| json!({}));
+    let additions = context.hook_settings()?;
+    let mut states = hooks
+        .get("state")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    for (event, event_name) in [
+        ("SessionStart", "session_start"),
+        ("Stop", "stop"),
+        ("PostToolUse", "post_tool_use"),
+        ("UserPromptSubmit", "user_prompt_submit"),
+    ] {
+        let Some(groups) = additions[event].as_array() else {
+            continue;
+        };
+        let mut combined = hooks
+            .get(event)
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let offset = combined.len();
+        for (index, group) in groups.iter().enumerate() {
+            let index = offset + index;
+            let mut handler = group["hooks"][0].clone();
+            handler["async"] = json!(false);
+            let mut identity = json!({"event_name":event_name, "hooks":[handler]});
+            if let Some(matcher) = group.get("matcher") {
+                identity["matcher"] = matcher.clone();
+            }
+            identity.sort_all_objects();
+            let hash = format!(
+                "sha256:{}",
+                hex::encode(Sha256::digest(serde_json::to_vec(&identity)?))
+            );
+            states.insert(
+                format!("/<session-flags>/config.toml:{event_name}:{index}:0"),
+                json!({"trusted_hash":hash}),
+            );
+        }
+        combined.extend(groups.iter().cloned());
+        hooks[event] = json!(combined);
+    }
+    hooks["state"] = Value::Object(states);
+>>>>>>> f9a16d6f84fde87b6650bab34af375bfb4981508
+    Ok(json!({"hooks":hooks}))
 }
 
 pub(crate) fn opencode_config(
@@ -134,14 +205,9 @@ pub(crate) fn configure_opencode(
     Ok(())
 }
 
-pub(crate) fn native_args(
-    harness: &str,
-    context: Option<&ContextDelivery>,
-    capture: bool,
-) -> Result<Vec<String>> {
+pub(crate) fn native_args(harness: &str, context: Option<&ContextDelivery>) -> Result<Vec<String>> {
     match (harness, context) {
         ("claude", Some(context)) => claude_args(context),
-        ("codex", _) if context.is_some() || capture => codex_args(context, capture),
         _ => Ok(Vec::new()),
     }
 }

@@ -212,7 +212,7 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
     format!("WITH page AS MATERIALIZED ({page})
         SELECT s.*,flow_process.id,flow.flow,flow_process.outcome,flow_process.completed_at,step.started_at,
         (fs.seq=(SELECT MAX(later.seq) FROM flow_process_steps later WHERE later.flow_lf_process_id=fs.flow_lf_process_id)),
-        w.slug,t.issue_identifier,
+        w.slug,
         ((SELECT {MEMBERSHIP_KIND} FROM session_events INDEXED BY session_input_membership
          WHERE session_id=s.id AND captured_event=s.current_capture
          AND kind='observed' AND substr(receipt_key,-14)=':manifest.json')='independent'),
@@ -236,6 +236,8 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
 }
 
 fn read_summary(
+    conn: &Connection,
+    labels: &mut std::collections::HashMap<TaskId, Option<String>>,
     row: &rusqlite::Row<'_>,
 ) -> rusqlite::Result<StoreResult<crate::session::SessionSummary>> {
     Ok((|| {
@@ -270,28 +272,33 @@ fn read_summary(
             }
             None => None,
         };
-        let agent_process_id: Option<crate::id::LfProcessId> = row.get(32)?;
+        let agent_process_id: Option<crate::id::LfProcessId> = row.get(31)?;
         let agent_process_evidence = crate::journal::agent_process_evidence(
+            row.get(32)?,
             row.get(33)?,
             row.get(34)?,
-            row.get(35)?,
             crate::journal::process_identity_evidence,
         );
         let live = agent_process_evidence == crate::journal::ProcessIdentityEvidence::Live;
+        let task_identifier = task_id
+            .as_ref()
+            .map(|id| super::children::cached_short_task_id(conn, labels, id))
+            .transpose()?
+            .flatten();
         Ok(crate::session::SessionSummary {
-            terminal_id: row.get::<_, Option<String>>(36)?.filter(|_| live),
-            task_ids: serde_json::from_str(&row.get::<_, String>(26)?)?,
-            primary_scope: row.get(27)?,
+            terminal_id: row.get::<_, Option<String>>(35)?.filter(|_| live),
+            task_ids: serde_json::from_str(&row.get::<_, String>(25)?)?,
+            primary_scope: row.get(26)?,
             agent_process_evidence,
-            waiting: live && row.get(28)?,
+            waiting: live && row.get(27)?,
             program_status: row
-                .get::<_, Option<String>>(31)?
+                .get::<_, Option<String>>(30)?
                 .map(|json| serde_json::from_str(&json))
                 .transpose()?
                 .filter(|_| live),
             agent_process_id,
-            task_terminal: row.get(29)?,
-            task_primary: row.get(30)?,
+            task_terminal: row.get(28)?,
+            task_primary: row.get(29)?,
             captured: row.get(16)?,
             id: row.get(0)?,
             artifact_key: crate::session_record::parse_artifact_key(&row.get::<_, String>(1)?)
@@ -316,8 +323,8 @@ fn read_summary(
             flow,
             flow_step_latest: row.get::<_, Option<bool>>(22)?.unwrap_or(false),
             wave_name: row.get(23)?,
-            task_identifier: row.get(24)?,
-            independent: row.get::<_, Option<bool>>(25)?.unwrap_or(false),
+            task_identifier,
+            independent: row.get::<_, Option<bool>>(24)?.unwrap_or(false),
         })
     })())
 }
@@ -451,9 +458,13 @@ impl SqliteStore {
     ) -> StoreResult<Vec<crate::session::SessionSummary>> {
         let live_agents = self.live_agent_ids(filter.waiting)?;
         let conn = self.conn.lock().expect("store mutex poisoned");
+        let conn = conn.unchecked_transaction()?;
+        let mut labels = std::collections::HashMap::new();
         let (page, values) = inventory_query(filter, SUMMARY_SELECT, now, &live_agents)?;
         let mut query = conn.prepare(&summary_query(&page, filter.after.is_some(), now))?;
-        let rows = query.query_map(rusqlite::params_from_iter(values), read_summary)?;
+        let rows = query.query_map(rusqlite::params_from_iter(values), |row| {
+            read_summary(&conn, &mut labels, row)
+        })?;
         rows.map(|row| row?).collect()
     }
 
@@ -463,10 +474,12 @@ impl SqliteStore {
         now: i64,
     ) -> StoreResult<Option<crate::session::SessionSummary>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
+        let conn = conn.unchecked_transaction()?;
+        let mut labels = std::collections::HashMap::new();
         conn.query_row(
             &summary_query(&format!("{SUMMARY_SELECT} WHERE s.id=?1"), false, now),
             [id],
-            read_summary,
+            |row| read_summary(&conn, &mut labels, row),
         )
         .optional()?
         .transpose()
@@ -575,10 +588,16 @@ impl SqliteStore {
         window: (i64, bool, Option<usize>),
         input: Option<&str>,
     ) -> StoreResult<(Vec<crate::session_record::SessionHistory>, bool)> {
+        let task_id = task
+            .map(|selector| self.resolve_task_id(selector, None))
+            .transpose()?
+            .flatten();
+        let task = task_id.as_ref().map(TaskId::as_str).or(task);
         // A captured input cannot outlive its lf process. Terminal and provider
         // turn evidence describe outcomes; attachment exit events do not own life.
         let inputs = {
             let conn = self.conn.lock().expect("store mutex poisoned");
+            let conn = conn.unchecked_transaction()?;
             let mut query = conn.prepare("WITH inputs AS (
                 SELECT i.seq AS captured,i.receipt_key AS input_id,i.session_id,json_extract(i.payload,'$.caller_key') AS caller_input_id,
                     COALESCE(m.observed_at,i.observed_at) AS started,
@@ -648,7 +667,6 @@ impl SqliteStore {
                 AND (started>=?5 OR (?6 AND ended>=?5)))
                 SELECT eligible.session_id,eligible.input_id,eligible.caller_input_id,started,eligible.task_id,eligible.wave_id,
                     (SELECT slug FROM wave_addresses WHERE id=eligible.wave_id),
-                    (SELECT issue_identifier FROM tasks WHERE id=eligible.task_id),
                     s.current_capture,s.cwd,s.repo,s.skill,s.provider,s.model,s.interactive,
                     total > MAX(?8,unfinished),COALESCE((SELECT json_extract(payload,'$.work_source') FROM session_events WHERE seq=eligible.captured),
                         CASE WHEN eligible.captured=s.current_capture AND s.bound_at IS NULL THEN s.work_source END),
@@ -656,45 +674,54 @@ impl SqliteStore {
                 FROM eligible JOIN agent_sessions s ON s.id=eligible.session_id
                 WHERE (?8 IS NULL OR ended IS NULL OR ordinal<=MAX(?8-unfinished,0))
                 ORDER BY started DESC,eligible.input_id DESC,eligible.session_id,eligible.thread,eligible.turn")?;
-            let rows = query.query_map(
-                params![
-                    wave,
-                    project,
+            let mut rows = query.query(params![
+                wave,
+                project,
+                task,
+                caller,
+                window.0,
+                window.1,
+                input,
+                window.2.map(|n| n as i64)
+            ])?;
+            let mut inputs = Vec::new();
+            let mut labels = std::collections::HashMap::new();
+            while let Some(row) = rows.next()? {
+                let task: Option<String> = row.get(4)?;
+                let task_identifier = task
+                    .as_ref()
+                    .map(|id| {
+                        super::children::cached_short_task_id(
+                            &conn,
+                            &mut labels,
+                            &TaskId::from_raw(id),
+                        )
+                    })
+                    .transpose()?
+                    .flatten();
+                inputs.push((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, i64>(3)?,
                     task,
-                    caller,
-                    window.0,
-                    window.1,
-                    input,
-                    window.2.map(|n| n as i64)
-                ],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, Option<String>>(1)?,
-                        row.get::<_, Option<String>>(2)?,
-                        row.get::<_, i64>(3)?,
-                        row.get::<_, Option<String>>(4)?,
-                        row.get::<_, Option<String>>(5)?,
-                        (
-                            row.get::<_, Option<String>>(6)?,
-                            row.get::<_, Option<String>>(7)?,
-                        ),
-                        row.get::<_, Option<i64>>(8)?,
-                        row.get::<_, String>(9)?,
-                        row.get::<_, Option<String>>(10)?,
-                        row.get::<_, Option<String>>(11)?,
-                        row.get::<_, Option<String>>(12)?,
-                        row.get::<_, Option<String>>(13)?,
-                        row.get::<_, bool>(14)?,
-                        row.get::<_, Option<bool>>(15)?.unwrap_or(false),
-                        row.get::<_, Option<String>>(16)?,
-                        row.get::<_, Option<i64>>(17)?,
-                        row.get::<_, Option<AgentSessionId>>(18)?,
-                        row.get::<_, Option<String>>(19)?,
-                    ))
-                },
-            )?;
-            rows.collect::<Result<Vec<_>, _>>()?
+                    row.get::<_, Option<String>>(5)?,
+                    (row.get::<_, Option<String>>(6)?, task_identifier),
+                    row.get::<_, Option<i64>>(7)?,
+                    row.get::<_, String>(8)?,
+                    row.get::<_, Option<String>>(9)?,
+                    row.get::<_, Option<String>>(10)?,
+                    row.get::<_, Option<String>>(11)?,
+                    row.get::<_, Option<String>>(12)?,
+                    row.get::<_, bool>(13)?,
+                    row.get::<_, Option<bool>>(14)?.unwrap_or(false),
+                    row.get::<_, Option<String>>(15)?,
+                    row.get::<_, Option<i64>>(16)?,
+                    row.get::<_, Option<AgentSessionId>>(17)?,
+                    row.get::<_, Option<String>>(18)?,
+                ));
+            }
+            inputs
         };
         let truncated = inputs.iter().any(|row| row.14);
         let scope = (wave, project, task);
@@ -1078,11 +1105,8 @@ impl SqliteStore {
         }
         if let Some(bound) = &session.task_id {
             if bound != task {
-                let issue: String = tx.query_row(
-                    "SELECT issue_identifier FROM tasks WHERE id=?1",
-                    [bound.as_str()],
-                    |row| row.get(0),
-                )?;
+                let issue =
+                    super::children::short_task_id(&tx, bound)?.ok_or(StoreError::NotFound)?;
                 return Err(StoreError::InvalidAuthority(format!(
                     "Session {id} already has Task {issue}; binding is permanent"
                 )));
@@ -1103,6 +1127,7 @@ impl SqliteStore {
                 params![id, task.as_str(), wave.as_str(), crate::store::rows::now_unix()],
             )?;
         }
+        repair_session_title_in(&tx, id, None)?;
         let bound = session_in(&tx, id)?.ok_or(StoreError::NotFound)?;
         tx.commit()?;
         Ok(bound)
@@ -1111,20 +1136,26 @@ impl SqliteStore {
     /// Sessions assigned to a Task after they began, oldest bind first.
     pub(crate) fn bound_sessions(&self) -> StoreResult<Vec<crate::session::SessionBind>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
+        let conn = conn.unchecked_transaction()?;
         let mut query = conn.prepare(
-            "SELECT s.id,s.bound_at,t.issue_identifier,(SELECT slug FROM wave_addresses WHERE id=s.wave_id)
+            "SELECT s.id,s.bound_at,t.id,(SELECT slug FROM wave_addresses WHERE id=s.wave_id)
              FROM agent_sessions s JOIN tasks t ON t.id=s.task_id
              WHERE s.bound_at IS NOT NULL ORDER BY s.bound_at,s.id",
         )?;
-        let rows = query.query_map([], |row| {
-            Ok(crate::session::SessionBind {
+        let mut rows = query.query([])?;
+        let mut binds = Vec::new();
+        let mut labels = std::collections::HashMap::new();
+        while let Some(row) = rows.next()? {
+            let task = TaskId::from_raw(row.get::<_, String>(2)?);
+            binds.push(crate::session::SessionBind {
                 session_id: row.get(0)?,
                 at: row.get(1)?,
-                task: row.get(2)?,
+                task: super::children::cached_short_task_id(&conn, &mut labels, &task)?
+                    .ok_or(StoreError::NotFound)?,
                 wave: row.get(3)?,
-            })
-        })?;
-        Ok(rows.collect::<Result<_, _>>()?)
+            });
+        }
+        Ok(binds)
     }
 
     /// Every open Session.
@@ -1154,16 +1185,82 @@ impl SqliteStore {
         }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        require_current_actor_in(&tx, id)?;
-        session_in(&tx, id)?.ok_or(StoreError::NotFound)?;
-        tx.execute(
-            "UPDATE agent_sessions SET title=?2, title_source=?3
-             WHERE id=?1 AND (title_source='generated' OR ?3='human')",
-            params![id, title.trim(), title_source(source)],
-        )?;
+        let session = session_in(&tx, id)?.ok_or(StoreError::NotFound)?;
+        rename_session_in(&tx, &session, title, source, None)?;
         tx.commit()?;
         Ok(())
     }
+}
+
+fn rename_session_in(
+    conn: &Connection,
+    session: &LfSession,
+    title: &str,
+    source: TitleSource,
+    previous: Option<&str>,
+) -> StoreResult<()> {
+    require_current_actor_in(conn, &session.id)?;
+    let title = generated_title_in(conn, session, title, source, previous)?;
+    conn.execute(
+        "UPDATE agent_sessions SET title=?2,title_source=?3 WHERE id=?1 AND (title_source='generated' OR ?3='human')",
+        params![session.id, title, title_source(source)],
+    )?;
+    Ok(())
+}
+
+fn generated_title_in(
+    conn: &Connection,
+    session: &LfSession,
+    title: &str,
+    source: TitleSource,
+    previous: Option<&str>,
+) -> StoreResult<String> {
+    if source == TitleSource::Generated {
+        if let Some(id) = &session.task_id {
+            if let Some(label) = super::children::short_task_id(conn, id)? {
+                return Ok(crate::naming::task_session_title(
+                    title, id, &label, previous,
+                ));
+            }
+        }
+    }
+    Ok(title.trim().to_string())
+}
+
+pub(super) fn repair_session_title_in(
+    conn: &Connection,
+    id: &str,
+    previous: Option<&str>,
+) -> StoreResult<()> {
+    let session = session_in(conn, id)?.ok_or(StoreError::NotFound)?;
+    if session.title_source == TitleSource::Generated {
+        rename_session_in(
+            conn,
+            &session,
+            &session.title,
+            TitleSource::Generated,
+            previous,
+        )?;
+    }
+    Ok(())
+}
+
+pub(super) fn repair_task_titles_in(
+    conn: &Connection,
+    task: &TaskId,
+    previous: Option<&str>,
+) -> StoreResult<()> {
+    let mut query = conn.prepare("SELECT id FROM agent_sessions WHERE task_id=?1 AND title_source='generated' AND completed_at IS NULL")?;
+    let sessions = query
+        .query_map([task.as_str()], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    for id in sessions {
+        match repair_session_title_in(conn, &id, previous) {
+            Err(StoreError::InvalidAuthority(_)) => {} // A stale provider cannot repair its replaced conversation.
+            result => result?,
+        }
+    }
+    Ok(())
 }
 
 pub(super) fn retain_history_in(
@@ -1329,6 +1426,7 @@ fn insert_session_in(
     session: &mut LfSession,
     process: Option<&crate::id::LfProcessId>,
 ) -> StoreResult<()> {
+    session.title = generated_title_in(conn, session, &session.title, session.title_source, None)?;
     conn.execute(
         "INSERT INTO agent_sessions(id,title,title_source,completed_at,
         created_at,request,interactive,repo,task_id,wave_id,work_source,bound_at,
@@ -1403,10 +1501,13 @@ pub(super) fn replace_input_in(
         crate::store::rows::now_unix(),
         process,
     )?);
-    conn.execute("UPDATE agent_sessions SET current_capture=?2,input_published=?3,skill=?4,provider=?5,model=?6
+    // A selected AgentSession belongs to its provider; another provider starts
+    // a fresh one. Earlier selections remain in session_events.
+    conn.execute("UPDATE agent_sessions SET current_capture=?2,input_published=?3,skill=?4,provider=?5,model=?6,
+        request=?7,provider_thread=CASE WHEN provider IS ?5 THEN provider_thread END
         WHERE id=?1",
         params![session.id,session.captured,session.input_published,
-            session.skill,session.provider,session.model])?;
+            session.skill,session.provider,session.model,session.request])?;
     Ok(())
 }
 

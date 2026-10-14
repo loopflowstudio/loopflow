@@ -32,27 +32,10 @@ pub(super) async fn human_input_times<'a>(
         let Some(reference) = store.sqlite.input_provider_session(&session.artifact_key)? else {
             continue;
         };
-        let id = reference.agent_session;
-        let isolated = store.provider_session_isolated(provider, &id).await?;
-        let home = if isolated == Some(true) {
-            let account = match reference.account_id {
-                Some(account) => Some(account),
-                None => store.provider_session_account(provider, &id).await?,
-            };
-            let Some(account) = account else {
-                continue;
-            };
-            let Some(home) = store
-                .get_provider_account(provider.as_str(), &account)
-                .await?
-                .and_then(|account| account.home)
-            else {
-                continue;
-            };
-            home
-        } else {
-            native_home(provider, None)
+        let Some(home) = conversation_home(&store.sqlite, provider, &reference)? else {
+            continue;
         };
+        let id = reference.agent_session;
         let home = fs::canonicalize(&home).unwrap_or(home);
         if provider == Provider::Codex {
             codex
@@ -90,6 +73,29 @@ fn json_lines(path: &Path) -> impl Iterator<Item = serde_json::Value> {
     })
 }
 
+/// The provider home holding a recorded conversation: its isolated account's
+/// home, else the native one. `None` when the isolated account is gone.
+pub(super) fn conversation_home(
+    store: &crate::store::sqlite::SqliteStore,
+    provider: Provider,
+    reference: &crate::session_record::ProviderSessionRef,
+) -> Result<Option<PathBuf>> {
+    let id = &reference.agent_session;
+    if store.provider_session_isolated(provider, id)? != Some(true) {
+        return Ok(Some(native_home(provider, None)));
+    }
+    let account = match &reference.account_id {
+        Some(account) => Some(account.clone()),
+        None => store.provider_session_account(provider, id)?,
+    };
+    let Some(account) = account else {
+        return Ok(None);
+    };
+    Ok(store
+        .get_provider_account(provider.as_str(), &account)?
+        .and_then(|account| account.home))
+}
+
 fn codex_input_times(path: &Path, wanted: &BTreeSet<&str>) -> BTreeMap<String, i64> {
     let mut times = BTreeMap::<String, i64>::new();
     for row in json_lines(path) {
@@ -114,52 +120,7 @@ fn codex_input_times(path: &Path, wanted: &BTreeSet<&str>) -> BTreeMap<String, i
 fn claude_input_time(path: &Path, id: &str) -> Option<i64> {
     json_lines(path)
         .filter_map(|row| {
-            if row["type"] != "user"
-                || row["userType"] != "external"
-                || row["sessionId"].as_str() != Some(id)
-                || ["isSidechain", "isMeta", "isCompactSummary", "isSynthetic"]
-                    .iter()
-                    .any(|key| row[key].as_bool() == Some(true))
-                || ["sourceToolAssistantUUID", "agentId", "toolUseResult"]
-                    .iter()
-                    .any(|key| !row[key].is_null())
-            {
-                return None;
-            }
-            let content = &row["message"]["content"];
-            let texts = if let Some(text) = content.as_str() {
-                vec![text]
-            } else {
-                content
-                    .as_array()?
-                    .iter()
-                    .filter(|block| block["type"] == "text")
-                    .filter_map(|block| block["text"].as_str())
-                    .collect::<Vec<_>>()
-            };
-            let image = content
-                .as_array()
-                .is_some_and(|blocks| blocks.iter().any(|block| block["type"] == "image"));
-            if !(image || texts.iter().any(|text| !text.trim().is_empty()))
-                || texts.iter().any(|text| {
-                    [
-                        "<lf:",
-                        "<task-notification>",
-                        "<local-command",
-                        "<command-name>",
-                        "<system-reminder>",
-                        "<session-start-hook>",
-                        "<tick>",
-                        "<goal>",
-                        "<ide_opened_file>",
-                        "<ide_selection>",
-                        "[Request interrupted by user",
-                        "This session is being continued from a previous conversation",
-                    ]
-                    .iter()
-                    .any(|marker| text.contains(marker))
-                })
-            {
+            if row["sessionId"].as_str() != Some(id) || !is_user_input(&row) {
                 return None;
             }
             let at = time::OffsetDateTime::parse(
@@ -170,6 +131,56 @@ fn claude_input_time(path: &Path, id: &str) -> Option<i64> {
             i64::try_from(at.unix_timestamp_nanos() / 1_000_000).ok()
         })
         .max()
+}
+
+/// Whether a Claude transcript row is something a person typed: not a tool
+/// result, sidechain, meta line, compaction, or Loopflow/harness-injected block.
+pub(super) fn is_user_input(row: &serde_json::Value) -> bool {
+    if row["type"] != "user"
+        || row["userType"] != "external"
+        || ["isSidechain", "isMeta", "isCompactSummary", "isSynthetic"]
+            .iter()
+            .any(|key| row[key].as_bool() == Some(true))
+        || ["sourceToolAssistantUUID", "agentId", "toolUseResult"]
+            .iter()
+            .any(|key| !row[key].is_null())
+    {
+        return false;
+    }
+    let content = &row["message"]["content"];
+    let texts = if let Some(text) = content.as_str() {
+        vec![text]
+    } else if let Some(blocks) = content.as_array() {
+        blocks
+            .iter()
+            .filter(|block| block["type"] == "text")
+            .filter_map(|block| block["text"].as_str())
+            .collect::<Vec<_>>()
+    } else {
+        return false;
+    };
+    let image = content
+        .as_array()
+        .is_some_and(|blocks| blocks.iter().any(|block| block["type"] == "image"));
+    (image || texts.iter().any(|text| !text.trim().is_empty()))
+        && !texts.iter().any(|text| {
+            [
+                "<lf:",
+                "<task-notification>",
+                "<local-command",
+                "<command-name>",
+                "<system-reminder>",
+                "<session-start-hook>",
+                "<tick>",
+                "<goal>",
+                "<ide_opened_file>",
+                "<ide_selection>",
+                "[Request interrupted by user",
+                "This session is being continued from a previous conversation",
+            ]
+            .iter()
+            .any(|marker| text.contains(marker))
+        })
 }
 
 /// The Session that recorded `id` as its provider conversation.
@@ -301,7 +312,7 @@ async fn find(store: &SharedStore, id: &str) -> Result<Vec<NativeConversation>> 
 
 /// Codex keeps `sessions/<year>/<month>/<day>/rollout-<time>-<id>.jsonl`;
 /// Claude keeps `projects/<directory>/<id>.jsonl`.
-fn transcript(provider: Provider, home: &Path, id: &str) -> Option<PathBuf> {
+pub(super) fn transcript(provider: Provider, home: &Path, id: &str) -> Option<PathBuf> {
     match provider {
         Provider::Codex => {
             let suffix = format!("-{id}.jsonl");

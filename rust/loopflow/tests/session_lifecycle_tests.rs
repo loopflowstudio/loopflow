@@ -318,36 +318,7 @@ fn assert_work_first_capture(capture: &Value) {
 #[test]
 fn personal_task_launch_resume_and_skill_workflow_keep_native_identity() {
     let fixture = Fixture::new(false);
-    let codex = fixture.home.path().join("bin/codex");
-    let script = support::codex_app_server_script("Parser inspected.", "");
-    let terminal = r#"#!/bin/sh
-if [ "$1" = --version ]; then exit 0; fi
-mode=terminal
-for arg in "$@"; do
-    case "$arg" in app-server) mode=server;; resume) mode=resume;; esac
-done
-if [ "$mode" = resume ]; then
-    case "$*" in *terminal-fixture*) exit 0 ;; *) exit 91 ;; esac
-fi
-if [ "$mode" = terminal ]; then
-    printf '%s\n' "$LF_CAPTURE_KEY" >> "$LF_HOME/launched"
-    python3 - "$@" <<'PYTHON'
-import subprocess, sys, tomllib
-config = tomllib.loads(next(arg for arg in sys.argv[1:] if arg.startswith("hooks=")))
-for group in config["hooks"]["SessionStart"]:
-    if "startup" in group["matcher"]:
-        for hook in group["hooks"]:
-            subprocess.run(hook["command"], shell=True, input='{"session_id":"terminal-fixture"}', text=True, check=True)
-PYTHON
-    exit $?
-fi
-"#;
-    std::fs::write(
-        &codex,
-        terminal.to_owned() + script.strip_prefix("#!/bin/sh\n").unwrap(),
-    )
-    .unwrap();
-    std::fs::set_permissions(&codex, std::fs::Permissions::from_mode(0o755)).unwrap();
+    support::install_native_codex(&fixture.home.path().join("bin"));
     fixture
         .repo
         .create_file(".lf/skills/inspect-parser.md", "Inspect the parser.");
@@ -385,6 +356,26 @@ fi
         .output()
         .unwrap();
     assert!(launch.status.success(), "{launch:?}");
+    let config: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(fixture.home.path().join("native-config.json")).unwrap(),
+    )
+    .unwrap();
+    let roots = config["config"]["sandbox_workspace_write.writable_roots"]
+        .as_array()
+        .unwrap();
+    assert!(
+        roots.contains(&serde_json::json!(fixture
+            .home
+            .path()
+            .canonicalize()
+            .unwrap()
+            .join("configured-root"))),
+        "{roots:?}"
+    );
+    assert!(
+        roots.len() >= 2,
+        "worktree Git access must retain configured roots"
+    );
     let capture = fixture.launches()[0].clone();
     let (session, ..) = fixture.session_row(&capture);
     let native: String = fixture
@@ -1239,6 +1230,7 @@ fn a_task_primary_is_one_of_its_own_conversations() {
     std::fs::remove_dir_all(&empty_path).unwrap();
     let launches_before = fixture.launches().len();
     let created = primary(&["INF-125"]);
+<<<<<<< HEAD
     assert_eq!(fixture.launches().len(), launches_before);
     assert!(created["open_argv"]
         .as_array()
@@ -1256,6 +1248,11 @@ fn a_task_primary_is_one_of_its_own_conversations() {
         head
     );
     assert_eq!(created["title"], "Sibling INF-125");
+||||||| e3c3a038aa
+    assert_eq!(created["title"], "Sibling INF-125");
+=======
+    assert_eq!(created["title"], "INF-125 Sibling");
+>>>>>>> f9a16d6f84fde87b6650bab34af375bfb4981508
     assert_eq!(fixture.count("agent_sessions"), before + 1);
     let (skill, cwd): (String, String) = fixture
         .db()

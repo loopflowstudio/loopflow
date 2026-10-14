@@ -1164,13 +1164,13 @@ uv run python scripts/test_network.py uv run python tests/e2e/codex_terminal.py 
   --lf target/debug/lf --codex /path/to/native/codex
 ```
 
-Use a native Codex binary supporting profile files. This headless PTY fixture
-uses disposable provider and Loopflow homes, a loopback model endpoint, and an
+Use a native Codex binary supporting app-server and `--remote`. The headless PTY
+fixture uses disposable provider and Loopflow homes, a loopback model endpoint, and an
 independently authored wrapper supplying trust plus SessionStart/Stop hooks.
-It verifies completed turns, exact native capture, both launch hooks, reconnect,
-unchanged configuration and temporary-profile cleanup. It uses no account or
-login. Native 0.160.1 resume emits neither fresh hook in this fixture, even
-without lf. This proves launch composition, not cmux's actual tab tracking.
+It verifies exact native capture, both launch hooks, a typed reconnect follow-up,
+two retained completed turns, provider cleanup, and preserved user settings.
+It uses no account or login. This proves protocol
+launch composition; actual cmux tab tracking remains a separate acceptance check.
 
 ### Released capture-history preservation
 
@@ -1449,6 +1449,7 @@ proposed actions; lifecycle integration tests remain the proof of tool effects.
 Isolated data clones install their own inherited sandbox. Run their macOS fixtures
 directly: `cargo test -p loopflow --test integration data_clones:: < /dev/null`.
 The network wrapper's privileged `ps` exception cannot nest with this policy.
+The changed-aware runner selects this separate boundary automatically.
 CI proves clone operation on macOS 26 and early unsupported-host refusal on
 macOS 15; both hosts retain native process identity tests. An environment marker
 never substitutes for kernel confinement.

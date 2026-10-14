@@ -28,6 +28,19 @@ fn command(home: &std::path::Path, args: &[&str]) -> Command {
     command
 }
 
+#[cfg(unix)]
+fn install_codex_fixture(home: &std::path::Path, thread: Option<&str>) {
+    crate::support::install_native_codex(&home.join("bin"));
+    if let Some(thread) = thread {
+        std::fs::write(home.join("native-thread"), thread).unwrap();
+        std::fs::write(
+            home.join("native-turns.json"),
+            r#"[{"id":"previous","status":"completed","items":[]}]"#,
+        )
+        .unwrap();
+    }
+}
+
 fn run(home: &std::path::Path, args: &[&str]) -> Output {
     command(home, args).output().unwrap()
 }
@@ -991,7 +1004,7 @@ fn session_names_are_shared_and_human_names_win() {
 #[test]
 fn terminal_titles_follow_session_rename_and_reconnect_without_provider_accounts() {
     use std::fs;
-    use std::io::{Read, Write};
+    use std::io::Read;
     use std::os::fd::FromRawFd;
     use std::os::unix::fs::PermissionsExt;
     use std::process::Stdio;
@@ -1077,10 +1090,13 @@ fi
 printf '%s\n' "$@" > "$LF_HOME/args"
 printf '%s' "${CLAUDE_CODE_DISABLE_TERMINAL_TITLE-}" > "$LF_HOME/title-disabled"
 touch "$LF_HOME/ready"
-IFS= read -r answer
-printf 'latest agent message: %s\n' "$answer"
+while [ ! -f "$LF_HOME/release" ]; do sleep 0.02; done
+printf 'latest agent message: done\n'
 "#,
         );
+        if provider == "codex" {
+            install_codex_fixture(home.path(), None);
+        }
         write_script(
             "cmux",
             r#"#!/bin/sh
@@ -1136,6 +1152,7 @@ exit 2
                     .env("CMUX_SURFACE_ID", "fixture-surface");
             }
             let _ = fs::remove_file(home.path().join("ready"));
+            let _ = fs::remove_file(home.path().join("release"));
             let mut child = launch.spawn().unwrap();
             drop(launch);
             let output_reader = std::thread::spawn(move || {
@@ -1164,7 +1181,7 @@ exit 2
                 let listed = inspect(&["session", "list", "--all", "--json"]);
                 assert_eq!(listed.as_array().unwrap().len(), 1, "{listed}");
                 id = listed[0]["id"].as_str().unwrap().to_string();
-                assert_eq!(listed[0]["title"], name);
+                assert_eq!(listed[0]["title"], title(name));
                 if let Some(task) = &task {
                     assert!(
                         listed[0]["task_ids"]
@@ -1185,7 +1202,7 @@ exit 2
                 );
             } else {
                 assert!(args.contains("tui.terminal_title=[]"), "{args}");
-                assert!(args.contains("--no-daemon\n"), "{args}");
+                assert!(args.contains("--remote\n"), "{args}");
             }
             if first {
                 let renamed = inspect(&["session", "rename", &id, "Release notes", "--json"]);
@@ -1196,14 +1213,14 @@ exit 2
                     "{args}"
                 );
             }
-            if first {
+            if first && provider == "claude" {
                 let store =
                     loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db"))
                         .unwrap();
                 let input = store.session(&id).unwrap().unwrap().artifact_key;
                 record_native(home.path(), &id, &input, &native);
             }
-            child.stdin.take().unwrap().write_all(b"done\n").unwrap();
+            fs::write(home.path().join("release"), "done").unwrap();
             let result = child.wait_with_output().unwrap();
             let terminal = output_reader.join().unwrap();
             assert!(result.status.success(), "{provider}/{host}: {terminal}");
@@ -1551,8 +1568,7 @@ fn resume_selects_human_input_in_the_physical_worktree_and_records_opening() {
     let bin = home.path().join("bin");
     std::fs::create_dir(&bin).unwrap();
     let provider = bin.join("codex");
-    std::fs::write(&provider, "#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\nprintf '%s' \"$LF_CAPTURE_KEY\" > \"$CODEX_HOME/opened\"\n").unwrap();
-    std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+    install_codex_fixture(home.path(), Some("native-a"));
     // An unavailable fixture must never fall through to a real provider.
     let path = std::env::join_paths([bin, "/usr/bin".into(), "/bin".into()]).unwrap();
     let resume = |args: &[&str]| {
@@ -1579,6 +1595,7 @@ fn resume_selects_human_input_in_the_physical_worktree_and_records_opening() {
         std::fs::read_to_string(codex.join("opened")).unwrap(),
         input_a
     );
+    install_codex_fixture(home.path(), Some("native-b"));
     for selector in [&b, "native-b"] {
         let result = resume(&["resume", selector]);
         assert!(result.status.success(), "{result:?}");
@@ -1625,6 +1642,9 @@ fn resume_admits_native_claude_and_codex_ids_and_keeps_their_identity() {
         )
         .unwrap();
         std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+        if provider == "codex" {
+            install_codex_fixture(home.path(), Some(&id));
+        }
         let path = std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(
             &std::env::var_os("PATH").unwrap_or_default(),
         )))

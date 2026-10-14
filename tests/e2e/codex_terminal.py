@@ -3,6 +3,7 @@
 
 import argparse
 import fcntl
+import hashlib
 import http.server
 import json
 import os
@@ -19,13 +20,16 @@ import threading
 import time
 from pathlib import Path
 
+import tomllib
+
 
 class Model(http.server.BaseHTTPRequestHandler):
     def log_message(self, *_args: object) -> None:
         pass
 
     def do_POST(self) -> None:
-        self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        request = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        answer = "FOLLOWUP_DONE" if b"typed reconnect follow-up" in request else "FIXTURE_DONE"
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.end_headers()
@@ -33,7 +37,7 @@ class Model(http.server.BaseHTTPRequestHandler):
             "id": "msg_fixture",
             "type": "message",
             "role": "assistant",
-            "content": [{"type": "output_text", "text": "FIXTURE_DONE"}],
+            "content": [{"type": "output_text", "text": answer}],
         }
         response = {"id": "resp_fixture", "status": "in_progress", "output": []}
         events = [
@@ -64,6 +68,7 @@ def _terminal(
     env: dict[str, str],
     cwd: Path,
     transcript: Path,
+    follow_up: bool = False,
 ) -> int:
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 120, 0, 0))
@@ -81,6 +86,8 @@ def _terminal(
     exiting = False
     submit_at = None
     exit_at = None
+    pending_follow_up = follow_up
+    expected = b"FOLLOWUP_DONE" if follow_up else b"FIXTURE_DONE"
     try:
         while time.monotonic() < deadline:
             if exit_at is not None and time.monotonic() >= exit_at:
@@ -98,13 +105,17 @@ def _terminal(
                 output.extend(chunk)
                 if b"\x1b[6n" in chunk:
                     os.write(master, b"\x1b[1;1R")
-                if not exiting and b"FIXTURE_DONE" in output:
+                if pending_follow_up and b"FIXTURE_DONE" in output:
+                    os.write(master, b"typed reconnect follow-up")
+                    submit_at = time.monotonic() + 0.3
+                    pending_follow_up = False
+                if not exiting and expected in output:
                     exit_at = time.monotonic() + 1
                     exiting = True
             if child.poll() is not None:
                 break
         assert child.poll() is not None, "terminal did not exit within 30 seconds"
-        assert b"FIXTURE_DONE" in output, "terminal never displayed the completed turn"
+        assert expected in output, "terminal never displayed the completed turn"
         return child.returncode
     finally:
         transcript.write_bytes(output)
@@ -132,22 +143,32 @@ trust_level="trusted"
 """
     (native / "config.toml").write_text(config)
     hooks = []
-    for event, matcher in [("SessionStart", "startup|resume"), ("Stop", "*")]:
-        command = json.dumps(f"cat > {shlex.quote(str(root / event))}")
+    states = []
+    for event, event_name, matcher in [
+        ("SessionStart", "session_start", "startup|resume"),
+        ("Stop", "stop", None),
+    ]:
+        command = f"cat > {shlex.quote(str(root / event))}"
+        matching = f"matcher={json.dumps(matcher)}," if matcher else ""
         hooks.append(
-            f'{event}=[{{matcher="{matcher}",hooks=[{{type="command",command={command}}}]}}]'
+            f'{event}=[{{{matching}hooks=[{{type="command",command={json.dumps(command)},timeout=30}}]}}]'
         )
-    # An independently authored wrapper models only the reported host behavior.
-    # Both modes select an isolated native foreground TUI, with no account access.
-    host_args = (
-        ["--dangerously-bypass-hook-trust", "-c", "hooks={" + ",".join(hooks) + "}"]
-        if wrapped
-        else []
-    )
+        declaration = {
+            "event_name": event_name,
+            "hooks": [{"type": "command", "command": command, "timeout": 30, "async": False}],
+        }
+        if matcher:
+            declaration["matcher"] = matcher
+        digest = hashlib.sha256(
+            json.dumps(declaration, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        key = json.dumps(f"/<session-flags>/config.toml:{event_name}:0:0")
+        states.append(f'{key}={{trusted_hash="sha256:{digest}"}}')
+    # Trust only this wrapper's declarations. The same IDs must survive resume.
+    hooks.append("state={" + ",".join(states) + "}")
+    host_args = ["-c", "hooks={" + ",".join(hooks) + "}"] if wrapped else []
     wrapper = (
-        "#!/bin/sh\nexec "
-        + shlex.join([str(codex), "--no-daemon", "--no-alt-screen", *host_args])
-        + ' "$@"\n'
+        "#!/bin/sh\nexec " + shlex.join([str(codex), "--no-alt-screen", *host_args]) + ' "$@"\n'
     )
     (bin_dir / "codex").write_text(wrapper)
     (bin_dir / "codex").chmod(0o755)
@@ -159,7 +180,7 @@ trust_level="trusted"
         "PATH": f"{bin_dir}:/usr/bin:/bin",
         "TERM": "xterm-256color",
     }
-    args = [str(lf), "--no-loopflow", "--diff", "none", "-a", "codex", ":", "hello"]
+    args = [str(lf), "--diff", "none", "-a", "codex", ":", "hello"]
     status = _terminal(args, env, root, root / "launch.txt")
     assert status == 0, (status, root / "launch.txt")
     with sqlite3.connect(root / "lf" / "loopflow.db") as database:
@@ -174,14 +195,35 @@ trust_level="trusted"
     if wrapped:
         for event in ["SessionStart", "Stop"]:
             assert json.loads((root / event).read_text())["session_id"] == native_id
-    assert (native / "config.toml").read_text() == config
-    assert not list(native.glob("lf-capture-*.config.toml"))
+    # Native UI onboarding may add its own preferences; supplied settings survive.
+    saved = tomllib.loads((native / "config.toml").read_text())
+    for key, value in tomllib.loads(config).items():
+        assert saved[key] == value, key
     assert not (native / "hooks.json").exists()
-    status = _terminal([str(lf), "session", "connect", session_id], env, root, root / "resume.txt")
+    status = _terminal(
+        [str(lf), "session", "connect", session_id], env, root, root / "resume.txt", follow_up=True
+    )
     assert status == 0, (status, root / "resume.txt")
     assert native_id.encode() in (root / "resume.txt").read_bytes()
+    with sqlite3.connect(root / "lf" / "loopflow.db") as database:
+        answers = database.execute(
+            "SELECT json_extract(payload,'$.text') FROM session_events "
+            "WHERE session_id=? AND kind='output' ORDER BY seq",
+            (session_id,),
+        ).fetchall()
+        completed = database.execute(
+            "SELECT count(*) FROM session_events WHERE session_id=? AND kind='completed'",
+            (session_id,),
+        ).fetchone()[0]
+        live = database.execute(
+            "SELECT count(*) FROM processes WHERE kind='agent' AND completed_at IS NULL"
+        ).fetchone()[0]
+    assert answers == [("FIXTURE_DONE",), ("FOLLOWUP_DONE",)], answers
+    assert completed == 2, completed
+    assert live == 0, live
     print(
-        f"{'wrapped' if wrapped else 'plain'}: captured {native_id}, reconnected {session_id}",
+        f"{'wrapped' if wrapped else 'plain'}: captured two turns in {native_id}, "
+        f"reconnected {session_id}, zero live providers",
         flush=True,
     )
 

@@ -414,9 +414,6 @@ pub enum Commands {
         #[arg(trailing_var_arg = true)]
         prompt: Vec<String>,
     },
-    /// Internal provider callback that records one native interactive session.
-    #[command(name = "__provider-session", hide = true)]
-    ProviderSession,
     /// Internal conversation context for native startup/compaction hooks.
     #[command(name = "__context-block", hide = true)]
     ContextBlock {

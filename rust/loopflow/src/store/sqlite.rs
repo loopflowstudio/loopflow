@@ -669,6 +669,7 @@ impl SqliteStore {
 
     pub(crate) fn work_identities(&self) -> StoreResult<Vec<WorkIdentity>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
+        let conn = conn.unchecked_transaction()?;
         let mut statement = conn.prepare(
             "SELECT 0 AS kind, id, NULL AS parent, slug, NULL AS external_id, created_at FROM wave_addresses
              UNION ALL
@@ -701,7 +702,14 @@ impl SqliteStore {
                 created_at: row.get(5)?,
             })
         })?;
-        rows.map(|row| row.map_err(StoreError::from)).collect()
+        let mut identities = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        for identity in &mut identities {
+            if let WorkRef::Task(id) = &identity.work {
+                identity.subject =
+                    children::short_task_id(&conn, id)?.ok_or(StoreError::NotFound)?;
+            }
+        }
+        Ok(identities)
     }
 
     #[cfg(test)]
@@ -2133,7 +2141,8 @@ mod frontier_tests {
              CREATE TABLE tasks (id TEXT, project_id TEXT, issue_identifier TEXT, external_issue_id TEXT, created_at INTEGER);
              INSERT INTO waves VALUES ('00000000-0000-0000-0000-000000000001', 'product', 1, NULL);
              INSERT INTO projects VALUES ('proj_desktop', '00000000-0000-0000-0000-000000000001', 'desktop', 'linear-project', 2);
-             INSERT INTO tasks VALUES ('task_watcher', 'proj_desktop', 'LOO-293', 'linear-issue', 3);",
+             INSERT INTO tasks VALUES ('task_watcher', 'proj_desktop', 'LOO-293', 'linear-issue', 3);
+             INSERT INTO tasks VALUES ('task_abcdef10000000000000000000000001', 'proj_desktop', 'lf-abcdef10000000000000000000000001', NULL, 4);",
         ).unwrap();
         let directory = tempfile::tempdir().unwrap();
         let reference =
@@ -2154,7 +2163,8 @@ mod frontier_tests {
             conn: std::sync::Arc::new(std::sync::Mutex::new(conn)),
         };
         let identities = store.work_identities().unwrap();
-        assert_eq!(identities.len(), 3);
+        assert_eq!(identities.len(), 4);
+        assert_eq!(identities[3].subject, "abcdef");
         assert_eq!(identities[2].subject, "LOO-293");
         assert_eq!(identities[2].external_id.as_deref(), Some("linear-issue"));
         assert_eq!(identities[2].parent.as_ref(), Some(&identities[1].work));

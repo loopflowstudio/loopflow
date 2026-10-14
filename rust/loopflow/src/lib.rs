@@ -26,6 +26,7 @@ pub mod portfolio;
 pub mod process;
 pub mod prompt;
 pub mod skills;
+pub(crate) mod startup;
 pub mod task_work;
 pub(crate) mod terminal_title;
 pub mod workflow;

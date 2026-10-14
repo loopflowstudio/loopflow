@@ -288,10 +288,11 @@ pub(crate) fn close_session_agent_process(store: &SqliteStore, session: &str) ->
     // A Codex server may host unrelated conversations. This is a refusal check,
     // not another provider-specific signaling path.
     if agent.provider.as_deref() == Some("codex") {
-        let (endpoint, thread) = store.session_connection(session)?.ok_or_else(|| {
+        let endpoint = store.agent_endpoint(&agent.process.id)?.ok_or_else(|| {
             StoreError::InvalidAuthority("Codex AgentProcess connection is unavailable".into())
         })?;
-        crate::harness::codex_connection::validate_agent_process_close(&endpoint, &thread)
+        let thread = store.session_thread(session)?;
+        crate::harness::codex_connection::validate_agent_process_close(&endpoint, thread.as_ref())
             .map_err(|error| StoreError::InvalidAuthority(error.to_string()))?;
     }
     close_agent_process(pid, started)

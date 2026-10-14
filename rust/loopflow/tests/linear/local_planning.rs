@@ -394,10 +394,7 @@ fn public_local_plan_matches_desktop() {
     let canonical = serde_json::to_string(&proof)
         .unwrap()
         .replace(id, "task_0123456789ab40008000000000000001")
-        .replace(
-            &format!("lf-{}", &id.trim_start_matches("task_")[..7]),
-            "lf-0123456",
-        )
+        .replace(&id.trim_start_matches("task_")[..6], "012345")
         .replace(&comment_id, "00000000-0000-4000-8000-000000000001")
         .replace(&comment_date, "2026-10-08T00:00:00Z");
     let actual: Value = serde_json::from_str(&canonical).unwrap();
@@ -633,7 +630,7 @@ fn public_task_prefixes_resolve_and_report_ambiguity() {
             &["task", "status", selector, "--json"],
         );
         assert_eq!(status["execution"]["task_id"], first);
-        assert_eq!(status["task"]["identifier"], "lf-abcd1234");
+        assert_eq!(status["task"]["identifier"], "abcd1234");
     }
     let failed = command(
         repo.path(),
@@ -970,7 +967,7 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
     assert!(placed["branch"]
         .as_str()
         .unwrap()
-        .starts_with(&format!("lf/{}/", id.trim_start_matches("task_"))));
+        .starts_with(&format!("jack/{}-", &id.trim_start_matches("task_")[..6])));
     lf(repo.path(), home.path(), &["-b", "task", "run", id]);
     let status = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
     assert_eq!(status["execution"]["status"], "active");
@@ -3790,4 +3787,80 @@ fn observed_issue(
         assignee: None,
         due_date: None,
     }
+}
+
+#[test]
+fn readable_checkout_names_preserve_explicit_names_and_reject_occupied_branches() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let title = "Fix login with a very long explanation";
+    let created = lf(
+        repo.path(),
+        home.path(),
+        &["task", "create", "--title", title, "--json"],
+    );
+    let id = created["id"].as_str().unwrap();
+    let label = created["identifier"].as_str().unwrap();
+    assert_eq!(label.len(), 6);
+    let expected = format!("jack/{label}-fix-login-with");
+    assert!(Command::new("git")
+        .current_dir(repo.path())
+        .args(["branch", &expected])
+        .status()
+        .unwrap()
+        .success());
+    let rejected = command(repo.path(), home.path(), &["checkout", label, "--json"])
+        .output()
+        .unwrap();
+    assert!(!rejected.status.success());
+    assert!(String::from_utf8_lossy(&rejected.stderr).contains("already exists"));
+    let placed = lf(
+        repo.path(),
+        home.path(),
+        &["checkout", label, "--name", "login-repair", "--json"],
+    );
+    assert_eq!(placed["branch"], format!("jack/{label}-login-repair"));
+    assert!(placed["worktree"]
+        .as_str()
+        .unwrap()
+        .ends_with(".login-repair"));
+    let retained = lf(
+        repo.path(),
+        home.path(),
+        &["checkout", id, "--name", "login-repair", "--json"],
+    );
+    assert_eq!(retained["branch"], placed["branch"]);
+    assert_eq!(retained["worktree"], placed["worktree"]);
+}
+
+#[test]
+fn offline_linear_checkout_uses_known_identifier_and_caps_title() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let title = format!("{} login", "Long".repeat(30));
+    let created = lf(
+        repo.path(),
+        home.path(),
+        &["task", "create", "--title", &title, "--json"],
+    );
+    let id = created["id"].as_str().unwrap();
+    let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    conn.execute(
+        "UPDATE tasks SET issue_identifier='ENG-123' WHERE id=?1",
+        [id],
+    )
+    .unwrap();
+    let placed = lf(repo.path(), home.path(), &["checkout", "ENG-123", "--json"]);
+    assert_eq!(
+        placed["branch"],
+        format!("jack/eng-123-{}", "long".repeat(8))
+    );
+    conn.execute(
+        "UPDATE tasks SET issue_identifier='ENG-124',issue_title='Changed title' WHERE id=?1",
+        [id],
+    )
+    .unwrap();
+    let retained = lf(repo.path(), home.path(), &["checkout", "ENG-124", "--json"]);
+    assert_eq!(retained["branch"], placed["branch"]);
+    assert_eq!(retained["worktree"], placed["worktree"]);
 }

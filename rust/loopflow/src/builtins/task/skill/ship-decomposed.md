@@ -63,8 +63,8 @@ as one PR; one large honest PR beats an artificially staged series.
 2. Keep taskless delivery taskless: use `lf wt create` for the selected branches
    and publish each PR without creating Tasks. Use the Task path below only
    when splitting an existing Task or the user explicitly requests managed work.
-   For managed work, give every independently deliverable PR its own Task. A Task has zero or
-   one PR, never a serial chain. Reuse existing Tasks for matching scope;
+   For managed work, prefer a Task for each independently deliverable outcome.
+   Reuse existing Tasks for matching scope, including continued delivery;
    preserve the original Task's intended outcome when assigning its slice.
    Independent Tasks start from main; dependent Tasks stack on their parent.
    A published parent PR, including a draft, is enough to start and publish a

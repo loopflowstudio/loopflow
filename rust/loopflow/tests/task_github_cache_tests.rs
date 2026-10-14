@@ -104,6 +104,71 @@ fn github_rest_reads(log: &str) -> Vec<String> {
 }
 
 #[test]
+fn reconciliation_skips_deleted_checkouts_without_losing_retained_work() {
+    let home = tempfile::tempdir().unwrap();
+    let repo = TestRepo::new();
+    let checkout = repo.create_named_worktree("deleted-checkout");
+    point_origin_at_github(&repo);
+    let mut active = register_task_with_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    let deleted = support::register_sibling_task(&active, "INF-124", "deleted-checkout", &checkout);
+    publish_task(&mut active);
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let mut retained = active.pr.clone();
+    retained.id = loopflow::work::task::TaskPrId::new();
+    retained.task_id = deleted.id.clone();
+    retained.slug = deleted.workspace_slug.clone();
+    retained.branch = deleted.branch.clone();
+    let github = retained
+        .publication
+        .as_mut()
+        .unwrap()
+        .github
+        .as_mut()
+        .unwrap();
+    github.number = 929;
+    github.url = "https://github.com/loopflowstudio/loopflow/pull/929".into();
+    runtime
+        .block_on(active.store.insert_task_pr(&retained))
+        .unwrap();
+    let retained = runtime
+        .block_on(active.store.active_task_pr(&deleted.id))
+        .unwrap();
+    let before = runtime
+        .block_on(active.store.get_task(&deleted.id))
+        .unwrap();
+    fs::remove_dir_all(&checkout).unwrap();
+    let log = home.path().join("gh.log");
+    let script = gh_success_script(log.to_str().unwrap());
+    let _env = EnvGuard::with_lf_home(&[("gh", script.as_str())], home.path());
+
+    let report = loopflow::ops::pr_landing::reconcile_repository(repo.path()).unwrap();
+
+    assert!(report.errors.is_empty(), "{report:?}");
+    assert!(!checkout.exists());
+    assert_eq!(
+        runtime
+            .block_on(active.store.get_task(&deleted.id))
+            .unwrap(),
+        before
+    );
+    assert_eq!(
+        runtime
+            .block_on(active.store.active_task_pr(&deleted.id))
+            .unwrap(),
+        retained
+    );
+    let observed = runtime
+        .block_on(active.store.active_task_pr(&active.task.id))
+        .unwrap()
+        .unwrap();
+    assert!(matches!(
+        observed.github_observation.unwrap().result,
+        GithubObservationResult::Fresh
+    ));
+    task_interrupt("INF-124").expect("interrupt survives external checkout deletion");
+}
+
+#[test]
 fn graph_ql_exhaustion_never_blocks_task_control_or_forces_pr_enumeration() {
     let home = tempfile::tempdir().expect("task home");
     let repo = TestRepo::new();

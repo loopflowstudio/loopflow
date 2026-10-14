@@ -338,7 +338,6 @@ fn land_local_squash_merges_to_main() {
         &LandOptions {
             strict: true,
             local: true,
-            create_pr: false,
             wait_and_fix: false,
             worktree: None,
             commit_message: None,
@@ -384,7 +383,6 @@ fn land_preserves_main_on_failure() {
         &LandOptions {
             strict: true,
             local: true,
-            create_pr: false,
             wait_and_fix: false,
             worktree: None,
             commit_message: None,
@@ -423,7 +421,6 @@ fn land_cleans_up_remote_branch() {
         &LandOptions {
             strict: true,
             local: true,
-            create_pr: false,
             wait_and_fix: false,
             worktree: None,
             commit_message: None,
@@ -467,7 +464,6 @@ fn land_cleans_added_scratch_and_retains_existing_edits() {
         &LandOptions {
             strict: true,
             local: true,
-            create_pr: false,
             wait_and_fix: false,
             worktree: None,
             commit_message: None,
@@ -525,7 +521,6 @@ fn final_preparation_keeps_published_history_when_the_base_changes() {
         let options = LandOptions {
             strict: true,
             local: false,
-            create_pr: false,
             wait_and_fix: false,
             worktree: None,
             commit_message: None,
@@ -629,7 +624,6 @@ fi
         let options = LandOptions {
             strict: true,
             local: false,
-            create_pr: false,
             wait_and_fix: false,
             worktree: None,
             commit_message: None,
@@ -704,7 +698,6 @@ fn land_preserves_checkpoint_history_and_pushes_the_final_tree_once() {
         &LandOptions {
             strict: true,
             local: false,
-            create_pr: true,
             wait_and_fix: false,
             worktree: None,
             commit_message: None,
@@ -785,7 +778,6 @@ fn land_refuses_when_clearing_scratch_leaves_no_authored_change() {
         &LandOptions {
             strict: true,
             local: false,
-            create_pr: true,
             wait_and_fix: false,
             worktree: None,
             commit_message: None,
@@ -849,7 +841,6 @@ fn land_does_not_push_when_target_already_contains_the_authored_patch() {
         &LandOptions {
             strict: true,
             local: false,
-            create_pr: true,
             wait_and_fix: false,
             worktree: None,
             commit_message: None,
@@ -886,7 +877,7 @@ fn land_does_not_push_when_target_already_contains_the_authored_patch() {
 }
 
 #[test]
-fn land_missing_pr_error_includes_branch_name() {
+fn land_creates_missing_pr_without_an_extra_flag() {
     let home = tempfile::TempDir::new().expect("temp home");
     let _env = EnvGuard::with_home(
         &[
@@ -908,7 +899,6 @@ fn land_missing_pr_error_includes_branch_name() {
         &LandOptions {
             strict: true,
             local: false,
-            create_pr: false,
             wait_and_fix: false,
             worktree: None,
             commit_message: None,
@@ -919,10 +909,7 @@ fn land_missing_pr_error_includes_branch_name() {
         &NullProgress,
     );
 
-    let Err(OpsError::Message(message)) = result else {
-        panic!("expected missing PR message");
-    };
-    assert!(message.contains("no open PR found for branch 'feature'"));
+    assert_eq!(result.unwrap().unwrap().number, 1);
 }
 
 #[test]
@@ -949,7 +936,6 @@ fn land_uses_cached_pr_copy_when_available() {
         &LandOptions {
             strict: false,
             local: false,
-            create_pr: true,
             wait_and_fix: false,
             worktree: None,
             commit_message: None,
@@ -992,7 +978,6 @@ fn submit_and_land_make_no_presentation_attempt() {
             &LandOptions {
                 strict: true,
                 local: false,
-                create_pr: true,
                 wait_and_fix: false,
                 worktree: None,
                 commit_message: None,
@@ -1030,7 +1015,6 @@ fn submit_and_land_make_no_presentation_attempt() {
             &LandOptions {
                 strict: true,
                 local: false,
-                create_pr: true,
                 wait_and_fix: false,
                 worktree: None,
                 commit_message: None,
@@ -1067,7 +1051,6 @@ fn submit_preserves_assignments_and_skips_auto_merge() {
         &LandOptions {
             strict: true,
             local: false,
-            create_pr: true,
             wait_and_fix: false,
             worktree: None,
             commit_message: None,
@@ -1133,7 +1116,6 @@ fn auto_merge_follows_repository_methods_and_queue_policy() {
             &LandOptions {
                 strict: true,
                 local: false,
-                create_pr: true,
                 wait_and_fix: false,
                 worktree: None,
                 commit_message: None,
@@ -1184,7 +1166,6 @@ fn submit_records_user_merge_for_a_managed_task() {
         &LandOptions {
             strict: true,
             local: false,
-            create_pr: true,
             wait_and_fix: false,
             worktree: None,
             commit_message: None,
@@ -1236,7 +1217,6 @@ fn land_clears_the_durable_request_when_auto_arm_fails() {
         &LandOptions {
             strict: true,
             local: false,
-            create_pr: false,
             wait_and_fix: false,
             worktree: None,
             commit_message: None,
@@ -1287,7 +1267,6 @@ fn same_head_publication_preserves_the_armed_merge_request() {
         &LandOptions {
             strict: true,
             local: false,
-            create_pr: false,
             wait_and_fix: false,
             worktree: None,
             commit_message: None,
@@ -1353,7 +1332,6 @@ fn repeated_identical_land_preserves_the_armed_task_request() {
     let options = LandOptions {
         strict: true,
         local: false,
-        create_pr: false,
         wait_and_fix: false,
         worktree: None,
         commit_message: None,
@@ -1443,7 +1421,6 @@ fi
     let mut options = LandOptions {
         strict: true,
         local: false,
-        create_pr: false,
         wait_and_fix: false,
         worktree: None,
         commit_message: None,
@@ -1531,7 +1508,6 @@ fn assert_non_task_land_publishes_changed_source(committed: bool) {
         &LandOptions {
             strict: committed,
             local: false,
-            create_pr: false,
             wait_and_fix: false,
             worktree: None,
             commit_message: None,
@@ -1591,7 +1567,6 @@ fn submit_does_not_rotate_worktree() {
         &LandOptions {
             strict: true,
             local: false,
-            create_pr: true,
             wait_and_fix: false,
             worktree: None,
             commit_message: None,
@@ -1652,7 +1627,6 @@ fn land_generates_copy_when_cached_pr_copy_is_stale() {
         &LandOptions {
             strict: true,
             local: false,
-            create_pr: true,
             wait_and_fix: false,
             worktree: None,
             commit_message: None,
@@ -2143,7 +2117,6 @@ fn persistent_submit_keeps_scratch_and_post_commit_edits() {
         &LandOptions {
             strict: false,
             local: false,
-            create_pr: true,
             wait_and_fix: false,
             worktree: None,
             commit_message: None,

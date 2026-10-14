@@ -1965,6 +1965,52 @@ mod tests {
     }
 
     #[test]
+    fn task_pr_continuation_preserves_released_delivery_and_one_current_pr() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        apply_before_current_draft(&conn, "task_pr_continuation");
+        conn.execute_batch(include_str!(
+            "../../tests/fixtures/migrations/task_pr_continuation.sql"
+        ))
+        .unwrap();
+        conn.execute_batch(&current_draft_sql("task_pr_continuation"))
+            .unwrap();
+        conn.execute("UPDATE tasks SET base_commit='next-base' WHERE id='t'", [])
+            .unwrap();
+        let base: String = conn
+            .query_row(
+                "SELECT base_commit FROM task_prs WHERE id='first'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(base, "base");
+        conn.execute("UPDATE task_prs SET historical=1 WHERE id='first'", [])
+            .unwrap();
+        conn.execute_batch("INSERT INTO task_prs(id,task_id,sequence,slug,branch,base_commit,publication_requested_at,created_at,updated_at)
+          VALUES('second','t',2,'work','work','next-base',2,2,2)").unwrap();
+        assert!(conn
+            .execute("UPDATE task_prs SET historical=1 WHERE id='second'", [])
+            .is_err());
+        assert!(conn
+            .execute("UPDATE task_prs SET github_number=99 WHERE id='first'", [])
+            .is_err());
+        assert!(conn
+            .execute("DELETE FROM task_prs WHERE id='first'", [])
+            .is_err());
+        assert!(conn.execute_batch("INSERT INTO task_prs(id,task_id,sequence,slug,branch,base_commit,created_at,updated_at)
+          VALUES('third','t',3,'work','work','next-base',3,3)").is_err());
+        let current: String = conn
+            .query_row(
+                "SELECT id FROM task_prs WHERE task_id='t' AND historical=0",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(current, "second");
+        validate_foreign_keys(&conn).unwrap();
+    }
+
+    #[test]
     fn optional_task_pr_preserves_placement_and_freezes_prior_delivery() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         apply_before_current_draft(&conn, "local_planning");

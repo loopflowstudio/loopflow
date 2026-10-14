@@ -108,6 +108,14 @@ pub fn resume(id: &str, message: &str, cli: &Cli) -> Result<()> {
     let resolved = crate::agent::resolve_session_config(&session, cli)?;
     let mut turn = cli.process_options();
     turn.agent = resolved.agent.clone();
+    let message = if session.provider.as_deref()
+        != Some(crate::config::parse_agent(resolved.agent()).0.as_str())
+    {
+        let request = crate::ops::human_session::conversation_log::continuation(&store, &session)?;
+        format!("{request}\n\n{message}")
+    } else {
+        message.to_owned()
+    };
     turn.resume = Some(session.id.clone());
     turn.skill_input = None;
     turn.resolved_invocation = None;
@@ -123,8 +131,8 @@ pub fn resume(id: &str, message: &str, cli: &Cli) -> Result<()> {
     // another Task's checkout. Do not rediscover Work from the caller's cwd.
     let mut built = build_prompt_at(
         None,
-        Some(message),
-        message,
+        Some(&message),
+        &message,
         &turn,
         session.cwd.clone(),
         None,

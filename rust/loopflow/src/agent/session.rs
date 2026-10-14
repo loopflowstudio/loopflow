@@ -232,12 +232,19 @@ pub(crate) fn resolve_session_config(
     } else {
         session.model.clone()
     };
-    let model = crate::config::resume_model(provider, model.as_deref(), selected.as_deref())?;
+    let (agent, importing) =
+        match crate::config::resume_choice(provider, model.as_deref(), selected.as_deref()) {
+            crate::config::Resume::Native(model) => (
+                model.map_or_else(
+                    || provider.to_string(),
+                    |model| format!("{provider}:{model}"),
+                ),
+                false,
+            ),
+            crate::config::Resume::Import { agent } => (agent, true),
+        };
     let mut config = AgentConfig {
-        agent: Some(model.map_or_else(
-            || provider.to_string(),
-            |model| format!("{provider}:{model}"),
-        )),
+        agent: Some(agent),
         cwd: Some(session.cwd.clone()),
         skip_permissions: cli.yolo || crate::config::yolo_override() || current.yolo,
         chrome: cli.chrome_setting().unwrap_or(current.chrome),
@@ -254,10 +261,12 @@ pub(crate) fn resolve_session_config(
     };
     let mut needs_execution_boundary = false;
     if let Some(request) = request {
-        if provider == "codex" {
+        if !importing && provider == "codex" {
             config.task_prompt = request.codex_initial_input();
         }
-        config.provider_account_id = request.account_id;
+        if !importing {
+            config.provider_account_id = request.account_id;
+        }
         config.system_prompt = request.system_prompt;
         config.conversation_context = request.conversation_context;
         config.write_scope = request.write_scope;
@@ -284,9 +293,11 @@ pub(crate) fn resolve_session_config(
             config.agent(),
         )?);
     }
-    if let Some(native) = store.input_provider_session(&session.artifact_key)? {
-        config.resume_token = Some(native.agent_session);
-        config.provider_account_id = native.account_id.or(config.provider_account_id);
+    if !importing {
+        if let Some(native) = store.input_provider_session(&session.artifact_key)? {
+            config.resume_token = Some(native.agent_session);
+            config.provider_account_id = native.account_id.or(config.provider_account_id);
+        }
     }
     Ok(config)
 }

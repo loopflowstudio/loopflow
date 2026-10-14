@@ -728,6 +728,59 @@ fn codex_headless_start_and_resume_receive_current_policy_on_the_wire() {
 }
 
 #[test]
+fn headless_provider_switch_imports_history_with_current_policy() {
+    let fixture = Fixture::new("claude");
+    fixture.create_wave();
+    fixture.run(&["-b", "--wave", "fixture", ":", "original request"]);
+    let session = fixture.session();
+    let transcript = fixture
+        .home
+        .path()
+        .join(".claude/projects/fixture/stream-fixture.jsonl");
+    fs::create_dir_all(transcript.parent().unwrap()).unwrap();
+    fs::write(
+        &transcript,
+        serde_json::json!({
+            "type": "user", "userType": "external",
+            "message": {"content": "Preserve the original design"}
+        })
+        .to_string(),
+    )
+    .unwrap();
+    support::register_codex_account(&fixture.home.path().join("machine"));
+    let script = support::codex_app_server_script("done", "")
+        .replace(
+            "read -r thread_start",
+            "read -r thread_start\nprintf '%s' \"$thread_start\" > \"$HOME/received.json\"",
+        )
+        .replace(
+            "read -r turn_start",
+            "read -r turn_start\nprintf '%s' \"$turn_start\" > \"$HOME/turn.json\"",
+        );
+    fs::write(fixture.home.path().join("bin/codex"), script).unwrap();
+    fixture.settings("claude", true, false);
+    let imported = fixture.run(&[
+        "-b",
+        "session",
+        "connect",
+        &session,
+        "-a",
+        "codex:new-model",
+        "--message",
+        "Continue the design",
+    ]);
+    assert_eq!(imported["method"], "thread/start");
+    assert!(imported["params"]["threadId"].is_null());
+    assert_eq!(imported["params"]["model"], "new-model");
+    assert_eq!(imported["params"]["sandbox"], "danger-full-access");
+    assert_eq!(imported["params"]["approvalPolicy"], "never");
+    let turn = fs::read_to_string(fixture.home.path().join("turn.json")).unwrap();
+    assert!(turn.contains("Preserve the original design"), "{turn}");
+    assert!(turn.contains("Continue the design"), "{turn}");
+    assert_eq!(fixture.session(), session);
+}
+
+#[test]
 fn opencode_headless_start_and_resume_preserve_history_and_reload_policy() {
     let fixture = Fixture::new("opencode:opencode/first-model");
     fixture.create_wave();

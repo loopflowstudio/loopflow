@@ -104,6 +104,12 @@ pub(crate) fn resume_session_with_env(
     } else {
         crate::agent::resolve_session_config(&session, &crate::lf::Cli::default())?
     };
+    anyhow::ensure!(
+        session.provider.as_deref() == Some(crate::config::parse_agent(config.agent()).0.as_str()),
+        "native history cannot resume in {}; continue it with lf resume -a {}",
+        config.agent(),
+        config.agent(),
+    );
     if let Some(provider) = provider_session {
         config.provider_account_id = provider.account_id.clone().or(config.provider_account_id);
     }

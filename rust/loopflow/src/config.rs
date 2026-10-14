@@ -87,20 +87,25 @@ pub fn agent_override() -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-pub(crate) fn resume_model(
-    provider: &str,
-    model: Option<&str>,
-    selected: Option<&str>,
-) -> anyhow::Result<Option<String>> {
-    let Some(agent) = selected else {
-        return Ok(model.map(str::to_owned));
+/// How a recorded conversation continues under the invocation's agent choice.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Resume {
+    /// The same provider resumes its native history with this model.
+    Native(Option<String>),
+    /// Another provider starts fresh from a log of the native history.
+    Import { agent: String },
+}
+
+pub(crate) fn resume_choice(provider: &str, model: Option<&str>, selected: Option<&str>) -> Resume {
+    let Some(agent) = selected.map(str::to_owned) else {
+        return Resume::Native(model.map(str::to_owned));
     };
-    let (selected, model) = parse_agent(agent);
-    anyhow::ensure!(
-        selected == provider,
-        "This Session's native history belongs to {provider}; it cannot resume with {selected}. Start a new Session with lf -a {agent} : <message>."
-    );
-    Ok(model)
+    let (selected, model) = parse_agent(&agent);
+    if selected == provider {
+        Resume::Native(model)
+    } else {
+        Resume::Import { agent }
+    }
 }
 
 /// Agent used when neither the caller, config, nor skill chooses one: the
@@ -567,24 +572,22 @@ pub fn load_config_or_default(repo_root: Option<&Path>) -> Config {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn native_resume_keeps_history_with_its_provider() {
+    fn resume_stays_native_until_the_provider_changes() {
+        use super::Resume;
         assert_eq!(
-            super::resume_model("claude", Some("haiku"), None)
-                .unwrap()
-                .as_deref(),
-            Some("haiku")
+            super::resume_choice("claude", Some("haiku"), None),
+            Resume::Native(Some("haiku".into()))
         );
         assert_eq!(
-            super::resume_model("claude", Some("haiku"), Some("claude:opus"))
-                .unwrap()
-                .as_deref(),
-            Some("opus")
+            super::resume_choice("claude", Some("haiku"), Some("claude:opus")),
+            Resume::Native(Some("opus".into()))
         );
-        let error = super::resume_model("codex", None, Some("claude:opus"))
-            .unwrap_err()
-            .to_string();
-        assert!(error.contains("native history belongs to codex"));
-        assert!(error.contains("Start a new Session"));
+        assert_eq!(
+            super::resume_choice("codex", None, Some("claude:opus")),
+            Resume::Import {
+                agent: "claude:opus".into()
+            }
+        );
     }
 
     use super::*;

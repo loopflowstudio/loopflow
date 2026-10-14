@@ -1077,27 +1077,26 @@ Direct invocation and large inputs.
 
 ## macOS CI evidence (lf-ddf2d53, 2026-10-13)
 
-Jack Heart authorized CI implementation/delivery: under five minutes over ten
-real typical-code PRs, owned by lf-12be237; queue/push-to-merged stay separate.
-#1543 merged; queue 38452715134 took 6:24 (6:25 updatedAt) despite exact
-dependency hits. Other Tasks' numeric retirement waives nothing here.
+Jack Heart authorized CI delivery. lf-12be237 retains ten consecutive typical-code
+PRs under five minutes and separate queue/push-to-merged proof. #1543 merged;
+queue 38452715134 remains 6:24 (6:25 updatedAt).
 
-Overlap saved 13.453–39.668s cold; warm totaled 0.417s slower, weak regression
-evidence. The supplied Task brief selects overlap on DerivedData misses only;
-ordinary cache hits remain. Unimplemented; performance unproved.
-Changed-source warm snapshots are not exact-source cache hits.
-Cleanup cost and hosted benefit remain unproved; neutral warm samples are allowed.
+Selected DerivedData-miss overlap is implemented; hits use ordinary Xcode.
+Matched pairs save 4.794s cold (opposite signs), 18.575s changed-source warm;
+exact hits add 0.064s. Warm changes miss. Earlier overlap gains are no forecast;
+codegen/boxing remain rejected. Query savings prove no build gain. Contention
+limits attribution; Xcode client CPU/RSS omits compilers.
 
-Codegen-units=256 and boxed planning futures remain rejected. Frontend dominated
-backend; boxing reduced caller queries without improving ordinary builds.
-Query attribution proves no elapsed gain. Shared services/contention limit timings;
-Xcode client CPU/RSS omits compilers. Match toolchain, SDK, deployment, source/target.
-Process groups alone left a Swift compiler alive; scoped cleanup passed.
+Twelve signed builds passed; `loopflow` compiled once per miss, zero per hit.
+Process groups left a compiler alive; scoped cancellation passed. Toolchain/SDK/deployment and
+source/target must match. Signature removal alone leaves Mach-O padding;
+identical re-signing of disposable copies proved bytes equal.
 
-Preserve signed Xcode proof, full Swift tests, copy/sign, development provenance,
-validation-only migrations and disposable Home/network boundaries. No paid
-runners, test removal, relaxed cache identity or retries. Release's lesson:
-local proof establishes no hosted delivery. [Trials](../../../docs/reviews/ci-under-five-minutes.md).
+Hosted benefit and cleanup cost remain unsettled. Full Swift/installation/network
+proof remains; Release's lesson separates local proof from delivery.
+Preserve copy/sign, development/validation-only authority and disposable
+OS accounts for installation. No paid runners, test removal, cache relaxation or
+retries. [Trials and limits](../../../docs/reviews/ci-under-five-minutes.md#october-13-follow-up-exact-cache-miss-overlap).
 
 ## Agent startup profiling (LOO-436, 2026-10-08)
 

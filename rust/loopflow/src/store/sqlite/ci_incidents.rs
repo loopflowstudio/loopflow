@@ -53,10 +53,10 @@ fn map_incident_report_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CiIncide
             repaired_head_sha: row.get(19)?,
         },
         wave: row.get(20)?,
-        task: row.get(21)?,
-        task_status: row.get(22)?,
-        task_started_at: optional_datetime(23, row.get(23)?)?,
-        human_assisted: row.get::<_, i64>(24)? != 0,
+        task: None,
+        task_status: row.get(21)?,
+        task_started_at: optional_datetime(22, row.get(22)?)?,
+        human_assisted: row.get::<_, i64>(23)? != 0,
     })
 }
 
@@ -255,6 +255,7 @@ impl super::SqliteStore {
         repo: Option<&str>,
     ) -> StoreResult<Vec<CiIncidentReportRow>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
+        let conn = conn.unchecked_transaction()?;
         let mut statement = conn.prepare(&format!(
             "SELECT
                 ci.identity, ci.landing_id, ci.task_id, ci.pr_id,
@@ -263,7 +264,7 @@ impl super::SqliteStore {
                 ci.claimed_landing_generation, ci.responded_at, ci.green_at,
                 ci.merged_at, ci.blocked_at, ci.blocked_reason, ci.created_at,
                 ci.updated_at, ci.repaired_head_sha,
-                w.slug, ts.issue_identifier,
+                w.slug,
                 CASE WHEN ts.id IS NOT NULL THEN {task_state} END,
                 ts.created_at,
                 EXISTS (
@@ -295,7 +296,17 @@ impl super::SqliteStore {
             params![timestamp(since), wave, repo],
             map_incident_report_row,
         )?;
-        rows.collect::<Result<Vec<_>, _>>()
-            .map_err(StoreError::from)
+        let mut incidents = rows.collect::<Result<Vec<_>, _>>()?;
+        let mut labels = std::collections::HashMap::new();
+        for row in &mut incidents {
+            row.task = row
+                .incident
+                .task_id
+                .as_ref()
+                .map(|id| super::children::cached_short_task_id(&conn, &mut labels, id))
+                .transpose()?
+                .flatten();
+        }
+        Ok(incidents)
     }
 }

@@ -237,6 +237,7 @@ pub(super) fn attach_in(
     if current.as_ref() != expected {
         return Err(attachment_changed());
     }
+    super::sessions::repair_session_title_in(tx, session, None)?;
     let replacing = current.is_none() || replace_provider;
     let attached = SessionAttachment {
         agent_process_id: current

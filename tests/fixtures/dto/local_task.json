@@ -12,7 +12,7 @@
       }
     ],
     "conflicts": {},
-    "identifier": "lf-0123456",
+    "identifier": "012345",
     "pending_sync": [],
     "refresh_error": null
   },
@@ -72,7 +72,7 @@
       "description": "Keep the escaped quote",
       "due_date": null,
       "id": "task_0123456789ab40008000000000000001",
-      "identifier": "lf-0123456",
+      "identifier": "012345",
       "name": "Retain quoted input",
       "rank": 0,
       "state": "unstarted",

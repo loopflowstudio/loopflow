@@ -210,8 +210,8 @@ mod tests {
                 .is_empty()
         );
         assert!(!home.path().join("runs").exists());
-        // Sampling failure keeps both records visible as unknown, rather than
-        // turning an unavailable observation into an empty Session list.
+        // A broken ps cannot affect native macOS sampling. Other hosts retain
+        // both records as unknown when sampling fails.
         let bin = home.path().join("bin");
         std::fs::create_dir(&bin).unwrap();
         let ps = bin.join("ps");
@@ -219,18 +219,23 @@ mod tests {
         std::fs::set_permissions(&ps, std::fs::Permissions::from_mode(0o755)).unwrap();
         let path = std::env::var_os("PATH");
         std::env::set_var("PATH", &bin);
-        let unavailable = read();
+        let without_ps = read();
         match path {
             Some(path) => std::env::set_var("PATH", path),
             None => std::env::remove_var("PATH"),
         }
-        assert_eq!(unavailable.discovery, DiscoveryState::Unavailable);
-        assert!(!unavailable.gaps.is_empty());
-        assert_eq!(unavailable.sessions[0].processes.len(), 2);
-        assert!(unavailable.sessions[0]
-            .processes
-            .iter()
-            .all(|process| process.state == crate::lf::commands::top::ActivityState::Unknown));
+        assert_eq!(without_ps.sessions[0].processes.len(), 2);
+        if cfg!(target_os = "macos") {
+            assert_eq!(without_ps.discovery, DiscoveryState::Ready);
+            assert!(without_ps.gaps.is_empty());
+        } else {
+            assert_eq!(without_ps.discovery, DiscoveryState::Unavailable);
+            assert!(!without_ps.gaps.is_empty());
+            assert!(without_ps.sessions[0]
+                .processes
+                .iter()
+                .all(|process| process.state == crate::lf::commands::top::ActivityState::Unknown));
+        }
         drop(old);
         assert_eq!(read().sessions[0].processes.len(), 1);
         assert_eq!(read().sessions[0].processes[0].id, second.agent_process_id);

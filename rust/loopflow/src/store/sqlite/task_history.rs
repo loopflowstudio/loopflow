@@ -196,13 +196,14 @@ impl SqliteStore {
 }
 
 fn recover_filing_in(conn: &Connection, intent: &RetainedFiling) -> StoreResult<String> {
-    let existing: Option<(String, String)> = conn.query_row(
-        "SELECT id,issue_identifier FROM tasks WHERE id=?1 OR external_issue_id=?1
+    let existing: Option<String> = conn.query_row(
+        "SELECT id FROM tasks WHERE id=?1 OR external_issue_id=?1
          OR id=(SELECT task_id FROM task_creation_intents WHERE json_extract(export_json,'$.id')=?1)",
-        [&intent.issue_id], |row| Ok((row.get(0)?, row.get(1)?)),
+        [&intent.issue_id], |row| row.get(0),
     ).optional()?;
-    if let Some((_, identifier)) = existing {
-        return Ok(identifier);
+    if let Some(id) = existing {
+        return super::children::short_task_id(conn, &TaskId::from_raw(id))?
+            .ok_or(StoreError::NotFound);
     }
     if intent.existing {
         return Ok(intent.issue_id.clone());

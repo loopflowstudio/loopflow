@@ -41,13 +41,14 @@ use crate::durable::{TaskState, WorkStatus};
 use crate::flow::compile_flow;
 use crate::flow::load_flow;
 use crate::flow::ConcreteStep;
+use crate::git::worktree_name::WorktreeName;
 use crate::git::worktrees::{
     plan_branch_placement, PlacementPlan, PlacementStrategy, WorktreeSegment,
 };
 use crate::git::{
     current_branch, fetch, get_default_branch, is_clean, merge_base, ref_exists, rev_parse,
 };
-use crate::naming::sanitize_for_branch;
+use crate::naming::{git_user, sanitize_for_branch};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::task_actions::{derive_task_actions, TaskActionEvidence, TaskActionModel};
 use crate::ops::workflow::WorkflowPosition;
@@ -1111,21 +1112,47 @@ fn plan_task_placement(
     recorded_branch: Option<&str>,
     options: &TaskProcessOptions,
 ) -> OpsResult<(PlacementPlan, String)> {
-    let uuid = task.id.as_str().trim_start_matches("task_");
-    let title = derive_workspace_slug(&task.title)?;
-    let segment = match options.name.as_deref() {
-        Some(name) => parse_workspace_slug(name)?,
-        None => parse_workspace_slug(&format!(
-            "{}-{}",
-            title.as_str(),
-            uuid.chars().take(12).collect::<String>(),
-        ))?,
+    let explicit_segment = options
+        .name
+        .as_deref()
+        .map(parse_workspace_slug)
+        .transpose()?;
+    let title = match &explicit_segment {
+        Some(segment) => segment.as_str().to_string(),
+        None => task
+            .title
+            .split(|ch: char| !ch.is_ascii_alphanumeric())
+            .filter(|word| !word.is_empty())
+            .take(3)
+            .collect::<Vec<_>>()
+            .join("-")
+            .to_ascii_lowercase()
+            .chars()
+            .take(32)
+            .collect::<String>()
+            .trim_end_matches('-')
+            .to_string(),
     };
-    let workspace_slug = segment.as_str().to_string();
+    let segment = WorktreeSegment::parse(
+        format!("{}-{title}", task.identifier.to_ascii_lowercase()).trim_end_matches('-'),
+    )
+    .map_err(task_error)?;
     let recorded_branch = recorded_branch.filter(|branch| !branch.is_empty());
-    let generated_branch = format!("lf/{uuid}/{}", title.as_str());
-    let branch = recorded_branch.unwrap_or(&generated_branch);
-    let plan = plan_branch_placement(main_repo, segment, Some(branch))?;
+    let branch = match recorded_branch {
+        Some(branch) => branch.to_string(),
+        None => WorktreeName::new(git_user(main_repo)?, segment.clone())
+            .expect("git_user returns a nonempty branch-safe author")
+            .branch(),
+    };
+    let segment = explicit_segment.unwrap_or(segment);
+    let workspace_slug = segment.as_str().to_string();
+    let plan = plan_branch_placement(main_repo, segment, Some(&branch))?;
+    if recorded_branch.is_none() && plan.strategy != PlacementStrategy::Create {
+        return Err(task_error(format!(
+            "branch {} already exists; choose another workspace name with --name",
+            plan.branch
+        )));
+    }
     // Plan without touching an occupied checkout; restoration consumes the saved placement.
     if plan.strategy != PlacementStrategy::UseExistingWorktree && plan.worktree_path.try_exists()? {
         return Err(task_error(format!(
@@ -1614,19 +1641,6 @@ fn parse_workspace_slug(value: &str) -> OpsResult<WorktreeSegment> {
         ));
     }
     WorktreeSegment::parse(value).map_err(task_error)
-}
-
-fn derive_workspace_slug(title: &str) -> OpsResult<WorktreeSegment> {
-    let sanitized = sanitize_for_branch(title);
-    let mut words = sanitized
-        .split('-')
-        .filter(|word| !word.is_empty())
-        .take(5)
-        .collect::<Vec<_>>();
-    if words.len() == 1 {
-        words.push("task");
-    }
-    parse_workspace_slug(&words.join("-"))
 }
 
 pub(crate) async fn task_for_checkout(store: &SharedStore, repo: &Path) -> OpsResult<Option<Task>> {

@@ -1429,6 +1429,7 @@ proposed actions; lifecycle integration tests remain the proof of tool effects.
 Isolated data clones install their own inherited sandbox. Run their macOS fixtures
 directly: `cargo test -p loopflow --test integration data_clones:: < /dev/null`.
 The network wrapper's privileged `ps` exception cannot nest with this policy.
+The changed-aware runner selects this separate boundary automatically.
 CI proves clone operation on macOS 26 and early unsupported-host refusal on
 macOS 15; both hosts retain native process identity tests. An environment marker
 never substitutes for kernel confinement.

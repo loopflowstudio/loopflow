@@ -170,6 +170,7 @@ fn create(
             "Provider files are best-effort retained history, not an atomic provider snapshot. Missing, changing and symlinked files are reported. Native continuation is not proved.".into()],
     };
     save_manifest(&manifest)?;
+    require_nested_sandbox(&manifest)?;
     // Even SQLite's auxiliary files and source WAL are outside write authority.
     sandbox(&manifest, false)?;
     for name in [
@@ -350,6 +351,27 @@ fn launch(directory: &Path, arguments: &[String]) -> Result<()> {
     let status = command.status().context("run isolated clone")?;
     if !status.success() {
         bail!("Clone command exited with {status}");
+    }
+    Ok(())
+}
+
+fn require_nested_sandbox(manifest: &CloneManifest) -> Result<()> {
+    // Older macOS releases reject a second sandbox application. Never replace
+    // kernel enforcement with an inherited environment flag on those hosts.
+    let profile = policy(manifest, true)?;
+    let result = Command::new("/usr/bin/sandbox-exec")
+        .args([
+            "-p",
+            &profile,
+            "/usr/bin/sandbox-exec",
+            "-p",
+            &profile,
+            "/usr/bin/true",
+        ])
+        .output()
+        .context("probe inherited clone sandbox")?;
+    if !result.status.success() {
+        bail!("This host cannot re-enter the inherited clone sandbox (macOS 15 is unsupported; verified on macOS 26). No source data was copied. Dispose this incomplete clone and use a capable host; isolation is never bypassed.");
     }
     Ok(())
 }

@@ -1,0 +1,1 @@
+CI proved macOS 15 rejects inherited sandbox re-entry. Retain strict enforcement: probe capability before source reads, prove early refusal on 15, and run the complete workflow on 26. No environment-based bypass or unsandboxed fallback.

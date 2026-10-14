@@ -13,7 +13,10 @@ lf session list --all --history --json
 Supply the source Machine directory explicitly (`~/.lf` for a default installation).
 Omit either provider-home option when that history is unavailable. Empty environment
 variables are not paths: replace the examples with the configured directories.
-The destination must be new and outside all source directories.
+The destination must be new and outside all source directories. This path is
+verified on macOS 26. macOS 15 cannot re-enter the inherited sandbox and is
+unsupported. Creation probes this capability before opening source data and
+reports unavailable instead of creating a seemingly usable snapshot.
 
 `create` backs up SQLite under the macOS sandbox, applies this build's pending
 canonical migrations and drafts to the destination, removes credential tokens and

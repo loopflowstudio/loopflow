@@ -403,3 +403,35 @@ fn populated_clone_retains_navigation_and_task_primary_without_source_authority(
     assert_eq!(fs::read(source.join("loopflow.db")).unwrap(), before);
     assert_eq!(fs::read(source.join("loopflow.db-wal")).unwrap(), wal);
 }
+
+#[test]
+fn clone_creation_refuses_an_incompatible_parent_sandbox_before_copying_source() {
+    let parent = tempfile::tempdir().unwrap();
+    let parent = parent.path().canonicalize().unwrap();
+    let source = parent.join("source");
+    let clone = parent.join("clone");
+    fs::create_dir(&source).unwrap();
+    let sentinel = b"source database must not be opened";
+    fs::write(source.join("loopflow.db"), sentinel).unwrap();
+    // macOS cannot tighten a parent profile that grants a no-sandbox exec.
+    // This reproduces an incompatible host without weakening the clone policy.
+    let output = Command::new("/usr/bin/sandbox-exec")
+        .args(["-p", r#"(version 1)(allow default)(allow process-exec (literal "/bin/ps") (with no-sandbox))"#])
+        .arg(env!("CARGO_BIN_EXE_lf"))
+        .env_clear().env("LF_HOME", &source)
+        .current_dir(&parent)
+        .args(["clone", "create", clone.to_str().unwrap(), "--source", source.to_str().unwrap()])
+        .stdin(Stdio::null()).output().unwrap();
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("cannot re-enter"),
+        "{output:?}"
+    );
+    assert_eq!(fs::read(source.join("loopflow.db")).unwrap(), sentinel);
+    assert!(!clone.join("loopflow.db").exists());
+    let manifest: Value =
+        serde_json::from_slice(&fs::read(clone.join("clone.json")).unwrap()).unwrap();
+    assert_eq!(manifest["ready"], false);
+    success(cli(&parent, &["clone", "dispose", clone.to_str().unwrap()]));
+    assert!(!clone.exists());
+}

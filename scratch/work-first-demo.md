@@ -16,16 +16,10 @@ Headless checks prove neither native speed nor continuation.
 
 ## Earlier cleanup and opening evidence
 
-Exact LOO-376 completion, retained unresolved execution, 126-row abandoned-state
-repair/conditional rollback, failed clone-provider opening and Started-membership
-cutover: `07626b7909dfbef40c97c008b459594416de7d6a:scratch/work-first-demo.md`, **October 11 native navigation and cleanup rehearsal** through **Correct repository and Started membership**.
-Those were bounded repairs, not further retirement authority. Preserve all other
-history, active clients and drafts; never restore a whole database over live work.
-
-## Earlier live-reader diagnosis
-
-October 12's failed loading, installed-CLI mismatch, membership fixes and evidence
-limits remain at `61f7090d660:scratch/work-first-demo.md`, **Live-reader diagnosis**.
+Cleanup, conditional rollback, failed clone/provider opening, loading and Started
+membership evidence: `deca0fd2f4:scratch/work-first-demo.md`, earlier cleanup and
+live-reader sections. Bounded repairs grant no further retirement authority;
+preserve history, active clients and drafts, never restore a database over live work.
 
 ## Bundled runtime — October 12
 
@@ -230,3 +224,12 @@ reads canceled on both sides; all 372 remaining Tasks match title/description/st
 Check: legacy cancellation regression, build, Clippy, fmt/diff PASS; logs
 `/tmp/loo462-legacy-cancel-{test,build,clippy,live}.log`.
 Earlier audit evidence and 79-test/Clippy passes: `7fde075f90`, this section.
+
+## Row hit targets — October 14
+
+Jack Heart requested the entire Task row background select its conversation, except
+independent PR/Task links. One background Button now spans the padded row, behind
+links and Wave disclosure; no nested controls or competing parent tap gesture.
+Metadata keeps hover help. Existing link checks preserve URLs, drafts and layout.
+Check: TaskRowMetadataTests + WorkNavigationTests PASS (48), `/tmp/loo462-row-hit-tests2.log`; native pixel-boundary review remains.
+The running demo has a real LOO-382 conversation open; do not restart it and lose input.

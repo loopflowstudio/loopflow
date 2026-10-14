@@ -51,7 +51,7 @@ struct TaskRowMetadata: View {
     }
 
     private func destination(_ title: String, url: URL, kind: String) -> some View {
-        // A sibling control to the title button: external links never select Work.
+        // Above the row selection target: external links never select Work.
         Link(destination: url) { Text(verbatim: title) }
             .buttonStyle(WorkLinkStyle())
             .help(url.absoluteString)

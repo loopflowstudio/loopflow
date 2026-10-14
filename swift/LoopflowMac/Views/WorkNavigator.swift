@@ -183,7 +183,7 @@ struct WorkNavigator: View {
         }
     }
 
-    /// Waves head the outline; Tasks keep title navigation separate from metadata links.
+    /// Waves head the outline; row selection stays behind independent metadata links.
     private func outlineRow(_ row: WorkOutlineRow) -> some View {
         let isWave = row.id.work.kind == .wave
         let status = row.task.map { _ in
@@ -210,23 +210,13 @@ struct WorkNavigator: View {
                     .accessibilityHidden(true)
             }
             VStack(alignment: .leading, spacing: 3) {
-                Button {
-                    if row.id.work.kind == .task, let onOpenTask {
-                        onOpenTask(row.id.work)
-                    } else {
-                        model.select(row.id.work)
-                    }
-                } label: {
-                    Text(row.title)
-                        .font(isWave ? Typography.textStrong : Typography.text)
-                        .foregroundStyle(isWave ? palette.textSecondary : palette.text)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
-                }
-                .help(row.title)
-                .accessibilityIdentifier("work-\(row.id.work.kind.rawValue)-\(row.id.work.id)")
+                Text(row.title)
+                    .font(isWave ? Typography.textStrong : Typography.text)
+                    .foregroundStyle(isWave ? palette.textSecondary : palette.text)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .allowsHitTesting(false)
                 if let task = row.task, let status {
                     TaskRowMetadata(task: task, status: status, localMachineId: model.observingMachineId)
                 }
@@ -234,6 +224,23 @@ struct WorkNavigator: View {
         }
         .padding(.horizontal, 6)
         .frame(minHeight: isWave ? 28 : 44)
+        .background {
+            // One row-sized selection target behind independent links/disclosure.
+            // Padding and noninteractive metadata belong to the same target.
+            Button {
+                if row.id.work.kind == .task, let onOpenTask {
+                    onOpenTask(row.id.work)
+                } else {
+                    model.select(row.id.work)
+                }
+            } label: {
+                Color.clear.contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(row.title)
+            .accessibilityLabel(row.title)
+            .accessibilityIdentifier("work-\(row.id.work.kind.rawValue)-\(row.id.work.id)")
+        }
         .workSelection(isSelected(row))
         .accessibilityAddTraits(isSelected(row) ? [.isSelected] : [])
         .padding(.top, isWave ? 8 : 0)

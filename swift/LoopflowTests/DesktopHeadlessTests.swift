@@ -387,8 +387,8 @@ struct DesktopHeadlessTests {
 
     @Test("A Task's Workflow shows its running edge, offers a stopped edge again, and moves by choice or by node")
     func taskWorkflow() async throws {
-        let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self,
-            from: Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")))
+        let planning = try Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json"))
+        let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: planning)
         let wave = try #require(roadmap.waves.first)
         let task = try #require(wave.tasks.items.first { $0.runControl.unavailable == nil })
         var wire = try #require(JSONSerialization.jsonObject(
@@ -397,6 +397,7 @@ struct DesktopHeadlessTests {
         let model = WorkModel(query: RegistryQuery(
             start: { args, _ in await started.add(args) },
             run: { args, _ in
+                if args.prefix(2) == ["wave", "show"] { return String(decoding: planning, as: UTF8.self) }
                 if args.prefix(2) == ["task", "move"] || args.prefix(2) == ["task", "complete"] { await started.add(args) }
                 return "{}"
             }))

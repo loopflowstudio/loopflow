@@ -13,7 +13,7 @@ receipt `2406680a23`, including main `37ca5fca81` and sidebar
 implementation/compression `88d91e53ca`/`0480344945`.
 The earlier feedback describing
 28-point single-line Task rows is superseded by those commits. Sidebar metadata
-is implemented; affected-suite gate and native review remain.
+is implemented; publication checks and repairs are recorded below. Native review remains.
 
 ## Problem and accepted direction
 
@@ -209,16 +209,13 @@ state; partial/error readings do not launch or drop anything; hiding all tabs
 starts nothing. Existing lifecycle/DTO and navigation suites own this proof;
 a filter selecting zero tests is not proof.
 
-Publication check commands (inherited LF_* removed, stdin closed; lifecycle uses
-`TMPDIR=/private/tmp uv run python scripts/test_network.py`):
-- `cargo test -p loopflow --test session_lifecycle_tests` — repo-primary reuse and
-  mixed membership pass with isolated, pinned fake providers.
-- `cargo test -p loopflow --test integration dto_fixtures::` — shared capture decodes in agreement.
-- `scripts/test_desktop.sh --filter 'WorkNavigationTests|WorkNavigationProofTests|WorktreeWorkspaceTests|DTOFixtureTests' -Xswiftc -gnone`
-  — app builds and nonempty headless tests pass, including new entry cases.
-- `cargo test -p loopflow --test integration documented_commands::` — changed examples resolve.
+Publication uses `uv run python scripts/test.py --reuse-passing --base 37ca5fca81`
+with stdin closed. Its Rust runner materializes migrations only in a disposable
+checkout, clears inherited LF_* and isolates network side effects. The consolidated
+integration target includes lifecycle, DTO, Portfolio and documented-command proof;
+Desktop runs headless through its configured source CLI.
 
-Gate owns the above suites once. Prompt fixtures inspect assembled input and
+Gate owns those suites once. Prompt fixtures inspect assembled input and
 assert no mandatory setup or operating pass before the no-work invitation, without requiring a real model.
 Rendered judgment is demo/review, not a headless gate. This Task supplies no native
 provider acceptance, installation, or three-day adoption credit. Chapter KRs remain
@@ -374,7 +371,7 @@ Wave move into `.lf/wave/` and shared Task pause handling; `cf67067b0d` removed
 the duplicate pause method introduced by integration. Its five Rust and 31 Swift
 focused passes are recorded at `cf67067b0d:scratch/get-me-using-lf.md`.
 
-Remaining delivery includes affected-suite gate and publication for review.
+Affected-suite checks and fixture repairs are complete below; publication is for demo review.
 Unlaunched review app:
 `/tmp/loo462-oct13-retention-compress/Loopflow Work Demo.app` (`a590ecb7ee`),
 with matching validation-only helper and verified signature; receipt in
@@ -419,8 +416,8 @@ LOO-462 retains feature/demo; that later inspection is not a screen receipt.
 The real store needs a published release containing the currently unreleased
 `task_paused` migration, installed through `lf install`; reinstalling 0.13.13
 cannot supply it. No live schema change or invented compatibility value. Remaining:
-gate's affected suites, publication, then real-schema
-review, six provider timing cases, hook trust and visual acceptance.
+publication, then real-schema review, six provider timing cases, hook trust and
+visual acceptance.
 
 Review found and fixed stale Workflow mutation buttons and old tests that expected
 Task ancestry to vanish on incomplete planning. No new Workflow/cache authority.
@@ -429,4 +426,6 @@ Workflow header and regressions. The repair is implemented; no additional code
 mismatch was established. The installation prerequisite remains outside this
 publication-only pursuit, and no native acceptance follows from retained fixtures.
 
-Check: `git diff --check` PASS (prose reconciliation); reuse `scripts/test_desktop.sh --filter 'WorkModelStreamTests|WorkNavigationTests|WorkCacheTests' -Xswiftc -gnone` PASS (62 at `a590ecb7ee`) and Rust/schema checks at `83fa49adf4:scratch/get-me-using-lf.md`; gate owns affected suites, demo owns native proof.
+Publication review repaired the missing Portfolio architecture owner and integration registration, narrowed toolbar inspection to avoid traversing an unmounted terminal, and updated two hook fixtures to follow the current manifest/environment handoff. The Workflow fixture now supplies valid planning after an action instead of treating the new stale-data disabling as a failure. Production behavior was unchanged by these repairs. The full Rust run reported one leaked child in the passing, unrelated `checkout_restoration_reserves_stashed_sidecar_directories` test; no native acceptance follows from the automated runs.
+
+Check: `uv run python scripts/test.py --reuse-passing --base 37ca5fca81` plus its bounded Rust/Swift repair commands: Python 455 PASS + sandbox 1 PASS, website 75 PASS; full Rust 2590 PASS/2 stale-fixture failures/18 skipped, then affected Flow/steer 32 PASS; full Swift 518 tests/1 stale-fixture issue, then `scripts/test_desktop.sh --jobs 4 --filter DesktopHeadlessTests -Xswiftc -gnone` 12 PASS (toolbar repair 1 PASS before full rerun); architecture, Rust inventory, fmt, Clippy, source CLI build, Swift boundaries and `git diff --check` PASS. One passing Rust sync test leaked a child; hosted matrix remains with delivery/CI, native schema/input/trust/visual proof with demo. Local receipts: `.lf/tmp/gate/run-51987`, `.lf/tmp/gate/loo462-publication-rust`, `.lf/tmp/gate/loo462-publication-repairs`, `/tmp/loo462-publication-desktop-repair.log`.

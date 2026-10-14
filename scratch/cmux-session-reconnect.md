@@ -145,3 +145,9 @@ follow-up without submitting it; separate text/Enter writes completed the check.
 
 The final transport and checks are recorded in `infra-bugs.md`. Release delivery
 remains; the earlier perceived incident-command hang still has no reproduced cause.
+
+Oct 14 actual cmux verification exposed and repaired normal-disconnect and early
+resume-exit errors; the causal evidence and passing branch-build launch/resume
+checks are recorded in `infra-bugs.md`. The initial one-second readiness estimate
+was invalidated because it matched a previous screen. No installed-release
+recovery or measured UI-readiness latency is claimed.

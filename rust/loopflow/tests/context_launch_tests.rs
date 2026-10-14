@@ -189,6 +189,21 @@ fn codex_terminal_delivers_large_input_and_approvals_then_reconnects_without_rep
             row.get(0)
         })
         .unwrap();
+    // Closing before subscription must not report the already-recorded first
+    // request as unsent. A genuine terminal failure must still fail.
+    for marker in ["close-terminal", "fail-terminal"] {
+        fs::write(home.path().join(marker), "").unwrap();
+        let output = command(&["session", "connect", &session]).output().unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(
+            output.status.success(),
+            marker == "close-terminal",
+            "{stderr}"
+        );
+        assert!(!stderr.contains("before submitting"), "{stderr}");
+        assert_eq!(read("native-turns.json").as_array().unwrap().len(), 1);
+        fs::remove_file(home.path().join(marker)).unwrap();
+    }
     let output = command(&["session", "connect", &session]).output().unwrap();
     assert!(
         output.status.success(),

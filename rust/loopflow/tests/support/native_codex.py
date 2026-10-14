@@ -40,6 +40,8 @@ def _header(stream: socket.socket) -> bytes:
 
 
 def _client(endpoint: str, home: Path, thread: str | None) -> None:
+    if (home / "close-terminal").exists():
+        return
     if (home / "fail-terminal").exists():
         raise SystemExit(24)
     with (home / "launched").open("a") as file:

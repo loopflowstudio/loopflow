@@ -910,8 +910,14 @@ fn run_codex_native(
                     store: store.clone(), session_id: session.clone(), thread_id: thread.clone(),
                     attachment: Some(attachment.clone()), account_id: account.clone(),
                 };
+                // Decide whether the original input is pending before opening
+                // the UI. A resumed terminal can exit before it subscribes.
+                let empty = if thread.is_some() {
+                    tokio::time::timeout(std::time::Duration::from_secs(20), connection.recover_history(&endpoint))
+                        .await.context("Codex native history recovery timed out")??
+                } else { true };
                 let initial = std::sync::Arc::new(tokio::sync::Mutex::new(crate::harness::codex_connection::NativeInput {
-                    params: Some(params), text: (!launch.task_prompt.is_empty()).then(|| launch.task_prompt.clone()),
+                    params: Some(params), text: (empty && !launch.task_prompt.is_empty()).then(|| launch.task_prompt.clone()),
                 }));
                 let directory = tempfile::Builder::new().prefix("lf-connect-").tempdir_in("/tmp")?;
                 let relay = directory.path().join("client.sock");

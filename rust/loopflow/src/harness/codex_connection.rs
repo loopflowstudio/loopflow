@@ -12,7 +12,11 @@ use anyhow::{anyhow, Result};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use tokio::net::UnixStream;
-use tokio_tungstenite::{accept_async, client_async, tungstenite::Message, WebSocketStream};
+use tokio_tungstenite::{
+    accept_async, client_async,
+    tungstenite::{error::ProtocolError, Error, Message},
+    WebSocketStream,
+};
 
 use crate::process::SessionAttachment;
 use crate::store::sqlite::SqliteStore;
@@ -221,7 +225,11 @@ impl CodexConnection {
             tokio::select! {
                 incoming = client.next() => {
                     let Some(incoming) = incoming else { break };
-                    let Message::Text(text) = incoming? else { continue };
+                    let text = match client_result(incoming)? {
+                        Some(Message::Text(text)) => text,
+                        None | Some(Message::Close(_)) => break,
+                        _ => continue,
+                    };
                     let mut rpc: Value = serde_json::from_str(&text)?;
                     let method = rpc.get("method").and_then(Value::as_str).unwrap_or_default();
                     let target = rpc.pointer("/params/threadId").and_then(Value::as_str);
@@ -318,7 +326,7 @@ impl CodexConnection {
                                 }
                                 continue;
                             }
-                            client.send(Message::Text(text)).await?;
+                            if client_result(client.send(Message::Text(text)).await)?.is_none() { break; }
                             if resumed {
                                 resume_request = None;
                                 if let Some(initial) = &initial {
@@ -340,7 +348,9 @@ impl CodexConnection {
                                 }
                             }
                         }
-                        message => client.send(message).await?,
+                        message => {
+                            if client_result(client.send(message).await)?.is_none() { break; }
+                        }
                     }
                 }
             }
@@ -374,6 +384,30 @@ impl CodexConnection {
         })
         .await
         .map_err(|error| anyhow!("Native dispatch task failed: {error}"))
+    }
+}
+
+// A terminal may close without completing the WebSocket handshake. This applies
+// only to its side of the relay: provider disconnects still propagate as failures.
+fn client_result<T>(result: std::result::Result<T, Error>) -> Result<Option<T>> {
+    match result {
+        Ok(value) => Ok(Some(value)),
+        Err(
+            Error::ConnectionClosed
+            | Error::AlreadyClosed
+            | Error::Protocol(ProtocolError::ResetWithoutClosingHandshake),
+        ) => Ok(None),
+        Err(Error::Io(error))
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::BrokenPipe
+                    | std::io::ErrorKind::ConnectionReset
+                    | std::io::ErrorKind::NotConnected
+            ) =>
+        {
+            Ok(None)
+        }
+        Err(error) => Err(error.into()),
     }
 }
 
@@ -429,4 +463,58 @@ async fn reject(client: &mut WebSocketStream<UnixStream>, rpc: &Value, reason: &
             .await?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CodexConnection;
+    use crate::store::sqlite::SqliteStore;
+    use futures_util::{SinkExt, StreamExt};
+    use tokio::net::{UnixListener, UnixStream};
+    use tokio_tungstenite::{accept_async, client_async, tungstenite::Message};
+
+    #[tokio::test]
+    async fn terminal_exit_with_or_without_close_handshake_ends_the_relay_cleanly() {
+        for handshake in [false, true] {
+            let home = tempfile::tempdir_in("/tmp").unwrap();
+            let endpoint = home.path().join("provider.sock");
+            let listener = UnixListener::bind(&endpoint).unwrap();
+            let provider = tokio::spawn(async move {
+                let (stream, _) = listener.accept().await.unwrap();
+                let mut socket = accept_async(stream).await.unwrap();
+                let input = socket.next().await.unwrap().unwrap();
+                socket.send(input).await.unwrap();
+                let _ = socket.next().await;
+            });
+            let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+            store.test_session("conversation", "input");
+            let connection = CodexConnection {
+                store,
+                session_id: "conversation".into(),
+                thread_id: None,
+                attachment: None,
+                account_id: None,
+            };
+            let (terminal, relay) = UnixStream::pair().unwrap();
+            let relay = tokio::spawn(async move { connection.serve(relay, &endpoint).await });
+            let (mut terminal, _) = client_async("ws://localhost", terminal).await.unwrap();
+            terminal
+                .send(Message::Text(
+                    r#"{"method":"initialize","params":{}}"#.into(),
+                ))
+                .await
+                .unwrap();
+            assert!(terminal.next().await.unwrap().unwrap().is_text());
+            if handshake {
+                terminal.close(None).await.unwrap();
+            }
+            drop(terminal);
+            tokio::time::timeout(std::time::Duration::from_secs(2), relay)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            provider.await.unwrap();
+        }
+    }
 }

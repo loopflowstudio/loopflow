@@ -11,12 +11,8 @@ Preserve its existing stop-and-resume behavior.
 
 ## Remaining improvements
 
-- Show terminal-only loading feedback during preparation and provider startup.
-  Stop its writer before the native terminal draws. Redirected output stays clean.
 - OpenCode: preserve plugin instructions and the exact first request while moving
   the request to HTTP. Preserve native approvals, ownership, retry and history.
-- Claude: probe supported first-message input in a real terminal before replacing
-  argv. Preserve instruction roles, keyboard input and approvals.
 - Verify release readiness and the installed path. No wrapper changes are needed.
 
 Jack reported another 10+ second `lf resume` wait on Oct 14. Its launcher started
@@ -107,7 +103,7 @@ captured request and does not replay a recorded first turn. Earlier dead-provide
 counterexamples remain covered, with and without published native history.
 
 Release delivery is still needed for this transport change and the already merged
-#1542 stale-exit repair. Claude/OpenCode input transport remains unchanged. The
+#1542 stale-exit repair. Claude stdin delivery is recorded below; OpenCode remains pending. The
 original perceived `lf incident -i -c` hang was not reproduced and remains unattributed.
 
 ## Delete — do not maintain
@@ -180,3 +176,31 @@ indicator probe passed. The PTY probe observed stage changes, clearing before
 native output and no later writes; redirected output contained no indicator.
 Review corrected a remaining worktree test that still expected Claude argv input.
 No OpenCode transport edit is included in this checkpoint.
+
+## Actual cmux disconnect regression
+
+The real cmux pane exposed a client-side broken pipe on normal Ctrl-D. The relay
+treated abrupt terminal closure as a provider failure. Client-side close/reset
+now ends the relay normally; provider errors and nonzero terminal exits still
+fail. A real socket regression covers both WebSocket close and abrupt closure.
+
+The first timing probe incorrectly matched text left by the previous terminal,
+then sent Ctrl-D before resume subscribed. Its 0.97-second readiness claim is
+invalid. That exposed another defect: saved initial input remained marked pending
+until the terminal's resume reply, even with existing native turns. Native startup
+now reads history before opening the terminal, using the same recovery reader as
+live attachment. Tests preserve fresh-start retry and prove early resume exit
+does not replay the original input or mask a nonzero terminal failure.
+
+Actual Codex 0.162.1, through the unmodified cmux wrapper in a real cmux pane,
+resumed native thread `01a13ae2-5f99-7943-ae9f-99fe8457a2a6`, returned the newly
+typed `CMUX_VERIFIED_RESUME_3`, and exited successfully on Ctrl-D. A fresh launch
+also returned `CMUX_LAUNCH_OK` and exited successfully, leaving zero live providers.
+Evidence: private Machine and terminal scripts in
+`/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/lf-cmux-launch-hagz2wwe`.
+The original timing record is retained with an explicit invalidation. This is
+branch-build evidence, not installed-release recovery.
+
+Checks: Oct 14 `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings`,
+both Codex context-launch regressions and the relay close regression passed;
+real cmux resume/reply/clean exit passed. Installed release verification remains.

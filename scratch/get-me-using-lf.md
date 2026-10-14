@@ -429,3 +429,14 @@ publication-only pursuit, and no native acceptance follows from retained fixture
 Publication review repaired the missing Portfolio architecture owner and integration registration, narrowed toolbar inspection to avoid traversing an unmounted terminal, and updated two hook fixtures to follow the current manifest/environment handoff. The Workflow fixture now supplies valid planning after an action instead of treating the new stale-data disabling as a failure. Production behavior was unchanged by these repairs. The full Rust run reported one leaked child in the passing, unrelated `checkout_restoration_reserves_stashed_sidecar_directories` test; no native acceptance follows from the automated runs.
 
 Check: `uv run python scripts/test.py --reuse-passing --base 37ca5fca81` plus its bounded Rust/Swift repair commands: Python 455 PASS + sandbox 1 PASS, website 75 PASS; full Rust 2590 PASS/2 stale-fixture failures/18 skipped, then affected Flow/steer 32 PASS; full Swift 518 tests/1 stale-fixture issue, then `scripts/test_desktop.sh --jobs 4 --filter DesktopHeadlessTests -Xswiftc -gnone` 12 PASS (toolbar repair 1 PASS before full rerun); architecture, Rust inventory, fmt, Clippy, source CLI build, Swift boundaries and `git diff --check` PASS. One passing Rust sync test leaked a child; hosted matrix remains with delivery/CI, native schema/input/trust/visual proof with demo. Local receipts: `.lf/tmp/gate/run-51987`, `.lf/tmp/gate/loo462-publication-rust`, `.lf/tmp/gate/loo462-publication-repairs`, `/tmp/loo462-publication-desktop-repair.log`.
+
+## Color and activity redesign — October 13 review direction
+
+Jack Heart requested preserving the palette while assigning consistent roles across
+Desktop: neutral structure and text, selection independent of status, quiet links,
+restrained burgundy emphasis, and evidence-backed blue/amber/red activity. Keep
+Task lifecycle and Workflow separate from program activity. Omit unknown activity;
+a live client alone cannot claim Working. This supersedes the sidebar's current
+“Status unknown”/“Active · inferred” presentation, not its underlying observations.
+The semantic-token cutover and rendered redesign remain unimplemented. The review
+in `pr-review.html` exposes this mismatch rather than treating the request as done.

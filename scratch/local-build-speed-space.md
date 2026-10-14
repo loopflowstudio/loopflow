@@ -1,7 +1,8 @@
 # Local test speed and build-output space
 
 Task lf-8f870b1 · Reconciled October 13, 2026 after implementation, compression
-and main integration (`471f9a4875`), with final measurements at `98face4a66`.
+and main integration (`471f9a4875`), with final measurements at `98face4a66`
+recorded in `c2ccce13c7` and final compression at `ff963fa769`.
 Jack Heart accepted the outcome, practical
 concurrency policy and autonomous delivery. Prepared CLI measurements show a
 29.5% warm median gain; disposable normal recovery removed 100% of measured
@@ -261,9 +262,7 @@ Gate commands, headless, once for the affected final content:
 uv run pytest python/tests/test_materialize_rust_tests.py python/tests/test_resource_envelope.py python/tests/test_gate_bounded.py
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
-uv run python scripts/materialize_rust_tests.py --prepare-cli -- cargo nextest run -p loopflow -E 'test(build_cleanup) | test(local_planning::public_local_task_places_and_runs_without_a_planning_provider) | test(agent_startup_tests::)' --no-tests fail
-swift build --package-path swift --jobs 4
-uv run python scripts/loopflow-dev.py bundle-control-tools --output /tmp/loopflow-build-demo
+uv run python scripts/materialize_rust_tests.py --prepare-cli -- cargo nextest run -p loopflow -E 'test(build_cleanup) | test(worktree_tests::) | test(git::worktrees::tests::) | test(reads_nonterminal_task_ownership) | test(reads_released_task_ownership) | test(local_planning::public_local_task_places_and_runs_without_a_planning_provider) | test(agent_startup_tests::)' --no-tests fail
 ```
 
 Rust commands require cleared inherited LF_* and closed stdin, with test_network.py
@@ -272,13 +271,15 @@ cross CLI → read-only store → cleanup → JSON → Python receipt and prove 
 without disk pressure plus apply idempotence. Affected gate also includes
 `python/tests/test_gate_bounded.py` (changed by this branch), existing materializer
 and resource-envelope tests, worktree/prune preservation, and released ownership.
-App builds remain unchanged controls. Full hosted CI remains required.
+The final Swift/control builds remain applicable: their sources, profiles and
+commands are unchanged since `98face4a66`, so no additional local app build is
+needed. Full hosted CI remains required.
 Compression checks are focused evidence, not a gate pass
 for the integrated tree. Final measurements built and
 exercised the integrated tree but do not replace affected-suite verification.
 
-Final measurements/usage belong in TESTING.md and docs/reviews/storage-footprint.md
-before scratch cleanup. Done when normal local Rust verification demonstrates a
+Final measurements and usage are preserved in TESTING.md and
+docs/reviews/storage-footprint.md. Done when normal local Rust verification demonstrates a
 matched fixture speedup, old completed inactive output is reclaimable through
 preview/apply and normal recovery with preservation proofs, affected/full hosted
 checks pass, and the PR is verified merged and Task completion recorded.
@@ -310,4 +311,4 @@ inspections and generated-tree walk have their own five-second limits. Unknown
 ownership/activity/content retains output. Whole inventory still scales with the
 number of roots; no broad-inventory latency claim follows.
 
-Check: `uv run pytest python/tests/test_resource_envelope.py -q` — 15 passed; materialized/network-isolated `cargo nextest run -p loopflow -E 'test(build_cleanup)' --no-tests fail` — 13 passed (`.lf/tmp/local-build-reclamation/final-compress.log`); fmt, Clippy `--all-targets -- -D warnings`, Ruff, diff/context checks pass; matched measurements retained at `c2ccce13c7`, affected suites deferred to gate and full matrix to hosted CI.
+Check: `git diff --check` and `lf context` — pass; prose-only reconciliation reuses 15 Python and 13 network-isolated cleanup passes plus fmt/Clippy/Ruff at `ff963fa769`, and measurements at `c2ccce13c7`; affected suites remain with gate, full matrix with hosted CI.

@@ -299,7 +299,10 @@ pressure or individual size. Defaults bound each invocation to eight generated r
 and 64 GiB; `--retention-hours`, `--maximum-roots` and `--maximum-bytes` select the
 prune policy. Repeated calls drain an eligible backlog. Python inventories capacity
 and consumes Rust cleanup receipts; an unavailable capable `lf` retains builds and
-reports the missing owner. Inventory timeouts grant no deletion authority.
+reports the missing owner. Each inventory `du` has a five-second deadline;
+failures appear as measurement issues. Total inventory time still scales with the
+number of roots. Inventory timeouts grant no deletion authority; Rust independently
+retains candidates whose ownership, activity or content inspection is unknown.
 
 The lease coordinates Loopflow operations. Concurrent direct Cargo/npm/Swift
 build or clean commands newly racing cleanup in a completed candidate are unsupported.

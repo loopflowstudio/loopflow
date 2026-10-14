@@ -2,9 +2,9 @@
 
 - Jack Heart accepted practical completed-worktree cleanup on October 13. The
   native Cargo lock-replacement race is a documented limitation, not a permission
-  blocker. Implement positive completed ownership, old output, fresh process and
-  execution checks, unknown/busy retention and cooperating leases. A detected
-  Cargo process raises a candidate-selection concern and must retain output.
+  blocker. Cleanup now requires positive completed ownership, old output, fresh
+  process/execution checks and cooperating leases; unknown/busy output is retained.
+  A detected Cargo process raises a candidate-selection concern and retains output.
   Concurrent direct tools ignoring cleanup coordination are unsupported.
 - An exploratory prepared startup run passed with nextest's `LEAK` warning;
   cause is unconfirmed. Preserve its raw log alongside clean runs rather than

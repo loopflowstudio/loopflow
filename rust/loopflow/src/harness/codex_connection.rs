@@ -253,9 +253,13 @@ impl CodexConnection {
                             }
                             let passive = params.is_none();
                             bind_thread = !passive;
-                            // A passive or stale UI can only subscribe. An owned
-                            // startup uses the prepared payload, never argv data.
-                            rpc["params"] = params.unwrap_or_else(|| json!({"threadId":thread}));
+                            // Keep native tools and explicitly selected UI settings;
+                            // prepared instructions and launch configuration win.
+                            // A passive or stale UI can only subscribe.
+                            rpc["params"] = match params {
+                                Some(params) => native_start_params(&rpc["params"], params),
+                                None => json!({"threadId":thread}),
+                            };
                             resume_request = rpc.get("id").cloned();
                             passive
                         }
@@ -385,6 +389,26 @@ impl CodexConnection {
         .await
         .map_err(|error| anyhow!("Native dispatch task failed: {error}"))
     }
+}
+
+fn native_start_params(client: &Value, prepared: Value) -> Value {
+    let mut params = client.as_object().cloned().unwrap_or_default();
+    let mut config = client["config"].as_object().cloned().unwrap_or_default();
+    let mut prepared = prepared
+        .as_object()
+        .expect("prepared thread parameters are an object")
+        .clone();
+    if let Some(overrides) = prepared.remove("config") {
+        config.extend(
+            overrides
+                .as_object()
+                .expect("prepared configuration is an object")
+                .clone(),
+        );
+    }
+    params.extend(prepared);
+    params.insert("config".into(), Value::Object(config));
+    Value::Object(params)
 }
 
 // A terminal may close without completing the WebSocket handshake. This applies

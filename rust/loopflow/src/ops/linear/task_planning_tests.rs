@@ -1565,13 +1565,17 @@ fn assert_native_runner_is_quiet_until_its_turn_ends(agent: &str, auto: bool, ta
         std::env::set_var("PATH", &path);
         let started = home.join("started");
         let stop = home.join("stop");
-        let executable = bin.join(agent);
-        std::fs::write(
-            &executable,
-            include_str!("../../../tests/support/holding_provider.py"),
-        )
-        .unwrap();
-        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+        if agent == "codex" {
+            crate::test_support::install_native_codex(&bin);
+        } else {
+            let executable = bin.join(agent);
+            std::fs::write(
+                &executable,
+                include_str!("../../../tests/support/holding_provider.py"),
+            )
+            .unwrap();
+            std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
         runtime.block_on(async {
             seed_finished_tasks(fixture, repo, &state).await;
             state.lock().await.requests = 0;
@@ -4823,7 +4827,7 @@ fn linear_on_demand_native_hooks_share_freshness_across_processes() {
         let claude = crate::harness::context::claude_args(&delivery).unwrap();
         let settings: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&claude[1]).unwrap()).unwrap();
-        let codex = crate::harness::context::codex_config(&delivery).unwrap();
+        let codex = crate::harness::context::codex_config(&delivery, None).unwrap();
         let hooks = [
             &settings["hooks"]["Stop"][0]["hooks"][0]["command"],
             &codex["hooks"]["Stop"][0]["hooks"][0]["command"],

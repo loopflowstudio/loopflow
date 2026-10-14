@@ -30,17 +30,7 @@ fn command(home: &std::path::Path, args: &[&str]) -> Command {
 
 #[cfg(unix)]
 fn install_codex_fixture(home: &std::path::Path, thread: Option<&str>) {
-    use std::os::unix::fs::PermissionsExt;
-    let executable = home.join("bin/codex");
-    std::fs::write(
-        &executable,
-        format!(
-            "#!/bin/sh\nexec /usr/bin/python3 '{}' \"$@\"\n",
-            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/native_codex.py")
-        ),
-    )
-    .unwrap();
-    std::fs::set_permissions(executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+    crate::support::install_native_codex(&home.join("bin"));
     if let Some(thread) = thread {
         std::fs::write(home.join("native-thread"), thread).unwrap();
         std::fs::write(

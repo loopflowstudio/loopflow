@@ -19,6 +19,24 @@ use time::OffsetDateTime;
 
 pub mod ambient;
 
+#[cfg(unix)]
+#[allow(dead_code)] // Shared native provider fixture compiled into multiple test crates.
+pub fn install_native_codex(bin: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+
+    fs::create_dir_all(bin).unwrap();
+    let provider = bin.join("codex");
+    fs::write(
+        &provider,
+        format!(
+            "#!/bin/sh\nexec /usr/bin/python3 '{}' \"$@\"\n",
+            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/native_codex.py")
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(provider, fs::Permissions::from_mode(0o755)).unwrap();
+}
+
 #[allow(dead_code)] // Shared GitHub fixture compiled into multiple test crates.
 pub fn github_checks_page(head: &str, checks: &[(&str, &str, bool)]) -> String {
     let nodes: Vec<_> = checks

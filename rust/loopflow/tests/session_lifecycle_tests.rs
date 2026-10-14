@@ -211,16 +211,7 @@ const LAUNCH: [&str; 5] = ["-i", "--agent", "opencode", ":", "Review the parser"
 #[test]
 fn personal_task_launch_resume_and_skill_workflow_keep_native_identity() {
     let fixture = Fixture::new(false);
-    let codex = fixture.home.path().join("bin/codex");
-    std::fs::write(
-        &codex,
-        format!(
-            "#!/bin/sh\nexec /usr/bin/python3 '{}' \"$@\"\n",
-            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/native_codex.py")
-        ),
-    )
-    .unwrap();
-    std::fs::set_permissions(&codex, std::fs::Permissions::from_mode(0o755)).unwrap();
+    support::install_native_codex(&fixture.home.path().join("bin"));
     fixture
         .repo
         .create_file(".lf/skills/inspect-parser.md", "Inspect the parser.");

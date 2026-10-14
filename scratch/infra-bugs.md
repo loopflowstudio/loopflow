@@ -1,236 +1,173 @@
 # Reliable provider launches
 
-Jack Heart requested command robustness across terminal integrations rather than
-relying on a cmux-specific patch. The incident evidence is in
-`cmux-session-reconnect.md`. Jack approved Codex implementation on 2026-10-13;
-that change is complete locally, with release delivery remaining. On Oct 14 Jack
-approved OpenCode HTTP prompt delivery, investigation of Claude first-message
-delivery, and visible startup feedback. Claude background/attach reconnect is
-excluded: Jack reported that approach had already been tried unsuccessfully.
-Preserve its existing stop-and-resume behavior.
+Accepted direction: Jack Heart requested commands robust across terminal
+integrations, without a cmux-specific patch. Jack approved Codex implementation
+on 2026-10-13, then Claude first-message investigation, OpenCode HTTP delivery
+and visible startup feedback on 2026-10-14. Claude background/attach reconnect
+is excluded: Jack reported that approach had already failed. Its stop-and-resume
+behavior remains required.
 
-## Remaining improvements
+## Remaining work
 
-- OpenCode: preserve plugin instructions and the exact first request while moving
-  the request to HTTP. Preserve native approvals, ownership, retry and history.
-- Verify release readiness and the installed path. No wrapper changes are needed.
+- Installed-release verification remains. The release
+  must include both this branch's launch changes and stale-provider fix #1542
+  (`def8881d82`). Passing branch builds do not establish installed recovery.
+- OpenCode HTTP delivery is accepted but unimplemented. Its prerequisite remains
+  an actual terminal rendering and answering a permission raised by the HTTP
+  first turn, then completing a typed follow-up. Plugin instructions, exact
+  input, native approvals, ownership, retry and history remain acceptance criteria.
+- The original perceived `lf incident -i -c` hang was not reproduced and remains
+  unattributed. No UI-readiness latency claim is supported.
 
-Jack reported another 10+ second `lf resume` wait on Oct 14. Its launcher started
-at 1791988065 and provider at 1791988066; the installed launch still used 10,862
-bytes of Codex argv. These timestamps bound admission to roughly one second,
-but do not timestamp execution past the wrapper or terminal readiness. The
-protocol fix is not installed. This is consistent with the earlier wrapper
-finding, without establishing the exact cause or duration of this restart.
+Reconciled 2026-10-14 against fetched `origin/main` at `cf754f02cd`: the v0.13.14
+release commit (`de368eda46`) already contains #1542, but not this branch's
+protocol/stdin transport changes. Release source inclusion proves neither
+publication nor installed recovery. Infrastructure recovery and Release
+follow-through memory retain the same distinction.
 
-## Direction supported by the probe
+## Surviving design
 
-Keep provider command lines small: executable, endpoint, cwd, model and short
-flags. Deliver instructions, hooks and first-turn content through the provider's
-structured protocol or a supported file input. Preserve the content and its
-instruction level, native history, user configuration and account selection.
+Codex native and headless launches share `harness/codex.rs` app-server startup,
+account routing, lifeline and attachment fencing. Native argv contains only short
+options and an endpoint/native ID. Instructions, hooks, roots and exact input
+travel through JSON-RPC. Do not replace base instructions, impersonate an account,
+overwrite user profiles, or encode whitespace for a wrapper parser.
 
-The installed Codex 0.162.1 accepted 1,100,000 instruction bytes in
-`thread/start.developerInstructions` through the **unmodified** installed cmux
-wrapper. The command line was 94 bytes. Initialization took 0.061 seconds and
-the thread response arrived at 0.070 seconds. The probe used a temporary HOME
-and CODEX_HOME, a no-op cmux executable and no account credentials. It created
-an ephemeral thread and never sent `turn/start`. This proves startup transport,
-not a model response, hook delivery or native terminal recovery.
+The bootstrap connection configures the server and closes before terminal
+attachment. The terminal creates/resumes the thread and owns approvals; a shared
+pending input submits the captured first request after subscription. Read native
+history before opening the terminal: an early resume exit must neither replay the
+original request nor report an already-recorded request as unsent. Empty threads
+cannot be resumed before their first turn materializes native history. Passive
+resubscriptions acquire no write authority. Stale input receives an RPC rejection
+while display continues.
 
-An initial probe omitted creation of CODEX_HOME and exited before initialization;
-the corrected probe created that directory. Its cleanup also checks child exit
-before signalling. No conclusion about the first failure's exact cause was
-established before the temporary diagnostics disappeared.
+Remote Codex rejects `--no-daemon` and `--add-dir`. Workspace roots travel in
+provider configuration, preserving configured roots. Client close/reset ends the
+relay normally; provider failures and nonzero terminal exits still fail. Failed
+startup retains the original captured input, with one owner for provider shutdown
+and settlement. The foreground readiness timeout explicitly kills and reaps its
+launcher; missing exit evidence never means fabricated success.
+Provider and relay sockets use the caller's temporary root. Gate reproduced
+native Codex failing inside an isolated clone because `/tmp/lf-codex-*` was
+outside its sandbox; honoring `TMPDIR` preserves that sandbox without widening it.
 
-## Implementation boundary
+Claude supplies initial input through an anonymous temporary stdin file, avoiding
+wrapper parsing and pipe-buffer blocking; the native client reopens the controlling
+terminal for keyboard input. System-prompt files and stop/resume are unchanged.
+OpenCode retains argv, its argument cap and native stop/resume.
 
-Codex already has the relevant components:
-
-- `harness/codex.rs`: launches app-server with short arguments and supplies
-  developer instructions, hooks, tool environment and input through JSON-RPC.
-- `ops/human_session.rs::connect_live_codex`: attaches the native terminal to a
-  running thread through an attachment-fenced relay.
-- `lf/commands/util.rs` and `agent/mod.rs`: still launch native Codex directly
-  with large arguments. Replace that duplicate transport with the existing
-  provider startup and native connection path.
-
-Do not make a third launcher, change CODEX_HOME to impersonate another account,
-overwrite user profiles, replace Codex's base instructions, or encode whitespace
-to accommodate one wrapper parser. The short-message request-file alternative
-was raised with Jack but has no recorded answer; it is not required for the
-Codex protocol approach.
-
-The native terminal creates or resumes the provider thread on its own connection.
-The relay supplies the prepared configuration and submits the saved first input
-there, after subscription. Approval events remain on the native connection.
-A reconnect with recorded turns never resubmits the original input. Preserve managed-account routing and native CLI options.
-Do not silently turn an interactive launch into an unattended headless turn.
-
-Claude already supports an additive system-prompt file; OpenCode's context
-plugin already uses a file. Their first-turn arguments still need a supported
-transport decision. Do not claim Codex's protocol solves other providers.
-
-## Failed starts must remain reconnectable
-
-The foreground opener currently drops its child after a 30-second readiness
-timeout. That can kill the recorder before its provider exits. Define one owner
-for startup cancellation, provider termination/reaping and settlement. Report
-the failed stage without printing prompts or environment values. Preserve the
-input and native history so a retry uses the same conversation.
-
-The merged dead-native-provider observation fix (#1542) is necessary for
-unexpected exits and needs release delivery. It does not prevent a slow wrapper
-or establish native history. Never turn missing exit evidence into fabricated
-success, and never start another provider while the previous one is alive.
-
-## Verification and remaining release work
-
-The actual installed Codex 0.162.1 launched through the unmodified cmux wrapper
-in an isolated Loopflow Machine and a `forkpty` terminal. It answered the initial
-request in 5.96 seconds, then resumed the same conversation and answered a typed
-follow-up in 8.57 seconds. Both exited successfully. The Machine retained one
-Session, two started/completed turns, two outputs and no live provider records.
-Context hooks ran successfully. The fake cmux endpoint deliberately disabled
-pane/title side effects; opening an actual cmux pane was not part of this probe.
-
-Focused CLI fixtures reject any provider argument over 1 KiB while preserving a
-440,000-byte skill body with Unicode, quotes, shell syntax and newlines, exact
-additive developer instructions, hook configuration and native history. The
-terminal declines an initial approval; the bootstrap connection never answers it.
-Failure checks cover early provider exit, a stalled wrapper, a terminal that
-never connects, and exit after the first turn starts. Reconnect preserves the
-captured request and does not replay a recorded first turn. Earlier dead-provider
-counterexamples remain covered, with and without published native history.
-
-Release delivery is still needed for this transport change and the already merged
-#1542 stale-exit repair. Claude stdin delivery is recorded below; OpenCode remains pending. The
-original perceived `lf incident -i -c` hang was not reproduced and remains unattributed.
+Startup feedback is terminal-only, shows stages and elapsed time, clears on
+failure and joins its writer before native rendering. Redirected output stays clean.
 
 ## Delete — do not maintain
 
-- Claude initial-message argv and its oversized-argument rejection fixture:
-  replace with exact stdin delivery and a large-message CLI regression.
-- `agent::build_codex_command` and its argv-only tests: use the shared native
-  protocol launch, retaining permission and model tests on protocol parameters.
-- `harness::context::codex_args`, its inline TOML encoder and the native
-  SessionStart identity hook: protocol replies now establish the native identity.
-- Native Codex prompt and developer-instruction argv in launch and resume.
-  Preserve exact captured input and additive developer instructions.
+Removed: `build_codex_command`, `context::codex_args`, inline TOML encoding,
+SessionStart identity-hook injection, Claude prompt argv, and their exclusive
+argv tests. Protocol replies establish Codex native identity; Claude retains its
+supplied native ID and OpenCode observes its startup log.
 
-## Implementation decisions and review
+This reduction also removes unused `agent::codex_permission_args` and its two
+helpers, `Commands::ProviderSession`, `observe_provider_session`, and the obsolete
+hook-only `terminal_launch_tests.rs`. Permission assertions now exercise protocol
+parameters; failed-start/history preservation lives in the existing startup test.
+Linear Flow fixtures and native launch/resume tests share `native_codex.py` through
+one installer. No pending deletion target remains.
 
-Codex cannot resume a new thread before its first user message materializes
-native history. An actual provider probe contradicted the first implementation's
-bootstrap-then-resume approach. Bootstrap now only starts and configures the
-server; the native client creates the thread. The relay binds its returned ID,
-then publishes the native-history receipt when the first turn starts. A shared
-pending input prevents duplicate submission by connections in the same launch.
+The async Codex worker is separate from the invoking-thread terminal driver.
+Native skill expansion happens once at their shared launch boundary. The worker
+reuses the admitted attachment rather than reopening the store to validate it twice.
+Review found the retired callback had only test callers and an old failure test
+still required its removed diagnostic; both consumers moved with the deletion.
 
-The installed CLI also rejects `--no-daemon` and `--add-dir` with `--remote`.
-Remote argv now carries the endpoint and optional native ID. Workspace roots
-travel through server configuration, retaining configured roots. The provider
-argv measured 125 bytes in the real probe. Claude/OpenCode retain their existing
-argument cap. Native and headless callers reuse the existing server owner,
-account routing, lifeline and attachment fencing.
+Updating the native PTY probe exposed a real startup regression: replacing the
+client's entire thread request discarded native tools, UI settings (including the
+wrapper's explicit `bypass_hook_trust`) and interactive approval policy. Startup
+now overlays the prepared instructions/configuration onto the native request;
+passive subscriptions still discard overrides. The shared headless permission
+default is omitted for ordinary native launches. One provider config read retains
+writable roots and the original session-flags hook declarations. Host hooks keep
+their indices and trust state; only appended Loopflow hooks receive new hashes.
+The provider trace also exposed duplicate shell-policy `-c` flags after
+`app-server`: Codex's parser dropped the wrapper's earlier global overrides.
+Those flags are removed; the same shell policy already travels with each thread.
+The probe now uses supported flags and permits native UI onboarding preferences
+while asserting every supplied user setting survives unchanged. Exact hook trust
+also requires omitting absent matchers from the normalized hash; hashing null
+marks matcherless hooks modified. The actual provider's `hooks/list` confirmed
+that normalization. The probe trusts only its two declared hooks by hash.
+A blanket hook-bypass flag alone still prompted for host-hook review on reconnect
+in the isolated Codex 0.162.1 probe; that variant is not verified as recovered.
 
-Review found that passive resume replies must never re-record an attachment:
-a stale terminal must continue displaying while its writes are refused. Only
-owned startup binds the returned native ID. The ownership regression also exposed
-an existing history-origin lookup that closed the socket on stale input before
-RPC rejection. It now rejects that input while preserving display. Failed starts retain the captured
-request, rather than substituting the Session's optional summary label. The
-foreground readiness timeout terminates and reaps its launcher explicitly.
+## Acceptance evidence and limits
 
-The scoped native worker keeps terminal I/O on the invoking thread. Startup is
-bounded; failures report the provider or terminal stage. No schema changes,
-wrapper modifications, account impersonation, or new durable delivery flags.
+Full dated investigation and previous checks are preserved at
+`5cbabcb81a:scratch/infra-bugs.md` and
+`5cbabcb81a:scratch/cmux-session-reconnect.md`.
 
-Checks: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, focused Codex/context-launch/native-lifecycle/stale-exit tests, actual-provider retained-client ownership test and unmodified-wrapper native launch/reconnect passed; release installation and a real cmux pane remain delivery/demo work.
+- Codex 0.162.1 through the unmodified cmux wrapper accepted 1,100,000 instruction
+  bytes over app-server with 94-byte argv (initialization 0.061s, thread 0.070s),
+  without credentials or a model turn. This established transport only.
+- A real PTY/account probe then answered the initial request in 5.96s and a typed
+  reconnect follow-up in 8.57s, both exit 0. It retained one Session, two completed
+  turns/outputs, successful hooks and zero live providers; argv was 125 bytes.
+  Pane/title effects were disabled. Evidence: system-temporary
+  `lf-native-transport-smoke-4cjkwi1d`.
+- Actual cmux launch and resume subsequently passed: native thread
+  `01a13ae2-5f99-7943-ae9f-99fe8457a2a6` returned newly typed
+  `CMUX_VERIFIED_RESUME_3`; fresh launch returned `CMUX_LAUNCH_OK`; Ctrl-D exited
+  successfully with zero live providers. Evidence: system-temporary
+  `lf-cmux-launch-hagz2wwe`. The earlier 0.97-second readiness estimate is invalid:
+  it matched old screen text and exited before subscription. These are branch-build
+  results, not installed-release recovery.
+- Claude 2.1.299 consumed exact 440,000-byte stdin and a typed follow-up in a real
+  terminal with an isolated home and local stand-in API. Evidence:
+  `/tmp/lf-claude-input-probe.py`, system-temporary `lf-claude-input-skgpq3t8`.
+  Canonicalizing the trust directory fixed a symlink fixture error; title
+  generation was distinguished from the initial conversation request.
+- OpenCode 1.18.33 stdin accepted initial input but not typed follow-up. HTTP
+  server/attach later preserved both, yet the actual permission probe left a
+  pending `bash` request in `/permission` while the UI showed it running without
+  an approval dialog. Fixture approval success was misleading. No permission
+  was approved by the harness. Early session selection also failed to navigate;
+  health is not UI subscription. No sleeps or speculative API changes resolve it.
+  The exploratory implementation was removed. Retained diff:
+  `/tmp/lf-opencode-native-approval-investigation.patch`; scripts:
+  `/tmp/lf-opencode-{attach,lf,permission}-probe.py`; permission logs:
+  system-temporary `lf-opencode-permission-{ha20prq8,ij_23gsa,re_agvj5}`.
+  The attach UI/API mismatch is suspected; a guessed v2 query's HTTP 400 proves
+  nothing about that explanation.
 
-## Oct 14 transport probes
+Gate review found that the native probe's reconnect assertion could pass by
+displaying the previous answer. It now types a follow-up, requires a distinct
+answer, checks exactly two retained completed turns and verifies zero live
+providers, retaining host-hook trust and supplied user settings. Both plain and
+wrapped Codex 0.162.1 passed after the socket-directory repair; evidence:
+system-temporary `lf-codex-terminal-epwobl8d`. History, usage and doctor also read
+the earlier disposable `lf-codex-terminal-hmgzvjju` store successfully; doctor's
+binary-freshness comparison remained unavailable in the temporary source checkout.
+The README now describes protocol/stdin delivery instead of a shared
+instructions-file path.
 
-Claude 2.1.299 consumed the exact 440,000-byte request from stdin and accepted a
-typed follow-up through the controlling terminal. The native terminal used an
-isolated home and a local stand-in Anthropic API, with no external model request.
-Temporary evidence: `/tmp/lf-claude-input-probe.py`; output and captured requests
-under `lf-claude-input-skgpq3t8` in the system temporary directory. The first
-probe's trust configuration used a symlinked path; using the canonical directory
-resolved that fixture error. Title generation is a separate provider request;
-the successful check distinguishes it from the conversation's initial message.
+The full gate found Claude Flow and bare-conversation fixtures still reading
+first-turn argv. They now read stdin; the Flow fixture reopens a controlling PTY
+for typed input, preserving wait/interrupt checks. The foreground quietness and
+isolated-clone fixtures now use the shared native Codex protocol stand-in instead
+of a non-protocol holding script or the retired identity callback.
+The PTY fixture drains terminal echo and closes the command builder's duplicate
+slave descriptor so macOS can finish session-leader teardown. Its four input and
+interruption scenarios pass in 8.6s. All four clone-isolation tests pass with the
+caller-selected temporary root.
 
-Claude now uses an anonymous temporary file as stdin, avoiding both wrapper
-parsing and pipe-buffer blocking. Its system instructions, native arguments,
-keyboard handling and stop-and-resume path remain intact. The new indicator is
-terminal-only, clears on failure, and joins its writer before provider rendering.
+The broad Rust gate ran 2,590 tests: 2,587 passed, three stale fixtures failed,
+and 22 tests were skipped. The repaired and affected selection passed all 167
+tests after resolving the PTY teardown. No leaked-output warning recurred.
 
-OpenCode 1.18.33 also reads stdin, but the real terminal probe accepted the exact
-message without accepting typed follow-up. Do not switch OpenCode to stdin on
-that evidence. Its native HTTP endpoint accepted early session selection without
-the UI navigating; a later selection did navigate. Server health alone does not
-prove native UI subscription. The server-and-attach approach remains unresolved;
-do not replace it with timed sleeps or report these probes as recovery.
+`scripts/test.py --reuse-passing` stopped before product checks when its resource
+preflight exceeded 60s. Separate inventory isolated a five-second uv-cache
+measurement timeout; direct `du` completed, and free disk stayed above 57 GiB.
+The planned checks ran through the runner's bounded `_run_command` entrypoint,
+with four workers, network isolation and disk monitoring. There is no reusable
+aggregate runner pass. Logs: `/tmp/infra-bugs-{checks,repairs,finish}.log`.
 
-Checks: Oct 14 `cargo clippy --all-targets -- -D warnings`, `cargo fmt --all`,
-17 native launch unit tests, 10 context-launch integration tests and a real PTY
-indicator probe passed. The PTY probe observed stage changes, clearing before
-native output and no later writes; redirected output contained no indicator.
-Review corrected a remaining worktree test that still expected Claude argv input.
-No OpenCode transport edit is included in this checkpoint.
-
-The subsequent actual OpenCode server-and-attach probe preserved the exact
-440,000-byte initial request and accepted a typed follow-up, using a local
-stand-in model API. A Loopflow implementation also passed exact-input, native
-permission-rejection, cleanup and retry fixtures, plus actual-terminal input.
-However, its actual OpenCode 1.18.33 permission probe failed: `/permission`
-retained a pending `bash` request while the attached terminal showed the tool
-running and never displayed its approval dialog. No permission was approved by
-the harness. This contradicts the fixture's apparent approval success.
-
-The exploratory OpenCode implementation was removed; existing argv launch,
-argument cap and native stop/resume remain. No OpenCode transport recovery is
-claimed. The next required check is a real terminal that renders and answers a
-permission raised by the HTTP-submitted first turn, followed by a completed typed
-reply. The attach UI/API mismatch is suspected, not established; a guessed v2
-permission query returned HTTP 400 and proves nothing about that explanation.
-
-Evidence: `/tmp/lf-opencode-{attach,lf,permission}-probe.py`; terminal and pending
-permission logs under system-temporary `lf-opencode-permission-ha20prq8`,
-`lf-opencode-permission-ij_23gsa`, and `lf-opencode-permission-re_agvj5`.
-The exploratory diff is retained at
-`/tmp/lf-opencode-native-approval-investigation.patch`; it includes fixture edits
-and is evidence, not an implementation to apply without review.
-
-## Actual cmux disconnect regression
-
-The real cmux pane exposed a client-side broken pipe on normal Ctrl-D. The relay
-treated abrupt terminal closure as a provider failure. Client-side close/reset
-now ends the relay normally; provider errors and nonzero terminal exits still
-fail. A real socket regression covers both WebSocket close and abrupt closure.
-
-The first timing probe incorrectly matched text left by the previous terminal,
-then sent Ctrl-D before resume subscribed. Its 0.97-second readiness claim is
-invalid. That exposed another defect: saved initial input remained marked pending
-until the terminal's resume reply, even with existing native turns. Native startup
-now reads history before opening the terminal, using the same recovery reader as
-live attachment. Tests preserve fresh-start retry and prove early resume exit
-does not replay the original input or mask a nonzero terminal failure.
-
-Actual Codex 0.162.1, through the unmodified cmux wrapper in a real cmux pane,
-resumed native thread `01a13ae2-5f99-7943-ae9f-99fe8457a2a6`, returned the newly
-typed `CMUX_VERIFIED_RESUME_3`, and exited successfully on Ctrl-D. A fresh launch
-also returned `CMUX_LAUNCH_OK` and exited successfully, leaving zero live providers.
-Evidence: private Machine and terminal scripts in
-`/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/lf-cmux-launch-hagz2wwe`.
-The original timing record is retained with an explicit invalidation. This is
-branch-build evidence, not installed-release recovery.
-
-Checks: Oct 14 `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings`,
-21 Session CLI tests, both Codex context-launch regressions and the relay close
-regression passed; real cmux launch/resume/reply/clean exit passed. Installed
-release verification remains. OpenCode's actual permission check failed as above.
-
-Review also found resume-admission and terminal-title fixtures still assuming
-Codex launched directly and Claude consumed keyboard input from stdin. They now
-use the existing Codex protocol fixture and a separate release signal for the
-title check. Native-ID admission, worktree recency, failed-start recovery,
-metadata inspection during active work and title behavior remain covered.
+Checks (2026-10-14): `git diff --check`, `cargo fmt --all -- --check`, `cargo clippy --all-targets --jobs 4 -- -D warnings`, `uv run python scripts/check_architecture.py`, `uv run python scripts/check_rust_test_inventory.py`, and `uv run ruff check tests/e2e/codex_terminal.py rust/loopflow/tests/support/native_codex.py` — passed; materialized `cargo nextest run --all` — broad results and all repaired/affected cases as above, exact filtered commands in the gate logs; materialized `cargo test -p loopflow --test integration --jobs 4 data_clones:: -- --test-threads 4` — 4 passed; `uv run pytest python/tests/test_loopflow_skill_alignment.py` under network isolation — 4 passed; `cd website && uv run python dev.py test` — 75 passed; `tests/e2e/codex_terminal.py` via `scripts/test_network.py` with `target/materialized-tests/debug/lf` and native Codex — plain/wrapped typed reconnect passed; disposable `lf history list --json`, `lf usage --json`, `lf doctor --json` — passed with the documented freshness warning. Installed-release verification remains delivery-owned; OpenCode still needs actual-terminal permission acceptance.

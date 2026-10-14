@@ -41,7 +41,6 @@ mod task_diff_tests;
 mod task_github_cache_tests;
 mod task_handoff_tests;
 mod task_initialization_tests;
-mod terminal_launch_tests;
 mod token_tests;
 mod user_cli_tests;
 mod worktree_tests;

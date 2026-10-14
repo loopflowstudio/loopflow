@@ -286,16 +286,21 @@ fn clone_runs_a_new_disposable_conversation_without_account_selection() {
     let lf = clone.join("bin/lf");
     for name in ["claude", "codex"] {
         let provider = clone.join("bin").join(name);
+        let native = if name == "codex" {
+            crate::support::install_native_codex(&clone.join("bin"));
+            fs::read_to_string(&provider).unwrap()
+        } else {
+            String::new()
+        };
         fs::write(
             &provider,
-            r#"#!/bin/sh
+            format!(
+                r#"#!/bin/sh
 set -e
-if [ "${0##*/}" = codex ]; then
-    printf '%s' '{"session_id":"offline-codex-session"}' | "$LF_BIN" __provider-session
-fi
 printf 'offline provider reached\n'
 printf '%s\n' "$LF_HOME" > "$LF_HOME/provider-home"
-"#,
+{native}"#
+            ),
         )
         .unwrap();
         fs::set_permissions(&provider, fs::Permissions::from_mode(0o755)).unwrap();

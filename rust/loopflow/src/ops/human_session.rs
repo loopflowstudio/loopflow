@@ -795,7 +795,7 @@ async fn connect_live_codex(
         )
         .context("Codex AgentProcess is stopping after its attached lf exited")?;
         store.sqlite.make_session_interactive(&session.id, &attachment)?;
-        let directory = tempfile::Builder::new().prefix("lf-connect-").tempdir_in("/tmp")?;
+        let directory = tempfile::tempdir()?;
         let remote = directory.path().join("client.sock");
         let listener = tokio::net::UnixListener::bind(&remote)?;
         let connection = crate::harness::codex_connection::CodexConnection {
@@ -1739,7 +1739,7 @@ mod tests {
                     if transfer == "none" {
                         assert!(result?, "composed connection did not launch");
                         let args = std::fs::read_to_string(&args_path)?;
-                        assert!(args.contains("--remote\nunix:///tmp/lf-connect-"), "{args}");
+                        assert!(args.contains("--remote\nunix://"), "{args}");
                         assert!(args.contains("client.sock") && args.contains("saved-thread"));
                         assert!(!args.contains(endpoint.to_str().unwrap()));
                         assert!(attachment.lf_process_id.is_none());

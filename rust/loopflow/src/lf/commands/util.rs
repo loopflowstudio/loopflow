@@ -261,7 +261,7 @@ pub(crate) fn open_saved_session_with_env(
         account_id = account_id.or(request.account_id.clone());
         command.context = request.conversation_context.clone();
         if harness == "codex" {
-            let mut config = crate::agent::AgentConfig {
+            let config = crate::agent::AgentConfig {
                 agent: Some(
                     selected_model
                         .as_ref()
@@ -278,10 +278,6 @@ pub(crate) fn open_saved_session_with_env(
                 skip_permissions: request.skip_permissions,
                 ..Default::default()
             };
-            if let Some(skill) = &config.skill_invocation {
-                config.task_prompt = skill.terminal_input("codex", &config)?.1;
-                config.skill_invocation = None;
-            }
             command.codex = Some(config);
         } else if harness == "claude" && !request.system_prompt.is_empty() {
             let path = crate::prompt::write_prompt_log(
@@ -646,6 +642,7 @@ fn run_native_session(
             exact_account_id,
             launch_lock,
             progress,
+            attachment,
         );
     }
     let provider = match command.program.as_str() {
@@ -806,11 +803,6 @@ pub(crate) fn run_native_codex_agent(
         .clone()
         .map(Ok)
         .unwrap_or_else(std::env::current_dir)?;
-    let mut launch = launch.clone();
-    if let Some(skill) = &launch.skill_invocation {
-        launch.task_prompt = skill.terminal_input("codex", &launch)?.1;
-        launch.skill_invocation = None;
-    }
     let command = SessionCommand {
         codex: Some(launch.clone()),
         input: None,
@@ -860,24 +852,22 @@ fn run_codex_native(
     exact_account_id: Option<&crate::store::ProviderAccountId>,
     launch_lock: Option<File>,
     progress: &mut crate::startup::Startup,
+    owner: crate::harness::agent_process::AttachmentOwner,
 ) -> Result<SessionCommandOutcome> {
-    use crate::harness::{
-        codex::CodexHarness, codex_connection::CodexConnection, ApprovalPolicy, Harness,
-    };
-
     progress.stage("Starting Codex");
-    let owner = native_provider_attachment(command, environment)?;
     let mut launch = command
         .codex
-        .clone()
-        .unwrap_or_else(|| crate::agent::AgentConfig {
-            agent: Some("codex".into()),
-            cwd: Some(command.cwd.clone()),
-            ..Default::default()
-        });
+        .as_ref()
+        .expect("native Codex command carries its launch configuration")
+        .clone();
     launch.env = environment.clone();
     launch.session_attachment = command.attachment.clone();
     launch.conversation_context = command.context.clone();
+    launch.resume_token = agent_session.cloned();
+    launch.provider_account_id = exact_account_id.cloned();
+    if let Some(skill) = launch.skill_invocation.take() {
+        launch.task_prompt = skill.terminal_input("codex", &launch)?.1;
+    }
     let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
     let (closed_tx, closed_rx) = tokio::sync::oneshot::channel();
 
@@ -885,69 +875,10 @@ fn run_codex_native(
     // The protocol worker owns only startup and the fenced native relay.
     std::thread::scope(|scope| {
         let worker = scope.spawn(move || -> Result<()> {
-            let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-            runtime.block_on(async {
-                let (events, _events) = tokio::sync::mpsc::unbounded_channel();
-                let mut harness = CodexHarness::new(events, ApprovalPolicy::NativeClient);
-                harness.set_agent_session(agent_session.cloned());
-                harness.set_provider_account_id(exact_account_id.cloned());
-                // No turn is sent on this bootstrap connection. Close it before
-                // the UI connects so it cannot answer the UI's approvals.
-                match tokio::time::timeout(std::time::Duration::from_secs(20), harness.start(&launch)).await {
-                    Ok(result) => result?,
-                    Err(_) => {
-                        harness.stop().await?;
-                        bail!("Codex conversation startup timed out after 20s; the owned provider was stopped");
-                    }
-                }
-                let account = harness.provider_account_id();
-                let (endpoint, params) = harness.native_start()
-                    .ok_or_else(|| anyhow!("Codex startup ended without its native launch configuration"))?;
-                let thread = params["threadId"].as_str().map(AgentSessionId::from);
-                harness.stop().await?;
-                let (store, session, attachment) = &owner;
-                let connection = CodexConnection {
-                    store: store.clone(), session_id: session.clone(), thread_id: thread.clone(),
-                    attachment: Some(attachment.clone()), account_id: account.clone(),
-                };
-                // Decide whether the original input is pending before opening
-                // the UI. A resumed terminal can exit before it subscribes.
-                let empty = if thread.is_some() {
-                    tokio::time::timeout(std::time::Duration::from_secs(20), connection.recover_history(&endpoint))
-                        .await.context("Codex native history recovery timed out")??
-                } else { true };
-                let initial = std::sync::Arc::new(tokio::sync::Mutex::new(crate::harness::codex_connection::NativeInput {
-                    params: Some(params), text: (empty && !launch.task_prompt.is_empty()).then(|| launch.task_prompt.clone()),
-                }));
-                let directory = tempfile::Builder::new().prefix("lf-connect-").tempdir_in("/tmp")?;
-                let relay = directory.path().join("client.sock");
-                let listener = tokio::net::UnixListener::bind(&relay)?;
-                ready_tx.send((thread, NativeConnection { relay, upstream: endpoint.clone() }, account))
-                    .map_err(|_| anyhow!("Native terminal launch was cancelled"))?;
-                let mut clients = tokio::task::JoinSet::new();
-                tokio::pin!(closed_rx);
-                loop {
-                    tokio::select! {
-                        _ = &mut closed_rx => break,
-                        accepted = listener.accept() => {
-                            let (client, _) = accepted?;
-                            let connection = connection.clone();
-                            let endpoint = endpoint.clone();
-                            let initial = initial.clone();
-                            clients.spawn(async move {
-                                connection.serve_with_input(client, &endpoint, Some(initial)).await
-                            });
-                        }
-                        result = clients.join_next(), if !clients.is_empty() => {
-                            if let Some(result) = result { result?.context("Codex native terminal connection failed")?; }
-                        }
-                    }
-                }
-                if initial.lock().await.text.is_some() {
-                    bail!("Codex terminal exited before submitting the saved initial request; reconnect to retry");
-                }
-                Ok(())
-            })
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()?;
+            runtime.block_on(serve_codex_native(launch, owner, ready_tx, closed_rx))
         });
         let prepared = ready_rx.recv();
         let result = match prepared {
@@ -986,6 +917,105 @@ fn run_codex_native(
             .map_err(|_| anyhow!("Codex startup worker panicked"))??;
         result
     })
+}
+
+async fn serve_codex_native(
+    launch: crate::agent::AgentConfig,
+    owner: crate::harness::agent_process::AttachmentOwner,
+    ready_tx: std::sync::mpsc::SyncSender<(
+        Option<AgentSessionId>,
+        NativeConnection,
+        Option<crate::store::ProviderAccountId>,
+    )>,
+    closed_rx: tokio::sync::oneshot::Receiver<()>,
+) -> Result<()> {
+    use crate::harness::{
+        codex::CodexHarness, codex_connection::CodexConnection, ApprovalPolicy, Harness,
+    };
+
+    let (events, _events) = tokio::sync::mpsc::unbounded_channel();
+    let mut harness = CodexHarness::new(events, ApprovalPolicy::NativeClient);
+    harness.set_agent_session(launch.resume_token.clone());
+    harness.set_provider_account_id(launch.provider_account_id.clone());
+    // No turn is sent on this bootstrap connection. Close it before
+    // the UI connects so it cannot answer the UI's approvals.
+    match tokio::time::timeout(std::time::Duration::from_secs(20), harness.start(&launch)).await {
+        Ok(result) => result?,
+        Err(_) => {
+            harness.stop().await?;
+            bail!("Codex conversation startup timed out after 20s; the owned provider was stopped");
+        }
+    }
+    let account = harness.provider_account_id();
+    let (endpoint, params) = harness
+        .native_start()
+        .ok_or_else(|| anyhow!("Codex startup ended without its native launch configuration"))?;
+    let thread = params["threadId"].as_str().map(AgentSessionId::from);
+    harness.stop().await?;
+    let (store, session, attachment) = &owner;
+    let connection = CodexConnection {
+        store: store.clone(),
+        session_id: session.clone(),
+        thread_id: thread.clone(),
+        attachment: Some(attachment.clone()),
+        account_id: account.clone(),
+    };
+    // Decide whether the original input is pending before opening
+    // the UI. A resumed terminal can exit before it subscribes.
+    let empty = if thread.is_some() {
+        tokio::time::timeout(
+            std::time::Duration::from_secs(20),
+            connection.recover_history(&endpoint),
+        )
+        .await
+        .context("Codex native history recovery timed out")??
+    } else {
+        true
+    };
+    let initial = std::sync::Arc::new(tokio::sync::Mutex::new(
+        crate::harness::codex_connection::NativeInput {
+            params: Some(params),
+            text: (empty && !launch.task_prompt.is_empty()).then(|| launch.task_prompt.clone()),
+        },
+    ));
+    let directory = tempfile::tempdir()?;
+    let relay = directory.path().join("client.sock");
+    let listener = tokio::net::UnixListener::bind(&relay)?;
+    ready_tx
+        .send((
+            thread,
+            NativeConnection {
+                relay,
+                upstream: endpoint.clone(),
+            },
+            account,
+        ))
+        .map_err(|_| anyhow!("Native terminal launch was cancelled"))?;
+    let mut clients = tokio::task::JoinSet::new();
+    tokio::pin!(closed_rx);
+    loop {
+        tokio::select! {
+            _ = &mut closed_rx => break,
+            accepted = listener.accept() => {
+                let (client, _) = accepted?;
+                let connection = connection.clone();
+                let endpoint = endpoint.clone();
+                let initial = initial.clone();
+                clients.spawn(async move {
+                    connection.serve_with_input(client, &endpoint, Some(initial)).await
+                });
+            }
+            result = clients.join_next(), if !clients.is_empty() => {
+                if let Some(result) = result { result?.context("Codex native terminal connection failed")?; }
+            }
+        }
+    }
+    if initial.lock().await.text.is_some() {
+        bail!(
+            "Codex terminal exited before submitting the saved initial request; reconnect to retry"
+        );
+    }
+    Ok(())
 }
 
 fn observe_opencode_session(capture_dir: &Path, stderr: impl Read) -> std::io::Result<()> {

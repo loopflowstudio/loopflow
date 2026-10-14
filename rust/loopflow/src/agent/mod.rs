@@ -535,72 +535,6 @@ fn merge_codex_permission_config(
     }
 }
 
-pub fn codex_permission_args(
-    cwd: Option<&Path>,
-    auto: bool,
-    skip_permissions: bool,
-) -> Vec<String> {
-    codex_permission_args_for_scope(cwd, auto, skip_permissions, AgentWriteScope::Configured)
-}
-
-fn codex_permission_args_for_scope(
-    cwd: Option<&Path>,
-    auto: bool,
-    skip_permissions: bool,
-    write_scope: AgentWriteScope,
-) -> Vec<String> {
-    if write_scope == AgentWriteScope::Worktree {
-        if skip_permissions {
-            return vec!["--dangerously-bypass-approvals-and-sandbox".to_string()];
-        }
-        let mut args = vec!["--sandbox".to_string(), "workspace-write".to_string()];
-        if auto {
-            args.push("--ask-for-approval".to_string());
-            args.push("never".to_string());
-        }
-        return args;
-    }
-    if skip_permissions {
-        return vec!["--dangerously-bypass-approvals-and-sandbox".to_string()];
-    }
-
-    let config = read_codex_permission_config(cwd);
-    codex_permission_args_for_config(config, auto, skip_permissions)
-}
-
-fn codex_permission_args_for_config(
-    config: CodexPermissionConfig,
-    auto: bool,
-    skip_permissions: bool,
-) -> Vec<String> {
-    if skip_permissions {
-        return vec!["--dangerously-bypass-approvals-and-sandbox".to_string()];
-    }
-
-    let mut args = Vec::new();
-    if config.sandbox < Some(CodexSandboxMode::WorkspaceWrite) {
-        if config.sandbox.is_some() {
-            eprintln!(
-                "warning: Codex config sandbox_mode is less permissive than Loopflow's workspace-write default; launching with --sandbox workspace-write"
-            );
-        }
-        args.push("--sandbox".to_string());
-        args.push("workspace-write".to_string());
-    }
-
-    if auto && config.approval < Some(CodexApprovalPolicy::Never) {
-        if config.approval.is_some() {
-            eprintln!(
-                "warning: Codex config approval_policy is less permissive than Loopflow's non-interactive default; launching with --ask-for-approval never"
-            );
-        }
-        args.push("--ask-for-approval".to_string());
-        args.push("never".to_string());
-    }
-
-    args
-}
-
 fn read_claude_permission_mode(cwd: Option<&Path>) -> Option<ClaudePermissionMode> {
     let mut mode = None;
     for path in claude_settings_paths(cwd) {
@@ -859,9 +793,6 @@ pub enum AgentFailure {
 }
 
 /// Build `thread/start` params for Codex app-server sessions.
-///
-/// Mirrors model/cwd mapping used by one-shot Codex launches so session and
-/// non-session paths stay in sync.
 pub fn build_codex_thread_start_params(
     launch: &AgentConfig,
 ) -> serde_json::Map<String, serde_json::Value> {
@@ -2025,41 +1956,36 @@ trust_level = "trusted"
     }
 
     #[test]
-    fn codex_permission_args_supply_loopflow_floor_when_unset() {
-        let args = codex_permission_args_for_config(CodexPermissionConfig::default(), true, false);
-
-        assert_arg_pair(&args, "--sandbox", "workspace-write");
-        assert_arg_pair(&args, "--ask-for-approval", "never");
-    }
-
-    #[test]
-    fn codex_permission_args_do_not_downgrade_danger_full_access() {
-        let args = codex_permission_args_for_config(
-            CodexPermissionConfig {
-                sandbox: Some(CodexSandboxMode::DangerFullAccess),
-                approval: Some(CodexApprovalPolicy::Never),
-            },
-            true,
-            false,
-        );
-
-        assert!(!args.contains(&"--sandbox".to_string()));
-        assert!(!args.contains(&"--ask-for-approval".to_string()));
-    }
-
-    #[test]
-    fn codex_permission_args_raise_less_permissive_config_to_floor() {
-        let args = codex_permission_args_for_config(
-            CodexPermissionConfig {
-                sandbox: Some(CodexSandboxMode::ReadOnly),
-                approval: Some(CodexApprovalPolicy::OnRequest),
-            },
-            true,
-            false,
-        );
-
-        assert_arg_pair(&args, "--sandbox", "workspace-write");
-        assert_arg_pair(&args, "--ask-for-approval", "never");
+    fn codex_thread_permissions_preserve_config_and_supply_the_loopflow_floor() {
+        let _lock = loopflow_test_support::env_lock().lock().unwrap();
+        let _env = crate::test_ambient::EnvGuard::clear(&["CODEX_HOME"]);
+        let home = tempfile::tempdir().unwrap();
+        env::set_var("CODEX_HOME", home.path());
+        let config = home.path().join("config.toml");
+        for (settings, expected) in [
+            ("", Some("workspace-write")),
+            (
+                "sandbox_mode=\"read-only\"\napproval_policy=\"on-request\"",
+                Some("workspace-write"),
+            ),
+            (
+                "sandbox_mode=\"danger-full-access\"\napproval_policy=\"never\"",
+                None,
+            ),
+        ] {
+            fs::write(&config, settings).unwrap();
+            let params = build_codex_thread_start_params(&default_launch());
+            assert_eq!(
+                params.get("sandbox").and_then(serde_json::Value::as_str),
+                expected
+            );
+            assert_eq!(
+                params
+                    .get("approvalPolicy")
+                    .and_then(serde_json::Value::as_str),
+                expected.map(|_| "never")
+            );
+        }
     }
 
     #[test]

@@ -22,24 +22,43 @@ pub(crate) fn claude_args(context: &ContextDelivery) -> Result<Vec<String>> {
 
 /// Codex hashes normalized hook declarations as sorted JSON. Trust only these
 /// exact commands in the session-flags layer, never all hooks on the machine.
-/// Protocol: codex-rs/hooks/src/engine/discovery.rs (0.161.0).
-pub(crate) fn codex_config(context: &ContextDelivery) -> Result<Value> {
-    let mut hooks = context.hook_settings()?;
-    let mut states = serde_json::Map::new();
+/// Protocol: codex-rs/hooks/src/engine/discovery.rs (0.162.1).
+pub(crate) fn codex_config(
+    context: &ContextDelivery,
+    session_hooks: Option<&Value>,
+) -> Result<Value> {
+    // Thread configuration replaces the app-server's session-flags layer. Keep
+    // wrapper declarations at their original indices so their trust IDs survive.
+    let mut hooks = session_hooks.cloned().unwrap_or_else(|| json!({}));
+    let additions = context.hook_settings()?;
+    let mut states = hooks
+        .get("state")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
     for (event, event_name) in [
         ("SessionStart", "session_start"),
         ("Stop", "stop"),
         ("PostToolUse", "post_tool_use"),
         ("UserPromptSubmit", "user_prompt_submit"),
     ] {
-        let Some(groups) = hooks[event].as_array() else {
+        let Some(groups) = additions[event].as_array() else {
             continue;
         };
+        let mut combined = hooks
+            .get(event)
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let offset = combined.len();
         for (index, group) in groups.iter().enumerate() {
+            let index = offset + index;
             let mut handler = group["hooks"][0].clone();
             handler["async"] = json!(false);
-            let mut identity =
-                json!({"event_name":event_name, "matcher":group["matcher"], "hooks":[handler]});
+            let mut identity = json!({"event_name":event_name, "hooks":[handler]});
+            if let Some(matcher) = group.get("matcher") {
+                identity["matcher"] = matcher.clone();
+            }
             identity.sort_all_objects();
             let hash = format!(
                 "sha256:{}",
@@ -50,6 +69,8 @@ pub(crate) fn codex_config(context: &ContextDelivery) -> Result<Value> {
                 json!({"trusted_hash":hash}),
             );
         }
+        combined.extend(groups.iter().cloned());
+        hooks[event] = json!(combined);
     }
     hooks["state"] = Value::Object(states);
     Ok(json!({"hooks":hooks}))

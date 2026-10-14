@@ -9,21 +9,6 @@ use std::process::Command;
 
 use loopflow_test_support::TestRepo;
 
-fn install_native_codex(home: &std::path::Path) {
-    let bin = home.join("bin");
-    fs::create_dir(&bin).unwrap();
-    let provider = bin.join("codex");
-    fs::write(
-        &provider,
-        format!(
-            "#!/bin/sh\nexec /usr/bin/python3 '{}' \"$@\"\n",
-            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/native_codex.py")
-        ),
-    )
-    .unwrap();
-    fs::set_permissions(&provider, fs::Permissions::from_mode(0o755)).unwrap();
-}
-
 fn native_codex_command(repo: &std::path::Path, home: &std::path::Path, args: &[&str]) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
     command
@@ -56,7 +41,13 @@ fn codex_startup_failures_preserve_input_and_allow_reconnect() {
             "diff: false\ndiff_files: false\npaste: false\n",
         );
         let home = tempfile::tempdir().unwrap();
-        install_native_codex(home.path());
+        crate::support::install_native_codex(&home.path().join("bin"));
+        let native = home.path().join(".codex");
+        fs::create_dir(&native).unwrap();
+        let config = "model=\"fixture\"\n";
+        let unrelated = "{\"session_id\":\"unrelated-native-session\",\"ts\":9999999999}\n";
+        fs::write(native.join("config.toml"), config).unwrap();
+        fs::write(native.join("history.jsonl"), unrelated).unwrap();
         fs::write(home.path().join(failure), "").unwrap();
         let start = std::time::Instant::now();
         let output = native_codex_command(
@@ -92,6 +83,22 @@ fn codex_startup_failures_preserve_input_and_allow_reconnect() {
             )
             .unwrap();
         assert_eq!(live, 0, "{failure} must settle the owned provider");
+        assert_eq!(
+            fs::read_to_string(native.join("config.toml")).unwrap(),
+            config
+        );
+        assert_eq!(
+            fs::read_to_string(native.join("history.jsonl")).unwrap(),
+            unrelated
+        );
+        let adopted: i64 = database.query_row(
+            "SELECT count(*) FROM session_events WHERE json_extract(payload,'$.evidence.provider_session_id')='unrelated-native-session'",
+            [], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(
+            adopted, 0,
+            "failed startup must not adopt unrelated history"
+        );
         let session: String = database
             .query_row("SELECT id FROM agent_sessions LIMIT 1", [], |row| {
                 row.get(0)
@@ -142,7 +149,7 @@ fn codex_terminal_delivers_large_input_and_approvals_then_reconnects_without_rep
     let body = "Preserve 雪, \"quotes\", $(shell syntax), and newlines.\n".repeat(8_000);
     repo.create_file(".lf/skills/probe.md", &body);
     let home = tempfile::tempdir().unwrap();
-    install_native_codex(home.path());
+    crate::support::install_native_codex(&home.path().join("bin"));
     let command = |args: &[&str]| native_codex_command(repo.path(), home.path(), args);
     let output = command(&["-i", "-a", "codex", "probe", "Find the bug."])
         .output()
@@ -182,7 +189,16 @@ fn codex_terminal_delivers_large_input_and_approvals_then_reconnects_without_rep
         manifest["exec"]["system_prompt"]
     );
     assert!(config.get("baseInstructions").is_none());
-    assert!(config["config"]["hooks"]["SessionStart"].is_array());
+    assert_eq!(config["approvalPolicy"], "on-request");
+    assert_eq!(config["threadSource"], "user");
+    assert_eq!(config["config"]["native-setting"], true);
+    let hooks = &config["config"]["hooks"];
+    assert_eq!(hooks["SessionStart"][0]["hooks"][0]["command"], "host-hook");
+    assert_eq!(hooks["state"]["host-trust"]["trusted_hash"], "unchanged");
+    assert!(hooks["SessionStart"].as_array().unwrap().len() > 1);
+    assert!(hooks["state"]
+        .get("/<session-flags>/config.toml:session_start:1:0")
+        .is_some());
     let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     let session: String = database
         .query_row("SELECT id FROM agent_sessions LIMIT 1", [], |row| {

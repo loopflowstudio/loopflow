@@ -71,12 +71,25 @@ def _client(endpoint: str, home: Path, thread: str | None) -> None:
         )
         assert json.loads(_message(stream))["id"] == 1
         _send(stream, {"method": "initialized"}, True)
+        if started := os.environ.get("FIXTURE_STARTED"):
+            Path(started).touch()
+            deadline = time.monotonic() + 75
+            while not Path(os.environ["FIXTURE_STOP"]).exists():
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("idle terminal was not released")
+                time.sleep(0.1)
+            return
         _send(
             stream,
             {
                 "id": 2,
                 "method": "thread/resume" if thread else "thread/start",
-                "params": {"threadId": thread} if thread else {},
+                "params": {
+                    **({"threadId": thread} if thread else {}),
+                    "approvalPolicy": "on-request",
+                    "threadSource": "user",
+                    "config": {"native-setting": True},
+                },
             },
             True,
         )
@@ -186,6 +199,11 @@ def _server(endpoint: str, home: Path) -> None:
                         result = {"data": [thread] if thread else [], "nextCursor": None}
                     elif method == "config/read":
                         result = {
+                            "layers": [{"name": {"type": "sessionFlags"}, "config": {
+                                "hooks": {"SessionStart": [{"matcher": "startup", "hooks": [
+                                    {"type": "command", "command": "host-hook"}
+                                ]}], "state": {"host-trust": {"trusted_hash": "unchanged"}}}
+                            }}],
                             "config": {
                                 "sandbox_workspace_write": {
                                     "writable_roots": [str(home / "configured-root")]
